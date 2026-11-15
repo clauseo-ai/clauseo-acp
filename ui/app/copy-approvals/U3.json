@@ -216,12 +216,15 @@
     "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-30)"
   },
   "U3-err-agent.launch_failed": {
-    "en": "Claude didn't start. Your question is kept.",
-    "hi": "Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (built from U3 53b4ca5d, approved as U3-31)"
+    "en": "Claude didn't start. Try again. Your question is kept.",
+    "hi": "Claude शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.launch_failed now also covers an error the agent answered a start request with, and an exit before its session was ready; \"Try again.\" added (was approved by Rohan on 2026-11-02 without \"Try again.\"). Rohan, on the review page (built from U3 53b4ca5d, approved as U3-31)"
   },
   "U3-err-agent.protocol_error": {
     "en": "Claude sent something Clauseo can't read.",
@@ -1084,5 +1087,15 @@
     "at": "2026-11-16",
     "by": "Rohan (review page, 2026-11-16)",
     "note": "agent.folder_inaccessible: the agent couldn't open the matter folder as it started (Claude Code's \"Can't access working directory\"); Try again under the turn, never Restart; Claude's; ChatGPT's is U6F-28"
+  "U3-err-agent.start_offline": {
+    "en": "You're offline, so Claude didn't start. Try again when you're back online. Your question is kept.",
+    "hi": "आप ऑफ़लाइन हैं, इसलिए Claude शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.start_offline: the start request failed on its connection and the host's probe did not get through"
   }
 }

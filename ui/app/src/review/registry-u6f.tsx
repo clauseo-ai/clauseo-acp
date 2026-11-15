@@ -9,6 +9,7 @@
 // UC-531 to UC-533 agent.unreachable's (offline truth), never a send's refusal: the stop line under the answer so far,
 // with Try again. U6F-25 to U6F-27 are matter.folder_backslash's and U6F-28 to U6F-30 agent.folder_inaccessible's
 // (drafts), the same way.
+// agent.start_offline's, a start that failed on its connection with the host's probe agreeing.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { type AgentName, errorWords as sentence } from "@clauseo/components/lib/words-errors.ts";
@@ -122,13 +123,13 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-01",
-    words: errorWords("ChatGPT didn't start. Your question is kept."),
+    words: errorWords("ChatGPT didn't start. Try again. Your question is kept."),
     screen: "room/composer",
     render: refused("agent.launch_failed", "codex-acp"),
   },
   {
     id: "U6F-02",
-    words: errorWords("{name} didn't start. Your question is kept."),
+    words: errorWords("{name} didn't start. Try again. Your question is kept."),
     screen: "room/composer",
     render: refused("agent.launch_failed", "gemini"),
   },
@@ -170,7 +171,7 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-09",
-    words: errorWords("The AI didn't start. Your question is kept."),
+    words: errorWords("The AI didn't start. Try again. Your question is kept."),
     screen: "room/composer",
     render: nameless("agent.launch_failed"),
   },
@@ -271,6 +272,10 @@ export const U6F: Entry[] = [
     ),
     screen: "room/thread",
     render: folderStopped("matter.folder_backslash", "codex-acp"),
+      "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.",
+    ),
+    screen: "room/composer",
+    render: refused("agent.start_offline", "codex-acp"),
   },
   {
     id: "U6F-26",
@@ -279,6 +284,10 @@ export const U6F: Entry[] = [
     ),
     screen: "room/thread",
     render: folderStopped("matter.folder_backslash", "gemini"),
+      "You're offline, so {name} didn't start. Try again when you're back online. Your question is kept.",
+    ),
+    screen: "room/composer",
+    render: refused("agent.start_offline", "gemini"),
   },
   {
     id: "U6F-27",
@@ -311,6 +320,10 @@ export const U6F: Entry[] = [
     ),
     screen: "room/thread",
     render: nameless("agent.folder_inaccessible"),
+      "You're offline, so the AI didn't start. Try again when you're back online. Your question is kept.",
+    ),
+    screen: "room/composer",
+    render: nameless("agent.start_offline"),
   },
   {
     id: "UC-531",

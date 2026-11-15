@@ -127,6 +127,7 @@ export type ErrorCode =
   | "blackline.too_large"
   | "blackline.format_unknown"
   | "word.too_large"
+  | "agent.start_offline"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -179,7 +180,7 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "permission.unknown_option": "That answer wasn't one of the choices offered.",
   "elicitation.not_pending": "That question was already answered, or it has expired.",
   "elicitation.invalid_values": "Those answers don't fit the question.",
-  "agent.launch_failed": "Claude didn't start. Your question is kept.",
+  "agent.launch_failed": "Claude didn't start. Try again. Your question is kept.",
   "agent.exited": STOPPED,
   "agent.protocol_error": "Claude sent something Clauseo can't read.",
   "agent.auth_required": "Sign in with Claude first. Your question is kept.",
@@ -365,6 +366,10 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // Restart. Draft English (Rohan to approve); Hindi provisional
   "agent.folder_inaccessible":
     "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+  // the agent didn't start: its start request failed on its connection and the host's probe didn't get through either
+  // (before-launch item 3); Try again once online, the question back in the field. Provisional
+  "agent.start_offline":
+    "You're offline, so Claude didn't start. Try again when you're back online. Your question is kept.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -392,14 +397,23 @@ const PLANNED: Partial<
   Record<WordedCode, { chatgpt: ErrorKey; named: ErrorKey; nameless: ErrorKey }>
 > = {
   "agent.launch_failed": {
-    chatgpt: "ChatGPT didn't start. Your question is kept.",
-    named: "{name} didn't start. Your question is kept.",
-    nameless: "The AI didn't start. Your question is kept.",
+    chatgpt: "ChatGPT didn't start. Try again. Your question is kept.",
+    named: "{name} didn't start. Try again. Your question is kept.",
+    nameless: "The AI didn't start. Try again. Your question is kept.",
   },
   "agent.protocol_error": {
     chatgpt: "ChatGPT sent something Clauseo can't read.",
     named: "{name} sent something Clauseo can't read.",
     nameless: "The AI sent something Clauseo can't read.",
+  },
+  // provisional (before-launch item 3), as ERROR_WORDS' sentence
+  "agent.start_offline": {
+    chatgpt:
+      "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.",
+    named:
+      "You're offline, so {name} didn't start. Try again when you're back online. Your question is kept.",
+    nameless:
+      "You're offline, so the AI didn't start. Try again when you're back online. Your question is kept.",
   },
   "agent.auth_required": {
     chatgpt: "Sign in with ChatGPT in Codex first. Your question is kept.",

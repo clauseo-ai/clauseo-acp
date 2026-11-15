@@ -449,12 +449,12 @@ test("in Hindi the region tags English names, as the line's words do", async () 
 // agent.launch_failed names the open conversation's plan (words-errors.ts's plannedKey): its kind read off the
 // thread's agent, Codex's as ChatGPT, and an agent of no kind by its own name (its settings id)
 test.each([
-  ["codex-acp", "en", "ChatGPT didn't start. Your question is kept."],
-  ["codex-acp", "hi", "ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।"],
-  ["claude-acp", "en", "Claude didn't start. Your question is kept."],
-  ["claude-acp", "hi", "Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।"],
-  ["my-agent", "en", "my-agent didn't start. Your question is kept."],
-  ["my-agent", "hi", "my-agent शुरू नहीं हुआ। आपका प्रश्न रखा गया है।"],
+  ["codex-acp", "en", "ChatGPT didn't start. Try again. Your question is kept."],
+  ["codex-acp", "hi", "ChatGPT शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।"],
+  ["claude-acp", "en", "Claude didn't start. Try again. Your question is kept."],
+  ["claude-acp", "hi", "Claude शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।"],
+  ["my-agent", "en", "my-agent didn't start. Try again. Your question is kept."],
+  ["my-agent", "hi", "my-agent शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।"],
 ] as const)(
   "a thread on %s that didn't start says so for its plan, in %s",
   async (agent, language, said) => {
@@ -508,10 +508,10 @@ test("a thread whose header names its agent: the line says the agent's own name,
   h.deliver(failed("agent.launch_failed", NOW, "my-agent", "Gemini CLI"));
   await h.settle();
   expect(h.one("agent-stopped")?.textContent).toContain(
-    "Gemini CLI didn't start. Your question is kept.",
+    "Gemini CLI didn't start. Try again. Your question is kept.",
   );
   expect(h.one("turn-stopped")?.textContent).toContain(
-    "Gemini CLI didn't start. Your question is kept.",
+    "Gemini CLI didn't start. Try again. Your question is kept.",
   );
 });
 
@@ -520,7 +520,7 @@ test("a thread whose header has no agent_name: the line says the settings id, as
   h.deliver(failed("agent.launch_failed", NOW, "my-agent"));
   await h.settle();
   expect(h.one("agent-stopped")?.textContent).toContain(
-    "my-agent didn't start. Your question is kept.",
+    "my-agent didn't start. Try again. Your question is kept.",
   );
 });
 
@@ -544,5 +544,7 @@ test("a draft with no thread names the agent by its settings id, though a thread
   await h.type(QUESTION);
   await h.key({ key: "Enter", keyCode: 13 });
   expect(h.one("error")?.dataset["code"]).toBe("agent.launch_failed");
-  expect(h.one("error")?.textContent).toBe("my-agent didn't start. Your question is kept.");
+  expect(h.one("error")?.textContent).toBe(
+    "my-agent didn't start. Try again. Your question is kept.",
+  );
 });

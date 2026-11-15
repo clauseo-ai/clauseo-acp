@@ -24,6 +24,7 @@ import { askedAs } from "./thread/steer.ts";
 export const RESTARTS = new Set<string>([
   "agent.exited",
   "agent.launch_failed",
+  "agent.start_offline",
   "thread.interrupted",
 ]);
 
