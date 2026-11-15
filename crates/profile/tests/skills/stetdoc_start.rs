@@ -3,9 +3,10 @@
 //! one loads) and is tried again in the background, whose answer the next agent start gets; a
 //! real failure at the start is absent at once and never checked again. A stetdoc not seen yet,
 //! the limits and the background's tries in turn are in `stetdoc_first.rs`. The stub stetdoc
-//! runs for real. A slow stetdoc is the stub held by `stub-hang` with a timer whose waits end at once: the run cannot
-//! answer, so the deadline wins whichever future `select` polls first. A stetdoc that answers in
-//! time is the stub with a timer whose waits never end. No outcome hangs on the wall clock.
+//! runs for real. A slow stetdoc is the stub held by `stub-hang` with a timer whose waits end at
+//! once: the run cannot answer, so the deadline wins whichever future `select` polls first. A
+//! stetdoc that answers in time is the stub with a timer whose waits never end. No outcome hangs
+//! on the wall clock.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
