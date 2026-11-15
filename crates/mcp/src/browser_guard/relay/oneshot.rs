@@ -130,6 +130,9 @@ fn run_once(shared: &Arc<Shared>, text: &str, list: bool) -> io::Result<Once> {
                     {
                         line = only;
                     }
+                    if let Some(changed) = super::redact::line(&line) {
+                        line = changed;
+                    }
                     line.push(b'\n');
                     // An agent that stopped reading: its stdin's end follows.
                     drop(emit(&shared.out, &line));

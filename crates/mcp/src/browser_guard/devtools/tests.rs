@@ -347,10 +347,23 @@ fn a_root_fetch_event_goes_to_the_guard_and_to_agent_browser_only_after_its_own_
         "a page enable is no root enable"
     );
     // agent-browser's own root enable is refused now: the guard takes Fetch there.
-    let refused = routes.client_message(r#"{"id":2,"method":"Fetch.enable"}"#);
-    assert!(matches!(refused, FromClient::Refuse(_)), "{refused:?}");
-    let routed = routes.browser_message(root);
-    assert!(!routed.forward && matches!(routed.guard, ToGuard::Event(_)));
+    // An empty or null `sessionId` is the root session too.
+    for enable in [
+        r#"{"id":2,"method":"Fetch.enable"}"#,
+        r#"{"id":2,"method":"Fetch.enable","sessionId":""}"#,
+        r#"{"id":2,"method":"Fetch.enable","sessionId":null}"#,
+    ] {
+        let refused = routes.client_message(enable);
+        assert!(
+            matches!(refused, FromClient::Refuse(_)),
+            "{enable}: {refused:?}"
+        );
+    }
+    let empty = br#"{"method":"Fetch.authRequired","sessionId":"","params":{}}"#;
+    for event in [&root[..], &empty[..]] {
+        let routed = routes.browser_message(event);
+        assert!(!routed.forward && matches!(routed.guard, ToGuard::Event(_)));
+    }
     // Any other event: agent-browser's.
     let other = routes.browser_message(br#"{"method":"Page.loadEventFired","params":{}}"#);
     assert_eq!(

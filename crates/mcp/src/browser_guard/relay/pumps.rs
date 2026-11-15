@@ -1,7 +1,7 @@
 //! The two pumps and agent-browser's start. The agent pump reads the agent's lines, runs each
 //! through `filter.rs` and routes what passes (`route`); one stdout pump per start of
-//! agent-browser copies its lines to the agent, whole lines and unchanged bytes. agent-browser's
-//! stderr reaches the guard's through `redact.rs`, without the relay's URL.
+//! agent-browser copies its lines to the agent, whole lines and unchanged bytes but the relay's
+//! URL, which `redact.rs` takes out of them and of agent-browser's stderr.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -47,7 +47,7 @@ pub(crate) fn spawn_child(
 ) -> io::Result<Child> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
-    let secrets = redact::secrets_of(env);
+    let secrets = redact::Secrets::of(env);
     let mut command = Command::new(program);
     command
         .args(args)
@@ -56,10 +56,10 @@ pub(crate) fn spawn_child(
         .envs(env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(if secrets.is_empty() {
-            Stdio::inherit()
-        } else {
+        .stderr(if secrets.is_some() {
             Stdio::piped()
+        } else {
+            Stdio::inherit()
         })
         // A group of its own, which `end_group` kills whole.
         .process_group(0);
@@ -68,9 +68,13 @@ pub(crate) fn spawn_child(
     Ok(child)
 }
 
-/// Copies the child's piped stderr to the guard's on a thread of its own, without `secrets`
-/// (`redact.rs`).
-fn forward_stderr(child: &mut Child, secrets: Vec<Vec<u8>>) {
+/// Copies the child's piped stderr to the guard's on a thread of its own, without `secrets`,
+/// and notes them for its stdout (`redact.rs`).
+fn forward_stderr(child: &mut Child, secrets: Option<redact::Secrets>) {
+    let Some(secrets) = secrets else {
+        return;
+    };
+    redact::remember(&secrets);
     if let Some(stderr) = child.stderr.take() {
         redact::start(stderr, secrets);
     }
@@ -90,7 +94,7 @@ pub(crate) fn spawn_child(
     job: &super::super::job::Job,
 ) -> io::Result<Child> {
     use super::super::job::{Io, Launch};
-    let secrets = redact::secrets_of(env);
+    let secrets = redact::Secrets::of(env);
     let mut child = job.spawn(&Launch {
         program,
         args,
@@ -98,10 +102,10 @@ pub(crate) fn spawn_child(
         env,
         stdin: Io::Piped,
         stdout: Io::Piped,
-        stderr: if secrets.is_empty() {
-            Io::Inherit
-        } else {
+        stderr: if secrets.is_some() {
             Io::Piped
+        } else {
+            Io::Inherit
         },
         inherit: &[],
     })?;
@@ -285,6 +289,10 @@ pub(crate) fn pump_child(
             if let Some(changed) = shared.saved.note_into(&line) {
                 line = changed;
             }
+        }
+        // Last, so nothing put in above can bring the relay's URL back (`redact.rs`).
+        if let Some(changed) = redact::line(&line) {
+            line = changed;
         }
         line.push(b'\n');
         if agent_reads && emit(&shared.out, &line).is_err() {

@@ -4,10 +4,11 @@
 //! (`pumps.rs`): to the running agent-browser; a tool call while the browser is stopped starts
 //! Chrome and agent-browser first (`session.rs`); any other request then goes to a one-shot
 //! agent-browser (`oneshot.rs`). Every start of agent-browser has a thread that copies its stdout
-//! to the agent, whole lines and unchanged bytes. All of them write to the guard's stdout only
-//! under one lock, a whole line at a time, so a refusal never lands inside a line of the child's.
+//! to the agent, whole lines and unchanged bytes but the relay's URL (`redact.rs`). All of them
+//! write to the guard's stdout only under one lock, a whole line at a time, so a refusal never
+//! lands inside a line of the child's.
 //! agent-browser starts with the map `env.rs` built plus Chrome's endpoint, in `--cwd`, with
-//! piped stdin and stdout and the guard's stderr.
+//! piped stdin and stdout, and its stderr copied to the guard's without the URL.
 //!
 //! This thread waits for the events. With nothing in flight for [`session::IDLE_STOP`] after the
 //! last tool call it stops the browser, keeping the profile; the next call starts it again. The

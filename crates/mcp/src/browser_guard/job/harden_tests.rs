@@ -83,8 +83,8 @@ fn hanging_child(job: &Job) -> super::Child {
 }
 
 /// The check the guard's hardened copy makes of itself (`Hardened::verified`): a process
-/// created with the descriptors passes it, an ordinary one does not, so a forged
-/// `--hardened-copy` makes a guard that refuses to start.
+/// created with the descriptors passes it, an ordinary one does not, so a copy started without
+/// them refuses to start.
 #[test]
 fn the_check_of_the_copy_passes_a_process_created_hardened_and_no_other() {
     for (job, expected) in [
