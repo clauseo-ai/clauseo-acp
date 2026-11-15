@@ -300,6 +300,9 @@ pub(super) struct ToldOnce {
     /// The other matters left unfenced, as last told (`outside/fence.rs`): told again when they
     /// change.
     pub(super) unfenced: Vec<clauseo_protocol::MatterId>,
+    /// Claude's commands were told they can't open the matter (`outside/fence.rs`), while it
+    /// lasts: told again once a launch can re-open the matter and a later one can't.
+    pub(super) shell_limited: bool,
 }
 
 /// The once-a-turn notes a turn has given, each at most once.

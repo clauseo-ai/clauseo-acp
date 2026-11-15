@@ -32,6 +32,15 @@ test("Claude's auto mode unavailable gives the app's line, in English and Hindi"
   );
 });
 
+test("Claude's commands kept out of a matter that holds another give the app's line (UC-382)", () => {
+  expect(noticeLine("shell_limited", en)).toBe(
+    "Claude's commands can't open this matter's files right now; it can still read and edit them.",
+  );
+  expect(noticeLine("shell_limited", words("hi"))).toBe(
+    "Claude की कमांड अभी इस मामले की फ़ाइलें नहीं खोल सकतीं; वह उन्हें अब भी पढ़ और संपादित कर सकता है।",
+  );
+});
+
 test("the data-fence refusal's line names the agent as the stop line does", () => {
   const claude = { kind: "claude", name: "claude-acp" } as const;
   expect(noticeLine("outside_matter_blocked", en, claude)).toBe(

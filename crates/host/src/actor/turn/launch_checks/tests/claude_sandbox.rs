@@ -32,7 +32,6 @@ fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
         data: &run.data_deny.spellings,
         other_matters: &[],
         matter_open: None,
-        matter_unlisted: false,
         matter_inside: &[],
     };
     let sandbox = ClaudeSandbox::for_os(SandboxOs::Mac, &paths).unwrap();

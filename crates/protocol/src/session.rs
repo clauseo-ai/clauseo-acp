@@ -340,6 +340,11 @@ open_data_enum! {
             /// How many more beyond `matters`.
             more: u32,
         },
+        /// Claude's sandboxed commands can't open this matter's files this session: another
+        /// matter lies inside it, and the matter's entries could not be re-opened one by one
+        /// safely (too many, a folder that can't be listed, a link on the way). Claude's file
+        /// tools still read and edit them. Once a launch.
+        ShellLimited = "shell_limited",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -358,6 +363,7 @@ open_data_enum! {
             reason: PackSkipReason::Changed,
         },
         NoticeKind::AutoModeUnavailable,
+        NoticeKind::ShellLimited,
         NoticeKind::OtherMatterRefused {
             matter: MatterId::new(uuid::Uuid::from_u128((0x0190_0000_0000 << 80) | (0x7 << 76) | (0b10 << 62) | 7))
                 .unwrap(),

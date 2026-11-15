@@ -315,6 +315,13 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::ShellNetworkBlockedNoWebSearch),
         },
+        Notice {
+            level: NoticeLevel::Info,
+            text: "Claude's commands can't open this matter's files right now; it can still \
+                   read and edit them."
+                .to_owned(),
+            kind: Some(NoticeKind::ShellLimited),
+        },
     ];
     notices.extend(
         [

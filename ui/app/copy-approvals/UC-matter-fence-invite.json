@@ -108,5 +108,16 @@
     "at": "2026-11-15",
     "by": "mfence (provisional; Rohan batch review)",
     "note": "UC-352's pill once its × was pressed while a turn runs (status starting, running or needs_you): the host closes the read only as the agent relaunches at that turn's end, so the pill stays, with no ×, until the status leaves those; withdrawn while idle it goes at once. {matter} bidi-isolated"
+  },
+  "UC-382": {
+    "en": "Claude's commands can't open this matter's files right now; it can still read and edit them.",
+    "hi": "Claude की कमांड अभी इस मामले की फ़ाइलें नहीं खोल सकतीं; वह उन्हें अब भी पढ़ और संपादित कर सकता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "Host notice NoticeKind::ShellLimited: another matter lies inside this one and its entries could not be re-opened safely, so Claude's sandbox re-opens none of the matter; its file tools still read and edit it. Once while it lasts"
   }
 }
