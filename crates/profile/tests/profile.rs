@@ -156,7 +156,17 @@ fn the_claude_fragment_holds_only_the_profiles_keys() {
     }
     let settings = options["settings"].as_object().unwrap();
     assert!(!settings.contains_key("hooks") && !settings.contains_key("disableAllHooks"));
-    insta::assert_snapshot!(pretty(&Value::Object(meta)));
+    // One snapshot for every platform: Windows adds PowerShell's exact stetdoc rules
+    // (`the_allow_list_is_stetdocs_read_only_commands` checks those).
+    let mut meta = Value::Object(meta);
+    if let Some(Value::Array(allowed)) = meta.pointer_mut("/claudeCode/options/allowedTools") {
+        allowed.retain(|rule| {
+            !rule
+                .as_str()
+                .is_some_and(|rule| rule.starts_with("PowerShell("))
+        });
+    }
+    insta::assert_snapshot!(pretty(&meta));
 }
 
 #[test]
@@ -174,16 +184,30 @@ fn a_settings_key_outside_the_list_never_reaches_the_fragment() {
 
 #[test]
 fn the_allow_list_is_stetdocs_read_only_commands() {
-    assert_eq!(
-        profile().claude_options().allowed_tools(),
-        [
-            "Bash(stetdoc view:*)",
-            "Bash(stetdoc inspect:*)",
-            "Bash(stetdoc check:*)",
-            "Bash(stetdoc lookup:*)",
-            "Bash(stetdoc capabilities:*)",
-        ]
-    );
+    let bash = [
+        "Bash(stetdoc view:*)",
+        "Bash(stetdoc inspect:*)",
+        "Bash(stetdoc check:*)",
+        "Bash(stetdoc lookup:*)",
+        "Bash(stetdoc capabilities:*)",
+        "Bash(stetdoc --help)",
+        "Bash(stetdoc --version)",
+    ];
+    assert_eq!(clauseo_profile::claude::stetdoc_allowed(false), bash);
+    // On Windows only the exact forms again for PowerShell: no `PowerShell(stetdoc <sub>:*)`.
+    let windows: Vec<String> = bash
+        .iter()
+        .map(|rule| (*rule).to_owned())
+        .chain(["PowerShell(stetdoc --help)".to_owned()])
+        .chain(["PowerShell(stetdoc --version)".to_owned()])
+        .collect();
+    assert_eq!(clauseo_profile::claude::stetdoc_allowed(true), windows);
+    let built: Vec<String> = if cfg!(windows) {
+        windows
+    } else {
+        bash.iter().map(|rule| (*rule).to_owned()).collect()
+    };
+    assert_eq!(profile().claude_options().allowed_tools(), built.as_slice());
     assert_eq!(
         profile().claude_options().disallowed_tools(),
         Vec::<String>::new().as_slice()

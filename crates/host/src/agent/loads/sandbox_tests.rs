@@ -523,3 +523,47 @@ fn only_the_trust_roots_file_opens() {
     let sandbox = mac(&session.paths()).unwrap();
     assert!(!sandbox.allow_read.iter().any(|path| path.contains("/tls")));
 }
+
+/// The own folders' shell allow rules come with the sandbox only: with it off (`Off`, falling
+/// back to `acceptEdits`) a command they allowed would run unsandboxed and unjudged. Their
+/// `Read` rules stay either way. (On Windows, which has no sandbox, the shell rules stay.)
+#[test]
+#[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
+fn the_own_folders_shell_rules_need_the_sandbox() {
+    let session = Session::new("s-1");
+    let deny = LaunchDeny {
+        spellings: vec![PathBuf::from(DATA)],
+        own_reads: vec!["run/s-1/work".to_owned()],
+        ..LaunchDeny::default()
+    };
+    let allow = |sandbox: Option<&ClaudeSandbox>| {
+        let keys = ClaudeKeys {
+            web_search: Switch {
+                on: false,
+                locked: false,
+            },
+            login: Login::FirstParty,
+            folders: folders(&session),
+            seed_sites: &[],
+            forced_ask: false,
+            data: &deny,
+            case_law: false,
+            browser: false,
+            sandbox,
+            matter: None,
+            trusted_servers: &[],
+        };
+        let mut options = serde_json::Map::new();
+        claude_options(&mut options, &keys);
+        let allow = texts(&options["settings"]["permissions"]["allow"]);
+        allow.into_iter().map(str::to_owned).collect::<Vec<_>>()
+    };
+    let shell = |rules: &[String]| rules.iter().any(|rule| rule.starts_with("Bash("));
+    let read = |rules: &[String]| rules.iter().any(|rule| rule.ends_with("/run/s-1/work/**)"));
+    let sandbox = mac(&session.paths()).unwrap();
+    let on = allow(Some(&sandbox));
+    assert!(shell(&on) && read(&on), "{on:?}");
+    let off = allow(None);
+    assert!(read(&off), "{off:?}");
+    assert!(!shell(&off), "{off:?}");
+}

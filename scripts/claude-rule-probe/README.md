@@ -77,7 +77,9 @@ decides what no rule settles in one of two ways:
   (`nTr`, `Hln`). Its verdict comes back with the reply that carried the tool use. A file's
   `"server_verdict": "flagged"` (or `"not_flagged"`) makes the fake API send that verdict
   (`SERVER_VERDICT`). Without one, Claude Code takes the server as not classifying for the rest
-  of the session.
+  of the session. So the fake sends it on every streamed reply, a turn's last one too: a
+  multi-turn session (`--input-format stream-json`) would otherwise run its later turns'
+  commands with no server verdict at all.
 
 A command an allow rule matches skips both. A case's `"ran": true|false` checks the verdict:
 `DENIED` (a deny rule), `REFUSED` (a path check, a safety check, a classifier, or a prompt that
@@ -94,3 +96,9 @@ sends no verdict, so a command no rule allows asks the local classifier. Off Win
 path is a relative one, inside the working folder. Git Bash's `/c/…` is absolute there, so
 those cases are left out. An unquoted trailing `\` goes to a classifier: Claude Code reads its
 own parse, not the text.
+
+A file may give `"cwd"` (the folder Claude Code works in, default a temp folder) and `"env"`
+(variables for the binary). With `"CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"` and `pwsh` on the
+`PATH` (PowerShell 7's Linux tarball works unpacked anywhere), 2.1.293 offers its real
+PowerShell tool off Windows, so PowerShell cases run instead of "no tool". `PROBE_VERBOSE=1`
+also prints each case's request count, its local classifier requests and the beta headers.

@@ -211,13 +211,25 @@ pub(crate) const BUILT_IN_SKILLS: [&str; 3] = ["profile", "claude-plugin", "skil
 /// own work and notes folders' (`LaunchDeny::own_reads`): `Read` of each and all under it, and
 /// a command that lists or reads one ([`own_shell_allow_rules`]), so the auto-mode classifiers
 /// never see those. Nothing wider; a deny rule (another session's, a link's) still beats each.
-/// A spelling that is not UTF-8 gets none.
-pub(crate) fn claude_allow_rules(deny: &LaunchDeny) -> Vec<String> {
+/// A spelling that is not UTF-8 gets none. With `sandbox_off` (macOS or Linux, Claude's sandbox
+/// `Off`, `agent::loads::sandbox`) the shell rules are left out: a command they allow would
+/// run unsandboxed with no classifier, so those commands keep theirs.
+pub(crate) fn claude_allow_rules(deny: &LaunchDeny, sandbox_off: bool) -> Vec<String> {
+    if sandbox_off {
+        return read_allow_rules(deny, cfg!(windows));
+    }
     claude_allow_rules_on(deny, cfg!(windows))
 }
 
 /// [`claude_allow_rules`] with Windows' paths and shell rules when `windows`.
 pub(crate) fn claude_allow_rules_on(deny: &LaunchDeny, windows: bool) -> Vec<String> {
+    let mut rules = read_allow_rules(deny, windows);
+    rules.extend(own_shell_allow_rules(deny, windows));
+    rules
+}
+
+/// [`claude_allow_rules_on`]'s `Read` rules alone.
+fn read_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
     let skills: Vec<String> = BUILT_IN_SKILLS.iter().map(|name| escape(name)).collect();
     let skills = skills.join("/");
     let mut rules = Vec::new();
@@ -234,7 +246,6 @@ pub(crate) fn claude_allow_rules_on(deny: &LaunchDeny, windows: bool) -> Vec<Str
             }
         }
     }
-    rules.extend(own_shell_allow_rules(deny, windows));
     rules
 }
 

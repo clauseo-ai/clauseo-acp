@@ -279,7 +279,9 @@ pub(crate) const SHED_AT: usize = 1_887_436;
 /// and reading (`data_fence::claude_allow_rules`), each after any the hook put there. The own
 /// folders' glob denies go in only without Claude's shell sandbox (`sandboxed`, `keys.sandbox`:
 /// on Windows, or with the sandbox `Off`). A hook value at `permissions`, `deny` or `allow` of
-/// another type is replaced. With no spelling (a unit test's keys) nothing changes.
+/// another type is replaced. With no spelling (a unit test's keys) nothing changes. With the
+/// sandbox `Off` where one was meant to be (not sandboxed, not Windows), the allow rules leave
+/// out the own folders' shell rules: a command one allowed would run unsandboxed and unjudged.
 fn deny_data_folder(
     settings: &mut Map<String, Value>,
     data: &crate::agent::data_fence::LaunchDeny,
@@ -288,13 +290,15 @@ fn deny_data_folder(
     if data.spellings.is_empty() {
         return;
     }
+    // Claude's sandbox off where one was meant to be (`sandbox::Off`, all but Windows).
+    let sandbox_off = !cfg!(windows) && !sandboxed;
     let mut permissions = take_object(settings, "permissions");
     let mut deny = take_array(&mut permissions, "deny");
     for rule in crate::agent::data_fence::claude_deny_rules(data, sandboxed) {
         push_new(&mut deny, &rule);
     }
     let mut allow = take_array(&mut permissions, "allow");
-    for rule in crate::agent::data_fence::claude_allow_rules(data) {
+    for rule in crate::agent::data_fence::claude_allow_rules(data, sandbox_off) {
         push_new(&mut allow, &rule);
     }
     if cfg!(windows) {

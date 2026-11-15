@@ -28,9 +28,11 @@ A case's "ran": true/false checks that verdict is (or is not) ran. A file's "ser
 tool use (fakeapi.py's SERVER_VERDICT): "flagged" refuses whatever Claude Code allowed only as
 read-only, and lets through what a rule allowed. PROBE_VERBOSE=1 prints the tool result of each case. A case may give "input" instead of
 "command" (any tool's input, e.g. {"tool": "Read", "input": {"file_path": "/x"}}).
-Prints the rule counts and one line per case (DENIED or ran), and exits 1 on any
-disagreement. A case whose "denied" is null is reported, not checked. Only the Bash tool exists
-off Windows; a PowerShell case is reported as "no tool".
+A file's "cwd" is the folder Claude Code works in (default: a temp folder), and its "env" adds
+variables for the binary. Prints the rule counts and one line per case (DENIED or ran), and exits
+1 on any disagreement. A case whose "denied" is null is reported, not checked. Only the Bash tool exists
+off Windows unless the file's "env" sets CLAUDE_CODE_USE_POWERSHELL_TOOL=1 and pwsh is on the
+PATH; otherwise a PowerShell case is reported as "no tool".
 """
 import json, os, shutil, socket, subprocess, sys, tempfile, time
 
@@ -61,6 +63,9 @@ os.makedirs(home)
 env = dict(os.environ, HOME=os.environ.get("PROBE_HOME", home), CLAUDE_CONFIG_DIR=home,
            ANTHROPIC_BASE_URL=f"http://127.0.0.1:{port}", ANTHROPIC_API_KEY="sk-ant-probe",
            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
+# A file's "env" adds variables for the binary (CLAUDE_CODE_AUTO_MODE_SERVER, and
+# CLAUDE_CODE_USE_POWERSHELL_TOOL, which with pwsh on the PATH gives Linux the PowerShell tool).
+env.update(spec.get("env", {}))
 failed = 0
 
 
@@ -153,7 +158,7 @@ try:
         mode = case.get("mode", "default")
         subprocess.run([binary, "-p", "go", "--settings", settings, "--max-turns", "2",
                         "--permission-mode", mode],
-                       env=env, cwd=work, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                       env=env, cwd=spec.get("cwd", work), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, timeout=120)
         result = open(out_file).read() if os.path.exists(out_file) else ""
         if "NO TOOL" in result:
@@ -185,7 +190,10 @@ try:
         print(f"{'ok ' if ok else 'BAD'} {verdict:7} {case['tool']:10} {case.get('name', '')}: {case.get('command', case.get('input'))}"
               f"{'  [' + note.strip() + ']' if note else ''}")
         if os.environ.get("PROBE_VERBOSE") == "1":
-            print(f"    {result.strip()[:300]}")
+            print(f"    {len(requests)} API requests, {sum(1 for r in requests if r.get('classifier'))}"
+                  f" to the local classifier: {result.strip()[:300]}")
+            betas = sorted({r.get("beta") or "" for r in requests if not r.get("classifier")})
+            print(f"    betas: {betas}")
 finally:
     server.terminate()
     server.wait()

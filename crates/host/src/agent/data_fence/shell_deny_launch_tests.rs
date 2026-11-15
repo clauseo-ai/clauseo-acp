@@ -465,7 +465,7 @@ fn the_shared_places_are_denied_to_the_shell_and_still_readable() {
     }
     // The Read allow rules for the built-in skills and the shared commands are as they were.
     let base = super::super::rule_path(VM_DATA, cfg!(windows));
-    let allow = super::super::claude_allow_rules(&deny);
+    let allow = super::super::claude_allow_rules(&deny, false);
     for place in [
         "profile/claude-plugin/skills",
         "tools",

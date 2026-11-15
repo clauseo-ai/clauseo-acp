@@ -366,7 +366,7 @@ fn python_and_tools_are_readable_never_editable_and_their_siblings_stay_denied()
     }
     let base = super::rule_path(&text(&data), cfg!(windows));
     let rules = claude_deny_rules(&deny, false);
-    let allow = claude_allow_rules(&deny);
+    let allow = claude_allow_rules(&deny, false);
     for place in ["agents/runtime/clauseo-python-*", "tools"] {
         assert!(READ_ONLY.contains(&place));
         let edit = format!("Edit({base}/{place}/**)");

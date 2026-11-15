@@ -33,7 +33,7 @@ enum Verdict {
 }
 
 /// The parts of `command` Claude Code matches one by one (`g4e`, PowerShell's `Ms`): split at
-/// `;`, `&&`, `||`, `|` and newlines outside quotes. `None` when it is too complex to match
+/// `;`, `&&`, `||`, `|`, `&` and newlines outside quotes. `None` when it is too complex to match
 /// (`g4e`'s and `Ht`'s asks): a substitution, a backtick, a variable or a redirection, and in
 /// PowerShell also a parenthesis or a script block.
 fn parts(tool: &str, command: &str) -> Option<Vec<String>> {
@@ -59,7 +59,7 @@ fn parts(tool: &str, command: &str) -> Option<Vec<String>> {
                 chars.next();
                 out.push(String::new());
             }
-            (None, ';' | '\n' | '|') => out.push(String::new()),
+            (None, ';' | '\n' | '|' | '&') => out.push(String::new()),
             _ => {}
         }
         let split = quote.is_none() && matches!(c, ';' | '\n' | '|' | '&');
