@@ -184,10 +184,10 @@ pub(super) fn notice(actor: &mut Actor, thread: ThreadId) -> Option<Notice> {
         .agent
         .as_deref()
         .is_some_and(|agent| agent.auto == Auto::Unavailable);
-    if !unavailable || state.auto_told {
+    if !unavailable || state.told_once.auto {
         return None;
     }
-    state.auto_told = true;
+    state.told_once.auto = true;
     Some(Notice {
         level: NoticeLevel::Info,
         text: AUTO_UNAVAILABLE.to_owned(),

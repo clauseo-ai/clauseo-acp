@@ -5,7 +5,7 @@
 //!
 //! - After each input, each live agent's launch key (`FenceKey`: the matters' ids and folders,
 //!   the conversation's invites) is compared with the key a launch would take now
-//!   (`turn::fence`). A different key stops it once [`super::stoppable`]: nothing pending,
+//!   (`turn::outside::fence`). A different key stops it once [`super::stoppable`]: nothing pending,
 //!   so a turn, a queued prompt, a permission or a launch keeps it until it ends (a busy agent
 //!   keeps its old rules until then; the host's auto-deny reads the new ones at once). A turn
 //!   that ends with prompts queued stops a stale agent before the next one starts
@@ -20,7 +20,7 @@ use clauseo_protocol::ThreadId;
 
 use super::super::super::Actor;
 use super::super::agents;
-use super::super::fence::{key_of, matters_hash};
+use super::super::outside::fence::{key_of, matters_hash};
 use crate::log_file::LIFECYCLE;
 
 /// Stops each live agent whose fence is out of date and that has nothing pending.

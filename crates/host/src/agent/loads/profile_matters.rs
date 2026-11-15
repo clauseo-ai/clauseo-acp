@@ -12,7 +12,7 @@ use super::json_len;
 /// launch whose other settings take `spent` bytes as JSON: every matter's, with the variable
 /// forms, when they fit `budget` ([`super::SHED_AT`]); else without them, matter by matter in the
 /// fence's order while they fit. The matters left out come second: the lawyer is told
-/// (`actor::turn::fence`). Logged with counts only.
+/// (`actor::turn::outside::fence`). Logged with counts only.
 pub(crate) fn matter_rules_within(
     data: &crate::agent::data_fence::LaunchDeny,
     var: &dyn Fn(&str) -> Option<OsString>,
