@@ -14,7 +14,8 @@
 //!   running then (a registry or file read that hangs) ends as `Unreadable`, and the next "Try
 //!   again" starts a new read; the late answer, its number no longer current, is dropped.
 //! - The read's end: `Unreadable`, `Blocked` or `Clear`. On `Blocked`, every header that showed
-//!   `BrowserPolicyUnreadable` shows `BrowserBlockedByPolicy` (`header_tools::policy_blocked`).
+//!   `BrowserPolicyUnreadable` shows what the read found blocks it: `BrowserBlockedByPolicy`, or
+//!   on Windows `BrowserBlockedEdge` or `BrowserBlockedChrome` (`header_tools::policy_blocked`).
 //!   `Unreadable` and `Clear` change no header: each says what its session has.
 //! - Once the app has heard a state, each launch that read the policy keeps it current
 //!   ([`on_launch_read`]): an earlier `Clear` does not outlive a later read error, nor an
@@ -96,7 +97,8 @@ fn begin(actor: &mut Actor) -> Result<(), Error> {
                 .filter(|roots| roots.platform.is_windows());
             let found = match windows {
                 Some(roots) => {
-                    rd_policy.recheck_among(allowed_anyway, &chrome::windows_installed(&roots))
+                    let installed = chrome::windows_installed(&roots).usable;
+                    rd_policy.recheck_among(allowed_anyway, &installed)
                 }
                 None => rd_policy.recheck(allowed_anyway),
             };
@@ -115,9 +117,11 @@ fn begin(actor: &mut Actor) -> Result<(), Error> {
 
 /// A read's end or its deadline. Only the running read's counts: a late answer is dropped.
 pub(super) fn on_input(actor: &mut Actor, input: PolicyInput) {
-    let (read, state) = match input {
-        PolicyInput::Read { read, found } => (read, state_of(found)),
-        PolicyInput::TimedOut { read } => (read, BrowserPolicyState::Unreadable),
+    let (read, found) = match input {
+        PolicyInput::Read { read, found } => (read, found),
+        PolicyInput::TimedOut { read } => {
+            (read, Some(ToolsUnavailableReason::BrowserPolicyUnreadable))
+        }
     };
     if actor.browser_policy.running.as_ref().map(|(n, _)| *n) != Some(read) {
         return;
@@ -125,7 +129,7 @@ pub(super) fn on_input(actor: &mut Actor, input: PolicyInput) {
     if let Some((_, deadline)) = actor.browser_policy.running.take() {
         deadline.abort();
     }
-    settle(actor, state);
+    settle(actor, found);
 }
 
 /// A launch prep read the firm's browser policy and found `found` (why it blocks, or `None`):
@@ -134,30 +138,34 @@ pub(crate) fn on_launch_read(actor: &mut Actor, found: Option<ToolsUnavailableRe
     if actor.browser_policy.running.is_some() || actor.browser_policy.latest.is_none() {
         return;
     }
+    if actor.browser_policy.latest != Some(state_of(found)) {
+        settle(actor, found);
+    }
+}
+
+/// The state a read found (`found`, why the browser stays off), published; on `Blocked`, the
+/// headers that said the policy was not read say what blocks it.
+fn settle(actor: &mut Actor, found: Option<ToolsUnavailableReason>) {
     let state = state_of(found);
-    if actor.browser_policy.latest != Some(state) {
-        settle(actor, state);
-    }
-}
-
-/// The state a read found, published; on `Blocked`, the headers that said the policy was not
-/// read say it blocks.
-fn settle(actor: &mut Actor, state: BrowserPolicyState) {
     publish(actor, state);
-    if state == BrowserPolicyState::Blocked {
-        super::header_tools::policy_blocked(actor);
+    if let (BrowserPolicyState::Blocked, Some(reason)) = (state, found) {
+        super::header_tools::policy_blocked(actor, reason);
     }
 }
 
-/// The state for a read's verdict.
+/// The state for a read's verdict. A false names the browsers it blocks on Windows
+/// (`BrowserBlockedEdge`, `BrowserBlockedChrome`); a per-user Chrome alone is no policy block, so
+/// clear.
 fn state_of(found: Option<ToolsUnavailableReason>) -> BrowserPolicyState {
-    if found.is_none() {
-        BrowserPolicyState::Clear
-    } else if found == Some(ToolsUnavailableReason::BrowserBlockedByPolicy) {
-        BrowserPolicyState::Blocked
-    } else {
-        // `RdPolicy` gives only the two policy reasons; any other keeps the browser off too.
-        BrowserPolicyState::Unreadable
+    match found {
+        None | Some(ToolsUnavailableReason::BrowserPerUserChromeOnly) => BrowserPolicyState::Clear,
+        Some(
+            ToolsUnavailableReason::BrowserBlockedByPolicy
+            | ToolsUnavailableReason::BrowserBlockedEdge
+            | ToolsUnavailableReason::BrowserBlockedChrome,
+        ) => BrowserPolicyState::Blocked,
+        // `RdPolicy` gives only the policy reasons; any other keeps the browser off too.
+        Some(_) => BrowserPolicyState::Unreadable,
     }
 }
 

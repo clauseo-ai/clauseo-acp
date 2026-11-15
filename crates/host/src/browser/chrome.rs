@@ -21,8 +21,12 @@
 //!
 //! Never a per-user Chrome (`%LOCALAPPDATA%`) and never Chrome for Testing on Windows: the guard
 //! drives the browser over a `DevTools` pipe, and Chrome's own sandbox cannot start a browser from
-//! a per-user folder, whose ACL lacks ALL APPLICATION PACKAGES (a Windows 11 test showed "cannot
-//! access executable"). Program Files installs work.
+//! a per-user folder, whose ACL lacks ALL APPLICATION PACKAGES (a Windows 11 test of Chrome for
+//! Testing showed "cannot access executable"; a per-user Chrome install sits under the same
+//! folder rules, so it is taken to fail the same way, not tried). Program Files installs work.
+//! A per-user Chrome is still looked for, to tell the lawyer why it is not used
+//! ([`WindowsBrowsers::per_user_chrome`], `BrowserPerUserChromeOnly`) rather than to install
+//! what they already have.
 //!
 //! On Linux (development and CI only) the host takes `/usr/bin/google-chrome`, then
 //! `/usr/bin/chromium`.
@@ -138,13 +142,15 @@ pub struct ChromeRoots {
     pub program_files: Option<PathBuf>,
     /// Windows: `%ProgramFiles(x86)%`.
     pub program_files_x86: Option<PathBuf>,
+    /// Windows: `%LOCALAPPDATA%`, only to find a per-user Chrome that is never taken.
+    pub local_app_data: Option<PathBuf>,
     /// Clauseo's app data folder, which holds `browsers/`.
     pub app_data: PathBuf,
 }
 
 impl ChromeRoots {
     /// This machine's roots, with `app_data` the host's data folder. Reads the environment
-    /// (`HOME`, `ProgramFiles`, `ProgramFiles(x86)`), so it runs off the actor
+    /// (`HOME`, `ProgramFiles`, `ProgramFiles(x86)`, `LOCALAPPDATA`), so it runs off the actor
     /// with the rest of the launch prep.
     pub fn system(app_data: &Path) -> Self {
         let var = |name: &str| {
@@ -158,6 +164,7 @@ impl ChromeRoots {
             home: var("HOME"),
             program_files: var("ProgramFiles"),
             program_files_x86: var("ProgramFiles(x86)"),
+            local_app_data: var("LOCALAPPDATA"),
             app_data: app_data.to_owned(),
         }
     }
@@ -223,6 +230,7 @@ pub fn find(roots: &ChromeRoots) -> Option<PathBuf> {
 fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
     if roots.platform.is_windows() {
         return windows_installed_with(roots, edge_allowed)
+            .usable
             .into_iter()
             .next()
             .map(|(_, path)| path);
@@ -241,19 +249,31 @@ fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
         })
 }
 
-/// On Windows, each browser installed, in the order the host takes them, with whose
-/// `RemoteDebuggingAllowed` it reads: Edge (while [`EDGE_ALLOWED`]), then Google Chrome, each
-/// from Program Files only and at most once. The launch prep takes the first one the firm's
-/// policy leaves on (`super::rd_policy`). Empty on any other machine. File system calls: off the
-/// actor.
-pub fn windows_installed(roots: &ChromeRoots) -> Vec<(Browser, PathBuf)> {
+/// What Windows has: the browsers the host can take, and a Chrome it found but cannot use.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WindowsBrowsers {
+    /// Each browser installed, in the order the host takes them, with whose policy it reads:
+    /// Edge (while [`EDGE_ALLOWED`]), then Google Chrome, each from Program Files only and at
+    /// most once.
+    pub usable: Vec<(Browser, PathBuf)>,
+    /// A Google Chrome installed for this user only,
+    /// `%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe`: present but not usable (the
+    /// module doc). Never taken; with nothing usable, the lawyer is told why
+    /// (`BrowserPerUserChromeOnly`).
+    pub per_user_chrome: Option<PathBuf>,
+}
+
+/// On Windows, the browsers installed ([`WindowsBrowsers`]). The launch prep takes the first
+/// usable one the firm's policy leaves on (`super::rd_policy`). Empty on any other machine. File
+/// system calls: off the actor.
+pub fn windows_installed(roots: &ChromeRoots) -> WindowsBrowsers {
     windows_installed_with(roots, EDGE_ALLOWED)
 }
 
 /// [`windows_installed`] with the Edge switch given.
-fn windows_installed_with(roots: &ChromeRoots, edge_allowed: bool) -> Vec<(Browser, PathBuf)> {
+fn windows_installed_with(roots: &ChromeRoots, edge_allowed: bool) -> WindowsBrowsers {
     if !roots.platform.is_windows() {
-        return Vec::new();
+        return WindowsBrowsers::default();
     }
     let edge = edge_allowed
         .then(|| roots.edge())
@@ -266,7 +286,20 @@ fn windows_installed_with(roots: &ChromeRoots, edge_allowed: bool) -> Vec<(Brows
         .into_iter()
         .find(|path| is_file(path))
         .map(|path| (Browser::Chrome, path));
-    edge.into_iter().chain(chrome).collect()
+    let per_user_chrome = roots
+        .local_app_data
+        .as_ref()
+        .map(|base| {
+            base.join("Google")
+                .join("Chrome")
+                .join("Application")
+                .join("chrome.exe")
+        })
+        .filter(|path| is_file(path));
+    WindowsBrowsers {
+        usable: edge.into_iter().chain(chrome).collect(),
+        per_user_chrome,
+    }
 }
 
 /// The highest-versioned Chrome for Testing under `<app data>/browsers/` whose binary is there.

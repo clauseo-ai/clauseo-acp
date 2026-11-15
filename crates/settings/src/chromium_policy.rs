@@ -11,7 +11,9 @@
 //! - Windows: `RemoteDebuggingAllowed` under `SOFTWARE\Policies\Google\Chrome`,
 //!   `SOFTWARE\Policies\Microsoft\Edge` and `SOFTWARE\Policies\Chromium`, in `HKLM` and in
 //!   `HKCU` (a `REG_DWORD`, or a `REG_SZ` holding an integer; 0 is false, any other true);
-//!   [`read_registry`] over a [`Registry`].
+//!   and under the same keys `DeveloperToolsAvailability` ([`DEVTOOLS_VALUE`]), whose 2
+//!   (developer tools disallowed) also turns it off, the computer's value over the user's;
+//!   [`read_registry`] over a [`Registry`]. macOS and Linux read `RemoteDebuggingAllowed` only.
 //! - macOS: the managed preferences files of `com.google.Chrome`, `com.microsoft.Edge` and
 //!   `org.chromium.Chromium`, the computer's and the login user's (a boolean, or the integer 0
 //!   or 1); [`read_managed_prefs`].
@@ -39,6 +41,14 @@ use std::path::{Path, PathBuf};
 
 /// The policy's name in every store.
 pub const VALUE: &str = "RemoteDebuggingAllowed";
+
+/// The developer tools policy, read on Windows beside [`VALUE`]: 2 disallows the developer
+/// tools, and a browser so set will not let a client attach to its pages, so it counts as
+/// [`Found::Disallowed`]; 0, 1 and 3 say nothing about remote debugging.
+pub const DEVTOOLS_VALUE: &str = "DeveloperToolsAvailability";
+
+/// [`DEVTOOLS_VALUE`]'s value that disallows the developer tools.
+pub const DEVTOOLS_DISALLOWED: i64 = 2;
 
 /// A browser whose policy Clauseo reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -280,7 +290,8 @@ impl PolicyTree for SystemTree {
     }
 }
 
-/// The six registry places: `HKLM` then `HKCU`, Chrome, Edge, then Chromium in each.
+/// The six registry places: `HKLM` then `HKCU`, Chrome, Edge, then Chromium in each; then
+/// each browser's `DeveloperToolsAvailability` ([`devtools_from_registry`]).
 pub fn read_registry(registry: &dyn Registry) -> RemoteDebugging {
     let mut found = Vec::new();
     for (hive, scope) in [
@@ -296,23 +307,72 @@ pub fn read_registry(registry: &dyn Registry) -> RemoteDebugging {
             found.push((Place { browser, scope }, said));
         }
     }
+    for (browser, key) in REGISTRY_KEYS {
+        found.extend(devtools_from_registry(registry, browser, key));
+    }
     RemoteDebugging { found }
+}
+
+/// One browser's `DeveloperToolsAvailability`, the computer's value over the user's as Chrome
+/// merges its policies: the computer's when it holds one, else the user's. The place that holds
+/// 2 says [`Found::Disallowed`]; nothing set, or any other value, adds nothing; a failed read
+/// says [`Found::Unreadable`] (the user's is still read when the computer's failed, since a 2
+/// there blocks whatever the computer holds); a value Chrome would not take, [`Found::BadValue`].
+fn devtools_from_registry(
+    registry: &dyn Registry,
+    browser: Browser,
+    key: &str,
+) -> Vec<(Place, Found)> {
+    let mut found = Vec::new();
+    for (hive, scope) in [
+        (Hive::LocalMachine, Scope::Machine),
+        (Hive::CurrentUser, Scope::User),
+    ] {
+        let place = Place { browser, scope };
+        match registry.value(hive, key, DEVTOOLS_VALUE) {
+            Ok(None) => {}
+            Ok(Some(value)) => match registry_integer(&value) {
+                Ok(number) => {
+                    if number == DEVTOOLS_DISALLOWED {
+                        found.push((place, Found::Disallowed));
+                    }
+                    // A value set here decides it: the user's is not read.
+                    return found;
+                }
+                Err(why) => found.push((place, Found::BadValue(why.to_owned()))),
+            },
+            Err(code) => found.push((
+                place,
+                Found::Unreadable(format!("the registry read failed ({code})")),
+            )),
+        }
+    }
+    found
+}
+
+/// A registry value as an integer, as Chrome converts it: a `REG_DWORD`, or a `REG_SZ` holding
+/// an integer (spaces around it allowed).
+fn registry_integer(value: &RegValue) -> Result<i64, &'static str> {
+    match value {
+        RegValue::Dword(number) => Ok(i64::from(*number)),
+        RegValue::Sz(text) => text
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .ok_or("the REG_SZ is not an integer"),
+        RegValue::MultiSz(_) | RegValue::Other(_) => {
+            Err("the value is neither a REG_DWORD nor a REG_SZ")
+        }
+    }
 }
 
 /// What a registry value says, as Chrome converts it to a boolean: a `REG_DWORD`, or a `REG_SZ`
 /// holding an integer (spaces around it allowed); 0 is false, any other number true.
 pub fn registry_says(value: &RegValue) -> Found {
-    match value {
-        RegValue::Dword(0) => Found::Disallowed,
-        RegValue::Dword(_) => Found::Allowed,
-        RegValue::Sz(text) => match text.trim().parse::<i64>() {
-            Ok(0) => Found::Disallowed,
-            Ok(_) => Found::Allowed,
-            Err(_) => Found::BadValue("the REG_SZ is not an integer".to_owned()),
-        },
-        RegValue::MultiSz(_) | RegValue::Other(_) => {
-            Found::BadValue("the value is neither a REG_DWORD nor a REG_SZ".to_owned())
-        }
+    match registry_integer(value) {
+        Ok(0) => Found::Disallowed,
+        Ok(_) => Found::Allowed,
+        Err(why) => Found::BadValue(why.to_owned()),
     }
 }
 

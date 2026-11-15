@@ -132,7 +132,7 @@ pub(crate) struct RunFolders {
     /// `Loopback::Ports(session.ports.loopback())`.
     pub(crate) browser_session: Option<Arc<BrowserSession>>,
     /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`):
-    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`.
+    /// a `BrowserBlocked*` reason, `BrowserPolicyUnreadable` or `BrowserPerUserChromeOnly`.
     pub(crate) browser_blocked: Option<clauseo_protocol::ToolsUnavailableReason>,
     /// Whether the launch prep read that policy (it does whenever the browser could come).
     pub(crate) browser_policy_read: bool,

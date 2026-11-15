@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use clauseo_settings::chromium_policy::Browser;
 
 use super::{
-    ChromeRoots, EDGE_ALLOWED, Platform, find, find_with, version, windows_installed,
-    windows_installed_with,
+    ChromeRoots, EDGE_ALLOWED, Platform, WindowsBrowsers, find, find_with, version,
+    windows_installed, windows_installed_with,
 };
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
@@ -19,6 +19,7 @@ fn roots(dir: &Path, platform: Platform) -> ChromeRoots {
         home: Some(dir.join("home")),
         program_files: Some(dir.join("pf")),
         program_files_x86: Some(dir.join("pf86")),
+        local_app_data: Some(dir.join(LOCAL)),
         app_data: dir.join("app"),
     }
 }
@@ -76,16 +77,35 @@ fn windows_chrome_in_program_files_order() {
 }
 
 /// A per-user Chrome cannot start sandboxed over the guard's pipe, so Windows never takes one,
-/// even with nothing else installed.
+/// even with nothing else installed; it is found as present but not usable, so the lawyer is
+/// told why (`BrowserPerUserChromeOnly`), not to install Chrome.
 #[test]
-fn windows_ignores_a_per_user_chrome() {
+fn windows_finds_a_per_user_chrome_but_never_takes_it() {
     let dir = TempDir::new("chrome-win-local");
-    touch(&dir.path().join(LOCAL), WIN_CHROME);
+    let local = touch(&dir.path().join(LOCAL), WIN_CHROME);
     for platform in [Platform::WindowsX64, Platform::WindowsArm64] {
         let roots = roots(dir.path(), platform);
         assert_eq!(find(&roots), None, "{platform:?}");
-        assert_eq!(windows_installed(&roots), [], "{platform:?}");
+        assert_eq!(
+            windows_installed(&roots),
+            WindowsBrowsers {
+                usable: Vec::new(),
+                per_user_chrome: Some(local.clone()),
+            },
+            "{platform:?}"
+        );
     }
+    // Beside a Program Files Chrome it is still never taken.
+    let pf = touch(&dir.path().join("pf"), WIN_CHROME);
+    let installed = windows_installed(&roots(dir.path(), Platform::WindowsX64));
+    assert_eq!(installed.usable, [(Browser::Chrome, pf)]);
+    assert_eq!(installed.per_user_chrome, Some(local));
+    // Without the folder there is none to find.
+    let unset = ChromeRoots {
+        local_app_data: None,
+        ..roots(dir.path(), Platform::WindowsX64)
+    };
+    assert_eq!(windows_installed(&unset).per_user_chrome, None);
 }
 
 #[test]
@@ -117,11 +137,11 @@ fn edge_is_the_first_place_looked_on_windows_and_only_when_allowed() {
     assert_eq!(find_with(&win, true), Some(edge.clone()));
     assert_eq!(find_with(&win, false), Some(chrome.clone()));
     assert_eq!(
-        windows_installed(&win),
+        windows_installed(&win).usable,
         [(Browser::Edge, edge), (Browser::Chrome, chrome.clone())]
     );
     assert_eq!(
-        windows_installed_with(&win, false),
+        windows_installed_with(&win, false).usable,
         [(Browser::Chrome, chrome)]
     );
 }
@@ -132,8 +152,12 @@ fn windows_installed_is_empty_off_windows() {
     touch(&dir.path().join("pf"), WIN_CHROME);
     touch(&dir.path().join("pf86"), WIN_EDGE);
     touch(&dir.path().join("root"), MAC_CHROME);
+    touch(&dir.path().join(LOCAL), WIN_CHROME);
     for platform in [Platform::MacArm64, Platform::MacX64, Platform::Linux] {
-        assert_eq!(windows_installed(&roots(dir.path(), platform)), []);
+        assert_eq!(
+            windows_installed(&roots(dir.path(), platform)),
+            WindowsBrowsers::default()
+        );
     }
 }
 

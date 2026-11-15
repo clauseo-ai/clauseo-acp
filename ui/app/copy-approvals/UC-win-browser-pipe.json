@@ -1,13 +1,57 @@
 {
   "UC-550": {
-    "en": "Your firm's settings stop apps from using Microsoft Edge and Google Chrome. Ask your firm's IT to allow Clauseo, then start a new conversation.",
-    "hi": "आपकी फ़र्म की सेटिंग्स ऐप्स को Microsoft Edge और Google Chrome का उपयोग नहीं करने देतीं। अपनी फ़र्म की IT टीम से Clauseo को अनुमति देने के लिए कहें, फिर एक नई बातचीत शुरू करें।",
+    "en": "Your firm's settings don't let apps control Microsoft Edge or Google Chrome. Ask your firm's IT to allow this for Clauseo, then start a new conversation.",
+    "hi": "आपकी फ़र्म की सेटिंग्स ऐप्स को Microsoft Edge या Google Chrome नियंत्रित नहीं करने देतीं। अपनी फ़र्म की IT टीम से Clauseo के लिए इसकी अनुमति देने को कहें, फिर एक नई बातचीत शुरू करें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-15",
     "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
-    "note": "Under Blocked by a browser policy on Windows (browser_blocked_by_policy): the host passes over a browser whose own RemoteDebuggingAllowed is false, so this shows only when Edge and Chrome are both blocked; says what to do, unlike UET-45 (the Mac line)"
+    "note": "Under Blocked by a browser policy on Windows (browser_blocked_by_policy): Edge and Chrome are both installed and each one's own policy (RemoteDebuggingAllowed 0 or DeveloperToolsAvailability 2) blocks it. Clauseo's own opt-in can't lift it, since such a browser refuses Clauseo's pipe, so it asks the firm's IT; unlike UET-45 (the Mac line). Reworded from 'stop apps from using ... Ask your firm's IT to allow Clauseo', which pointed at that opt-in"
+  },
+  "UC-551": {
+    "en": "Clauseo can't use a copy of Google Chrome installed just for you. Install Microsoft Edge, or ask your firm's IT to install Google Chrome for everyone on this computer. Then start a new conversation.",
+    "hi": "Clauseo सिर्फ़ आपके लिए इंस्टॉल की गई Google Chrome की कॉपी का उपयोग नहीं कर सकता। Microsoft Edge इंस्टॉल करें, या अपनी फ़र्म की IT टीम से इस कंप्यूटर पर सभी के लिए Google Chrome इंस्टॉल करने को कहें। फिर एक नई बातचीत शुरू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
+    "note": "Under Can't use this Chrome (UC-554) on Windows (browser_per_user_chrome_only): no Edge and no Program Files Chrome, only %LOCALAPPDATA%\\Google\\Chrome, which can't start under Clauseo's browser guard; replaces UET-50, which told the lawyer to install what they have"
+  },
+  "UC-552": {
+    "en": "Your firm's settings don't let apps control Microsoft Edge. Ask your firm's IT to allow this for Clauseo, then start a new conversation.",
+    "hi": "आपकी फ़र्म की सेटिंग्स ऐप्स को Microsoft Edge नियंत्रित नहीं करने देतीं। अपनी फ़र्म की IT टीम से Clauseo के लिए इसकी अनुमति देने को कहें, फिर एक नई बातचीत शुरू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
+    "note": "UC-550 when Edge is the one browser installed (browser_blocked_edge), so only Edge is named"
+  },
+  "UC-553": {
+    "en": "Your firm's settings don't let apps control Google Chrome. Ask your firm's IT to allow this for Clauseo, then start a new conversation.",
+    "hi": "आपकी फ़र्म की सेटिंग्स ऐप्स को Google Chrome नियंत्रित नहीं करने देतीं। अपनी फ़र्म की IT टीम से Clauseo के लिए इसकी अनुमति देने को कहें, फिर एक नई बातचीत शुरू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
+    "note": "UC-550 when a Program Files Chrome is the one browser installed (browser_blocked_chrome), so only Chrome is named"
+  },
+  "UC-554": {
+    "en": "Can't use this Chrome",
+    "hi": "यह Chrome इस्तेमाल नहीं हो सकता",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
+    "note": "The browser's reason on Windows when the only Chrome is a per-user copy (browser_per_user_chrome_only); UC-551 says it in full under it; in the tool line's tooltip as 'Browser: off, can't use this Chrome.'"
   }
 }

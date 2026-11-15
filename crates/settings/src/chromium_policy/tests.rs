@@ -24,11 +24,24 @@ const KEYS: [(&str, Browser); 3] = [
 struct FakeRegistry(BTreeMap<(u8, String, String), Result<RegValue, u32>>);
 
 impl FakeRegistry {
-    fn with(mut self, hive: Hive, key: &str, value: Result<RegValue, u32>) -> Self {
-        self.0.insert(
-            (hive_id(hive), key.to_owned(), super::VALUE.to_owned()),
-            value,
-        );
+    fn with(self, hive: Hive, key: &str, value: Result<RegValue, u32>) -> Self {
+        self.with_value(hive, key, super::VALUE, value)
+    }
+
+    /// `DeveloperToolsAvailability` set to `value`.
+    fn with_devtools(self, hive: Hive, key: &str, value: Result<RegValue, u32>) -> Self {
+        self.with_value(hive, key, super::DEVTOOLS_VALUE, value)
+    }
+
+    fn with_value(
+        mut self,
+        hive: Hive,
+        key: &str,
+        name: &str,
+        value: Result<RegValue, u32>,
+    ) -> Self {
+        self.0
+            .insert((hive_id(hive), key.to_owned(), name.to_owned()), value);
         self
     }
 }
@@ -167,6 +180,80 @@ fn each_registry_place_says_nothing_false_true_bad_or_unreadable() {
     }
     let read = read_registry(&FakeRegistry::default());
     assert!(read.found.iter().all(|(_, found)| *found == Found::Absent));
+}
+
+// `DeveloperToolsAvailability` 2 (developer tools disallowed) turns it off as a false does, for
+// every key; the computer's value wins over the user's, and other values add nothing.
+#[test]
+fn developer_tools_disallowed_turns_it_off_the_computers_value_first() {
+    use Hive::{CurrentUser as User, LocalMachine as Machine};
+    let dword = |n| Ok(RegValue::Dword(n));
+    for (key, browser) in KEYS {
+        let off = |registry: FakeRegistry| read_registry(&registry).turned_off_by();
+        assert_eq!(
+            off(FakeRegistry::default().with_devtools(Machine, key, dword(2))),
+            Some(place(browser, Scope::Machine)),
+            "{key}"
+        );
+        assert_eq!(
+            off(FakeRegistry::default().with_devtools(User, key, dword(2))),
+            Some(place(browser, Scope::User)),
+            "{key}: the user's, with nothing on the computer"
+        );
+        assert_eq!(
+            off(FakeRegistry::default().with_devtools(User, key, Ok(RegValue::Sz(" 2 ".into())))),
+            Some(place(browser, Scope::User)),
+            "{key}: a REG_SZ integer"
+        );
+        assert_eq!(
+            off(FakeRegistry::default()
+                .with_devtools(Machine, key, dword(1))
+                .with_devtools(User, key, dword(2))),
+            None,
+            "{key}: the computer allows the developer tools"
+        );
+        assert_eq!(
+            off(FakeRegistry::default()
+                .with_devtools(Machine, key, dword(2))
+                .with_devtools(User, key, dword(1))),
+            Some(place(browser, Scope::Machine)),
+            "{key}"
+        );
+        for other in [0, 1, 3] {
+            let read =
+                read_registry(&FakeRegistry::default().with_devtools(Machine, key, dword(other)));
+            assert_eq!(read.turned_off_by(), None, "{key} {other}");
+            assert_eq!(read.found.len(), 6, "{key} {other}: nothing added");
+        }
+        let failed = read_registry(
+            &FakeRegistry::default()
+                .with_devtools(Machine, key, Err(5))
+                .with_devtools(User, key, dword(2)),
+        );
+        assert_eq!(
+            failed.unreadable().collect::<Vec<_>>(),
+            [(
+                place(browser, Scope::Machine),
+                "the registry read failed (5)"
+            )]
+        );
+        assert_eq!(failed.turned_off_by(), Some(place(browser, Scope::User)));
+        let bad = read_registry(&FakeRegistry::default().with_devtools(
+            Machine,
+            key,
+            Ok(RegValue::Sz("no".into())),
+        ));
+        assert_eq!(bad.bad_values().count(), 1, "{key}");
+        assert_eq!(bad.turned_off_by(), None, "{key}");
+    }
+    // Remote debugging allowed does not lift developer tools disallowed: either one blocks.
+    let both = FakeRegistry::default()
+        .with(Machine, KEYS[1].0, dword(1))
+        .with_devtools(Machine, KEYS[1].0, dword(2));
+    assert_eq!(
+        read_registry(&both).turned_off_by(),
+        Some(place(Browser::Edge, Scope::Machine))
+    );
 }
 
 // A missing key or value, or a missing path on the way to it, is nothing set; any other error

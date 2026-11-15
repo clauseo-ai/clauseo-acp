@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use super::{RdPolicy, decide, decide_among};
-use clauseo_protocol::ToolsUnavailableReason::{BrowserBlockedByPolicy, BrowserPolicyUnreadable};
+use clauseo_protocol::ToolsUnavailableReason::{
+    BrowserBlockedByPolicy, BrowserBlockedChrome, BrowserBlockedEdge, BrowserPolicyUnreadable,
+};
 use clauseo_settings::chromium_policy::{Browser, Found, Place, RemoteDebugging, Scope};
 
 fn read(found: &[Found]) -> RemoteDebugging {
@@ -134,30 +136,71 @@ fn windows_edge_blocked_and_chrome_allowed_takes_chrome() {
     assert_eq!(decide_among(&per(&[]), &both, false), Ok(Some(edge().1)));
 }
 
+/// On Windows a browser its own policy turns off refuses the guard's pipe, and the guard sets it
+/// aside whatever Clauseo's opt-in says, so the panel shows it blocked with the opt-in too.
 #[test]
-fn windows_both_blocked_is_blocked_unless_the_firm_allows_clauseo_anyway() {
+fn windows_both_blocked_is_blocked_even_when_the_firm_allows_clauseo_anyway() {
     let read = per(&[
         (Browser::Edge, Scope::User, Found::Disallowed),
         (Browser::Chrome, Scope::Machine, Found::Disallowed),
     ]);
     let both = [edge(), chrome()];
+    for allowed_anyway in [false, true] {
+        assert_eq!(
+            decide_among(&read, &both, allowed_anyway),
+            Err(BrowserBlockedByPolicy),
+            "{allowed_anyway}"
+        );
+    }
+    let policy = RdPolicy::new(std::sync::Arc::new(Per(read)));
+    assert_eq!(policy.pick(true, &both), Err(BrowserBlockedByPolicy));
     assert_eq!(
-        decide_among(&read, &both, false),
-        Err(BrowserBlockedByPolicy)
+        policy.recheck_among(true, &both),
+        Some(BrowserBlockedByPolicy)
     );
-    assert_eq!(decide_among(&read, &both, true), Ok(Some(edge().1)));
 }
 
 #[test]
-fn windows_edge_only_installed_and_blocked_is_blocked() {
+fn windows_names_only_the_installed_browser_that_is_blocked() {
     let read = per(&[
+        (Browser::Edge, Scope::Machine, Found::Disallowed),
+        (Browser::Chrome, Scope::Machine, Found::Disallowed),
+    ]);
+    for allowed_anyway in [false, true] {
+        assert_eq!(
+            decide_among(&read, &[edge()], allowed_anyway),
+            Err(BrowserBlockedEdge)
+        );
+        assert_eq!(
+            decide_among(&read, &[chrome()], allowed_anyway),
+            Err(BrowserBlockedChrome)
+        );
+    }
+    // Chrome allowed but not installed: only Edge is named.
+    let edge_off = per(&[
         (Browser::Edge, Scope::Machine, Found::Disallowed),
         (Browser::Chrome, Scope::Machine, Found::Allowed),
     ]);
     assert_eq!(
-        decide_among(&read, &[edge()], false),
-        Err(BrowserBlockedByPolicy)
+        decide_among(&edge_off, &[edge()], false),
+        Err(BrowserBlockedEdge)
     );
+}
+
+/// The opt-in lifts a place that could not be read, never a false: with Edge off and Chrome's
+/// policy unread, it takes Chrome, not the blocked Edge.
+#[test]
+fn windows_the_opt_in_takes_the_first_browser_not_turned_off() {
+    let both = [edge(), chrome()];
+    let mixed = per(&[
+        (Browser::Edge, Scope::Machine, Found::Disallowed),
+        (Browser::Chrome, Scope::User, unreadable()),
+    ]);
+    assert_eq!(decide_among(&mixed, &both, false), Err(BrowserBlockedEdge));
+    assert_eq!(decide_among(&mixed, &both, true), Ok(Some(chrome().1)));
+    let policy = RdPolicy::new(std::sync::Arc::new(Per(mixed)));
+    assert_eq!(policy.recheck_among(false, &both), Some(BrowserBlockedEdge));
+    assert_eq!(policy.recheck_among(true, &both), None);
 }
 
 #[test]
@@ -193,7 +236,7 @@ fn windows_an_unreadable_browser_is_passed_over_and_a_false_wins_over_it() {
     ]);
     assert_eq!(
         decide_among(&mixed, &both, false),
-        Err(BrowserBlockedByPolicy)
+        Err(BrowserBlockedChrome)
     );
 }
 
@@ -219,10 +262,25 @@ fn a_windows_recheck_reads_with_the_launch_rule() {
     assert_eq!(policy.recheck_among(false, &[edge(), chrome()]), None);
     assert_eq!(
         policy.recheck_among(false, &[chrome()]),
-        Some(BrowserBlockedByPolicy)
+        Some(BrowserBlockedChrome)
     );
-    assert_eq!(policy.recheck_among(true, &[chrome()]), None);
+    assert_eq!(
+        policy.recheck_among(true, &[chrome()]),
+        Some(BrowserBlockedChrome),
+        "Windows' opt-in never lifts a false"
+    );
     assert_eq!(policy.recheck_among(false, &[]), None);
-    assert_eq!(policy.pick(false, &[chrome()]), Err(BrowserBlockedByPolicy));
+    assert_eq!(policy.pick(false, &[chrome()]), Err(BrowserBlockedChrome));
+    assert_eq!(policy.pick(true, &[chrome()]), Err(BrowserBlockedChrome));
     assert_eq!(policy.pick(false, &[edge(), chrome()]), Ok(Some(edge().1)));
+}
+
+/// A reader that says what it was given, by place.
+#[derive(Debug)]
+struct Per(RemoteDebugging);
+
+impl clauseo_settings::chromium_policy::RemoteDebuggingPolicy for Per {
+    fn read(&self) -> RemoteDebugging {
+        self.0.clone()
+    }
 }

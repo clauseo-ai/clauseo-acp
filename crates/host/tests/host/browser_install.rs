@@ -135,6 +135,7 @@ pub(super) fn roots(dir: &Dir) -> ChromeRoots {
         home: None,
         program_files: None,
         program_files_x86: None,
+        local_app_data: None,
         app_data: data.join("app"),
     }
 }

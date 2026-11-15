@@ -73,6 +73,8 @@ pub(super) enum Chrome {
     WindowsEdge,
     /// Windows' roots with only Chrome for Testing, which Windows never takes.
     WindowsForTesting,
+    /// Windows' roots with only a Google Chrome installed for this user (`%LOCALAPPDATA%`).
+    WindowsPerUser,
 }
 
 /// The browser state one `BROWSING` session shows under `says`, with the firm's Clauseo
@@ -201,6 +203,7 @@ fn roots(dir: &Dir, chrome: Chrome) -> ChromeRoots {
     let app = dir.data().join("app");
     let pf = dir.data().join("pf");
     let pf86 = dir.data().join("pf86");
+    let local = dir.data().join("local");
     let cft = ["browsers", "chrome-131.0.6778.85"];
     let platform = match chrome {
         Chrome::Forced | Chrome::ForTesting => {
@@ -227,6 +230,10 @@ fn roots(dir: &Dir, chrome: Chrome) -> ChromeRoots {
             touch(&app, &[&cft[..], &["chrome-win64", "chrome.exe"]].concat());
             Platform::WindowsX64
         }
+        Chrome::WindowsPerUser => {
+            touch(&local, &["Google", "Chrome", "Application", "chrome.exe"]);
+            Platform::WindowsX64
+        }
     };
     ChromeRoots {
         platform,
@@ -234,6 +241,7 @@ fn roots(dir: &Dir, chrome: Chrome) -> ChromeRoots {
         home: None,
         program_files: Some(pf),
         program_files_x86: Some(pf86),
+        local_app_data: Some(local),
         app_data: app,
     }
 }
@@ -308,7 +316,8 @@ fn the_firms_clauseo_policy_allows_the_browser_when_the_policy_was_not_read() {
     );
 }
 
-/// Windows: Edge's own false leaves a Program Files Chrome to start; with Edge alone it blocks.
+/// Windows: Edge's own false leaves a Program Files Chrome to start; with Edge alone it blocks,
+/// named, and the firm's Clauseo opt-in does not lift it (the guard would set Edge aside).
 #[test]
 fn on_windows_edges_false_leaves_chrome() {
     let edge_off = || Found::Disallowed;
@@ -318,11 +327,35 @@ fn on_windows_edges_false_leaves_chrome() {
     );
     assert_eq!(
         reason("rd_win_edge", edge_off(), None, Chrome::WindowsEdge),
-        Some(ToolsUnavailableReason::BrowserBlockedByPolicy)
+        Some(ToolsUnavailableReason::BrowserBlockedEdge)
+    );
+    assert_eq!(
+        reason(
+            "rd_win_edge_allowed",
+            edge_off(),
+            Some(ALLOW),
+            Chrome::WindowsEdge
+        ),
+        Some(ToolsUnavailableReason::BrowserBlockedEdge)
     );
     assert_eq!(
         reason("rd_win_edge_ok", Found::Absent, None, Chrome::WindowsEdge),
         None
+    );
+}
+
+/// Windows: with only a per-user Chrome there, the lawyer is told it can't be used, not to
+/// install Chrome.
+#[test]
+fn on_windows_a_per_user_chrome_alone_is_told_apart() {
+    assert_eq!(
+        reason(
+            "rd_win_per_user",
+            Found::Absent,
+            None,
+            Chrome::WindowsPerUser
+        ),
+        Some(ToolsUnavailableReason::BrowserPerUserChromeOnly)
     );
 }
 

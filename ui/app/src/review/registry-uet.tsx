@@ -169,12 +169,43 @@ export const UET: Entry[] = [
     ),
     [browser("browser_blocked_by_policy")],
   ),
+  // on Windows, every installed browser blocked by its own policy, naming those; or only a per-user Chrome
   entry(
     "UC-550",
     popWords(
-      "Your firm's settings stop apps from using Microsoft Edge and Google Chrome. Ask your firm's IT to allow Clauseo, then start a new conversation.",
+      "Your firm's settings don't let apps control Microsoft Edge or Google Chrome. Ask your firm's IT to allow this for Clauseo, then start a new conversation.",
     ),
     [browser("browser_blocked_by_policy")],
+    WINDOWS,
+  ),
+  entry(
+    "UC-551",
+    popWords(
+      "Clauseo can't use a copy of Google Chrome installed just for you. Install Microsoft Edge, or ask your firm's IT to install Google Chrome for everyone on this computer. Then start a new conversation.",
+    ),
+    [browser("browser_per_user_chrome_only")],
+    WINDOWS,
+  ),
+  entry(
+    "UC-552",
+    popWords(
+      "Your firm's settings don't let apps control Microsoft Edge. Ask your firm's IT to allow this for Clauseo, then start a new conversation.",
+    ),
+    [browser("browser_blocked_edge")],
+    WINDOWS,
+  ),
+  entry(
+    "UC-553",
+    popWords(
+      "Your firm's settings don't let apps control Google Chrome. Ask your firm's IT to allow this for Clauseo, then start a new conversation.",
+    ),
+    [browser("browser_blocked_chrome")],
+    WINDOWS,
+  ),
+  entry(
+    "UC-554",
+    lineWords("Can't use this Chrome"),
+    [browser("browser_per_user_chrome_only")],
     WINDOWS,
   ),
   // the firm's browser policy couldn't be read: the reason, then in full under it, and Try again
