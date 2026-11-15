@@ -1,0 +1,200 @@
+{
+  "UC-262": {
+    "en": "{path} is inside the folder of {name}. Choose another folder.",
+    "hi": "{path}, {name} के फ़ोल्डर के भीतर है। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "New matter, the form's refusal line: matter.folder_inside_matter with the listed matter (HostError.matter); Open {name} under it (ME-13). Replaces ME-11"
+  },
+  "UC-263": {
+    "en": "{path} contains the folder of {name}. Choose another folder.",
+    "hi": "{path} में {name} का फ़ोल्डर है। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "New matter: matter.folder_holds_matter with the listed matter; Open {name} under it. Replaces ME-12"
+  },
+  "UC-264": {
+    "en": "{name} already uses {path}. Open {name}, or choose another folder.",
+    "hi": "{name} पहले से {path} का उपयोग करता है। {name} खोलें, या दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "New matter and the first screen: matter.folder_is_matter with the listed matter (the folder in use), at the pick's check or at Create; Open {name} under it, Create held until another folder is chosen"
+  },
+  "UC-265": {
+    "en": "{path} is inside, or contains, the folder of a matter you removed from the list. Choose another folder.",
+    "hi": "{path} उस मामले के फ़ोल्डर के भीतर है, या उसमें वह फ़ोल्डर है, जिसे आपने सूची से हटा दिया है। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "New matter and Locate folder: matter.folder_of_forgotten_matter"
+  },
+  "UC-266": {
+    "en": "{path} is inside, or contains, a folder Clauseo is still making into a matter. Try again in a moment, or choose another folder.",
+    "hi": "{path} ऐसे फ़ोल्डर के भीतर है, या उसमें ऐसा फ़ोल्डर है, जिससे Clauseo अभी मामला बना रहा है। थोड़ी देर में फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "New matter and Locate folder: matter.folder_being_made (a create, import or Locate in flight)"
+  },
+  "UC-267": {
+    "en": "{path} is the top of a drive. Choose a folder on it.",
+    "hi": "{path} किसी ड्राइव का सबसे ऊपरी स्तर है। उस पर कोई फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "New matter and Locate folder: matter.folder_is_drive. Replaces ME-06"
+  },
+  "UC-268": {
+    "en": "{path} is your home folder. Choose a folder inside it.",
+    "hi": "{path} आपका होम फ़ोल्डर है। उसके भीतर कोई फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "New matter and Locate folder: matter.folder_is_home. Replaces ME-07"
+  },
+  "UC-269": {
+    "en": "{path} is a system folder. Choose another folder.",
+    "hi": "{path} एक सिस्टम फ़ोल्डर है। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "New matter and Locate folder: matter.folder_is_system. Replaces ME-08"
+  },
+  "UC-270": {
+    "en": "Clauseo keeps its own files in {path}. Choose another folder.",
+    "hi": "Clauseo अपनी फ़ाइलें {path} में रखता है। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "New matter and Locate folder: matter.folder_in_clauseo_data. Replaces ME-09"
+  },
+  "UC-271": {
+    "en": "{path} is too deeply nested for Windows. Choose a folder with a shorter path.",
+    "hi": "{path} Windows के लिए दूसरे फ़ोल्डरों के बहुत भीतर है। छोटे पथ वाला फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "New matter and Locate folder: matter.folder_too_deep (words-errors' line for a turn stays). Replaces ME-10"
+  },
+  "UC-272": {
+    "en": "Clauseo can't make a matter of {path}. Choose another folder.",
+    "hi": "Clauseo {path} से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "New matter: matter.folder_refused, and a nested or in-use folder whose matter the list doesn't have. Replaces U2-31"
+  },
+  "UC-273": {
+    "en": "{path} is already this matter's folder.",
+    "hi": "{path} पहले से इसी मामले का फ़ोल्डर है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "Locate folder, under the moved folder's words (or the rail row's note line): matter.folder_is_matter naming the matter being located"
+  },
+  "UC-274": {
+    "en": "{name} already uses {path}. Choose this matter's own folder.",
+    "hi": "{name} पहले से {path} का उपयोग करता है। इस मामले का अपना फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "Locate folder: matter.folder_is_matter naming another listed matter"
+  },
+  "UC-275": {
+    "en": "{path} isn't this matter's folder. Choose the folder you moved it to.",
+    "hi": "{path} इस मामले का फ़ोल्डर नहीं है। वह फ़ोल्डर चुनें जहाँ आप इसे ले गए हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "Locate folder: matter.folder_not_a_matter (no marker, or another matter's)"
+  },
+  "UC-276": {
+    "en": "Clauseo can't find {path}. Choose the folder again.",
+    "hi": "Clauseo को {path} नहीं मिल रहा। फ़ोल्डर फिर से चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "Locate folder: matter.folder_missing"
+  },
+  "UC-277": {
+    "en": "Clauseo can't use {path} for this matter. Choose another folder.",
+    "hi": "Clauseo इस मामले के लिए {path} का उपयोग नहीं कर सकता। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "Locate folder: matter.folder_refused, any other code, and a nested folder whose matter the list doesn't have"
+  },
+  "U3-err-matter.folder_being_made": {
+    "en": "Clauseo can't make a matter of this folder. Choose another folder.",
+    "hi": "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "words-errors' line for matter.folder_being_made (a new code, no folder to name): U2-31's approved line, as inside/holds have it"
+  },
+  "U3-err-matter.folder_of_forgotten_matter": {
+    "en": "Clauseo can't make a matter of this folder. Choose another folder.",
+    "hi": "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "words-errors' line for matter.folder_of_forgotten_matter (a new code, no folder to name): U2-31's approved line, as inside/holds have it"
+  }
+}

@@ -2,10 +2,12 @@
 // folder (existing_folder) in the computer's own picker and shows how it reads; cancelled, nothing changes. Where the
 // host has H20's default location, "Use a new folder in" offers it (default_location, no picker). Create matter waits
 // for one of the two, and makes the matter from it. The host's refusal is said in the form by its code
-// (matter-form-check.ts), never its message. Made, the new matter opens, the dialog
-// closes and focus goes back to New matter (or, where the room folded the rail on onMade, to Matters). A folder inside
-// or holding a matter's folder (matter.folder_inside_matter, matter.folder_holds_matter) names that matter when the list
-// has it, and Open {name} opens it, as the rail does; with no name it takes the line of any folder refused.
+// (matter-form-check.ts), never its message, naming the folder: the one picked, or the new folder the default location
+// would hold. Made, the new matter opens, the dialog closes and focus goes back to New matter (or, where the room
+// folded the rail on onMade, to Matters). A folder inside or holding a matter's folder (matter.folder_inside_matter,
+// matter.folder_holds_matter), or one a matter already uses (matter.folder_is_matter, the folder in use), names that
+// matter when the list has it, and Open {name} opens it, as the rail does, Create held until another folder is chosen;
+// the folder's matter is never opened for the lawyer. With no name it takes the line of any folder refused.
 // The first screen (UD1's first run) takes the same form in place, titled, with Back (FirstMatter), and says a folder
 // its Open the folder couldn't make a matter of by the same code's words (RefusedLine, with RefusedOpen's Open {name});
 // all load with this chunk. A folder picked, either form asks the host about it first and warns or refuses as
@@ -14,13 +16,14 @@ import { useEffect, useState, type RefObject } from "react";
 import { NewMatterForm } from "@clauseo/components/clauseo/matter-form.tsx";
 import { NewMatterDialog } from "@clauseo/components/clauseo/new-matter-dialog.tsx";
 import { createErrorLine, nestedRefusal } from "@clauseo/components/clauseo/matter-form-check.ts";
+import { under } from "@clauseo/components/clauseo/folder-path.ts";
 import { isolate } from "@clauseo/components/lib/bidi.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { toHostError } from "../transport/host-transport.ts";
 import type { HostError } from "../transport/protocol.ts";
-import { usePickedFolder } from "./folder-check.tsx";
+import { usePickedFolder, type Where } from "./folder-check.tsx";
 import type { MatterInfo } from "./host-next.ts";
 import type { Matters } from "./matters.ts";
 
@@ -29,11 +32,19 @@ import type { Matters } from "./matters.ts";
 const refusesFolder = (code: string | undefined) =>
   code !== undefined && code.startsWith("matter.folder_");
 
-/** The matter on the list a refusal names: a folder inside or holding its folder, where the host gave the matter. */
+/** The matter on the list a refusal names: a folder inside or holding its folder, or its own folder, where the host
+ * gave the matter. */
 const namedBy = (matters: Matters, refused: Pick<HostError, "code" | "matter">) =>
   nestedRefusal(refused.code) && refused.matter !== undefined
     ? (matters.view().matters.find((m) => m.matter === refused.matter) ?? null)
     : null;
+
+/** The folder a create's refusal names: the one picked, or the new folder named `name` in the default location. */
+const folderOf = (where: Where, location: string | null, name: string) =>
+  where.path ??
+  (where.source === "default_location" && location !== null
+    ? under(location, name.trim())
+    : undefined);
 
 /** A refusal's line, and the matter on the list it names. */
 const refusalOf = (
@@ -111,7 +122,8 @@ export function NewMatter({
     setNamed(null);
     const where = await pick.where(made && detailed && location !== null);
     if (where === null) return false;
-    const { source, path } = where;
+    const { source } = where;
+    const path = folderOf(where, location, name);
     if (where.refused !== undefined) {
       setError({ line: refusal(where.refused, path).line, code: where.refused.code });
       return false;
@@ -221,7 +233,8 @@ export function FirstMatter({
     setNamed(null);
     const where = await pick.where(made && detailed && location !== null);
     if (where === null) return false;
-    const { source, path } = where;
+    const { source } = where;
+    const path = folderOf(where, location, name);
     if (where.refused !== undefined) {
       setError({
         line: refusalOf(matters, w.lang, where.refused, path).line,
@@ -288,7 +301,8 @@ export function RefusedLine({ matters, refused }: { matters: Matters; refused: R
   return <>{refusalOf(matters, w.lang, refused, refused.path).line}</>;
 }
 
-/** Under that line, for a folder inside or holding a matter on the list: Open {name}, which opens it. */
+/** Under that line, for a folder inside or holding a matter on the list, or one it already uses: Open {name}, which
+ * opens it. */
 export function RefusedOpen({ matters, refused }: { matters: Matters; refused: Refused }) {
   const w = useWords();
   const at = namedBy(matters, refused);

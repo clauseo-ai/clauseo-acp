@@ -291,16 +291,11 @@ fn a_forgotten_folder_still_counts_for_other_folders() {
     let host = dir.start(0);
     let matter = created(import(&host, "Smith v Jones", &folder, (None, None)));
     host.ok(HostCommand::ForgetMatter { matter });
-    // A folder inside it or holding it is refused, naming no matter: the forgotten one is not
-    // on the list, so there is nothing to open.
-    for (path, code) in [
-        (inside, ErrorCode::MatterFolderInsideMatter),
-        (
-            folder.parent().unwrap().to_owned(),
-            ErrorCode::MatterFolderHoldsMatter,
-        ),
-    ] {
+    // A folder inside it or holding it is refused as a forgotten matter's, naming no matter: the
+    // forgotten one is not on the list, so there is nothing to open.
+    for path in [inside, folder.parent().unwrap().to_owned()] {
         let error = import(&host, "Other", &path, (None, None)).expect_err("refused");
+        let code = ErrorCode::MatterFolderOfForgottenMatter;
         assert_eq!(error.code(), code, "{}: {error}", path.display());
         assert_eq!(error.matter(), None, "{}", path.display());
     }
@@ -316,7 +311,7 @@ fn a_forgotten_folder_still_counts_for_other_folders() {
             client: None,
             next_date: None,
         },
-        ErrorCode::MatterFolderInsideMatter,
+        ErrorCode::MatterFolderOfForgottenMatter,
     );
     assert_eq!(error.matter(), None);
     assert!(!folder.join("Appeal").exists());

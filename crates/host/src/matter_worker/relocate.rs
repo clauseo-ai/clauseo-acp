@@ -4,9 +4,9 @@
 use std::path::{Path, PathBuf};
 
 use clauseo_matters::{Matter, Settings};
-use clauseo_protocol::{CheckpointId, ErrorCode, MatterId, Timestamp};
+use clauseo_protocol::{CheckpointId, ErrorCode, HostError, MatterId, Timestamp};
 
-use super::Slot;
+use super::{Claimed, Slot, check_registry, is_same_folder};
 use crate::error::Error;
 use crate::log_file::Cause;
 
@@ -19,27 +19,17 @@ pub(crate) struct Registry {
     /// The protected folders import refuses (`HostConfig::with_refused_folders` and the data
     /// folder).
     pub(crate) refused: Vec<PathBuf>,
-    /// Every other registered matter and its folder.
-    pub(crate) others: Vec<(MatterId, PathBuf)>,
+    /// Every other registered matter's folder (listed or forgotten) and every folder a create,
+    /// import or locate in flight claims, each with no command to join.
+    pub(crate) others: Vec<Claimed>,
 }
 
 impl Registry {
-    /// `matter.folder_refused` when `folder` is, holds or sits inside another matter's folder.
+    /// Refuses `folder` when it is, holds or sits inside another matter's folder, with the codes
+    /// a new matter's folder gets ([`check_registry`]): naming a listed matter, or saying the
+    /// folder is one being made or a forgotten matter's.
     pub(super) fn check(&self, folder: &Path) -> Result<(), Error> {
-        match self
-            .others
-            .iter()
-            .find(|(_, other)| clauseo_matters::same_or_nested(folder, other))
-        {
-            Some((other, _)) => Err(Error::refused(
-                ErrorCode::MatterFolderRefused,
-                format!(
-                    "the folder may not be this matter's: it is, holds or sits inside the \
-                     folder of matter {other}"
-                ),
-            )),
-            None => Ok(()),
-        }
+        check_registry(folder, &self.others, false).map(|_| ())
     }
 }
 
@@ -51,9 +41,11 @@ pub(crate) struct Relink {
     pub(crate) registry: Registry,
 }
 
-/// "Locate folder": refuses a folder another matter claims, then drops the matter this worker
-/// holds (R8 opens one `Matter` per history) and locates it in `folder`. A refusal leaves the
-/// matter to be opened again from `current`.
+/// "Locate folder": refuses the matter's own recorded folder (`matter.folder_is_matter` naming
+/// the matter: there is nothing to locate), then a refused place (as an import checks it first,
+/// so a drive root is named as one even though it holds other matters) and a folder another
+/// matter claims, then drops the matter this worker holds (R8 opens one `Matter` per history)
+/// and locates it in `folder`. A refusal leaves the matter to be opened again from `current`.
 pub(super) fn locate(
     settings: &Settings,
     slot: &mut Slot,
@@ -62,6 +54,16 @@ pub(super) fn locate(
     current: PathBuf,
     registry: &Registry,
 ) -> Result<Option<CheckpointId>, Error> {
+    if is_same_folder(folder, &current) {
+        return Err(Error::Refused(
+            HostError::new(
+                ErrorCode::MatterFolderIsMatter,
+                "the folder is already this matter's recorded folder",
+            )
+            .with_matter(id),
+        ));
+    }
+    clauseo_matters::check_place(folder, &registry.refused)?;
     registry.check(folder)?;
     *slot = Slot::Empty;
     match Matter::locate(settings.clone(), id, folder, &registry.refused) {

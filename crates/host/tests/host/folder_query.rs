@@ -89,8 +89,8 @@ fn a_picked_folder_answers_as_the_row_would() {
 /// An existing folder create refuses (the data folder or one inside it, the matters' history
 /// folder, the home folder, a system folder, a drive root, a folder inside or holding another
 /// matter's) is refused with create's code, naming a listed matter, and never checked: the
-/// fixed `network` answer never shows. A listed matter's own folder is not refused: the import
-/// answers with that matter.
+/// fixed `network` answer never shows. A listed matter's own folder is refused too, naming it
+/// (`matter.folder_is_matter`): the import never answers with that matter.
 #[test]
 fn an_existing_folder_create_refuses_is_refused_with_its_code_and_never_checked() {
     let dir = Dir::new("folder_query_refused", &[]);
@@ -99,6 +99,7 @@ fn an_existing_folder_create_refuses_is_refused_with_its_code_and_never_checked(
     let matter = dir.folder("home-of-lawyer/Case", &[("a.txt", "x\n")]);
     let inside = dir.folder("home-of-lawyer/Case/Pleadings", &[("b.txt", "y\n")]);
     let other = dir.folder("work/Other", &[("c.txt", "z\n")]);
+    let fresh = dir.folder("work/Fresh", &[("d.txt", "w\n")]);
     let host = network(&dir, |config| {
         config
             .with_home_folder(Some(home.clone()))
@@ -129,6 +130,7 @@ fn an_existing_folder_create_refuses_is_refused_with_its_code_and_never_checked(
             None,
         ),
         (inside, ErrorCode::MatterFolderInsideMatter, Some(case)),
+        (matter, ErrorCode::MatterFolderIsMatter, Some(case)),
         (
             other.parent().unwrap().to_owned(),
             ErrorCode::MatterFolderHoldsMatter,
@@ -154,7 +156,7 @@ fn an_existing_folder_create_refuses_is_refused_with_its_code_and_never_checked(
             assert_eq!(error.matter(), named, "{step} {}", folder.display());
         }
     }
-    let folder = register(&host, &matter);
+    let folder = register(&host, &fresh);
     let source = MatterSource::ExistingFolder { folder };
     assert_eq!(
         asked(&host, source).unwrap(),

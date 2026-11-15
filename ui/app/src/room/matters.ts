@@ -12,7 +12,8 @@ import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { pickReopenMatter } from "../store/reopen.ts";
 import { ActRefusals } from "./act-refusals.ts";
-import type { HostTransport } from "../transport/host-transport.ts";
+import { LocateRefusals } from "./locate-refusals.ts";
+import { toHostError, type HostTransport } from "../transport/host-transport.ts";
 import type {
   FolderRefId,
   FolderScanned,
@@ -170,6 +171,8 @@ export class Matters {
   readonly #listeners = new Set<() => void>();
   /** What the lawyer's last open or show on each matter was refused with (act-refusals.ts). */
   readonly refusals = new ActRefusals();
+  /** What the lawyer's last Locate folder on each matter was refused with (locate-refusals.ts). */
+  readonly located = new LocateRefusals();
   #view: MattersView;
   /** Thread views the room watches without the matters part, for their headers: the open thread, and threads of left
    * matters still working. */
@@ -195,6 +198,8 @@ export class Matters {
       now: Date.now(),
       zone: localZone(),
     };
+    // a Locate refused while the folder was away goes once it's found
+    this.subscribe(() => this.located.settle(this.#view.matters));
   }
 
   view = (): MattersView => this.#view;
@@ -322,7 +327,8 @@ export class Matters {
   }
 
   /** H3: asks for the folder of a matter that moved, and tells the host where it is now. `around` runs the picker, so a
-   * caller can show its wait; left out, the pick runs as it is. */
+   * caller can show its wait; left out, the pick runs as it is. A refusal stands in `located`, with the folder picked,
+   * until the next Locate. */
   async locate(
     matter: MatterId,
     around: <T>(pick: () => Promise<T>) => Promise<T> = (pick) => pick(),
@@ -330,7 +336,23 @@ export class Matters {
     const picked = await around(() => this.#transport.pickFolder());
     if (picked === null) return;
     this.refusals.clear(matter);
-    await this.#command({ relocate_matter: { matter, folder: picked.folder } }, "relocate_matter");
+    this.located.clear(matter);
+    if (this.#rows === null) return;
+    const missing = this.#view.matters.some(
+      (m) => m.matter === matter && m.folder_state === "missing",
+    );
+    try {
+      await this.#rows.command({ relocate_matter: { matter, folder: picked.folder } });
+    } catch (thrown) {
+      const refused = toHostError(thrown);
+      this.located.refuse(matter, {
+        code: refused.code,
+        path: picked.display,
+        missing,
+        ...(refused.matter === undefined ? {} : { matter: refused.matter }),
+      });
+    }
+    await this.refresh();
   }
 
   /** H11: shows the matter's folder in Finder or File Explorer; a refusal stands in `refusals`

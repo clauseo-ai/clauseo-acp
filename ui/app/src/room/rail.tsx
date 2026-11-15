@@ -4,7 +4,7 @@
 // rest each by their latest activity; the rest is headed "Other matters" under any group above it, "Matters" alone. With the
 // NextHost's matters part, Pinned, Recent (the five opened last), finding by name and client, and each row's menu (Pin,
 // Locate folder, Show in Finder, Remove from the list, which asks first), and Locate folder beside a refused Show in
-// Finder's words on the row; without it, finding by name only, and a menu of Show in Finder
+// Finder's words, or a refused Locate's, on the row; without it, finding by name only, and a menu of Show in Finder
 // alone. What each row says it's doing comes from matters.ts's status,
 // its moments put in the lawyer's clock as the rail renders, so nothing ticks at rest; the open matter's row says
 // nothing, since the lawyer is looking at it. Until the list arrives, and if it can't be read, the rail draws no list
@@ -44,6 +44,7 @@ import type { AllThreads } from "./all-threads.ts";
 import type { MatterInfo, MatterStatus } from "./host-next.ts";
 import { openConversation } from "./open-conversation.ts";
 import { locatable } from "./act-refusals.ts";
+import { locateLine } from "./locate-refusals.ts";
 import { LocateButton } from "./locate-button.tsx";
 import { railView, recentDays } from "./rail-lists.ts";
 import { RailTriage } from "./rail-triage.ts";
@@ -175,6 +176,8 @@ export function RoomRail({
   const every = useSyncExternalStore(threads.subscribe, threads.view, threads.view);
   const { refusals } = matters;
   const refused = useSyncExternalStore(refusals.subscribe, refusals.view, refusals.view);
+  const { located } = matters;
+  const relocated = useSyncExternalStore(located.subscribe, located.view, located.view);
   const zone = view.zone;
   // the last moment the pointer came or went, or the window came back
   const [stamp, setStamp] = useRailClock(transport, zone);
@@ -235,11 +238,15 @@ export function RoomRail({
     // a refused Show in Finder says why on the row's note line until the next try (act-refusals.ts)
     const said = refused.get(m.matter);
     const revealed = said?.act === "reveal" ? said.code : null;
+    // a refused Locate folder says why there too, unless the open matter's moved folder says it (locate-refusals.ts)
+    const relocate = current && m.folder_state === "missing" ? undefined : relocated.get(m.matter);
+    const locateNote =
+      relocate === undefined ? "" : locateLine(w.lang, m.matter, relocate, view.matters);
     const findFolder = m.folder_state === "missing" || locatable(revealed);
     const snoozing = matterSnooze(sc, m, every.lists.get(m.matter), placed.group.get(m.matter));
     // the refusal's words have Locate folder beside them, as the menu has it, where the matters part can relocate
     const locate =
-      detailed && locatable(revealed) ? (
+      detailed && (locatable(revealed) || locateNote !== "") ? (
         <LocateButton onLocate={() => void matters.locate(m.matter)} />
       ) : null;
     const below =
@@ -254,8 +261,8 @@ export function RoomRail({
     return {
       id: m.matter,
       name: m.name,
-      note: revealed === null ? "" : errorWords(w.lang, revealed),
-      locateAsked: locatable(revealed),
+      note: revealed === null ? locateNote : errorWords(w.lang, revealed),
+      locateAsked: locatable(revealed) || locateNote !== "",
       hint:
         m.folder_display === undefined || m.folder_display === "" ? "" : isolate(m.folder_display),
       current,

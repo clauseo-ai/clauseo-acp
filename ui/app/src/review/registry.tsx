@@ -28,6 +28,7 @@ import { TF } from "./registry-follow.tsx";
 import { C117 } from "./registry-c117.tsx";
 import { U6F } from "./registry-u6f.tsx";
 import { ME } from "./registry-me.tsx";
+import { UC_FOLDER_REFUSALS } from "./registry-uc-folder-refusals.tsx";
 import { UTC } from "./registry-utc.tsx";
 import { WEB_SOURCES } from "./registry-web-sources.tsx";
 import { UET } from "./registry-uet.tsx";
@@ -326,24 +327,11 @@ const CHANGE_CREATE: readonly Step[] = [
 
 /** A line of the new matter form's refusal (matter-form-check.ts's createErrorLine), after Choose folder… and Create,
  * or with `next` after Use a new folder and Create, in the default location, where the line names no folder. */
-const refusal = (
-  id: string,
-  words: WordsRef,
-  code: NextErrorCode,
-  display: string,
-  next = false,
-): Entry => ({
+const refusal = (id: string, words: WordsRef, code: NextErrorCode, display: string): Entry => ({
   id,
   words,
   screen: "matters/new-matter",
-  render: () => (
-    <RoomAfter
-      host={() => refusingHost(code, display, next)}
-      steps={
-        next ? [...NEW_MATTER, { press: "matter-made" }, { press: "create-matter" }] : CHANGE_CREATE
-      }
-    />
-  ),
+  render: () => <RoomAfter host={() => refusingHost(code, display)} steps={CHANGE_CREATE} />,
 });
 
 export const REGISTRY: readonly Entry[] = [
@@ -398,6 +386,7 @@ export const REGISTRY: readonly Entry[] = [
   ...WEB_SOURCES,
   ...UET,
   ...ME,
+  ...UC_FOLDER_REFUSALS,
   ...UD1,
   ...UD2,
   ...UD2_PLANS,
@@ -427,13 +416,8 @@ export const REGISTRY: readonly Entry[] = [
     "matter.folder_unreadable",
     "Documents/Locked",
   ),
-  refusal(
-    "U2-17",
-    matterWords("Clauseo can't read that folder."),
-    "matter.folder_unreadable",
-    "",
-    true,
-  ),
+  // no folder to name: a pick that reads as nothing (the default location's new folder is named)
+  refusal("U2-17", matterWords("Clauseo can't read that folder."), "matter.folder_unreadable", ""),
   refusal(
     "U2-18",
     matterWords("It may be locked, or on a drive that's no longer connected."),
@@ -523,14 +507,7 @@ export const REGISTRY: readonly Entry[] = [
     ...RAIL,
     render: () => <RoomAfter host={railHost} steps={[{ find: "Zaveri" }]} />,
   },
-  // matter.folder_refused, which doesn't say why; also a folder nested with a matter the list doesn't have, and
-  // matter.folder_is_matter
-  refusal(
-    "U2-31",
-    matterWords("Clauseo can't make a matter of this folder. Choose another folder."),
-    "matter.folder_refused",
-    "Documents/Acme",
-  ),
+  // U2-31, retired: a folder Clauseo can't make a matter of is named (folder refusals, UC-272)
   // the design's words (design/03-system/src/lib/words-matters.ts), approved with it
   {
     id: "U2-32",

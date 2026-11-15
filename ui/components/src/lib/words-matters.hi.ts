@@ -21,11 +21,11 @@ export const HI = {
   "Folder moved": "फ़ोल्डर कहीं और ले जाया गया",
   "A matter waits for you": "एक मामला आपकी प्रतीक्षा में है",
   /* ---------- a new matter: a folder the host refused, a create that failed ---------- */
-  // matter.folder_refused, which doesn't say why; also the line for a folder inside or holding a matter the list
-  // doesn't have (one being made or forgotten), and for matter.folder_is_matter, with no Open
+  // matter.folder_refused, which doesn't say why, where no folder is at hand to name; also the line for a folder nested
+  // with, or used by, a matter the list doesn't have, with no Open
   "Clauseo can't make a matter of this folder. Choose another folder.":
     "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
-  // folder PR 2: each refusal says its reason (matter-form-check.ts)
+  // folder PR 2: each refusal says its reason (matter-form-check.ts); these, where no folder is at hand to name
   "This is the top of a drive. Choose a folder on it.":
     "यह किसी ड्राइव का सबसे ऊपरी स्तर है। उस पर कोई फ़ोल्डर चुनें।",
   "This is your home folder. Choose a folder inside it.":
@@ -50,6 +50,40 @@ export const HI = {
   "{path} is the folder Clauseo keeps matters in.": "{path} वह फ़ोल्डर है जिसमें Clauseo मामले रखता है।",
   "That folder is where Clauseo keeps matters.": "उस फ़ोल्डर में Clauseo मामले रखता है।",
   "Choose the folder for one matter.": "एक मामले का फ़ोल्डर चुनें।",
+  // folder refusals (UC-262..UC-277, Hindi provisional): each line names the folder picked, as it reads; the lines
+  // above without a path stay for a refusal with no folder to name (matter-form-check.ts)
+  "{path} is inside the folder of {name}. Choose another folder.":
+    "{path}, {name} के फ़ोल्डर के भीतर है। दूसरा फ़ोल्डर चुनें।",
+  "{path} contains the folder of {name}. Choose another folder.":
+    "{path} में {name} का फ़ोल्डर है। दूसरा फ़ोल्डर चुनें।",
+  // matter.folder_is_matter in New matter: the folder another matter on the list already uses, with Open {name}
+  "{name} already uses {path}. Open {name}, or choose another folder.":
+    "{name} पहले से {path} का उपयोग करता है। {name} खोलें, या दूसरा फ़ोल्डर चुनें।",
+  "{path} is inside, or contains, the folder of a matter you removed from the list. Choose another folder.":
+    "{path} उस मामले के फ़ोल्डर के भीतर है, या उसमें वह फ़ोल्डर है, जिसे आपने सूची से हटा दिया है। दूसरा फ़ोल्डर चुनें।",
+  "{path} is inside, or contains, a folder Clauseo is still making into a matter. Try again in a moment, or choose another folder.":
+    "{path} ऐसे फ़ोल्डर के भीतर है, या उसमें ऐसा फ़ोल्डर है, जिससे Clauseo अभी मामला बना रहा है। थोड़ी देर में फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
+  "{path} is the top of a drive. Choose a folder on it.":
+    "{path} किसी ड्राइव का सबसे ऊपरी स्तर है। उस पर कोई फ़ोल्डर चुनें।",
+  "{path} is your home folder. Choose a folder inside it.":
+    "{path} आपका होम फ़ोल्डर है। उसके भीतर कोई फ़ोल्डर चुनें।",
+  "{path} is a system folder. Choose another folder.": "{path} एक सिस्टम फ़ोल्डर है। दूसरा फ़ोल्डर चुनें।",
+  "Clauseo keeps its own files in {path}. Choose another folder.":
+    "Clauseo अपनी फ़ाइलें {path} में रखता है। दूसरा फ़ोल्डर चुनें।",
+  "{path} is too deeply nested for Windows. Choose a folder with a shorter path.":
+    "{path} Windows के लिए दूसरे फ़ोल्डरों के बहुत भीतर है। छोटे पथ वाला फ़ोल्डर चुनें।",
+  "Clauseo can't make a matter of {path}. Choose another folder.":
+    "Clauseo {path} से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+  // Locate folder, refused: under the moved folder's words, or on the rail row's note line
+  "{path} is already this matter's folder.": "{path} पहले से इसी मामले का फ़ोल्डर है।",
+  "{name} already uses {path}. Choose this matter's own folder.":
+    "{name} पहले से {path} का उपयोग करता है। इस मामले का अपना फ़ोल्डर चुनें।",
+  "{path} isn't this matter's folder. Choose the folder you moved it to.":
+    "{path} इस मामले का फ़ोल्डर नहीं है। वह फ़ोल्डर चुनें जहाँ आप इसे ले गए हैं।",
+  "Clauseo can't find {path}. Choose the folder again.":
+    "Clauseo को {path} नहीं मिल रहा। फ़ोल्डर फिर से चुनें।",
+  "Clauseo can't use {path} for this matter. Choose another folder.":
+    "Clauseo इस मामले के लिए {path} का उपयोग नहीं कर सकता। दूसरा फ़ोल्डर चुनें।",
   /* ---------- the folder picker's line, while a pick is slow (New matter, the first screen, Locate) ---------- */
   "Opening the folder picker…": "फ़ोल्डर चुनने की विंडो खुल रही है…",
   // the first screen, while the folder picked is made a matter (matters.create)

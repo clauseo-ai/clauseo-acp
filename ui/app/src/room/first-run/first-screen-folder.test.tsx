@@ -14,8 +14,9 @@ import { RefusedLine, RefusedOpen, type Refused } from "../new-matter.tsx";
 import { A, MADE_MATTER, byId, mountFirstRun, press, sent, settle, text } from "./rig.tsx";
 
 const OPENING = "Opening the folder…";
-const CANT = "Clauseo can't make a matter of this folder. Choose another folder.";
 const PICKED = { folder: "folder-ref-1", display: "Documents/Matters/Rathi Steels" };
+/** The refused line, naming the folder picked. */
+const CANT = `Clauseo can't make a matter of \u2068~/${PICKED.display}\u2069. Choose another folder.`;
 const title = () => document.querySelector('[data-testid="matter"]')?.textContent;
 
 test("while the folder is made a matter: its line shows, the button waits, a second press does nothing, and the made matter opens", async () => {
@@ -67,13 +68,14 @@ const refusing = (refusal: Omit<HostError, "message" | "retryable">) => (): Comm
   throw { message: "SECRET-DETAIL", retryable: false, ...refusal };
 };
 
+/** Each place refusal's line, naming the folder picked. */
 const LINES = {
-  "matter.folder_is_drive": "This is the top of a drive. Choose a folder on it.",
-  "matter.folder_is_home": "This is your home folder. Choose a folder inside it.",
-  "matter.folder_is_system": "This is a system folder. Choose another folder.",
-  "matter.folder_in_clauseo_data":
-    "This folder is part of Clauseo's own data. Choose another folder.",
-  "matter.folder_too_deep": "This folder is too deeply nested for Windows. Choose a shorter path.",
+  "matter.folder_is_drive": "{path} is the top of a drive. Choose a folder on it.",
+  "matter.folder_is_home": "{path} is your home folder. Choose a folder inside it.",
+  "matter.folder_is_system": "{path} is a system folder. Choose another folder.",
+  "matter.folder_in_clauseo_data": "Clauseo keeps its own files in {path}. Choose another folder.",
+  "matter.folder_too_deep":
+    "{path} is too deeply nested for Windows. Choose a folder with a shorter path.",
 } as const;
 
 for (const lang of ["en", "hi"] as const) {
@@ -82,7 +84,10 @@ for (const lang of ["en", "hi"] as const) {
       await mountFirstRun({ matters: [], language: lang, create: refusing({ code }) });
       await press(byId("open-folder"));
       expect(document.querySelector(".fl-refusal-head")?.textContent).toBe(
-        lang === "en" ? en : HI[en as keyof typeof HI],
+        (lang === "en" ? en : HI[en as keyof typeof HI]).replace(
+          "{path}",
+          `\u2068~/${PICKED.display}\u2069`,
+        ),
       );
       expect(text()).not.toContain("SECRET-DETAIL");
       expect(byId<HTMLButtonElement>("open-folder")?.disabled).toBe(false);
@@ -105,7 +110,7 @@ for (const refusal of [
   { code: "matter.folder_holds_matter" },
   { code: "matter.folder_is_matter", matter: A.matter },
 ] as const) {
-  test(`${refusal.code} with no matter on the list says the refused line with no Open`, async () => {
+  test(`${refusal.code} with no matter on the list says the refused line, naming the folder, with no Open`, async () => {
     await mountFirstRun({ matters: [], create: refusing(refusal) });
     await press(byId("open-folder"));
     expect(document.querySelector(".fl-refusal-head")?.textContent).toBe(CANT);
@@ -137,14 +142,21 @@ async function renderRefused(refused: Refused) {
   return { host, root, open };
 }
 
-test("a folder nested with a matter on the list names it on the first screen, and Open {name} opens it", async () => {
+test("a folder nested with a matter on the list, or one it already uses, names it on the first screen, and Open {name} opens it", async () => {
   for (const [code, words] of [
-    ["matter.folder_inside_matter", "This folder is inside the folder of {name}."],
-    ["matter.folder_holds_matter", "This folder holds the folder of {name}."],
+    [
+      "matter.folder_inside_matter",
+      "{path} is inside the folder of {name}. Choose another folder.",
+    ],
+    ["matter.folder_holds_matter", "{path} contains the folder of {name}. Choose another folder."],
+    [
+      "matter.folder_is_matter",
+      "{name} already uses {path}. Open {name}, or choose another folder.",
+    ],
   ] as const) {
     const { host, root, open } = await renderRefused({ code, matter: A.matter, path: "Z:\\Acme" });
     expect(host.querySelector("p")?.textContent).toBe(
-      words.replace("{name}", `\u2068${A.name}\u2069`),
+      words.replace("{path}", "\u2068Z:\\Acme\u2069").replaceAll("{name}", `\u2068${A.name}\u2069`),
     );
     const button = host.querySelector<HTMLButtonElement>('[data-testid="open-matter"]');
     expect(button?.textContent).toBe(`Open \u2068${A.name}\u2069`);
@@ -159,7 +171,9 @@ test("a folder nested with a matter on the list names it on the first screen, an
     matter: "00000000-0000-4000-8000-000000000042",
     path: "Z:\\Acme",
   });
-  expect(host.querySelector("p")?.textContent).toBe(CANT);
+  expect(host.querySelector("p")?.textContent).toBe(
+    "Clauseo can't make a matter of \u2068Z:\\Acme\u2069. Choose another folder.",
+  );
   expect(host.querySelector('[data-testid="open-matter"]')).toBeNull();
   await act(async () => root.unmount());
   host.remove();

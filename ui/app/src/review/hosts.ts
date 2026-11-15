@@ -322,6 +322,47 @@ export function refusingHost(
   });
 }
 
+/** A matter whose folder moved, open, for Locate folder's states. */
+export const MOVED_MATTER: MatterSummary = {
+  matter: "00000000-0000-4000-8000-000000000002",
+  name: "Khan Leather Works v. Customs",
+  kind: "folder",
+};
+
+/** A host whose open matter's folder moved (MOVED_MATTER, MATTER beside it on the list), the picker giving `display`
+ * and relocate_matter refused with `code`, naming the moved matter itself (`self`), MATTER (`other`), or none. */
+export function locatingHost(
+  code: NextErrorCode,
+  display: string,
+  names?: "self" | "other",
+): FakeTransport {
+  const refusal: NextHostError = {
+    code,
+    message: "a detail for logs",
+    retryable: false,
+    ...(names === undefined
+      ? {}
+      : { matter: names === "self" ? MOVED_MATTER.matter : MATTER.matter }),
+  };
+  return new FakeTransport({
+    pickFolder: () => ({ folder: "review-folder", display }),
+    next: fakeNext({
+      matters: () => [
+        detailed(MATTER),
+        detailed(MOVED_MATTER, {
+          folder_state: "missing",
+          folder_display: "Documents/Khan Leather Works",
+          last_opened: 1,
+        }),
+      ],
+      command: (command) => {
+        if ("relocate_matter" in command) throw refusal;
+        return undefined;
+      },
+    }),
+  });
+}
+
 /** One thing a state does once rendered: press the control with this test id, type into a field of the dialog (by its
  * place among the dialog's fields: 0 the name, 1 the client) and move on from it, press Enter in one, or type into the
  * rail's Find. */

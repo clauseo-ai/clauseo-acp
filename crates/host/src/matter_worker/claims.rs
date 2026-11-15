@@ -36,22 +36,23 @@ pub(crate) enum Held {
     /// No folder of the registry is, holds or sits inside it (or, for an import, it is a
     /// forgotten matter's own folder, which the import brings back).
     Free,
-    /// It is this listed matter's own folder, by any spelling: an import answers with that
-    /// matter and makes nothing.
+    /// It is this listed matter's own folder, by any spelling: an import is refused with
+    /// [`in_use`] and makes nothing.
     Listed(MatterId),
     /// It is the folder this create or import in flight is making: the new command joins it.
     Making(CommandId),
 }
 
 /// A refusal when `folder` is, holds or sits inside a folder of `registry`, compared as the
-/// refused-folder check compares (`same_or_nested`): `matter.folder_inside_matter` inside it,
-/// `matter.folder_holds_matter` holding it, `matter.folder_is_matter` the same folder. It
-/// names the matter (`HostError::matter`) only when it is on the list: there is nothing to open
-/// otherwise. The
+/// refused-folder check compares (`same_or_nested`). For a listed matter's folder,
+/// `matter.folder_inside_matter` inside it, `matter.folder_holds_matter` holding it,
+/// `matter.folder_is_matter` the same folder, each naming the matter (`HostError::matter`);
+/// for one being made `matter.folder_being_made`, and for a forgotten matter's
+/// `matter.folder_of_forgotten_matter`, naming none (the app's list has neither to open). The
 /// same folder is not refused when something else answers for it ([`Held`]): one a create or
 /// import in flight is making, and for an import (`import`) a listed matter's own folder (the
-/// import answers with that matter) or a forgotten matter's (the import finds its marker and
-/// brings that matter back).
+/// import refuses it with [`in_use`] once the actor has checked the matter is still listed) or
+/// a forgotten matter's (the import finds its marker and brings that matter back).
 pub(crate) fn check_registry(
     folder: &Path,
     registry: &[Claimed],
@@ -68,10 +69,18 @@ pub(crate) fn check_registry(
             (Claim::Forgotten, _) if import && same() => continue,
             _ => {}
         }
-        let (code, relation) = match nesting(folder, &claimed.folder) {
-            Nesting::Same => (ErrorCode::MatterFolderIsMatter, "is"),
-            Nesting::Inside => (ErrorCode::MatterFolderInsideMatter, "sits inside"),
-            Nesting::Holds => (ErrorCode::MatterFolderHoldsMatter, "holds"),
+        let nesting = nesting(folder, &claimed.folder);
+        let relation = match nesting {
+            Nesting::Same => "is",
+            Nesting::Inside => "sits inside",
+            Nesting::Holds => "holds",
+        };
+        let code = match (claimed.claim, nesting) {
+            (Claim::Making, _) => ErrorCode::MatterFolderBeingMade,
+            (Claim::Forgotten, _) => ErrorCode::MatterFolderOfForgottenMatter,
+            (Claim::Listed, Nesting::Same) => ErrorCode::MatterFolderIsMatter,
+            (Claim::Listed, Nesting::Inside) => ErrorCode::MatterFolderInsideMatter,
+            (Claim::Listed, Nesting::Holds) => ErrorCode::MatterFolderHoldsMatter,
         };
         let refusal = HostError::new(
             code,
@@ -87,6 +96,29 @@ pub(crate) fn check_registry(
         return Err(Error::Refused(refusal));
     }
     Ok(Held::Free)
+}
+
+/// [`check_registry`] for an import's folder, run off the actor (the `FolderSupport` query, the
+/// folder scan): a listed matter's own folder is refused with [`in_use`] here, as the import is;
+/// one being made passes, since the import joins it.
+pub(crate) fn check_import(folder: &Path, registry: &[Claimed]) -> Result<(), Error> {
+    match check_registry(folder, registry, true)? {
+        Held::Listed(matter) => Err(in_use(matter)),
+        Held::Free | Held::Making(_) => Ok(()),
+    }
+}
+
+/// `matter.folder_is_matter` naming `matter`: the folder picked for a new matter is that listed
+/// matter's own folder ([`Held::Listed`]). Nothing is made, and the matter is not opened in its
+/// place: the app says which matter uses the folder and offers to open it.
+pub(crate) fn in_use(matter: MatterId) -> Error {
+    Error::Refused(
+        HostError::new(
+            ErrorCode::MatterFolderIsMatter,
+            format!("the folder is the folder of matter {matter}, on the list"),
+        )
+        .with_matter(matter),
+    )
 }
 
 /// Whether `a` and `b` are the same folder by any spelling: `same_or_nested` relates them and
@@ -130,3 +162,6 @@ fn depth(path: &Path) -> usize {
         .components()
         .count()
 }
+
+#[cfg(test)]
+mod tests;

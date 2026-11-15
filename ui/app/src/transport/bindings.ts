@@ -1901,6 +1901,10 @@ export type ErrorCode =
 "agent.quiet" | 
 /** The servers an import would add, with their programs, arguments, URLs and variable or header names, are too long to show whole in one confirm (over 2,000 characters), so nothing was imported. */
 "mcp.import_too_large" | 
+/** The folder is, holds or sits inside a folder that a create, import or Locate folder in flight is making a matter's folder; it may be picked again once that one ends. */
+"matter.folder_being_made" | 
+/** The folder holds or sits inside the folder of a matter taken off Clauseo's list (forgotten), or, for a new folder or Locate folder, is that folder; importing a forgotten matter's own folder brings it back instead. */
+"matter.folder_of_forgotten_matter" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -2304,9 +2308,11 @@ export type HostCommand =
  *  stores it as the matter's folder and logs `matter_relocated`; it answers `Done`.
  *  Refused while a turn or an undo holds the matter's writer (`matter.turn_running`); a
  *  folder that is not there is `matter.folder_missing`; one with no marker, an unreadable one
- *  or one naming another matter is `matter.folder_not_a_matter`; a folder import would
- *  refuse, or one that is, holds or sits inside another matter's folder, is
- *  `matter.folder_refused`. A refusal changes nothing.
+ *  or one naming another matter is `matter.folder_not_a_matter`; the matter's own recorded
+ *  folder is `matter.folder_is_matter` naming this matter; a folder import would refuse, or
+ *  one that is, holds or sits inside another matter's folder, gets the code `CreateMatter`
+ *  gives it (`matter.folder_is_drive`, `matter.folder_inside_matter` and the like). A
+ *  refusal changes nothing.
  */
 ({ relocate_matter: {
 	/**  The matter. */

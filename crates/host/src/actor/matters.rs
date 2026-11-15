@@ -3,8 +3,9 @@
 //! worker thread, started and opened on
 //! first use (relinking a deleted `matter.json` once, when no other matter claims the folder). A
 //! refused folder gets one code per reason (`refusal`), and an import of a forgotten matter's
-//! folder brings that matter back (`matter_details.rs`); a listed matter's folder, one being made
-//! and one whose marker names a matter this install does not know are answered in `answer.rs`.
+//! folder brings that matter back (`matter_details.rs`); a listed matter's folder (refused,
+//! naming it), one being made and one whose marker names a matter this install does not know are
+//! answered in `answer.rs`.
 //! `RelocateMatter` is in `relocate.rs`.
 //!
 //! A matter's worker starts lazily: at start-up the host only lists matters, and the first
@@ -123,17 +124,27 @@ pub(crate) fn matter_worker(
 /// registered matter's folder (forgotten ones too: their folders bring them back), and the
 /// folders other commands are making matters of.
 pub(super) fn registry(actor: &Actor, matter: MatterId) -> Registry {
-    let rows = actor
-        .matters
+    let rows = |claim| {
+        move |entry: &MatterEntry| (entry.row.id, PathBuf::from(&entry.row.folder_path), claim)
+    };
+    let listed = actor.matters.values().map(rows(Claim::Listed));
+    let forgotten = actor.forgotten.values().map(rows(Claim::Forgotten));
+    let claimed = actor
+        .claims
         .values()
-        .chain(actor.forgotten.values())
-        .map(|entry| (entry.row.id, PathBuf::from(&entry.row.folder_path)));
-    let claimed = actor.claims.values().cloned();
+        .map(|(id, folder)| (*id, folder.clone(), Claim::Making));
     Registry {
         refused: refused_folders(actor),
-        others: rows
+        others: listed
+            .chain(forgotten)
             .chain(claimed)
-            .filter(|(id, _)| *id != matter)
+            .filter(|(id, _, _)| *id != matter)
+            .map(|(matter, folder, claim)| Claimed {
+                matter,
+                folder,
+                claim,
+                command: None,
+            })
             .collect(),
     }
 }

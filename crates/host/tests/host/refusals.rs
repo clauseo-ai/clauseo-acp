@@ -2,8 +2,9 @@
 //! folder, a system folder, a folder that does not read, a folder that sits inside another
 //! matter's or holds it (naming it), Clauseo's own data folder and the matters' history folder
 //! in it, and on Windows a path too long for
-//! Windows to start programs in. A listed matter's own folder, by any spelling, is not refused:
-//! the import answers with that matter. A `matter.json` that does not read is set aside.
+//! Windows to start programs in. A listed matter's own folder, by any spelling, is refused as
+//! `matter.folder_is_matter` naming that matter, and nothing is made or opened. A `matter.json`
+//! that does not read is set aside.
 
 use std::path::Path;
 
@@ -148,8 +149,9 @@ fn a_folder_inside_or_holding_a_matters_folder_is_refused_naming_it() {
     let inside = dir.folder("Smith v Jones/Pleadings", &[("b.txt", "y\n")]);
     let host = dir.start(0);
     let matter = imported(&host, &folder);
-    // The same folder is answered with the matter.
-    assert_eq!(imported(&host, &folder), matter);
+    // The same folder is refused naming the matter, never answered with it.
+    let error = refused(&host, &folder, ErrorCode::MatterFolderIsMatter);
+    assert_eq!(error.matter(), Some(matter));
     for (path, code) in [
         (inside, ErrorCode::MatterFolderInsideMatter),
         (
@@ -255,12 +257,12 @@ fn a_missing_folder_is_still_folder_missing() {
 }
 
 /// "New matter" on a folder that is already this install's matter, picked by another spelling
-/// of its path (as `Z:\n1` and `\\server\share\n1` on Windows): the import is answered with
-/// that matter, and nothing is made: no second matter on the list, no second history, the
-/// folder's `matter.json` unchanged.
+/// of its path (as `Z:\n1` and `\\server\share\n1` on Windows): the import is refused as
+/// `matter.folder_is_matter` naming that matter, and nothing is made: no second matter on the
+/// list, no second history, the folder's `matter.json` unchanged.
 #[cfg(unix)]
 #[test]
-fn a_matters_folder_by_another_spelling_is_answered_with_it_and_makes_nothing() {
+fn a_matters_folder_by_another_spelling_is_refused_naming_it_and_makes_nothing() {
     let dir = Dir::new("refuse_is_matter_spelled", &[]);
     let folder = dir.folder("Smith v Jones", &[("a.txt", "x\n")]);
     let parent = folder.parent().unwrap().to_owned();
@@ -281,7 +283,8 @@ fn a_matters_folder_by_another_spelling_is_answered_with_it_and_makes_nothing() 
         ("with `..`", folder.join("..").join("Smith v Jones")),
         ("with `.`", parent.join(".").join("Smith v Jones").join(".")),
     ] {
-        assert_eq!(imported(&host, &path), matter, "{case}");
+        let error = refused(&host, &path, ErrorCode::MatterFolderIsMatter);
+        assert_eq!(error.matter(), Some(matter), "{case}");
         assert_eq!(host.matters().len(), listed, "{case}: no second matter");
         assert_eq!(histories(), made, "{case}: no second history");
         assert_eq!(

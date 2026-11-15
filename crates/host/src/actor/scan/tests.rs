@@ -533,9 +533,9 @@ fn an_unknown_folder_ref_and_a_refused_folder_are_refused() {
 
 /// A marker refuses no scan: one naming a matter this install never had (the import adopts it)
 /// and one that does not read (the import sets it aside) scan as any folder, and so does a copy
-/// of a listed matter's folder (it becomes a new matter). A listed matter's own folder scans too
-/// (the import answers with that matter); a folder inside it is `matter.folder_inside_matter`
-/// naming it.
+/// of a listed matter's folder (it becomes a new matter). A listed matter's own folder is
+/// `matter.folder_is_matter` naming it, as the import is refused; a folder inside it is
+/// `matter.folder_inside_matter` naming it.
 #[test]
 fn a_marker_refuses_no_scan_and_a_folder_inside_a_listed_matters_is_named() {
     let host = Running::start("scan-markers", None);
@@ -559,10 +559,9 @@ fn a_marker_refuses_no_scan_and_a_folder_inside_a_listed_matters_is_named() {
     let CommandOutcome::MatterCreated { matter } = host.dispatch(3, create).unwrap() else {
         panic!("no matter");
     };
-    assert_eq!(
-        host.dispatch(4, scan(listed)).unwrap(),
-        CommandOutcome::Done
-    );
+    let own = host.dispatch(4, scan(listed)).unwrap_err();
+    assert_eq!(own.code(), ErrorCode::MatterFolderIsMatter, "{own}");
+    assert_eq!(own.matter(), Some(matter));
     let inside = block_on(host.host.register_folder(path.join("sub"))).unwrap();
     let error = host.dispatch(6, scan(inside)).unwrap_err();
     assert_eq!(error.code(), ErrorCode::MatterFolderInsideMatter, "{error}");

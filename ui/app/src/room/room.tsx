@@ -70,7 +70,7 @@ import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
 import { usePaperLinks } from "./paper-links.ts";
 import { useMatterMoves, usePapers } from "./use-papers.ts";
 import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
-import { LocateGate, MovedFolder } from "./moved.tsx";
+import { LocateGate, MovedMatter } from "./moved.tsx";
 import { usePickWait } from "./picker-wait.ts";
 import { useDraftMenus } from "./config-menus.ts";
 import { FolderChooserHost } from "./folder-chooser-host.tsx";
@@ -514,8 +514,9 @@ function RoomFrame({
           {welcome ? null : open !== null && view.folderMissing ? (
             // the folder moved (H3): its line in the thread's place, and Locate folder as the composer's gate
             <>
-              <MovedFolder
-                {...(open.folder_display === undefined ? {} : { folder: open.folder_display })}
+              <MovedMatter
+                matters={matters}
+                open={open}
                 onLocate={() => void matters.locate(open.matter, locating.track)}
               />
               {locating.opening && <PickerLine />}

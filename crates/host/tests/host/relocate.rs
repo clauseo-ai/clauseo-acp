@@ -152,6 +152,11 @@ fn moved_folder_is_located_and_the_next_turn_versions_it() {
     host.shutdown();
 }
 
+/// Each Locate folder refusal has a new matter's code for its reason, naming a listed matter
+/// where one is involved, and leaves the matter as it was: its own recorded folder (naming it),
+/// another matter's folder, one holding or inside it (naming that matter), one inside a forgotten
+/// matter's, the data folder and the matters' history folder in it, a drive root, a folder that
+/// is not this matter's or is not there.
 #[test]
 fn locate_refusals_leave_the_matter_unchanged() {
     let dir = Dir::new("locate_refusals", &[]);
@@ -160,6 +165,9 @@ fn locate_refusals_leave_the_matter_unchanged() {
     let matter = host.create_matter("a", &old);
     let other_folder = dir.folder("outer/b", &[("lease.txt", "y\n")]);
     let other = host.create_matter("b", &other_folder);
+    let gone_folder = dir.folder("c", &[("deed.txt", "z\n")]);
+    let forgotten = host.create_matter("c", &gone_folder);
+    host.ok(HostCommand::ForgetMatter { matter: forgotten });
     let moved = dir.work_path("a-moved");
     write::rename(&old, &moved);
 
@@ -172,50 +180,68 @@ fn locate_refusals_leave_the_matter_unchanged() {
         &[("brief.txt", "x\n"), (".clauseo/matter.json", "{oops")],
     );
     let inside = dir.folder("outer/b/sub", &[]);
+    let in_forgotten = dir.folder("c/sub", &[]);
+    let in_data = dir.data().join("work");
+    write::create_dir_all(&in_data);
+    let not_a_matter = (ErrorCode::MatterFolderNotAMatter, None);
     let cases = [
         (
-            "a marker naming another matter",
-            copy,
-            ErrorCode::MatterFolderNotAMatter,
+            "its own recorded folder",
+            old,
+            (ErrorCode::MatterFolderIsMatter, Some(matter)),
         ),
-        ("no marker", plain, ErrorCode::MatterFolderNotAMatter),
-        (
-            "an unreadable marker",
-            bad,
-            ErrorCode::MatterFolderNotAMatter,
-        ),
+        ("a marker naming another matter", copy, not_a_matter),
+        ("no marker", plain, not_a_matter),
+        ("an unreadable marker", bad, not_a_matter),
         (
             "no folder",
             dir.work_path("gone"),
-            ErrorCode::MatterFolderMissing,
+            (ErrorCode::MatterFolderMissing, None),
         ),
         (
             "another matter's folder",
             other_folder,
-            ErrorCode::MatterFolderRefused,
+            (ErrorCode::MatterFolderIsMatter, Some(other)),
         ),
         (
             "a folder holding another matter's",
             dir.work_path("outer"),
-            ErrorCode::MatterFolderRefused,
+            (ErrorCode::MatterFolderHoldsMatter, Some(other)),
         ),
         (
             "inside another matter's folder",
             inside,
-            ErrorCode::MatterFolderRefused,
+            (ErrorCode::MatterFolderInsideMatter, Some(other)),
+        ),
+        (
+            "inside a forgotten matter's folder",
+            in_forgotten,
+            (ErrorCode::MatterFolderOfForgottenMatter, None),
         ),
         (
             "the matters root",
-            dir.data_dir().join("matters"),
-            ErrorCode::MatterFolderRefused,
+            dir.data().join("matters"),
+            (ErrorCode::MatterFolderInMattersRoot, None),
+        ),
+        (
+            "inside the data folder",
+            in_data,
+            (ErrorCode::MatterFolderInClauseoData, None),
+        ),
+        #[cfg(unix)]
+        (
+            "a drive root",
+            Path::new("/").to_path_buf(),
+            (ErrorCode::MatterFolderIsDrive, None),
         ),
     ];
     let id = command_id();
-    for (what, folder, code) in &cases {
+    for (what, folder, (code, named)) in &cases {
         let refused = host
             .dispatch_as(id, relocate(&host, matter, folder))
             .expect_err(what);
         assert_eq!(refused.code(), *code, "{what}: {refused}");
+        assert_eq!(refused.matter(), *named, "{what}: {refused}");
         assert_eq!(folder_state(&host, matter), FolderState::Missing, "{what}");
     }
     assert_eq!(
@@ -259,11 +285,13 @@ fn relocate_while_a_turn_runs_is_refused() {
     answer_from(&host, &mut events, thread, 0, &KINDS_ANSWERS);
     events.until_turn_ended(turn);
     host.settle();
-    // With the writer free, locating the folder where it already is succeeds.
-    assert_eq!(
-        host.ok(relocate(&host, matter, &folder)),
-        CommandOutcome::Done
+    // With the writer free, the same folder gets the worker's own refusal: it is already the
+    // matter's folder.
+    let error = host.refused(
+        relocate(&host, matter, &folder),
+        ErrorCode::MatterFolderIsMatter,
     );
+    assert_eq!(error.matter(), Some(matter));
     host.shutdown();
 }
 

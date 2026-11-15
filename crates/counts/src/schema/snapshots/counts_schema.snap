@@ -1546,7 +1546,9 @@ expression: counts_schema()
         "mcp.save_declined",
         "agent.service_error",
         "agent.quiet",
-        "mcp.import_too_large"
+        "mcp.import_too_large",
+        "matter.folder_being_made",
+        "matter.folder_of_forgotten_matter"
       ],
       "type": "string"
     },

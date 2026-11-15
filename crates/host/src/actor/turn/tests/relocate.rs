@@ -223,7 +223,7 @@ fn a_folder_a_relocate_is_moving_a_matter_to_counts_against_new_matters() {
     );
     assert_eq!(
         import.unwrap_err().code(),
-        ErrorCode::MatterFolderIsMatter,
+        ErrorCode::MatterFolderBeingMade,
         "the import of the relocate's target"
     );
     let inside = rig.dispatch(
@@ -237,7 +237,7 @@ fn a_folder_a_relocate_is_moving_a_matter_to_counts_against_new_matters() {
     );
     assert_eq!(
         inside.unwrap_err().code(),
-        ErrorCode::MatterFolderInsideMatter,
+        ErrorCode::MatterFolderBeingMade,
         "a new folder inside the relocate's target"
     );
     assert!(!moved.join("Appeal").exists(), "nothing was made");

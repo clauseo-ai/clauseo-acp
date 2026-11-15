@@ -55,6 +55,8 @@ export type ErrorCode =
   | "matter.folder_in_clauseo_data"
   | "matter.folder_inside_matter"
   | "matter.folder_holds_matter"
+  | "matter.folder_being_made"
+  | "matter.folder_of_forgotten_matter"
   | "transport.unauthorized"
   | "transport.too_large"
   | "settings.locked"
@@ -201,6 +203,11 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "matter.folder_inside_matter":
     "Clauseo can't make a matter of this folder. Choose another folder.",
   "matter.folder_holds_matter":
+    "Clauseo can't make a matter of this folder. Choose another folder.",
+  // folder refusals: nested with a folder being made a matter, or a forgotten matter's; here, with no folder to name,
+  // the same line (New matter and Locate folder name the folder, matter-form-check.ts)
+  "matter.folder_being_made": "Clauseo can't make a matter of this folder. Choose another folder.",
+  "matter.folder_of_forgotten_matter":
     "Clauseo can't make a matter of this folder. Choose another folder.",
   "matter.folder_network":
     "ChatGPT can't work on a network drive. Move the matter to this computer.",

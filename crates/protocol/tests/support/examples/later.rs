@@ -196,7 +196,8 @@ fn mcp_failures() -> Vec<DomainEvent> {
 }
 
 /// A `TurnFailed` of turn 3 with `code` and `detail`.
-/// Folder PR 2's refusal codes, never a turn's failure in practice; here for the corpus.
+/// Folder PR 2's refusal codes and the folder refusals' two, never a turn's failure in practice;
+/// here for the corpus.
 fn folder_failures() -> Vec<DomainEvent> {
     vec![
         failed(
@@ -210,6 +211,14 @@ fn folder_failures() -> Vec<DomainEvent> {
         failed(
             ErrorCode::MatterFolderHoldsMatter,
             "holds another matter's folder",
+        ),
+        failed(
+            ErrorCode::MatterFolderBeingMade,
+            "inside a folder another command is making a matter's",
+        ),
+        failed(
+            ErrorCode::MatterFolderOfForgottenMatter,
+            "holds a forgotten matter's folder",
         ),
     ]
 }

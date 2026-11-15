@@ -151,6 +151,8 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `agent.service_error` | The agent's service had a problem on its side and the agent gave up on the turn: an AIR `sessionFailure` of severity `error` offering `retry` or `new_session`, in a category no other code reads (codex-acp's `internal_error`, `provider_error`, `overloaded`). The answer so far is kept; asking again can work. | yes | host (a prompt whose `end_turn` carries such a failure, `PromptEnd::failed`; `actor/turn/gave_up.rs`); retryable because the agent itself offers `retry`. A JSON-RPC error to `session/prompt` stays `agent.protocol_error`: it cannot be told from a malformed reply |
 | `agent.quiet` | The agent sent nothing for 5 minutes while answering, with no tool running and no question waiting for the lawyer, so the host ended the turn (D-050's backstop: a blocked network the host's probe could not see, such as a proxy that asks for credentials or one that inspects TLS). The answer so far is kept; asking again can work. | yes | host (a turn the agent sent nothing on for 5 minutes, with no tool running and no question waiting; the D-050 backstop in `actor/turn/offline/quiet.rs`); retryable because the agent may answer once the blocked network clears |
 | `mcp.import_too_large` | The servers an import would add, with their programs, arguments, URLs and variable or header names, are too long to show whole in one confirm (over 2,000 characters), so nothing was imported. | no | host (the MCP import, when its servers are too long for one confirm; settings and keychain untouched) |
+| `matter.folder_being_made` | The folder is, holds or sits inside a folder that a create, import or Locate folder in flight is making a matter's folder; it may be picked again once that one ends. | no | host (the registry check on create, import, the folder scan, the folder query and Locate folder; folder refusals, 2026-11-15) |
+| `matter.folder_of_forgotten_matter` | The folder holds or sits inside the folder of a matter taken off Clauseo's list (forgotten), or, for a new folder or Locate folder, is that folder; importing a forgotten matter's own folder brings it back instead. | no | host (the registry check on create, import, the folder scan, the folder query and Locate folder; folder refusals, 2026-11-15) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -198,6 +200,15 @@ folder, and `matter.folder_inside_matter` or `matter.folder_holds_matter` for a 
 another matter's, keeping `matter.folder_is_matter` for the same folder. The folder scan answers
 the same codes as the import (before, it answered `matter.folder_refused`). An older app reads the
 new codes as `unknown`, which it shows as a generic failure.
+
+`matter.folder_being_made` and `matter.folder_of_forgotten_matter` were added on 2026-11-15
+(folder refusals), so the app can say why a folder nested with a matter it can't name is refused:
+`matter.folder_inside_matter`, `matter.folder_holds_matter` and `matter.folder_is_matter` from
+the registry check now always name a listed matter. A listed matter's own folder picked for a new
+matter is `matter.folder_is_matter` naming it (before, the import answered `MatterCreated` with
+that matter, which reopened it under its old name). Locate folder answers these codes and the
+place codes of a new matter's folder (before, `matter.folder_refused` for all of them), and
+`matter.folder_is_matter` naming the located matter for its own recorded folder.
 
 ## Consequences
 

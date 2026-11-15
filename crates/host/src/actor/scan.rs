@@ -3,10 +3,10 @@
 //! and walks it (`clauseo_matters::scan_folder`), posting what it finds to the actor, which
 //! publishes it as `HostEvent::FolderScanned` on the app stream. It refuses what an import
 //! refuses, in its order and with its codes (`RefusalNames`): the place check, then the
-//! registry (a folder inside or holding another matter's is `matter.folder_inside_matter` or
-//! `matter.folder_holds_matter`, naming a listed one), then the walk's own checks. A marker
-//! refuses nothing (the import adopts the matter it names, sets it aside, or relinks a moved
-//! matter), and a listed matter's own folder is scanned (the import answers with that matter).
+//! registry (`check_registry`'s codes: a folder that is, sits inside or holds a listed
+//! matter's names it; one being made or forgotten has its own code), then the walk's own
+//! checks. A marker refuses nothing (the import adopts the matter it names, sets it aside, or
+//! relinks a moved matter); a listed matter's own folder is refused naming it, as the import is.
 //! No file system call runs on the actor, and nothing is stored: not even a receipt, so a
 //! repeated `command_id` scans again.
 //!
@@ -35,7 +35,7 @@ use super::Actor;
 use super::commands::CommandCtx;
 use super::input::Input;
 use crate::error::Error;
-use crate::matter_worker::{Claimed, Held, check_registry, matter_settings};
+use crate::matter_worker::{Claimed, check_import, matter_settings};
 
 /// The least time between two progress events of a scan.
 pub(crate) const THROTTLE: Duration = Duration::from_millis(250);
@@ -454,14 +454,15 @@ impl Job {
                 send(ScanInput::Progress { id });
             }
         };
-        // The import's order: the place, then the registry (a listed matter's own folder and
-        // one being made pass), then the walk, which checks the place again and the matters
-        // root. A marker inside counts for nothing here: one naming no known matter is adopted,
-        // one that does not read is set aside, a copy of a known matter's folder becomes a new
-        // matter, and a listed matter's moved folder is relinked, so the scan passes for each.
+        // The import's order: the place, then the registry (a listed matter's own folder is
+        // refused naming it; one being made passes), then the walk, which checks the place again
+        // and the matters root. A marker inside counts for nothing here: one naming no known
+        // matter is adopted, one that does not read is set aside, a copy of a known matter's
+        // folder becomes a new matter, and a listed matter's moved folder is relinked, so the
+        // scan passes for each.
         let result = clauseo_matters::check_place(&path, &refused)
             .map_err(Error::Matters)
-            .and_then(|()| check_registry(&path, &registry, true).map(|_: Held| ()))
+            .and_then(|()| check_import(&path, &registry))
             .and_then(|()| {
                 walk(&path, &refused, &settings, &mut progress, &cancel).map_err(Error::from)
             })

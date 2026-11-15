@@ -103,7 +103,8 @@ export function FirstScreen({
     makingNow.current = true;
     setMaking(true);
     try {
-      // made, or a matter the host already has for it (MatterCreated either way): the room opens it
+      // made: the room opens it. A folder a matter on the list already uses is refused (matter.folder_is_matter),
+      // and RefusedOpen offers Open {name}: it is never opened for the lawyer
       await matters.create(folderName(picked.display), {
         existing_folder: { folder: picked.folder },
       });

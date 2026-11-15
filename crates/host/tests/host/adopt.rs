@@ -7,8 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{
-    CheckpointKind, CommandEnvelope, CommandOutcome, HostCommand, HostError, HostQuery, MatterId,
-    MatterSource, QueryResult, RestoreRequest, StreamId, Title,
+    CheckpointKind, CommandEnvelope, CommandOutcome, ErrorCode, HostCommand, HostError, HostQuery,
+    MatterId, MatterSource, QueryResult, RestoreRequest, StreamId, Title,
 };
 
 use crate::support::{Dir, Running, command_id, foreign_uuid, wait};
@@ -92,13 +92,14 @@ fn a_marker_naming_a_matter_this_install_never_had_is_adopted_under_its_id() {
         "{preview:?}"
     );
 
-    // The same folder again is answered with it, and nothing more is made.
+    // The same folder again is refused naming it, and nothing more is made.
     let listed = host.matters().len();
     let made = histories(&dir);
-    assert_eq!(
-        created(host.dispatch(import_command(&host, &folder))),
-        foreign
-    );
+    let again = host
+        .dispatch(import_command(&host, &folder))
+        .expect_err("the folder is the adopted matter's");
+    assert_eq!(again.code(), ErrorCode::MatterFolderIsMatter, "{again}");
+    assert_eq!(again.matter(), Some(foreign));
     assert_eq!((host.matters().len(), histories(&dir)), (listed, made));
     assert_eq!(std::fs::read_to_string(marker(&folder)).unwrap(), bytes);
     host.shutdown();

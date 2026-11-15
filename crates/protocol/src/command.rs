@@ -193,9 +193,11 @@ pub enum HostCommand {
     /// stores it as the matter's folder and logs `matter_relocated`; it answers `Done`.
     /// Refused while a turn or an undo holds the matter's writer (`matter.turn_running`); a
     /// folder that is not there is `matter.folder_missing`; one with no marker, an unreadable one
-    /// or one naming another matter is `matter.folder_not_a_matter`; a folder import would
-    /// refuse, or one that is, holds or sits inside another matter's folder, is
-    /// `matter.folder_refused`. A refusal changes nothing.
+    /// or one naming another matter is `matter.folder_not_a_matter`; the matter's own recorded
+    /// folder is `matter.folder_is_matter` naming this matter; a folder import would refuse, or
+    /// one that is, holds or sits inside another matter's folder, gets the code `CreateMatter`
+    /// gives it (`matter.folder_is_drive`, `matter.folder_inside_matter` and the like). A
+    /// refusal changes nothing.
     RelocateMatter {
         /// The matter.
         matter: MatterId,

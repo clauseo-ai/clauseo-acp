@@ -2,10 +2,14 @@
 //! lawyer picked, once that folder's `.clauseo/matter.json` names the matter.
 //!
 //! Order: the matter must be known and the folder ref registered; the matter's writer must be
-//! free (`matter.turn_running`); then, on the matter's worker, the registry check (the folder is
-//! not, does not hold and is not inside another registered or claimed matter folder:
-//! `matter.folder_refused`) and `Matter::locate`, which refuses what import refuses for the
-//! place and a folder whose marker is missing, unreadable or names another matter. Only after
+//! free (`matter.turn_running`); then, on the matter's worker, the matter's own recorded folder
+//! is refused (`matter.folder_is_matter` naming the matter), then the registry check (the
+//! folder is not, does not hold and is not inside another registered or claimed matter folder,
+//! with a new matter's codes: `matter.folder_is_matter`, `matter.folder_inside_matter` or
+//! `matter.folder_holds_matter` naming a listed matter, `matter.folder_being_made`,
+//! `matter.folder_of_forgotten_matter`) and `Matter::locate`, which refuses what import
+//! refuses for the place (with a new matter's code per reason, `RefusalNames`) and a folder
+//! whose marker is missing, unreadable or names another matter. Only after
 //! `Ok` does one commit carry `MatterRelocated`, the matter's row with the new path and the
 //! receipt. The host's row moves when that commit is durable; a failed commit sends the worker
 //! back to the recorded folder. A refusal stores nothing, so the matter stays as it was.
@@ -29,7 +33,7 @@ use clauseo_protocol::{
 
 use super::commands::{AfterCommand, CommandCtx};
 use super::input::MatterTag;
-use super::matters::{registry, start_worker};
+use super::matters::{RefusalNames, registry, start_worker};
 use super::{Actor, Tag, turn};
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -170,6 +174,9 @@ pub(super) fn located(
     };
     if let Err(error) = result {
         // The worker refused before holding the new folder, or went back to the recorded one.
+        // A place refusal gets its reason's code, as a new matter's folder does.
+        let error =
+            RefusalNames::of(actor).refusal(error, folder, |m| actor.matters.contains_key(m));
         turn::release_relocate(actor, matter);
         actor.finish_command(command, Err(error));
         return;

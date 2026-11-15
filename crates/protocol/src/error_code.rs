@@ -354,6 +354,13 @@ error_codes! {
         import would add, with their programs, arguments, URLs and variable or header names, \
         are too long to show whole in one confirm (over 2,000 characters), so nothing was \
         imported.";
+    MatterFolderBeingMade = "matter.folder_being_made", retryable: false, meaning: "The folder \
+        is, holds or sits inside a folder that a create, import or Locate folder in flight is \
+        making a matter's folder; it may be picked again once that one ends.";
+    MatterFolderOfForgottenMatter = "matter.folder_of_forgotten_matter", retryable: false,
+        meaning: "The folder holds or sits inside the folder of a matter taken off Clauseo's \
+        list (forgotten), or, for a new folder or Locate folder, is that folder; importing a \
+        forgotten matter's own folder brings it back instead.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

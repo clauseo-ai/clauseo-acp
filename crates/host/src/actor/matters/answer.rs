@@ -2,9 +2,9 @@
 //! forgotten matter's folder brings it back, and a refusal is worded for the form. An import
 //! whose folder something else answers for makes nothing of its own ([`settle`]):
 //!
-//! - a listed matter's own folder, by any spelling: answered with that matter as a forgotten
-//!   matter's folder is (`MatterCreated` naming it), with a receipt and nothing else: no new
-//!   matter, no count, no history touched;
+//! - a listed matter's own folder, by any spelling: refused `matter.folder_is_matter` naming
+//!   that matter (`matter_worker::in_use`), so the app says which matter uses the folder and
+//!   offers to open it: no new matter, no receipt, no count, no history touched;
 //! - a folder another create or import in flight is making: the command joins that one and gets
 //!   its answer, whatever it is, dropping its own client and next date ([`join`]);
 //! - a folder whose marker names a listed matter whose own folder is gone (moved here): relinked
@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use clauseo_matters::Refusal;
-use clauseo_protocol::{CommandId, CommandOutcome, MatterId, StreamId};
+use clauseo_protocol::{CommandId, CommandOutcome, MatterId};
 
 use super::super::commands::AfterCommand;
 use super::super::input::MatterTag;
@@ -36,8 +36,7 @@ use super::{
     refused_folders, start_worker,
 };
 use crate::error::Error;
-use crate::matter_worker::{ImportEnd, MatterJob, MatterReply};
-use crate::pipeline::Draft;
+use crate::matter_worker::{ImportEnd, MatterJob, MatterReply, in_use};
 
 /// Command `id`'s create or import, made as `matter` on its worker, answered with `reply`.
 pub(super) fn create_replied(
@@ -140,27 +139,20 @@ fn settle(
     None
 }
 
-/// The import's folder is the listed matter `listed`'s: command `id` is answered with it by a
-/// receipt alone, as an import of a forgotten matter's folder is answered with that matter.
+/// The import's folder is the listed matter `listed`'s: command `id` is refused naming it
+/// (`matter.folder_is_matter`), never answered with it, so a new matter never opens as an old
+/// one under its old name. When `listed` left the list meanwhile, the import runs again.
 fn listed_folder(actor: &mut Actor, id: CommandId, pending: Box<PendingMatter>, listed: MatterId) {
     if !actor.matters.contains_key(&listed) {
         again(actor, id, *pending);
         return;
     }
     // Joins the minted id's worker, idle: it made nothing.
+    let minted = pending.new.id;
     drop(pending);
-    tracing::info!(command = %id, matter = %listed, "an import of a listed matter's folder");
-    let sent = command_ctx(actor, id).and_then(|ctx| {
-        let outcome = CommandOutcome::MatterCreated { matter: listed };
-        let now = actor.now().wall;
-        let mut draft = Draft::new();
-        draft.receipt(ctx.receipt(Some(StreamId::Matter(listed)), outcome, now));
-        let after = AfterCommand::Nothing;
-        actor.send_commit(draft, Tag::Command { id, outcome, after })
-    });
-    if let Err(error) = sent {
-        actor.finish_command(id, Err(error));
-    }
+    let refused = in_use(listed);
+    made::not_created(Some(minted), &refused, "listed");
+    actor.finish_command(id, Err(refused));
 }
 
 /// The import's folder has a marker naming `old`, a matter the registry did not hold and with no

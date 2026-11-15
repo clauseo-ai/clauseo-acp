@@ -226,6 +226,8 @@ const CODES = [
   "matter.folder_in_clauseo_data",
   "matter.folder_inside_matter",
   "matter.folder_holds_matter",
+  "matter.folder_being_made",
+  "matter.folder_of_forgotten_matter",
   "matter.folder_too_deep",
   "matter.folder_missing",
   "internal",
@@ -277,9 +279,12 @@ function refusingNext(refusal: NextHostError, sent: NextCommand[], open?: Matter
 }
 
 const NESTED = [
-  ["matter.folder_inside_matter", "This folder is inside the folder of {name}."],
-  ["matter.folder_holds_matter", "This folder holds the folder of {name}."],
+  ["matter.folder_inside_matter", "{path} is inside the folder of {name}. Choose another folder."],
+  ["matter.folder_holds_matter", "{path} contains the folder of {name}. Choose another folder."],
 ] as const;
+
+/** The new folder Use a new folder makes in the default location, as a line names it. */
+const NEW_FOLDER = `\u2068~/Documents/Clauseo/${NAME}\u2069`;
 
 for (const [code, words] of NESTED) {
   test(`${code} names the matter on the list, and Open {name} sends open_matter and closes the form`, async () => {
@@ -301,7 +306,7 @@ for (const [code, words] of NESTED) {
     await press("matter-made");
     await press("create-matter");
     expect(dialog()?.querySelector('[role="alert"]')?.textContent).toBe(
-      words.replace("{name}", `\u2068${A.name}\u2069`),
+      words.replace("{path}", NEW_FOLDER).replace("{name}", `\u2068${A.name}\u2069`),
     );
     expect(dialog()?.textContent).not.toContain("SECRET-DETAIL");
     expect(byId("open-matter")?.textContent).toBe(`Open \u2068${A.name}\u2069`);
@@ -325,8 +330,8 @@ const UNNAMED: [string, NextHostError][] = [
     { code: "matter.folder_holds_matter", message: "", retryable: false },
   ],
   [
-    "folder_is_matter, even naming a matter on the list",
-    { code: "matter.folder_is_matter", message: "", retryable: false, matter: A.matter },
+    "a folder in use by a matter not on the list",
+    { code: "matter.folder_is_matter", message: "", retryable: false, matter: uuid(9, 9) },
   ],
 ];
 
@@ -337,8 +342,9 @@ for (const [what, refusal] of UNNAMED) {
     await openForm();
     await press("matter-made");
     await press("create-matter");
+    // the default location's new folder, named
     expect(dialog()?.querySelector('[role="alert"]')?.textContent).toBe(
-      "Clauseo can't make a matter of this folder. Choose another folder.",
+      `Clauseo can't make a matter of ${NEW_FOLDER}. Choose another folder.`,
     );
     expect(dialog()?.textContent).not.toMatch(/already a matter/);
     expect(byId("open-matter")).toBeNull();
