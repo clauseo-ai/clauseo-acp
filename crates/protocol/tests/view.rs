@@ -456,6 +456,7 @@ fn step_undo_possible_is_a_checkpoint_not_undone() {
         failure: None,
         files: vec![],
         skipped: vec![],
+        checkpoint_before: None,
         checkpoint_after,
         undone,
         usage: None,

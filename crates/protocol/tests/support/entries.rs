@@ -190,6 +190,7 @@ fn turn_entries() -> Vec<ViewEntry> {
             failure: None,
             files: file_changes(),
             skipped: vec![],
+            checkpoint_before: Some(checkpoint_id(13)),
             checkpoint_after: Some(checkpoint_id(14)),
             undone: false,
             usage: None,

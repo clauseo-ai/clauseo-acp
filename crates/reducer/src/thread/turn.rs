@@ -3,7 +3,7 @@
 use clauseo_protocol::{
     DetachReason, EntryId, EventId, FileChange, FilesChanged, LimitStopEntry, MarkerKind, Seq,
     SkippedFile, StepEntry, StepUndone, StopReason, ThreadStatus, Timestamp, TurnEnded, TurnFailed,
-    TurnId, TurnQueued, TurnStoppedAtLimit, UserMessage, UserMessageEntry, UserMessageStatus,
+    TurnQueued, TurnStarted, TurnStoppedAtLimit, UserMessage, UserMessageEntry, UserMessageStatus,
     ViewEntry, is_excluded_path,
 };
 
@@ -195,7 +195,11 @@ fn opens_own_turn(state: &ThreadState, event: &TurnQueued) -> bool {
     event.behind_turn().is_none() && state.index.unstarted(event.turn()).is_none()
 }
 
-pub(super) fn turn_started(state: &mut ThreadState, turn: TurnId, out: &mut Applied) {
+pub(super) fn turn_started(state: &mut ThreadState, event: &TurnStarted, out: &mut Applied) {
+    let turn = event.turn;
+    state
+        .before_checkpoints
+        .insert(turn, event.checkpoint_before);
     settle_prompt(state, turn, UserMessageStatus::Sent, out);
     state.running = Some(turn);
     state.turn = Some(turn);
@@ -301,6 +305,7 @@ pub(super) fn turn_ended(
     if !running && event.stop != StopReason::Failed {
         state.files.remove(&event.turn);
         state.failures.remove(&event.turn);
+        state.before_checkpoints.remove(&event.turn);
         settle_prompt(state, event.turn, UserMessageStatus::Removed, out);
         if state.running.is_none()
             && state.turn == Some(event.turn)
@@ -327,6 +332,7 @@ pub(super) fn turn_ended(
         turn: event.turn,
         stop: event.stop,
         failure: state.failures.remove(&event.turn),
+        checkpoint_before: state.before_checkpoints.remove(&event.turn),
         files,
         skipped,
         checkpoint_after: event.checkpoint_after,

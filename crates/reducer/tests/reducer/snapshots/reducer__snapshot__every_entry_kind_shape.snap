@@ -231,6 +231,7 @@ expression: "Snapshot::of(&every)"
               }
             ],
             "skipped": [],
+            "checkpoint_before": "01900000-0000-7000-8000-000c00000005",
             "checkpoint_after": "01900000-0000-7000-8000-000c00000018",
             "undone": true,
             "usage": {
@@ -274,7 +275,8 @@ expression: "Snapshot::of(&every)"
       "running": null,
       "after_turn": null,
       "files": {},
-      "failures": {}
+      "failures": {},
+      "before_checkpoints": {}
     }
   }
 }

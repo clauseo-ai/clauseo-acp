@@ -122,6 +122,7 @@ fn a_turn_failed_before_it_starts_gets_a_failed_step_card() {
             StepEntry {
                 order: twin_card.order,
                 ts: twin_card.ts,
+                checkpoint_before: twin_card.checkpoint_before,
                 ..card.clone()
             },
             *twin_card,

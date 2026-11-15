@@ -89,7 +89,7 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         DomainEvent::TurnQueued(event) => turn::turn_queued(state, event, out),
         DomainEvent::QueuedPromptEdited(event) => queue::queued_prompt_edited(state, event, out),
         DomainEvent::SteerResolved(event) => queue::steer_resolved(state, event, out),
-        DomainEvent::TurnStarted(event) => turn::turn_started(state, event.turn, out),
+        DomainEvent::TurnStarted(event) => turn::turn_started(state, event, out),
         DomainEvent::TextAppended(event) => text_appended(state, seq, event, out),
         DomainEvent::ContentAppended(event) => content_appended(state, seq, event_id, event, out),
         DomainEvent::ToolCallStarted(event) => tool_call_started(state, seq, ts, event, out),
