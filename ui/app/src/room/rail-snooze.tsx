@@ -8,6 +8,7 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ConversationRowProps } from "@clauseo/components/clauseo/rail-conversations.tsx";
 import type { DoneRow } from "@clauseo/components/clauseo/rail-done-rows.tsx";
+import type { ReadPick } from "@clauseo/components/clauseo/rail-triage-items.tsx";
 import type { MatterRowProps } from "@clauseo/components/clauseo/rail.tsx";
 import type { Triage } from "@clauseo/components/clauseo/rail-triage.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
@@ -155,6 +156,7 @@ function triageOf(
   threads: readonly Held[],
   done = false,
   matter = false,
+  reads?: ReadPick,
 ): Triage {
   const first = threads[0];
   const onDone =
@@ -180,7 +182,7 @@ function triageOf(
     ),
     items: (matter) => (
       <Suspense fallback={null}>
-        <LazyItems times={menu()} onDone={onDone} matter={matter} done={done} />
+        <LazyItems times={menu()} onDone={onDone} matter={matter} done={done} reads={reads} />
       </Suspense>
     ),
     context: (at, onClose) => (
@@ -244,6 +246,8 @@ export function splitConversations(
   c: SnoozeCtx,
   rows: readonly ConversationRow[],
   props: readonly ConversationRowProps[],
+  /** Optional: the open conversation's Let this conversation read, its matters to list (read-matters.ts). */
+  reads?: (thread: ThreadId) => ReadPick | undefined,
 ): { rows: ConversationRowProps[]; done?: { count: number; rows: () => ReactNode } } {
   const shown: ConversationRowProps[] = [];
   const done: DoneRow[] = [];
@@ -280,7 +284,14 @@ export function splitConversations(
               when: whenWords(until, c.now, c.zone, c.lang),
             }),
           }),
-      triage: triageOf(c, thread, [held], isDone),
+      triage: triageOf(
+        c,
+        thread,
+        [held],
+        isDone,
+        false,
+        p.current === true ? reads?.(thread) : undefined,
+      ),
       ...(isDone ? { done: true } : {}),
       ...(replace === undefined ? {} : { replace }),
     });

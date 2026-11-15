@@ -52,6 +52,7 @@ import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { kindOf, knownPlan } from "./agent.ts";
 import { planLine, useKeyInUse } from "./key-in-use.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
+import { MatterNamesContext, matterNamesOf } from "./read-matters.ts";
 import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
 import { RoomNotices } from "./notices.tsx";
@@ -229,6 +230,8 @@ function RoomFrame({
     [talks.drafting, talks.options, talks.agent, conversations],
   );
   const open = view.open;
+  // each matter's name, for the thread's lines and the composer's pills that name another matter (read-matters.ts)
+  const matterNames = useMemo(() => matterNamesOf(view.matters, w.lang), [view.matters, w.lang]);
   const draftMenus = useDraftMenus(talks, conversations, open, w.lang);
   const setup = hasSetup(transport);
   const welcome =
@@ -450,6 +453,7 @@ function RoomFrame({
       {versions.rail ?? (
         <RoomRail
           transport={transport}
+          store={store}
           matters={matters}
           view={view}
           conversations={conversations}
@@ -540,27 +544,29 @@ function RoomFrame({
                   <WordOpenContext value={word}>
                     <FolderPlaceContext value={papers?.place}>
                       <AgentPlanContext value={agentPlan}>
-                        <ToolLineContext value={toolRoom}>
-                          <ProtectionContext value={shield.composer}>
-                            <Work
-                              key={talks.open ?? open?.matter ?? "none"}
-                              transport={transport}
-                              matter={open}
-                              drafts={drafts}
-                              draftKey={talks.open}
-                              conversation={link}
-                              choice={choice}
-                              menus={draftMenus}
-                              plan={plan}
-                              focus={talks.focus?.n ?? null}
-                              archived={talks.archived}
-                              onThread={matters.onThread}
-                              conversations={conversations}
-                              folderShut={folderShut}
-                              openRefused={opened?.act === "open" ? opened.code : null}
-                            />
-                          </ProtectionContext>
-                        </ToolLineContext>
+                        <MatterNamesContext value={matterNames}>
+                          <ToolLineContext value={toolRoom}>
+                            <ProtectionContext value={shield.composer}>
+                              <Work
+                                key={talks.open ?? open?.matter ?? "none"}
+                                transport={transport}
+                                matter={open}
+                                drafts={drafts}
+                                draftKey={talks.open}
+                                conversation={link}
+                                choice={choice}
+                                menus={draftMenus}
+                                plan={plan}
+                                focus={talks.focus?.n ?? null}
+                                archived={talks.archived}
+                                onThread={matters.onThread}
+                                conversations={conversations}
+                                folderShut={folderShut}
+                                openRefused={opened?.act === "open" ? opened.code : null}
+                              />
+                            </ProtectionContext>
+                          </ToolLineContext>
+                        </MatterNamesContext>
                       </AgentPlanContext>
                     </FolderPlaceContext>
                   </WordOpenContext>
