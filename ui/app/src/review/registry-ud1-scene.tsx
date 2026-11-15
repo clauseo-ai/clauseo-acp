@@ -1,6 +1,6 @@
 // UD1's scenes and the fake host each plays in, apart from registry-ud1.tsx to keep it under the size limit: the room
 // over a FakeTransport that carries the setup wire, the first screen (no matter yet) or matter A open.
-import type { SettingsView, SetupEvent } from "../transport/protocol.ts";
+import type { FolderSupportKind, SettingsView, SetupEvent } from "../transport/protocol.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import { FIXED_OFFLINE, FIXED_ONLINE, OnlineSource } from "../transport/online.ts";
 import { MATTER } from "./hosts.ts";
@@ -27,6 +27,8 @@ export type Scene = {
   /** What the window says of the network (online.ts): offline unless the scene says so, never the review page's own,
    * so a waiting install's scene says the same words wherever the page is opened. */
   online?: boolean;
+  /** The folder check's reading of the folder picked (FolderSupport), where the scene presses Open the folder. */
+  support?: FolderSupportKind;
 };
 
 /** The room over a fake host with the setup wire, in the scene. */
@@ -53,6 +55,8 @@ function host(s: Scene): () => FakeTransport {
             } as unknown as SettingsView,
           };
         if (typeof query === "object" && "list_threads" in query) return { threads: [] };
+        if (typeof query === "object" && "folder_support" in query && s.support !== undefined)
+          return { folder_support: { support: s.support } };
         throw new Error(`not scripted: ${JSON.stringify(query)}`);
       },
       setup: {

@@ -41,6 +41,7 @@ import { UC_TOOL_ROWS } from "./registry-uc-tool-rows.tsx";
 import { PLAIN_REFUSAL } from "./registry-plain-refusal.tsx";
 import { UC_CONVERSATION_SMALL_FIXES } from "./registry-uc-conversation-small-fixes.tsx";
 import { UC_GUARD_BLOCK } from "./registry-uc-guard-block.tsx";
+import { UC_OPEN_FOLDER_WARNING } from "./registry-uc-open-folder-warning.tsx";
 import { SAC } from "./registry-sac.tsx";
 import { NM } from "./registry-nm.tsx";
 import { ownEntries, ownEntry } from "./registry-offline.tsx";
@@ -417,6 +418,7 @@ export const REGISTRY: readonly Entry[] = [
   ...PLAIN_REFUSAL,
   ...UC_CONVERSATION_SMALL_FIXES,
   ...UC_GUARD_BLOCK,
+  ...UC_OPEN_FOLDER_WARNING,
   ...UC_MCP_CONFIRM,
   ...UC_MCP_IMPORT,
   ...UC_PASTE_CHIP,
