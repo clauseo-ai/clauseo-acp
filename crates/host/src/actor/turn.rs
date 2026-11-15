@@ -230,12 +230,8 @@ struct Current {
     /// The agent said its connection failed, or the window said offline, and the agent has sent
     /// nothing since (`offline.rs`).
     offline: Option<offline::Watch>,
-    /// When the agent last sent model output, or an ask of it ended, on the host's monotonic
-    /// clock: the quiet arm runs from here (`offline/quiet.rs`).
-    last_output: std::time::Duration,
-    /// A compaction of the turn started and has not ended: it holds the backstop off, up to
-    /// `TOOL_LIMIT` from `last_output` (`offline/quiet.rs`).
-    compacting: bool,
+    /// The quiet arm's clock of the turn (`offline/quiet.rs`).
+    quiet: offline::quiet::QuietClock,
     /// The failure asks to stop the prompt once the commit being built is sent.
     abort: bool,
     /// An agent-driven commit of the turn failed with this code.

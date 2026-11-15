@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use clauseo_protocol::{AgentKind, ErrorCode, StopReason};
+use clauseo_protocol::{AgentKind, DomainEvent, ErrorCode, StopReason, TurnId};
 use serde_json::json;
 
 use super::agents::send_prompt;
@@ -181,6 +181,19 @@ fn compaction(status: &str) -> String {
     update(&json!({"sessionUpdate": "compaction_update", "compactionId": "c-1", "status": status}))
 }
 
+/// The detail of `turn`'s `TurnFailed` in `log`: the event log's own words, never shown.
+fn failure_detail(log: &[DomainEvent], turn: TurnId) -> Option<String> {
+    log.iter().find_map(|event| {
+        if let DomainEvent::TurnFailed(failed) = event
+            && failed.turn == turn
+        {
+            failed.detail.clone()
+        } else {
+            None
+        }
+    })
+}
+
 /// A compaction in progress holds the backstop off: 7 silent minutes after its start (probed,
 /// every probe through) the turn goes on; its end restarts the clock, so the backstop comes 5
 /// minutes after it, at 12:00, not at the open compaction's cap (11:00).
@@ -211,15 +224,19 @@ fn a_compaction_in_progress_holds_the_backstop_off_until_it_ends() {
     assert!(going(&rig, thread), "still going at 11:59");
     wait(&mut rig, thread, SECOND);
     finish_turn(&mut rig, thread);
+    let log = rig.log(thread);
     assert_eq!(
-        ended(&rig.log(thread), turn),
+        ended(&log, turn),
         (Some(StopReason::Failed), Some(ErrorCode::AgentQuiet))
     );
+    let detail = failure_detail(&log, turn).expect("the backstop's detail");
+    assert!(detail.contains("for 5 min "), "the plain limit: {detail}");
     rig.finish();
 }
 
 /// The hold has an open tool call's cap: a compaction that sends nothing after its start ends
-/// the turn `agent.quiet` `TOOL_LIMIT` (11 min) after it, going at 10:59.
+/// the turn `agent.quiet` `TOOL_LIMIT` (11 min) after it, going at 10:59, and the detail reports
+/// the 11 minutes applied, not the 5 of the plain backstop.
 #[test]
 fn a_compaction_silent_for_eleven_minutes_ends_the_turn_quiet() {
     let lines = [
@@ -242,9 +259,15 @@ fn a_compaction_silent_for_eleven_minutes_ends_the_turn_quiet() {
     assert!(going(&rig, thread), "still going at 10:59");
     wait(&mut rig, thread, SECOND);
     finish_turn(&mut rig, thread);
+    let log = rig.log(thread);
     assert_eq!(
-        ended(&rig.log(thread), turn),
+        ended(&log, turn),
         (Some(StopReason::Failed), Some(ErrorCode::AgentQuiet))
+    );
+    let detail = failure_detail(&log, turn).expect("the backstop's detail");
+    assert!(
+        detail.contains("for 11 min "),
+        "the limit applied: {detail}"
     );
     rig.finish();
 }
