@@ -25,26 +25,39 @@ Each is a `git diff` from upstream's repository root (paths `a/cli/src/...`), ap
 `git apply` inside the extracted folder, in number order. A later fix is a new numbered file, not
 an edit to a published one.
 
-`patches/0001-stream-disabled-switch.patch` (every OS; 3 files, +50/-17): upstream always starts
+`patches/0001-stream-disabled-switch.patch` (every OS; 6 files, +72/-17): upstream always starts
 the daemon's stream server, a loopback HTTP server whose API can drive the session. With
 `AGENT_BROWSER_STREAM_DISABLED=1` the daemon starts none and writes no `.stream` file,
-`stream enable` fails, and a daemon started with streaming on is not reused by a CLI that has it
-off. This is the part offered upstream; if upstream takes it, macOS can go back to upstream's
-binary (the pin accepts an upstream url for any triple).
+`stream enable` fails, `inspect` and `dashboard start` refuse to start their servers, and a
+daemon started with streaming on is not reused by a CLI that has it off. This is the part offered
+upstream; if upstream takes it, macOS can go back to upstream's binary (the pin accepts an
+upstream url for any triple).
 
-`patches/0002-windows-pipe-and-hardening.patch` (Windows code paths only; 15 files, +1541/-141,
+`patches/0002-windows-pipe-and-hardening.patch` (Windows code paths only; 30 files, +2029/-197,
 most of it three new modules and their tests):
 - the CLI reaches the daemon over the named pipe `\\.\pipe\clauseo-ab-<128-bit random hex>`
-  instead of loopback TCP. The name is in `<session>.pipe` in the socket folder, never on a
-  command line. The pipe's first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE, its DACL
-  lets only the user and SYSTEM in, and the daemon disconnects, before writing a byte, any client
-  whose process token is restricted (as a sandbox's is) or cannot be checked. The CLI refuses a
-  pipe whose server is not the daemon in `<session>.pid`;
-- every agent-browser process (MCP server, CLI, daemon) sets the protected process DACL
-  `D:P(A;;0x1FFFFF;;;SY)(A;;0x101000;;;<user SID>)(A;;0x101000;;;OW)` on itself first thing,
-  and starts its children (the CLI, the daemon) with it through CreateProcessW's
-  lpProcessAttributes;
-- streaming is always off on Windows, and the dashboard and the `inspect` proxy refuse to start.
+  instead of loopback TCP, with four instances listening at once. `<session>.pipe` in the socket
+  folder records the pipe id with the daemon's pid and creation time; the name is never on a
+  command line. The first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE, its DACL lets
+  only the user and SYSTEM in, and the daemon disconnects, before writing a byte, any client
+  whose process token is restricted (as a sandbox's is) or cannot be checked;
+- the CLI refuses a pipe whose server is not the recorded daemon (same pid and creation time,
+  this executable, an unrestricted token), and connects at identification level only;
+- a live daemon keeps its files and is never replaced by a second one; the `taskkill` fallback
+  is gone (the protected DACL denies PROCESS_TERMINATE anyway);
+- every agent-browser process (MCP server, CLI, daemon) sets the protected DACL
+  `D:P(A;;0x1FFFFF;;;SY)(A;;0x101000;;;<user SID>)(A;;0x101000;;;OW)` on itself and its main
+  thread first thing, the daemon's runtime threads get it as they start, and the CLI and the
+  daemon are started with it as their process and first-thread descriptor through
+  CreateProcessW;
+- every other child agent-browser starts on Windows (Chrome, engines, ffmpeg, plugins, probes)
+  gets only the base Windows environment variables, so the CDP url stays out of unprotected
+  memory;
+- streaming, `inspect` and the dashboard are always off on Windows.
+
+`patches/0003-version-suffix.patch` (every OS; 2 files): our build reports version
+`0.41.1-clauseo.1`, so the CLI's daemon version check tells a patched daemon from an unpatched
+one.
 
 Linux keeps upstream's binary for now: dev and CI only, the stream server still on there.
 
@@ -93,6 +106,31 @@ needs nothing here, and nothing is notarised here: the release's sidecar fetch p
 it as today. On Windows `sign-windows` signs every PE there; on macOS the build leg codesigns
 `Contents/Helpers/clauseo-agent-browser` with the app's identity and the hardened runtime
 before bundling, and the app is notarised as a whole.
+
+## What the build trusts
+
+`agent-browser-build.mjs` meets five rules:
+
+1. **Upstream source pinned by commit and verified by hash.** It downloads GitHub's archive of
+   `upstream_commit` (a 40-hex commit, never a tag name), refuses it unless its SHA-256 is
+   `upstream_tarball_sha256`, and refuses it unless the commit the archive names (its pax
+   header) is `upstream_commit`. All three come from the pin in the checkout.
+2. **Patches only from the checked-out commit.** It applies exactly the `NNNN-*.patch` files in
+   this folder of the checkout it runs from (numbered from 0001, no gaps; any other file but a
+   dot file is refused), and `build` refuses to run when `git status --porcelain` shows
+   anything uncommitted in this folder. No flag or variable points it elsewhere, and each
+   applied patch's SHA-256 goes in the build record.
+3. **`--locked`.** Both `cargo test` and `cargo build --release` run with `--locked` against
+   upstream's own `Cargo.lock`, which our patches change only for the package's own version
+   (0003).
+4. **Nothing downloaded without a hash.** The archive is checked as above. Cargo checks every
+   crate against the `checksum` in `Cargo.lock` (upstream's lock has no git dependencies). The
+   toolchain is our `rust-toolchain.toml` channel, and `build` refuses it unless `rustc -vV`'s
+   commit-hash is the pin's `rustc_commit`. The script downloads nothing else.
+5. **`tag` needs nothing a publish job would have to trust.** `tag` (and `toolchain`) read
+   only committed files (`agent-browser.toml`, `rust-toolchain.toml`) and print one line: no
+   network, no child process, no fetched code. A read-only job can run it on the dispatched
+   commit and hand the tag to the publish job.
 
 ## Bumping
 

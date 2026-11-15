@@ -3,20 +3,27 @@ windows: daemon over a protected named pipe, protected processes, no loopback se
 Clauseo's patch to vercel-labs/agent-browser v0.41.1, applied after 0001. Windows code paths
 only; macOS and Linux behave as upstream (plus 0001).
 
-- The daemon listens on \\.\pipe\clauseo-ab-<128-bit random hex> instead of loopback TCP. The id
-  is written to <session>.pipe in the socket directory (never a command-line argument). The first
-  instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE; every instance has a protected DACL for
-  the user and SYSTEM and rejects remote clients. After a client connects the daemon reads its
-  process token (GetNamedPipeClientProcessId, OpenProcessToken, IsTokenRestricted) and
-  disconnects a restricted client, or any it cannot check, before writing a byte. The client
-  connects at SECURITY_IDENTIFICATION and refuses a pipe whose GetNamedPipeServerProcessId is not
-  the pid in <session>.pid.
+- The daemon listens on \\.\pipe\clauseo-ab-<128-bit random hex> instead of loopback TCP, with
+  four instances listening at once. <session>.pipe records the pipe id with the daemon's pid and
+  creation time (never a command-line argument). The first instance is created with
+  FILE_FLAG_FIRST_PIPE_INSTANCE; every instance has a protected DACL for the user and SYSTEM and
+  rejects remote clients. After a client connects the daemon reads its process token
+  (GetNamedPipeClientProcessId, OpenProcessToken, IsTokenRestricted) and disconnects a restricted
+  client, or any it cannot check, before writing a byte.
+- The client connects at SECURITY_IDENTIFICATION and refuses a pipe whose server is not the
+  recorded daemon: the same pid and creation time (so a reused pid fails), this executable, and an
+  unrestricted token.
+- A live daemon (pid and creation time match) keeps its files and is not replaced: a busy pipe is
+  waited for, and the CLI does not start a second daemon over it. The taskkill fallback is gone
+  (the protected DACL denies PROCESS_TERMINATE anyway).
 - Every agent-browser process applies
-  D:P(A;;0x1FFFFF;;;SY)(A;;0x101000;;;<user SID>)(A;;0x101000;;;OW) to itself first thing in
-  main, and starts the daemon (from the CLI) and the CLI (from the MCP server) with the same
-  descriptor in CreateProcessW's lpProcessAttributes, inheriting only their stdio handles.
-- Streaming is always off on Windows (0001's switch is forced on); the dashboard and the inspect
-  proxy refuse to start on Windows.
+  D:P(A;;0x1FFFFF;;;SY)(A;;0x101000;;;<user SID>)(A;;0x101000;;;OW) to itself and its main thread
+  first thing in main; the daemon's runtime threads get it as they start; the daemon (from the
+  CLI) and the CLI (from the MCP server) start with it as their process and first-thread
+  descriptor through CreateProcessW, inheriting only their stdio handles.
+- Every other child (Chrome, engines, ffmpeg, plugins, probes) starts through child_command,
+  which on Windows gives it only the base Windows environment variables.
+- Streaming, `inspect` and the dashboard are always off on Windows (0001's switch forced on).
 
 diff --git a/cli/Cargo.toml b/cli/Cargo.toml
 index c474f89..e9200b0 100644
@@ -31,11 +38,110 @@ index c474f89..e9200b0 100644
  
  [dev-dependencies]
  tempfile = "3"
+diff --git a/cli/src/child_command.rs b/cli/src/child_command.rs
+new file mode 100644
+index 0000000..d936fd4
+--- /dev/null
++++ b/cli/src/child_command.rs
+@@ -0,0 +1,82 @@
++//! Commands for the programs agent-browser starts without its protected descriptor.
++//!
++//! On Windows such a child (Chrome, an engine, ffmpeg, a plugin, a probe like `where`) can be
++//! opened by any process of the user, a sandboxed one included, and its environment read. So
++//! there it starts with only the variables a Windows program needs to run: agent-browser's own
++//! settings, the CDP url among them, stay out of its memory. Elsewhere this is `Command::new`.
++
++use std::ffi::OsStr;
++use std::process::Command;
++
++/// The variables a child keeps on Windows.
++#[cfg(windows)]
++const BASE_ENV: &[&str] = &[
++    "ALLUSERSPROFILE",
++    "APPDATA",
++    "CommonProgramFiles",
++    "CommonProgramFiles(x86)",
++    "CommonProgramW6432",
++    "ComSpec",
++    "COMPUTERNAME",
++    "HOMEDRIVE",
++    "HOMEPATH",
++    "LOCALAPPDATA",
++    "NUMBER_OF_PROCESSORS",
++    "OS",
++    "PATH",
++    "PATHEXT",
++    "PROCESSOR_ARCHITECTURE",
++    "PROCESSOR_IDENTIFIER",
++    "ProgramData",
++    "ProgramFiles",
++    "ProgramFiles(x86)",
++    "ProgramW6432",
++    "PUBLIC",
++    "SystemDrive",
++    "SystemRoot",
++    "TEMP",
++    "TMP",
++    "USERDOMAIN",
++    "USERNAME",
++    "USERPROFILE",
++    "windir",
++];
++
++/// `Command::new(program)`, with the environment cut down to `BASE_ENV` on Windows. Variables a
++/// call site sets afterwards are kept.
++pub fn child_command(program: impl AsRef<OsStr>) -> Command {
++    #[allow(unused_mut)]
++    let mut command = Command::new(program);
++    #[cfg(windows)]
++    {
++        command.env_clear();
++        for name in BASE_ENV {
++            if let Some(value) = std::env::var_os(name) {
++                command.env(name, value);
++            }
++        }
++    }
++    command
++}
++
++#[cfg(all(test, windows))]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn a_child_keeps_only_the_base_variables() {
++        let _guard = crate::test_utils::EnvGuard::new(&["AGENT_BROWSER_CDP"]);
++        _guard.set(
++            "AGENT_BROWSER_CDP",
++            "ws://127.0.0.1:1/devtools/browser/secret",
++        );
++        let mut command = child_command("cmd.exe");
++        command.env("SET_BY_CALLER", "1");
++        let envs: Vec<_> = command.get_envs().collect();
++        assert!(envs
++            .iter()
++            .any(|(k, v)| *k == "SET_BY_CALLER" && v.is_some()));
++        assert!(envs.iter().all(|(k, _)| *k != "AGENT_BROWSER_CDP"));
++        assert!(envs.iter().any(|(k, _)| *k == "SystemRoot"));
++    }
++}
 diff --git a/cli/src/connection.rs b/cli/src/connection.rs
-index 887dae5..1df449c 100644
+index 887dae5..137f08e 100644
 --- a/cli/src/connection.rs
 +++ b/cli/src/connection.rs
-@@ -51,6 +51,8 @@ pub enum Connection {
+@@ -8,7 +8,9 @@ use std::hash::{Hash, Hasher};
+ use std::io::{BufRead, BufReader, Read, Write};
+ use std::net::TcpStream;
+ use std::path::PathBuf;
+-use std::process::{Command, Stdio};
++use std::process::Command;
++#[cfg(unix)]
++use std::process::Stdio;
+ use std::thread;
+ use std::time::{Duration, Instant};
+ 
+@@ -51,6 +53,8 @@ pub enum Connection {
      #[cfg(unix)]
      Unix(UnixStream),
      Tcp(TcpStream),
@@ -44,7 +150,7 @@ index 887dae5..1df449c 100644
  }
  
  impl Read for Connection {
-@@ -59,6 +61,8 @@ impl Read for Connection {
+@@ -59,6 +63,8 @@ impl Read for Connection {
              #[cfg(unix)]
              Connection::Unix(s) => s.read(buf),
              Connection::Tcp(s) => s.read(buf),
@@ -53,7 +159,7 @@ index 887dae5..1df449c 100644
          }
      }
  }
-@@ -69,6 +73,8 @@ impl Write for Connection {
+@@ -69,6 +75,8 @@ impl Write for Connection {
              #[cfg(unix)]
              Connection::Unix(s) => s.write(buf),
              Connection::Tcp(s) => s.write(buf),
@@ -62,7 +168,7 @@ index 887dae5..1df449c 100644
          }
      }
  
-@@ -77,24 +83,36 @@ impl Write for Connection {
+@@ -77,24 +85,36 @@ impl Write for Connection {
              #[cfg(unix)]
              Connection::Unix(s) => s.flush(),
              Connection::Tcp(s) => s.flush(),
@@ -101,22 +207,31 @@ index 887dae5..1df449c 100644
          }
      }
  }
-@@ -403,42 +421,28 @@ pub fn walk_daemons() -> DaemonInventory {
+@@ -162,6 +182,12 @@ fn get_config_path(session: &str) -> PathBuf {
+ 
+ /// Clean up the stale daemon files of a session
+ pub fn cleanup_stale_files(session: &str) {
++    // On Windows a live daemon (its pid and creation time still match) keeps its
++    // files: they are how its clients find and check it.
++    #[cfg(windows)]
++    if recorded_daemon_alive(session) {
++        return;
++    }
+     remove_daemon_files(&get_socket_dir(), session);
+ }
+ 
+@@ -403,42 +429,32 @@ pub fn walk_daemons() -> DaemonInventory {
      inventory
  }
  
-+/// The id of the daemon's pipe, from the `.pipe` file the daemon writes. It is the only place a
-+/// client learns it: there is no derived fallback, and the id never goes on a command line.
++/// The daemon's `.pipe` record: its pipe id, pid and creation time. It is the only place a
++/// client learns the pipe: there is no derived fallback, and the id never goes on a command line.
  #[cfg(windows)]
 -fn get_port_path(session: &str) -> PathBuf {
 -    SessionFile::Port.path(session)
-+fn read_pipe_id(session: &str) -> Option<String> {
-+    crate::windows_pipe::read_pipe_id(&SessionFile::Pipe.path(session))
- }
- 
-+/// Connects to the session's daemon over its pipe, refusing a pipe whose server is not the
-+/// process recorded in the session's `.pid` file.
- #[cfg(windows)]
+-}
+-
+-#[cfg(windows)]
 -fn port_identity_for_session(session: &str) -> String {
 -    if let Ok(namespace) = env::var("AGENT_BROWSER_NAMESPACE") {
 -        let namespace = sanitize_session_component(&namespace);
@@ -125,9 +240,13 @@ index 887dae5..1df449c 100644
 -        }
 -    }
 -    session.to_string()
--}
--
--#[cfg(windows)]
++fn read_pipe_record(session: &str) -> Option<crate::windows_pipe::PipeRecord> {
++    crate::windows_pipe::read_pipe_record(&SessionFile::Pipe.path(session))
+ }
+ 
++/// Whether the daemon the session's `.pipe` record names is still running: the same pid with
++/// the same creation time, so a reused pid does not count.
+ #[cfg(windows)]
 -pub fn get_port_for_session(session: &str) -> u16 {
 -    let mut hash: i32 = 0;
 -    for c in port_identity_for_session(session).chars() {
@@ -136,32 +255,34 @@ index 887dae5..1df449c 100644
 -    // Correct logic: first take absolute modulo, then cast to u16
 -    // Using unsigned_abs() to safely handle i32::MIN
 -    49152 + ((hash.unsigned_abs() as u32 % 16383) as u16)
--}
--
++fn recorded_daemon_alive(session: &str) -> bool {
++    read_pipe_record(session)
++        .is_some_and(|record| crate::windows_security::process_is_alive(record.pid, record.created))
+ }
+ 
 -/// Read the actual daemon port from the `.port` file written by the daemon.
 -/// There is no hash-derived fallback: the hash ignores the socket directory,
 -/// so before this session's daemon writes its file that port can belong to
 -/// another daemon with the same session name.
--#[cfg(windows)]
++/// Connects to the session's daemon over its pipe, refusing a pipe whose server is not the
++/// recorded daemon (see `windows_pipe::check_server`).
+ #[cfg(windows)]
 -pub fn resolve_port(session: &str) -> Option<u16> {
 -    fs::read_to_string(get_port_path(session))
+-        .ok()
+-        .and_then(|s| s.trim().parse::<u16>().ok())
 +fn connect_pipe(
 +    session: &str,
 +    busy_wait: Duration,
 +) -> Result<crate::windows_pipe::PipeStream, String> {
-+    let id = read_pipe_id(session)
++    let record = read_pipe_record(session)
 +        .ok_or_else(|| "Failed to connect: daemon has not written its pipe file".to_string())?;
-+    let daemon_pid = fs::read_to_string(get_pid_path(session))
-         .ok()
--        .and_then(|s| s.trim().parse::<u16>().ok())
-+        .and_then(|s| s.trim().parse::<u32>().ok())
-+        .ok_or_else(|| "Failed to connect: daemon has not written its pid file".to_string())?;
-+    crate::windows_pipe::PipeStream::connect(&id, daemon_pid, busy_wait)
++    crate::windows_pipe::PipeStream::connect(&record, busy_wait)
 +        .map_err(|e| format!("Failed to connect: {}", e))
  }
  
  pub fn daemon_ready(session: &str) -> bool {
-@@ -449,13 +453,7 @@ pub fn daemon_ready(session: &str) -> bool {
+@@ -449,13 +465,7 @@ pub fn daemon_ready(session: &str) -> bool {
      }
      #[cfg(windows)]
      {
@@ -176,7 +297,86 @@ index 887dae5..1df449c 100644
      }
  }
  
-@@ -935,8 +933,14 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
+@@ -796,15 +806,11 @@ fn kill_stale_daemon(session: &str) {
+                     thread::sleep(Duration::from_millis(100));
+                 }
+             }
++            // Nothing to do on Windows: the daemon's protected DACL denies the user
++            // PROCESS_TERMINATE, and a taskkill child would only receive this
++            // process's environment unprotected.
+             #[cfg(windows)]
+-            {
+-                let _ = Command::new("taskkill")
+-                    .args(["/PID", &pid.to_string(), "/F"])
+-                    .stdout(Stdio::null())
+-                    .stderr(Stdio::null())
+-                    .status();
+-                thread::sleep(Duration::from_millis(500));
+-            }
++            let _ = pid;
+         }
+     }
+ 
+@@ -815,11 +821,20 @@ fn kill_stale_daemon(session: &str) {
+ fn wait_for_daemon_exit(session: &str, timeout: Duration) -> bool {
+     let start = Instant::now();
+     while start.elapsed() < timeout {
+-        if !daemon_ready(session) {
++        if daemon_gone(session) {
+             return true;
+         }
+         thread::sleep(Duration::from_millis(100));
+     }
++    daemon_gone(session)
++}
++
++/// No daemon answers, and on Windows the recorded daemon process has exited too.
++fn daemon_gone(session: &str) -> bool {
++    #[cfg(windows)]
++    if recorded_daemon_alive(session) {
++        return false;
++    }
+     !daemon_ready(session)
+ }
+ 
+@@ -860,6 +875,20 @@ pub(crate) fn prevent_stdio_handle_inheritance() {
+ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult, String> {
+     let mut restarted = false;
+ 
++    // On Windows a live daemon whose pipe is busy for a moment is waited for, not
++    // replaced: a second daemon would take over its files and the first one,
++    // which cannot be killed, would linger.
++    #[cfg(windows)]
++    {
++        let start = Instant::now();
++        while start.elapsed() < Duration::from_secs(3)
++            && !daemon_ready(session)
++            && recorded_daemon_alive(session)
++        {
++            thread::sleep(Duration::from_millis(100));
++        }
++    }
++
+     // Socket connectivity is the sole liveness check — no PID check — so
+     // callers in a different PID namespace (e.g. unshare) can still reuse
+     // an existing daemon they can reach over the socket.
+@@ -894,6 +923,15 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
+     // Clean up any stale socket/pid files before starting fresh
+     cleanup_stale_files(session);
+ 
++    #[cfg(windows)]
++    if recorded_daemon_alive(session) {
++        return Err(format!(
++            "The daemon for session '{}' is running but does not answer on its pipe; \
++             it stops after its idle timeout",
++            session
++        ));
++    }
++
+     // Ensure socket directory exists
+     let socket_dir = get_socket_dir();
+     if !socket_dir.exists() {
+@@ -935,8 +973,14 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
      let exe_path = env::current_exe().map_err(|e| e.to_string())?;
      let exe_path = exe_path.canonicalize().unwrap_or(exe_path);
  
@@ -192,7 +392,7 @@ index 887dae5..1df449c 100644
  
      #[cfg(unix)]
      {
-@@ -964,7 +968,7 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
+@@ -964,7 +1008,7 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
  
      #[cfg(windows)]
      {
@@ -201,7 +401,7 @@ index 887dae5..1df449c 100644
  
          prevent_stdio_handle_inheritance();
  
-@@ -976,12 +980,12 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
+@@ -976,12 +1020,12 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
          const DETACHED_PROCESS: u32 = 0x00000008;
  
          daemon_child = Some(
@@ -220,7 +420,7 @@ index 887dae5..1df449c 100644
          );
      }
  
-@@ -1054,10 +1058,11 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
+@@ -1054,10 +1098,11 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
  
      #[cfg(unix)]
      let endpoint_info = format!("socket: {}", SessionFile::Socket.path(session).display());
@@ -229,13 +429,13 @@ index 887dae5..1df449c 100644
 -    let endpoint_info = match resolve_port(session) {
 -        Some(port) => format!("port: 127.0.0.1:{}", port),
 -        None => format!("no port file in {}", get_socket_dir().display()),
-+    let endpoint_info = match read_pipe_id(session) {
++    let endpoint_info = match read_pipe_record(session) {
 +        Some(_) => "its pipe did not answer".to_string(),
 +        None => format!("no pipe file in {}", get_socket_dir().display()),
      };
  
      Err(format!("Daemon failed to start ({})", endpoint_info))
-@@ -1073,11 +1078,7 @@ fn connect(session: &str) -> Result<Connection, String> {
+@@ -1073,11 +1118,7 @@ fn connect(session: &str) -> Result<Connection, String> {
      }
      #[cfg(windows)]
      {
@@ -248,7 +448,7 @@ index 887dae5..1df449c 100644
      }
  }
  
-@@ -1237,7 +1238,7 @@ fn send_command_once(cmd: &Value, session: &str) -> Result<Response, SendError>
+@@ -1237,7 +1278,7 @@ fn send_command_once(cmd: &Value, session: &str) -> Result<Response, SendError>
      let mut json_str = serde_json::to_string(cmd).map_err(|e| SendError::NotSent(e.to_string()))?;
      json_str.push('\n');
  
@@ -257,7 +457,7 @@ index 887dae5..1df449c 100644
  
      stream.set_read_timeout(Some(read_timeout_for(cmd))).ok();
      stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
-@@ -1883,32 +1884,23 @@ mod tests {
+@@ -1883,32 +1924,24 @@ mod tests {
  
      #[test]
      #[cfg(windows)]
@@ -298,18 +498,140 @@ index 887dae5..1df449c 100644
 -        assert_ne!(namespaced_one, namespaced_two);
 +        assert!(!daemon_ready("pipe-test"));
 +        fs::write(dir.path().join("pipe-test.pipe"), r"\\host\pipe\x").unwrap();
-+        assert!(read_pipe_id("pipe-test").is_none());
++        assert!(read_pipe_record("pipe-test").is_none());
++        assert!(!recorded_daemon_alive("pipe-test"));
 +        let error = connect_pipe("pipe-test", Duration::ZERO).err().unwrap();
 +        assert!(error.contains("pipe file"), "{}", error);
 +        assert!(daemon_unreachable(&error));
      }
  
      // === Daemon Version Mismatch Detection Tests ===
+diff --git a/cli/src/doctor/chrome.rs b/cli/src/doctor/chrome.rs
+index a862bc5..101388c 100644
+--- a/cli/src/doctor/chrome.rs
++++ b/cli/src/doctor/chrome.rs
+@@ -206,7 +206,7 @@ fn query_chrome_version(path: &Path) -> Option<String> {
+ 
+ #[cfg(not(windows))]
+ fn query_chrome_version(path: &Path) -> Option<String> {
+-    let mut cmd = std::process::Command::new(path);
++    let mut cmd = crate::child_command::child_command(path);
+     cmd.arg("--version");
+     run_version_command(cmd, VERSION_QUERY_TIMEOUT)
+ }
+diff --git a/cli/src/doctor/ffmpeg.rs b/cli/src/doctor/ffmpeg.rs
+index e7e726e..3f69db6 100644
+--- a/cli/src/doctor/ffmpeg.rs
++++ b/cli/src/doctor/ffmpeg.rs
+@@ -6,7 +6,7 @@
+ //! feature that needs ffmpeg, so a machine without it is still healthy.
+ 
+ use std::path::{Path, PathBuf};
+-use std::process::{Command, Stdio};
++use std::process::Stdio;
+ 
+ use super::helpers::which_path;
+ use super::{Check, Status};
+@@ -147,7 +147,7 @@ fn reinstall_hint(os: &str) -> String {
+ 
+ /// Run `binary` with `args`, returning stdout when it exits successfully.
+ fn run_ffmpeg(binary: &Path, args: &[&str]) -> Option<String> {
+-    let output = Command::new(binary)
++    let output = crate::child_command::child_command(binary)
+         .args(args)
+         .stdin(Stdio::null())
+         .stderr(Stdio::null())
+diff --git a/cli/src/doctor/fix.rs b/cli/src/doctor/fix.rs
+index 233ff70..1e86448 100644
+--- a/cli/src/doctor/fix.rs
++++ b/cli/src/doctor/fix.rs
+@@ -78,7 +78,7 @@ fn attempt_chrome_install() -> bool {
+         Ok(p) => p,
+         Err(_) => return false,
+     };
+-    std::process::Command::new(exe)
++    crate::child_command::child_command(exe)
+         .arg("install")
+         .status()
+         .map(|s| s.success())
+diff --git a/cli/src/doctor/helpers.rs b/cli/src/doctor/helpers.rs
+index 1128461..5d11f62 100644
+--- a/cli/src/doctor/helpers.rs
++++ b/cli/src/doctor/helpers.rs
+@@ -69,7 +69,7 @@ pub(super) fn which_path(name: &str) -> Option<std::path::PathBuf> {
+     } else {
+         "which"
+     };
+-    let output = std::process::Command::new(probe)
++    let output = crate::child_command::child_command(probe)
+         .arg(name)
+         .stdin(std::process::Stdio::null())
+         .stderr(std::process::Stdio::null())
+diff --git a/cli/src/install.rs b/cli/src/install.rs
+index 6491351..92539f5 100644
+--- a/cli/src/install.rs
++++ b/cli/src/install.rs
+@@ -215,7 +215,7 @@ fn validate_macos_version(version: &str) -> Result<(), String> {
+ 
+ #[cfg(target_os = "macos")]
+ fn check_macos_version() -> Result<(), String> {
+-    let output = Command::new("sw_vers")
++    let output = crate::child_command::child_command("sw_vers")
+         .arg("-productVersion")
+         .output()
+         .map_err(|e| {
+@@ -902,10 +902,10 @@ fn privileged_command(pkg_mgr: &str) -> io::Result<Command> {
+ 
+ fn privileged_command_with(is_root: bool, has_sudo: bool, pkg_mgr: &str) -> io::Result<Command> {
+     if is_root {
+-        return Ok(Command::new(pkg_mgr));
++        return Ok(crate::child_command::child_command(pkg_mgr));
+     }
+     if has_sudo {
+-        let mut command = Command::new("sudo");
++        let mut command = crate::child_command::child_command("sudo");
+         command.arg(pkg_mgr);
+         return Ok(command);
+     }
+@@ -918,7 +918,7 @@ fn privileged_command_with(is_root: bool, has_sudo: bool, pkg_mgr: &str) -> io::
+ fn which_exists(cmd: &str) -> bool {
+     #[cfg(unix)]
+     {
+-        Command::new("which")
++        crate::child_command::child_command("which")
+             .arg(cmd)
+             .stdout(Stdio::null())
+             .stderr(Stdio::null())
+@@ -928,7 +928,7 @@ fn which_exists(cmd: &str) -> bool {
+     }
+     #[cfg(windows)]
+     {
+-        Command::new("where")
++        crate::child_command::child_command("where")
+             .arg(cmd)
+             .stdout(Stdio::null())
+             .stderr(Stdio::null())
+@@ -939,7 +939,7 @@ fn which_exists(cmd: &str) -> bool {
+ }
+ 
+ fn package_exists_apt(pkg: &str) -> bool {
+-    Command::new("apt-cache")
++    crate::child_command::child_command("apt-cache")
+         .arg("show")
+         .arg(pkg)
+         .stdout(Stdio::null())
 diff --git a/cli/src/main.rs b/cli/src/main.rs
-index a009151..1cb984f 100644
+index 67d6a1a..772d5b7 100644
 --- a/cli/src/main.rs
 +++ b/cli/src/main.rs
-@@ -18,6 +18,12 @@ mod test_utils;
+@@ -1,5 +1,6 @@
+ mod ca_bundle;
+ mod chat;
++mod child_command;
+ mod color;
+ mod commands;
+ mod connection;
+@@ -18,6 +19,12 @@ mod test_utils;
  mod tls;
  mod upgrade;
  mod validation;
@@ -322,7 +644,25 @@ index a009151..1cb984f 100644
  
  use serde_json::json;
  use sha2::{Digest, Sha256};
-@@ -1436,6 +1442,14 @@ fn run_close_all(flags: &Flags) {
+@@ -26,7 +33,7 @@ use std::fs;
+ #[cfg(unix)]
+ use std::io::Write;
+ use std::path::PathBuf;
+-use std::process::{exit, Command};
++use std::process::exit;
+ 
+ #[cfg(windows)]
+ use windows_sys::Win32::Foundation::CloseHandle;
+@@ -632,7 +639,7 @@ fn canonical_path(path: PathBuf) -> PathBuf {
+ }
+ 
+ fn git_toplevel() -> Option<PathBuf> {
+-    let output = Command::new("git")
++    let output = crate::child_command::child_command("git")
+         .args(["rev-parse", "--show-toplevel"])
+         .output()
+         .ok()?;
+@@ -1436,6 +1443,14 @@ fn run_close_all(flags: &Flags) {
  }
  
  fn main() {
@@ -337,24 +677,23 @@ index a009151..1cb984f 100644
      // Rust ignores SIGPIPE by default, causing println! to panic on broken pipes.
      // Reset to SIG_DFL so the OS terminates the process cleanly instead.
      #[cfg(unix)]
-@@ -1567,6 +1581,17 @@ fn main() {
-                 run_dashboard_stop(flags.json);
-                 return;
-             }
-+            // The dashboard is a loopback HTTP server that drives sessions; on Windows any
-+            // local process, a sandboxed one included, could reach it.
-+            DashboardCommand::Start { .. } if cfg!(windows) => {
-+                let error = "The dashboard is disabled on Windows in this build";
-+                if flags.json {
-+                    print_json_error(error);
-+                } else {
-+                    eprintln!("{} {}", color::error_indicator(), error);
-+                }
-+                exit(1);
-+            }
-             DashboardCommand::Start {
-                 port,
-                 allowed_origins,
+@@ -1464,7 +1479,16 @@ fn main() {
+             eprintln!("{} {}", color::error_indicator(), msg);
+             exit(1);
+         }
++        #[cfg(not(windows))]
+         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
++        // The daemon holds the CDP url: on Windows each runtime thread gets the
++        // protected DACL as it starts (see windows_security).
++        #[cfg(windows)]
++        let rt = tokio::runtime::Builder::new_multi_thread()
++            .enable_all()
++            .on_thread_start(windows_security::harden_current_thread_or_abort)
++            .build()
++            .expect("Failed to create tokio runtime");
+         rt.block_on(native::daemon::run_daemon(&session));
+         return;
+     }
 diff --git a/cli/src/mcp.rs b/cli/src/mcp.rs
 index eecc1a7..72e251b 100644
 --- a/cli/src/mcp.rs
@@ -379,8 +718,180 @@ index eecc1a7..72e251b 100644
      let mut child = command.spawn().map_err(|e| e.to_string())?;
  
      if let Some(body) = stdin_body {
+diff --git a/cli/src/native/actions.rs b/cli/src/native/actions.rs
+index 037cf27..268a4d0 100644
+--- a/cli/src/native/actions.rs
++++ b/cli/src/native/actions.rs
+@@ -6024,11 +6024,13 @@ async fn handle_inspect(state: &mut DaemonState) -> Result<Value, String> {
+ 
+ fn open_url_in_browser(url: &str) {
+     #[cfg(target_os = "macos")]
+-    let result = std::process::Command::new("open").arg(url).spawn();
++    let result = crate::child_command::child_command("open").arg(url).spawn();
+     #[cfg(target_os = "linux")]
+-    let result = std::process::Command::new("xdg-open").arg(url).spawn();
++    let result = crate::child_command::child_command("xdg-open")
++        .arg(url)
++        .spawn();
+     #[cfg(target_os = "windows")]
+-    let result = std::process::Command::new("cmd")
++    let result = crate::child_command::child_command("cmd")
+         .args(["/c", "start", "", url])
+         .spawn();
+     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+diff --git a/cli/src/native/cdp/chrome.rs b/cli/src/native/cdp/chrome.rs
+index e939b29..6cd2918 100644
+--- a/cli/src/native/cdp/chrome.rs
++++ b/cli/src/native/cdp/chrome.rs
+@@ -4,8 +4,10 @@ use std::io::{BufRead, BufReader, Write};
+ #[cfg(target_os = "linux")]
+ use std::os::unix::ffi::OsStrExt;
+ use std::path::{Path, PathBuf};
++#[cfg(all(test, unix))]
++use std::process::Command;
+ #[cfg(not(windows))]
+-use std::process::{Child, Command, Stdio};
++use std::process::{Child, Stdio};
+ use std::sync::Arc;
+ use std::time::Duration;
+ 
+@@ -254,7 +256,7 @@ fn maybe_start_xvfb(options: &LaunchOptions) -> Option<XvfbServer> {
+     let mut read_end = unsafe { std::fs::File::from_raw_fd(fds[0]) };
+     let write_end = unsafe { std::fs::File::from_raw_fd(fds[1]) };
+ 
+-    let mut child = match Command::new("Xvfb")
++    let mut child = match crate::child_command::child_command("Xvfb")
+         .args([
+             "-displayfd",
+             &fds[1].to_string(),
+@@ -688,7 +690,7 @@ fn resolve_prepared_nss_home(options: &LaunchOptions) -> Result<Option<PreparedN
+ 
+ #[cfg(target_os = "linux")]
+ fn run_certutil(args: &[&str], action: &str) -> Result<(), String> {
+-    let output = Command::new("certutil").args(args).output().map_err(|e| {
++    let output = crate::child_command::child_command("certutil").args(args).output().map_err(|e| {
+         format!(
+             "Failed to {action}: could not run certutil ({e}). Run agent-browser install --with-deps, or install libnss3-tools on Debian/Ubuntu or nss-tools on RPM Linux."
+         )
+@@ -832,7 +834,7 @@ fn try_launch_chrome(chrome_path: &Path, options: &LaunchOptions) -> Result<Chro
+     let xvfb = maybe_start_xvfb(options);
+ 
+     #[cfg(not(windows))]
+-    let mut cmd = Command::new(chrome_path);
++    let mut cmd = crate::child_command::child_command(chrome_path);
+     #[cfg(not(windows))]
+     cmd.args(&args)
+         .stdin(Stdio::null())
+@@ -1106,7 +1108,10 @@ pub fn find_chrome() -> Option<PathBuf> {
+             "brave-browser-stable",
+         ];
+         for name in &candidates {
+-            if let Ok(output) = Command::new("which").arg(name).output() {
++            if let Ok(output) = crate::child_command::child_command("which")
++                .arg(name)
++                .output()
++            {
+                 if output.status.success() {
+                     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                     if !path.is_empty() {
+diff --git a/cli/src/native/cdp/lightpanda.rs b/cli/src/native/cdp/lightpanda.rs
+index c8c6f9b..4f6e4d5 100644
+--- a/cli/src/native/cdp/lightpanda.rs
++++ b/cli/src/native/cdp/lightpanda.rs
+@@ -2,7 +2,9 @@ use std::collections::VecDeque;
+ use std::io::{BufRead, BufReader};
+ use std::net::TcpListener;
+ use std::path::PathBuf;
+-use std::process::{Child, Command, Stdio};
++#[cfg(all(test, unix))]
++use std::process::Command;
++use std::process::{Child, Stdio};
+ use std::sync::{Arc, Mutex};
+ use std::time::Duration;
+ 
+@@ -101,7 +103,10 @@ fn push_bounded(buffer: &Mutex<VecDeque<String>>, line: String) {
+ pub fn find_lightpanda() -> Option<PathBuf> {
+     #[cfg(unix)]
+     {
+-        if let Ok(output) = Command::new("which").arg("lightpanda").output() {
++        if let Ok(output) = crate::child_command::child_command("which")
++            .arg("lightpanda")
++            .output()
++        {
+             if output.status.success() {
+                 let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                 if !path.is_empty() {
+@@ -113,7 +118,10 @@ pub fn find_lightpanda() -> Option<PathBuf> {
+ 
+     #[cfg(windows)]
+     {
+-        if let Ok(output) = Command::new("where").arg("lightpanda").output() {
++        if let Ok(output) = crate::child_command::child_command("where")
++            .arg("lightpanda")
++            .output()
++        {
+             if output.status.success() {
+                 let path = String::from_utf8_lossy(&output.stdout)
+                     .lines()
+@@ -162,7 +170,7 @@ pub async fn launch_lightpanda(
+     };
+     let args = build_lightpanda_serve_args(port, options.proxy.as_deref());
+ 
+-    let mut child = Command::new(&binary_path)
++    let mut child = crate::child_command::child_command(&binary_path)
+         .args(&args)
+         .stdin(Stdio::null())
+         .stdout(Stdio::piped())
+diff --git a/cli/src/native/cdp/obscura.rs b/cli/src/native/cdp/obscura.rs
+index 2b7425e..0a64a12 100644
+--- a/cli/src/native/cdp/obscura.rs
++++ b/cli/src/native/cdp/obscura.rs
+@@ -2,7 +2,9 @@ use std::collections::VecDeque;
+ use std::io::{BufRead, BufReader};
+ use std::net::TcpListener;
+ use std::path::PathBuf;
+-use std::process::{Child, Command, Stdio};
++#[cfg(all(test, unix))]
++use std::process::Command;
++use std::process::{Child, Stdio};
+ use std::sync::{Arc, Mutex};
+ use std::time::Duration;
+ 
+@@ -136,7 +138,10 @@ fn push_bounded(buffer: &Mutex<VecDeque<String>>, line: String) {
+ pub fn find_obscura() -> Option<PathBuf> {
+     #[cfg(unix)]
+     {
+-        if let Ok(output) = Command::new("which").arg("obscura").output() {
++        if let Ok(output) = crate::child_command::child_command("which")
++            .arg("obscura")
++            .output()
++        {
+             if output.status.success() {
+                 let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                 if !path.is_empty() {
+@@ -148,7 +153,10 @@ pub fn find_obscura() -> Option<PathBuf> {
+ 
+     #[cfg(windows)]
+     {
+-        if let Ok(output) = Command::new("where").arg("obscura").output() {
++        if let Ok(output) = crate::child_command::child_command("where")
++            .arg("obscura")
++            .output()
++        {
+             if output.status.success() {
+                 let path = String::from_utf8_lossy(&output.stdout)
+                     .lines()
+@@ -196,7 +204,7 @@ pub async fn launch_obscura(options: &ObscuraLaunchOptions) -> Result<ObscuraPro
+     };
+     let args = build_obscura_serve_args(port, options.proxy.as_deref(), options.stealth);
+ 
+-    let mut child = Command::new(&binary_path)
++    let mut child = crate::child_command::child_command(&binary_path)
+         .args(&args)
+         .stdin(Stdio::null())
+         .stdout(Stdio::piped())
 diff --git a/cli/src/native/daemon.rs b/cli/src/native/daemon.rs
-index 4fb9666..97b0080 100644
+index 4fb9666..98ac631 100644
 --- a/cli/src/native/daemon.rs
 +++ b/cli/src/native/daemon.rs
 @@ -76,8 +76,8 @@ pub async fn run_daemon(session: &str) {
@@ -403,12 +914,12 @@ index 4fb9666..97b0080 100644
      }
  
      let stream_path = SessionFile::Stream.path_in(&socket_dir, session);
-@@ -359,27 +359,21 @@ async fn run_socket_server(
+@@ -359,27 +359,23 @@ async fn run_socket_server(
      idle_timeout: Option<IdleTimeout>,
      autosave_interval_ms: u64,
  ) -> Result<(), String> {
 -    use tokio::net::TcpListener;
-+    use crate::windows_pipe::{new_pipe_id, write_pipe_id, PipeListener};
++    use crate::windows_pipe::{new_pipe_id, write_pipe_record, PipeListener, PipeRecord};
  
      let idle_timeout_ms = idle_timeout.map(|t| t.ms);
  
@@ -427,7 +938,8 @@ index 4fb9666..97b0080 100644
 -        .port();
 +    // A named pipe with a fresh random name, a user-and-SYSTEM DACL and a peer
 +    // check on every client (see windows_pipe). Clients learn the name only from
-+    // the .pipe file in the socket directory.
++    // the .pipe file in the socket directory, which also records this process's
++    // pid and creation time so they can check who serves the pipe.
 +    let pipe_id = new_pipe_id().map_err(|e| format!("Failed to bind pipe: {}", e))?;
 +    let mut listener =
 +        PipeListener::bind(&pipe_id).map_err(|e| format!("Failed to bind pipe: {}", e))?;
@@ -436,12 +948,13 @@ index 4fb9666..97b0080 100644
 -    let port_path = SessionFile::Port.path_in(socket_dir, session);
 -    let _ = fs::write(&port_path, actual_port.to_string());
 +    let pipe_path = SessionFile::Pipe.path_in(socket_dir, session);
-+    write_pipe_id(&pipe_path, &pipe_id)
++    PipeRecord::for_this_process(&pipe_id)
++        .and_then(|record| write_pipe_record(&pipe_path, &record))
 +        .map_err(|e| format!("Failed to write the pipe file: {}", e))?;
  
      let state: std::sync::Arc<tokio::sync::Mutex<DaemonState>> =
          std::sync::Arc::new(tokio::sync::Mutex::new(DaemonState::new_with_stream(
-@@ -405,7 +399,7 @@ async fn run_socket_server(
+@@ -405,7 +401,7 @@ async fn run_socket_server(
          tokio::select! {
              accept_result = listener.accept() => {
                  match accept_result {
@@ -450,7 +963,7 @@ index 4fb9666..97b0080 100644
                          let state = state.clone();
                          let idle_activity = idle_activity.clone();
                          let close = close.clone();
-@@ -415,6 +409,8 @@ async fn run_socket_server(
+@@ -415,6 +411,8 @@ async fn run_socket_server(
                      }
                      Err(e) => {
                          let _ = writeln!(std::io::stderr(), "Accept error: {}", e);
@@ -459,7 +972,7 @@ index 4fb9666..97b0080 100644
                      }
                  }
              }
-@@ -718,11 +714,6 @@ fn get_daemon_socket_dir() -> PathBuf {
+@@ -718,11 +716,6 @@ fn get_daemon_socket_dir() -> PathBuf {
      crate::connection::get_socket_dir()
  }
  
@@ -471,7 +984,7 @@ index 4fb9666..97b0080 100644
  #[cfg(test)]
  mod tests {
      #[allow(unused_imports)]
-@@ -815,18 +806,6 @@ mod tests {
+@@ -815,18 +808,6 @@ mod tests {
          ));
      }
  
@@ -490,39 +1003,41 @@ index 4fb9666..97b0080 100644
      #[test]
      fn test_close_completed_response_requires_actual_close_result() {
          let confirmation_response = serde_json::json!({
-diff --git a/cli/src/native/inspect_server.rs b/cli/src/native/inspect_server.rs
-index 2910ade..1b7a826 100644
---- a/cli/src/native/inspect_server.rs
-+++ b/cli/src/native/inspect_server.rs
-@@ -38,6 +38,11 @@ impl InspectServer {
-         target_id: String,
-         chrome_host_port: String,
-     ) -> Result<Self, String> {
-+        // A loopback TCP server is reachable by any local process, a sandboxed
-+        // one included, so the inspect server stays off on Windows.
-+        if cfg!(windows) {
-+            return Err("The inspect server is disabled on Windows in this build".to_string());
-+        }
-         let listener = TcpListener::bind("127.0.0.1:0")
-             .await
-             .map_err(|e| format!("Failed to bind inspect server: {}", e))?;
-diff --git a/cli/src/native/stream/dashboard.rs b/cli/src/native/stream/dashboard.rs
-index bf64ca1..917cbef 100644
---- a/cli/src/native/stream/dashboard.rs
-+++ b/cli/src/native/stream/dashboard.rs
-@@ -624,6 +624,12 @@ async fn proxy_session_stream(mut stream: tokio::net::TcpStream, port: u16) {
+diff --git a/cli/src/native/providers.rs b/cli/src/native/providers.rs
+index aeff240..d10524d 100644
+--- a/cli/src/native/providers.rs
++++ b/cli/src/native/providers.rs
+@@ -786,7 +786,7 @@ mod agentcore {
+         }
+ 
+         // Fall back to AWS CLI
+-        let mut cmd = std::process::Command::new("aws");
++        let mut cmd = crate::child_command::child_command("aws");
+         cmd.args(["configure", "export-credentials", "--format", "env"]);
+ 
+         // Honor AWS_PROFILE
+diff --git a/cli/src/native/recording.rs b/cli/src/native/recording.rs
+index 0ff4b38..10f3545 100644
+--- a/cli/src/native/recording.rs
++++ b/cli/src/native/recording.rs
+@@ -696,7 +696,7 @@ pub fn recording_stop(state: &mut RecordingState) -> Result<Value, String> {
  }
  
- pub async fn run_dashboard_server(port: u16) {
-+    // A loopback HTTP server that drives sessions: any local process, a
-+    // sandboxed one included, could reach it, so it stays off on Windows.
-+    if cfg!(windows) {
-+        eprintln!("The dashboard is disabled on Windows in this build");
-+        return;
-+    }
-     let ipv4_addr = (Ipv4Addr::LOCALHOST, port);
-     let ipv4_listener = match TcpListener::bind(ipv4_addr).await {
-         Ok(l) => l,
+ fn build_ffmpeg_command(output_path: &str, fps: u32, cursor: bool) -> tokio::process::Command {
+-    let mut cmd = tokio::process::Command::new("ffmpeg");
++    let mut cmd = tokio::process::Command::from(crate::child_command::child_command("ffmpeg"));
+     let high_fps = fps > HIGH_FPS_THRESHOLD;
+ 
+     // -hide_banner keeps the version and build banner out of stderr, so a
+@@ -1366,7 +1366,7 @@ fn ffmpeg_launch_error(error: impl std::fmt::Display) -> String {
+ /// This keeps missing-binary failures ahead of browser attachment while the
+ /// real encoder process is deferred until that attachment succeeds.
+ pub async fn check_ffmpeg_available() -> Result<(), String> {
+-    let status = tokio::process::Command::new("ffmpeg")
++    let status = tokio::process::Command::from(crate::child_command::child_command("ffmpeg"))
+         .arg("-version")
+         .stdin(Stdio::null())
+         .stdout(Stdio::null())
 diff --git a/cli/src/native/stream/http.rs b/cli/src/native/stream/http.rs
 index b428183..bb08f8d 100644
 --- a/cli/src/native/stream/http.rs
@@ -578,13 +1093,13 @@ index b428183..bb08f8d 100644
  
      writer
 diff --git a/cli/src/native/stream/mod.rs b/cli/src/native/stream/mod.rs
-index a4a2ba4..9ca55e5 100644
+index 52dc255..8d363ab 100644
 --- a/cli/src/native/stream/mod.rs
 +++ b/cli/src/native/stream/mod.rs
-@@ -22,12 +22,16 @@ use super::cdp::client::CdpClient;
- /// Whether streaming is switched off with `AGENT_BROWSER_STREAM_DISABLED=1` (or
- /// `true`). Then the daemon starts no stream server and writes no `.stream`
- /// file, and `stream enable` fails: nothing listens on a loopback port.
+@@ -23,16 +23,23 @@ use super::cdp::client::CdpClient;
+ /// `true`). Then nothing listens on a loopback port: the daemon starts no
+ /// stream server and writes no `.stream` file, `stream enable` fails, and
+ /// `inspect` and `dashboard start` refuse to start their servers.
 +///
 +/// On Windows streaming is always off: a loopback TCP server is reachable by any
 +/// local process, a sandboxed one included.
@@ -602,7 +1117,135 @@ index a4a2ba4..9ca55e5 100644
 +        )
  }
  
- fn stream_disabled_value(value: Option<&str>) -> bool {
+ /// The error for a loopback server that `stream_disabled` keeps off.
+ pub fn stream_disabled_error(what: &str) -> String {
++    if cfg!(windows) {
++        return format!("{} is disabled on Windows in this build", what);
++    }
+     format!("{} is disabled (AGENT_BROWSER_STREAM_DISABLED=1)", what)
+ }
+ 
+diff --git a/cli/src/native/webdriver/appium.rs b/cli/src/native/webdriver/appium.rs
+index 3d85a5e..e466ff3 100644
+--- a/cli/src/native/webdriver/appium.rs
++++ b/cli/src/native/webdriver/appium.rs
+@@ -1,5 +1,5 @@
+ use serde_json::{json, Value};
+-use std::process::{Child, Command, Stdio};
++use std::process::{Child, Stdio};
+ use std::time::Duration;
+ 
+ use super::client::WebDriverClient;
+@@ -165,7 +165,7 @@ async fn is_appium_running(port: u16) -> bool {
+ 
+ fn launch_appium(port: u16) -> Result<Child, String> {
+     // Try npx appium first, then direct appium
+-    let result = Command::new("npx")
++    let result = crate::child_command::child_command("npx")
+         .args(["appium", "--relaxed-security", "--port", &port.to_string()])
+         .stdin(Stdio::null())
+         .stdout(Stdio::piped())
+@@ -174,7 +174,7 @@ fn launch_appium(port: u16) -> Result<Child, String> {
+ 
+     match result {
+         Ok(child) => Ok(child),
+-        Err(_) => Command::new("appium")
++        Err(_) => crate::child_command::child_command("appium")
+             .args(["--relaxed-security", "--port", &port.to_string()])
+             .stdin(Stdio::null())
+             .stdout(Stdio::piped())
+diff --git a/cli/src/native/webdriver/ios.rs b/cli/src/native/webdriver/ios.rs
+index 2637938..92534d2 100644
+--- a/cli/src/native/webdriver/ios.rs
++++ b/cli/src/native/webdriver/ios.rs
+@@ -1,5 +1,4 @@
+ use serde_json::{json, Value};
+-use std::process::Command;
+ 
+ #[derive(Debug, Clone)]
+ pub struct IosDevice {
+@@ -11,7 +10,7 @@ pub struct IosDevice {
+ }
+ 
+ pub fn list_simulators() -> Result<Vec<IosDevice>, String> {
+-    let output = Command::new("xcrun")
++    let output = crate::child_command::child_command("xcrun")
+         .args(["simctl", "list", "devices", "--json"])
+         .output()
+         .map_err(|e| format!("Failed to run xcrun simctl: {}", e))?;
+@@ -59,7 +58,7 @@ pub fn list_simulators() -> Result<Vec<IosDevice>, String> {
+ }
+ 
+ pub fn list_real_devices() -> Result<Vec<IosDevice>, String> {
+-    let output = Command::new("xcrun")
++    let output = crate::child_command::child_command("xcrun")
+         .args(["xctrace", "list", "devices"])
+         .output()
+         .map_err(|e| format!("Failed to run xcrun xctrace: {}", e))?;
+@@ -117,7 +116,7 @@ pub fn list_all_devices() -> Result<Vec<IosDevice>, String> {
+ }
+ 
+ pub fn boot_simulator(udid: &str) -> Result<(), String> {
+-    let output = Command::new("xcrun")
++    let output = crate::child_command::child_command("xcrun")
+         .args(["simctl", "boot", udid])
+         .output()
+         .map_err(|e| format!("Failed to boot simulator: {}", e))?;
+@@ -133,7 +132,7 @@ pub fn boot_simulator(udid: &str) -> Result<(), String> {
+ }
+ 
+ pub fn shutdown_simulator(udid: &str) -> Result<(), String> {
+-    let output = Command::new("xcrun")
++    let output = crate::child_command::child_command("xcrun")
+         .args(["simctl", "shutdown", udid])
+         .output()
+         .map_err(|e| format!("Failed to shutdown simulator: {}", e))?;
+diff --git a/cli/src/native/webdriver/safari.rs b/cli/src/native/webdriver/safari.rs
+index a6e489b..e8376ec 100644
+--- a/cli/src/native/webdriver/safari.rs
++++ b/cli/src/native/webdriver/safari.rs
+@@ -1,5 +1,5 @@
+ use std::path::PathBuf;
+-use std::process::{Child, Command, Stdio};
++use std::process::{Child, Stdio};
+ use std::time::Duration;
+ 
+ pub struct SafariDriverProcess {
+@@ -31,7 +31,10 @@ pub fn find_safaridriver() -> Option<PathBuf> {
+     }
+ 
+     // Try PATH
+-    if let Ok(output) = Command::new("which").arg("safaridriver").output() {
++    if let Ok(output) = crate::child_command::child_command("which")
++        .arg("safaridriver")
++        .output()
++    {
+         if output.status.success() {
+             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+             if !path.is_empty() {
+@@ -47,7 +50,7 @@ pub fn launch_safaridriver(port: u16) -> Result<SafariDriverProcess, String> {
+     let driver_path = find_safaridriver()
+         .ok_or("safaridriver not found. Safari WebDriver requires macOS with Safari.")?;
+ 
+-    let child = Command::new(&driver_path)
++    let child = crate::child_command::child_command(&driver_path)
+         .arg("--port")
+         .arg(port.to_string())
+         .stdin(Stdio::null())
+diff --git a/cli/src/plugins.rs b/cli/src/plugins.rs
+index b70ea02..29119d8 100644
+--- a/cli/src/plugins.rs
++++ b/cli/src/plugins.rs
+@@ -204,7 +204,8 @@ async fn invoke_plugin_process(
+     timeout_secs: u64,
+     expose_plugin_error: bool,
+ ) -> Result<serde_json::Value, String> {
+-    let mut command = tokio::process::Command::new(&plugin.command);
++    let mut command =
++        tokio::process::Command::from(crate::child_command::child_command(&plugin.command));
+     command
+         .args(&plugin.args)
+         .stdin(Stdio::piped())
 diff --git a/cli/src/session_files.rs b/cli/src/session_files.rs
 index 18129f6..25e8d4a 100644
 --- a/cli/src/session_files.rs
@@ -645,29 +1288,71 @@ index 18129f6..25e8d4a 100644
              | SessionFile::Pid
              | SessionFile::Version
              | SessionFile::Config
+diff --git a/cli/src/upgrade.rs b/cli/src/upgrade.rs
+index c73843c..10b46d6 100644
+--- a/cli/src/upgrade.rs
++++ b/cli/src/upgrade.rs
+@@ -1,6 +1,6 @@
+ use crate::color;
+ use std::path::Path;
+-use std::process::{exit, Command, Stdio};
++use std::process::{exit, Stdio};
+ 
+ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+ const NPM_REGISTRY_URL: &str = "https://registry.npmjs.org/agent-browser/latest";
+@@ -126,7 +126,7 @@ fn detect_install_method() -> InstallMethod {
+ }
+ 
+ fn command_succeeds(cmd: &str, args: &[&str]) -> bool {
+-    Command::new(cmd)
++    crate::child_command::child_command(cmd)
+         .args(args)
+         .stdout(Stdio::null())
+         .stderr(Stdio::null())
+@@ -136,7 +136,7 @@ fn command_succeeds(cmd: &str, args: &[&str]) -> bool {
+ }
+ 
+ fn command_output_contains(cmd: &str, args: &[&str], needle: &str) -> bool {
+-    Command::new(cmd)
++    crate::child_command::child_command(cmd)
+         .args(args)
+         .stderr(Stdio::null())
+         .output()
+@@ -182,7 +182,7 @@ fn run_upgrade_command(method: &InstallMethod) -> bool {
+     };
+ 
+     println!("Running: {}", display);
+-    Command::new(cmd)
++    crate::child_command::child_command(cmd)
+         .args(args)
+         .status()
+         .map(|s| s.success())
 diff --git a/cli/src/windows_pipe.rs b/cli/src/windows_pipe.rs
 new file mode 100644
-index 0000000..801d450
+index 0000000..d147d7c
 --- /dev/null
 +++ b/cli/src/windows_pipe.rs
-@@ -0,0 +1,315 @@
+@@ -0,0 +1,425 @@
 +//! The daemon's named pipe on Windows, which replaces loopback TCP.
 +//!
 +//! A loopback port can be reached by any local process, a sandboxed one included. The pipe is
 +//! `\\.\pipe\clauseo-ab-<id>`, `<id>` being 128 random bits the daemon draws at start and
-+//! writes to `<session>.pipe` in the socket directory, which is the only way a client learns it
-+//! (never a command-line argument). Four checks stand behind the name:
++//! writes to `<session>.pipe` in the socket directory with its own pid and creation time; that
++//! file is the only way a client learns the name (never a command-line argument). Four checks
++//! stand behind the name:
 +//!
 +//! - the first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE, so the daemon fails
 +//!   rather than join a pipe someone else created first;
 +//! - every instance has a protected DACL for the user and SYSTEM only, and refuses remote
-+//!   clients;
++//!   clients. Several instances listen at once, so a client holding one cannot make the pipe
++//!   busy for the others;
 +//! - after a client connects, the daemon reads the client's process token and disconnects,
 +//!   before writing a byte, unless it is unrestricted (anything that fails counts as
 +//!   restricted);
-+//! - the client checks that the pipe's server process is the session's daemon (its `.pid`),
-+//!   and connects at identification level only, so a pipe squatter can neither pose as the
-+//!   daemon nor impersonate the client.
++//! - the client checks that the pipe's server is the recorded daemon (pid and creation time, so
++//!   a reused pid fails), runs this executable and has an unrestricted token, and connects at
++//!   identification level only, so a pipe squatter can neither pose as the daemon nor
++//!   impersonate the client.
 +
 +use std::ffi::c_void;
 +use std::io::{self, Read, Write};
@@ -675,6 +1360,7 @@ index 0000000..801d450
 +use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 +use std::path::Path;
 +use std::ptr;
++use std::sync::Arc;
 +use std::time::{Duration, Instant};
 +
 +use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
@@ -692,8 +1378,13 @@ index 0000000..801d450
 +use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
 +use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 +
-+use crate::windows_security::SecurityDescriptor;
-+use crate::windows_security::{pipe_descriptor, process_token_is_restricted, raw, to_wide};
++use crate::windows_security::{
++    pipe_descriptor, process_creation_time, process_image, process_token_is_restricted, raw,
++    same_image, to_wide, SecurityDescriptor,
++};
++
++/// How many instances of the pipe listen at once.
++const LISTENING_INSTANCES: usize = 4;
 +
 +/// Every daemon pipe's name starts with this.
 +pub const PIPE_PREFIX: &str = r"\\.\pipe\clauseo-ab-";
@@ -715,21 +1406,80 @@ index 0000000..801d450
 +    format!("{PIPE_PREFIX}{id}")
 +}
 +
-+/// The pipe id in a `<session>.pipe` file, if the file holds a valid one.
-+pub fn read_pipe_id(path: &Path) -> Option<String> {
-+    let text = std::fs::read_to_string(path).ok()?;
-+    let id = text.trim();
-+    is_valid_pipe_id(id).then(|| id.to_string())
++/// What `<session>.pipe` holds: the pipe id, and the daemon serving it (pid and creation time).
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct PipeRecord {
++    pub id: String,
++    pub pid: u32,
++    pub created: u64,
 +}
 +
-+/// Writes `<session>.pipe` whole: a reader sees the old file, no file or the new id, never a
-+/// part of it.
-+pub fn write_pipe_id(path: &Path, id: &str) -> io::Result<()> {
++impl PipeRecord {
++    /// The record for pipe `id` served by this process.
++    pub fn for_this_process(id: &str) -> io::Result<Self> {
++        let pid = std::process::id();
++        Ok(Self {
++            id: id.to_string(),
++            pid,
++            created: process_creation_time(pid)?,
++        })
++    }
++
++    /// `<id> <pid> <created>`; anything else, or an id `new_pipe_id` would not make, is None.
++    fn parse(text: &str) -> Option<Self> {
++        let mut parts = text.split_whitespace();
++        let (id, pid, created) = (parts.next()?, parts.next()?, parts.next()?);
++        if parts.next().is_some() || !is_valid_pipe_id(id) {
++            return None;
++        }
++        Some(Self {
++            id: id.to_string(),
++            pid: pid.parse().ok()?,
++            created: created.parse().ok()?,
++        })
++    }
++}
++
++/// The record in a `<session>.pipe` file, if the file holds a valid one.
++pub fn read_pipe_record(path: &Path) -> Option<PipeRecord> {
++    PipeRecord::parse(&std::fs::read_to_string(path).ok()?)
++}
++
++/// Writes `<session>.pipe` whole: a reader sees the old file, no file or the new record, never
++/// a part of it.
++pub fn write_pipe_record(path: &Path, record: &PipeRecord) -> io::Result<()> {
 +    let partial = path.with_extension("pipe.partial");
-+    std::fs::write(&partial, id)?;
++    let text = format!("{} {} {}", record.id, record.pid, record.created);
++    std::fs::write(&partial, text)?;
 +    std::fs::rename(&partial, path).inspect_err(|_| {
 +        let _ = std::fs::remove_file(&partial);
 +    })
++}
++
++/// The client's check of the pipe's server process: the daemon `record` names (same pid and
++/// creation time), running this executable, with an unrestricted token. Anything that cannot be
++/// checked refuses.
++pub fn check_server(server_pid: u32, record: &PipeRecord) -> io::Result<()> {
++    let refuse = |why: String| Err(io::Error::new(io::ErrorKind::PermissionDenied, why));
++    if server_pid != record.pid {
++        let daemon = record.pid;
++        return refuse(format!(
++            "the pipe's server is process {server_pid}, not the daemon {daemon}"
++        ));
++    }
++    if !process_creation_time(server_pid).is_ok_and(|t| t == record.created) {
++        return refuse(format!(
++            "process {server_pid} is not the process that started as the daemon"
++        ));
++    }
++    let ours = std::env::current_exe()?;
++    if !process_image(server_pid).is_ok_and(|image| same_image(&image, &ours.to_string_lossy())) {
++        return refuse(format!("process {server_pid} does not run this executable"));
++    }
++    if process_token_is_restricted(server_pid) {
++        return refuse(format!("process {server_pid} runs with a restricted token"));
++    }
++    Ok(())
 +}
 +
 +/// The client end: a blocking stream with optional read and write timeouts.
@@ -740,9 +1490,10 @@ index 0000000..801d450
 +}
 +
 +impl PipeStream {
-+    /// Opens pipe `id` and checks that its server is process `daemon_pid`. While every instance
-+    /// is busy it waits for a free one, for up to `busy_wait`.
-+    pub fn connect(id: &str, daemon_pid: u32, busy_wait: Duration) -> io::Result<Self> {
++    /// Opens the pipe `record` names and checks its server (`check_server`). While every
++    /// instance is busy it waits for a free one, for up to `busy_wait`.
++    pub fn connect(record: &PipeRecord, busy_wait: Duration) -> io::Result<Self> {
++        let id = record.id.as_str();
 +        if !is_valid_pipe_id(id) {
 +            return Err(io::Error::new(
 +                io::ErrorKind::InvalidInput,
@@ -779,12 +1530,7 @@ index 0000000..801d450
 +        if unsafe { GetNamedPipeServerProcessId(raw(&handle), &mut server_pid) } == 0 {
 +            return Err(io::Error::last_os_error());
 +        }
-+        if server_pid != daemon_pid {
-+            return Err(io::Error::new(
-+                io::ErrorKind::PermissionDenied,
-+                format!("the pipe's server is process {server_pid}, not the daemon {daemon_pid}"),
-+            ));
-+        }
++        check_server(server_pid, record)?;
 +        Ok(Self {
 +            handle,
 +            read_timeout: None,
@@ -885,15 +1631,16 @@ index 0000000..801d450
 +    }
 +}
 +
-+/// The daemon's end: always one instance waiting for the next client.
++/// The daemon's end: `LISTENING_INSTANCES` instances wait for clients at once, each in its own
++/// task, so a client that holds one open (a read-only opener, say) cannot make the pipe busy.
 +pub struct PipeListener {
-+    path: String,
-+    descriptor: SecurityDescriptor,
-+    next: NamedPipeServer,
++    accepted: tokio::sync::mpsc::Receiver<io::Result<NamedPipeServer>>,
++    slots: Vec<tokio::task::JoinHandle<()>>,
 +}
 +
 +impl PipeListener {
-+    /// Creates the pipe's first instance. Fails if an instance of that name exists already.
++    /// Creates the pipe's instances, the first with FILE_FLAG_FIRST_PIPE_INSTANCE: fails if an
++    /// instance of that name exists already. Call it inside a tokio runtime.
 +    pub fn bind(id: &str) -> io::Result<Self> {
 +        if !is_valid_pipe_id(id) {
 +            return Err(io::Error::new(
@@ -902,29 +1649,74 @@ index 0000000..801d450
 +            ));
 +        }
 +        let path = pipe_path(id);
-+        let descriptor = pipe_descriptor()?;
-+        let next = create_instance(&path, &descriptor, true)?;
-+        Ok(Self {
-+            path,
-+            descriptor,
-+            next,
-+        })
++        let descriptor = Arc::new(pipe_descriptor()?);
++        let mut instances = vec![create_instance(&path, &descriptor, true)?];
++        for _ in 1..LISTENING_INSTANCES {
++            instances.push(create_instance(&path, &descriptor, false)?);
++        }
++        let (sender, accepted) = tokio::sync::mpsc::channel(LISTENING_INSTANCES);
++        let slots = instances
++            .into_iter()
++            .map(|instance| {
++                let slot = serve_slot(instance, path.clone(), descriptor.clone(), sender.clone());
++                tokio::spawn(slot)
++            })
++            .collect();
++        Ok(Self { accepted, slots })
 +    }
 +
-+    /// The next client that passes the peer check. Clients that fail it are disconnected
-+    /// before the daemon writes anything. Cancel safe, as `NamedPipeServer::connect` is.
++    /// The next client that passed the peer check. Clients that fail it are disconnected
++    /// before the daemon writes anything. Cancel safe.
 +    pub async fn accept(&mut self) -> io::Result<NamedPipeServer> {
-+        loop {
-+            self.next.connect().await?;
-+            let fresh = create_instance(&self.path, &self.descriptor, false)?;
-+            let connected = mem::replace(&mut self.next, fresh);
-+            match client_refusal(&connected) {
-+                None => return Ok(connected),
-+                Some(reason) => {
-+                    let _ = writeln!(io::stderr(), "Refused a pipe client: {}", reason);
-+                    let _ = connected.disconnect();
++        match self.accepted.recv().await {
++            Some(result) => result,
++            None => Err(io::Error::other("the pipe listener stopped")),
++        }
++    }
++}
++
++impl Drop for PipeListener {
++    /// Stops listening: every waiting instance closes with its task.
++    fn drop(&mut self) {
++        for slot in &self.slots {
++            slot.abort();
++        }
++    }
++}
++
++/// One listening slot: waits for a client, puts a fresh instance in its place, then runs the
++/// peer check and hands an accepted client to `accept`.
++async fn serve_slot(
++    mut instance: NamedPipeServer,
++    path: String,
++    descriptor: Arc<SecurityDescriptor>,
++    accepted: tokio::sync::mpsc::Sender<io::Result<NamedPipeServer>>,
++) {
++    loop {
++        let connected = instance.connect().await;
++        let fresh = loop {
++            match create_instance(&path, &descriptor, false) {
++                Ok(fresh) => break fresh,
++                Err(e) => {
++                    let _ = writeln!(io::stderr(), "Failed to create a pipe instance: {}", e);
++                    tokio::time::sleep(Duration::from_millis(100)).await;
 +                }
 +            }
++        };
++        let served = mem::replace(&mut instance, fresh);
++        let handed = match connected {
++            Err(e) => accepted.send(Err(e)).await,
++            Ok(()) => match client_refusal(&served) {
++                None => accepted.send(Ok(served)).await,
++                Some(reason) => {
++                    let _ = writeln!(io::stderr(), "Refused a pipe client: {}", reason);
++                    let _ = served.disconnect();
++                    Ok(())
++                }
++            },
++        };
++        if handed.is_err() {
++            return; // the listener is gone
 +        }
 +    }
 +}
@@ -968,14 +1760,15 @@ index 0000000..801d450
 +mod tests;
 diff --git a/cli/src/windows_pipe_tests.rs b/cli/src/windows_pipe_tests.rs
 new file mode 100644
-index 0000000..3b8b3c0
+index 0000000..3cf853f
 --- /dev/null
 +++ b/cli/src/windows_pipe_tests.rs
-@@ -0,0 +1,290 @@
-+//! Tests for the daemon pipe. The restricted-client test starts this test binary again as the
-+//! client, under a write-restricted token made with CreateRestrictedToken (as Codex's Windows
-+//! sandbox runs its commands), and checks that the daemon disconnects it before writing
-+//! anything; a control run with the normal token must be served.
+@@ -0,0 +1,393 @@
++//! Tests for the daemon pipe. The restricted-token tests start this test binary again, under a
++//! write-restricted token made with CreateRestrictedToken (as Codex's Windows sandbox runs its
++//! commands): as a client, which the daemon must disconnect before writing anything (a control
++//! run with the normal token must be served), and as a would-be server, which a client must
++//! refuse.
 +
 +use super::*;
 +use std::os::windows::ffi::OsStrExt;
@@ -983,13 +1776,20 @@ index 0000000..3b8b3c0
 +
 +const HELPER_ID: &str = "AB_PIPE_TEST_ID";
 +const HELPER_PID: &str = "AB_PIPE_TEST_DAEMON_PID";
++const HELPER_CREATED: &str = "AB_PIPE_TEST_DAEMON_CREATED";
 +const HELPER_TEST: &str = "windows_pipe::tests::pipe_client_helper";
++const SLEEPER: &str = "AB_PIPE_TEST_SLEEP";
++const SLEEPER_TEST: &str = "windows_pipe::tests::sleep_helper";
 +
 +/// The helper's exit codes.
 +const DISCONNECTED: i32 = 0;
 +const COULD_NOT_OPEN: i32 = 1;
 +const READ_TIMED_OUT: i32 = 11;
 +const SERVED: i32 = 20;
++
++fn this_process(id: &str) -> PipeRecord {
++    PipeRecord::for_this_process(id).unwrap()
++}
 +
 +#[test]
 +fn pipe_ids_are_128_random_bits_in_lowercase_hex() {
@@ -1014,14 +1814,22 @@ index 0000000..3b8b3c0
 +}
 +
 +#[test]
-+fn the_pipe_file_round_trips_and_garbage_is_ignored() {
++fn the_pipe_record_round_trips_and_garbage_is_ignored() {
 +    let dir = tempfile::tempdir().unwrap();
 +    let path = dir.path().join("s.pipe");
-+    let id = new_pipe_id().unwrap();
-+    write_pipe_id(&path, &id).unwrap();
-+    assert_eq!(read_pipe_id(&path), Some(id));
-+    std::fs::write(&path, r"\\evil\pipe\x").unwrap();
-+    assert_eq!(read_pipe_id(&path), None);
++    let record = this_process(&new_pipe_id().unwrap());
++    write_pipe_record(&path, &record).unwrap();
++    assert_eq!(read_pipe_record(&path), Some(record.clone()));
++    for bad in [
++        r"\\evil\pipe\x 1 2".to_string(),
++        record.id.clone(),
++        format!("{} {}", record.id, record.pid),
++        format!("{} {} {} extra", record.id, record.pid, record.created),
++        format!("{} x {}", record.id, record.created),
++    ] {
++        std::fs::write(&path, &bad).unwrap();
++        assert_eq!(read_pipe_record(&path), None, "{bad:?}");
++    }
 +    assert!(!dir.path().join("s.pipe.partial").exists());
 +}
 +
@@ -1034,11 +1842,9 @@ index 0000000..3b8b3c0
 +        "FILE_FLAG_FIRST_PIPE_INSTANCE must refuse"
 +    );
 +
-+    let client_id = id.clone();
++    let record = this_process(&id);
 +    let client = tokio::task::spawn_blocking(move || {
-+        let mut stream =
-+            PipeStream::connect(&client_id, std::process::id(), Duration::from_secs(5))
-+                .expect("connect");
++        let mut stream = PipeStream::connect(&record, Duration::from_secs(5)).expect("connect");
 +        stream.set_read_timeout(Some(Duration::from_secs(10)));
 +        stream.write_all(b"ping\n").unwrap();
 +        let mut reply = [0u8; 5];
@@ -1056,21 +1862,90 @@ index 0000000..3b8b3c0
 +}
 +
 +#[tokio::test(flavor = "multi_thread")]
-+async fn the_client_refuses_a_server_that_is_not_the_daemon() {
++async fn several_clients_connect_at_once_without_waiting() {
++    let id = new_pipe_id().unwrap();
++    let _listener = PipeListener::bind(&id).unwrap();
++    let record = this_process(&id);
++    let held = tokio::task::spawn_blocking(move || {
++        // No busy wait at all, and every connection is held: each must still find a
++        // listening instance.
++        (0..LISTENING_INSTANCES)
++            .map(|_| PipeStream::connect(&record, Duration::ZERO))
++            .collect::<Vec<_>>()
++    })
++    .await
++    .unwrap();
++    for result in held {
++        result.expect("a client found the pipe busy");
++    }
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn the_client_refuses_a_server_that_is_not_the_recorded_daemon() {
 +    let id = new_pipe_id().unwrap();
 +    let mut listener = PipeListener::bind(&id).unwrap();
-+    let accept = tokio::spawn(async move {
-+        let _ = listener.accept().await;
-+    });
-+    let wrong_pid = std::process::id().wrapping_add(4);
-+    let result = tokio::task::spawn_blocking(move || {
-+        PipeStream::connect(&id, wrong_pid, Duration::from_secs(5)).map(|_| ())
++    let accept = tokio::spawn(async move { while listener.accept().await.is_ok() {} });
++    let right = this_process(&id);
++    let wrong_pid = PipeRecord {
++        pid: right.pid.wrapping_add(4),
++        ..right.clone()
++    };
++    // The same pid with another creation time: a reused pid.
++    let reused_pid = PipeRecord {
++        created: right.created + 1,
++        ..right.clone()
++    };
++    let results = tokio::task::spawn_blocking(move || {
++        [wrong_pid, reused_pid].map(|r| PipeStream::connect(&r, Duration::from_secs(5)).map(|_| ()))
 +    })
 +    .await
 +    .unwrap();
 +    accept.abort();
-+    let error = result.expect_err("a server other than the daemon must be refused");
-+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
++    for result in results {
++        let error = result.expect_err("a server other than the recorded daemon must be refused");
++        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
++    }
++}
++
++#[test]
++fn check_server_wants_the_same_executable_and_an_unrestricted_token() {
++    let id = new_pipe_id().unwrap();
++    check_server(std::process::id(), &this_process(&id)).expect("this process passes");
++
++    // Another executable, recorded correctly, is refused.
++    let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
++    let mut ping = Command::new(format!(r"{system}\System32\ping.exe"))
++        .args(["-n", "30", "127.0.0.1"])
++        .stdout(std::process::Stdio::null())
++        .spawn()
++        .unwrap();
++    let other = PipeRecord {
++        id: id.clone(),
++        pid: ping.id(),
++        created: process_creation_time(ping.id()).unwrap(),
++    };
++    let other_image = check_server(ping.id(), &other);
++    let _ = ping.kill();
++    let _ = ping.wait();
++    assert!(other_image.unwrap_err().to_string().contains("executable"));
++
++    // This executable under a restricted token, recorded correctly, is refused.
++    let mut command = Command::new(std::env::current_exe().unwrap());
++    command
++        .args(["--exact", SLEEPER_TEST, "--test-threads=1", "--quiet"])
++        .env(SLEEPER, "1");
++    let (process, pid) = restricted::start(&command);
++    let sandboxed = PipeRecord {
++        id,
++        pid,
++        created: process_creation_time(pid).unwrap(),
++    };
++    let restricted_server = check_server(pid, &sandboxed);
++    unsafe { windows_sys::Win32::System::Threading::TerminateProcess(raw(&process), 1) };
++    assert!(restricted_server
++        .unwrap_err()
++        .to_string()
++        .contains("restricted"));
 +}
 +
 +#[tokio::test(flavor = "multi_thread")]
@@ -1115,8 +1990,12 @@ index 0000000..3b8b3c0
 +    let Ok(id) = std::env::var(HELPER_ID) else {
 +        return;
 +    };
-+    let pid: u32 = std::env::var(HELPER_PID).unwrap().parse().unwrap();
-+    let code = match PipeStream::connect(&id, pid, Duration::from_secs(5)) {
++    let record = PipeRecord {
++        id,
++        pid: std::env::var(HELPER_PID).unwrap().parse().unwrap(),
++        created: std::env::var(HELPER_CREATED).unwrap().parse().unwrap(),
++    };
++    let code = match PipeStream::connect(&record, Duration::from_secs(5)) {
 +        Err(_) => COULD_NOT_OPEN,
 +        Ok(mut stream) => {
 +            stream.set_read_timeout(Some(Duration::from_secs(10)));
@@ -1134,14 +2013,24 @@ index 0000000..3b8b3c0
 +    std::process::exit(code);
 +}
 +
++/// Run only as a child of the tests above (which set SLEEPER): stays alive for a while.
++#[test]
++fn sleep_helper() {
++    if std::env::var(SLEEPER).is_ok() {
++        std::thread::sleep(Duration::from_secs(30));
++    }
++}
++
 +/// Starts this test binary as the pipe client and returns its exit code.
 +fn run_helper(id: &str, restricted: bool) -> i32 {
 +    let exe = std::env::current_exe().unwrap();
++    let daemon = this_process(id);
 +    let mut command = Command::new(&exe);
 +    command
 +        .args(["--exact", HELPER_TEST, "--test-threads=1", "--quiet"])
 +        .env(HELPER_ID, id)
-+        .env(HELPER_PID, std::process::id().to_string());
++        .env(HELPER_PID, daemon.pid.to_string())
++        .env(HELPER_CREATED, daemon.created.to_string());
 +    if !restricted {
 +        let status = command
 +            .stdout(std::process::Stdio::null())
@@ -1170,6 +2059,17 @@ index 0000000..3b8b3c0
 +    /// Runs `command` under a write-restricted copy of this process's token whose restricting
 +    /// SIDs are the user and Everyone, and returns its exit code.
 +    pub fn run(command: &Command) -> i32 {
++        let (process, _) = start(command);
++        let mut code = 0u32;
++        unsafe {
++            WaitForSingleObject(raw(&process), INFINITE);
++            GetExitCodeProcess(raw(&process), &mut code);
++        }
++        code as i32
++    }
++
++    /// Starts `command` as `run` does and returns its process handle (full access) and pid.
++    pub fn start(command: &Command) -> (OwnedHandle, u32) {
 +        let token = restricted_token();
 +        let program = command.get_program().to_owned();
 +        let mut line = command_line(&program, command.get_args()).unwrap();
@@ -1199,14 +2099,9 @@ index 0000000..3b8b3c0
 +            "CreateProcessAsUserW: {}",
 +            io::Error::last_os_error()
 +        );
-+        let mut code = 0u32;
-+        unsafe {
-+            CloseHandle(info.hThread);
-+            WaitForSingleObject(info.hProcess, INFINITE);
-+            GetExitCodeProcess(info.hProcess, &mut code);
-+            CloseHandle(info.hProcess);
-+        }
-+        code as i32
++        unsafe { CloseHandle(info.hThread) };
++        let process = unsafe { OwnedHandle::from_raw_handle(info.hProcess as _) };
++        (process, info.dwProcessId)
 +    }
 +
 +    fn restricted_token() -> OwnedHandle {
@@ -1264,10 +2159,10 @@ index 0000000..3b8b3c0
 +}
 diff --git a/cli/src/windows_security.rs b/cli/src/windows_security.rs
 new file mode 100644
-index 0000000..841c316
+index 0000000..91a4ab6
 --- /dev/null
 +++ b/cli/src/windows_security.rs
-@@ -0,0 +1,263 @@
+@@ -0,0 +1,338 @@
 +//! Windows process and pipe security.
 +//!
 +//! Every agent-browser process protects itself first thing in `main`: its DACL lets SYSTEM do
@@ -1285,7 +2180,8 @@ index 0000000..841c316
 +use std::ptr;
 +
 +use windows_sys::Win32::Foundation::{
-+    GetLastError, LocalFree, SetLastError, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HANDLE,
++    GetLastError, LocalFree, SetLastError, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, FILETIME,
++    HANDLE, STILL_ACTIVE,
 +};
 +use windows_sys::Win32::Security::Authorization::{
 +    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SetSecurityInfo,
@@ -1297,7 +2193,8 @@ index 0000000..841c316
 +    SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
 +};
 +use windows_sys::Win32::System::Threading::{
-+    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
++    GetCurrentProcess, GetCurrentThread, GetExitCodeProcess, GetProcessTimes, OpenProcess,
++    OpenProcessToken, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
 +};
 +
 +/// The protected process DACL: SYSTEM gets PROCESS_ALL_ACCESS; the user and OWNER RIGHTS get
@@ -1381,18 +2278,41 @@ index 0000000..841c316
 +    SecurityDescriptor::from_sddl(&pipe_sddl(&current_user_sid()?))
 +}
 +
-+/// Replaces this process's DACL with the protected one. Called first thing in `main`.
++/// Replaces this process's DACL, and the calling thread's, with the protected one. Called first
++/// thing in `main`, on the main thread.
 +pub fn harden_current_process() -> io::Result<()> {
 +    let descriptor = process_descriptor()?;
-+    let dacl = descriptor.dacl()?;
++    set_dacl(unsafe { GetCurrentProcess() }, &descriptor)?;
++    set_dacl(unsafe { GetCurrentThread() }, &descriptor)
++}
++
++/// Gives the calling thread the protected DACL (for a thread, the user keeps SYNCHRONIZE and
++/// THREAD_RESUME, 0x101000: no GET_CONTEXT or SET_CONTEXT). Threads otherwise get the token's
++/// default DACL. That default is left alone on purpose: anonymous pipes (std's and
++/// CreatePipe's) take it and are reopened by name, so a protected default would break every
++/// piped child.
++pub fn harden_current_thread() -> io::Result<()> {
++    set_dacl(unsafe { GetCurrentThread() }, &process_descriptor()?)
++}
++
++/// `harden_current_thread` for a runtime's thread-start hook, which cannot return an error:
++/// a thread that cannot be protected ends the process (fail closed).
++pub fn harden_current_thread_or_abort() {
++    if let Err(e) = harden_current_thread() {
++        eprintln!("agent-browser: could not protect a thread: {}", e);
++        std::process::abort();
++    }
++}
++
++fn set_dacl(object: HANDLE, descriptor: &SecurityDescriptor) -> io::Result<()> {
 +    let status = unsafe {
 +        SetSecurityInfo(
-+            GetCurrentProcess(),
++            object,
 +            SE_KERNEL_OBJECT,
 +            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
 +            ptr::null_mut(),
 +            ptr::null_mut(),
-+            dacl,
++            descriptor.dacl()?,
 +            ptr::null(),
 +        )
 +    };
@@ -1400,6 +2320,58 @@ index 0000000..841c316
 +        return Err(io::Error::from_raw_os_error(status as i32));
 +    }
 +    Ok(())
++}
++
++/// Process `pid`'s creation time (FILETIME ticks). With the pid it names one process: a pid
++/// can be reused, a (pid, creation time) pair cannot.
++pub fn process_creation_time(pid: u32) -> io::Result<u64> {
++    let process = open_limited(pid)?;
++    let mut times: [FILETIME; 4] = unsafe { std::mem::zeroed() };
++    let [created, exited, kernel, user] = &mut times;
++    if unsafe { GetProcessTimes(raw(&process), created, exited, kernel, user) } == 0 {
++        return Err(io::Error::last_os_error());
++    }
++    Ok((u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
++}
++
++/// Whether process `pid` is running and was created at `created`.
++pub fn process_is_alive(pid: u32, created: u64) -> bool {
++    let Ok(process) = open_limited(pid) else {
++        return false;
++    };
++    let mut code = 0u32;
++    let running =
++        unsafe { GetExitCodeProcess(raw(&process), &mut code) } != 0 && code == STILL_ACTIVE as u32;
++    running && process_creation_time(pid).is_ok_and(|t| t == created)
++}
++
++/// The full path of process `pid`'s executable.
++pub fn process_image(pid: u32) -> io::Result<String> {
++    let process = open_limited(pid)?;
++    let mut buf = vec![0u16; 32_768];
++    let mut len = buf.len() as u32;
++    if unsafe { QueryFullProcessImageNameW(raw(&process), 0, buf.as_mut_ptr(), &mut len) } == 0 {
++        return Err(io::Error::last_os_error());
++    }
++    Ok(String::from_utf16_lossy(&buf[..len as usize]))
++}
++
++/// Whether two executable paths name the same file: case-insensitive, `/` as `\`, and a
++/// `\\?\` prefix ignored.
++pub fn same_image(a: &str, b: &str) -> bool {
++    let plain = |p: &str| {
++        let p = p.replace('/', "\\");
++        p.strip_prefix(r"\\?\").unwrap_or(&p).to_lowercase()
++    };
++    plain(a) == plain(b)
++}
++
++fn open_limited(pid: u32) -> io::Result<OwnedHandle> {
++    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
++    if process == 0 {
++        return Err(io::Error::last_os_error());
++    }
++    Ok(unsafe { OwnedHandle::from_raw_handle(process as _) })
 +}
 +
 +/// The user SID of this process's token, as `S-1-...`.
@@ -1424,11 +2396,9 @@ index 0000000..841c316
 +/// write-restricted token has). Fails closed: anything that cannot be checked counts as
 +/// restricted.
 +pub fn process_token_is_restricted(pid: u32) -> bool {
-+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-+    if process == 0 {
++    let Ok(process) = open_limited(pid) else {
 +        return true;
-+    }
-+    let process = unsafe { OwnedHandle::from_raw_handle(process as _) };
++    };
 +    let Ok(token) = open_process_token(raw(&process)) else {
 +        return true;
 +    };
@@ -1533,10 +2503,10 @@ index 0000000..841c316
 +}
 diff --git a/cli/src/windows_spawn.rs b/cli/src/windows_spawn.rs
 new file mode 100644
-index 0000000..84851c1
+index 0000000..0e5d5b1
 --- /dev/null
 +++ b/cli/src/windows_spawn.rs
-@@ -0,0 +1,485 @@
+@@ -0,0 +1,487 @@
 +//! Starting a child process that is protected from its first instruction.
 +//!
 +//! `std::process::Command` cannot pass a security descriptor to CreateProcess, so a child it
@@ -1545,7 +2515,8 @@ index 0000000..84851c1
 +//! protected descriptor (`windows_security::process_descriptor`) in lpProcessAttributes.
 +//!
 +//! It takes the program, arguments, environment changes and working directory from a
-+//! configured `Command`, so call sites keep building their commands as before. Only the child's
++//! configured `Command`, so call sites keep building their commands as before. The child's
++//! first thread gets the same descriptor (lpThreadAttributes). Only the child's
 +//! three stdio handles are inherited (PROC_THREAD_ATTRIBUTE_HANDLE_LIST), and only the child's
 +//! ends of its pipes are ever inheritable.
 +
@@ -1696,7 +2667,8 @@ index 0000000..84851c1
 +            program.as_ptr(),
 +            command_line.as_mut_ptr(),
 +            &process_attributes,
-+            ptr::null(),
++            // The child's first thread gets the same protected DACL.
++            &process_attributes,
 +            1,
 +            creation_flags | EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
 +            environment.as_ptr().cast(),
