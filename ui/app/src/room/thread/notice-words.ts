@@ -4,7 +4,7 @@
 import { listOf, namesOf } from "@clauseo/components/lib/words-core.ts";
 import type { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
-import type { NoticeKind } from "../../transport/protocol.ts";
+import type { NoticeKind, NotKeptReason } from "../../transport/protocol.ts";
 import { agentNameOf } from "./stops.ts";
 
 /** The thread's words the line is drawn with: its page language, the thread's own, and the shared ones ({n} more). */
@@ -112,6 +112,29 @@ function guardBlocked(kind: NoticeKind, w: NoticeWords, agent?: AgentName): stri
       );
 }
 
+/** "Always for this matter" kept no rule, so the request was allowed this once only: why, by `reason`; null for a
+ * reason this version doesn't know. */
+function notKeptLine(reason: NotKeptReason, w: NoticeWords): string | null {
+  switch (reason) {
+    case "no_rule":
+      return w.th("Allowed this once only: Clauseo can't keep “Always” for this kind of request.");
+    case "refused":
+      return w.th(
+        "Allowed this once only: Clauseo keeps “Always” only for one exact command, site or file.",
+      );
+    case "outside_matter":
+      return w.th(
+        "Allowed this once only: Clauseo keeps “Always” only for files in this matter's folder.",
+      );
+    case "full":
+      return w.th(
+        "Allowed this once only: This matter keeps as many permissions as it can. Remove some from Kept permissions to keep more.",
+      );
+    default:
+      return null;
+  }
+}
+
 /** The line for a notice's kind in the page's language, its slots filled; null for no kind, or a kind this version
  * does not know, so the notice's own text shows. `agent`: the open conversation's agent
  * (useAgentPlan), named as the outside-matter stop names it (stops.ts). */
@@ -165,6 +188,11 @@ export function noticeLine(
       : undefined;
   if (came !== undefined)
     return came.files.length + came.more === 0 ? null : cameBack(came.files, came.more, w);
+  const notKept =
+    typeof kind === "object" && kind !== null && "always_not_kept" in kind
+      ? kind.always_not_kept
+      : undefined;
+  if (notKept !== undefined) return notKeptLine(notKept.reason, w);
   const skipped =
     typeof kind === "object" && kind !== null && "skill_pack_not_loaded" in kind
       ? kind.skill_pack_not_loaded

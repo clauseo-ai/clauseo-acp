@@ -78,6 +78,7 @@ import { FOLDER_RIGHTS } from "./registry-folder-rights.tsx";
 import { BACKSLASH_ENTRIES } from "./registry-backslash.tsx";
 import { FOLDER_CHOOSER } from "./registry-folder-chooser.tsx";
 import { TN } from "./registry-notices.tsx";
+import { CLAUDE_ALWAYS } from "./registry-claude-always.tsx";
 import { UBL } from "./registry-blocklist.tsx";
 import { R23 } from "./registry-update.tsx";
 import { UC_CRASH } from "./registry-uc-crash.tsx";
@@ -575,4 +576,5 @@ export const REGISTRY: readonly Entry[] = [
   ...UC_AGENTS,
   ...RELEASE_NOTES,
   ...UC_PANELS,
+  ...CLAUDE_ALWAYS,
 ];
