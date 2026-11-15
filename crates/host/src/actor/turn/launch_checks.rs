@@ -9,19 +9,21 @@
 //! they answer, launches the agent on the actor with what they found ([`agents::launch_now`]), or
 //! fails the waiting work.
 //!
-//! After both refusals, the same thread makes the session's folders ([`RunFolders`]: its stand-in
-//! `run/<session id>` folder with `work` and `browser` under it, and the matter's notes folder)
-//! and, for an agent with a kind, writes the profile's skills (`ProfileHook::launch_writes`,
-//! `clauseo_profile::write_skills`). A skill write that fails is a warning, never a failed launch.
-//! The first write's token goes in [`Prepared`], so only that launch's Codex keys carry the skills
-//! index; a failed write leaves none. Then the launch's skill packs go into its own plugin under
-//! the run folder ([`packs`]). The notes folder stays; the run folder is the launch's own (its id
-//! is in the name) and is removed off the actor on every way out: by the prep thread when nobody
-//! waits for its answer any more ([`codex::prepare::off_actor_or_undo`]), and otherwise from the
-//! actor ([`discard`]) when the answer is for an earlier launch, the host is stopping, the profile
-//! keys or the launch fail, or the agent ends ([`remove_run`]). No launch removes another's folder:
-//! a prep that came late can only take its own. Shutdown waits for the actor's removals in flight,
-//! so the host answers it with the run folders gone.
+//! After both refusals, the same thread makes the session's folders ([`RunFolders`]: its
+//! stand-in `run/<session id>` folder with `work` and `browser` under it, and the matter's
+//! notes folder) and, for an agent with a kind, writes the profile's skills
+//! (`ProfileHook::launch_writes`, `clauseo_profile::write_skills`), after their wait when one is
+//! in flight ([`skill_wait`]). A skill write that fails is a warning, never a failed launch.
+//! The first write's token goes in [`Prepared`], so only that launch's Codex keys carry the
+//! skills index; a failed write leaves none. Then the launch's skill packs go into its own
+//! plugin under the run folder ([`packs`]). The notes folder stays; the run folder is the
+//! launch's own (its id is in the name) and is removed off the actor on every way out: by the
+//! prep thread when nobody waits for its answer any more
+//! ([`codex::prepare::off_actor_or_undo`]), and otherwise from the actor ([`discard`]) when
+//! the answer is for an earlier launch, the host is stopping, the profile keys or the launch
+//! fail, or the agent ends ([`remove_run`]). No launch removes another's folder: a prep that
+//! came late can only take its own. Shutdown waits for the actor's removals in flight, so the
+//! host answers it with the run folders gone.
 //!
 //! For a session that can get the browser, the same thread checks that the browser entry's
 //! sidecars (`clauseo-mcp` and agent-browser) exist, finds its Chrome, and claims its ports and,
@@ -343,9 +345,7 @@ pub(super) fn prepare(
     let matter = run.key.matter;
     let (mcp, settings) = (McpReads::of(actor), Reads::of(actor, claude));
     actor.spawn_post(async move {
-        if let Some(keys_wait) = keys_wait {
-            keys_wait.await;
-        }
+        let skills = skill_wait::after_keys(keys_wait, skills).await;
         // Before anything is made for the launch: a folder that is gone, or does not answer,
         // is `matter.folder_missing`, not a spawn that fails in it (`folder.rs`).
         let there = folder::check(Arc::clone(&clock), matter, stored.clone()).await;
@@ -594,6 +594,7 @@ mod folders;
 use folders::{browser_run_dir, launch_deny, notes_dir, remove_tree, run_dir};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
+mod skill_wait;
 
 #[cfg(test)]
 mod tests;

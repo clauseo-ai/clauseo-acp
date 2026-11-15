@@ -2,9 +2,11 @@
 //! thread, one 3 s try for a stetdoc seen to answer before and none for one not seen yet (the
 //! OS may be scanning it); when the start has no answer, the background tries (20 s for one not
 //! seen yet, then 20 s, then 30 s) on a thread of their own, whose answer goes into [`Live`] for
-//! the agent starts that follow. An agent already running keeps the profile it started with: a
-//! conversation whose agent started before the answer gets the skill when its agent starts again
-//! (after 300 s idle, for one) or in a new conversation. Nothing is shown to the lawyer.
+//! the agent starts that follow. An agent launch while a try is in flight waits for that try's
+//! end, at most 20 s from the launch (`ProfileHook::launch_wait`), with its turn "starting"
+//! meanwhile. An agent already running keeps the profile it started with: a conversation whose
+//! agent started before the answer gets the skill when its agent starts again (after 300 s idle,
+//! for one) or in a new conversation. Nothing is shown to the lawyer.
 //!
 //! Only the profile itself (the instructions' stetdoc line and the skills) changes after the
 //! start. stetdoc's folder on the agents' `PATH` and the Word blackline's program are given to
@@ -23,7 +25,7 @@ use std::time::Duration;
 
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
 use clauseo_profile::ClauseoProfile;
-use clauseo_profile::skills::stetdoc::start::{self, Limits, Start, State};
+use clauseo_profile::skills::stetdoc::start::{self, InFlight, Later, Limits, Start, State};
 
 /// The rendered profile the hook reads at each call, put in place whole when the background
 /// check ends. A read takes the lock only to clone an `Arc`; the profile is rendered before
@@ -80,10 +82,11 @@ pub(super) fn render(base: ClauseoProfile, state: &State, browser: bool) -> Clau
     profile
 }
 
-/// What the background tries need: the program, the cached skills folder, the marker of the
-/// stetdoc seen to answer and the tries' limits, the state the agents start with, and how to
-/// render the profile again.
+/// What the background tries need: the first try, marked in flight before the thread starts,
+/// the program, the cached skills folder, the marker of the stetdoc seen to answer and the
+/// tries' limits, the state the agents start with, and how to render the profile again.
 pub(super) struct Recheck {
+    pub(super) held: InFlight,
     pub(super) program: PathBuf,
     pub(super) cached: PathBuf,
     pub(super) seen: PathBuf,
@@ -109,6 +112,7 @@ pub(super) fn recheck_later(recheck: Recheck, live: Live) {
         .name("stetdoc-recheck".to_owned())
         .spawn(move || {
             let Recheck {
+                held,
                 program,
                 cached,
                 seen,
@@ -118,18 +122,24 @@ pub(super) fn recheck_later(recheck: Recheck, live: Live) {
                 browser,
             } = recheck;
             let launcher = PassthroughLauncher::new(SpawnOptions::new());
-            let next = async_io::block_on(start::recheck(
+            let later = Later {
+                limits: &later,
+                held,
+            };
+            let answered = async_io::block_on(start::recheck(
                 &launcher,
                 &AsyncIoTimer,
                 &program,
                 &cached,
                 &seen,
                 &state,
-                &later,
+                later,
             ));
-            if let Some(state) = next {
+            if let Some(state) = answered.state {
                 live.set(render(base, &state, browser));
             }
+            // The try ends after its answer is in place: a launch that waited reads it.
+            drop(answered.held);
         });
     if let Err(err) = spawned {
         tracing::warn!(%err, "stetdoc's background check did not start; it stays on as it is");

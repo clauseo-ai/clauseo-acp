@@ -293,8 +293,9 @@ pub use config::mcp::{
     McpLaunchConfirm, McpResolver, find_mcp_imports_in,
 };
 pub use config::{
-    CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT, LIVE_AGENTS,
-    NoProfile, PackRequest, ProfileHook, Sandbox, SessionKey,
+    CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT,
+    LAUNCH_WAIT_LIMIT, LIVE_AGENTS, LaunchWait, NoProfile, PackRequest, ProfileHook, Sandbox,
+    SessionKey,
 };
 #[cfg(feature = "test-support")]
 pub use config::{TestProxy, WithMatterTrash, WithPlaceholderProbe};

@@ -3,7 +3,10 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::time::Duration;
 
 use clauseo_acp::McpServer;
 use clauseo_profile::{PackWrite, PacksWritten, SkillWrite, SkillsWritten};
@@ -11,6 +14,14 @@ use clauseo_protocol::AgentId;
 use serde_json::{Map, Value};
 
 use super::PackRequest;
+
+/// A launch's wait for [`ProfileHook::launch_wait`]'s step: it ends with the skills writes to
+/// run.
+pub type LaunchWait = Pin<Box<dyn Future<Output = Vec<SkillWrite>> + Send>>;
+
+/// The longest a launch waits for [`ProfileHook::launch_wait`], from the launch: the turn
+/// stays "starting" meanwhile.
+pub const LAUNCH_WAIT_LIMIT: Duration = Duration::from_secs(20);
 
 /// What Clauseo's launch profile adds to an agent's session and launch (decision record 0030).
 /// The host calls it at each launch and session start, with only the agent's id, then fills the
@@ -28,6 +39,8 @@ use super::PackRequest;
 ///   and the host's own (`web_search`, `hooks`) leave room.
 /// - `launch_writes` are written on the launch-prep thread before the agent starts; the first
 ///   write's [`SkillsWritten`] goes to that launch's `codex_config` and to no other launch.
+///   While [`ProfileHook::launch_wait`] gives a wait, the launch's prep waits for it, at most
+///   [`LAUNCH_WAIT_LIMIT`], and writes what it ends with instead.
 /// - `agent_path` folders go on the session's `PATH` after stetdoc's and the shell browser's.
 /// - `pack_write` turns the launch's [`PackRequest`] (decision record 0040) into the packs the
 ///   launch-prep thread loads and writes into `run/<session id>/skill-packs/`; the
@@ -75,6 +88,15 @@ pub trait ProfileHook: Send {
     /// warning, never a failed launch.
     fn launch_writes(&self, _agent: &AgentId) -> Vec<SkillWrite> {
         Vec::new()
+    }
+    /// A wait for a background step in flight that may change [`Self::launch_writes`] (default:
+    /// none): desktop's while stetdoc's skill loads after an install or an update. The future
+    /// ends when the step ends, with `agent`'s writes as they are then; the launch's prep task
+    /// (never this thread) waits for it at most [`LAUNCH_WAIT_LIMIT`] from the launch, then
+    /// writes what it ended with, or on the limit what `launch_writes` gave. `None`: nothing
+    /// is in flight, and the launch does not wait. No I/O here: it only hands out the wait.
+    fn launch_wait(&self, _agent: &AgentId) -> Option<LaunchWait> {
+        None
     }
     /// The skill packs to load and write before `agent` starts, from `request` (default:
     /// none): `ClauseoProfile::pack_write` adds where the packs live. A load or write failure

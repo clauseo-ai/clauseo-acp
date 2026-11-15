@@ -25,6 +25,11 @@
 //!   stetdoc is treated as absent;
 //! - the last try passes its limit too, or only the skill fails: nothing changes.
 //!
+//! Each background try is in flight ([`Tries`]) from its start until it moves on to the next or
+//! its answer is in place, and an agent launch meanwhile waits for it (the host's
+//! `ProfileHook::launch_wait`, at most 20 s), so the first conversation after an install gets
+//! the skill when the try answers in time.
+//!
 //! An answer, at the start or in the background, is recorded in the marker, so the next start
 //! gives the stetdoc 3 s. A `--version` that fails for real at the start is absent at once, and
 //! nothing is checked again. The functions take the launcher and the timer, so tests drive them
@@ -42,6 +47,9 @@ use super::{RunError, SKILL_FILE, STETDOC, load_skill_at, skill_source, version_
 use crate::skills::{SkillSource, is_current, manifest::Manifest};
 
 pub mod seen;
+pub mod tries;
+
+pub use tries::{InFlight, Tries, TryEnd};
 
 /// The target of the start's support lines: host.log keeps info only from `clauseo_*::lifecycle`
 /// targets.
@@ -205,9 +213,32 @@ pub fn first(found: Found, limits: Limits, cached: impl FnOnce() -> Option<Skill
     Start { state, later }
 }
 
+/// The background tries' limits, in order ([`Start::later`]), and the first try, marked in
+/// flight before the thread that runs them starts, so a launch right after the start waits on it.
+#[derive(Debug)]
+pub struct Later<'a> {
+    /// The limits, one try each.
+    pub limits: &'a [Duration],
+    /// The first try, in flight.
+    pub held: InFlight,
+}
+
+/// What [`recheck`] found: the state to put in place, or `None` to keep it, and the last try,
+/// still in flight. The caller puts the state in place, then drops `held`, so a launch that
+/// waited on the try reads the new profile.
+#[derive(Debug)]
+pub struct Answered {
+    /// The new state, or `None` for no change.
+    pub state: Option<State>,
+    /// The last try, ended when dropped.
+    pub held: InFlight,
+}
+
 /// The background tries, within `later`'s limits one after another while they time out or do
 /// not start: the state to put in place of `current`, or `None` to keep it. Records an answer
-/// in `seen`. Starts stetdoc and reads and writes files: on a thread of its own.
+/// in `seen`. Each try is in flight ([`Tries`]) from its start until it moves on to the next or
+/// the caller drops [`Answered::held`]. Starts stetdoc and reads and writes files: on a thread
+/// of its own.
 pub async fn recheck<T: Timer>(
     launcher: &dyn Launcher,
     timer: &T,
@@ -215,25 +246,28 @@ pub async fn recheck<T: Timer>(
     cached: &Path,
     seen: &Path,
     current: &State,
-    later: &[Duration],
-) -> Option<State> {
-    for (at, &limit) in later.iter().enumerate() {
+    later: Later<'_>,
+) -> Answered {
+    let Later { limits, mut held } = later;
+    for (at, &limit) in limits.iter().enumerate() {
         let found = check(launcher, timer, program, cached, limit).await;
         if found.answered() {
             seen::record(seen, program);
         }
-        if found.retried() && at + 1 < later.len() {
+        if found.retried() && at + 1 < limits.len() {
             tracing::warn!(
                 target: LIFECYCLE,
                 timed_out = found == Found::TimedOut,
                 limit_secs = limit.as_secs(),
                 "stetdoc did not answer in the background; it is tried once more"
             );
+            held = held.next();
             continue;
         }
-        return after(current, found, limit);
+        let state = after(current, found, limit);
+        return Answered { state, held };
     }
-    None
+    Answered { state: None, held }
 }
 
 /// What a background check within `limit` that found `found` does to `current`: the new

@@ -17,7 +17,8 @@ use std::time::Duration;
 use clauseo_process::{PassthroughLauncher, SpawnOptions, Timer};
 use clauseo_profile::instructions::STETDOC_CLI;
 use clauseo_profile::skills::stetdoc::start::{
-    self, FIRST_LIMIT, Found, LONG_LIMIT, Limits, RECHECK_LIMIT, Start, State, cached_skill, seen,
+    self, FIRST_LIMIT, Found, LONG_LIMIT, Later, Limits, RECHECK_LIMIT, Start, State, Tries,
+    cached_skill, seen,
 };
 use clauseo_profile::skills::stetdoc::{STETDOC, skill_source};
 use clauseo_profile::skills::{self, render, write_rendered};
@@ -166,8 +167,12 @@ fn again<T: Timer>(timer: &T, program: &Path, cached: &Path, now: &State) -> Opt
         cached,
         &seen,
         now,
-        &[RECHECK_LIMIT],
+        Later {
+            limits: &[RECHECK_LIMIT],
+            held: Tries::new().begin(),
+        },
     ))
+    .state
 }
 
 /// What the agents are told and given under `state`: whether the instructions hold the
