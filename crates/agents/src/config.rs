@@ -245,6 +245,11 @@ pub struct SigninConfig {
     /// `test-support` the field does not exist, so the probe is always `127.0.0.1:1455`.
     #[cfg(feature = "test-support")]
     pub callback_port: Option<u16>,
+    /// Tests only: the program detection's macOS Keychain query runs in place of
+    /// `/usr/bin/security` (a fake that exits as a test tells it). Outside `test-support` the
+    /// field does not exist, so the query always runs Apple's `security` by absolute path.
+    #[cfg(feature = "test-support")]
+    pub security_program: Option<PathBuf>,
 }
 
 /// The port Codex's browser sign-in listens on for its callback: `http://127.0.0.1:1455`.
@@ -258,6 +263,8 @@ impl SigninConfig {
             base_env: std::env::vars_os().collect(),
             #[cfg(feature = "test-support")]
             callback_port: None,
+            #[cfg(feature = "test-support")]
+            security_program: None,
         }
     }
 
@@ -283,6 +290,24 @@ impl SigninConfig {
     )]
     pub(crate) fn callback_port(&self) -> u16 {
         CODEX_CALLBACK_PORT
+    }
+
+    /// The program the macOS Keychain query runs: a test's fake, or `/usr/bin/security`.
+    #[cfg(feature = "test-support")]
+    pub(crate) fn security_program(&self) -> PathBuf {
+        self.security_program
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(crate::signin::reuse::SECURITY))
+    }
+
+    /// The program the macOS Keychain query runs: always `/usr/bin/security` outside tests.
+    #[cfg(not(feature = "test-support"))]
+    #[expect(
+        clippy::unused_self,
+        reason = "the test-support build reads a test's fake from self; one signature for both"
+    )]
+    pub(crate) fn security_program(&self) -> PathBuf {
+        PathBuf::from(crate::signin::reuse::SECURITY)
     }
 }
 

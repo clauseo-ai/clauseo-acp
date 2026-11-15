@@ -1,7 +1,9 @@
 //! Detection (the brief, "Detection"): whether the lawyer already has a Claude Code or Codex
-//! login. It starts no CLI, so it writes nothing into the lawyer's own config and sends nothing
-//! over the network: for each agent it is one stat (never an open) of the login file where the
-//! CLI keeps it by default (`super::reuse`, the one file that may name them).
+//! login. It starts no agent CLI, so it writes nothing into the lawyer's own config and sends
+//! nothing over the network: for each agent it is one stat (never an open) of the login file
+//! where the CLI keeps it by default (`super::reuse`, the one file that may name them), and on
+//! macOS, for Claude, an attributes-only `security find-generic-password` query of Claude's
+//! default Keychain item: never `-w`/`-g`; exit status only.
 //!
 //! Why no CLI: Claude Code's `auth status` writes into the lawyer's folders, even offline. On an
 //! expired token it takes and removes its refresh locks (`~/.claude/.oauth_refresh.lock`, an
@@ -12,10 +14,13 @@
 //!
 //! - Claude: `~/.claude/.credentials.json` (`%USERPROFILE%\.claude` on Windows) a regular file
 //!   is `LoginFound { from: ClaudeCode, email: None }`; anything else (missing, a link, a folder)
-//!   is `SignedOut { found: NoLogin }`. macOS keeps the login in the Keychain, so nothing is
-//!   found there. With `CLAUDE_CONFIG_DIR` set in the lawyer's environment nothing is found: their
-//!   Claude Code keeps its login elsewhere, and "Use it" reads the default store only
-//!   (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""`).
+//!   is `SignedOut { found: NoLogin }`. On macOS (`config.platform`, decided at run time),
+//!   where Claude Code keeps the login in the Keychain, the login is also found when
+//!   `/usr/bin/security find-generic-password -s "Claude Code-credentials"` exits 0
+//!   (`reuse::claude_keychain_present`: attributes only, output discarded, killed past 3 s; any
+//!   other end is not found). With `CLAUDE_CONFIG_DIR` set in the lawyer's environment nothing
+//!   is found and no query runs: their Claude Code keeps its login elsewhere, and "Use it" reads
+//!   the default store only (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""`).
 //! - Codex: `~/.codex/auth.json` a regular file is `LoginFound { from: Codex, email: None }`, else
 //!   `SignedOut { found: NoLogin }`. With `CODEX_HOME` set in the lawyer's environment nothing is
 //!   found: "Use it", the split check and the guard address `~/.codex` only.
@@ -32,7 +37,10 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
 
+use clauseo_process::Timer;
+
 use crate::cancel::Cancel;
+use crate::platform::Os;
 use crate::signin::env::Vendor;
 use crate::signin::job::{SigninJob, Task};
 use crate::signin::{Method, SigninState, marker, reuse};
@@ -48,15 +56,30 @@ pub(crate) struct Detected {
     pub(crate) identity: Identity,
 }
 
-/// Claude's detection, a stat alone: see the module docs. `None` only when cancelled.
-pub(crate) fn claude<T>(job: &SigninJob<T>, cancel: &Cancel) -> Option<Detected> {
-    detected(
-        job,
-        cancel,
-        "CLAUDE_CONFIG_DIR",
-        reuse::claude_login_present,
-    )
-    .map(|present| found(claude_detection(present)))
+/// The variable that moves Claude Code's config folder, and with it its login.
+const CLAUDE_MOVED: &str = "CLAUDE_CONFIG_DIR";
+
+/// Claude's detection, a stat, and on macOS the Keychain query when the stat finds nothing: see
+/// the module docs. `None` only when cancelled.
+pub(crate) async fn claude<T: Timer>(job: &SigninJob<T>, cancel: &Cancel) -> Option<Detected> {
+    let file = detected(job, cancel, CLAUDE_MOVED, reuse::claude_login_present)?;
+    let present = file || in_keychain(job).await;
+    Some(found(claude_detection(present)))
+}
+
+/// Whether Claude Code's default Keychain item exists: only when the config's platform is macOS
+/// and the lawyer's environment does not move Claude's folder (else no query runs at all).
+async fn in_keychain<T: Timer>(job: &SigninJob<T>) -> bool {
+    let signin = &job.config.signin;
+    job.config.platform.os == Os::Darwin
+        && !folder_moved(&signin.base_env, CLAUDE_MOVED, false)
+        && reuse::claude_keychain_present(
+            &*job.launcher,
+            &*job.timer,
+            &signin.security_program(),
+            &signin.base_env,
+        )
+        .await
 }
 
 /// Codex's detection, a stat alone: see the module docs. `None` only when cancelled.
@@ -96,7 +119,7 @@ fn detected<T>(
 /// nothing found, `no-reuse` there (the lawyer chose Clauseo's own sign-in), the login already
 /// reused, for Codex any login file in Clauseo's home (Clauseo's own, which "Use it" could not
 /// link over, or one shared with the lawyer's: the login's guard decides), or cancelled.
-pub(crate) fn at_press<T>(job: &SigninJob<T>) -> Option<SigninState> {
+pub(crate) async fn at_press<T: Timer>(job: &SigninJob<T>) -> Option<SigninState> {
     if job.task == Task::SignIn(Method::Console)
         || marker::no_reuse(&job.config.data_dir, &job.ticket.agent)
         || super::found::is_reused(job)
@@ -105,7 +128,7 @@ pub(crate) fn at_press<T>(job: &SigninJob<T>) -> Option<SigninState> {
     }
     let cancel = &job.ticket.cancel;
     let found = match job.vendor {
-        Vendor::Claude => claude(job, cancel)?,
+        Vendor::Claude => claude(job, cancel).await?,
         Vendor::Codex if std::fs::symlink_metadata(reuse::login_file(&job.home)).is_ok() => {
             return None;
         }

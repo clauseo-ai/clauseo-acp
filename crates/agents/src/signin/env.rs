@@ -145,6 +145,12 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
     match inputs.vendor {
         Vendor::Claude => {
             set(&mut env, "ANTHROPIC_API_KEY", OsStr::new(""));
+            // The split between Clauseo's own login and the lawyer's. Own: the inherited
+            // `CLAUDE_SECURESTORAGE_CONFIG_DIR` is stripped, so Claude's item is
+            // `Claude Code-credentials-<hash of home>`, never the lawyer's. Reused: `""`, the
+            // lawyer's unsuffixed item. Any Keychain shim or jail (draft #815, plan-c) applies to
+            // Own only: on macOS a Reused run must reach Apple's `security` and SecurityServer
+            // (decision 0046, "Guard"; `signin/reuse.rs`).
             match inputs.kind {
                 RunKind::Own { home } => set(&mut env, "CLAUDE_CONFIG_DIR", home.as_os_str()),
                 RunKind::Reused { home } => {

@@ -228,8 +228,8 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             if self.ticket.cancel.is_cancelled() {
                 return Some(self.failed(SigninCode::Cancelled));
             }
-            // Not signed in: the lawyer's own login, found by a stat now, is offered first.
-            if let Some(found) = detect::at_press(self) {
+            // Not signed in: the lawyer's own login, found by detection now, is offered first.
+            if let Some(found) = detect::at_press(self).await {
                 tracing::info!(agent = %self.ticket.agent, "sign in: the lawyer's login offered");
                 return Some(found);
             }
