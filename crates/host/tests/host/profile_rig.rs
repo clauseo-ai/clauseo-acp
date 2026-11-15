@@ -310,10 +310,6 @@ pub(crate) fn browser_server() -> McpServer {
                 "AGENT_BROWSER_EXECUTABLE_PATH".to_owned(),
                 "{browser_executable}".to_owned(),
             ),
-            (
-                "AGENT_BROWSER_STREAM_PORT".to_owned(),
-                "{stream_port}".to_owned(),
-            ),
         ],
     }
 }
@@ -350,7 +346,6 @@ pub(crate) fn filled_browser() -> Value {
         {"name": "AGENT_BROWSER_PROXY", "value": "http://127.0.0.1:8123"},
         {"name": "AGENT_BROWSER_SESSION", "value": session},
         {"name": "AGENT_BROWSER_EXECUTABLE_PATH", "value": "/chrome"},
-        {"name": "AGENT_BROWSER_STREAM_PORT", "value": "{{any}}"},
     ]})
 }
 

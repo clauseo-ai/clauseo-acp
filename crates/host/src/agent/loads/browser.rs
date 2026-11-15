@@ -15,7 +15,8 @@
 //!    workspace's, never the plain client's Codex entry) with no proxy set: `NoProxy`.
 //! 5. The firm's Chrome or Edge policy turns remote debugging off and its Clauseo policy does
 //!    not allow Clauseo's browser anyway (`browser::rd_policy`): `BrowserBlockedByPolicy`; or,
-//!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`.
+//!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`. On
+//!    Windows each installed browser's own policy counts, so only every one off blocks.
 //! 6. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
 //! 7. For an entry that asks for it, the session's proxy did not open, so it has no port:
@@ -34,7 +35,7 @@ use clauseo_acp::McpServer;
 use clauseo_profile::instructions::BrowserPart;
 use clauseo_profile::placeholders::{
     self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_SERVERS, MATTER_DOWNLOADS,
-    PROXY_PORT, SESSION_ID, SOCKET_DIR, STREAM_PORT,
+    PROXY_PORT, SESSION_ID, SOCKET_DIR,
 };
 use clauseo_profile::servers::BROWSER;
 use clauseo_protocol::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
@@ -99,8 +100,6 @@ pub(crate) struct Claims<'a> {
     pub(crate) name: &'a str,
     /// `{cdp_port}`.
     pub(crate) cdp_port: u16,
-    /// `{stream_port}`.
-    pub(crate) stream_port: u16,
     /// `{daemon_port}`, Windows only.
     pub(crate) daemon_port: Option<u16>,
     /// `{socket_dir}`, macOS and Linux only: the folder as made (`/tmp/...`), never its
@@ -114,7 +113,6 @@ impl<'a> Claims<'a> {
         Self {
             name: &session.name,
             cdp_port: session.ports.cdp.port(),
-            stream_port: session.ports.stream.port(),
             daemon_port: session
                 .ports
                 .daemon
@@ -203,7 +201,6 @@ fn browser_entry(
         return Err(ToolsUnavailableReason::BrowserNotInstalled);
     };
     let cdp_port = claims.cdp_port.to_string();
-    let stream_port = claims.stream_port.to_string();
     let daemon_port = claims.daemon_port.map(|port| port.to_string());
     let socket_dir = match claims.socket_dir.map(Path::to_str) {
         Some(Some(text)) => Some(text),
@@ -221,7 +218,6 @@ fn browser_entry(
         (SESSION_ID, claims.name),
         (BROWSER_EXECUTABLE, executable),
         (CDP_PORT, cdp_port.as_str()),
-        (STREAM_PORT, stream_port.as_str()),
     ];
     values.extend(port.as_deref().map(|port| (PROXY_PORT, port)));
     values.extend(daemon_port.as_deref().map(|port| (DAEMON_PORT, port)));
@@ -309,7 +305,7 @@ pub(crate) fn asks_for_proxy(server: &McpServer) -> bool {
 /// so never the lawyer's own profile), all three in its run folder's `agent-browser` folder,
 /// the one place the data fences open to this session's agent-browser and to no other session's
 /// (`agent::codex_fence`, `agent::data_fence`), and the Chrome the launch prep
-/// found (`AGENT_BROWSER_EXECUTABLE_PATH`), and [`IDLE_TIMEOUT_MS`]. No proxy, stream port or
+/// found (`AGENT_BROWSER_EXECUTABLE_PATH`), and [`IDLE_TIMEOUT_MS`]. No proxy or
 /// socket folder: the shell tool has none of the guard's claims.
 pub(crate) fn shell_env(inputs: &ShellInputs<'_>) -> BTreeMap<OsString, OsString> {
     [

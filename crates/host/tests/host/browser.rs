@@ -197,7 +197,6 @@ fn the_chrome_the_prep_finds_fills_the_entry() {
         home: None,
         program_files: None,
         program_files_x86: None,
-        local_app_data: None,
         app_data: root.join("app"),
     };
     let launcher = Wired::new(&dir);

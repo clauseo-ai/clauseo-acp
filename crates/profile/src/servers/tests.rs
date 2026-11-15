@@ -62,8 +62,9 @@ fn each_os_gets_its_own_port_and_socket_tokens() {
             "core"
         ]
     );
-    assert_eq!(unix.env["AGENT_BROWSER_STREAM_PORT"], "{stream_port}");
-    assert_eq!(windows.env["AGENT_BROWSER_STREAM_PORT"], "{stream_port}");
+    // No stream port: the guard turns agent-browser's stream server off itself.
+    assert!(!unix.env.contains_key("AGENT_BROWSER_STREAM_PORT"));
+    assert!(!windows.env.contains_key("AGENT_BROWSER_STREAM_PORT"));
     assert_eq!(unix.env["AGENT_BROWSER_SOCKET_DIR"], "{socket_dir}");
     assert!(!windows.env.contains_key("AGENT_BROWSER_SOCKET_DIR"));
     // No proxy: Chrome goes direct, and the host opens no egress proxy for the entry.
@@ -77,8 +78,8 @@ fn each_os_gets_its_own_port_and_socket_tokens() {
                 .all(|text| !text.contains("{proxy_port}"))
         );
     }
-    assert_eq!(unix.env.len(), 5);
-    assert_eq!(windows.env.len(), 4);
+    assert_eq!(unix.env.len(), 4);
+    assert_eq!(windows.env.len(), 3);
 }
 
 /// The `case-law` entry: `clauseo-mcp connector case-law` with the relay's address and the

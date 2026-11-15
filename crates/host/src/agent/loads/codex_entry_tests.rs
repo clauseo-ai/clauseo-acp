@@ -35,7 +35,6 @@ fn codex_server(windows: bool) -> McpServer {
     if !windows {
         env.push(("AGENT_BROWSER_SOCKET_DIR", "{socket_dir}"));
     }
-    env.push(("AGENT_BROWSER_STREAM_PORT", "{stream_port}"));
     McpServer::Stdio {
         name: "browser".to_owned(),
         command: PathBuf::from("/app/clauseo-mcp"),
@@ -101,7 +100,6 @@ fn codex_s_entry_goes_without_a_proxy_on_each_os() {
                 "/tmp/clauseo-ab-0123456789abcdef",
             ));
         }
-        want_env.push(("AGENT_BROWSER_STREAM_PORT", "61100"));
         let got: Vec<(&str, &str)> = env
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_str()))

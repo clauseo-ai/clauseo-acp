@@ -287,8 +287,8 @@ fn a_guard_killed_while_stopped_leaves_nothing() {
     drop(guard);
 }
 
-/// A SIGKILL of the guard during a lazy restart, while the new Chrome has not listened yet: the
-/// reaper, told the new Chrome's pid before the wait, ends it.
+/// A SIGKILL of the guard during a lazy restart, while the new Chrome has not answered on its
+/// pipe yet: the reaper, told the new Chrome's pid before the wait, ends it.
 #[cfg(unix)]
 #[test]
 fn a_guard_killed_during_a_lazy_restart_leaves_nothing() {
@@ -300,7 +300,7 @@ fn a_guard_killed_during_a_lazy_restart_leaves_nothing() {
     assert!(within(|| !alive(first[1])), "the first Chrome is left");
     scratch.chrome_mode("silent");
     guard.send_call("again");
-    guard.stderr_until("Chrome started; waiting for it to listen");
+    guard.stderr_until("started; waiting for its answer on its DevTools pipe");
     let mut chrome = 0;
     assert!(within(|| {
         chrome = pid_in(&scratch.path().join("chrome.pid"));
@@ -320,34 +320,6 @@ fn a_guard_killed_during_a_lazy_restart_leaves_nothing() {
         assert!(within(|| left().is_empty()), "left behind: {:?}", left());
     }
     drop(guard);
-}
-
-/// The first call waits for a claimed debugging port another process still holds (a dying run's
-/// Chrome after an MCP reconnect), and starts once it is free, rather than the guard exiting.
-#[cfg(unix)]
-#[test]
-fn the_first_call_waits_for_a_busy_debugging_port() {
-    use std::net::{Ipv4Addr, TcpListener};
-    let scratch = Scratch::new("lazy_port_wait");
-    // A port of its own, so the other tests' starts never wait on this one.
-    let port = "61151";
-    let holder = TcpListener::bind((Ipv4Addr::LOCALHOST, 61_151)).unwrap();
-    let mut args = crate::support::guard_args(&scratch, &example("daemon_stub"), &no_args());
-    let at = args.iter().position(|arg| arg == "--cdp-port").unwrap();
-    args[at + 1] = port.into();
-    let mut command = std::process::Command::new(crate::support::GUARD);
-    command.args(args).envs(crate::support::host_env(&scratch));
-    let mut guard = Guard::start(command);
-    guard.send_call("open");
-    guard.stderr_until("is taken; waiting up to 15 s for it");
-    drop(holder);
-    let answer = guard.read();
-    assert_eq!(answer["id"], "open", "{answer}");
-    assert!(answer.get("error").is_none(), "{answer}");
-    let pids = session_pids(&scratch);
-    let (status, _) = guard.finish();
-    assert_eq!(status.code(), Some(0));
-    assert_nothing_left(&scratch, pids);
 }
 
 /// The run's Chrome record through the host's API: none before the first call, the running

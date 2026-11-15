@@ -8,7 +8,8 @@
 //! - The command publishes `Checking`, starts the read (`RdPolicy::recheck`, the launch's rule,
 //!   off the actor: the registry and the policy files are never read here) and answers `Done`,
 //!   with no receipt and no log line. While one runs it answers `Done` and starts nothing: the
-//!   running read's event answers both.
+//!   running read's event answers both. On Windows the read asks each installed browser's own
+//!   policy (`RdPolicy::recheck_among`), as the launch prep does.
 //! - Each read has a number and a deadline on the host clock ([`READ_WAIT`]). A read still
 //!   running then (a registry or file read that hangs) ends as `Unreadable`, and the next "Try
 //!   again" starts a new read; the late answer, its number no longer current, is dropped.
@@ -29,6 +30,7 @@ use clauseo_protocol::{BrowserPolicyState, CommandOutcome, HostEvent, ToolsUnava
 use super::Actor;
 use super::commands::CommandCtx;
 use super::input::Input;
+use crate::browser::chrome::{self, ChromeRoots};
 use crate::error::Error;
 
 /// The read thread's name.
@@ -77,11 +79,27 @@ fn begin(actor: &mut Actor) -> Result<(), Error> {
         .settings()
         .browser
         .allow_when_remote_debugging_disabled;
+    // On Windows the rule goes per browser over those installed (`browser::rd_policy`), as the
+    // launch prep's does; a forced Chrome takes the rule for every browser.
+    let roots = actor
+        .wiring
+        .browser_executable
+        .is_none()
+        .then(|| actor.wiring.chrome_roots.clone());
+    let data = actor.effective.data_dir().to_path_buf();
     let post = actor.post.clone();
     std::thread::Builder::new()
         .name(THREAD_NAME.to_owned())
         .spawn(move || {
-            let found = rd_policy.recheck(allowed_anyway);
+            let windows = roots
+                .map(|roots| roots.unwrap_or_else(|| ChromeRoots::system(&data)))
+                .filter(|roots| roots.platform.is_windows());
+            let found = match windows {
+                Some(roots) => {
+                    rd_policy.recheck_among(allowed_anyway, &chrome::windows_installed(&roots))
+                }
+                None => rd_policy.recheck(allowed_anyway),
+            };
             let _gone = post.try_send(Input::BrowserPolicy(PolicyInput::Read { read, found }));
         })
         .map_err(|error| Error::Internal(format!("starting {THREAD_NAME}: {error}")))?;

@@ -59,7 +59,11 @@ pub(crate) fn spawn_child(
     command.spawn()
 }
 
-/// Windows: agent-browser as on Unix, created in the guard's job (`job/spawn.rs`).
+/// Windows: agent-browser as on Unix, created in the guard's job (`job/spawn.rs`), hardened from
+/// its first instruction by the job's descriptors (`harden.rs`). Its own children (the CLI's
+/// daemon, which holds the relay's URL too) start with agent-browser's defaults: hardening them
+/// is the patched agent-browser's part (route 2's W2), each process setting the same DACL on
+/// itself and passing it to its children.
 #[cfg(windows)]
 pub(crate) fn spawn_child(
     program: &Path,
@@ -77,6 +81,7 @@ pub(crate) fn spawn_child(
         stdin: Io::Piped,
         stdout: Io::Piped,
         stderr: Io::Inherit,
+        inherit: &[],
     })
 }
 
@@ -160,15 +165,16 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
         }
         if state.live.is_none()
             && call
-            && let Err(reason) = session::start(shared, &mut state, parent, events)
+            && let Err(failure) = session::start(shared, &mut state, parent, events)
         {
             drop(state);
-            let message = match reason {
-                StartError::Sandbox(_) => REFUSAL,
-                StartError::Other(_) => NOT_STARTED,
+            let told = match (&failure.reason, failure.agent_note) {
+                (StartError::Sandbox(_), _) => REFUSAL.to_owned(),
+                (StartError::Other(_), Some(note)) => format!("{NOT_STARTED}. {note}"),
+                (StartError::Other(_), None) => NOT_STARTED.to_owned(),
             };
-            answer_all(&shared.out, &id.into_iter().collect::<Vec<_>>(), message);
-            send(events, Event::StartFailed(reason));
+            answer_all(&shared.out, &id.into_iter().collect::<Vec<_>>(), &told);
+            send(events, Event::StartFailed(failure.reason));
             return false;
         }
         let to_child = state.live.as_ref().map(|live| Arc::clone(&live.to_child));

@@ -16,8 +16,6 @@ pub(crate) const GUARD: &str = env!("CARGO_BIN_EXE_clauseo-mcp");
 
 /// The proxy the tests give the guard.
 pub(crate) const PROXY: &str = "http://127.0.0.1:9";
-/// The stream port the tests give the guard.
-pub(crate) const STREAM_PORT: &str = "61100";
 /// The Chrome stand-in's name in the scratch folder.
 pub(crate) const CHROME: &str = if cfg!(windows) {
     "chrome.exe"
@@ -46,6 +44,7 @@ impl Scratch {
             write::remove_dir_all(&path).unwrap();
         }
         write::create_dir_all(path.join("state")).unwrap();
+        write::create_dir_all(path.join("program-files")).unwrap();
         write::write(path.join("agent-browser.json"), "{}").unwrap();
         write::copy(example("chrome_stub"), path.join(CHROME)).unwrap();
         // FNV-1a of the test's name, then the process id: 16 hex characters, unique per test.
@@ -149,15 +148,18 @@ pub(crate) fn host_env(scratch: &Scratch) -> Vec<(String, String)> {
             "AGENT_BROWSER_SESSION".to_owned(),
             scratch.session().to_owned(),
         ),
-        (
-            "AGENT_BROWSER_STREAM_PORT".to_owned(),
-            STREAM_PORT.to_owned(),
-        ),
     ];
     if cfg!(unix) {
         vars.push((
             "AGENT_BROWSER_SOCKET_DIR".to_owned(),
             scratch.socket_dir().to_str().unwrap().to_owned(),
+        ));
+    } else {
+        // The guard's Program Files folders, an empty one in the scratch folder, so it never
+        // starts the runner's real Edge or Chrome after the stand-in (a `test-support` knob).
+        vars.push((
+            "CLAUSEO_TEST_GUARD_PROGRAM_FILES".to_owned(),
+            path("program-files"),
         ));
     }
     vars

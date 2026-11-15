@@ -1,17 +1,17 @@
-//! The session's Chrome, which the guard starts itself before agent-browser, at the first tool
-//! call and again after each stop (`session.rs`), and which agent-browser only connects to
-//! (`AGENT_BROWSER_CDP`, `env.rs`).
+//! The session's browser, which the guard starts itself before agent-browser, at the first tool
+//! call and again after each stop (`session.rs`), and which agent-browser only reaches through
+//! the guard's relay (`AGENT_BROWSER_CDP`, `env.rs`, `devtools.rs`).
 //!
-//! agent-browser's own launch cannot use the host's claimed debugging port: it puts
-//! `--remote-debugging-port=0` first and waits for the `DevToolsActivePort` file, which Chrome
-//! writes only for port 0 (`remote_debugging_server.cc:366-396`), so a pinned port timed out
-//! after 30 s (decision record 0029). The guard therefore runs Chrome headless with
-//! agent-browser's own headless flags (v0.41.1 `cli/src/native/cdp/chrome.rs:466-597`), the
-//! session's proxy, the WebRTC flag and `--remote-debugging-port=<--cdp-port>`, never a switch
-//! that weakens its sandbox (`chrome/sandbox.rs`, refused when that sandbox cannot start); reads
-//! Chrome's stderr until `DevTools listening on ws://127.0.0.1:<port>/devtools/browser/<id>` (at
-//! most [`START_WAIT`]); and refuses unless the port is exactly the claimed one. The start is two
-//! steps, [`launch`] and [`Chrome::endpoint`], so the reaper knows Chrome before the wait.
+//! The browser has no debugging port on any system (route 2, decision record 0060): a port on
+//! 127.0.0.1 has no authentication, and a sandboxed command can reach loopback. The guard runs
+//! it headless with agent-browser's own headless flags (v0.41.1
+//! `cli/src/native/cdp/chrome.rs:466-597`), the session's proxy and the WebRTC flag, never a
+//! switch that weakens its sandbox (`chrome/sandbox.rs`, refused when that sandbox cannot start),
+//! and with `--remote-debugging-pipe`: `DevTools` over a pipe whose ends the guard holds
+//! (`chrome/pipe.rs`; fds 3 and 4 on macOS and Linux, inherited handles on Windows). The browser is
+//! the host's Chrome on macOS and Linux, and Edge or a Program Files Chrome on Windows
+//! (`browsers.rs`). The start is two steps, [`launch`] and [`Chrome::endpoint`], so the
+//! reaper knows Chrome before the wait for its answer on the pipe (at most [`START_WAIT`]).
 //!
 //! The profile is the run's own, `<cwd>/chrome-profile-<run id>` (`runs.rs`), made at the first
 //! start and kept by every later one, so tabs, cookies and storage outlive an idle stop or a
@@ -26,9 +26,8 @@
 //! ([`Chrome::on_reap`]), so the reaper never signals a pid the guard has reaped.
 
 use std::collections::BTreeMap;
-use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
-use std::io::{self, BufReader};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -36,13 +35,12 @@ use std::thread;
 use std::time::Duration;
 
 use super::downloads::{Held, Mover, Saved};
-use super::parent::{self, Parent};
-use super::relay::{Line, Overflow, read_line};
+use super::parent::Parent;
 use super::session::StartError;
-use super::{Child, ChildStderr, env, pause, quiet};
+use super::{Child, env, pause, quiet};
 use crate::write;
 
-/// How long Chrome has to print its `DevTools` endpoint.
+/// How long the browser has to answer on its `DevTools` pipe.
 pub(crate) const START_WAIT: Duration = Duration::from_secs(15);
 /// The folder in the profile Chrome downloads into, before `downloads.rs` moves each file.
 pub(crate) const STAGING: &str = "downloads-staging";
@@ -54,14 +52,6 @@ const GROUP_WAIT: Duration = Duration::from_secs(5);
 const GROUP_LOOK: Duration = Duration::from_millis(20);
 /// How often the watcher looks whether Chrome has exited.
 const WATCH_EVERY: Duration = Duration::from_millis(250);
-/// The longest stderr line kept; longer ones are skipped.
-const MAX_STDERR_LINE: usize = 64 * 1024;
-/// How many of Chrome's last stderr lines a start failure quotes.
-const TAIL_LINES: usize = 5;
-/// The line Chrome prints once its `DevTools` server listens (`devtools_http_handler.cc:293`).
-const LISTENING: &str = "DevTools listening on ";
-/// The line Chrome prints when the port is taken (`devtools_http_handler.cc`).
-const CANNOT_LISTEN: &str = "Cannot start http server for devtools";
 
 /// agent-browser v0.41.1's flags for a headless launch with no extensions, webgpu or real
 /// keychain (`chrome.rs:466-560`), less its `--remote-debugging-port=0` and its
@@ -95,8 +85,6 @@ pub(crate) struct Spec<'a> {
     pub(crate) downloads: &'a Path,
     /// The run's profile (`runs.rs`), which [`launch`] makes.
     pub(crate) profile: &'a Path,
-    /// `--cdp-port`.
-    pub(crate) cdp_port: u16,
     /// `AGENT_BROWSER_PROXY`, checked by `env.rs`; none when the host gave none.
     pub(crate) proxy: Option<&'a OsStr>,
     /// [`env::chrome_env`].
@@ -118,6 +106,9 @@ pub(crate) struct Chrome {
     mover: Option<Mover>,
     /// Dropped to stop the exit watcher.
     stop_watch: Option<mpsc::Sender<()>>,
+    /// The relay holding the guard's ends of the browser's `DevTools` pipe. Dropped after the
+    /// browser is killed.
+    devtools: super::devtools::Devtools,
 }
 
 /// Chrome's process, and what to call once it is reaped here.
@@ -142,16 +133,6 @@ impl Tracked {
             tell();
         }
     }
-}
-
-/// What Chrome's stderr reader saw first.
-enum Seen {
-    Endpoint(String),
-    /// Chrome closed stderr, or said it cannot listen, first; its last lines.
-    Failed(Vec<String>),
-    /// Chrome said its sandbox cannot start, first: the fixed part of what it said
-    /// ([`sandbox::failure`]).
-    Sandbox(&'static str),
 }
 
 /// Starts Chrome, with its stderr reader, and returns it at once, before it listens: the
@@ -185,20 +166,24 @@ fn launch_on(
     let downloads = spec.downloads.to_owned();
     ready_profile(&profile, &staging, &downloads)
         .map_err(|error| format!("cannot make Chrome's profile: {error}"))?;
-    let args = chrome_args(spec, &profile, host);
-    if let Some(switch) = args.iter().find_map(|arg| sandbox::weakening(arg)) {
+    // The arguments but for Windows' pipe handles, which name no switch.
+    if let Some(switch) = chrome_args(spec, &profile, host, None)
+        .iter()
+        .find_map(|arg| sandbox::weakening(arg))
+    {
         return Err(StartError::Other(format!(
             "Chrome's arguments include {switch}, which weakens its sandbox; the guard never \
              passes it"
         )));
     }
-    let mut child = spawn(
+    let (mut child, devtools) = pipe::spawn(
         spec,
-        &args,
+        &profile,
+        host,
         #[cfg(windows)]
         job,
     )
-    .map_err(|error| format!("cannot start Chrome: {error}"))?;
+    .map_err(|error| format!("cannot start {}: {error}", spec.executable.display()))?;
     let (seen, inbox) = mpsc::channel();
     if let Some(stderr) = child.stderr.take() {
         drop(thread::spawn(move || read_stderr(stderr, &seen)));
@@ -215,18 +200,17 @@ fn launch_on(
         starting: Some(inbox),
         mover: None,
         stop_watch: None,
+        devtools,
     })
 }
 
 impl Chrome {
-    /// Waits for Chrome's endpoint, at most `wait` ([`START_WAIT`] but in tests), checks it is on
-    /// the claimed port and starts the download mover, which records held downloads in `held`
-    /// and delivered ones in `saved`.
-    /// Every [`parent::POLL`] it also looks whether the guard's parent has gone, and gives up if
-    /// so.
+    /// Waits for the browser's answer on its pipe, at most `wait` ([`START_WAIT`] but in tests),
+    /// starts the download mover, which records held downloads in `held` and delivered ones in
+    /// `saved`, and returns the relay's endpoint for agent-browser. Every [`super::parent::POLL`]
+    /// it also looks whether the guard's parent has gone, and gives up if so.
     pub(crate) fn endpoint(
         &mut self,
-        cdp_port: u16,
         wait: Duration,
         parent: &Parent,
         (held, saved): (Arc<Held>, Arc<Saved>),
@@ -234,49 +218,33 @@ impl Chrome {
         let inbox = self
             .starting
             .take()
-            .ok_or_else(|| "Chrome's start was already read".to_owned())?;
-        let polls = wait.as_millis() / parent::POLL.as_millis();
-        let mut seen = None;
-        for _ in 0..polls {
-            match inbox.recv_timeout(parent::POLL) {
-                Ok(first) => {
-                    seen = Some(first);
-                    break;
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    seen = Some(Seen::Failed(Vec::new()));
-                    break;
-                }
-                Err(RecvTimeoutError::Timeout) if parent.gone() => {
-                    return Err(super::PARENT_GONE.to_owned().into());
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-            }
-        }
-        let endpoint = match seen {
-            Some(Seen::Endpoint(endpoint)) => endpoint,
-            Some(Seen::Sandbox(said)) => return Err(StartError::Sandbox(Some(said))),
-            Some(Seen::Failed(tail)) => {
-                return Err(StartError::Other(format!(
-                    "Chrome stopped before it listened on the claimed debugging port{}",
-                    quote(&tail)
-                )));
-            }
-            None => {
-                return Err(StartError::Other(format!(
-                    "Chrome did not report its debugging port within {} s",
-                    wait.as_secs()
-                )));
-            }
-        };
-        check_endpoint(&endpoint, cdp_port)?;
+            .ok_or_else(|| "the browser's start was already read".to_owned())?;
+        pipe::wait_ready(&self.devtools, &inbox, wait, parent)?;
+        self.start_mover(held, saved);
+        Ok(self.devtools.url())
+    }
+
+    /// Attaches the guard's own CDP clients and sends their start commands
+    /// (`devtools/seam.rs`), before agent-browser starts; `env` is agent-browser's.
+    pub(crate) fn start_guard(&self, env: &BTreeMap<String, OsString>) -> Result<(), String> {
+        self.devtools.start_guard(env)
+    }
+
+    /// Lets agent-browser, the guard's child `pid`, and its descendants connect to the relay
+    /// (`devtools/peer.rs`).
+    pub(crate) fn allow_client(&self, pid: u32) {
+        self.devtools.allow_descendants_of(pid);
+    }
+
+    /// Starts the download mover, which records held downloads in `held` and delivered ones
+    /// in `saved`.
+    fn start_mover(&mut self, held: Arc<Held>, saved: Arc<Saved>) {
         self.mover = Some(Mover::start(
             self.staging.clone(),
             self.downloads.clone(),
             held,
             saved,
         ));
-        Ok(endpoint)
     }
 
     /// Whether Chrome has exited (and been reaped here), without waiting.
@@ -422,9 +390,15 @@ pub(crate) fn remove_profile(profile: &Path) {
     ));
 }
 
-/// Chrome's arguments, in order, on `host`: never one that weakens Chrome's sandbox
-/// (`sandbox.rs`).
-pub(crate) fn chrome_args(spec: &Spec<'_>, profile: &Path, host: sandbox::Host) -> Vec<OsString> {
+/// The browser's arguments, in order, on `host`: never one that weakens Chrome's sandbox
+/// (`sandbox.rs`). `io_pipes` are the pipe's two inherited handle values on Windows
+/// (`--remote-debugging-io-pipes=<read>,<write>`); elsewhere none, the browser using fds 3 and 4.
+pub(crate) fn chrome_args(
+    spec: &Spec<'_>,
+    profile: &Path,
+    host: sandbox::Host,
+    io_pipes: Option<(u32, u32)>,
+) -> Vec<OsString> {
     let mut args: Vec<OsString> = HEADLESS_ARGS.iter().map(OsString::from).collect();
     args.extend(
         quiet::FEATURES
@@ -444,127 +418,28 @@ pub(crate) fn chrome_args(spec: &Spec<'_>, profile: &Path, host: sandbox::Host) 
     user_data.push(profile);
     args.push(user_data);
     args.push(OsString::from(env::WEBRTC_ARG));
-    args.push(OsString::from(format!(
-        "--remote-debugging-port={}",
-        spec.cdp_port
-    )));
+    args.push(OsString::from("--remote-debugging-pipe"));
+    if let Some((read, write)) = io_pipes {
+        args.push(OsString::from(format!(
+            "--remote-debugging-io-pipes={read},{write}"
+        )));
+    }
     args.extend(sandbox::host_args(host).iter().map(OsString::from));
     args.push(OsString::from("about:blank"));
     args
-}
-
-#[cfg(unix)]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the guard's second fixed child: the host's Chrome, whose tree the guard kills \
-              (docs/decisions/0029-browser.md)"
-)]
-fn spawn(spec: &Spec<'_>, args: &[OsString]) -> io::Result<Child> {
-    use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
-    let mut command = Command::new(spec.executable);
-    command
-        .args(args)
-        .current_dir(spec.cwd)
-        .env_clear()
-        .envs(spec.env)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .process_group(0);
-    command.spawn()
-}
-
-/// Windows: Chrome as on Unix, created in the guard's job (`job/spawn.rs`).
-#[cfg(windows)]
-fn spawn(spec: &Spec<'_>, args: &[OsString], job: &super::job::Job) -> io::Result<Child> {
-    use super::job::{Io, Launch};
-    job.spawn(&Launch {
-        program: spec.executable,
-        args,
-        cwd: spec.cwd,
-        env: spec.env,
-        stdin: Io::Null,
-        stdout: Io::Null,
-        stderr: Io::Piped,
-    })
-}
-
-/// Reads Chrome's stderr to its end: reports the endpoint line, a sandbox failure
-/// ([`sandbox::failure`]; Chrome is refused even if it would go on), or the last lines if Chrome
-/// fails first, then drains the rest so Chrome never blocks on a full pipe.
-fn read_stderr(stderr: ChildStderr, seen: &mpsc::Sender<Seen>) {
-    let mut input = BufReader::new(stderr);
-    let mut line = Vec::new();
-    let mut tail = VecDeque::new();
-    let mut reported = false;
-    loop {
-        match read_line(&mut input, &mut line, MAX_STDERR_LINE, Overflow::Skip) {
-            Ok(Line::Whole | Line::Partial) => {}
-            Ok(Line::Oversize) => continue,
-            Ok(Line::Eof) | Err(_) => break,
-        }
-        if reported {
-            continue;
-        }
-        let text = String::from_utf8_lossy(&line);
-        if let Some(endpoint) = text.trim().strip_prefix(LISTENING) {
-            reported = true;
-            drop(seen.send(Seen::Endpoint(endpoint.to_owned())));
-            continue;
-        }
-        if tail.len() == TAIL_LINES {
-            tail.pop_front();
-        }
-        tail.push_back(text.trim().to_owned());
-        if let Some(said) = sandbox::failure(&text) {
-            reported = true;
-            drop(seen.send(Seen::Sandbox(said)));
-        } else if text.contains(CANNOT_LISTEN) {
-            reported = true;
-            drop(seen.send(Seen::Failed(tail.iter().cloned().collect())));
-        }
-    }
-    if !reported {
-        drop(seen.send(Seen::Failed(tail.into_iter().collect())));
-    }
-}
-
-/// Exactly `ws://127.0.0.1:<port>/devtools/browser/<id>`, `<id>` 1 to 64 of `A-Z a-z 0-9 -`.
-/// The refusal names the port, never the endpoint (which grants control of the browser).
-pub(crate) fn check_endpoint(endpoint: &str, port: u16) -> Result<(), String> {
-    let refused = || "Chrome reported a debugging endpoint the guard does not accept".to_owned();
-    let rest = endpoint
-        .strip_prefix("ws://127.0.0.1:")
-        .ok_or_else(refused)?;
-    let (seen, path) = rest.split_once('/').ok_or_else(refused)?;
-    if seen != port.to_string() {
-        return Err(format!(
-            "Chrome listens on debugging port {seen}, not the claimed port {port}"
-        ));
-    }
-    let id = path.strip_prefix("devtools/browser/").ok_or_else(refused)?;
-    let valid =
-        (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
-    if valid { Ok(()) } else { Err(refused()) }
-}
-
-fn quote(tail: &[String]) -> String {
-    if tail.is_empty() {
-        String::new()
-    } else {
-        format!("; its last stderr lines: {}", tail.join(" | "))
-    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+mod pipe;
 mod profile;
 pub(crate) mod sandbox;
+mod stderr;
 
 pub(super) use profile::ready_profile;
+use stderr::{Seen, quote, read_stderr};
 
 #[cfg(test)]
 mod tests;

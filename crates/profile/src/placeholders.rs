@@ -45,9 +45,6 @@ pub const BROWSER_EXECUTABLE: &str = "{browser_executable}";
 /// was killed, as `AGENT_BROWSER_SOCKET_DIR`. Unfillable (the folder could not be made): the
 /// host drops `browser` and shows `BrowserNotInstalled`.
 pub const SOCKET_DIR: &str = "{socket_dir}";
-/// The loopback port the host claimed for the session's stream server, as
-/// `AGENT_BROWSER_STREAM_PORT`. Unfillable (no port claimed): the host drops `browser`.
-pub const STREAM_PORT: &str = "{stream_port}";
 /// The loopback port the host claimed for the session's Chrome debugging endpoint, as the
 /// guard's `--cdp-port`. Unfillable (no port claimed): the host drops `browser`.
 pub const CDP_PORT: &str = "{cdp_port}";
@@ -84,14 +81,13 @@ pub const IN_INSTRUCTIONS: [&str; 4] = [WORK_FOLDER, MATTER_NOTES, CONNECTORS, B
 /// The tokens the host fills in the `browser` and `case-law` entries. The browser entry holds
 /// [`SOCKET_DIR`] on macOS and Linux only and [`DAEMON_PORT`] on Windows only; the host fills
 /// whichever it finds. Only `case-law` holds [`RELAY_PORT`] and [`RELAY_TOKEN_FILE`].
-pub const IN_SERVERS: [&str; 11] = [
+pub const IN_SERVERS: [&str; 10] = [
     BROWSER_DIR,
     MATTER_DOWNLOADS,
     PROXY_PORT,
     SESSION_ID,
     BROWSER_EXECUTABLE,
     SOCKET_DIR,
-    STREAM_PORT,
     CDP_PORT,
     DAEMON_PORT,
     RELAY_PORT,
@@ -173,22 +169,32 @@ mod tests {
     fn the_port_and_socket_tokens_fill_in_one_pass() {
         let values = [
             (SOCKET_DIR, "/tmp/clauseo-ab-0123456789abcdef"),
-            (STREAM_PORT, "61100"),
-            (CDP_PORT, "{stream_port}"),
+            (CDP_PORT, "{daemon_port}"),
             (DAEMON_PORT, "61102"),
         ];
         assert_eq!(
             fill(
-                "{socket_dir} {stream_port} {cdp_port} {daemon_port}",
+                "{socket_dir} {cdp_port} {daemon_port}",
                 &IN_SERVERS,
                 &values
             )
             .as_deref(),
-            Ok("/tmp/clauseo-ab-0123456789abcdef 61100 {stream_port} 61102")
+            Ok("/tmp/clauseo-ab-0123456789abcdef {daemon_port} 61102")
         );
-        for token in [SOCKET_DIR, STREAM_PORT, CDP_PORT, DAEMON_PORT] {
+        for token in [SOCKET_DIR, CDP_PORT, DAEMON_PORT] {
             assert_eq!(fill(token, &IN_SERVERS, &[]), Err(Unfilled(token)));
         }
+    }
+
+    /// The guard no longer takes a stream port (agent-browser's stream server is off), so
+    /// `{stream_port}` is no token: text that holds it stays as it is.
+    #[test]
+    fn stream_port_is_no_longer_a_token() {
+        assert!(!IN_SERVERS.contains(&"{stream_port}"));
+        assert_eq!(
+            fill("{stream_port}", &IN_SERVERS, &[]).as_deref(),
+            Ok("{stream_port}")
+        );
     }
 
     #[test]

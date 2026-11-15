@@ -47,6 +47,10 @@ export type ToolRowRoom = {
 
 const POLICY: ToolsKey =
   "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo can't use one for you.";
+/** On Windows the host passes over a browser its own policy blocks, so this shows only when Edge and Chrome both
+ * are: it's the firm's doing, and its IT can allow Clauseo. */
+const POLICY_WINDOWS: ToolsKey =
+  "Your firm's settings stop apps from using Microsoft Edge and Google Chrome. Ask your firm's IT to allow Clauseo, then start a new conversation.";
 const UNREADABLE: ToolsKey =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.";
 
@@ -60,7 +64,8 @@ const INSTALL_WINDOWS: ToolsKey =
 function browserNote(lang: Lang, platform: Platform, state: BrowserState): string | null {
   if (state === "browser_not_installed")
     return tw(lang, platform === "windows" ? INSTALL_WINDOWS : INSTALL_MAC);
-  if (state === "browser_blocked_by_policy") return tw(lang, POLICY);
+  if (state === "browser_blocked_by_policy")
+    return tw(lang, platform === "windows" ? POLICY_WINDOWS : POLICY);
   if (state === "browser_policy_unreadable") return tw(lang, UNREADABLE);
   return null;
 }

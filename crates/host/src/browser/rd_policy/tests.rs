@@ -1,4 +1,6 @@
-use super::{RdPolicy, decide};
+use std::path::PathBuf;
+
+use super::{RdPolicy, decide, decide_among};
 use clauseo_protocol::ToolsUnavailableReason::{BrowserBlockedByPolicy, BrowserPolicyUnreadable};
 use clauseo_settings::chromium_policy::{Browser, Found, Place, RemoteDebugging, Scope};
 
@@ -94,4 +96,133 @@ fn a_recheck_reads_with_the_launch_rule() {
         assert_eq!(policy.recheck(false), policy.check(false), "{found:?}");
         assert_eq!(policy.recheck(true), None, "{found:?}");
     }
+}
+
+/// Windows: what each place said, by browser and scope.
+fn per(found: &[(Browser, Scope, Found)]) -> RemoteDebugging {
+    RemoteDebugging {
+        found: found
+            .iter()
+            .map(|(browser, scope, said)| {
+                let place = Place {
+                    browser: *browser,
+                    scope: *scope,
+                };
+                (place, said.clone())
+            })
+            .collect(),
+    }
+}
+
+fn edge() -> (Browser, PathBuf) {
+    (Browser::Edge, PathBuf::from("msedge.exe"))
+}
+
+fn chrome() -> (Browser, PathBuf) {
+    (Browser::Chrome, PathBuf::from("chrome.exe"))
+}
+
+#[test]
+fn windows_edge_blocked_and_chrome_allowed_takes_chrome() {
+    let read = per(&[(Browser::Edge, Scope::Machine, Found::Disallowed)]);
+    let both = [edge(), chrome()];
+    assert_eq!(decide_among(&read, &both, false), Ok(Some(chrome().1)));
+    // The user's place blocks Edge as the computer's does.
+    let read = per(&[(Browser::Edge, Scope::User, Found::Disallowed)]);
+    assert_eq!(decide_among(&read, &both, false), Ok(Some(chrome().1)));
+    // Nothing set takes Edge, first.
+    assert_eq!(decide_among(&per(&[]), &both, false), Ok(Some(edge().1)));
+}
+
+#[test]
+fn windows_both_blocked_is_blocked_unless_the_firm_allows_clauseo_anyway() {
+    let read = per(&[
+        (Browser::Edge, Scope::User, Found::Disallowed),
+        (Browser::Chrome, Scope::Machine, Found::Disallowed),
+    ]);
+    let both = [edge(), chrome()];
+    assert_eq!(
+        decide_among(&read, &both, false),
+        Err(BrowserBlockedByPolicy)
+    );
+    assert_eq!(decide_among(&read, &both, true), Ok(Some(edge().1)));
+}
+
+#[test]
+fn windows_edge_only_installed_and_blocked_is_blocked() {
+    let read = per(&[
+        (Browser::Edge, Scope::Machine, Found::Disallowed),
+        (Browser::Chrome, Scope::Machine, Found::Allowed),
+    ]);
+    assert_eq!(
+        decide_among(&read, &[edge()], false),
+        Err(BrowserBlockedByPolicy)
+    );
+}
+
+#[test]
+fn windows_nothing_installed_is_no_policy_block() {
+    let read = per(&[
+        (Browser::Edge, Scope::Machine, Found::Disallowed),
+        (Browser::Chrome, Scope::User, unreadable()),
+    ]);
+    assert_eq!(decide_among(&read, &[], false), Ok(None));
+    assert_eq!(decide_among(&read, &[], true), Ok(None));
+}
+
+#[test]
+fn windows_an_unreadable_browser_is_passed_over_and_a_false_wins_over_it() {
+    let both = [edge(), chrome()];
+    let edge_unread = per(&[(Browser::Edge, Scope::User, unreadable())]);
+    assert_eq!(
+        decide_among(&edge_unread, &both, false),
+        Ok(Some(chrome().1))
+    );
+    let all_unread = per(&[
+        (Browser::Edge, Scope::User, unreadable()),
+        (Browser::Chrome, Scope::Machine, unreadable()),
+    ]);
+    assert_eq!(
+        decide_among(&all_unread, &both, false),
+        Err(BrowserPolicyUnreadable)
+    );
+    assert_eq!(decide_among(&all_unread, &both, true), Ok(Some(edge().1)));
+    let mixed = per(&[
+        (Browser::Edge, Scope::User, unreadable()),
+        (Browser::Chrome, Scope::Machine, Found::Disallowed),
+    ]);
+    assert_eq!(
+        decide_among(&mixed, &both, false),
+        Err(BrowserBlockedByPolicy)
+    );
+}
+
+/// Neither browser Clauseo starts on Windows reads Chromium's place, so it decides nothing there.
+#[test]
+fn windows_ignores_chromiums_place() {
+    let read = per(&[
+        (Browser::Chromium, Scope::Machine, Found::Disallowed),
+        (Browser::Chromium, Scope::User, unreadable()),
+        (Browser::Edge, Scope::Machine, bad()),
+    ]);
+    assert_eq!(
+        decide_among(&read, &[edge(), chrome()], false),
+        Ok(Some(edge().1))
+    );
+}
+
+#[test]
+fn a_windows_recheck_reads_with_the_launch_rule() {
+    let found = vec![Found::Disallowed];
+    // `Says` puts everything at Chrome's place.
+    let policy = RdPolicy::new(std::sync::Arc::new(Says(found)));
+    assert_eq!(policy.recheck_among(false, &[edge(), chrome()]), None);
+    assert_eq!(
+        policy.recheck_among(false, &[chrome()]),
+        Some(BrowserBlockedByPolicy)
+    );
+    assert_eq!(policy.recheck_among(true, &[chrome()]), None);
+    assert_eq!(policy.recheck_among(false, &[]), None);
+    assert_eq!(policy.pick(false, &[chrome()]), Err(BrowserBlockedByPolicy));
+    assert_eq!(policy.pick(false, &[edge(), chrome()]), Ok(Some(edge().1)));
 }

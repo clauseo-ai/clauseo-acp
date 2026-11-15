@@ -1,67 +1,71 @@
-//! The endpoint check and Chrome's arguments.
+//! The browser's arguments and profile.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
-use super::{Spec, check_endpoint, chrome_args, ready_profile, sandbox};
+use super::{Spec, chrome_args, ready_profile, sandbox};
 
+/// Route 2: the browser gets the `DevTools` pipe and never a debugging port; on Windows the
+/// pipe's two inherited handle values too. Every other flag is the same on each system.
 #[test]
-fn the_endpoint_must_be_loopback_on_the_claimed_port() {
-    let good = "ws://127.0.0.1:61101/devtools/browser/0b1e-77AF";
-    assert_eq!(check_endpoint(good, 61_101), Ok(()));
-    assert_eq!(
-        check_endpoint("ws://127.0.0.1:47120/devtools/browser/abc", 61_101),
-        Err("Chrome listens on debugging port 47120, not the claimed port 61101".to_owned())
-    );
-    for bad in [
-        "ws://localhost:61101/devtools/browser/abc",
-        "ws://127.0.0.1:61101/devtools/page/abc",
-        "ws://127.0.0.1:61101/devtools/browser/",
-        "ws://127.0.0.1:61101/devtools/browser/a/b",
-        "ws://127.0.0.1:61101/devtools/browser/a?b",
-        "wss://127.0.0.1:61101/devtools/browser/abc",
-        "ws://127.0.0.1:61101",
-    ] {
-        let refusal = check_endpoint(bad, 61_101).unwrap_err();
-        assert!(!refusal.contains("ws://"), "names no endpoint: {refusal}");
-    }
-}
-
-#[test]
-fn chrome_gets_the_proxy_the_profile_and_the_claimed_port_never_port_zero() {
+fn the_browser_gets_the_pipe_and_never_a_port() {
     let env = BTreeMap::new();
     let spec = Spec {
         executable: Path::new("/chrome"),
         cwd: Path::new("/state/browser"),
         downloads: Path::new("/matter/downloads"),
         profile: Path::new("/state/browser/chrome-profile-1-0000abcd"),
-        cdp_port: 61_101,
         proxy: Some(OsStr::new("http://127.0.0.1:8080")),
         env: &env,
     };
-    let args = chrome_args(
+    let strings = |args: Vec<OsString>| -> Vec<String> {
+        args.iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    };
+    let posix = strings(chrome_args(&spec, spec.profile, sandbox::Host::now(), None));
+    let windows = strings(chrome_args(
         &spec,
-        Path::new("/state/browser/chrome-profile-1-0000abcd"),
+        spec.profile,
         sandbox::Host::now(),
-    );
-    let has = |arg: &str| args.iter().any(|a| a == &OsString::from(arg));
+        Some((724, 732)),
+    ));
     for arg in [
         "--headless=new",
         "--proxy-server=http://127.0.0.1:8080",
         "--proxy-bypass-list=<-loopback>",
         "--user-data-dir=/state/browser/chrome-profile-1-0000abcd",
         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-        "--remote-debugging-port=61101",
         "--disable-background-networking",
     ] {
-        assert!(has(arg), "{arg} in {args:?}");
+        assert!(posix.iter().any(|a| a == arg), "{arg} in {posix:?}");
     }
-    let debugging = args
-        .iter()
-        .filter(|a| a.to_string_lossy().starts_with("--remote-debugging"))
-        .count();
-    assert_eq!(debugging, 1, "{args:?}");
+    let debugging = |args: &[String]| -> Vec<String> {
+        args.iter()
+            .filter(|a| a.starts_with("--remote-debugging"))
+            .cloned()
+            .collect()
+    };
+    assert_eq!(debugging(&posix), ["--remote-debugging-pipe"]);
+    assert_eq!(
+        debugging(&windows),
+        [
+            "--remote-debugging-pipe",
+            "--remote-debugging-io-pipes=724,732"
+        ]
+    );
+    let others = |args: &[String]| -> Vec<String> {
+        args.iter()
+            .filter(|a| !a.starts_with("--remote-debugging"))
+            .cloned()
+            .collect()
+    };
+    assert_eq!(others(&posix), others(&windows), "the same flags otherwise");
+    assert!(
+        !posix.iter().any(|a| a.contains("debugging-port")),
+        "{posix:?}"
+    );
 }
 
 /// With no proxy given (the plain client's Codex entry), Chrome gets no proxy switch at all and
@@ -74,11 +78,10 @@ fn chrome_without_a_proxy_gets_no_proxy_switch() {
         cwd: Path::new("/state/browser"),
         downloads: Path::new("/matter/downloads"),
         profile: Path::new("/state/browser/chrome-profile-1-0000abcd"),
-        cdp_port: 61_101,
         proxy: None,
         env: &env,
     };
-    let args: Vec<String> = chrome_args(&spec, spec.profile, sandbox::Host::now())
+    let args: Vec<String> = chrome_args(&spec, spec.profile, sandbox::Host::now(), None)
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
@@ -89,7 +92,7 @@ fn chrome_without_a_proxy_gets_no_proxy_switch() {
     for arg in [
         "--headless=new",
         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-        "--remote-debugging-port=61101",
+        "--remote-debugging-pipe",
     ] {
         assert!(args.iter().any(|a| a == arg), "{arg} in {args:?}");
     }
@@ -103,11 +106,10 @@ fn chrome_gets_one_feature_list_of_each_kind_and_no_weakened_security() {
         cwd: Path::new("/state/browser"),
         downloads: Path::new("/matter/downloads"),
         profile: Path::new("/state/browser/chrome-profile-1-0000abcd"),
-        cdp_port: 61_101,
         proxy: Some(OsStr::new("http://127.0.0.1:8080")),
         env: &env,
     };
-    let args: Vec<String> = chrome_args(&spec, spec.profile, sandbox::Host::now())
+    let args: Vec<String> = chrome_args(&spec, spec.profile, sandbox::Host::now(), None)
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
@@ -172,7 +174,6 @@ fn chrome_never_gets_a_switch_that_weakens_its_sandbox_on_any_host() {
         cwd: Path::new("/state/browser"),
         downloads: Path::new("/matter/downloads"),
         profile: Path::new("/state/browser/chrome-profile-1-0000abcd"),
-        cdp_port: 61_101,
         proxy: Some(OsStr::new("http://127.0.0.1:8080")),
         env: &env,
     };
@@ -184,7 +185,9 @@ fn chrome_never_gets_a_switch_that_weakens_its_sandbox_on_any_host() {
                     root,
                     container,
                 };
-                let args = chrome_args(&spec, spec.profile, host);
+                // `launch` checks the arguments without Windows' pipe handles; with them too.
+                let mut args = chrome_args(&spec, spec.profile, host, None);
+                args.extend(chrome_args(&spec, spec.profile, host, Some((724, 732))));
                 for arg in &args {
                     assert_eq!(sandbox::weakening(arg), None, "{arg:?} for {host:?}");
                     assert_eq!(sandbox::weakening_in(arg), None, "{arg:?} for {host:?}");
@@ -281,7 +284,6 @@ fn chrome_on_linux_always_gets_gpu_sandbox_failures_fatal() {
         cwd: Path::new("/state/browser"),
         downloads: Path::new("/matter/downloads"),
         profile: Path::new("/state/browser/chrome-profile-1-0000abcd"),
-        cdp_port: 61_101,
         proxy: Some(OsStr::new("http://127.0.0.1:8080")),
         env: &env,
     };
@@ -293,7 +295,7 @@ fn chrome_on_linux_always_gets_gpu_sandbox_failures_fatal() {
                     root,
                     container,
                 };
-                let args = chrome_args(&spec, spec.profile, host);
+                let args = chrome_args(&spec, spec.profile, host, None);
                 let fatal = args
                     .iter()
                     .filter(|arg| arg.to_string_lossy().contains("gpu-sandbox-failures-fatal"))
@@ -323,7 +325,6 @@ fn launch_as_root_on_linux_is_refused_before_anything_starts() {
         cwd: &dir,
         downloads: &downloads,
         profile: &profile,
-        cdp_port: 61_101,
         proxy: Some(OsStr::new("http://127.0.0.1:8080")),
         env: &env,
     };

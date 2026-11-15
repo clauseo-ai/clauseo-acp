@@ -1,9 +1,8 @@
 //! `agent_browser_close` with the real agent-browser v0.41.1 and a real Chrome: its reply stops
-//! the guard's Chrome and agent-browser, keeping the profile, so Chrome's debugging port lives
-//! only from the first browser call to the close; the next call starts both again, and a close
+//! the guard's Chrome and agent-browser, keeping the profile, so Chrome runs only from the first
+//! browser call to the close; the next call starts both again, and a close
 //! while they are stopped starts nothing and gets agent-browser's own result from the guard.
 
-use std::net::{Ipv4Addr, TcpStream};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -13,33 +12,28 @@ use super::{binaries, call, command, handshake, processes};
 use crate::page_proxy::{HEADING, PageProxy};
 use crate::support::{Guard, Scratch};
 
-/// The processes running with the scratch folder's profile flag, and the debugging port the
-/// first of them was given (`--remote-debugging-port=`).
-fn chrome_runs(scratch: &Scratch) -> (bool, Option<u16>) {
+/// Whether a process runs with the scratch folder's profile flag, and whether the first such
+/// one was given a `DevTools` pipe rather than a port (`--remote-debugging-pipe`, route 2).
+fn chrome_runs(scratch: &Scratch) -> (bool, bool) {
     let flag = format!(
         "--user-data-dir={}",
         scratch.cwd().join("chrome-profile-").display()
     );
-    let mut port = None;
-    let mut runs = false;
+    let mut piped = None;
     for pid in processes() {
         let Ok(cmd) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
             continue;
         };
         let args: Vec<&[u8]> = cmd.split(|b| *b == 0).collect();
         if args.iter().any(|arg| arg.starts_with(flag.as_bytes())) {
-            runs = true;
-            port = port.or_else(|| {
-                args.iter().find_map(|arg| {
-                    std::str::from_utf8(arg.strip_prefix(b"--remote-debugging-port=")?)
-                        .ok()?
-                        .parse()
-                        .ok()
-                })
-            });
+            let pipe = args.contains(&b"--remote-debugging-pipe".as_slice())
+                && !args
+                    .iter()
+                    .any(|arg| arg.starts_with(b"--remote-debugging-port"));
+            piped = piped.or(Some(pipe));
         }
     }
-    (runs, port)
+    (piped.is_some(), piped.unwrap_or_default())
 }
 
 /// Whether `ready` holds within 10 s, looking every 50 ms.
@@ -51,15 +45,6 @@ fn within(mut ready: impl FnMut() -> bool) -> bool {
         }
         now
     })
-}
-
-/// Whether something accepts connections on 127.0.0.1:`port`.
-fn listens(port: u16) -> bool {
-    TcpStream::connect_timeout(
-        &(Ipv4Addr::LOCALHOST, port).into(),
-        Duration::from_millis(500),
-    )
-    .is_ok()
 }
 
 /// What of `session` runs but the guard and its reaper.
@@ -74,10 +59,10 @@ fn browser_left(session: &Session) -> Vec<String> {
         .collect()
 }
 
-/// Open (cold), open again (warm), close: within a few seconds no Chrome or daemon runs, the
-/// first Chrome's debugging port takes no connection and the profile is still there. The next
-/// open starts Chrome again (cold) on the kept profile and the page reads; the guard's exit then
-/// leaves nothing. The `agent_browser_open` times it prints are the cold start the close adds.
+/// Open (cold), open again (warm), close: within a few seconds no Chrome or daemon runs and the
+/// profile is still there; the Chrome that ran had a `DevTools` pipe and no debugging port. The
+/// next open starts Chrome again (cold) on the kept profile and the page reads; the guard's exit
+/// then leaves nothing. The `agent_browser_open` times it prints are the cold start the close adds.
 #[test]
 fn close_stops_chrome_keeps_the_profile_and_the_next_call_starts_it() {
     let Some(binaries) = binaries() else { return };
@@ -91,8 +76,10 @@ fn close_stops_chrome_keeps_the_profile_and_the_next_call_starts_it() {
     eprint!("warm ");
     call(&mut guard, 4, "agent_browser_open", &open);
     let first = Session::find(&scratch);
-    let port = chrome_runs(&scratch).1.expect("Chrome's debugging port");
-    assert!(listens(port), "Chrome does not listen on {port}");
+    assert!(
+        chrome_runs(&scratch).1,
+        "Chrome runs without a DevTools pipe, or with a debugging port"
+    );
     call(&mut guard, 5, "agent_browser_close", &json!({}));
     guard.stderr_until("agent_browser_close: stopped Chrome and agent-browser");
     assert!(
@@ -101,10 +88,6 @@ fn close_stops_chrome_keeps_the_profile_and_the_next_call_starts_it() {
         browser_left(&first)
     );
     assert!(!chrome_runs(&scratch).0, "Chrome runs after the close");
-    assert!(
-        !listens(port),
-        "the first Chrome's port {port} still listens"
-    );
     assert_eq!(
         crate::support::profiles(&scratch.cwd()).len(),
         1,

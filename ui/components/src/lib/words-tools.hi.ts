@@ -25,6 +25,10 @@ export const HI = {
   // (provisional Hindi, app track final)
   "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo can't use one for you.":
     "इस कंप्यूटर पर Chrome या Edge की एक नीति ऐप्स को ब्राउज़र नियंत्रित नहीं करने देती, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता।",
+  // the same on Windows, where the host passes over a browser its own policy blocks, so only every one blocked
+  // shows it: what to do, ask the firm's IT (UC-550; provisional Hindi, app track final)
+  "Your firm's settings stop apps from using Microsoft Edge and Google Chrome. Ask your firm's IT to allow Clauseo, then start a new conversation.":
+    "आपकी फ़र्म की सेटिंग्स ऐप्स को Microsoft Edge और Google Chrome का उपयोग नहीं करने देतीं। अपनी फ़र्म की IT टीम से Clauseo को अनुमति देने के लिए कहें, फिर एक नई बातचीत शुरू करें।",
   // under the browser's reason when Clauseo couldn't read that policy, in full
   // (provisional Hindi, app track final)
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.":

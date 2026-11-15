@@ -1,0 +1,13 @@
+{
+  "UC-550": {
+    "en": "Your firm's settings stop apps from using Microsoft Edge and Google Chrome. Ask your firm's IT to allow Clauseo, then start a new conversation.",
+    "hi": "आपकी फ़र्म की सेटिंग्स ऐप्स को Microsoft Edge और Google Chrome का उपयोग नहीं करने देतीं। अपनी फ़र्म की IT टीम से Clauseo को अनुमति देने के लिए कहें, फिर एक नई बातचीत शुरू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
+    "note": "Under Blocked by a browser policy on Windows (browser_blocked_by_policy): the host passes over a browser whose own RemoteDebuggingAllowed is false, so this shows only when Edge and Chrome are both blocked; says what to do, unlike UET-45 (the Mac line)"
+  }
+}

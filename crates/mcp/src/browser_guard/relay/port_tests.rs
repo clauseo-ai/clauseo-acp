@@ -1,5 +1,6 @@
 //! The port files checked through the stdout pump: for the session's whole life (a match does
-//! not end the checks), the stream server's on every OS, and a refusal ends the pump.
+//! not end the checks), and a refusal ends the pump. The stream server must write none at all
+//! where it is checked (Windows, route 2).
 
 #[cfg(unix)]
 use std::collections::BTreeMap;
@@ -43,12 +44,16 @@ fn a_match_does_not_end_the_checks() {
     let scratch = Scratch::new("refusal");
     let checks = [
         Expected::daemon(&scratch.0, "s", 61_102),
-        Expected::stream(&scratch.0, "s", 61_100),
+        Expected::stream_off(&scratch.0, "s"),
     ];
     assert_eq!(refusal(&checks), None, "no files yet");
     crate::write::write(&checks[0].file, "61102").unwrap();
-    crate::write::write(&checks[1].file, "61100").unwrap();
-    assert_eq!(refusal(&checks), None, "both on their claimed ports");
+    crate::write::write(&checks[1].file, "").unwrap();
+    assert_eq!(
+        refusal(&checks),
+        None,
+        "the claimed port, and an empty stream file"
+    );
     crate::write::write(&checks[0].file, "50123").unwrap();
     assert_eq!(
         refusal(&checks).as_deref(),
@@ -58,7 +63,9 @@ fn a_match_does_not_end_the_checks() {
     crate::write::write(&checks[1].file, "40117").unwrap();
     assert_eq!(
         refusal(&checks).as_deref(),
-        Some("agent-browser's stream port file says 40117, not the claimed port 61100")
+        Some(
+            "agent-browser wrote a stream port file, but its stream server must be off on Windows"
+        )
     );
 }
 
@@ -113,11 +120,11 @@ exec sleep 30"#,
     );
 }
 
-/// The stream server's fallback: a `.stream` file naming another port ends the child, on Unix
-/// too.
+/// Where the stream server must be off (Windows), a `.stream` file at all ends the child; the
+/// check itself is modelled here on Unix.
 #[cfg(unix)]
 #[test]
-fn a_stream_server_on_another_port_is_refused() {
+fn a_stream_server_that_must_be_off_is_refused() {
     let scratch = Scratch::new("stream");
     let reason = pump_script(
         &scratch.0,
@@ -125,10 +132,10 @@ fn a_stream_server_on_another_port_is_refused() {
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
 exec sleep 30"#,
         &[("DIR", &scratch.0)],
-        vec![Expected::stream(&scratch.0, "s", 61_100)],
+        vec![Expected::stream_off(&scratch.0, "s")],
     );
     assert_eq!(
         reason,
-        "agent-browser's stream port file says 40117, not the claimed port 61100"
+        "agent-browser wrote a stream port file, but its stream server must be off on Windows"
     );
 }

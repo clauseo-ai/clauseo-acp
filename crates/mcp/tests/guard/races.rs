@@ -1,8 +1,8 @@
 //! The guard ended while Chrome is still starting (the first call's lazy start), and Chrome dying
-//! just as the agent goes. The Chrome stand-in's `silent` mode never prints its endpoint, so the
-//! guard stays in its wait for it (up to 15 s) for as long as a test needs; the test acts once the
-//! guard says on stderr that Chrome has started (after it told the reaper). Waits poll as
-//! `lifecycle.rs`'s do.
+//! just as the agent goes. The Chrome stand-in's `silent` mode never answers on its `DevTools`
+//! pipe, so the guard stays in its wait for the answer (up to 15 s) for as long as a test needs;
+//! the test acts once the guard says on stderr that Chrome has started (after it told the
+//! reaper). Waits poll as `lifecycle.rs`'s do.
 
 use std::path::PathBuf;
 #[cfg(unix)]
@@ -14,11 +14,11 @@ use crate::support::{Guard, Scratch, example, guard_command};
 
 /// What the guard prints once Chrome runs and the reaper knows it.
 #[cfg(unix)]
-const STARTED: &str = "Chrome started; waiting for it to listen";
+const STARTED: &str = "started; waiting for its answer on its DevTools pipe";
 
-/// What the guard prints once Chrome listens on the claimed port.
+/// What the guard prints once Chrome answers on its pipe.
 #[cfg(unix)]
-const LISTENING: &str = "Chrome is listening on the claimed debugging port";
+const LISTENING: &str = "answers on its DevTools pipe; the relay listens on 127.0.0.1";
 
 /// Chrome is gone, its profile too, and on Linux no process names the scratch folder.
 #[cfg(unix)]
@@ -33,7 +33,7 @@ fn assert_chrome_gone(scratch: &Scratch, chrome: i32) {
     }
 }
 
-/// The review's repro: a SIGKILL of the guard while it waits for Chrome's endpoint left Chrome
+/// The review's repro: a SIGKILL of the guard while it waits for Chrome's answer left Chrome
 /// running, as the reaper learnt Chrome's pid only after the wait.
 #[cfg(unix)]
 #[test]
@@ -84,14 +84,14 @@ fn a_parent_killed_while_chrome_starts_ends_the_guard() {
     drop(parent);
 }
 
-/// Chrome dies just as the agent goes: the stand-in exits right after it prints its endpoint,
+/// Chrome dies just as the agent goes: the stand-in exits right after its first answer,
 /// and the agent's stdin closes right after its one call, so agent-browser has answered the
 /// close and exited before Chrome's watcher first looks (250 ms). No restart for an agent that
 /// has gone: the guard still exits 1.
 #[test]
 fn chrome_that_dies_as_the_agent_goes_is_still_reported() {
     let scratch = Scratch::new("race_chrome_eof");
-    scratch.chrome_mode("listen-exit");
+    scratch.chrome_mode("answer-exit");
     let log = scratch.log();
     let args = [log.as_os_str()];
     let mut guard = Guard::start(guard_command(&scratch, &example("echo_stub"), &args));
@@ -109,7 +109,7 @@ fn chrome_that_dies_as_the_agent_goes_is_still_reported() {
     );
 }
 
-/// The code owner's repro (M1): guard A is killed once Chrome listens, and guard B starts at once
+/// The code owner's repro (M1): guard A is killed once Chrome answers, and guard B starts at once
 /// with the same `--cwd` and ports, as an MCP reconnect does. A's reaper must end A's run alone:
 /// B's profile, its staging folder and its daemon stay, for longer than A's reaper takes (it
 /// ends A's daemon a second time about 1 s after A dies). Before each run had a profile and a

@@ -22,6 +22,9 @@ enum ChromeSearch {
     Forced(PathBuf),
     /// Search these roots; `None` is this machine's, with the data folder as app data.
     Roots(Option<ChromeRoots>),
+    /// Already picked, or none found: Windows' search, made with the firm's policy per browser
+    /// ([`policy`]).
+    Picked(Option<PathBuf>),
 }
 
 impl ChromeSearch {
@@ -30,11 +33,22 @@ impl ChromeSearch {
         match self {
             Self::Skip => None,
             Self::Forced(chrome) => Some(chrome),
+            Self::Picked(chrome) => chrome,
             Self::Roots(roots) => {
                 let roots = roots.unwrap_or_else(|| ChromeRoots::system(data));
                 crate::browser::chrome::find(&roots)
             }
         }
+    }
+
+    /// On Windows, the roots whose browsers the firm's policy is asked about one by one
+    /// (`browser::rd_policy`); `None` for a forced Chrome and on any other machine.
+    fn windows_roots(&self, data: &Path) -> Option<ChromeRoots> {
+        let Self::Roots(roots) = self else {
+            return None;
+        };
+        let roots = roots.clone().unwrap_or_else(|| ChromeRoots::system(data));
+        roots.platform.is_windows().then_some(roots)
     }
 
     /// The Chrome found, once agent-browser's config file is in place
@@ -109,7 +123,8 @@ impl BrowserPrep {
     /// The Chrome found and the session's claims. The firm's browser policy comes first,
     /// before any Chrome is picked, forced or found (`browser::rd_policy`), read again at each
     /// launch: when it blocks, both are left out and the entry drops with
-    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`. A missing sidecar
+    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`. On Windows it is asked per
+    /// browser over those installed ([`policy`]), so the search comes with it. A missing sidecar
     /// leaves both out, with a warning (a development build has no agent-browser); a failed
     /// claim leaves the claims out. Either way the entry drops with `BrowserNotInstalled`.
     /// Registry, file system and socket calls: off the actor.
@@ -117,7 +132,8 @@ impl BrowserPrep {
         if matches!(self.chrome, ChromeSearch::Skip) {
             return Prepared::default();
         }
-        let policy_block = self.rd_policy.check(self.allowed_anyway);
+        let (policy_block, chrome) =
+            policy(self.chrome, &self.rd_policy, self.allowed_anyway, data);
         let read = Prepared {
             policy_read: true,
             policy_block,
@@ -133,9 +149,9 @@ impl BrowserPrep {
         // The shell tool's config is the session's own (`launch_checks::shell_folders`); the
         // app-wide one under `<data>/browser` is the parked MCP entry's.
         let found = if self.shell {
-            self.chrome.find(data)
+            chrome.find(data)
         } else {
-            self.chrome.find_with_config(data)
+            chrome.find_with_config(data)
         };
         let Some(chrome) = found else {
             return read;
@@ -176,6 +192,28 @@ impl BrowserPrep {
                 }
             }
         }
+    }
+}
+
+/// The firm's browser policy for `search`, read now: why it leaves the session without a
+/// browser, if it does, and the search to make. On Windows (`ChromeSearch::windows_roots`) the
+/// policy is asked per browser over what is installed, so the search is already made
+/// (`ChromeSearch::Picked`); elsewhere, and for a forced Chrome, one false or unread place
+/// blocks every browser and the search comes after. Registry and file system calls: off the
+/// actor.
+fn policy(
+    search: ChromeSearch,
+    rd_policy: &RdPolicy,
+    allowed_anyway: bool,
+    data: &Path,
+) -> (Option<ToolsUnavailableReason>, ChromeSearch) {
+    let Some(roots) = search.windows_roots(data) else {
+        return (rd_policy.check(allowed_anyway), search);
+    };
+    let installed = crate::browser::chrome::windows_installed(&roots);
+    match rd_policy.pick(allowed_anyway, &installed) {
+        Ok(picked) => (None, ChromeSearch::Picked(picked)),
+        Err(reason) => (Some(reason), ChromeSearch::Picked(None)),
     }
 }
 

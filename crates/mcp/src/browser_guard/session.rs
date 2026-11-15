@@ -2,9 +2,9 @@
 //!
 //! Nothing runs at the guard's start but the guard (and on Unix its reaper). The agent's first
 //! `tools/call` starts the browser ([`start`], from the agent pump in `relay/pumps.rs`, under the
-//! state's lock): the guard waits up to [`PORT_WAIT`] for the claimed debugging port to be free
-//! (the run an MCP reconnect replaced may still be ending its Chrome there), starts Chrome on it
-//! with the run's profile, kept from an earlier start, then agent-browser connected to it.
+//! state's lock): the guard starts the browser over its `DevTools` pipe with the run's profile,
+//! kept from an earlier start (`session/browser.rs`), then agent-browser, given the relay's
+//! endpoint and let in by the relay's peer check (route 2, decision record 0060).
 //!
 //! [`stop`] ends both as the guard's exit does: on Windows the job; on Unix agent-browser's
 //! process group, the run's daemon (`reaper::kill_daemon`) and Chrome's group, each reaped here
@@ -20,7 +20,6 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{self, BufReader};
-use std::net::{Ipv4Addr, TcpListener};
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::sync::atomic::AtomicBool;
@@ -30,14 +29,16 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use super::chrome::{self, Chrome, Spec};
+use super::chrome::{self, Chrome};
 use super::downloads::{Held, Saved};
-use super::parent::{self, Parent};
+#[cfg(windows)]
+use super::note;
+use super::parent::Parent;
 use super::port_file::Expected;
 use super::record::{self, ChromeState};
 use super::relay::lines::{Out, ToChild};
 use super::relay::{Event, end_group, pumps, send};
-use super::{Child, ChildStdin, PARENT_GONE, env, note, now, pause};
+use super::{Child, ChildStdin, env, now};
 
 /// How long the browser runs with no tool call in flight or completed before the guard stops
 /// it: agent-browser's own idle timeout, `AGENT_BROWSER_IDLE_TIMEOUT_MS` (`env::FIXED`), so the
@@ -52,8 +53,6 @@ pub(crate) const IDLE_STOP_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_IDLE_MS";
 /// [`chrome::START_WAIT`] in milliseconds, read from the guard's own environment.
 #[cfg(feature = "test-support")]
 const START_WAIT_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_START_MS";
-/// How long a start waits for the claimed debugging port to be free.
-pub(crate) const PORT_WAIT: Duration = Duration::from_secs(15);
 
 /// Why a start failed: its own kind when Chrome's sandbox could not start, so the agent's call
 /// gets [`chrome::sandbox::REFUSAL`] and the host can tell it apart later.
@@ -100,8 +99,8 @@ pub(crate) fn idle_stop() -> Duration {
     IDLE_STOP
 }
 
-/// How long a start waits for Chrome's endpoint: [`chrome::START_WAIT`], or in a `test-support`
-/// build the test's.
+/// How long a start waits for the browser's answer on its pipe: [`chrome::START_WAIT`], or in a
+/// `test-support` build the test's.
 fn start_wait() -> Duration {
     #[cfg(feature = "test-support")]
     if let Some(ms) = std::env::var(START_WAIT_FOR_TESTS)
@@ -123,7 +122,6 @@ pub(crate) struct Launcher {
     /// The run's id and profile (`runs.rs`), kept from one start to the next.
     pub(crate) run: String,
     pub(crate) profile: PathBuf,
-    pub(crate) cdp_port: u16,
     /// `AGENT_BROWSER_PROXY`, if the host gave one.
     pub(crate) proxy: Option<OsString>,
     /// [`env::chrome_env`].
@@ -146,6 +144,32 @@ pub(crate) struct Launcher {
     pub(crate) reaper: super::reaper::Teller,
     #[cfg(windows)]
     pub(crate) job: super::job::Job,
+    /// The browser that started last, tried first next time (`session/browser.rs`).
+    pub(crate) started_with: Mutex<Option<PathBuf>>,
+}
+
+/// Why a start failed: the guard's line (its own kind for Chrome's sandbox), and words for the
+/// agent's tool call beyond the plain "could not start" (on Windows, when no browser is installed
+/// or every one is blocked).
+#[derive(Debug)]
+pub(crate) struct StartFailure {
+    pub(crate) reason: StartError,
+    pub(crate) agent_note: Option<&'static str>,
+}
+
+impl From<StartError> for StartFailure {
+    fn from(reason: StartError) -> Self {
+        StartFailure {
+            reason,
+            agent_note: None,
+        }
+    }
+}
+
+impl From<String> for StartFailure {
+    fn from(reason: String) -> Self {
+        StartError::Other(reason).into()
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -158,7 +182,7 @@ impl Launcher {
             downloads: dir.join("downloads"),
             run: "1-0000abcd".to_owned(),
             profile: dir.join("chrome-profile-1-0000abcd"),
-            cdp_port: 61_101,
+            started_with: Mutex::new(None),
             proxy: Some(OsString::from("http://127.0.0.1:9")),
             chrome_env: BTreeMap::new(),
             program: dir.join("agent-browser"),
@@ -339,7 +363,7 @@ pub(crate) fn start(
     state: &mut State,
     parent: &Parent,
     events: &mpsc::Sender<Event>,
-) -> Result<(), StartError> {
+) -> Result<(), StartFailure> {
     let started = start_both(shared, state, parent, events);
     if started.is_err() {
         let launcher = &shared.launcher;
@@ -354,47 +378,9 @@ fn start_both(
     state: &mut State,
     parent: &Parent,
     events: &mpsc::Sender<Event>,
-) -> Result<(), StartError> {
+) -> Result<(), StartFailure> {
     let launcher = &shared.launcher;
-    wait_for_port(launcher.cdp_port, parent)?;
-    let spec = Spec {
-        executable: &launcher.executable,
-        cwd: &launcher.cwd,
-        downloads: &launcher.downloads,
-        profile: &launcher.profile,
-        cdp_port: launcher.cdp_port,
-        proxy: launcher.proxy.as_deref(),
-        env: &launcher.chrome_env,
-    };
-    record::write_state(&launcher.cwd, &launcher.run, &ChromeState::Starting);
-    let mut chrome = chrome::launch(
-        &spec,
-        #[cfg(windows)]
-        &launcher.job,
-    )?;
-    record::write_state(&launcher.cwd, &launcher.run, &chrome.recorded());
-    // Before the wait for Chrome's endpoint: a guard killed during it leaves the reaper to end
-    // Chrome's group. Once the guard reaps Chrome, the reaper leaves its pid alone.
-    #[cfg(unix)]
-    {
-        launcher.reaper.say(&format!("chrome {}", chrome.pid()));
-        let teller = launcher.reaper.clone();
-        chrome.on_reap(move || teller.say("reaped chrome"));
-    }
-    note(&format!(
-        "Chrome started; waiting for it to listen on the claimed debugging port {}",
-        launcher.cdp_port
-    ));
-    let endpoint = chrome.endpoint(
-        launcher.cdp_port,
-        start_wait(),
-        parent,
-        (Arc::clone(&shared.held), Arc::clone(&shared.saved)),
-    )?;
-    note(&format!(
-        "Chrome is listening on the claimed debugging port {}",
-        launcher.cdp_port
-    ));
+    let (mut chrome, endpoint) = browser::start_browser(shared, parent)?;
     let mut env = launcher.env.clone();
     env::set_cdp(&mut env, &endpoint);
     let cannot_run =
@@ -410,6 +396,8 @@ fn start_both(
     .map_err(cannot_run)?;
     #[cfg(unix)]
     launcher.reaper.say(&format!("agent {}", agent.id()));
+    // agent-browser and its descendants (its daemon) may connect to the relay; nothing else.
+    chrome.allow_client(agent.id());
     let (Some(stdin), Some(stdout)) = (agent.stdin.take(), agent.stdout.take()) else {
         drop(end_agent(launcher, &mut agent));
         return Err(cannot_run(io::Error::other("its stdin or stdout is not piped")).into());
@@ -476,30 +464,7 @@ pub(crate) fn end_agent(
     agent.wait()
 }
 
-/// Returns once nothing listens on the claimed debugging port (a bind there succeeds), at most
-/// [`PORT_WAIT`], looking at the guard's parent every [`parent::POLL`].
-fn wait_for_port(port: u16, parent: &Parent) -> Result<(), String> {
-    let polls = PORT_WAIT.as_millis() / parent::POLL.as_millis();
-    for poll in 0..=polls {
-        if TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_ok() {
-            return Ok(());
-        }
-        if poll == 0 {
-            note(&format!(
-                "the claimed debugging port {port} is taken; waiting up to {} s for it",
-                PORT_WAIT.as_secs()
-            ));
-        }
-        if parent.gone() {
-            return Err(PARENT_GONE.to_owned());
-        }
-        pause(parent::POLL);
-    }
-    Err(format!(
-        "the claimed debugging port {port} stayed taken for {} s",
-        PORT_WAIT.as_secs()
-    ))
-}
+mod browser;
 
 #[cfg(all(test, unix))]
 mod tests {

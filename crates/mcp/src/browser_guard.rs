@@ -15,24 +15,38 @@
 //!
 //! Chrome starts lazily (`session.rs`): while it is stopped, a request that is no tool call
 //! goes to a one-shot agent-browser with no Chrome (`relay/oneshot.rs`). The first tool call
-//! starts Chrome on the claimed debugging port (`chrome.rs`; the reaper learns its pid, or the
+//! starts the browser over its `DevTools` pipe (`chrome.rs`; the reaper learns its pid, or the
 //! job holds it, before the guard waits for it) with its download mover (`downloads.rs`), then
-//! agent-browser connected to it; after each child line the guard checks that the stream server
-//! and on Windows the daemon are on their claimed ports (`port_file.rs`). Ten minutes without a
-//! tool call stop Chrome, agent-browser and its daemon, keeping the profile; Chrome's first
+//! agent-browser connected to it; on Windows, after each child line, the guard checks that the
+//! stream server is off and the daemon is on its claimed port (`port_file.rs`). Ten minutes
+//! without a tool call stop Chrome, agent-browser and its daemon, keeping the profile; Chrome's first
 //! unexpected exit stops them too, and its second ends the guard. The guard ends when the
 //! agent's stdin ends, agent-browser exits, a start fails or the guard's parent goes
 //! (`parent.rs`). On the way out, whatever the reason, it ends agent-browser's daemon and Chrome
 //! and deletes the run's profile, its Chrome record and its lock file. [`runs_settled`] and
 //! [`chrome_groups`] let the host read the runs under a `--cwd`.
 //! `docs/decisions/0029-browser.md` gives every rule its reason.
+//!
+//! Route 2 (`docs/decisions/0060-browser-devtools-pipe.md`), on every system: the browser has
+//! no debugging port. The guard starts it over a `DevTools` pipe (`chrome/pipe.rs`) and relays the
+//! pipe to agent-browser on a 127.0.0.1 websocket with a 256-bit secret path, letting in only
+//! agent-browser's own processes (`devtools.rs`, `devtools/peer.rs`); `--cdp-port` is unused,
+//! and agent-browser is told to start no stream server (`env.rs`, `port_file.rs`). The guard
+//! first hides itself from other processes of the user (`harden.rs`; exit 1 if it cannot): on
+//! Windows a protected DACL, which every child it starts gets too, and on Linux
+//! `PR_SET_DUMPABLE` 0. On Windows the browser is Edge, or else a Program Files Chrome
+//! (`browsers.rs`).
 
+#[cfg(any(windows, test))]
+mod browsers;
 mod chrome;
 #[cfg(any(windows, test))]
 mod command_line;
+mod devtools;
 mod downloads;
 mod env;
 mod filter;
+mod harden;
 #[cfg(windows)]
 mod job;
 mod logon;
@@ -91,7 +105,8 @@ struct Command {
     cwd: PathBuf,
     /// `--downloads`, or `<cwd>/downloads`.
     downloads: PathBuf,
-    /// Chrome's debugging port, passed to the guard's Chrome as `--remote-debugging-port`.
+    /// The port the host claimed for Chrome's debugging port. Unused since route 2: the browser
+    /// has no debugging port (decision record 0060); the host still claims and passes it.
     cdp_port: u16,
     /// Windows only: the port agent-browser's daemon must listen on.
     daemon_port: Option<u16>,
@@ -115,6 +130,20 @@ fn windows_dirs() -> env::WindowsDirs {
 pub fn run(args: &[OsString]) -> Result<i32, Failure> {
     // First, before anything slow: a parent that dies later is then still the one watched.
     let parent = parent::Parent::now().ok_or_else(|| failed(PARENT_GONE))?;
+    // Windows: before any secret or browser handle exists, and before any child; refused
+    // outright when Windows will not take it (fail closed).
+    #[cfg(windows)]
+    let hardened = harden::Hardened::apply().map_err(|error| {
+        failed(&format!(
+            "cannot harden the guard's process, so it starts no browser: {error}"
+        ))
+    })?;
+    #[cfg(target_os = "linux")]
+    harden::not_dumpable().map_err(|error| {
+        failed(&format!(
+            "cannot hide the guard's process, so it starts no browser: {error}"
+        ))
+    })?;
     let command = parse(args, env::Os::CURRENT).map_err(|reason| Failure {
         code: EXIT_USAGE,
         message: format!("clauseo-mcp browser-guard: {reason}\n{USAGE}"),
@@ -202,7 +231,15 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
             ))
         })?;
     }
-    serve(&command, env, &session, &parent, &run)
+    serve(
+        &command,
+        env,
+        &session,
+        &parent,
+        &run,
+        #[cfg(windows)]
+        hardened,
+    )
 }
 
 /// Relays, starting Chrome and agent-browser at the first tool call (`session.rs`); ends both,
@@ -213,6 +250,7 @@ fn serve(
     session: &str,
     parent: &parent::Parent,
     run: &runs::Run,
+    #[cfg(windows)] hardened: harden::Hardened,
 ) -> Result<i32, Failure> {
     #[cfg(unix)]
     let socket_dir = env
@@ -234,7 +272,6 @@ fn serve(
         downloads: command.downloads.clone(),
         run: run.id().to_owned(),
         profile: run.profile().to_owned(),
-        cdp_port: command.cdp_port,
         proxy: env.get(env::PROXY).cloned(),
         chrome_env: env::chrome_env(&env),
         program: command.agent_browser.clone(),
@@ -249,7 +286,8 @@ fn serve(
         #[cfg(unix)]
         reaper: reaper.teller(),
         #[cfg(windows)]
-        job: job::Job::new().map_err(|error| failed(&error.to_string()))?,
+        job: job::Job::new(hardened).map_err(|error| failed(&error.to_string()))?,
+        started_with: std::sync::Mutex::new(None),
     };
     let shared = Arc::new(session::Shared::new(launcher));
     // Stops whatever runs (Chrome's tree, agent-browser's, the daemon) before it returns.
@@ -339,8 +377,8 @@ pub(crate) fn pause(time: Duration) {
     std::thread::sleep(time);
 }
 
-/// The port files the relay checks after each child line: the stream server's in the socket
-/// folder (the host's on Unix, `<cwd>\run` on Windows), and the daemon's on Windows.
+/// The port files the relay checks after each child line, on Windows only: the stream server's,
+/// which must not exist, and the daemon's, in `<cwd>\run`.
 fn port_checks(
     env: &BTreeMap<String, OsString>,
     command: &Command,
@@ -350,12 +388,10 @@ fn port_checks(
         .get(env::SOCKET_DIR)
         .map_or_else(|| env::windows_socket_dir(&command.cwd), PathBuf::from);
     let mut checks = Vec::new();
-    // `env::build` checked the stream port already.
-    if let Some(port) = env
-        .get(env::STREAM_PORT)
-        .and_then(|value| env::port_of(value))
-    {
-        checks.push(port_file::Expected::stream(&socket_dir, session, port));
+    // agent-browser gets no stream port anywhere (route 2). On Windows its server must not run
+    // at all; elsewhere an upstream agent-browser may still start one, which is let be.
+    if env::Os::CURRENT == env::Os::Windows {
+        checks.push(port_file::Expected::stream_off(&socket_dir, session));
     }
     if let Some(port) = command.daemon_port {
         checks.push(port_file::Expected::daemon(&socket_dir, session, port));
