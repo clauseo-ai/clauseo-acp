@@ -1,0 +1,46 @@
+{
+  "UC-256": {
+    "en": "Pasted text",
+    "hi": "चिपकाया गया टेक्स्ट",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "the name on a long paste's chip on the composer's well: a paste of 20,000 characters or more goes into a chip, not the field"
+  },
+  "UC-257": {
+    "en": "{count} words",
+    "hi": "{count} शब्द",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "under Pasted text on the chip: the pasted text's size in words, Indian grouping and Western digits (money.ts's count), e.g. 8,400 words"
+  },
+  "UC-258": {
+    "en": "Remove pasted text",
+    "hi": "चिपकाया गया टेक्स्ट हटाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "the chip's remove button's name, for a screen reader and its tooltip-less icon; the chip's size describes it"
+  },
+  "UC-259": {
+    "en": "1 word",
+    "hi": "1 शब्द",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "spare id: under Pasted text when the paste is one word, such as a long run of digits; the one form of {count} words (UC-257), as 1 paper and {n} papers are"
+  }
+}

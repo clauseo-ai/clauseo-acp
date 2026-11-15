@@ -110,7 +110,7 @@ test("the field starts with its words, keeps what is typed through a render, and
   expect(field().value).toBe("Draft");
   expect(ask().disabled).toBe(false);
   await type("What did the bank know?");
-  expect(onInput).toHaveBeenLastCalledWith("What did the bank know?");
+  expect(onInput).toHaveBeenLastCalledWith("What did the bank know?", false);
   // other words given later are not the field's: it was read once, as the field mounted
   await rerender(composer({ initialText: "Other words", onInput, busy: false }));
   expect(field().value).toBe("What did the bank know?");
@@ -199,12 +199,12 @@ test("the handle sets and clears the words through the engine's editing, so undo
   expect(field().value).toBe("When was the notice sent?");
   expect(document.activeElement).toBe(field());
   expect(ref.current?.text()).toBe("When was the notice sent?");
-  expect(onInput).toHaveBeenCalledExactlyOnceWith("When was the notice sent?");
+  expect(onInput).toHaveBeenCalledExactlyOnceWith("When was the notice sent?", false);
   expect(ask().disabled).toBe(false);
   await act(async () => ref.current?.clear());
   expect(calls.at(-1)).toEqual(["delete", undefined]);
   expect(field().value).toBe("");
-  expect(onInput).toHaveBeenLastCalledWith("");
+  expect(onInput).toHaveBeenLastCalledWith("", true);
   expect(ask().disabled).toBe(true);
 });
 
@@ -220,7 +220,7 @@ test("clear never takes the focus from where the lawyer is; the words go in plac
   expect(calls).toEqual([]);
   expect(field().value).toBe("");
   expect(document.activeElement).toBe(elsewhere);
-  expect(onInput).toHaveBeenCalledExactlyOnceWith("");
+  expect(onInput).toHaveBeenCalledExactlyOnceWith("", true);
   elsewhere.remove();
 });
 
@@ -254,7 +254,7 @@ test("fill puts words into an empty field without taking the focus from elsewher
   expect(calls).toEqual([]);
   expect(field().value).toBe("Summarise the notice");
   expect(document.activeElement).toBe(elsewhere);
-  expect(onInput).toHaveBeenCalledExactlyOnceWith("Summarise the notice");
+  expect(onInput).toHaveBeenCalledExactlyOnceWith("Summarise the notice", false);
   // words in the field keep their place
   await act(async () => ref.current?.fill("Something else"));
   expect(field().value).toBe("Summarise the notice");
@@ -343,7 +343,7 @@ test("where the engine refuses its editing, setText still puts the words in and 
   await act(async () => ref.current?.setText("Words"));
   expect(calls).toEqual([["insertText", "Words"]]);
   expect(field().value).toBe("Words");
-  expect(onInput).toHaveBeenCalledExactlyOnceWith("Words");
+  expect(onInput).toHaveBeenCalledExactlyOnceWith("Words", false);
 });
 
 test("the field stands in the room's field slot, and a capture listener reads its typed words", async () => {

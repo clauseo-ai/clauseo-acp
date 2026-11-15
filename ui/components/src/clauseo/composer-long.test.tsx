@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The composer with a long text in it, such as a pasted brief of megabytes: a field over its six-line cap is fitted
-// with one read per edit, and text too long for the engine's line-at-a-time insertText is set in place.
+// with one read per edit, and a text set through the handle too long for the field goes into a chip.
 import { act, createRef, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
@@ -8,6 +8,7 @@ import { TooltipProvider } from "../ui/tooltip.tsx";
 import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
 import { Composer, type ComposerHandle, type ComposerProps } from "./composer.tsx";
 import { UNDOABLE_MAX } from "./composer-edit.ts";
+import { PASTE_CHIP_MIN } from "./paste-chips-logic.ts";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -124,7 +125,7 @@ test("over the cap, an edit that leaves it over reads only the scroll height: no
   expect(a.style.overflowY).toBe("hidden");
 });
 
-test("setText over UNDOABLE_MAX sets the words in place, never through the engine's line-at-a-time insertText", async () => {
+test("setText of a text past PASTE_CHIP_MIN puts it in a chip, never through the engine's line-at-a-time insertText", async () => {
   const calls = engine();
   const onInput = vi.fn();
   const ref = createRef<ComposerHandle>();
@@ -134,12 +135,15 @@ test("setText over UNDOABLE_MAX sets the words in place, never through the engin
     .slice(0, UNDOABLE_MAX + 1);
   await act(async () => ref.current?.setText(big));
   expect(calls).toEqual([]);
-  expect(field().value).toBe(big);
+  expect(field().value).toBe("");
+  expect(document.querySelectorAll('[data-testid="paste-chip"]')).toHaveLength(1);
+  expect(ref.current?.text()).toBe(big);
   expect(document.activeElement).toBe(field());
-  expect(onInput).toHaveBeenCalledExactlyOnceWith(big);
-  // at the limit it still goes through the engine, so undo takes it back
-  const most = big.slice(0, UNDOABLE_MAX);
+  expect(onInput).toHaveBeenCalledExactlyOnceWith(big, false);
+  // just under it, the words go through the engine, so undo takes them back
+  const most = big.slice(0, PASTE_CHIP_MIN - 1);
   await act(async () => ref.current?.setText(most));
   expect(calls).toEqual([["insertText", most]]);
   expect(field().value).toBe(most);
+  expect(document.querySelectorAll('[data-testid="paste-chip"]')).toHaveLength(0);
 });

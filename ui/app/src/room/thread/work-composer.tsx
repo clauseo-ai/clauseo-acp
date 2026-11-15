@@ -224,9 +224,10 @@ export function WorkComposer({
   const mark = useSyncExternalStore(subscribe, readMark, readMark);
   // moved on: cleared in this render, so the line's change is the flush's own commit, not one after it
   if (lost !== null && mark !== null && mark !== lost) setLost(null);
-  // the field holds the words, not React: each change goes straight to the conversation's draft
-  const keep = (text: string) => {
-    const isEmpty = text.trim() === "";
+  // the field holds the words, not React: each change goes straight to the conversation's draft, long pastes'
+  // chips and all (the composer's one string); `isEmpty` comes from the composer, as a trim of a long paste's text
+  // would copy it on every keystroke
+  const keep = (text: string, isEmpty: boolean) => {
     if (emptyNow.current !== isEmpty) {
       emptyNow.current = isEmpty;
       setEmpty(isEmpty);

@@ -157,7 +157,7 @@ test("questions are offered over an empty field only, and a press puts one in th
   const area = document.querySelector<HTMLTextAreaElement>(".room-field textarea");
   expect(area?.value).toBe("When was the notice sent?");
   expect(document.activeElement).toBe(area);
-  expect(onInput).toHaveBeenLastCalledWith("When was the notice sent?");
+  expect(onInput).toHaveBeenLastCalledWith("When was the notice sent?", false);
   // the field holds words now: the questions step aside
   expect(document.querySelector(".room-composer .room-prompts")).toBeNull();
   await act(async () => root?.unmount());

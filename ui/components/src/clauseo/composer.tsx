@@ -19,11 +19,15 @@ import { late } from "../lib/late.ts";
 import { useThreadWords } from "../lib/words-thread.ts";
 import type { Paper } from "./matter.ts";
 import { dur, ease } from "./motion.ts";
-import { insertedOnly, mayTakeFocus, pressOwn, replaceAll } from "./composer-edit.ts";
+import { mayTakeFocus, pressOwn, replaceAll } from "./composer-edit.ts";
+import { useFieldFit } from "./composer-fit.ts";
 import { sendsOnEnter } from "./composer-keys.ts";
 import type { MenuShown } from "./composer-menu.tsx";
 import { useRoom } from "./room-scope.ts";
 import { PaperChips } from "./paper-chips.tsx";
+import { PasteChips } from "./paste-chips.tsx";
+import { usePasteChips } from "./paste-chips-state.ts";
+import { askedOf, PASTE_CHIP_MIN, splitAsked } from "./paste-chips-logic.ts";
 import { SafeWorkspaceLine } from "./safe-workspace-line.tsx";
 import { Say } from "./say.tsx";
 import { StatusLine, type ConfigMenu, type PlanChoice } from "./status-line.tsx";
@@ -87,7 +91,7 @@ function useOpening(ref: RefObject<HTMLDivElement | null>, on: boolean) {
  * engine's own editing (`execCommand`), so Cmd/Ctrl+Z takes it back. */
 export type ComposerHandle = {
   focus: () => void;
-  /** What the field holds now. */
+  /** What the field holds now: its typed words, then each long paste's text (paste-chips-logic.ts's askedOf). */
   text: () => string;
   /** Puts the field's focus in it and replaces all it holds with `text`, as one step undo takes back. */
   setText: (text: string) => void;
@@ -121,8 +125,10 @@ export type ComposerProps<V extends string = string> = {
   /** The words the field starts with, such as the matter's draft. Read once, as the field mounts: key the composer to
    * start it again with other words. */
   initialText?: string;
-  /** Hears what the field holds after each change, an input method's composing included, read from the field. */
-  onInput?: (text: string) => void;
+  /** Hears what the field holds after each change, an input method's composing included, read from the field, with
+   * the long pastes' chips (askedOf), and whether it holds no words at all. Read `empty` rather than trimming the text:
+   * the text is made without copying a long paste, and a trim would copy it on every keystroke. */
+  onInput?: (text: string, empty: boolean) => void;
   /** The handle: focus, the field's words, and setting or clearing them so undo survives. */
   ref?: Ref<ComposerHandle>;
   papers?: readonly QuestionPaper[];
@@ -184,9 +190,6 @@ export type ComposerProps<V extends string = string> = {
 /** The composer: the status line or the working line, then a field set into the work's surface, Add papers as a
  * quiet icon button, the lawyer's own words at 17 on 26 at 600, and Ask, or Stop while Clauseo works; then the
  * room's line under it, with the lock. */
-/** How long typing pauses before a field only grown as words went in is fitted whole (ms). */
-const SETTLE_MS = 400;
-
 export function Composer<V extends string = string>({
   took,
   plan,
@@ -226,10 +229,16 @@ export function Composer<V extends string = string>({
   // changes only when the field fills or empties, so a keystroke renders nothing
   // pinned at mount: React writes a textarea's defaultValue (its text child) on every commit, and the caller's draft
   // changes as the lawyer types, so passing the prop through would rewrite the field's child mid-composition
-  const [initial] = useState(initialText);
-  const [empty, setEmpty] = useState(() => initial.trim() === "");
+  // a long paste in the draft comes back as its chip (paste-chips.tsx), the typed words into the field
+  const [start] = useState(() => splitAsked(initialText));
+  const initial = start.typed;
+  const chips = usePasteChips(start.chips);
+  const [boxEmpty, setEmpty] = useState(() => initial.trim() === "");
+  const empty = boxEmpty && chips.list.length === 0;
   const area = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
+  // all the composer holds, as one string: built per call, never per keystroke but as a concatenation
+  const asked = () => askedOf(area.current?.value ?? "", chips.tail());
   // a clear asked for while an input method composed: what the field held then, cleared at the composition's end
   // only if the field still holds it
   const clearAfter = useRef<string | null>(null);
@@ -272,75 +281,10 @@ export function Composer<V extends string = string>({
   const fieldId = room.id(id);
   const isWorking = working !== null;
   useOpening(entry, isWorking && opening);
+  const { lang, textSize, platform } = useDisplay();
+  useFieldFit(area, fitted, fitRef, lang, textSize);
   // the field takes a second line, and more, when what it holds needs one, the placeholder too: on a narrow window or
   // at a large text size the words wrap rather than hide. At one line it keeps the stylesheet's own height.
-  const { lang, textSize } = useDisplay();
-  useLayoutEffect(() => {
-    const a = area.current;
-    if (a === null) return;
-    // the one line's height, as the last whole fit measured it
-    let one = 0;
-    // each style written only when it changes: a write of the same value still restyles the field in some engines
-    const set = (height: string, scrolls: boolean) => {
-      if (a.style.height !== height) a.style.height = height;
-      const overflow = scrolls ? "" : "hidden";
-      if (a.style.overflowY !== overflow) a.style.overflowY = overflow;
-      if (!scrolls && a.scrollTop !== 0) a.scrollTop = 0;
-    };
-    // a whole fit once typing pauses, after fits that only grew the field
-    let settle: ReturnType<typeof setTimeout> | undefined;
-    const fit = (grow = false, kind = "") => {
-      clearTimeout(settle);
-      settle = undefined;
-      const was = fitted.current;
-      // macOS commits a dead key's mark by taking it out and putting it back, in one task: no fit between (#117 L)
-      const out = kind === "deleteCompositionText";
-      if (!out) fitted.current = a.value;
-      // over the cap, a scroll height past the field's height is its words' own: the field stays, with no diff, no
-      // collapse and no settle. After a 6 MiB paste the diff took 11 ms a key; Backspace's whole fit 149 ms to 108
-      if (one > 0 && a.style.height === `${one * 6}px` && a.style.overflowY === "") {
-        if (a.scrollHeight > a.clientHeight) return;
-      }
-      // words only put in, as plain typing does: the field can only keep its height or grow, which its own scroll
-      // height shows with no collapse. Collapsing it to measure, as the whole fit does, laid out the room's column
-      // twice and repainted the thread above on every keystroke (Chromium trace, #117 L). A mark that joins a
-      // conjunct can narrow a line enough to lose one, which a scroll height never shows, and a mark can go for good:
-      // so once typing pauses, a field taller than one line is fitted whole
-      if (grow && one > 0 && (out || insertedOnly(was, a.value))) {
-        const h = a.scrollHeight;
-        if (h > a.clientHeight + (a.style.height === "" ? 4 : 0))
-          set(`${Math.min(h, one * 6)}px`, h > one * 6);
-        if (a.style.height !== "") settle = setTimeout(() => fit(), SETTLE_MS);
-        return;
-      }
-      a.style.height = "";
-      one = a.clientHeight;
-      const cap = one * 6;
-      const h = a.scrollHeight;
-      // only words past the six lines scroll; short of them the field draws no scroll arrows. A Devanagari line can
-      // measure a few px over the one line, inside the slack above, and WebView2 drew arrows on an empty field
-      set(h > one + 4 ? `${Math.min(h, cap)}px` : "", h > cap);
-    };
-    fitRef.current = fit;
-    fit();
-    // the fit can change the field's height and so the form's, which the status line's observer, watching the form,
-    // has already been told of this frame: the browser keeps that change for the next frame and reports
-    // "ResizeObserver loop completed with undelivered notifications" once. It is no loop: the next delivery finds
-    // the width unchanged and fits nothing. (Chromium, a composer at 390 px whose width alone changes.)
-    // The WebKit probe must allow this one message ("ResizeObserver loop completed with undelivered notifications"),
-    // decided in review: it fires once per width change and settles.
-    let width = a.clientWidth;
-    const ro = new ResizeObserver(() => {
-      if (a.clientWidth === width) return;
-      width = a.clientWidth;
-      fit();
-    });
-    ro.observe(a);
-    return () => {
-      ro.disconnect();
-      clearTimeout(settle);
-    };
-  }, [lang, textSize]);
   // after every change to the words, typed, composed, undone or set through the handle: fit the field to them, say
   // whether it holds any, and tell the room
   const changed = (typed = false, kind?: string) => {
@@ -348,25 +292,36 @@ export function Composer<V extends string = string>({
     if (a === null) return;
     fitRef.current(typed, kind);
     tokenSync.current?.();
-    setEmpty(a.value.trim() === "");
-    onInput?.(a.value);
+    const none = a.value.trim() === "";
+    setEmpty(none);
+    onInput?.(asked(), none && !chips.has());
+  };
+  // the field's words and the chips together set to `next`, split again (splitAsked): the chips first, so the field's
+  // input event reads them, and one undo step for both (usePasteChips); a field the engine left as it was is told here
+  const replace = (a: HTMLTextAreaElement, next: string, focus: boolean, inPlace = false) => {
+    const { typed, chips: back } = splitAsked(next);
+    const was = a.value;
+    const step = chips.set(back, typed);
+    if (inPlace) a.value = typed;
+    const engine = !inPlace && replaceAll(a, typed, focus);
+    if (step !== null) step.engine = engine && was !== typed;
+    if (!engine || was === typed) changed();
   };
   const put = (next: string) => {
     const a = area.current;
     if (a === null) return;
-    if (!replaceAll(a, next, true)) changed();
+    replace(a, next, true);
     a.focus();
   };
   const clear = (only?: string, inPlace = false) => {
     const a = area.current;
-    if (a === null || (only !== undefined && a.value !== only)) return;
+    if (a === null || (only !== undefined && asked() !== only)) return;
     if (composing.current) {
       // select-all and delete inside a composition would break it: wait for its end
-      clearAfter.current = a.value;
+      clearAfter.current = asked();
       return;
     }
-    if (inPlace) a.value = "";
-    if (inPlace || !replaceAll(a, "", mayTakeFocus(a))) changed();
+    replace(a, "", mayTakeFocus(a), inPlace);
   };
   const fill = (text: string, inPlace = false) => {
     const a = area.current;
@@ -376,9 +331,8 @@ export function Composer<V extends string = string>({
       fillAfter.current = text;
       return;
     }
-    if (a.value !== "") return;
-    if (inPlace) a.value = text;
-    if (inPlace || !replaceAll(a, text, mayTakeFocus(a))) changed();
+    if (a.value !== "" || chips.has()) return;
+    replace(a, text, mayTakeFocus(a), inPlace);
   };
   // the held clear and fill, once the composition is over; in place when the field is losing focus, which it never
   // takes back
@@ -393,7 +347,7 @@ export function Composer<V extends string = string>({
   // made anew each render, as changed reads the caller's onInput: the composer renders rarely, never per keystroke
   useImperativeHandle(ref, () => ({
     focus: () => area.current?.focus(),
-    text: () => area.current?.value ?? "",
+    text: asked,
     setText: put,
     clear: (only) => clear(only),
     fill: (text) => fill(text),
@@ -425,7 +379,7 @@ export function Composer<V extends string = string>({
       data-composer=""
       onSubmit={(e) => {
         e.preventDefault();
-        onAsk?.(area.current?.value ?? "");
+        onAsk?.(asked());
       }}
     >
       {queue}
@@ -456,7 +410,7 @@ export function Composer<V extends string = string>({
         <div
           ref={frameRef}
           className="room-field"
-          data-papers={papers.length > 0 ? "" : undefined}
+          data-papers={papers.length > 0 || chips.list.length > 0 ? "" : undefined}
           data-gate={gate !== undefined ? "" : undefined}
           onPointerDown={(e) => {
             // the whole field takes the pointer, not just its one line of text
@@ -469,6 +423,16 @@ export function Composer<V extends string = string>({
           {gate === undefined && (
             <>
               {papers.length > 0 && <PaperChips papers={papers} onRemove={onRemovePaper} />}
+              {chips.list.length > 0 && (
+                <PasteChips
+                  chips={chips.list}
+                  onRemove={(id) => {
+                    chips.remove(id);
+                    changed();
+                  }}
+                  onEmptied={() => area.current?.focus()}
+                />
+              )}
               <label className="sr-only" htmlFor={fieldId}>
                 {placeholder ?? w.t("Ask about this matter")}
               </label>
@@ -498,6 +462,14 @@ export function Composer<V extends string = string>({
               setArmed(e.currentTarget);
             }}
             onInput={(e) => changed(true, (e.nativeEvent as InputEvent).inputType)}
+            onPaste={(e) => {
+              // a long paste is a chip, not words in the field (paste-chips-logic.ts)
+              const text = e.clipboardData.getData("text/plain");
+              if (composing.current || text.length < PASTE_CHIP_MIN) return;
+              e.preventDefault();
+              chips.add(text);
+              changed();
+            }}
             onCompositionStart={() => {
               composing.current = true;
             }}
@@ -515,6 +487,12 @@ export function Composer<V extends string = string>({
               settle(true);
             }}
             onKeyDown={(e) => {
+              // Cmd/Ctrl+Z taking back a clear, fill or set takes its chips back too
+              if (chips.undo(e, platform === "mac")) {
+                e.preventDefault();
+                changed();
+                return;
+              }
               const key = {
                 key: e.key,
                 shiftKey: e.shiftKey,
@@ -530,7 +508,7 @@ export function Composer<V extends string = string>({
               }
               if (!sendsOnEnter(key)) return;
               e.preventDefault();
-              onAsk?.(e.currentTarget.value);
+              onAsk?.(asked());
             }}
           />
           {armed !== null && hasMenu && !gated && !disabled && (
