@@ -201,6 +201,26 @@ fn mcp_failures() -> Vec<DomainEvent> {
             ErrorCode::McpImportTooLarge,
             "the import is too long to show in one confirm",
         ),
+        failed(
+            ErrorCode::BlacklineNestedTable,
+            "stetdoc refused the compare over a table inside a table",
+        ),
+        failed(
+            ErrorCode::BlacklineCannotCompare,
+            "stetdoc refused the compare",
+        ),
+        failed(
+            ErrorCode::BlacklineNotReadable,
+            "stetdoc could not read a version",
+        ),
+        failed(
+            ErrorCode::BlacklineTooLarge,
+            "a version is past stetdoc's limit",
+        ),
+        failed(
+            ErrorCode::BlacklineFormatUnknown,
+            "the view is not in the stet 1 format",
+        ),
     ]
 }
 

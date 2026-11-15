@@ -1927,10 +1927,15 @@ export type ErrorCode =
 "matter.folder_backslash" | 
 /** The agent could not open the matter folder as its working folder when it started (Claude Code's "Can't access working directory" in its answer to a startup request), though the host found the folder there just before. Asking again can work once the folder is back where the matter expects it. */
 "agent.folder_inaccessible" | 
+/** stetdoc could not compare the two versions because of a table inside a table cell (its compare refused the redline it made, `validation_failed`, over a cell), so nothing is shown; trying again gives the same answer. */
 "blackline.nested_table" | 
+/** stetdoc refused to compare the two versions (`validation_failed` or `unsupported`) for a reason other than a table inside a table, so nothing is shown; trying again gives the same answer. */
 "blackline.cannot_compare" | 
+/** stetdoc could not read one of the two versions as a Word document (`malformed_input`, `corrupt_complement` or `unsupported_version`), so nothing is shown. */
 "blackline.not_readable" | 
+/** One of the two versions is past a size limit of stetdoc's (`limit_exceeded`), so nothing is shown. */
 "blackline.too_large" | 
+/** stetdoc's view of the blackline is in a format this Clauseo does not know (a header other than `stet 1`, or none), so nothing is shown rather than a guess. */
 "blackline.format_unknown" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
@@ -7467,8 +7472,9 @@ export type WindowKind =
 
 /**
  *  A Word document's blackline, for `WordBlackline`: its body's paragraphs in document order,
- *  each table cell a paragraph of its own. A struct, so later fields are additive; it accepts
- *  fields it does not know.
+ *  each paragraph of a table cell one of its own, a table inside a cell included (its cells'
+ *  paragraphs come where the inner table stands). A struct, so later fields are additive; it
+ *  accepts fields it does not know.
  */
 export type WordBlackline = {
 	/**  The paragraphs, first to last. */
