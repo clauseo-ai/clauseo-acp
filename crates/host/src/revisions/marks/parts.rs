@@ -30,9 +30,13 @@ pub(super) struct Entries {
     lower: HashSet<String>,
 }
 
-/// The zip's entries that are files (not folders); `None` when a name does not read or two
-/// names are one part name (they match without case), so one would go unread.
+/// The zip's entries that are files (not folders); `None` when a name does not read, or two
+/// entries have one name or names that match without case: the scan would read only one, and
+/// which one Word reads is not known.
 pub(super) fn entries<R: Read + Seek>(zip: &zip::ZipArchive<R>) -> Option<Entries> {
+    if zip.has_duplicate_names() {
+        return None;
+    }
     let mut names = Vec::new();
     let mut lower = HashSet::new();
     for name in zip.file_names() {
@@ -84,15 +88,30 @@ impl ContentTypes {
         ends_with(name, ".rels") || self.of(name).is_some_and(|kind| kind == RELS_TYPE)
     }
 
-    /// Whether the part `name` is XML: named `.xml`, or given an XML content type.
+    /// Whether the part `name` is XML: named `.xml`, or given an XML content type other than an
+    /// image's. Word never reads an image (`image/svg+xml`) as a document part, and an exported SVG
+    /// often holds what the scan does not model, which would offer Tracked changes on every file
+    /// with that logo.
     pub(super) fn is_xml(&self, name: &str) -> bool {
-        ends_with(name, ".xml") || self.of(name).is_some_and(|kind| kind.ends_with("xml"))
+        ends_with(name, ".xml")
+            || self
+                .of(name)
+                .is_some_and(|kind| kind.ends_with("xml") && !kind.starts_with("image/"))
     }
 
     /// Whether every part the content types name by name is in the zip.
     pub(super) fn all_present(&self, entries: &Entries) -> bool {
         self.overrides.keys().all(|name| entries.holds(name))
     }
+}
+
+/// A content type as the scan compares it: lowered, without its parameters (`; charset=...`).
+fn media_type(kind: &str) -> String {
+    kind.split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase()
 }
 
 /// Whether `name` ends with `end` (lowercase), without case.
@@ -114,7 +133,7 @@ pub(super) fn content_types(xml: &[u8]) -> Option<ContentTypes> {
                 if let (Some(extension), Some(kind)) = (extension, kind) {
                     types
                         .defaults
-                        .insert(extension.to_lowercase(), kind.to_lowercase());
+                        .insert(extension.to_lowercase(), media_type(&kind));
                 }
             }
             "Override" => {
@@ -124,7 +143,7 @@ pub(super) fn content_types(xml: &[u8]) -> Option<ContentTypes> {
                     let part = part_name(part.strip_prefix('/').unwrap_or(&part))?;
                     types
                         .overrides
-                        .insert(part.to_lowercase(), kind.to_lowercase());
+                        .insert(part.to_lowercase(), media_type(&kind));
                 }
             }
             _ => {}
@@ -136,7 +155,8 @@ pub(super) fn content_types(xml: &[u8]) -> Option<ContentTypes> {
 
 /// The parts inside the package that the relationships part `rels` (its zip name) names in
 /// `xml`, resolved against their source's folder; `None` when it does not read as the scan
-/// models it or a target is not a part name inside the package.
+/// models it, a target is not a part name inside the package, or a relationship imports a chunk
+/// (`aFChunk`).
 pub(super) fn targets(rels: &str, xml: &[u8]) -> Option<Vec<String>> {
     // `word/_rels/document.xml.rels` holds `word/document.xml`'s: its targets are in `word/`
     let folder = match rels.to_ascii_lowercase().rfind("_rels/") {
@@ -147,6 +167,14 @@ pub(super) fn targets(rels: &str, xml: &[u8]) -> Option<Vec<String>> {
     elements(xml, |name, element| {
         if name != "Relationship" {
             return Some(());
+        }
+        // an imported chunk (HTML, RTF, another document) Word merges in can carry revisions in
+        // a form the scan does not read
+        let chunk = attribute(element, "Type")
+            .ok()?
+            .is_some_and(|kind| ends_with(&kind, "/afchunk"));
+        if chunk {
+            return None;
         }
         let external = attribute(element, "TargetMode")
             .ok()?

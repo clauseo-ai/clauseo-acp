@@ -204,11 +204,16 @@ fn zip_marks(file: impl Read + Seek, part_cap: u64, total_cap: u64) -> Option<bo
         return Some(true);
     }
     for name in rels {
-        let targets = match read_whole(&mut zip, name, part_cap, &mut left)? {
-            Whole::Read(bytes) => parts::targets(name, &bytes),
-            Whole::Not => None,
+        let Whole::Read(bytes) = read_whole(&mut zip, name, part_cap, &mut left)? else {
+            return Some(true);
         };
+        let targets = parts::targets(name, &bytes);
         if !targets.is_some_and(|targets| parts::present(&targets, &entries)) {
+            return Some(true);
+        }
+        // read for marks too: a part named `.rels` may be typed and used as a story part; a real
+        // relationships part holds none
+        if holds_any(bytes.as_slice(), &[CHANGE_MARKS, COMMENT_MARKS])? != Found::Clean {
             return Some(true);
         }
     }
