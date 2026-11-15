@@ -7,6 +7,7 @@ import { replaceAll, UNDOABLE_MAX } from "./composer-edit.ts";
 
 afterEach(() => {
   document.body.replaceChildren();
+  delete document.documentElement.dataset["platform"];
 });
 
 const long = "Clause 00001. The parties agree.\n".repeat(Math.ceil((UNDOABLE_MAX + 1) / 33));
@@ -58,6 +59,23 @@ test("Cmd+Shift+Z after the undo puts the long text back, and Cmd+Z takes it awa
   a.value = "Draft again";
   expect(press(a, { metaKey: true, shiftKey: true })).toBe(false);
   expect(press(a, { metaKey: true })).toBe(false);
+});
+
+test("on Windows Ctrl+Y redoes it too; elsewhere Ctrl+Y and Cmd+Y are left alone", () => {
+  document.documentElement.dataset["platform"] = "mac";
+  const a = field("Draft");
+  replaceAll(a, long, true);
+  expect(press(a, { metaKey: true })).toBe(true);
+  expect(press(a, { key: "y", metaKey: true })).toBe(false);
+  expect(press(a, { key: "y", ctrlKey: true })).toBe(false);
+  expect(a.value).toBe("Draft");
+  document.documentElement.dataset["platform"] = "windows";
+  expect(press(a, { key: "y", metaKey: true })).toBe(false);
+  expect(press(a, { key: "y", ctrlKey: true, shiftKey: true })).toBe(false);
+  expect(press(a, { key: "y", ctrlKey: true })).toBe(true);
+  expect(a.value).toBe(long);
+  expect(press(a, { ctrlKey: true })).toBe(true);
+  expect(a.value).toBe("Draft");
 });
 
 test("Ctrl+Z takes it back too; Shift, Alt or both modifiers leave the key alone", () => {

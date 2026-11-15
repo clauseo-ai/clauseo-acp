@@ -5,7 +5,7 @@ import { toolCall } from "../../testing/stream-script.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { doneOf, timeOf } from "./steps.ts";
 import { doingOf, plainOf, siteQuery, thoughtText, titleOf } from "./step-names.ts";
-import { inMatter, taskOf, whyOf } from "./task-words.ts";
+import { inMatter, programsOf, taskOf, whyOf } from "./task-words.ts";
 
 const FOLDER = "Documents/Clauseo/Sharma";
 const ROOT = `/Users/lawyer/${FOLDER}`;
@@ -101,6 +101,19 @@ test("a chained command is counted, not named by its first program; its command 
   expect(doneOf("en", task({ ...ps, description: "Copy the notice into drafts" }))).toBe(
     "Copy the notice into drafts.",
   );
+});
+
+test.each([
+  ["echo 'it'\\''s' ; rm -rf papers", ["echo", "rm"]],
+  ['echo "a \\" b" ; rm -rf papers', ["echo", "rm"]],
+  ['echo `"; Remove-Item papers', ["echo", "Remove-Item"]],
+  ["Write-Output \\; Remove-Item papers", ["Write-Output", "Remove-Item"]],
+  ['echo "abc ; rm -rf papers', ["echo", "rm"]],
+  ["echo 'abc ; rm -rf papers", ["echo", "rm"]],
+])("no quote or backslash hides a chained task: %s", (line, programs) => {
+  expect(programsOf(line)).toEqual(programs);
+  expect(taskOf(task({ command: line }))).toMatchObject({ program: programs[0], count: 2 });
+  expect(doneOf("en", task({ command: line }))).toBe("Ran 2 tasks.");
 });
 
 test("paths inside the matter read from the matter, through the home folder or a whole path", () => {
