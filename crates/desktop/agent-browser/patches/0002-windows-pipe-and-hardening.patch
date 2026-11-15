@@ -1329,10 +1329,10 @@ index c73843c..10b46d6 100644
          .map(|s| s.success())
 diff --git a/cli/src/windows_pipe.rs b/cli/src/windows_pipe.rs
 new file mode 100644
-index 0000000..d147d7c
+index 0000000..7aad1d0
 --- /dev/null
 +++ b/cli/src/windows_pipe.rs
-@@ -0,0 +1,425 @@
+@@ -0,0 +1,426 @@
 +//! The daemon's named pipe on Windows, which replaces loopback TCP.
 +//!
 +//! A loopback port can be reached by any local process, a sandboxed one included. The pipe is
@@ -1380,7 +1380,7 @@ index 0000000..d147d7c
 +
 +use crate::windows_security::{
 +    pipe_descriptor, process_creation_time, process_image, process_token_is_restricted, raw,
-+    same_image, to_wide, SecurityDescriptor,
++    same_executable, to_wide, SecurityDescriptor,
 +};
 +
 +/// How many instances of the pipe listen at once.
@@ -1473,7 +1473,8 @@ index 0000000..d147d7c
 +        ));
 +    }
 +    let ours = std::env::current_exe()?;
-+    if !process_image(server_pid).is_ok_and(|image| same_image(&image, &ours.to_string_lossy())) {
++    let image = process_image(server_pid).map(std::path::PathBuf::from);
++    if !image.is_ok_and(|image| same_executable(&image, &ours)) {
 +        return refuse(format!("process {server_pid} does not run this executable"));
 +    }
 +    if process_token_is_restricted(server_pid) {
@@ -2159,10 +2160,10 @@ index 0000000..3cf853f
 +}
 diff --git a/cli/src/windows_security.rs b/cli/src/windows_security.rs
 new file mode 100644
-index 0000000..91a4ab6
+index 0000000..bf29988
 --- /dev/null
 +++ b/cli/src/windows_security.rs
-@@ -0,0 +1,338 @@
+@@ -0,0 +1,374 @@
 +//! Windows process and pipe security.
 +//!
 +//! Every agent-browser process protects itself first thing in `main`: its DACL lets SYSTEM do
@@ -2177,6 +2178,7 @@ index 0000000..91a4ab6
 +
 +use std::io;
 +use std::os::windows::io::{FromRawHandle, OwnedHandle};
++use std::path::Path;
 +use std::ptr;
 +
 +use windows_sys::Win32::Foundation::{
@@ -2288,9 +2290,11 @@ index 0000000..91a4ab6
 +
 +/// Gives the calling thread the protected DACL (for a thread, the user keeps SYNCHRONIZE and
 +/// THREAD_RESUME, 0x101000: no GET_CONTEXT or SET_CONTEXT). Threads otherwise get the token's
-+/// default DACL. That default is left alone on purpose: anonymous pipes (std's and
-+/// CreatePipe's) take it and are reopened by name, so a protected default would break every
-+/// piped child.
++/// default DACL. That default is left alone on purpose: an anonymous pipe (std's, and
++/// CreatePipe's) takes it, and the parent then opens the pipe's second end itself. A protected
++/// default, which leaves OWNER RIGHTS only SYNCHRONIZE and 0x1000, would deny that open and
++/// break every piped child. The pipes need no DACL of their own: each has one instance and is
++/// connected at once.
 +pub fn harden_current_thread() -> io::Result<()> {
 +    set_dacl(unsafe { GetCurrentThread() }, &process_descriptor()?)
 +}
@@ -2354,6 +2358,16 @@ index 0000000..91a4ab6
 +        return Err(io::Error::last_os_error());
 +    }
 +    Ok(String::from_utf16_lossy(&buf[..len as usize]))
++}
++
++/// Whether two executables are the same file: both paths are resolved first (junctions,
++/// symlinks), so an install reached through a link still matches. A path that cannot be
++/// resolved matches nothing.
++pub fn same_executable(a: &Path, b: &Path) -> bool {
++    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
++        (Ok(a), Ok(b)) => same_image(&a.to_string_lossy(), &b.to_string_lossy()),
++        _ => false,
++    }
 +}
 +
 +/// Whether two executable paths name the same file: case-insensitive, `/` as `\`, and a
@@ -2470,6 +2484,29 @@ index 0000000..91a4ab6
 +#[cfg(test)]
 +mod tests {
 +    use super::*;
++
++    #[test]
++    fn the_same_executable_matches_through_a_junction() {
++        let exe = std::env::current_exe().unwrap();
++        let dir = tempfile::tempdir().unwrap();
++        let link = dir.path().join("linked");
++        // A directory junction needs no privilege (a symlink would).
++        let made = std::process::Command::new("cmd")
++            .args(["/d", "/c", "mklink", "/J"])
++            .arg(&link)
++            .arg(exe.parent().unwrap())
++            .output()
++            .unwrap();
++        assert!(made.status.success(), "mklink /J: {made:?}");
++        let through_link = link.join(exe.file_name().unwrap());
++        assert!(same_executable(&exe, &through_link));
++        assert!(!same_executable(&exe, &dir.path().join("missing.exe")));
++        let other = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap())
++            .join("System32")
++            .join("cmd.exe");
++        assert!(!same_executable(&exe, &other));
++        std::fs::remove_dir(&link).unwrap();
++    }
 +
 +    #[test]
 +    fn sddl_strings_are_the_approved_ones() {
