@@ -12,6 +12,7 @@
 // agent.start_offline's, a start that failed on its connection with the host's probe agreeing.
 // agent.start_offline's, a start that failed on its connection with the host's probe agreeing, and U6F-28 to
 // U6F-30 agent.answer_failed's, an error the agent answered the question with: the stop line, with Try again.
+// U6F-31 to U6F-33 are agent.setting_refused's, the lawyer's mode or setting change the agent didn't accept.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { type AgentName, errorWords as sentence } from "@clauseo/components/lib/words-errors.ts";
@@ -375,6 +376,24 @@ export const U6F: Entry[] = [
     words: errorWords("The AI stopped with an error. Try again."),
     screen: "room/thread",
     render: nameless("agent.answer_failed"),
+  },
+  {
+    id: "U6F-31",
+    words: errorWords("ChatGPT didn't accept that change. Try again."),
+    screen: "room/composer",
+    render: refused("agent.setting_refused", "codex-acp"),
+  },
+  {
+    id: "U6F-32",
+    words: errorWords("{name} didn't accept that change. Try again."),
+    screen: "room/composer",
+    render: refused("agent.setting_refused", "gemini"),
+  },
+  {
+    id: "U6F-33",
+    words: errorWords("The AI didn't accept that change. Try again."),
+    screen: "room/composer",
+    render: nameless("agent.setting_refused"),
   },
   {
     id: "U3-52",

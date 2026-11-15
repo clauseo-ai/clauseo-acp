@@ -1119,5 +1119,16 @@
     "at": "2026-11-15",
     "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
     "note": "agent.mode_missing: the session offered no mode Clauseo runs it in (was \"Claude sent something Clauseo can't read.\"); the same words as U3-err-agent.unsupported_version, approved there"
+  },
+  "U3-err-agent.setting_refused": {
+    "en": "Claude didn't accept that change. Try again.",
+    "hi": "Claude ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.setting_refused: the agent answered the lawyer's mode or setting change with an error (was \"Claude sent something Clauseo can't read.\")"
   }
 }

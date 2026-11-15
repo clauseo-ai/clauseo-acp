@@ -130,6 +130,7 @@ export type ErrorCode =
   | "agent.start_offline"
   | "agent.answer_failed"
   | "agent.mode_missing"
+  | "agent.setting_refused"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -378,6 +379,9 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // the agent's session offered no mode Clauseo runs it in: as agent.unsupported_version says it, a version Clauseo
   // doesn't support (before-launch item 3)
   "agent.mode_missing": "This version of Claude Code doesn't work with Clauseo.",
+  // the agent answered the lawyer's own mode or setting change with an error; nothing changed (before-launch item
+  // 3). Provisional
+  "agent.setting_refused": "Claude didn't accept that change. Try again.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -425,6 +429,12 @@ const PLANNED: Partial<
     chatgpt: "This version of Codex doesn't work with Clauseo.",
     named: "This version of {name} doesn't work with Clauseo.",
     nameless: "This version of the AI doesn't work with Clauseo.",
+  },
+  // provisional (before-launch item 3), as ERROR_WORDS' sentence
+  "agent.setting_refused": {
+    chatgpt: "ChatGPT didn't accept that change. Try again.",
+    named: "{name} didn't accept that change. Try again.",
+    nameless: "The AI didn't accept that change. Try again.",
   },
   // provisional (before-launch item 3), as ERROR_WORDS' sentence
   "agent.start_offline": {
