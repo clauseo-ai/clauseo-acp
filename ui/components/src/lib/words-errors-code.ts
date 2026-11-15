@@ -126,4 +126,5 @@ export type ErrorCode =
   | "blackline.too_large"
   | "blackline.format_unknown"
   | "word.too_large"
+  | "matter.file_folder_clash"
   | "unknown";

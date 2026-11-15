@@ -272,6 +272,9 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // lines are in PLANNED
   "agent.program_blocked": PROGRAM_BLOCKED.claude,
   "agent.program_missing": PROGRAM_MISSING.claude,
+  // Versions' Restore of one paper whose name is now a folder, or whose folder is now a file: nothing was written
+  "matter.file_folder_clash":
+    "Clauseo can't restore this paper: a folder now has its name, or the folder it was in is now a file. Nothing has changed.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

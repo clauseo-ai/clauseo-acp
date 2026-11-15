@@ -9,6 +9,7 @@ import type {
   HostError,
   MatterId,
   RestorePreview,
+  RestoreRequest,
   SkippedFile,
   StreamId,
   ThreadId,
@@ -195,7 +196,7 @@ export async function lockedRestore(
   refusal: { code: string; files?: readonly string[] | undefined },
   previewOf: (id: string) => Promise<RestorePreview | null>,
 ): Promise<Ask> {
-  const { id, undoes } = ask;
+  const { id, undoes, file } = ask;
   let preview = ask.preview;
   if (preview.locked.length === 0 && preview.changes.length !== 1) {
     try {
@@ -213,28 +214,34 @@ export async function lockedRestore(
     ),
   );
   return files === null
-    ? { act: "restore", id, preview, undoes, stage: "confirm", failed: refusal.code }
-    : { act: "restore", id, preview, undoes, stage: "word", files };
+    ? { act: "restore", id, preview, undoes, file, stage: "confirm", failed: refusal.code }
+    : { act: "restore", id, preview, undoes, file, stage: "word", files };
 }
 
 /** What restoring a version would write now, by the host's preview_restore; undoes: the restore it takes back, whose
- * added files go too (the preview's removes). Null when the answer isn't one. */
+ * added files go too (the preview's removes); file: the one file restored, null for the whole matter. Null when the
+ * answer isn't one. */
 export async function previewRestore(
   transport: HostTransport,
   matter: MatterId,
   id: string,
   undoes: string | null = null,
+  file: string | null = null,
 ): Promise<RestorePreview | null> {
   const r = await transport.query({
     preview_restore: {
       matter,
       checkpoint: id,
-      scope: "matter",
+      scope: scopeOf(file),
       ...(undoes === null ? {} : { undoes }),
     },
   });
   return "restore_preview" in r ? r.restore_preview : null;
 }
+
+/** What a restore puts back: the whole matter, or the one file Versions' per-file Restore names. */
+export const scopeOf = (file: string | null): RestoreRequest =>
+  file === null ? "matter" : { files: { paths: [file] } };
 
 /** A restore whose preview rejected: the rejection is logged, and a file a program holds (matter.file_locked, with its
  * files) gets lockedRestore's Word or lock dialog. That dialog needs what restoring writes, which the rejection didn't
@@ -243,6 +250,7 @@ export async function previewRestore(
 export async function refusedPreview(
   id: string,
   undoes: string | null,
+  file: string | null,
   error: HostError,
   previewOf: (id: string) => Promise<RestorePreview | null>,
 ): Promise<Ask | null> {
@@ -250,7 +258,7 @@ export async function refusedPreview(
   if (error.code !== "matter.file_locked" || !error.files?.length) return null;
   const none: RestorePreview = { changes: [], added_since: [], kept: [], locked: [] };
   const ask = await lockedRestore(
-    { act: "restore", id, preview: none, undoes, stage: "confirm", failed: null },
+    { act: "restore", id, preview: none, undoes, file, stage: "confirm", failed: null },
     error,
     previewOf,
   );

@@ -26,6 +26,7 @@ import type {
 } from "../../transport/protocol.ts";
 import { fileName } from "@clauseo/components/lib/words-core.ts";
 import { clockOf, dayOf } from "../when.ts";
+import type { Look } from "./state.ts";
 
 const DAY_MS = 86_400_000;
 
@@ -199,6 +200,24 @@ export const undoesAsRestore = (
   restores: ReadonlyMap<string, string>,
   id: string,
 ): boolean => t.meta.get(id)?.kind === "restore" && restores.has(id) && t.history[0]?.id !== id;
+
+/** Where the room stands when the lawyer looks at a version, or at now (null, or the newest): the newest version is
+ * now; a turn's, or a restore the host marked, stays picked, so the band can offer its Undo. Comparing carries over
+ * from the look before. */
+export function lookAt(
+  t: Timeline,
+  restores: ReadonlyMap<string, string>,
+  before: Look,
+  id: string | null,
+): Look {
+  const last = t.history.at(-1)?.id;
+  if (id !== null && id !== last)
+    return { kind: "back", id, comparing: before.kind === "back" && before.comparing };
+  const kind = id === null ? undefined : t.meta.get(id)?.kind;
+  return id !== null && (kind === "after_turn" || undoesAsRestore(t, restores, id))
+    ? { kind: "now", id }
+    : { kind: "now" };
+}
 
 /** What the toolbar's Undo takes back: the newest version when it is a marked restore (restore); else the newest
  * turn's version whose change can be undone (ready), walking newest first past each turn whose step is in and can't be

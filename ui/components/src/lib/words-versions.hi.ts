@@ -182,6 +182,23 @@ const OWN = {
   "'{papers}', added by the restore, will be removed.":
     "पुनर्स्थापन से जोड़ा गया '{papers}' हटा दिया जाएगा।",
   "{papers}, added by the restore, will be removed.": "पुनर्स्थापन से जोड़े गए {papers} हटा दिए जाएँगे।",
+  // restoring one document (Versions' Restore this document, beside the documents that differ from now)
+  "Restore this document": "यह दस्तावेज़ पुनर्स्थापित करें",
+  "Restore '{paper}' to how it was at {time} today?":
+    "'{paper}' को वैसा पुनर्स्थापित करें जैसा वह आज {time} बजे था?",
+  "Restore '{paper}' to how it was at {time} on {date}?":
+    "'{paper}' को वैसा पुनर्स्थापित करें जैसा वह {date} को {time} बजे था?",
+  "This replaces '{paper}' as it is now. The copy you have now stays in Versions, so you can undo this.":
+    "इससे '{paper}' का अभी वाला रूप बदल जाएगा। आपकी अभी वाली प्रति संस्करणों में रहेगी, इसलिए आप इसे पूर्ववत कर सकते हैं।",
+  "'{paper}' comes back as it was then. You can undo this.":
+    "'{paper}' वैसा ही वापस आ जाएगा जैसा तब था। आप इसे पूर्ववत कर सकते हैं।",
+  "Nothing will change.": "कुछ नहीं बदलेगा।",
+  "Nothing will change. '{paper}' already stands as it did then.":
+    "कुछ नहीं बदलेगा। '{paper}' पहले से वैसा ही है जैसा तब था।",
+  "Restored {paper} to how it was at {time} today.":
+    "{paper} को वैसा पुनर्स्थापित किया गया जैसा वह आज {time} बजे था।",
+  "Restored {paper} to how it was at {time} on {date}.":
+    "{paper} को वैसा पुनर्स्थापित किया गया जैसा वह {date} को {time} बजे था।",
   "'{papers}' can't be restored and stays as it is.":
     "'{papers}' पुनर्स्थापित नहीं हो सकता और जैसा है वैसा ही रहेगा।",
   "{papers} can't be restored and stay as they are.":

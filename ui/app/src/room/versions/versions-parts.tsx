@@ -21,7 +21,7 @@ import {
   type Calendar,
   type Version,
 } from "@clauseo/components/clauseo/versions-model.ts";
-import { IconUndo } from "@clauseo/components/icons/icons.tsx";
+import { IconHistory, IconUndo } from "@clauseo/components/icons/icons.tsx";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { useVersionWords, vt } from "@clauseo/components/lib/words-versions.ts";
@@ -32,7 +32,7 @@ import { PAPER_GONE, refusalOf } from "../open.ts";
 import { markable, markAskOf, type Blacklines } from "./blackline.ts";
 import { MarkedDesk } from "./blackline-sheet.tsx";
 import type { VersionsController } from "./controller.ts";
-import { restoreOf, type Snapshot } from "./state.ts";
+import { restorable, restoreOf, type Snapshot } from "./state.ts";
 import type { StandIns } from "./stand-ins.ts";
 import { calendarOf, fileName, undoable } from "./timeline.ts";
 import {
@@ -312,6 +312,8 @@ export function VersionsCentre({
         {...openNow(standIns, inView, fileRef(inView.path), c, freshRef)}
       />
     );
+  // the document in view, which Restore this document puts back alone as it was then
+  const back = inView === undefined ? null : restorable(inView);
   // an undo waits while the host checks what changed since, and while it would put nothing back
   const held =
     s.ask?.act === "undo" &&
@@ -372,6 +374,22 @@ export function VersionsCentre({
             onDoc={setDoc}
             legend={changes.length === 0 ? vt(lang, "No changes since then.") : ""}
             unchanged=""
+            {...(back === null
+              ? {}
+              : {
+                  action: (
+                    <WaitingButton
+                      waiting={waiting !== null}
+                      describedBy={waitId}
+                      className="ver-restore-file"
+                      testId="version-restore-file"
+                      onClick={() => void c.askRestore(shown.id, null, back)}
+                    >
+                      <IconHistory size={16} />
+                      {w.v("Restore this document")}
+                    </WaitingButton>
+                  ),
+                })}
           />
           {inView !== undefined && (
             <Desk label={fileName(inView.path)} scrollRef={desk}>
