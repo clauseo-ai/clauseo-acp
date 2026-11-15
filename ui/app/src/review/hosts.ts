@@ -122,6 +122,10 @@ export type ThreadState = {
   /** The unsafe-site list's notices on the app feed (0053), and the code an allow is refused
    * with. */
   blocked?: { sites: SiteBlocked[]; refuse?: ErrorCode };
+  /** Other matters list_matters gives after the thread's own, for lines that name another matter. */
+  others?: MatterSummary[];
+  /** The other matters the thread's header says it may read (`read_matters`): the composer's pills. */
+  read?: string[];
 };
 
 /** The app feed of a state with connectors (U15): the state, then the hint when it has one. */
@@ -178,17 +182,15 @@ export function threadHost(state: ThreadState): FakeTransport {
   head.header!.status = state.status ?? "idle";
   head.header!.commands = state.commands ?? [];
   head.header!.agent = agent;
+  if (state.read !== undefined) head.header!.read_matters = state.read;
   const transport: FakeTransport = new FakeTransport({
     ...(state.platform === undefined ? {} : { platform: state.platform }),
     query: (query) => {
       if (query === "list_matters")
         return {
           matters: [
-            {
-              ...MATTER,
-              ...(state.folder === undefined ? {} : { folder_support: state.folder }),
-              ...(state.matterFolder === undefined ? {} : { folder_display: state.matterFolder }),
-            },
+            state.folder === undefined ? MATTER : { ...MATTER, folder_support: state.folder },
+            ...(state.others ?? []),
           ],
         };
       if (typeof query === "object" && query.list_threads !== undefined)
