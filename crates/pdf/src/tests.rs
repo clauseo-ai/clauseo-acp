@@ -9,28 +9,13 @@ fn runtime(root: &Path, os: Os) -> BTreeSet<PathBuf> {
     BTreeSet::from([root.join(RECEIPT), runtime_program(root, os)])
 }
 
-fn find(var: Option<&str>, dirs: &[&Path], os: Os, files: &BTreeSet<PathBuf>) -> Option<PathBuf> {
+fn find(dirs: &[&Path], os: Os, files: &BTreeSet<PathBuf>) -> Option<PathBuf> {
     let path = (!dirs.is_empty()).then(|| std::env::join_paths(dirs).unwrap());
-    find_python_with(var.map(OsStr::new), path.as_deref(), os, &|file| {
-        files.contains(file)
-    })
+    find_python_with(path.as_deref(), os, &|file| files.contains(file))
 }
 
 fn root() -> PathBuf {
     std::env::temp_dir().join("clauseo-python-3.13.18-c3-test")
-}
-
-#[test]
-fn the_variable_wins_when_absolute_and_a_relative_or_empty_one_counts_as_unset() {
-    let files = runtime(&root(), Os::Unix);
-    let bin = root().join("bin");
-    let var = std::env::temp_dir().join("python-x");
-    assert_eq!(find(var.to_str(), &[&bin], Os::Unix, &files), Some(var));
-    assert_eq!(find(Some("python3"), &[&bin], Os::Unix, &files), None);
-    assert_eq!(
-        find(Some(""), &[&bin], Os::Unix, &files),
-        Some(bin.join("python3"))
-    );
 }
 
 #[test]
@@ -39,7 +24,7 @@ fn the_macos_runtime_is_found_from_its_bin_folder_after_other_folders() {
     let other = std::env::temp_dir().join("other");
     let bin = root().join("bin");
     assert_eq!(
-        find(None, &[&other, &bin], Os::Unix, &files),
+        find(&[&other, &bin], Os::Unix, &files),
         Some(bin.join("python3"))
     );
 }
@@ -48,7 +33,7 @@ fn the_macos_runtime_is_found_from_its_bin_folder_after_other_folders() {
 fn the_windows_runtime_is_found_from_its_root_or_its_command_folder() {
     let files = runtime(&root(), Os::Windows);
     for dir in [root().join("clauseo-bin"), root()] {
-        let found = find(None, &[&dir], Os::Windows, &files);
+        let found = find(&[&dir], Os::Windows, &files);
         assert_eq!(found, Some(root().join("python.exe")), "{}", dir.display());
     }
 }
@@ -57,17 +42,17 @@ fn the_windows_runtime_is_found_from_its_root_or_its_command_folder() {
 fn no_runtime_without_a_receipt_an_interpreter_an_absolute_folder_or_a_path() {
     let bin = root().join("bin");
     let no_receipt = BTreeSet::from([runtime_program(&root(), Os::Unix)]);
-    assert_eq!(find(None, &[&bin], Os::Unix, &no_receipt), None);
+    assert_eq!(find(&[&bin], Os::Unix, &no_receipt), None);
     let no_program = BTreeSet::from([root().join(RECEIPT)]);
-    assert_eq!(find(None, &[&bin], Os::Unix, &no_program), None);
+    assert_eq!(find(&[&bin], Os::Unix, &no_program), None);
     let files = runtime(&root(), Os::Unix);
-    assert_eq!(find(None, &[], Os::Unix, &files), None);
+    assert_eq!(find(&[], Os::Unix, &files), None);
     let relative = BTreeSet::from([
         PathBuf::from("rt").join(RECEIPT),
         runtime_program(Path::new("rt"), Os::Unix),
     ]);
     assert_eq!(
-        find(None, &[&Path::new("rt").join("bin")], Os::Unix, &relative),
+        find(&[&Path::new("rt").join("bin")], Os::Unix, &relative),
         None
     );
 }
@@ -102,8 +87,10 @@ fn the_command_runs_the_script_isolated_with_the_tool_and_arguments_as_given() {
 
 #[test]
 fn the_script_fits_a_windows_command_line() {
-    // CreateProcess takes at most 32,767 characters; the script goes as one argument.
-    assert!(SCRIPT.len() < 16_000, "{} bytes", SCRIPT.len());
+    // CreateProcess takes at most 32,767 characters; the script goes as one argument, each `"`
+    // and `\` in it escaped with a backslash.
+    let escaped = SCRIPT.len() + SCRIPT.matches(['"', '\\']).count();
+    assert!(escaped < 24_000, "{escaped} characters");
 }
 
 #[test]

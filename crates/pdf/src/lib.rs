@@ -8,14 +8,14 @@
 //! needs a real `.exe`, hence these programs rather than a script. Codex has no PDF input and is
 //! told to run `pdftoppm -png` itself, then view the images.
 //!
-//! Each program finds the interpreter ([`find_python`]): [`PYTHON_VAR`] when set, else the
-//! first folder on `PATH` that is, or is inside, a Clauseo Python runtime folder (it holds
-//! [`RECEIPT`]): the desktop puts the runtime's folders on the agents' `PATH` with this tool's
-//! folder, and only once the runtime is installed. It runs it isolated (`-I`: no `PYTHON*`
-//! variable, no user site, no current folder on the module path), in UTF-8 mode, with the script
-//! as `-c` (so the bundle holds no loose file beside the programs), the tool's name and the
-//! arguments as given. With no runtime it exits [`NOT_FOUND`], as a shell does for a missing
-//! command, so Claude Code's check finds no `pdftoppm` and says so.
+//! Each program finds the interpreter ([`find_python`]) only one way, with no variable to
+//! override it: the first folder on `PATH` that is, or is inside, a Clauseo Python runtime
+//! folder (it holds [`RECEIPT`]): the desktop puts the runtime's folders on the agents' `PATH`
+//! with this tool's folder, and only once the runtime is installed. It runs it isolated (`-I`:
+//! no `PYTHON*` variable, no user site, no current folder on the module path), in UTF-8 mode,
+//! with the script as `-c` (so the bundle holds no loose file beside the programs), the tool's
+//! name and the arguments as given. With no runtime it exits [`NOT_FOUND`], as a shell does for a
+//! missing command, so Claude Code's check finds no `pdftoppm` and says so.
 //!
 //! On Unix the program becomes the interpreter (`exec`): one process, so a signal sent to it
 //! (Claude Code's SIGTERM at its timeout) reaches Python itself. On Windows it waits for it in
@@ -31,9 +31,6 @@ mod job;
 
 /// The Python script both programs run: `pdftoppm` and `pdfinfo` over `pypdfium2` and Pillow.
 pub const SCRIPT: &str = include_str!("clauseo_pdf.py");
-
-/// The variable naming the interpreter, over the `PATH` search (tests, and a support override).
-pub const PYTHON_VAR: &str = "CLAUSEO_PDF_PYTHON";
 
 /// The receipt every installed Clauseo Python runtime folder holds (`clauseo_agents`'
 /// `python.rs`, `PYTHON_RECEIPT`).
@@ -92,12 +89,11 @@ pub fn runtime_program(root: &Path, os: Os) -> PathBuf {
     }
 }
 
-/// The interpreter to run: `var` ([`PYTHON_VAR`]'s value) when it is set and absolute; else,
-/// along `path` (the `PATH` value) in order, the first absolute folder that holds [`RECEIPT`]
-/// or whose parent does (macOS `<rt>/bin`, Windows `<rt>` and `<rt>\clauseo-bin`), and whose
-/// runtime has its interpreter. `None` when there is none: a relative `var` counts as unset.
-pub fn find_python(var: Option<&OsStr>, path: Option<&OsStr>, os: Os) -> Option<PathBuf> {
-    find_python_with(var, path, os, &|file| file.is_file())
+/// The interpreter to run: along `path` (the `PATH` value) in order, the first absolute folder
+/// that holds [`RECEIPT`] or whose parent does (macOS `<rt>/bin`, Windows `<rt>` and
+/// `<rt>\clauseo-bin`), and whose runtime has its interpreter. `None` when there is none.
+pub fn find_python(path: Option<&OsStr>, os: Os) -> Option<PathBuf> {
+    find_python_with(path, os, &|file| file.is_file())
 }
 
 /// [`find_python`], with `is_file` saying whether a file is there (the tests' file system).
@@ -106,15 +102,10 @@ pub fn find_python(var: Option<&OsStr>, path: Option<&OsStr>, os: Os) -> Option<
     reason = "the launcher walks PATH once to find the Clauseo Python runtime the desktop put on it"
 )]
 pub fn find_python_with(
-    var: Option<&OsStr>,
     path: Option<&OsStr>,
     os: Os,
     is_file: &dyn Fn(&Path) -> bool,
 ) -> Option<PathBuf> {
-    if let Some(var) = var.filter(|var| !var.is_empty()) {
-        let program = PathBuf::from(var);
-        return program.is_absolute().then_some(program);
-    }
     std::env::split_paths(path?)
         .filter(|dir| dir.is_absolute())
         .find_map(|dir| {
@@ -143,9 +134,8 @@ pub fn command(python: &Path, tool: Tool, args: &[OsString]) -> Command {
 /// [`command`] with its own arguments, or says why not and exits [`NOT_FOUND`].
 pub fn run(tool: Tool) -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    let var = std::env::var_os(PYTHON_VAR);
     let path = std::env::var_os("PATH");
-    let Some(python) = find_python(var.as_deref(), path.as_deref(), Os::host()) else {
+    let Some(python) = find_python(path.as_deref(), Os::host()) else {
         say(&format!(
             "{}: Clauseo's Python runtime was not found; it is set up from Clauseo's settings",
             tool.name()
