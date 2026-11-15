@@ -19,12 +19,11 @@ Every lawyer-facing string has an id registered in `ui/app/src/review/registry*.
 | stage E   | 500 to 599                            |
 | stage F   | 260 to 261 (reserved), and 750 to 799 |
 
-## Other prefixes
+## Other prefixes: closed to new ids
 
-- **Brief prefixes** (`U1` to `U17`, `U4B`, `U6F`, `UBL`, `UD1`, `UD2`, `UEP`, `UET`, `UTC`, `AR`, `C117`, `FC`, `FR`, `H11`, `IT`, `ME`, `MN`, `ND`, `NM`, `PK`, `PL`, `R23`, `RO`, `SAC`, `TF`, `TN`, `WA`, `WEB`):
-  - Each belongs to the brief or area that made it, and its file is `<PREFIX>.json`.
-  - The thread that owns that area adds the next free number in that file, and only that thread does.
-  - For example, `MN` is the app's menu bar (app track), `FR` is the folder-rights words, and `U3` is the conversation's lines.
-  - If you need a line in another thread's prefix, ask that thread, or the app track, which owns the copy system, for the next number. Don't guess.
-- **`U3-err-<code>`:** made from the error code's name, one per `ErrorCode` (`registry.tsx`). A new error code gets its entry under that id, in the branch's own file, so there's nothing to hand out.
-- **A new prefix** (a new brief or area): ask the app track first, so two threads never start the same one.
+**Every new lawyer-facing string takes a UC id from its thread's block, whatever screen it's on.**
+
+- The other prefixes (`U1` to `U17`, `U4B`, `U6F`, `U8`, `UBL`, `UD1`, `UD2`, `UEP`, `UET`, `UTC`, `AR`, `C117`, `FC`, `FR`, `H11`, `IT`, `ME`, `MN`, `ND`, `NM`, `PK`, `PL`, `R23`, `RO`, `SAC`, `TF`, `TN`, `WA`, `WEB`, …) are closed to new ids. They stay only for strings already on main, or already in an open pull request on 2026-11-15.
+- If an unmerged branch picked a new id under one of those prefixes and another open pull request uses the same id, the later branch moves its string into its own UC block.
+- `U3-err-<code>` is the one exception: it's made from the error code's name, one per `ErrorCode` (`registry.tsx`), so there's nothing to hand out. A new error code gets its entry under that id, in the branch's own file.
+- No new prefixes.
