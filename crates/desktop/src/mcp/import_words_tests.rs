@@ -96,7 +96,7 @@ fn mcp_import_words_are_the_reviewed_copy() {
             table.left_one,
         ]
     };
-    let ids = [231, 232, 252, 253, 254, 255];
+    let ids = [231, 232, 336, 337, 338, 339];
     for (n, (en, hi)) in ids
         .into_iter()
         .zip(column(&EN).into_iter().zip(column(&HI)))

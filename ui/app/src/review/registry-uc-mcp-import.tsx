@@ -1,9 +1,9 @@
 // UC's entries for the native confirm before Settings › Tools' import adds servers from Claude Desktop, Claude Code or
-// Codex (UC-231, UC-232, UC-252 to UC-255): the dialog Rust draws, which the webview never shows. Its words live in
+// Codex (UC-231, UC-232, UC-336 to UC-339): the dialog Rust draws, which the webview never shows. Its words live in
 // crates/desktop/src/mcp/import_words.rs; a Rust test there fails unless its strings are in this file verbatim, in both
 // languages. The buttons and the names line are the save confirm's (UC-216, UC-217, UC-220,
 // registry-uc-mcp-confirm.tsx). Every server is listed whole: the host lists the servers that fit, in order, and the
-// last line (UC-252 to UC-255) says how many more were left out for the next import. Every entry is provisional, its
+// last line (UC-336 to UC-339) says how many more were left out for the next import. Every entry is provisional, its
 // Hindi too.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { ConfirmMock } from "./confirm-mock.tsx";
@@ -89,22 +89,22 @@ export const UC_MCP_IMPORT: Entry[] = [
   { id: "UC-231", words: TITLE, screen: "native/mcp-import", ...DIALOG, render: dialog },
   { id: "UC-232", words: MESSAGE, screen: "native/mcp-import", ...DIALOG, render: dialog },
   {
-    id: "UC-252",
+    id: "UC-336",
     words: LEFT_NAMED,
     screen: "native/mcp-import",
     ...DIALOG,
     render: withLeft(LEFT_NAMED),
   },
   {
-    id: "UC-253",
+    id: "UC-337",
     words: LEFT_ONE_NAMED,
     screen: "native/mcp-import",
     ...DIALOG,
     render: withLeft(LEFT_ONE_NAMED),
   },
-  { id: "UC-254", words: LEFT, screen: "native/mcp-import", ...DIALOG, render: withLeft(LEFT) },
+  { id: "UC-338", words: LEFT, screen: "native/mcp-import", ...DIALOG, render: withLeft(LEFT) },
   {
-    id: "UC-255",
+    id: "UC-339",
     words: LEFT_ONE,
     screen: "native/mcp-import",
     ...DIALOG,

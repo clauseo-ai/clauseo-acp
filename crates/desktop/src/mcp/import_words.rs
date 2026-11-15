@@ -1,11 +1,11 @@
 //! The words of the one confirm before Settings › Tools' import adds servers from another app
 //! (`super::LaunchConfirm::confirm_import`), in English and Hindi by the app's language. Their
-//! review home is `ui/app/src/review/registry-uc-mcp-import.tsx` (UC-231, UC-232, UC-252 to
-//! UC-255); the buttons and the names line are A1's (UC-216, UC-217, UC-220). `{list}` names
+//! review home is `ui/app/src/review/registry-uc-mcp-import.tsx` (UC-231, UC-232, UC-336 to
+//! UC-339); the buttons and the names line are A1's (UC-216, UC-217, UC-220). `{list}` names
 //! every server it imports with what it starts, whole, in the host's own shown text
 //! (`mcp_shown::import_list`), the text the host measured against `MAX_ASK_CHARS`: nothing in it
 //! is cut. The servers that did not fit are left out whole and named on a line of their own
-//! (UC-252 to UC-255), or only counted when their names would pass `MAX_LEFT_OUT_CHARS`.
+//! (UC-336 to UC-339), or only counted when their names would pass `MAX_LEFT_OUT_CHARS`.
 
 use clauseo_host::{McpLaunchAsk, mcp_shown};
 use clauseo_protocol::Language;
@@ -20,13 +20,13 @@ pub(super) struct ImportTable {
     pub(super) title: &'static str,
     /// UC-232: the message; `{list}` is the servers and what each starts.
     pub(super) message: &'static str,
-    /// UC-252: the line when more servers did not fit, named; `{count}` and `{names}`.
+    /// UC-336: the line when more servers did not fit, named; `{count}` and `{names}`.
     pub(super) left_named: &'static str,
-    /// UC-253: the same for one server; `{names}` is its name.
+    /// UC-337: the same for one server; `{names}` is its name.
     pub(super) left_one_named: &'static str,
-    /// UC-254: the line when more servers did not fit, too many to name; `{count}`.
+    /// UC-338: the line when more servers did not fit, too many to name; `{count}`.
     pub(super) left: &'static str,
-    /// UC-255: the same for one server whose name is too long to show.
+    /// UC-339: the same for one server whose name is too long to show.
     pub(super) left_one: &'static str,
 }
 

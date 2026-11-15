@@ -8,11 +8,13 @@ use crate::config::mcp::shown::{self, MAX_ASK_CHARS};
 /// How many of `asks`, from the first, fit in one confirm. Stops at the first that does not fit,
 /// so the confirm's text is measured at most once per server kept, plus one.
 pub(super) fn fitting(asks: &[McpLaunchAsk]) -> usize {
-    let mut kept = 0;
-    while kept < asks.len() && shown::import_chars(&asks[..=kept]) <= MAX_ASK_CHARS {
-        kept += 1;
-    }
-    kept
+    (1..=asks.len())
+        .take_while(|&n| {
+            asks.get(..n)
+                .is_some_and(|some| shown::import_chars(some) <= MAX_ASK_CHARS)
+        })
+        .last()
+        .unwrap_or(0)
 }
 
 /// Whether `ask` fits in a confirm on its own.
