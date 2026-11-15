@@ -46,16 +46,15 @@ pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
 }
 
-/// Opens `path` empty for writing, making its folder first, and writes `header` to it. The
-/// native crash handler appends its one line to the file this returns.
+/// Makes `path` a new file, making its folder first, and writes `header` to it. The native
+/// crash handler appends its one line to the file this returns. Whatever was at `path` is
+/// deleted first and the file is made with `create_new` (`O_EXCL`, `CREATE_NEW`), so a link put
+/// there is removed, never followed: the file it pointed at is not truncated or written.
 pub(crate) fn open_record(path: &Path, header: &[u8]) -> io::Result<std::fs::File> {
     let dir = path.parent().ok_or(io::ErrorKind::InvalidInput)?;
     std::fs::create_dir_all(dir)?;
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)?;
+    remove_file(path)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     file.write_all(header).and_then(|()| file.sync_all())?;
     Ok(file)
 }

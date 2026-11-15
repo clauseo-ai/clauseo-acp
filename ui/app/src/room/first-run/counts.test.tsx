@@ -40,6 +40,13 @@ test("welcome: the one question, the lede, and the counts switch on by default; 
   expect(text().split("No matters yet").length - 1).toBe(1);
 });
 
+test("welcome: the counts line says a crash report goes with the counts (0060, UC-750)", async () => {
+  await mountFirstRun({ matters: [] });
+  expect(text()).toContain(
+    "How many questions, which features, how long answers take, and a short report if Clauseo crashes. Never your papers, your questions or the answers.",
+  );
+});
+
 test("counts: before the first act the switch is the window's alone: no command, no settings write", async () => {
   const t = await mountFirstRun({ matters: [] });
   await press(toggle());

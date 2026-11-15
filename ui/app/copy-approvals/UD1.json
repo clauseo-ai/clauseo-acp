@@ -48,13 +48,6 @@
     "at": "2026-11-02",
     "by": "design"
   },
-  "UD1-08": {
-    "en": "How many questions, which features, how long answers take. Never your papers, your questions or the answers.",
-    "hi": "कितने प्रश्न, कौन-सी सुविधाएँ, और उत्तर कितना समय लेते हैं। आपके दस्तावेज़, आपके प्रश्न या उत्तर कभी नहीं।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
-  },
   "UD1-09": {
     "en": "What's sent",
     "hi": "क्या भेजा जाता है",

@@ -13,9 +13,10 @@ symbols job and no new crates.
 ## Decision
 
 - **Crash reports follow the counts.** A report is made and sent only while `privacy.counts` is
-  on and saving (after the welcome's first act), with no prompt of their own. Settings, Privacy
-  adds one sentence under the counts switch (UC-261). Turning counts off deletes every stored
-  report.
+  on and saving (after the welcome's first act), with no prompt of their own. The welcome's
+  counts line says so (UC-750, in place of UD1-08), and Settings, Privacy adds one sentence under
+  the counts switch (UC-261). Turning counts off deletes every stored report, and cancels a
+  report's POST in flight.
 - **`privacy.crash_reports` is firm IT's lock alone.** The off-only security key from 0036 gets
   no UI. A policy `false` turns crash reports off while counts stay on, and deletes every stored
   report; an unreadable policy source locks it off, as for every security key. The lawyer's own
@@ -45,7 +46,8 @@ symbols job and no new crates.
     raises none of these, so it never makes a report, and the `SIGABRT` that follows a panic is
     the panic's report. The next start turns the record into a report, with the version that
     crashed.
-  - The webview's renderer gone: macOS's `webViewWebContentProcessDidTerminate:` through Tauri's
+  - The webview's renderer gone, once per run (a renderer that keeps failing makes one report):
+    macOS's `webViewWebContentProcessDidTerminate:` through Tauri's
     builder hook (the page is loaded again, as Tauri does with no hook; no reason given, so
     `other`), WebView2's `ProcessFailed` for a render process that exited (not `TERMINATED`,
     an end from outside), WebKitGTK's `web-process-terminated` for a crash or out of memory (not
@@ -55,15 +57,20 @@ symbols job and no new crates.
 - **The tally still counts.** Each crash adds one `crash` cell to the weekly tally while counts
   are on, whether or not its report can be sent.
 - **Stored, then sent.** Under `<data_dir>/crash/`: at most 5 reports waiting, each kept at most
-  30 days; the bytes stored at the crash are the bytes sent, before gzip. One gzip POST to
-  `/v1/crash` on the counts endpoint, at a random moment 1 to 24 hours after the crash and never
-  within an hour of a counts POST, so a report cannot be paired with a day report. 204 or 400
-  deletes the report; 429, 503, any other answer or none keeps it for a later try.
+  30 days. A file is read only when it is a plain file of at most 2 KB, and the native record is
+  deleted and made anew (`create_new`), so a link put in its place is never followed. A report
+  is read back through `parse_crash` and sent as `crash_body` writes it again, so a file changed
+  on disk goes only while it still passes the schema; a report the app wrote goes byte for byte.
+  One gzip POST to `/v1/crash` on the counts endpoint, at a random moment 1 to 24 hours after
+  the crash and never within an hour of a counts POST, so a report cannot be paired with a day
+  report. 204 or 400 deletes the report; 429 (the Worker's hourly cap), 503, any other answer or
+  none keeps it for a later try, 1 to 6 hours on, for up to its 30 days.
 
 ## Consequences
 
-- A lawyer who keeps counts on now also sends crash reports, and Settings says so. Firm IT turns
-  them off alone with `privacy.crash_reports: false` (`docs/firm-it.md`, section 12).
+- A lawyer who keeps counts on now also sends crash reports, and the welcome and Settings say
+  so. Firm IT turns them off alone with `privacy.crash_reports: false` (`docs/firm-it.md`,
+  section 12).
 - A report says where Clauseo stopped (a crate, a source line, a signal or a reason) but carries
   no stack, so a crash deep in a dependency is found only as far as its file and line.
 - A new field or value is a schema change, as for the counts (0036): the Worker's `/v1/crash`

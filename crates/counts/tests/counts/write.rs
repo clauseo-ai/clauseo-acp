@@ -54,6 +54,13 @@ pub(crate) fn link_dir(link: &Path, target: &Path) {
     std::os::unix::fs::symlink(target, link).unwrap();
 }
 
+/// Makes `link` (which must not exist; its folder is made) a symbolic link to the file
+/// `target`.
+#[cfg(unix)]
+pub(crate) fn link_file(link: &Path, target: &Path) {
+    link_dir(link, target);
+}
+
 /// Makes the folder at `path` read-only (`0555`), or writable again (`0755`), so a delete in
 /// it fails.
 #[cfg(unix)]

@@ -133,11 +133,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ["Start a new matter", WELCOME, "welcome"],
   ["Send anonymous counts", WELCOME, "welcome"],
   ["Send anonymous counts.", WELCOME, "welcome"],
-  [
-    "How many questions, which features, how long answers take. Never your papers, your questions or the answers.",
-    WELCOME,
-    "welcome",
-  ],
+  // UD1-08, retired: the welcome's counts line names crash reports too (UC-750, below)
+  null,
   ["What's sent", WELCOME, "welcome"],
   // UD1-10, retired: a locked counts switch stands off with Settings' own words, no sentence of its own
   null,
@@ -442,6 +439,16 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   null,
 ];
 
+/** The welcome's counts line with crash reports in it (0060), in the null SCENES keeps for UD1-08. */
+const COUNTS_LINE: Entry = {
+  id: "UC-750",
+  words: firstLaunchWords(
+    "How many questions, which features, how long answers take, and a short report if Clauseo crashes. Never your papers, your questions or the answers.",
+  ),
+  screen: "first-launch/welcome",
+  render: render(WELCOME),
+};
+
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.
  * Its id is the null SCENES keeps for it. */
 const REFUSAL: Entry = {
@@ -585,6 +592,7 @@ export const UD1: readonly Entry[] = [
   REFUSAL,
   TOOLS_OFFLINE,
   REUSE_UNUSABLE,
+  COUNTS_LINE,
   ...UC_KEY,
   ...UC_UNREACHABLE,
   AFTER_SIGN_IN,

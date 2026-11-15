@@ -4,8 +4,8 @@
 use std::io::Write as _;
 
 use clauseo_counts::schema::{
-    CrashArea, CrashKind, CrashProcess, CrashReport, RendererGoneReason, SourceFile, Time,
-    parse_crash,
+    CrashArea, CrashKind, CrashProcess, CrashReport, MAX_CRASH_JSON, RendererGoneReason,
+    SourceFile, Time, parse_crash,
 };
 use clauseo_counts::{
     Counts, Crashes, MAX_QUEUED, NATIVE_LINE_MAX, Switch, area_of_thread, native_line, source_file,
@@ -38,6 +38,15 @@ pub(crate) fn recording(scratch: &Scratch) -> (Counts, Crashes) {
 
 pub(crate) fn crash_files(scratch: &Scratch) -> Vec<String> {
     files(&scratch.path().join("crash"))
+}
+
+/// A renderer gone at `now`, recorded by another run of the app (one per run) into the same
+/// data folder, for tests that need several reports.
+pub(crate) fn renderer_gone_in_a_new_run(scratch: &Scratch, now: Time) {
+    let run = Crashes::open(scratch.path(), about(), SEED);
+    run.set_recording(true);
+    run.record_renderer_gone(RendererGoneReason::Crashed, now)
+        .unwrap();
 }
 
 /// A panic in the store at `now`, written.
@@ -189,22 +198,32 @@ fn a_dependency_panic_takes_its_area_from_the_thread() {
 }
 
 #[test]
-fn a_renderer_gone_is_recorded_each_time() {
+fn a_renderer_gone_is_recorded_once_per_run() {
     let scratch = Scratch::new("crash-renderer");
     let (counts, crashes) = recording(&scratch);
     for reason in [RendererGoneReason::Crashed, RendererGoneReason::OutOfMemory] {
         crashes.record_renderer_gone(reason, at(2, 60)).unwrap();
     }
+    // A renderer gone is not the host's crash: a panic after it still makes its report.
     assert!(!crashes.crashed());
     crashes.ingest(&counts, ON, at(2, 120)).unwrap();
     let queued = crashes.queued();
-    assert_eq!(queued.len(), 2);
+    assert_eq!(
+        queued.len(),
+        1,
+        "a renderer that keeps failing makes one report"
+    );
     let report = queued_report(&scratch, &queued[0]);
     assert_eq!(report.process, CrashProcess::Webview);
     assert_eq!(report.area, CrashArea::Webview);
-    assert!(report.reason.is_some());
+    assert_eq!(report.reason, Some(RendererGoneReason::Crashed));
     let cells = tally_crash_cells(&scratch, &counts, at(2, 180));
-    assert_eq!(cells[0]["n"], 2);
+    assert_eq!(cells[0]["n"], 1);
+    panic_at(&crashes, at(2, 240));
+    // The next run records one again.
+    renderer_gone_in_a_new_run(&scratch, at(2, 300));
+    crashes.ingest(&counts, ON, at(2, 360)).unwrap();
+    assert_eq!(crashes.queued().len(), 3);
 }
 
 #[test]
@@ -318,9 +337,7 @@ fn a_policy_lock_deletes_the_queue_and_still_tallies() {
         .unwrap();
     crashes.ingest(&counts, ON, at(2, 120)).unwrap();
     assert_eq!(crashes.queued().len(), 1);
-    crashes
-        .record_renderer_gone(RendererGoneReason::Crashed, at(2, 180))
-        .unwrap();
+    renderer_gone_in_a_new_run(&scratch, at(2, 180));
     crashes.ingest(&counts, LOCKED, at(2, 240)).unwrap();
     assert_eq!(crashes.queued(), Vec::<String>::new());
     assert_eq!(crash_files(&scratch), Vec::<String>::new());
@@ -335,9 +352,7 @@ fn at_most_5_wait_and_none_past_30_days() {
     let scratch = Scratch::new("crash-cap");
     let (counts, crashes) = recording(&scratch);
     for n in 0..7 {
-        crashes
-            .record_renderer_gone(RendererGoneReason::Crashed, at(2, 60 + n))
-            .unwrap();
+        renderer_gone_in_a_new_run(&scratch, at(2, 60 + n));
     }
     // A temp file a crash cut short goes too.
     plant(&scratch.path().join("crash/new/.x.json.1-0.tmp"), b"{");
@@ -367,5 +382,67 @@ fn a_report_that_does_not_read_is_deleted_untallied() {
     crashes.ingest(&counts, ON, at(2, 60)).unwrap();
     assert_eq!(crash_files(&scratch), Vec::<String>::new());
     let cells = tally_crash_cells(&scratch, &counts, at(2, 120));
+    assert!(cells.as_array().is_none_or(Vec::is_empty), "{cells}");
+}
+
+/// The native record, a link to a file outside `crash/` (a matter's paper): the next start
+/// deletes the link and makes the record anew, so the paper is never truncated or written.
+#[cfg(unix)]
+#[test]
+fn a_link_in_place_of_the_native_record_is_never_followed() {
+    let scratch = Scratch::new("crash-native-link");
+    let (_counts, crashes) = recording(&scratch);
+    let paper = scratch.path().join("matter/contract.docx");
+    plant(&paper, b"the lawyer's paper");
+    let native = scratch.path().join("crash/native");
+    crate::write::link_file(&native, &paper);
+
+    let mut record = crashes.open_native(at(2, 0)).unwrap().unwrap();
+    let mut buf = [0_u8; NATIVE_LINE_MAX];
+    record.write_all(native_line(11, true, &mut buf)).unwrap();
+    drop(record);
+
+    assert_eq!(std::fs::read(&paper).unwrap(), b"the lawyer's paper");
+    let kind = std::fs::symlink_metadata(&native).unwrap().file_type();
+    assert!(kind.is_file() && !kind.is_symlink(), "{kind:?}");
+    assert!(std::fs::read(&native).unwrap().ends_with(b"signal 11 1\n"));
+}
+
+/// Files past `MAX_CRASH_JSON` bytes are never read whole: a new report, a queued one and a
+/// native record that begins well and runs on are each deleted, with no report and no POST.
+#[test]
+fn an_oversized_file_is_deleted_unread() {
+    let scratch = Scratch::new("crash-oversized");
+    let (counts, _crashes) = recording(&scratch);
+    let big = |head: &[u8]| {
+        let mut bytes = head.to_vec();
+        bytes.resize(MAX_CRASH_JSON * 64, b' ');
+        bytes
+    };
+    let name = format!(
+        "{}-3d1f8a62-5c4b-4e7a-b9d0-1f2e3a4b5c6d.json",
+        at(2, 0).unix_secs()
+    );
+    plant(&scratch.path().join("crash/new").join(&name), &big(b"{"));
+    plant(&scratch.path().join("crash/queue").join(&name), &big(b"{"));
+    let native = scratch.path().join("crash/native");
+    plant(&native, &big(b"clauseo-native 1 3.0.4\nsignal 11 1\n"));
+
+    let next = Crashes::open(scratch.path(), about(), SEED);
+    next.ingest(&counts, ON, at(2, 60)).unwrap();
+    // The queued file is only read when it is due.
+    assert_eq!(next.queued(), vec![name]);
+    drop(next.open_native(at(2, 60)).unwrap().unwrap());
+    assert!(std::fs::metadata(&native).unwrap().len() < 100);
+    next.ingest(&counts, ON, at(2, 120)).unwrap();
+    // The first try falls within the hour after the first look; every look finds nothing.
+    let mut now = at(3, 60);
+    while now <= at(3, 2 * HOUR) {
+        assert_eq!(next.due(&counts, now), None);
+        now = now.plus(60);
+    }
+    assert_eq!(next.queued(), Vec::<String>::new());
+    assert_eq!(crash_files(&scratch), vec!["native".to_owned()]);
+    let cells = tally_crash_cells(&scratch, &counts, at(3, 60));
     assert!(cells.as_array().is_none_or(Vec::is_empty), "{cells}");
 }

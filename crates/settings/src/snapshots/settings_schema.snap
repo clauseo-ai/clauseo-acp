@@ -358,7 +358,7 @@ source: crates/settings/src/schema/tests.rs
         },
         "crash_reports": {
           "default": false,
-          "description": "Whether Clauseo sends crash reports. Off by default.",
+          "description": "Firm IT's lock on crash reports, which go with the counts: a policy `false` turns them off\nwhile counts stay on. Nothing else reads this key; the lawyer's own value is not used.",
           "type": "boolean"
         }
       },
