@@ -75,6 +75,10 @@ zeroize = { workspace = true }
 # A Codex config.toml the offline probe checks for a provider or base URL
 # (actor/turn/offline/probe/settings.rs; xtask's and desktop's version).
 toml = "1"
+# Claude Code's macOS managed preferences (XML or binary) that the offline probe checks
+# (actor/turn/offline/probe/settings/os_policy.rs); plain Rust, so tested on every OS. 1.10.1 is
+# already in the lock through clauseo-settings.
+plist = { workspace = true }
 
 # The Chrome for Testing download's free-space check (browser/install/system.rs): statvfs, safe.
 [target.'cfg(unix)'.dependencies]
@@ -94,13 +98,15 @@ libc = { workspace = true }
 
 # The Chrome for Testing download's Win32 calls (browser/install/windows.rs): System32's folder
 # (SystemInformation), the free disk space (Storage_FileSystem), and Authenticode on chrome.exe
-# (Security_WinTrust, whose WINTRUST_DATA needs Security_Cryptography).
+# (Security_WinTrust, whose WINTRUST_DATA needs Security_Cryptography). The offline probe's read
+# of Claude Code's registry policy (System_Registry; actor/turn/offline/probe/settings/os_policy).
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Security_Cryptography",
   "Win32_Security_WinTrust",
   "Win32_Storage_FileSystem",
+  "Win32_System_Registry",
   "Win32_System_SystemInformation",
 ] }
 

@@ -1122,6 +1122,7 @@ dependencies = [
  "memchr",
  "nix",
  "notify",
+ "plist",
  "proptest",
  "quick-xml",
  "rusqlite",
