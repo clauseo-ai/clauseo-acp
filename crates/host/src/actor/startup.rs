@@ -103,6 +103,7 @@ pub(super) async fn open(
         browser_policy: super::browser_policy::PolicyCheck::default(),
         header_tools: super::header_tools::HeaderTools::default(),
         pack_generations: BTreeMap::new(),
+        kept: super::kept::Ledger::default(),
         turn_path: super::turn::wide::TurnPath::new(parts.idle),
         refused_folders: parts.refused_folders,
         documents: super::documents::DocumentsWait::new(parts.documents),

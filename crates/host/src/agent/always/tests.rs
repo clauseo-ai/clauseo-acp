@@ -167,10 +167,10 @@ fn the_file_sits_beside_the_notes_and_keeps_each_rule_once() {
     let file = file_beside(&notes).unwrap();
     assert_eq!(file, dir.path().join("agent-state").join("m1").join(FILE));
     assert_eq!(read(&file), Vec::<String>::new());
-    store_now(&file, "Bash(npm test)".to_owned()).unwrap();
-    store_now(&file, "Bash(npm test)".to_owned()).unwrap();
-    store_now(&file, "WebFetch(domain:sci.gov.in)".to_owned()).unwrap();
-    store_now(&file, "Bash(*)".to_owned()).unwrap();
+    store_now(&file, "Bash(npm test)".to_owned(), 1).unwrap();
+    store_now(&file, "Bash(npm test)".to_owned(), 2).unwrap();
+    store_now(&file, "WebFetch(domain:sci.gov.in)".to_owned(), 3).unwrap();
+    store_now(&file, "Bash(*)".to_owned(), 4).unwrap();
     assert_eq!(
         read(&file),
         ["Bash(npm test)", "WebFetch(domain:sci.gov.in)"]
@@ -313,14 +313,14 @@ fn a_bad_file_is_set_aside_not_overwritten() {
     let file = dir.path().join(FILE);
     crate::write::write_file(&file, b"not json").unwrap();
     assert_eq!(read(&file), Vec::<String>::new());
-    assert!(!remove_now(&file, "Bash(ls)").unwrap());
+    assert!(!remove_now(&file, "Bash(ls)", 5).unwrap());
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "not json");
-    store_now(&file, "Bash(ls)".to_owned()).unwrap();
+    store_now(&file, "Bash(ls)".to_owned(), 6).unwrap();
     let aside = dir.path().join(format!("{FILE}.bad-1"));
     assert_eq!(std::fs::read_to_string(&aside).unwrap(), "not json");
     assert_eq!(read(&file), ["Bash(ls)"]);
     crate::write::write_file(&file, &vec![b' '; (1 << 20) + 1]).unwrap();
-    store_now(&file, "Bash(pwd)".to_owned()).unwrap();
+    store_now(&file, "Bash(pwd)".to_owned(), 7).unwrap();
     assert!(dir.path().join(format!("{FILE}.bad-2")).exists());
     assert_eq!(read(&file), ["Bash(pwd)"]);
 }
@@ -330,9 +330,26 @@ fn a_bad_file_is_set_aside_not_overwritten() {
 fn a_removed_rule_is_gone_and_the_rest_stay() {
     let dir = TempDir::new("always_remove");
     let file = dir.path().join(FILE);
-    store_now(&file, "Bash(ls)".to_owned()).unwrap();
-    store_now(&file, "Bash(pwd)".to_owned()).unwrap();
-    assert!(remove_now(&file, "Bash(ls)").unwrap());
-    assert!(!remove_now(&file, "Bash(ls)").unwrap());
+    store_now(&file, "Bash(ls)".to_owned(), 8).unwrap();
+    store_now(&file, "Bash(pwd)".to_owned(), 9).unwrap();
+    assert!(remove_now(&file, "Bash(ls)", 10).unwrap());
+    assert!(!remove_now(&file, "Bash(ls)", 11).unwrap());
     assert_eq!(read(&file), ["Bash(pwd)"]);
+}
+
+/// An add whose write was still pending when the lawyer removed its rule runs after the removal
+/// and never puts the rule back; an add the lawyer chose after the removal does.
+#[test]
+fn a_pending_add_never_undoes_a_removal() {
+    let dir = TempDir::new("always_pending");
+    let file = dir.path().join(FILE);
+    store_now(&file, "Bash(pwd)".to_owned(), 1).unwrap();
+    // The add numbered 2 reaches the lock only after the removal numbered 3.
+    assert!(!remove_now(&file, "Bash(ls)", 3).unwrap());
+    store_now(&file, "Bash(ls)".to_owned(), 2).unwrap();
+    assert_eq!(read(&file), ["Bash(pwd)"]);
+    // A removal that comes after a later add of the same rule leaves it.
+    store_now(&file, "Bash(ls)".to_owned(), 5).unwrap();
+    assert!(!remove_now(&file, "Bash(ls)", 4).unwrap());
+    assert_eq!(read(&file), ["Bash(pwd)", "Bash(ls)"]);
 }

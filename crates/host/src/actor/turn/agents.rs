@@ -245,7 +245,7 @@ pub(super) fn launch_now(
     }
     let kind = actor.check_thread(thread).ok();
     let kind = kind.and_then(|entry| clauseo_protocol::AgentKind::of(&entry.row.agent));
-    let always = super::always::Always::at_launch(&prepared.run, kind, forced_ask);
+    let always = super::always::Always::at_launch(&prepared.run, kind, forced_ask, &actor.kept);
     let mut tree = None;
     let (link, folder, codex, plan_notes, matter_spellings, claude_home, fence_vars, probe) =
         match launch(actor, thread, prepared, &mut tree) {

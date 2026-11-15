@@ -3,10 +3,16 @@
 //! read and write holds one lock, so two of them never lose a rule. The lock is per process:
 //! Clauseo runs one instance (`tauri_plugin_single_instance`, `crates/desktop/src/lib.rs`).
 //!
+//! An add and a removal carry the sequence number the actor gave them (`actor/kept.rs`
+//! `Ledger`), and run on threads of their own, so they can reach the lock out of order. Under it,
+//! an operation on a rule that one the actor gave a later number already applied to is skipped:
+//! an add whose write was still pending when the lawyer removed the rule never puts it back.
+//!
 //! A file this host cannot take (not JSON it reads, larger than [`MAX_FILE_LEN`], unreadable) is
 //! never written over: the next write sets it aside first, as `claude-allow.json.bad-<n>`, and
 //! starts empty. Until then it reads as no rules.
 
+use std::collections::BTreeMap;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -21,8 +27,12 @@ const MAX_FILE_LEN: u64 = 1 << 20;
 /// The most set-aside names tried.
 const MAX_ASIDE: u32 = 100;
 
-/// The one lock of every read and write of a rules file.
-static LOCK: Mutex<()> = Mutex::new(());
+/// The one lock of every read and write of a rules file, over each file's rules' latest
+/// applied sequence number.
+static LOCK: Mutex<Applied> = Mutex::new(BTreeMap::new());
+
+/// For each rules file and rule, the sequence number of the last add or removal applied to it.
+type Applied = BTreeMap<(PathBuf, String), u64>;
 
 /// What a rules file holds.
 enum Kept {
@@ -43,9 +53,22 @@ impl Kept {
     }
 }
 
-fn locked() -> std::sync::MutexGuard<'static, ()> {
+fn locked() -> std::sync::MutexGuard<'static, Applied> {
     LOCK.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Whether an operation numbered `seq` on `rule` in `file` comes too late: one with a later
+/// number already applied. When not, it is recorded as the latest, before it runs.
+fn superseded(applied: &mut Applied, file: &Path, rule: &str, seq: u64) -> bool {
+    let latest = applied
+        .entry((file.to_owned(), rule.to_owned()))
+        .or_insert(seq);
+    if *latest > seq {
+        return true;
+    }
+    *latest = seq;
+    false
 }
 
 /// A Claude launch's kept rules (`claude`), read from [`file_beside`] `notes`; none for any
@@ -101,13 +124,14 @@ fn read_unlocked(file: &Path) -> Kept {
     Kept::Rules(kept)
 }
 
-/// Adds `rule` to `file` on a thread of its own: read, merged, then replaced atomically through
-/// no link. A failure is a warning that names no rule (a command may hold a client's name).
-pub(crate) fn store(file: PathBuf, rule: String) {
+/// Adds `rule` to `file` on a thread of its own, as operation `seq`: read, merged, then
+/// replaced atomically through no link. A failure is a warning that names no rule (a command may
+/// hold a client's name).
+pub(crate) fn store(file: PathBuf, rule: String, seq: u64) {
     let spawned = std::thread::Builder::new()
         .name("clauseo-always".to_owned())
         .spawn(move || {
-            if let Err(error) = store_now(&file, rule) {
+            if let Err(error) = store_now(&file, rule, seq) {
                 tracing::warn!(%error, "a matter's Claude rule was not kept");
             }
         });
@@ -116,9 +140,12 @@ pub(crate) fn store(file: PathBuf, rule: String) {
     }
 }
 
-/// [`store`]'s work, on the calling thread.
-pub(crate) fn store_now(file: &Path, rule: String) -> std::io::Result<()> {
-    let _held = locked();
+/// [`store`]'s work, on the calling thread; nothing when a later operation on `rule` applied.
+pub(crate) fn store_now(file: &Path, rule: String, seq: u64) -> std::io::Result<()> {
+    let mut held = locked();
+    if superseded(&mut held, file, &rule, seq) {
+        return Ok(());
+    }
     let mut rules = match read_unlocked(file) {
         Kept::Bad => {
             set_aside(file)?;
@@ -133,10 +160,14 @@ pub(crate) fn store_now(file: &Path, rule: String) -> std::io::Result<()> {
     write_unlocked(file, &rules)
 }
 
-/// Removes `rule` from `file`: whether it was there. A file this host cannot take is left as it
-/// is (it holds no rule this host applies). File system calls: off the actor.
-pub(crate) fn remove_now(file: &Path, rule: &str) -> std::io::Result<bool> {
-    let _held = locked();
+/// Removes `rule` from `file` as operation `seq`: whether it was there. A file this host cannot
+/// take is left as it is (it holds no rule this host applies), and so is a rule a later add put
+/// back. File system calls: off the actor.
+pub(crate) fn remove_now(file: &Path, rule: &str, seq: u64) -> std::io::Result<bool> {
+    let mut held = locked();
+    if superseded(&mut held, file, rule, seq) {
+        return Ok(false);
+    }
     let Kept::Rules(mut rules) = read_unlocked(file) else {
         return Ok(false);
     };

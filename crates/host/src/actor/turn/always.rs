@@ -10,9 +10,10 @@
 //!   (`agent::always::real_within`).
 //! - [`answer`]: the lawyer's `allow_always` answer is logged as chosen, but the agent gets the
 //!   request's `allow_once` option, so claude-agent-acp writes nothing into the matter; the
-//!   rule is kept for the session and in the matter's file, unless it is a path rule outside the
-//!   matter folder by its text (`agent::always::within`) or its real path. What was not kept,
-//!   and why, goes back for the lawyer's notice ([`Answered`]).
+//!   rule is kept for the session and in the matter's file ([`keep`], numbered by the actor's
+//!   `kept::Ledger`), unless it is a path rule outside the matter folder by its text
+//!   (`agent::always::within`) or its real path. What was not kept, and why, goes back for the
+//!   lawyer's notice ([`Answered`]).
 //! - [`auto_allow`]: a later request whose rule is kept is answered `allow_once` by the host,
 //!   after the data-fence and held-open checks, logged as `PermissionRequested` and
 //!   `PermissionResolved` in one commit, as `asks::refuse_held_open` logs its answer; a path
@@ -34,6 +35,7 @@ use clauseo_protocol::{
 use serde_json::Value;
 
 use super::super::Actor;
+use super::super::kept::Ledger;
 use super::Then;
 use super::agents::Agent;
 use super::asks::PermissionAsk;
@@ -60,6 +62,8 @@ pub(super) struct AlwaysAsk {
 pub(super) struct Answered {
     pub(super) once: AgentChoiceId,
     pub(super) not_kept: Option<NotKept>,
+    /// The rule newly kept and its matter's file, for [`keep`] to store.
+    pub(super) keep: Option<(PathBuf, String)>,
 }
 
 /// A Claude agent's kept rules for its matter, and its pending requests' [`AlwaysAsk`].
@@ -76,14 +80,22 @@ pub(super) struct Always {
 
 impl Always {
     /// For a launch of an agent of `kind`: the rules its prep read (`RunFolders::always`), for
-    /// Claude outside forced ask only.
-    pub(super) fn at_launch(run: &RunFolders, kind: Option<AgentKind>, forced_ask: bool) -> Self {
+    /// Claude outside forced ask only, without those the lawyer removed since (`kept`, the
+    /// actor's ledger): the prep read the file off the actor, maybe before a removal's write.
+    pub(super) fn at_launch(
+        run: &RunFolders,
+        kind: Option<AgentKind>,
+        forced_ask: bool,
+        kept: &Ledger,
+    ) -> Self {
         if kind != Some(AgentKind::Claude) || forced_ask {
             return Self::default();
         }
+        let mut rules = run.always.iter().cloned().collect();
+        kept.drop_removed(run.key.matter, &mut rules);
         Self {
             file: always::file_beside(&run.notes),
-            rules: run.always.iter().cloned().collect(),
+            rules,
             roots: Vec::new(),
             asked: BTreeMap::new(),
         }
@@ -183,7 +195,8 @@ pub(super) fn asked(agent: &mut Agent, request: PermissionRequestId, ask: Option
 }
 
 /// The lawyer answered `request` with `option`: for an `allow_always` one with an
-/// [`AlwaysAsk`], the option the agent gets instead, its rule kept for the session and stored.
+/// [`AlwaysAsk`], the option the agent gets instead, its rule kept for the session and given
+/// back to be stored ([`keep`]).
 pub(super) fn answer(
     agent: &mut Agent,
     request: PermissionRequestId,
@@ -204,16 +217,13 @@ pub(super) fn answer(
             (true, false) => Ok(rule),
         }
     });
-    let not_kept = match kept {
+    let (not_kept, keep) = match kept {
         Ok(rule) => {
-            if agent.always.rules.insert(rule.clone())
-                && let Some(file) = &agent.always.file
-            {
-                always::store(file.clone(), rule);
-            }
-            None
+            let new = agent.always.rules.insert(rule.clone());
+            let file = agent.always.file.clone().filter(|_| new);
+            (None, file.map(|file| (file, rule)))
         }
-        Err(why) => Some(why),
+        Err(why) => (Some(why), None),
     };
     tracing::info!(
         ?not_kept,
@@ -222,7 +232,22 @@ pub(super) fn answer(
     Some(Answered {
         once: ask.once,
         not_kept,
+        keep,
     })
+}
+
+/// Stores a rule [`answer`] newly kept for `thread`'s matter, numbered by the actor's ledger
+/// so a removal the lawyer asks for later always wins (`actor/kept.rs`).
+pub(super) fn keep(actor: &mut Actor, thread: ThreadId, keep: Option<(PathBuf, String)>) {
+    let Some((file, rule)) = keep else {
+        return;
+    };
+    let Ok(entry) = actor.check_thread(thread) else {
+        return;
+    };
+    let matter = entry.row.matter;
+    let seq = actor.kept.keep(matter, &rule);
+    always::store(file, rule, seq);
 }
 
 /// Answers `ask` `allow_once` when its rule is kept (a path rule only when `real`, its file's
