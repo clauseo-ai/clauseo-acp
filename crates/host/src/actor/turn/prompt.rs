@@ -1,4 +1,5 @@
-//! Step 5: the prompt, with the undo note (the files put back since the last turn) first.
+//! Step 5: the prompt, with the notes first: the offline-shell note a steer could not deliver
+//! (`shell_network.rs`), then the undo note (the files put back since the last turn).
 //!
 //! The note is added here, after `SendPrompt` checked the question alone, so a Codex prompt is
 //! checked against Codex's cap again as it will be sent (`codex_cap::refuse`): over
@@ -133,17 +134,26 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     });
 }
 
-/// The undo note's text for the next prompt; the note stays until [`clear_note`].
+/// The notes' text for the next prompt: the owed offline-shell note, then the undo note; both
+/// stay until [`clear_note`].
 fn note_text(actor: &mut Actor, thread: ThreadId) -> Option<String> {
     ensure_note(actor, thread);
     let state = state(actor, thread)?;
-    undo_note::note_text(state.note.as_deref().unwrap_or_default())
+    let undo = undo_note::note_text(state.note.as_deref().unwrap_or_default());
+    let owed = state
+        .offline_owed
+        .then_some(super::shell_network::OWED_NOTE);
+    match (owed, undo) {
+        (Some(owed), Some(undo)) => Some(format!("{owed}\n{undo}")),
+        (owed, undo) => owed.map(str::to_owned).or(undo),
+    }
 }
 
 /// The note cleared: the turn starting now carries it, or its agent is gone.
 fn clear_note(actor: &mut Actor, thread: ThreadId) {
     if let Some(state) = state(actor, thread) {
         state.note = Some(Vec::new());
+        state.offline_owed = false;
     }
 }
 

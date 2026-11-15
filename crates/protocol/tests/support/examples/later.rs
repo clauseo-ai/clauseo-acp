@@ -255,6 +255,13 @@ pub(super) fn notices() -> Vec<DomainEvent> {
             text: "Clauseo blocked a request: it reaches outside this matter.".to_owned(),
             kind: Some(NoticeKind::OutsideMatterBlocked),
         },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo stopped a step: ChatGPT tried to go online by running a command. \
+                   ChatGPT can use web search instead."
+                .to_owned(),
+            kind: Some(NoticeKind::ShellNetworkBlocked),
+        },
     ];
     notices.extend(
         [

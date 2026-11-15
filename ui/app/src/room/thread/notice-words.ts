@@ -81,6 +81,17 @@ export function noticeLine(
       ? w.th("Clauseo stopped a step: the AI tried to reach outside this matter.")
       : w.th("Clauseo stopped a step: {name} tried to reach outside this matter.", { name });
   }
+  if (kind === "shell_network_blocked") {
+    const name = agentNameOf(agent);
+    return name === null
+      ? w.th(
+          "Clauseo stopped a step: the AI tried to go online by running a command. It can use web search instead.",
+        )
+      : w.th(
+          "Clauseo stopped a step: {name} tried to go online by running a command. {name} can use web search instead.",
+          { name },
+        );
+  }
   if (typeof kind === "string") {
     if (kind === "context_not_restored")
       return w.th(

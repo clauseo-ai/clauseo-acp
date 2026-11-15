@@ -125,6 +125,8 @@ pub(crate) struct TurnState {
     /// The restores of the thread's matter while `note` is `None`, held in memory only
     /// (`restore.rs`); the note takes them when first read.
     restored: Vec<crate::undo_note::RestoreNote>,
+    /// The offline-shell note did not reach the agent; it goes first in the next prompt.
+    offline_owed: bool,
     /// Start-up reconciliation of this thread is in progress.
     reconciling: bool,
     /// The last turn, until the commit holding its `TurnEnded` returns `Ok`. A new prompt is
@@ -404,6 +406,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             turn,
             reach,
         } => offline::on_probed(actor, thread, turn, reach),
+        TurnInput::OfflineNoteOwed(thread) => shell_network::owe_note(actor, thread),
         TurnInput::Log {
             thread,
             why,

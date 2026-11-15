@@ -57,6 +57,22 @@ test("with no agent name known, the data-fence line names the AI", () => {
   );
 });
 
+test("a declined shell download's line names the agent, in English and Hindi", () => {
+  const codex = { kind: "codex", name: "codex-acp" } as const;
+  expect(noticeLine("shell_network_blocked", en, codex)).toBe(
+    "Clauseo stopped a step: ChatGPT tried to go online by running a command. ChatGPT can use web search instead.",
+  );
+  expect(noticeLine("shell_network_blocked", words("hi"), codex)).toBe(
+    "Clauseo ने एक काम रोक दिया: ChatGPT ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की। इसके बजाय ChatGPT वेब खोज का उपयोग कर सकता है।",
+  );
+  expect(noticeLine("shell_network_blocked", en)).toBe(
+    "Clauseo stopped a step: the AI tried to go online by running a command. It can use web search instead.",
+  );
+  expect(noticeLine("shell_network_blocked", words("hi"), { kind: undefined, name: " " })).toBe(
+    "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की। इसके बजाय यह वेब खोज का उपयोग कर सकता है।",
+  );
+});
+
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
   expect(noticeLine(undefined, en)).toBeNull();
 });

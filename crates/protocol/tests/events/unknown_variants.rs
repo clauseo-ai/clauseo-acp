@@ -171,6 +171,10 @@ fn notice_kind() {
         r#""outside_matter_blocked""#,
         &NoticeKind::OutsideMatterBlocked,
     );
+    decodes_in_both(
+        r#""shell_network_blocked""#,
+        &NoticeKind::ShellNetworkBlocked,
+    );
     let pack = PackId::new("nda-kit").unwrap();
     let skipped = NoticeKind::SkillPackNotLoaded {
         pack,

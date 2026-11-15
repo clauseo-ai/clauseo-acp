@@ -167,6 +167,13 @@ export const HI = {
     "Clauseo ने एक काम रोक दिया: {name} ने इस मामले के बाहर पहुँचने की कोशिश की।",
   "Clauseo stopped a step: the AI tried to reach outside this matter.":
     "Clauseo ने एक काम रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
+  // Clauseo declined, unasked, a shell command of the agent's that needed the internet (Codex's
+  // curl or wget); {name} as above (provisional, TN-13), and the AI where none is known
+  // (provisional, TN-14)
+  "Clauseo stopped a step: {name} tried to go online by running a command. {name} can use web search instead.":
+    "Clauseo ने एक काम रोक दिया: {name} ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की। इसके बजाय {name} वेब खोज का उपयोग कर सकता है।",
+  "Clauseo stopped a step: the AI tried to go online by running a command. It can use web search instead.":
+    "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की। इसके बजाय यह वेब खोज का उपयोग कर सकता है।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

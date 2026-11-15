@@ -430,6 +430,9 @@ mod settings;
 #[path = "host/settings_entries.rs"]
 mod settings_entries;
 #[cfg(test)]
+#[path = "host/shell_offline_owed.rs"]
+mod shell_offline_owed;
+#[cfg(test)]
 #[path = "host/sign_in_hold.rs"]
 mod sign_in_hold;
 #[cfg(test)]

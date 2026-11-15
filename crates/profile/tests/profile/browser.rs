@@ -145,8 +145,7 @@ fn only_the_browser_part_names_agent_browser() {
         "never a browser command in your shell",
         "confidential matter text",
         "The eval tool is off",
-        "Your shell has no internet, so save a file by clicking its link in the browser, never with \
-         curl or wget.",
+        "Save a file from the web by clicking its link in the browser.",
         "close tool",
     ] {
         assert!(codex_on.contains(rule), "{rule}: {codex_on}");
@@ -169,4 +168,22 @@ fn only_the_browser_part_names_agent_browser() {
         assert!(!browser_part_for(part, true).contains("agent-browser"));
     }
     assert!(word_count(browser_part(BrowserPart::NotInstalled)) <= 50);
+}
+
+/// Every Codex session is told its shell has no internet, whatever its browser part (the line
+/// sits outside `{browser}`): Clauseo declines Codex's downloads in the shell. Claude never is.
+#[test]
+fn every_codex_session_is_told_its_shell_is_offline() {
+    use clauseo_profile::instructions::CODEX_SHELL_OFFLINE;
+    let line = CODEX_SHELL_OFFLINE.trim();
+    assert!(
+        line.contains("curl") && line.contains("web search"),
+        "{line}"
+    );
+    let profile = profile();
+    for macos in [false, true] {
+        let codex = profile.codex_instructions_for(macos);
+        assert_eq!(codex.matches(line).count(), 1, "{codex}");
+        assert!(!profile.claude_instructions_for(macos).contains(line));
+    }
 }

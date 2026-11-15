@@ -1,0 +1,1 @@
+Your shell has no internet: never use curl, wget or another download command in it. Use your web search and web fetch tools instead.
