@@ -60,6 +60,7 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!({"snooze_thread": {"thread": thread}}),
         json!({"mark_thread_done": {"thread": thread, "done": true}}),
         json!({"sweep_done": {"day_start": 1_790_000_000_000_u64}}),
+        json!({"allow_matter_read": {"thread": thread, "matter": matter}}),
         // The room's tracked changes in a Word file.
         json!({"decide_revisions": {"matter": matter, "path": "Lease.docx",
             "version": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",

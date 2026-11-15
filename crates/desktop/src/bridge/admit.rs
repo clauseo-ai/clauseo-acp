@@ -108,6 +108,9 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         | HostCommand::SnoozeThread { .. }
         | HostCommand::MarkThreadDone { .. }
         | HostCommand::SweepDone { .. }
+        // A thread and another matter; the host checks both.
+        | HostCommand::AllowMatterRead { .. }
+        | HostCommand::WithdrawMatterRead { .. }
         | HostCommand::UndoStep { .. }
         | HostCommand::RestoreVersion { .. }
         | HostCommand::SetUiSettings { .. }
