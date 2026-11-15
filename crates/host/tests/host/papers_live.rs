@@ -225,3 +225,58 @@ fn opening_another_matter_moves_the_watch() {
     );
     host.shutdown();
 }
+
+/// Whether `matter`'s row reads `state` within `patience`.
+#[cfg(target_os = "macos")]
+fn row_within(
+    sub: &mut AppSubscription,
+    matter: MatterId,
+    state: FolderState,
+    patience: Duration,
+) -> bool {
+    futures::executor::block_on(async {
+        let read = std::pin::pin!(async {
+            while let Some(item) = sub.next().await {
+                if let HostEvent::MattersChanged(changed) = decode(&item)
+                    && changed
+                        .matters
+                        .iter()
+                        .any(|row| row.matter == matter && row.folder_state == state)
+                {
+                    return true;
+                }
+            }
+            false
+        });
+        match futures::future::select(read, async_io::Timer::after(patience)).await {
+            Either::Left((read, _timer)) => read,
+            Either::Right(_) => false,
+        }
+    })
+}
+
+/// `FSEvents` tells the watch nothing when a folder above the matter's moves (its client's
+/// folder renamed): the watch reads the folder every 2 s on macOS, so the row reads `missing`
+/// within that and the 2 s re-check.
+#[cfg(target_os = "macos")]
+#[test]
+fn on_macos_a_matter_folder_moved_with_its_parent_reads_missing() {
+    let dir = Dir::new("papers_live_parent", &[]);
+    let host = start(&dir);
+    let folder = dir.folder("clients/m", &[("brief.txt", "x\n")]);
+    let matter = host.create_matter("m", &folder);
+    let (mut sub, _first) = subscribe_app(&host);
+    host.ok(HostCommand::OpenMatter { matter });
+    until_watched(&mut sub, matter, &folder);
+    // Quiet: what the probe set off has been told, so what comes next is the move's.
+    while told_within(&mut sub, matter, Duration::from_secs(1)) {}
+
+    write::rename(&dir.work_path("clients"), &dir.work_path("clients-old"));
+    assert!(row_within(
+        &mut sub,
+        matter,
+        FolderState::Missing,
+        Duration::from_secs(6)
+    ));
+    host.shutdown();
+}

@@ -14,7 +14,14 @@ day, beside Clauseo.
   (`OpenMatter`) or the app last listed (`ListPapers`: the matter the app reopens at launch is
   listed, never opened), one matter at a time, through the `notify` crate: FSEvents on macOS,
   inotify on Linux. The whole tree is watched, as the listing walks it, symlinks not followed.
-  No polling. Windows has no watch (below).
+  No polling of the tree. Windows has no watch (below).
+- FSEvents tells of the watched folder itself moving, never of a folder above it moving (a
+  client's folder renamed with the matter's inside), and `notify` 8.2.2 does not ask for
+  `kFSEventStreamCreateFlagWatchRoot` or offer a setting for it. So on macOS only, the
+  `clauseo-papers` thread also reads the folder's device and inode every 2 s, one `stat` of
+  the one watched folder: one gone, or another folder at the path, is looked at as after a
+  change (below). inotify does not tell of a folder above moving either, but Linux is left as
+  it was: the listing when the window comes back to the front finds the folder gone.
 - The watch starts on a short-lived thread, never on the actor: resolving the folder and
   inotify's walk of its tree would freeze the host on a share that does not answer. Each start
   has a generation; what a replaced watch posts is dropped. A start the OS refused (inotify's
