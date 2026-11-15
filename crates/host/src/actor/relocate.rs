@@ -4,7 +4,8 @@
 //! Order: the matter must be known and the folder ref registered; the matter's writer must be
 //! free (`matter.turn_running`); then, on the matter's worker, the registry check (the folder is
 //! not, does not hold and is not inside another registered or claimed matter folder:
-//! `matter.folder_refused`) and `Matter::locate`, which refuses what import refuses for the
+//! `matter.folder_is_matter`, `matter.folder_holds_matter`, `matter.folder_inside_matter`, as a
+//! new matter gets them) and `Matter::locate`, which refuses what import refuses for the
 //! place and a folder whose marker is missing, unreadable or names another matter. Only after
 //! `Ok` does one commit carry `MatterRelocated`, the matter's row with the new path and the
 //! receipt. The host's row moves when that commit is durable; a failed commit sends the worker
