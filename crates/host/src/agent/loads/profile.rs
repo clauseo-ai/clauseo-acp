@@ -232,7 +232,6 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         allowed.extend(clauseo_profile::claude::agent_browser_allowed().map(Value::String));
         disallowed.extend(clauseo_profile::claude::agent_browser_denied().map(Value::String));
     }
-    super::subagents::subagent_options(options, keys.login, keys.web_search.on);
     if !disallowed.is_empty() {
         options.insert("disallowedTools".to_owned(), Value::Array(disallowed));
     }

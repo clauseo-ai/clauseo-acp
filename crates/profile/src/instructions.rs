@@ -148,12 +148,14 @@ pub const SHIP_WORKING_AT_SCALE: bool = true;
 /// Its conversion script names `pypdf` and `python-docx`: Clauseo's Python runtime bundles both
 /// (`python-runtime/lock.toml`'s requirements, imported by its smoke test at every build; a
 /// profile test reads the lock). Linux has no runtime, and on macOS and Windows it installs after
-/// the agent, so a session can start before it is there.
+/// the agent, so a session can start before it is there: the part then says to convert with
+/// `textutil` or `stetdoc` instead and never to install packages.
 pub const SCALE_CLAUDE: &str = include_str!("../assets/instructions/scale-claude.txt");
 
-/// Whether [`SCALE_CLAUDE`] gains [`SCALE_RESEARCH`] when Claude has the `researcher` agent
-/// (`crate::subagents::RESEARCHER_ARM`). Measured setting: off, so the researcher is defined
-/// and available but no text tells Claude to delegate research first.
+/// Whether [`SCALE_CLAUDE`] gains [`SCALE_RESEARCH`] in a session that keeps the `researcher`
+/// agent (`crate::subagents::RESEARCHER_ARM`, web search on): the host adds it then. Measured
+/// setting: off, so the researcher is defined and available but no text tells Claude to
+/// delegate research first.
 pub const SHIP_RESEARCH_TEXT: bool = false;
 
 /// The research bullets [`SCALE_CLAUDE`] gains with [`SHIP_RESEARCH_TEXT`] and a researcher:
