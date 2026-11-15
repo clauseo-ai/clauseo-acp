@@ -1556,7 +1556,9 @@ expression: counts_schema()
         "blackline.format_unknown",
         "agent.unreachable",
         "word.too_large",
-        "agent.start_offline"
+        "agent.start_offline",
+        "agent.answer_failed",
+        "agent.mode_missing"
       ],
       "type": "string"
     },

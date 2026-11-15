@@ -526,10 +526,7 @@ fn codex_giving_up_after_a_reached_quiet_probe_is_not_offline() {
     let log = rig.log(thread);
     assert_eq!(
         ended(&log, turn),
-        (
-            Some(StopReason::Failed),
-            Some(ErrorCode::AgentProtocolError)
-        )
+        (Some(StopReason::Failed), Some(ErrorCode::AgentAnswerFailed))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
     rig.finish();

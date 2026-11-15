@@ -130,7 +130,7 @@ pub(super) fn claude_start(
 /// what the agent's answer lacked.
 fn no_mode(actor: &mut Actor, thread: ThreadId, mode: &str, why: &str) {
     let error = Error::refused(
-        ErrorCode::AgentProtocolError,
+        ErrorCode::AgentModeMissing,
         format!(
             "Claude Code {why}, so Clauseo cannot run it in its \"{mode}\" mode and sent no message"
         ),

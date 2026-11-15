@@ -80,7 +80,7 @@ fn prompt_too_long_reads_only_allowlisted_fields_of_a_prompt_error() {
     for error in too_long {
         assert!(error.prompt_too_long(), "{error:?}");
         // The code stays the RPC error's: only the host's turn end reads `prompt_too_long`.
-        assert_eq!(error.code(), ErrorCode::AgentProtocolError);
+        assert_eq!(error.code(), ErrorCode::AgentAnswerFailed);
     }
     let other = [
         rpc("Internal error", &json!({"errorKind": "invalid_request"})),

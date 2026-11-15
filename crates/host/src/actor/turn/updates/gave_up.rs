@@ -2,8 +2,8 @@
 //! with `retry` or `new_session`, in a category no other rule reads (`clauseo_acp::AgentFailed`),
 //! as codex-acp 2.2.2 ends a turn on Codex's internal error. The turn ends `Failed` with
 //! `agent.service_error`, so the lawyer sees a failure line and Try again (no Restart), and the
-//! queue holds. A JSON-RPC error to `session/prompt` keeps `agent.protocol_error`: it cannot be
-//! told from a malformed reply. The agent's title is never shown nor logged:
+//! queue holds. A JSON-RPC error to `session/prompt` is `agent.answer_failed` instead
+//! (`clauseo_acp::Error::code`). The agent's title is never shown nor logged:
 //! the detail and the log name only its allowlisted category.
 
 use clauseo_acp::PromptEnd;

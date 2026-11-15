@@ -43,7 +43,7 @@
 //! the verdict's code too (its end waits for a fresh probe when the last is over 30 s old),
 //! unless its error says a server answered or asks for a sign-in; so does one that ends on a
 //! `connection` failure the agent gave up on, unless the host's last probe got through (then it
-//! fails `agent.protocol_error`). The log gets fixed fields only, never
+//! fails `agent.answer_failed`). The log gets fixed fields only, never
 //! the agent's text (decision 0047).
 
 use std::time::Duration;

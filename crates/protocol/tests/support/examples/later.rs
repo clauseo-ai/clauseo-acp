@@ -162,6 +162,14 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentUnreachable,
             "the agent could not reach its service; probe class=refused via=direct status=0",
         ),
+        failed(
+            ErrorCode::AgentAnswerFailed,
+            "acp: the agent answered session/prompt with error -32603: Internal error",
+        ),
+        failed(
+            ErrorCode::AgentModeMissing,
+            "Claude Code reported no modes, so Clauseo cannot run it in its \"default\" mode",
+        ),
     ]
 }
 

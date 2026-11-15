@@ -117,6 +117,10 @@ fn each_start_method_is_a_failed_launch_and_others_are_not() {
     for method in crate::error::START_METHODS {
         assert_eq!(rpc(method).code(), ErrorCode::AgentLaunchFailed, "{method}");
     }
-    // A prompt's error is not a start's; its code is outside this change.
-    assert_eq!(rpc("session/prompt").code(), ErrorCode::AgentProtocolError);
+    // A question's error is the answer's failure, never unreadable; any other request's stays.
+    assert_eq!(rpc("session/prompt").code(), ErrorCode::AgentAnswerFailed);
+    assert_eq!(
+        rpc("session/set_mode").code(),
+        ErrorCode::AgentProtocolError
+    );
 }
