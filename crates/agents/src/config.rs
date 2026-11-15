@@ -257,8 +257,8 @@ pub struct SigninConfig {
     pub allow_real_security: bool,
     /// Tests only: the macOS login keychain's lock state the background status check sees
     /// (`signin/keychain_lock.rs`). `None` makes the real `SecKeychainGetStatus` call, which
-    /// reads the machine's own default keychain, so a test that runs the status check on macOS
-    /// must set it (`Some(false)` for an unlocked keychain).
+    /// reads the machine's own default and login keychains, so a test that runs the status check
+    /// on macOS must set it (`Some(false)` for an unlocked keychain).
     #[cfg(feature = "test-support")]
     pub keychain_locked: Option<bool>,
 }
