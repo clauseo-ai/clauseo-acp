@@ -190,13 +190,17 @@ host added later reached the page without anyone deciding it should.
     Claude's report, not `agent.quiet` a moment before); past it the silence counts, so a tool
     left open with no word for 11 min ends the turn `agent.quiet` then. A window-only watch
     keeps its own `WORKING_LIMIT` (10 min).
+  - **A compaction in progress** holds the backstop off the same way, up to the same
+    `TOOL_LIMIT` from the agent's last output; past it the backstop applies again. The hold runs
+    from `compaction_update` `in_progress` until `completed`, `failed` or `cancelled` (all
+    three sent by claude-agent-acp 0.89.1, `cancelled` at the turn's end), any other output
+    but its summary, or the turn's end. Its summary chunks count as output, as before; the hold
+    covers the silence while the summary call waits for its first token. The quiet arm's
+    probes run as ever: only a service the probe cannot reach ends such a turn early.
   - **Gaps the backstop is what ends:** a proxy that asks for credentials (407, counted as reached
     so a proxy login never reads as offline) and a TLS-inspecting proxy that answers the
-    handshake itself, both in front of a blocked upstream; a Claude on a cloud provider's login,
-    or behind an `https://` or SOCKS proxy (not probed); and a Claude compaction whose summary
-    sends nothing for 5 minutes after its start (claude-agent-acp 0.89.1 sends
-    `compaction_update` at the start and streams `compaction_summary_chunk`, each counted as
-    output, but nothing comes between them while the summary call waits for its first token).
+    handshake itself, both in front of a blocked upstream; and a Claude on a cloud provider's
+    login, or behind an `https://` or SOCKS proxy (not probed).
   - **The probe's line reaches host.log**, at the lifecycle target, with fixed fields only:
     `reached`, `noted`, `by` (note, window, quiet), `class`, `via`, `status`, `ms`, `misses`;
     never a host, a proxy or bytes. Stage C's case 1 (proxy killed) had the probe run unseen:

@@ -233,7 +233,11 @@ pub(super) fn on_live(
                 | AgentUpdate::SessionTitle { .. }
         );
         if !idle {
+            let compacting = matches!(update, AgentUpdate::CompactionStarted { .. })
+                || (matches!(update, AgentUpdate::CompactionSummaryChunk { .. })
+                    && quiet::compacting(actor, thread));
             agent_active(actor, thread, turn);
+            quiet::set_compacting(actor, thread, turn, compacting);
         }
         return Some(update);
     };

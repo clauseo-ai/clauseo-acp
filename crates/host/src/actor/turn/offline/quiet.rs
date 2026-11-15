@@ -6,12 +6,14 @@
 //! its service is known does not matter here: one that is not is never probed (it counts as
 //! reached, `probe/service.rs`), so only the backstop ends such a turn. A tool call left open
 //! keeps both off only while the agent sent something within [`TOOL_LIMIT`]; past it the
-//! silence counts as any other.
+//! silence counts as any other. A compaction in progress (from its `in_progress` until it
+//! ends, any other output, or the turn's end) holds the backstop off the same way, up to the
+//! same cap, but not the probes: the summary call may wait long for its first token.
 //! - [`QUIET_WAIT`] with no output, no open tool call and no ask: a quiet watch arms and the host
 //!   probes the agent's service (`probe.rs`) at once. A probe that gets through waits again; two
 //!   misses in a row ([`QUIET_MISSES`]) end the turn `agent.offline`, as any watch does. Output
 //!   clears the watch; an agent's note turns it into a note's watch.
-//! - [`QUIET_LIMIT`] with no output, no open tool call and no ask ends the turn
+//! - [`QUIET_LIMIT`] with no output, no open tool call, no compaction and no ask ends the turn
 //!   `Failed { agent.quiet }` (the answer so far kept, Try again, the queue held), whatever the
 //!   probes said: the backstop for what a probe cannot see (a proxy that asks for credentials, a
 //!   TLS-inspecting one that answers the handshake itself).
@@ -71,6 +73,21 @@ pub(super) fn output(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     }
 }
 
+/// Whether a compaction of `thread`'s turn is in progress.
+pub(super) fn compacting(actor: &mut Actor, thread: ThreadId) -> bool {
+    current(actor, thread).is_some_and(|current| current.compacting)
+}
+
+/// The agent of `thread`'s live `turn` sent output that leaves a compaction in progress, or
+/// not: a compaction's start sets it; its end, or any output but its summary, clears it.
+pub(super) fn set_compacting(actor: &mut Actor, thread: ThreadId, turn: TurnId, on: bool) {
+    if let Some(current) =
+        current(actor, thread).filter(|current| current.turn == turn && current.live())
+    {
+        current.compacting = on;
+    }
+}
+
 /// An ask of `thread`'s agent ended (answered, cancelled, done): the clock of its live turn
 /// restarts, so the lawyer's time never counts.
 pub(in crate::actor::turn) fn ask_ended(actor: &mut Actor, thread: ThreadId) {
@@ -115,7 +132,13 @@ pub(in crate::actor::turn) fn on_timer(actor: &mut Actor, thread: ThreadId, turn
         );
         return;
     }
-    if quiet >= QUIET_LIMIT {
+    // A compaction in progress holds the backstop (not the probes) off up to the same cap.
+    let limit = if current.compacting && quiet < TOOL_LIMIT {
+        TOOL_LIMIT
+    } else {
+        QUIET_LIMIT
+    };
+    if quiet >= limit {
         backstop(actor, thread, quiet);
         return;
     }
@@ -123,7 +146,7 @@ pub(in crate::actor::turn) fn on_timer(actor: &mut Actor, thread: ThreadId, turn
         arm(actor, thread, turn, QUIET_WAIT.saturating_sub(quiet));
         return;
     }
-    let next = QUIET_WAIT.min(QUIET_LIMIT.saturating_sub(quiet));
+    let next = QUIET_WAIT.min(limit.saturating_sub(quiet));
     // A standing watch keeps its own timer.
     if current.offline.is_none() {
         let mut watch = Watch::new(now, Arm::Quiet);
