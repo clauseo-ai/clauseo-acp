@@ -118,7 +118,7 @@ fn a_refused_session_new_names_its_method_and_data_keys() {
             ("session/new", -32602, "keys [cwd]")
         );
         assert!(message.starts_with("Invalid params: `cwd` does not exist"));
-        assert_eq!(refused.code(), ErrorCode::AgentProtocolError);
+        assert_eq!(refused.code(), ErrorCode::AgentLaunchFailed);
     };
     let script = async {
         let init = agent.read().await;

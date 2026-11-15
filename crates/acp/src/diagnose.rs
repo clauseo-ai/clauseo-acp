@@ -47,6 +47,12 @@ pub(crate) fn undecoded(method: &str, serde: &str) {
     );
 }
 
+/// Whether `error` is the SDK's decode failure ([`decode_failure`]): the agent's answer did not
+/// decode, so it is unreadable, unlike an error the agent answered.
+pub(crate) fn is_decode_failure(error: &acp::Error) -> bool {
+    decode_failure(error).is_some()
+}
+
 /// The serde error text of the SDK's decode failure, when `error` is one: `-32700` with
 /// `data.phase == "deserialization"` and `data.error` (agent-client-protocol 3.3.0,
 /// `util::json_cast`).
