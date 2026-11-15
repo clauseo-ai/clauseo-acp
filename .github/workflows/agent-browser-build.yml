@@ -180,10 +180,13 @@ jobs:
   # linker's ad-hoc signature (the real signing stays in release.yml), the version against the
   # pin's patched_tag, and the daemon with streaming off as Clauseo's guard runs it, with a control
   # run that streaming on does listen. A report, not a gate: nothing needs it, and
-  # continue-on-error keeps a red run from failing the workflow. It checks out nothing.
+  # continue-on-error keeps a red run from failing the workflow. It checks out nothing. It runs
+  # even when another build leg failed (`!cancelled()`): it needs only the x86_64 artifact, and
+  # its download fails the job when that leg failed too.
   intel:
     name: intel check (x86_64-apple-darwin)
     needs: [resolve, build]
+    if: ${{ !cancelled() && needs.resolve.result == 'success' }}
     runs-on: macos-15-intel
     timeout-minutes: 20
     continue-on-error: true
