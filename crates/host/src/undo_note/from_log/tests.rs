@@ -84,6 +84,7 @@ fn step(n: u64, turn: TurnId, stop: StopReason, after: Option<CheckpointId>) -> 
         failure: None,
         files: Vec::new(),
         skipped: Vec::new(),
+        checkpoint_before: Some(checkpoint(40 + u8::try_from(n).unwrap())),
         checkpoint_after: after,
         undone: false,
         usage: None,
@@ -140,10 +141,10 @@ fn a_turn_counts_when_the_agent_answered_spoke_or_asked() {
     ];
     let (inputs, since) = told(&entries);
     assert_eq!(inputs, ["a.txt", "|", "b.txt", "|", "c.txt", "|", "d.txt"]);
-    // The last turn that carried it failed: no after checkpoint, so restores are read from the
-    // time it ended.
+    // The last turn that carried it failed: no after checkpoint, so restores are read from its
+    // before checkpoint on.
     assert_eq!(since, None);
-    assert_eq!(read(entries.iter()).ended, Some(at(11)));
+    assert_eq!(read(entries.iter()).before, Some(checkpoint(51)));
     assert!(carried(entries.iter(), one));
     assert!(carried(entries.iter(), two));
     assert!(carried(entries.iter(), three));
@@ -168,9 +169,10 @@ fn a_turn_the_agent_never_took_leaves_the_note() {
     let (inputs, since) = told(&entries);
     assert_eq!(inputs, ["|", "a.txt"]);
     assert_eq!(since, Some(checkpoint(1)));
-    assert_eq!(read(entries.iter()).ended, Some(at(3)));
+    assert_eq!(read(entries.iter()).before, Some(checkpoint(43)));
     // No turn carried it yet: restores since the conversation was created are read.
-    assert_eq!(read(entries[3..].iter()).ended, None);
+    let none = read(entries[3..].iter());
+    assert_eq!((none.since, none.before), (None, None));
     assert!(!carried(entries.iter(), refused));
     assert!(!carried(entries.iter(), cancelled));
     // A turn whose step is not there yet did not.

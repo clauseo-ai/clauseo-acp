@@ -393,6 +393,10 @@ pub struct StepEntry {
     pub files: Vec<FileChange>,
     /// The files it changed but did not version.
     pub skipped: Vec<SkippedFile>,
+    /// The before-turn checkpoint, from its `TurnStarted`; `None` for a turn that never
+    /// started, and in a step folded before the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub checkpoint_before: Option<CheckpointId>,
     /// The after-turn checkpoint; `None` when it failed, and the step cannot be undone.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub checkpoint_after: Option<CheckpointId>,

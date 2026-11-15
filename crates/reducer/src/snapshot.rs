@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use clauseo_protocol::{
-    AgentTextEntry, ErrorCode, HeaderEntry, MatterHeaderEntry, MatterId, MessageId, Seq, TextKind,
-    ThreadId, ThreadStatus, TurnId, ViewEntry,
+    AgentTextEntry, CheckpointId, ErrorCode, HeaderEntry, MatterHeaderEntry, MatterId, MessageId,
+    Seq, TextKind, ThreadId, ThreadStatus, TurnId, ViewEntry,
 };
 use serde::de::{self, IgnoredAny, MapAccess, Visitor};
 use serde::ser::{SerializeMap, SerializeSeq, SerializeStruct};
@@ -150,7 +150,7 @@ impl SnapshotRef<'_> {
 
 impl Serialize for ThreadState {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("ThreadState", 10)?;
+        let mut s = serializer.serialize_struct("ThreadState", 11)?;
         s.serialize_field("thread", &self.thread)?;
         s.serialize_field("seq", &self.seq)?;
         s.serialize_field("header", &unheld(self.header.as_ref()))?;
@@ -161,6 +161,7 @@ impl Serialize for ThreadState {
         s.serialize_field("after_turn", &self.after_turn)?;
         s.serialize_field("files", &self.files)?;
         s.serialize_field("failures", &self.failures)?;
+        s.serialize_field("before_checkpoints", &self.before_checkpoints)?;
         s.end()
     }
 }
@@ -277,6 +278,7 @@ struct ThreadWire {
     after_turn: Option<ThreadStatus>,
     files: BTreeMap<TurnId, TurnFiles>,
     failures: BTreeMap<TurnId, ErrorCode>,
+    before_checkpoints: BTreeMap<TurnId, CheckpointId>,
 }
 
 impl<'de> Deserialize<'de> for ThreadState {
@@ -295,6 +297,7 @@ impl<'de> Deserialize<'de> for ThreadState {
             after_turn: wire.after_turn,
             files: wire.files,
             failures: wire.failures,
+            before_checkpoints: wire.before_checkpoints,
             index,
         })
     }

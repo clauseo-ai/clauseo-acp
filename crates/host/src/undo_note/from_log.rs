@@ -24,20 +24,21 @@ pub(crate) struct Read<'a> {
     /// logged after its `CheckpointRecorded` are the note's too ([`Floor::After`]). `None` when
     /// no turn carried it, or that turn has no after checkpoint (it failed).
     pub(crate) since: Option<CheckpointId>,
-    /// When that turn ended: without its checkpoint (or the store's row of it), the restores
-    /// logged since are the note's ([`Floor::At`]). `None` when no turn carried the note: then
-    /// those since the conversation was created are.
-    pub(crate) ended: Option<Timestamp>,
+    /// That turn's before checkpoint, from its `TurnStarted`: when it has no after checkpoint
+    /// (or the store has no row of it), the restores logged after this one's row are the note's,
+    /// as none can run during a turn. With neither, and when no turn carried the note, those
+    /// logged since the conversation was created are ([`Floor::At`]).
+    pub(crate) before: Option<CheckpointId>,
 }
 
 /// Where the note's restores start in the matter's log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Floor {
-    /// After the `CheckpointRecorded` of the last turn that carried the note: the log is read
-    /// from there, and a restore whose checkpoint it is came before that turn.
+    /// After the `CheckpointRecorded` of the last turn that carried the note's after (or before)
+    /// checkpoint: the log is read from there, and a restore whose checkpoint it is came before
+    /// that turn.
     After(CheckpointId),
-    /// Logged at this time or later: the end of that turn, or the conversation's creation when
-    /// no turn carried the note. Nothing logged since was told yet.
+    /// Logged at this time or later: the conversation's creation. Nothing logged since was told.
     At(Timestamp),
 }
 
@@ -47,7 +48,7 @@ pub(crate) fn read<'a>(entries: impl Iterator<Item = &'a ViewEntry>) -> Read<'a>
     let mut acted = HashSet::new();
     let mut asked = false;
     let mut inputs = Vec::new();
-    let (mut since, mut ended) = (None, None);
+    let (mut since, mut before) = (None, None);
     for entry in entries {
         if let ViewEntry::UserMessage(message) = entry {
             prompted.insert(message.turn);
@@ -61,7 +62,7 @@ pub(crate) fn read<'a>(entries: impl Iterator<Item = &'a ViewEntry>) -> Read<'a>
             if prompted.contains(&step.turn) && took {
                 inputs.push(NoteInput::TurnStarted);
                 since = step.checkpoint_after;
-                ended = Some(step.ts);
+                before = step.checkpoint_before;
             }
         } else if let ViewEntry::Marker(marker) = entry
             && let MarkerKind::StepUndone { restored, .. } = &marker.kind
@@ -75,7 +76,7 @@ pub(crate) fn read<'a>(entries: impl Iterator<Item = &'a ViewEntry>) -> Read<'a>
     Read {
         inputs,
         since,
-        ended,
+        before,
     }
 }
 

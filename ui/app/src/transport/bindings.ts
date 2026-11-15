@@ -6135,6 +6135,11 @@ export type StepEntry = {
 	files: FileChange[],
 	/**  The files it changed but did not version. */
 	skipped: SkippedFile[],
+	/**
+	 *  The before-turn checkpoint, from its `TurnStarted`; `None` for a turn that never
+	 *  started, and in a step folded before the field.
+	 */
+	checkpoint_before?: CheckpointId,
 	/**  The after-turn checkpoint; `None` when it failed, and the step cannot be undone. */
 	checkpoint_after?: CheckpointId,
 	/**  Whether the step was undone. */

@@ -5,9 +5,10 @@
 //! kept current in memory. Before a turn's prompt, the matter's restores since the thread's
 //! last turn that carried the note are read off the actor, from that turn's after checkpoint
 //! on, decoded with no fold: the cost is the matter's events since that turn, not its history.
-//! With no such checkpoint (no turn carried the note, or that turn failed, or the store has no
-//! row of it), they are read from the time that turn ended, or the conversation was created,
-//! found by halving the log: nothing logged since was told yet, and nothing before is read.
+//! When that turn failed (no after checkpoint) or the store has no row of it, its before
+//! checkpoint places it the same way: no restore runs during a turn. With neither, or when no
+//! turn carried the note, they are read from the conversation's creation, found by halving the
+//! log: nothing logged since was told yet, and nothing before is read.
 //!
 //! A prompt takes the note and it is held aside while its turn runs: once that turn has ended,
 //! the note is dropped if the agent took the prompt (`undo_note::carried`), or put back first.
@@ -41,14 +42,12 @@ pub(crate) struct NoteState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Bound {
     /// The after checkpoint of the last turn that carried the note, when it has one.
-    checkpoint: Option<CheckpointId>,
-    /// When that turn ended; when no turn carried the note, when the conversation was created.
+    after: Option<CheckpointId>,
+    /// That turn's before checkpoint, when it has one.
+    before: Option<CheckpointId>,
+    /// When the conversation was created.
     at: Timestamp,
 }
-
-/// How many events before the time it found the log is read from: events are logged in time
-/// order but for a wall clock that stepped back, which this much slack covers.
-const SLACK: u64 = 256;
 
 /// One step that waits for the matter's restores to be read.
 type Then = Box<dyn FnOnce(&mut Actor)>;
@@ -176,8 +175,9 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId) {
         Some((state, created)) => {
             let read = undo_note::read(state.entries().values());
             let since = Bound {
-                checkpoint: read.since,
-                at: read.ended.unwrap_or(created),
+                after: read.since,
+                before: read.before,
+                at: created,
             };
             (
                 undo_note::since_last_turn(read.inputs, restores),
@@ -226,22 +226,25 @@ pub(super) fn read_first(
     });
 }
 
-/// The matter's restores the note lacks (`undo_note::kept`), from its log after the
-/// `CheckpointRecorded` of `since`'s checkpoint; or, with no checkpoint or no row of it in the
-/// store, those logged at `since`'s time or later. Never the whole log's restores: those were
-/// told, or are older than the conversation.
+/// The matter's restores the note lacks (`undo_note::kept`): from its log after the
+/// `CheckpointRecorded` of `since`'s after checkpoint, else of its before checkpoint, the first
+/// the store has a row of; with neither, those logged since the conversation was created. Never
+/// the whole log's restores: those were told, or are older than the conversation.
 async fn restores_log(
     store: &clauseo_store::Store,
     stream: StreamId,
     since: Bound,
 ) -> Result<Vec<Envelope>, clauseo_store::Error> {
-    let row = match since.checkpoint {
-        Some(checkpoint) => store.checkpoint(checkpoint).await?,
-        None => None,
-    };
-    let (mut after, floor) = match (row, since.checkpoint) {
-        (Some(row), Some(checkpoint)) => (Some(row.seq), Floor::After(checkpoint)),
-        _ => (seek(store, stream, since.at).await?, Floor::At(since.at)),
+    let mut placed = None;
+    for checkpoint in [since.after, since.before].into_iter().flatten() {
+        if let Some(row) = store.checkpoint(checkpoint).await? {
+            placed = Some((row.seq, checkpoint));
+            break;
+        }
+    }
+    let (mut after, floor) = match placed {
+        Some((seq, checkpoint)) => (Some(seq), Floor::After(checkpoint)),
+        None => (seek(store, stream, since.at).await?, Floor::At(since.at)),
     };
     let mut log: Vec<Envelope> = Vec::new();
     loop {
@@ -261,8 +264,7 @@ async fn restores_log(
 }
 
 /// Where to read `stream` from for the events logged at `at` or later: the first such event,
-/// found by halving its seqs with one-event reads, less [`SLACK`] events. `None` reads from the
-/// start.
+/// found by halving its seqs with one-event reads. `None` reads from the start.
 async fn seek(
     store: &clauseo_store::Store,
     stream: StreamId,
@@ -286,7 +288,7 @@ async fn seek(
             Some(_) | None => high = middle,
         }
     }
-    Ok(Seq::new(low.saturating_sub(SLACK)).ok())
+    Ok(Seq::new(low).ok())
 }
 
 /// The matter's restores from `since` came back: they join the note, unless a prompt took
