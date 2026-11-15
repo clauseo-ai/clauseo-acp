@@ -13,15 +13,40 @@
 
 use std::collections::BTreeSet;
 
-/// The count of tracked changes the head's summary line `line` gives: 0 when it names none.
-/// `None` when `line` is not the summary.
-pub(super) fn summary_count(line: &str) -> Option<usize> {
-    let rest = line.strip_prefix("{summary: ")?;
-    let (number, after) = rest.split_once(' ')?;
-    if !after.starts_with("tracked change") {
-        return Some(0);
+/// What a line says as the head's summary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Summary {
+    /// Not the summary line.
+    NotSummary,
+    /// The summary, counting this many tracked changes (0 when it names none).
+    Count(usize),
+    /// A summary that speaks of tracked changes in words this reader can't read: the count
+    /// check can't be made.
+    Unreadable,
+}
+
+/// What `line` says as the head's summary (`{summary: 6 tracked changes (C 6) · …}`, a
+/// thousands separator allowed: `1,234 tracked changes`).
+pub(super) fn summary_count(line: &str) -> Summary {
+    let Some(rest) = line.strip_prefix("{summary:") else {
+        return Summary::NotSummary;
+    };
+    let first = rest.trim_start().split(" · ").next().unwrap_or_default();
+    if let Some(number) = first.find(" tracked change").and_then(|at| first.get(..at)) {
+        let digits: String = number.chars().filter(|c| *c != ',').collect();
+        let grouped = !number.starts_with(',') && !number.ends_with(',') && !number.contains(",,");
+        return match digits.parse() {
+            Ok(count) if grouped && digits.bytes().all(|b| b.is_ascii_digit()) => {
+                Summary::Count(count)
+            }
+            _ => Summary::Unreadable,
+        };
     }
-    number.parse().ok().or(Some(0))
+    if rest.contains("tracked") || rest.contains("change") {
+        Summary::Unreadable
+    } else {
+        Summary::Count(0)
+    }
 }
 
 /// Adds the change ids `line`'s markers name to `ids`.
@@ -84,6 +109,8 @@ fn word_ids(word: &[u8], ids: &mut BTreeSet<u64>) {
 mod tests {
     use std::collections::BTreeSet;
 
+    use super::Summary::{Count, NotSummary, Unreadable};
+    use super::Summary::{Count, NotSummary, Unreadable};
     use super::{ids_in, summary_count};
 
     fn ids(line: &str) -> Vec<u64> {
@@ -112,15 +139,31 @@ mod tests {
     #[test]
     fn the_summary_gives_stetdocs_count() {
         let count = summary_count;
-        assert_eq!(
-            count("{summary: 6 tracked changes (C 6) · 1 footnote · 1 section}"),
-            Some(6)
-        );
+        let six = "{summary: 6 tracked changes (C 6) · 1 footnote · 1 section}";
+        assert_eq!(count(six), Count(6));
         assert_eq!(
             count("{summary: 1 tracked change (C 1) · 1 section}"),
-            Some(1)
+            Count(1)
         );
-        assert_eq!(count("{summary: 1 section}"), Some(0));
-        assert_eq!(count("{authors: C \"Clauseo\"}"), None);
+        assert_eq!(
+            count("{summary: 1,234 tracked changes (C 1,234)}"),
+            Count(1234)
+        );
+        assert_eq!(count("{summary: 1 section}"), Count(0));
+        assert_eq!(
+            count("{summary: 1 section · 2 read-only paragraphs}"),
+            Count(0)
+        );
+        assert_eq!(count("{authors: C \"Clauseo\"}"), NotSummary);
+        // Wording or a number this reader can't read turns the check off, and says so.
+        for odd in [
+            "{summary: many tracked changes (C 6)}",
+            "{summary: 1.234 tracked changes}",
+            "{summary: 6 tracked revisions}",
+            "{summary: 3 changes}",
+            "{summary: ,12 tracked changes}",
+        ] {
+            assert_eq!(count(odd), Unreadable, "{odd}");
+        }
     }
 }

@@ -1,7 +1,9 @@
 """The pairs behind view-nested-inner's siblings: hidden text that changes, tables three deep,
 a paragraph past stetdoc's wrap, and an inner table that ends its cell and is removed (the
 compare stetdoc 0.9.3 refuses), a sentence struck through and one hidden as tracked format
-changes, and a changed footnote and header. Standard library only; writes into the current folder, with
+changes, a changed footnote and header, and documents that already hold a tracked row
+insertion, a row deletion, a cell insertion and deletion, and a row inserted in a nested table
+(viewed as they are, with no compare). Standard library only; writes into the current folder, with
 make_docs.py's package writer (run make_docs.py's pairs from a temporary folder: it writes
 other files too)."""
 import os
@@ -85,3 +87,32 @@ def noted(name, body_text, note, header):
 
 noted('notes-old.docx', 'The term is one year.', 'Note one year.', 'Header one year.')
 noted('notes-new.docx', 'The term is two years.', 'Note two years.', 'Header two years.')
+
+
+# Documents that already hold a tracked table change, viewed as they are (`stetdoc view --all
+# --json <name>.docx`): a row inserted or deleted (w:trPr/w:ins, w:del), a cell inserted or
+# deleted (w:tcPr/w:cellIns, w:cellDel), and a row inserted in a table inside a cell.
+GC = '<w:gridCol w:w="2000"/>'
+
+
+def cell(x, tcpr=''):
+    return f'<w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/>{tcpr}</w:tcPr>{x}</w:tc>'
+
+
+def row(cells, trpr=''):
+    props = f'<w:trPr>{trpr}</w:trPr>' if trpr else ''
+    return f'<w:tr>{props}{cells}</w:tr>'
+
+
+def grid(rows, cols):
+    return (f'<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>'
+            f'<w:tblGrid>{GC * cols}</w:tblGrid>{rows}</w:tbl>')
+
+
+KEPT = row(cell(p('Kept A.')) + cell(p('Kept B.')))
+pkg('row-ins.docx', p('Intro.') + grid(KEPT + row(cell(p('New A.')) + cell(p('New B.')), f'<w:ins w:id="11" {D}/>'), 2) + S)
+pkg('row-del.docx', p('Intro.') + grid(KEPT + row(cell(p('Gone A.')) + cell(p('Gone B.')), f'<w:del w:id="12" {D}/>'), 2) + S)
+pkg('cell-ins.docx', p('Intro.') + grid(row(cell(p('Kept A.')) + cell(p('New cell.'), f'<w:cellIns w:id="13" {D}/>')), 2) + S)
+pkg('cell-del.docx', p('Intro.') + grid(row(cell(p('Kept A.')) + cell(p('Gone cell.'), f'<w:cellDel w:id="14" {D}/>')), 2) + S)
+INNER = grid(row(cell(p('Inner kept.'))) + row(cell(p('Inner new.')), f'<w:ins w:id="15" {D}/>'), 1)
+pkg('row-ins-nested.docx', p('Intro.') + grid(row(cell(p('Outer.') + INNER + p(''))), 1) + S)

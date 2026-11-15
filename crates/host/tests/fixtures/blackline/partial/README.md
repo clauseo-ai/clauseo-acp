@@ -22,6 +22,11 @@ unit tests (`src/actor/query/blackline/parse/tests/partial.rs`) and the host tes
 - `notes-old.docx`, `notes-new.docx`: the body, a footnote and a header each change. `view-notes.json`:
   the summary counts 6 tracked changes, the body's line names 2, and the footnote follows
   `{appendix}` in its final text, unmarked.
+- `view-row-ins.json`, `view-row-del.json`, `view-cell-ins.json`, `view-cell-del.json`,
+  `view-row-ins-nested.json`: `stetdoc view --all --json` on documents of `make_more.py` that
+  already hold a tracked row insertion or deletion, a cell insertion or deletion, and a row
+  inserted in a table inside a cell (`{row inserted #11 R}`, `{cell deleted #14 R}`; the
+  paragraphs inside show no change of their own).
 - `inner-last-old.docx`, `inner-last-new.docx`: an inner table that is the last thing in its
   cell, removed in the new version. `compare-inner-last.json` is what `stetdoc compare --json`
   printed for them: `validation_failed`, exit 5 (stetdoc's fix comes after its PR #22).
