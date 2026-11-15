@@ -41,6 +41,7 @@ fn decision_record_quotes_the_migration() {
         include_str!("../../src/migrations/0004_thread_title_source.sql"),
         include_str!("../../src/migrations/0005_matter_skill_packs.sql"),
         include_str!("../../src/migrations/0006_matter_agent_prefs.sql"),
+        include_str!("../../src/migrations/0007_pending_actions.sql"),
     ];
     let mut rest = record;
     for migration in migrations {
@@ -85,6 +86,7 @@ fn migrations_set_user_version() {
         ("table", "checkpoints"),
         ("index", "checkpoints_by_matter"),
         ("table", "account_limits"),
+        ("table", "pending_actions"),
     ]
     .into_iter()
     .map(|(kind, name)| (kind.to_owned(), name.to_owned()))
