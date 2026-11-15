@@ -27,6 +27,7 @@ import {
   rustcCommit,
   tarInfo,
   toolchainChannel,
+  workParent,
 } from "./agent-browser-build.mjs";
 import { parsePin } from "./agent-browser.mjs";
 
@@ -342,6 +343,16 @@ describe("check", () => {
     const server = serve(gz);
     await assert.rejects(main(["check"], { pinPath, patchDir, fetch: server.fetch, log: quiet }), /NNNN/);
     assert.equal(server.calls.length, 0);
+  });
+});
+
+describe("workParent", () => {
+  test("macOS builds under /tmp, so upstream's Unix socket tests stay under 104 bytes", () => {
+    assert.equal(workParent("darwin"), "/tmp");
+    assert.equal(workParent("linux"), tmpdir());
+    assert.equal(workParent("win32"), tmpdir());
+    // The longest socket path upstream's tests make there: /private/tmp/ab-XXXXXX/s/cli/target/t/ab-XXXXXX/x.sock.
+    assert.ok("/private/tmp/ab-XXXXXX/s/cli/target/t/ab-XXXXXX/x.sock".length < 104);
   });
 });
 
