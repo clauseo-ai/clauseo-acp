@@ -375,11 +375,14 @@ pub enum FoundLogin {
     /// Reuse is off here ("Sign in with a different account", or "Stop using it here"), so
     /// nothing was looked for; [`SetupCommand::FindLogin`] turns it back on.
     ReuseOff,
+    /// "Use it" (or a later start) found the lawyer's login but the agent could not use it here
+    /// (it may have expired), so reuse is off as with `ReuseOff`; this says why, once.
+    ReuseUnusable,
 }
 
 impl FoundLogin {
     /// Every value, in declaration order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::ClaudeSettings,
         Self::ClaudeWindowsSandbox,
         Self::CodexKeyring,
@@ -389,6 +392,7 @@ impl FoundLogin {
         Self::CodexLinkSplit,
         Self::NoneFound,
         Self::ReuseOff,
+        Self::ReuseUnusable,
     ];
 }
 

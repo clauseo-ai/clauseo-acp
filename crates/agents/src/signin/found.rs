@@ -149,7 +149,9 @@ async fn check_claude<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Sign
 /// report `loggedIn: true`." Signed in: `Reused` (with `record`, `login-source` is written
 /// first). Signed out while detection found the login, the run-time fallback: "S18 logs
 /// `claude_reuse_fallback` and offers Clauseo's own sign-in" (the note, then reuse stops with no
-/// reason, so it is not offered again until "Look for my Claude Code login").
+/// reason, so it is not offered again until "Look for my Claude Code login"). The state says
+/// `ReuseUnusable` rather than `ReuseOff`, so the card tells the lawyer why "Use it" did not
+/// take.
 async fn claude_session<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     email: Option<String>,
@@ -159,7 +161,12 @@ async fn claude_session<T: Timer + Send + Sync>(
     let reused = RunKind::Reused { home: &job.home };
     let Some(session) = claude::status_as(job, &job.ticket.cancel, reused).await? else {
         job.note(SigninNote::ClaudeReuseFallback);
-        return Some(stop(job, None).await);
+        return Some(match stop(job, None).await {
+            SigninState::SignedOut { .. } => SigninState::SignedOut {
+                found: Some(Found::ReuseUnusable),
+            },
+            failed => failed,
+        });
     };
     if record {
         // Cancelled or replaced while status ran: no record of a reuse nobody chose to keep.

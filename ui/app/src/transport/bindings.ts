@@ -2121,7 +2121,12 @@ export type FoundLogin =
  *  Reuse is off here ("Sign in with a different account", or "Stop using it here"), so
  *  nothing was looked for; [`SetupCommand::FindLogin`] turns it back on.
  */
-"reuse_off";
+"reuse_off" | 
+/**
+ *  "Use it" (or a later start) found the lawyer's login but the agent could not use it here
+ *  (it may have expired), so reuse is off as with `ReuseOff`; this says why, once.
+ */
+"reuse_unusable";
 
 /**  One piece of an event's JSON text. */
 export type Fragment = {

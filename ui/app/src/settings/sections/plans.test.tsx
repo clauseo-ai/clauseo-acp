@@ -145,6 +145,10 @@ test.each<[FoundLogin, string]>([
     "Claude Code on this computer is signed out, so Clauseo stopped using its sign-in.",
   ],
   ["reused_failed", "Claude Code's sign-in stopped working here, so Clauseo stopped using it."],
+  [
+    "reuse_unusable",
+    "Clauseo couldn't use your Claude Code sign-in. It may have expired, so sign in here instead.",
+  ],
 ])("found %s: UD1's line above Sign in", async (found, line) => {
   const t = await at({ signed_out: { found } });
   expect(words()).toContain(line);
