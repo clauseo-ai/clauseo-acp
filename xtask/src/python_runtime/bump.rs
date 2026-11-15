@@ -89,6 +89,11 @@ fn bump<W: Write>(
         super::pandoc::REPO
     ));
     let pandoc = super::pandoc::bump(&old.pandoc, &options.resolver, cache)?;
+    out.note(format!(
+        "bump: taking tesseract {}, leptonica {} and tessdata_fast {}",
+        old.tesseract.version, old.tesseract.leptonica, old.tesseract.tessdata_commit
+    ));
+    let tesseract = super::tesseract::bump(&old.tesseract, cache)?;
     let mut lock = Lock {
         schema: old.schema,
         runtime: old.runtime.clone(),
@@ -96,8 +101,12 @@ fn bump<W: Write>(
         pbs,
         packages,
         pandoc,
+        tesseract,
     };
-    let changed = lock.pbs != old.pbs || lock.packages != old.packages || lock.pandoc != old.pandoc;
+    let changed = lock.pbs != old.pbs
+        || lock.packages != old.packages
+        || lock.pandoc != old.pandoc
+        || lock.tesseract != old.tesseract;
     if changed {
         lock.runtime.build = old.runtime.build + 1;
     }

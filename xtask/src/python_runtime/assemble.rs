@@ -1,6 +1,6 @@
-//! The notices `bump` writes: it unpacks PBS's archives, each wheel's `.dist-info` and pandoc's
-//! licence files from the downloads (each checked against the lock's sha256 first) and reads the
-//! licence files.
+//! The notices `bump` writes: it unpacks PBS's archives, each wheel's `.dist-info`, and pandoc's,
+//! tesseract's, leptonica's and `tessdata_fast`'s licence files from the downloads (each checked
+//! against the lock's sha256 first) and reads the licence files.
 
 use super::Failure;
 use super::bump::Options;
@@ -148,14 +148,25 @@ pub(crate) fn notices<W: Write>(
         }
         sections.push(section);
     }
+    sections.extend(program_sections(options, lock, cache)?);
+    Ok(notices::render(lock, lock_text, &sections))
+}
+
+/// The sections of the programs that ride in the runtime: pandoc's, then tesseract's three.
+fn program_sections(options: &Options, lock: &Lock, cache: &Path) -> Result<Vec<Section>, Failure> {
     let texts = super::pandoc::licence_texts(
         &lock.pandoc,
         &TARGETS,
         &options.resolver,
         &cache.join("pandoc"),
     )?;
-    sections.push(super::pandoc::section(&lock.pandoc, &texts));
-    Ok(notices::render(lock, lock_text, &sections))
+    let mut sections = vec![super::pandoc::section(&lock.pandoc, &texts)];
+    sections.extend(super::tesseract::notice_sections(
+        &lock.tesseract,
+        &options.resolver,
+        cache,
+    )?);
+    Ok(sections)
 }
 
 fn missing(triple: &str) -> Failure {
