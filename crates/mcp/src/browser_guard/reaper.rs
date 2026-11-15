@@ -318,6 +318,9 @@ fn clean_up(
     // the host, which shows the lawyer where it is.
     let untold = downloads::sweep(&profile.join(STAGING), downloads, fallback);
     downloads::queue(cwd, &untold);
+    if let Some(fallback) = fallback {
+        downloads::queue_fallback(fallback, cwd, &untold);
+    }
     chrome::remove_profile(&profile);
     runs::forget(cwd, run);
 }

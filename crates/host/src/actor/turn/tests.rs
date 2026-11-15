@@ -3,6 +3,7 @@
 mod agents;
 mod closed;
 mod failures;
+mod fallback_queue;
 mod gave_up;
 mod guard_blocks;
 mod idle;

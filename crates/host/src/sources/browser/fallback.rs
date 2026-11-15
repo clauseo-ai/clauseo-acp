@@ -14,6 +14,9 @@
 //! MCP result in Codex's `rawOutput` (`{ result, error }`), only when the call completes in
 //! the live turn, like `PageVisited`.
 //!
+//! A file the guard delivered in its last sweep, after the last tool result, is told through its
+//! queue in the folder instead ([`queue`]), read when the session ends or the host starts.
+//!
 //! The check stats one file in the data folder, on the actor: only for a block that already
 //! names this session's folder, so a page cannot make it stat anything else.
 
@@ -47,6 +50,11 @@ pub(crate) struct Fallbacks {
 }
 
 impl Fallbacks {
+    /// Whether `path` was not told yet in this thread; it counts as told from now on.
+    pub(crate) fn first_time(&mut self, path: &Path) -> bool {
+        self.told.insert(path.to_path_buf())
+    }
+
     /// A tool call started: a `browser` one is followed until it ends, or read at once when it
     /// started completed. `folder`: the session's fallback folder as the guard got it.
     pub(crate) fn started(&mut self, call: &ToolCall, folder: Option<&Path>) -> Vec<Notice> {
@@ -117,7 +125,7 @@ impl Fallbacks {
 }
 
 /// The notice for a file saved as `name`, with its English fallback text.
-fn notice(name: String) -> Notice {
+pub(crate) fn notice(name: String) -> Notice {
     Notice {
         level: NoticeLevel::Info,
         text: format!(
@@ -222,6 +230,8 @@ fn plain_name(name: &str) -> bool {
             .chars()
             .any(|c| c.is_control() || crate::agent::title::is_format(c))
 }
+
+pub(crate) mod queue;
 
 #[cfg(test)]
 mod tests;

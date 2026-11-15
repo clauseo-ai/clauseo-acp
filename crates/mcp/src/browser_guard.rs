@@ -360,7 +360,11 @@ fn serve(
     // agent-browser and its daemon are ended: their last stderr lines, redacted, before the exit.
     relay::redact::drain(STDERR_DRAIN);
     // What the guard's last sweep delivered is told by the next guard under `--cwd`.
-    downloads::queue(&command.cwd, &shared.saved.drain());
+    let untold = shared.saved.drain();
+    downloads::queue(&command.cwd, &untold);
+    if let Some(fallback) = &command.fallback {
+        downloads::queue_fallback(fallback, &command.cwd, &untold);
+    }
     chrome::remove_profile(run.profile());
     // Chrome is reaped: the record goes, before the run's lock (`runs::Run`'s drop).
     record::clear(&command.cwd, run.id());

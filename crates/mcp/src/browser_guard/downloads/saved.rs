@@ -17,6 +17,13 @@
 //! name and renamed), and the next guard under that `--cwd` (an MCP reconnect, or the session
 //! resumed) tells them with its next tool result ([`Saved::queued_in`]), so the host still sees
 //! a file delivered to the fallback folder and shows the lawyer where it is.
+//!
+//! A session that never resumes has no next guard, so the fallback deliveries among those notes
+//! are also queued in the fallback folder itself ([`queue_fallback`]: the same file name, JSON
+//! `{"session": "<--cwd's name>", "notes": [...]}`), which the host reads when the session ends
+//! and when it starts, and shows the lawyer each file there once (`crates/host`,
+//! `sources/browser/fallback/queue.rs`). Each queue file is made hidden (`write::Folder::
+//! create_hidden`).
 
 use std::ffi::{OsStr, OsString};
 use std::hash::{BuildHasher, Hasher};
@@ -135,7 +142,10 @@ pub(crate) fn queue(cwd: &Path, notes: &[String]) {
     if notes.is_empty() {
         return;
     }
-    if let Err(error) = try_queue(cwd, notes) {
+    let written = serde_json::to_vec(notes)
+        .map_err(std::io::Error::other)
+        .and_then(|bytes| try_queue(cwd, &bytes));
+    if let Err(error) = written {
         crate::browser_guard::note(&format!(
             "{} note(s) to the agent could not be queued for the next guard: {error}",
             notes.len()
@@ -143,9 +153,38 @@ pub(crate) fn queue(cwd: &Path, notes: &[String]) {
     }
 }
 
-fn try_queue(cwd: &Path, notes: &[String]) -> std::io::Result<()> {
-    let bytes = serde_json::to_vec(notes).map_err(std::io::Error::other)?;
-    let folder = write::Folder::open(cwd)?;
+/// Queues the fallback deliveries among `notes` (each [`fallback_note`]) in `fallback`, the
+/// fallback folder, for the host (above), naming the session by `cwd`'s name. Nothing when
+/// none is a fallback delivery; noted on stderr when the write fails.
+pub(crate) fn queue_fallback(fallback: &Path, cwd: &Path, notes: &[String]) {
+    let delivered: Vec<&String> = notes
+        .iter()
+        .filter(|note| note.starts_with("Saved ") && note.contains(FALLBACK_MARKER))
+        .collect();
+    if delivered.is_empty() {
+        return;
+    }
+    let session = cwd
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let written = serde_json::to_vec(&serde_json::json!({
+        "session": session,
+        "notes": delivered,
+    }))
+    .map_err(std::io::Error::other)
+    .and_then(|bytes| try_queue(fallback, &bytes));
+    if let Err(error) = written {
+        crate::browser_guard::note(&format!(
+            "{} download(s) saved outside the matter could not be queued for the host: {error}",
+            delivered.len()
+        ));
+    }
+}
+
+/// Writes `bytes` into `folder` as a new queue file (above), hidden on Windows.
+fn try_queue(folder: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let folder = write::Folder::open(folder)?;
     let mut last = std::io::Error::from(std::io::ErrorKind::AlreadyExists);
     for _ in 0..QUEUE_TRIES {
         let random = std::collections::hash_map::RandomState::new()
@@ -154,7 +193,7 @@ fn try_queue(cwd: &Path, notes: &[String]) -> std::io::Result<()> {
         let name = OsString::from(format!("{QUEUE_PREFIX}{random:016x}"));
         let mut writing = name.clone();
         writing.push(QUEUE_WRITING);
-        let mut file = match folder.create_new(&writing) {
+        let mut file = match folder.create_hidden(&writing) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 last = error;
@@ -162,7 +201,7 @@ fn try_queue(cwd: &Path, notes: &[String]) -> std::io::Result<()> {
             }
             Err(error) => return Err(error),
         };
-        let renamed = std::io::Write::write_all(&mut file, &bytes)
+        let renamed = std::io::Write::write_all(&mut file, bytes)
             .and_then(|()| file.sync_all())
             .and_then(|()| folder.rename_new(&file, &writing, &name));
         if renamed.is_err() {

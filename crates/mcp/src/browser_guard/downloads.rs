@@ -61,7 +61,7 @@ mod saved;
 pub(crate) use deliver::{How, deliver};
 
 pub(crate) use held::Held;
-pub(crate) use saved::{OPEN_WAIT, Saved, open_reply, queue};
+pub(crate) use saved::{OPEN_WAIT, Saved, open_reply, queue, queue_fallback};
 
 /// Names no download may take, compared without ASCII case: the matter root's write-denied
 /// names, `clauseo_sandbox::policy::PROTECTED_NAMES` (this crate may not depend on the sandbox;

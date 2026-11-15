@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use super::{Mover, NONE, names, scratch, sweep};
 use crate::browser_guard::downloads::deliver::Failed;
-use crate::browser_guard::downloads::saved::{Saved, note, queue};
+use crate::browser_guard::downloads::saved::{Saved, fallback_note, note, queue, queue_fallback};
 use crate::browser_guard::downloads::{How, Sweeper, deliver};
 use crate::write;
 
@@ -326,5 +326,34 @@ fn a_download_with_no_free_name_is_held_and_told_once() {
         "{told:?}"
     );
     assert_eq!(names(&staging), ["a.pdf"]);
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// For the host, which shows the lawyer a file even when no guard comes after: the fallback
+/// deliveries among a last sweep's notes are queued in the fallback folder, hidden, with the
+/// session's name; other notes are not, and nothing is written when there is none.
+#[test]
+fn a_last_sweeps_fallback_deliveries_are_queued_for_the_host() {
+    let (dir, _staging, _downloads) = scratch("hard-queue-fallback");
+    let fallback = dir.join("fallback");
+    let cwd = dir.join("0190f5a0-0000-7000-8000-000000000001-3");
+    write::create_dir_all(&fallback).unwrap();
+    let landed = fallback.join("b.pdf");
+    let told = fallback_note("b.pdf", &landed);
+    queue_fallback(&fallback, &cwd, &[note("a.pdf")]);
+    assert_eq!(names(&fallback), NONE);
+    queue_fallback(&fallback, &cwd, &[note("a.pdf"), told.clone()]);
+    let queued = names(&fallback);
+    assert_eq!(queued.len(), 1, "{queued:?}");
+    assert!(queued[0].starts_with(".clauseo-untold-") && queued[0].len() == 32);
+    let text: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(fallback.join(&queued[0])).unwrap()).unwrap();
+    assert_eq!(
+        text,
+        serde_json::json!({
+            "session": "0190f5a0-0000-7000-8000-000000000001-3",
+            "notes": [told],
+        })
+    );
     write::remove_dir_all(&dir).unwrap();
 }

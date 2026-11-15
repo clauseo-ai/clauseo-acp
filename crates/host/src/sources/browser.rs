@@ -19,7 +19,7 @@
 //! the live turn: `Origin::Late` and `Origin::Replay` never reach here (`actor/turn/updates.rs`).
 
 mod fallback;
-pub(crate) use fallback::Fallbacks;
+pub(crate) use fallback::{Fallbacks, notice as fallback_notice, queue as fallback_queue};
 
 use std::collections::BTreeMap;
 
