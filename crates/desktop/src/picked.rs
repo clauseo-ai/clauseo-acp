@@ -1,9 +1,13 @@
 //! What `pick_folder` returns: the folder's ref and how the window shows it ([`PickedFolder`]).
 //! The display is relative to the home folder, so the form shows `Documents/Acme` and not the
-//! lawyer's user name in full ([`display`]).
+//! lawyer's user name in full ([`display`]). Windows' 8.3 short names are spelt out first
+//! ([`long_name`]), so neither the display nor the registry holds `LONGPA~1`.
 
+mod long_name;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use long_name::long_name;
 
 use std::path::Path;
 

@@ -3,7 +3,8 @@
 //! (`KF_FLAG_DONT_VERIFY`, a registry read), a folder's entries with their attributes and reparse
 //! tags in one pass (`FindFirstFileExW`), and the pre-check's probe (`GetFileAttributesW`). The
 //! calls that touch a folder may block on a share that is down; the chooser runs each on a thread
-//! of its own with a time limit.
+//! of its own with a time limit. Also the picked folder's short names spelt out
+//! ([`long_path_name`], `GetLongPathNameW`, for `picked/long_name.rs`).
 #![expect(unsafe_code, reason = "FFI to the Windows file and known-folder APIs")]
 
 use std::ffi::OsString;
@@ -227,4 +228,26 @@ fn known_folder(id: &GUID) -> Option<String> {
     // CoTaskMemFree, and its only borrow has ended.
     unsafe { CoTaskMemFree(Some(path.as_ptr().cast())) };
     folder.into_string().ok()
+}
+
+/// `GetLongPathNameW` on `path` into `room`: the units written when they fit (less than its
+/// length), the length needed with the NUL when they do not, 0 on failure
+/// (`picked/long_name.rs` grows `room` and asks again).
+pub(crate) fn long_path_name(path: &std::path::Path, room: &mut [u16]) -> u32 {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows::Win32::Storage::FileSystem::GetLongPathNameW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: `wide` is NUL-terminated and outlives the call; `room` is written in place, at
+    // most its length.
+    unsafe { GetLongPathNameW(windows::core::PCWSTR(wide.as_ptr()), Some(room)) }
+}
+
+/// Tests: `GetShortPathNameW` on `path` into `room`, as [`long_path_name`] answers.
+#[cfg(test)]
+pub(crate) fn short_path_name(path: &std::path::Path, room: &mut [u16]) -> u32 {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows::Win32::Storage::FileSystem::GetShortPathNameW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: as in `long_path_name`.
+    unsafe { GetShortPathNameW(windows::core::PCWSTR(wide.as_ptr()), Some(room)) }
 }

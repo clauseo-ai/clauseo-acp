@@ -116,7 +116,8 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # CreateProcessAsUserW.
 # The uninstaller's deletion (src/delete_app_data/ops.rs): Storage_FileSystem for a linked
 # `sandbox`'s reparse tag and its delete on one handle (GetFileInformationByHandleEx,
-# SetFileInformationByHandle). Other crates already build the feature.
+# SetFileInformationByHandle). Other crates already build the feature. Also GetLongPathNameW, a
+# picked folder's 8.3 short names spelt out (src/picked/long_name.rs).
 # The updater's install kind (src/update/install_kind/windows.rs): Registry for RegOpenKeyExW,
 # to see the per-machine installer's uninstall key.
 # The folder chooser (src/chooser/windows.rs): Storage_FileSystem for the drives and a folder's

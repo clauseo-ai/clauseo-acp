@@ -494,9 +494,10 @@ impl Bridge {
     }
 
     /// Asks `picker` for a folder and registers it, with the display `picked::display` gives
-    /// it under `home`; `None` when the lawyer cancelled. Whether the folder may be a matter is
-    /// the host's rule: `CreateMatter` refuses a refused folder with one `matter.folder_*` code
-    /// per reason (decision record 0022).
+    /// it under `home`, both with Windows' short names spelt out (`picked::long_name`), so the
+    /// registry never keeps one; `None` when the lawyer cancelled. Whether the folder may be a
+    /// matter is the host's rule: `CreateMatter` refuses a refused folder with one
+    /// `matter.folder_*` code per reason (decision record 0022).
     pub(crate) async fn pick_folder(
         &self,
         picker: &dyn Picker,
@@ -505,7 +506,9 @@ impl Bridge {
         let Some(path) = picker.pick().await else {
             return Ok(None);
         };
-        let display = picked::display(&path, home, MAIN_SEPARATOR);
+        let path = picked::long_name(&path);
+        let home = home.map(picked::long_name);
+        let display = picked::display(&path, home.as_deref(), MAIN_SEPARATOR);
         let folder = self.host().await?.register_folder(path).await?;
         lock(&self.issued).insert(folder);
         Ok(Some(PickedFolder { folder, display }))
