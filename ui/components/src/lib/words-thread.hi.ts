@@ -182,6 +182,16 @@ export const HI = {
     "Clauseo ने एक काम रोक दिया: {name} ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
   "Clauseo stopped a step: the AI tried to go online by running a command.":
     "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
+  // the lawyer chose "Always for this matter" on a Claude request, but Clauseo kept no rule, so
+  // it was allowed this once only; one line per reason (new, provisional, UC-506 to UC-509)
+  "Allowed this once only: Clauseo can't keep “Always” for this kind of request.":
+    "सिर्फ़ इस बार अनुमति दी गई: Clauseo इस तरह के अनुरोध के लिए “हमेशा” नहीं रख सकता।",
+  "Allowed this once only: Clauseo keeps “Always” only for one exact command, site or file.":
+    "सिर्फ़ इस बार अनुमति दी गई: Clauseo “हमेशा” सिर्फ़ किसी एक तय कमांड, वेबसाइट या फ़ाइल के लिए रखता है।",
+  "Allowed this once only: Clauseo keeps “Always” only for files in this matter's folder.":
+    "सिर्फ़ इस बार अनुमति दी गई: Clauseo “हमेशा” सिर्फ़ इस मामले के फ़ोल्डर की फ़ाइलों के लिए रखता है।",
+  "Allowed this once only: This matter keeps as many permissions as it can. Remove some from Kept permissions to keep more.":
+    "सिर्फ़ इस बार अनुमति दी गई: इस मामले में जितनी अनुमतियाँ रखी जा सकती हैं, उतनी रखी हुई हैं। और रखने के लिए रखी गई अनुमतियों में से कुछ हटाएँ।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

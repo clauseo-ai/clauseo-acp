@@ -6,6 +6,7 @@ import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { Menu, MenuPopup, MenuTrigger } from "@clauseo/components/ui/menu.tsx";
 import type { MatterSummary } from "../transport/protocol.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
+import type { KeptPermission } from "../transport/protocol.ts";
 import { uuid } from "../testing/stream-script.ts";
 import { detailed, fakeNext } from "../room/fake-next.ts";
 import type { ThreadInfo } from "../room/host-next.ts";
@@ -80,9 +81,11 @@ function lists(): Map<string, ThreadInfo[]> {
   ]);
 }
 
-const triageHost = (): FakeTransport => {
+const triageHost = (kept?: readonly KeptPermission[]): FakeTransport => {
   const threads = lists();
   return new FakeTransport({
+    // a matter's Kept permissions… list (registry-kept.tsx), when given
+    ...(kept === undefined ? {} : { query: () => ({ kept_permissions: [...kept] }) }),
     next: fakeNext({
       matters: () => [
         detailed(SHARMA, { last_opened: Date.now() }),
@@ -107,7 +110,14 @@ export type Act =
 /** The room, then `acts` taken as the lawyer would, each once the last has settled: the pointer coming to the
  * conversation titled `arm`, a press on `press` (a selector), the menu row reading `item`, the focus on `focus`, or the
  * pointer resting on `hover` (its tooltip open). */
-export function RoomTriage({ acts = [] }: { acts?: readonly Act[] }) {
+export function RoomTriage({
+  acts = [],
+  kept,
+}: {
+  acts?: readonly Act[];
+  /** Optional: what each matter's Kept permissions… lists. */
+  kept?: readonly KeptPermission[];
+}) {
   const taken = useRef(false);
   useEffect(() => {
     // once, though Strict Mode runs the effect twice
@@ -164,7 +174,7 @@ export function RoomTriage({ acts = [] }: { acts?: readonly Act[] }) {
       }
     })();
   }, [acts]);
-  return <RoomOver host={triageHost} />;
+  return <RoomOver host={() => triageHost(kept)} />;
 }
 
 /** The snooze menu alone, its times worked out for `hour`:00 today. */

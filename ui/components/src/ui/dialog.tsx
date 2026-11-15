@@ -24,6 +24,7 @@ export const DialogClose = Base.Close;
 export function DialogPopup({
   title,
   body,
+  between,
   actions,
   className,
   undoable,
@@ -34,6 +35,8 @@ export function DialogPopup({
   title: ReactNode;
   /** What it means, in one or two sentences. */
   body?: ReactNode;
+  /** Optional: what stands between the body and the buttons, such as a short list to act on. */
+  between?: ReactNode;
   /** The buttons, the one that acts last. */
   actions: ReactNode;
   className?: string;
@@ -55,6 +58,7 @@ export function DialogPopup({
       >
         <Base.Title className={dialogTitle}>{title}</Base.Title>
         {body !== undefined && <Base.Description className={dialogBody}>{body}</Base.Description>}
+        {between}
         <div className={dialogActions} data-dialog-acts="">
           {actions}
         </div>

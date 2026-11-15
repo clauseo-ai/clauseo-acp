@@ -3,7 +3,7 @@
 import { t, type Key } from "@clauseo/components/lib/words.ts";
 import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { expect, test } from "vitest";
-import type { NoticeKind, PackSkipReason } from "../../transport/protocol.ts";
+import type { NoticeKind, NotKeptReason, PackSkipReason } from "../../transport/protocol.ts";
 import { noticeLine, type NoticeWords } from "./notice-words.ts";
 
 const words = (lang: "en" | "hi"): NoticeWords => ({
@@ -209,4 +209,39 @@ test("a skill pack notice with no pack gives null, so the row shows its text", (
   expect(
     noticeLine({ skill_pack_not_loaded: { reason: "changed" } } as unknown as NoticeKind, en),
   ).toBeNull();
+});
+
+const notKept = (reason: string): NoticeKind => ({ always_not_kept: { reason } }) as NoticeKind;
+
+test.each<[NotKeptReason, string, string]>([
+  [
+    "no_rule",
+    "Allowed this once only: Clauseo can't keep “Always” for this kind of request.",
+    "सिर्फ़ इस बार अनुमति दी गई: Clauseo इस तरह के अनुरोध के लिए “हमेशा” नहीं रख सकता।",
+  ],
+  [
+    "refused",
+    "Allowed this once only: Clauseo keeps “Always” only for one exact command, site or file.",
+    "सिर्फ़ इस बार अनुमति दी गई: Clauseo “हमेशा” सिर्फ़ किसी एक तय कमांड, वेबसाइट या फ़ाइल के लिए रखता है।",
+  ],
+  [
+    "outside_matter",
+    "Allowed this once only: Clauseo keeps “Always” only for files in this matter's folder.",
+    "सिर्फ़ इस बार अनुमति दी गई: Clauseo “हमेशा” सिर्फ़ इस मामले के फ़ोल्डर की फ़ाइलों के लिए रखता है।",
+  ],
+  [
+    "full",
+    "Allowed this once only: This matter keeps as many permissions as it can. Remove some from Kept permissions to keep more.",
+    "सिर्फ़ इस बार अनुमति दी गई: इस मामले में जितनी अनुमतियाँ रखी जा सकती हैं, उतनी रखी हुई हैं। और रखने के लिए रखी गई अनुमतियों में से कुछ हटाएँ।",
+  ],
+])(
+  "an Always that kept nothing (%s) says it was allowed once only, and why",
+  (reason, line, hi) => {
+    expect(noticeLine(notKept(reason), en)).toBe(line);
+    expect(noticeLine(notKept(reason), words("hi"))).toBe(hi);
+  },
+);
+
+test("an Always that kept nothing for a reason this version does not know gives null", () => {
+  expect(noticeLine(notKept("something_newer"), en)).toBeNull();
 });

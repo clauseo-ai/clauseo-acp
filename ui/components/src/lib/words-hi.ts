@@ -13,6 +13,7 @@ import { HI as firstRead } from "./words-first-read.hi.ts";
 import { HI as folderCard } from "./words-folder-card.hi.ts";
 import { HI as folder } from "./words-folder.hi.ts";
 import { HI as frame } from "./words-frame.hi.ts";
+import { HI as kept } from "./words-kept.hi.ts";
 import { HI as limitsThread } from "./words-limits-thread.hi.ts";
 import { HI as limits } from "./words-limits.hi.ts";
 import { HI as list } from "./words-list.hi.ts";
@@ -56,6 +57,7 @@ export const HINDI = {
   "folder-card": folderCard,
   folder,
   frame,
+  kept,
   "limits-thread": limitsThread,
   limits,
   list,

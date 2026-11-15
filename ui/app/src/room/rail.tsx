@@ -59,6 +59,7 @@ import { matterSnooze, snoozedShelf, splitConversations, useSnooze } from "./rai
 import { preloadSnooze } from "./snooze-load.ts";
 import { useRailClock } from "./sweep.ts";
 import { notProtected } from "./protection/causes.ts";
+import { KeptPermissions } from "./kept-permissions.tsx";
 
 /** A row's status as MatterRow takes it: the state, and its moment as words. Working never names a time (no end
  * estimates), so it says "Answering."; a stop or a reset on another day gives its day. */
@@ -180,6 +181,8 @@ export function RoomRail({
   const [stamp, setStamp] = useRailClock(transport, zone);
   // whether the focus is inside the rail: rows hold their groups while it is, as under the pointer
   const [focused, setFocused] = useState(false);
+  // the matter whose Kept permissions… list is open, from its menu
+  const [kept, setKept] = useState<MatterId | null>(null);
   const now = Math.max(view.now, every.now, stamp);
   // where the pointer and the focus are, as the last events said, for a line that arrives later (rail-snooze.tsx)
   const onRail = useRef({ pointer: false, focus: false });
@@ -302,6 +305,7 @@ export function RoomRail({
             pinned: m.pinned,
             onPin: (pinned: boolean) => void matters.pin(m.matter, pinned),
             onRemove: () => void matters.forget(m.matter),
+            onPermissions: () => setKept(m.matter),
             ...(findFolder ? { onLocate: () => void matters.locate(m.matter) } : {}),
           }
         : {}),
@@ -363,104 +367,107 @@ export function RoomRail({
     onMoved();
   };
   return (
-    <Rail
-      groups={groups}
-      pinned={pinned.map(row)}
-      open={open}
-      onNewMatter={onNewMatter}
-      {...(onNewMatterPreload === undefined ? {} : { onNewMatterPreload })}
-      newMatterRef={newMatterRef}
-      brand
-      // nothing to find on an empty rail
-      {...(folders.length === 0
-        ? {}
-        : {
-            find: {
-              all,
-              recent,
-              covers: detailed ? ("nameClient" as const) : ("name" as const),
-              results,
-              onPreload: () => void preloadFind(),
-            },
-          })}
-      {...(scratch === undefined
-        ? {}
-        : {
-            scratch: {
-              current: view.open?.matter === scratch.matter,
-              onOpen: openScratch(scratch.matter),
-            },
-          })}
-      empty={view.phase === "ready"}
-      aside={
-        <RailSwitch
-          view={list}
-          onView={(v) => {
-            railView.set(v);
-            setList(v);
-          }}
-          testId="rail-switch"
-        />
-      }
-      {...(list === "recent"
-        ? {
-            list: (
-              <Suspense fallback={null}>
-                <RailRecent
-                  days={recentDays({
-                    lists: every.lists,
-                    matters: view.matters,
-                    current: talks.thread,
-                    now,
-                    zone,
-                    lang: w.lang,
-                    onOpen: (matter, thread) => {
-                      openConversation(room, matter, thread);
-                      onConversation();
-                    },
-                  })}
-                  testId="rail-recent"
-                />
-              </Suspense>
-            ),
-          }
-        : {})}
-      shelf={snoozedShelf(
-        sc,
-        view.matters,
-        every.lists,
-        {
-          conversation: (matter, thread) => {
-            openConversation(room, matter, thread);
-            onConversation();
-          },
-          matter: (id) => openScratch(id)(),
-        },
-        placed.group,
-      )}
-      onHover={(on) => {
-        onRail.current.pointer = on;
-        setOver(on);
-        setStamp(Date.now());
-        if (on) void preloadSnooze();
-        else {
-          // the pointer leaving lets the rows go where they now belong, as before; the focus holds them only from the
-          // keyboard
-          onRail.current.focus = false;
-          setFocused(false);
-          snooze.leave();
+    <>
+      <Rail
+        groups={groups}
+        pinned={pinned.map(row)}
+        open={open}
+        onNewMatter={onNewMatter}
+        {...(onNewMatterPreload === undefined ? {} : { onNewMatterPreload })}
+        newMatterRef={newMatterRef}
+        brand
+        // nothing to find on an empty rail
+        {...(folders.length === 0
+          ? {}
+          : {
+              find: {
+                all,
+                recent,
+                covers: detailed ? ("nameClient" as const) : ("name" as const),
+                results,
+                onPreload: () => void preloadFind(),
+              },
+            })}
+        {...(scratch === undefined
+          ? {}
+          : {
+              scratch: {
+                current: view.open?.matter === scratch.matter,
+                onOpen: openScratch(scratch.matter),
+              },
+            })}
+        empty={view.phase === "ready"}
+        aside={
+          <RailSwitch
+            view={list}
+            onView={(v) => {
+              railView.set(v);
+              setList(v);
+            }}
+            testId="rail-switch"
+          />
         }
-      }}
-      onFocusMove={(inside, elsewhere) => {
-        onRail.current.focus = inside;
-        setFocused(inside);
-        if (inside) void preloadSnooze();
-        if (elsewhere) snooze.leave();
-      }}
-      onEscape={onEscape}
-      {...(onSettings === undefined ? {} : { onSettings })}
-      {...(notice === undefined ? {} : { notice })}
-      testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}
-    />
+        {...(list === "recent"
+          ? {
+              list: (
+                <Suspense fallback={null}>
+                  <RailRecent
+                    days={recentDays({
+                      lists: every.lists,
+                      matters: view.matters,
+                      current: talks.thread,
+                      now,
+                      zone,
+                      lang: w.lang,
+                      onOpen: (matter, thread) => {
+                        openConversation(room, matter, thread);
+                        onConversation();
+                      },
+                    })}
+                    testId="rail-recent"
+                  />
+                </Suspense>
+              ),
+            }
+          : {})}
+        shelf={snoozedShelf(
+          sc,
+          view.matters,
+          every.lists,
+          {
+            conversation: (matter, thread) => {
+              openConversation(room, matter, thread);
+              onConversation();
+            },
+            matter: (id) => openScratch(id)(),
+          },
+          placed.group,
+        )}
+        onHover={(on) => {
+          onRail.current.pointer = on;
+          setOver(on);
+          setStamp(Date.now());
+          if (on) void preloadSnooze();
+          else {
+            // the pointer leaving lets the rows go where they now belong, as before; the focus holds them only from the
+            // keyboard
+            onRail.current.focus = false;
+            setFocused(false);
+            snooze.leave();
+          }
+        }}
+        onFocusMove={(inside, elsewhere) => {
+          onRail.current.focus = inside;
+          setFocused(inside);
+          if (inside) void preloadSnooze();
+          if (elsewhere) snooze.leave();
+        }}
+        onEscape={onEscape}
+        {...(onSettings === undefined ? {} : { onSettings })}
+        {...(notice === undefined ? {} : { notice })}
+        testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}
+      />
+      <KeptPermissions transport={transport} matter={kept} onClose={() => setKept(null)} />
+    </>
   );
 }

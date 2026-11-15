@@ -19,6 +19,7 @@ import { raised } from "../ui/recipes-overlays.ts";
 import {
   IconLocateFolder,
   IconMore,
+  IconNeedsPermission,
   IconNotProtected,
   IconPin,
   IconRemoveFromList,
@@ -30,6 +31,7 @@ import { useDisplay } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
 import { revealKey, ui } from "../lib/words-ui.ts";
 import { tbt } from "../lib/words-toolbar.ts";
+import { kp } from "../lib/words-kept.ts";
 import { Say } from "./say.tsx";
 import { ConversationList, type ConversationRowProps } from "./rail-conversations.tsx";
 import { RailMark } from "./rail-mark.tsx";
@@ -82,6 +84,8 @@ export type MatterRowProps = {
   onLocate?: (() => void) | undefined;
   onReveal?: (() => void) | undefined;
   onRemove?: (() => void) | undefined;
+  /** Optional: Kept permissions… in its menu, which opens the matter's kept "Always" rules. */
+  onPermissions?: (() => void) | undefined;
   /** Optional: test ids; row goes on the row's button, which carries data-state. */
   testIds?: { row?: string } | undefined;
   /** The current matter's conversations, opened beneath it, with New conversation. */
@@ -119,6 +123,7 @@ type ActionProps = Pick<
   | "onLocate"
   | "onReveal"
   | "onRemove"
+  | "onPermissions"
   | "triage"
 >;
 
@@ -135,9 +140,11 @@ const hasActions = ({
   onLocate,
   onReveal,
   onRemove,
+  onPermissions,
   triage,
 }: ActionProps) =>
   onPin !== undefined ||
+  onPermissions !== undefined ||
   triage !== undefined ||
   ((movedOf(moved, state) || locateAsked === true) && onLocate !== undefined) ||
   onReveal !== undefined ||
@@ -153,13 +160,18 @@ function MatterActions({
   onLocate,
   onReveal,
   onRemove,
+  onPermissions,
   triage,
 }: ActionProps) {
   const { lang, platform } = useDisplay();
   const moved = movedOf(movedFlag, state);
   const locate = moved || locateAsked === true ? onLocate : undefined;
   const above =
-    onPin !== undefined || triage !== undefined || locate !== undefined || onReveal !== undefined;
+    onPin !== undefined ||
+    triage !== undefined ||
+    locate !== undefined ||
+    onReveal !== undefined ||
+    onPermissions !== undefined;
   return (
     <>
       {above && (
@@ -187,6 +199,13 @@ function MatterActions({
               icon={<IconShowInFinder size={16} />}
               disabled={moved}
               onClick={onReveal}
+            />
+          )}
+          {onPermissions !== undefined && (
+            <MenuItem
+              label={kp(lang, "Kept permissions…")}
+              icon={<IconNeedsPermission size={16} />}
+              onClick={onPermissions}
             />
           )}
         </MenuGroup>
@@ -325,6 +344,7 @@ export function MatterRow({
   onLocate,
   onReveal,
   onRemove,
+  onPermissions,
   testIds,
   conversations,
   onNewConversation,
@@ -353,6 +373,7 @@ export function MatterRow({
     onLocate,
     onReveal,
     onRemove: onRemove === undefined ? undefined : () => setAsking(true),
+    onPermissions,
     triage,
   };
   const menu = hasActions(actions);

@@ -1,0 +1,112 @@
+{
+  "UC-500": {
+    "en": "Kept permissions…",
+    "hi": "रखी गई अनुमतियाँ…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "alwaysui (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "alwaysui (provisional)",
+    "note": "the rail's matter menu item that opens the matter's kept permissions (the rules Always for this matter kept for Claude)"
+  },
+  "UC-501": {
+    "en": "Kept permissions",
+    "hi": "रखी गई अनुमतियाँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "alwaysui (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "alwaysui (provisional)",
+    "note": "the list's title"
+  },
+  "UC-502": {
+    "en": "Claude doesn't ask before these in this matter: you chose “Always for this matter”.",
+    "hi": "इस मामले में Claude इनसे पहले नहीं पूछता: आपने “इस मामले के लिए हमेशा” चुना था।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "alwaysui (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "alwaysui (provisional)",
+    "note": "the line under the title"
+  },
+  "UC-503": {
+    "en": "Run: {command} / Edit: {file} / Read: {file} / Any page on {site} / Use tool: {server} {tool}",
+    "hi": "चलाना: {command} / बदलना: {file} / पढ़ना: {file} / {site} का कोई भी पेज / टूल का इस्तेमाल: {server} {tool}",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "alwaysui (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "alwaysui (provisional)",
+    "note": "one row per kept rule, by kind: a Bash command; a file Claude may change (relative to the matter folder when inside it); a file it may read (whole path when outside); WebFetch, which covers every page on the host; an MCP server and its tool"
+  },
+  "UC-504": {
+    "en": "Remove / Remove {permission} / Close",
+    "hi": "हटाएँ / {permission} हटाएँ / बंद करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "alwaysui (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "alwaysui (provisional)",
+    "note": "each row's button; its accessible name, the row's own words; the list's one way out"
+  },
+  "UC-505": {
+    "en": "Nothing is kept for this matter. Claude asks each time.",
+    "hi": "इस मामले के लिए कुछ नहीं रखा गया है। Claude हर बार पूछता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "alwaysui (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "alwaysui (provisional)",
+    "note": "the empty list"
+  },
+  "UC-506": {
+    "en": "Allowed this once only: Clauseo can't keep “Always” for this kind of request.",
+    "hi": "सिर्फ़ इस बार अनुमति दी गई: Clauseo इस तरह के अनुरोध के लिए “हमेशा” नहीं रख सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "alwaysui (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "alwaysui (provisional)",
+    "note": "thread notice NoticeKind::AlwaysNotKept, reason no_rule: the lawyer chose Always for this matter on a Claude request and Clauseo kept no rule, so it was allowed this once only. The host's own notice text is this English"
+  },
+  "UC-507": {
+    "en": "Allowed this once only: Clauseo keeps “Always” only for one exact command, site or file.",
+    "hi": "सिर्फ़ इस बार अनुमति दी गई: Clauseo “हमेशा” सिर्फ़ किसी एक तय कमांड, वेबसाइट या फ़ाइल के लिए रखता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "alwaysui (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "alwaysui (provisional)",
+    "note": "thread notice NoticeKind::AlwaysNotKept, reason refused: the lawyer chose Always for this matter on a Claude request and Clauseo kept no rule, so it was allowed this once only. The host's own notice text is this English"
+  },
+  "UC-508": {
+    "en": "Allowed this once only: Clauseo keeps “Always” only for files in this matter's folder.",
+    "hi": "सिर्फ़ इस बार अनुमति दी गई: Clauseo “हमेशा” सिर्फ़ इस मामले के फ़ोल्डर की फ़ाइलों के लिए रखता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "alwaysui (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "alwaysui (provisional)",
+    "note": "thread notice NoticeKind::AlwaysNotKept, reason outside_matter: the lawyer chose Always for this matter on a Claude request and Clauseo kept no rule, so it was allowed this once only. The host's own notice text is this English"
+  },
+  "UC-509": {
+    "en": "Allowed this once only: This matter keeps as many permissions as it can. Remove some from Kept permissions to keep more.",
+    "hi": "सिर्फ़ इस बार अनुमति दी गई: इस मामले में जितनी अनुमतियाँ रखी जा सकती हैं, उतनी रखी हुई हैं। और रखने के लिए रखी गई अनुमतियों में से कुछ हटाएँ।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "alwaysui (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "alwaysui (provisional)",
+    "note": "thread notice NoticeKind::AlwaysNotKept, reason full: the lawyer chose Always for this matter on a Claude request and Clauseo kept no rule, so it was allowed this once only. The host's own notice text is this English"
+  }
+}
