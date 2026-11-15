@@ -699,7 +699,10 @@ tool call and every `extraArgs` token but six output flags (`filter.rs`).
 its `DevTools` pipe (route 2, decision record 0060; before it, up to the endpoint line), is
 matched against the messages Chromium prints when the sandbox cannot start; a match seen with the
 answer still refuses, and a pipe that ends first waits up to 2 s for stderr to say why
-(`chrome/pipe.rs`):
+(`chrome/pipe.rs`). The reader goes on for that Chrome's life: a match after the start was
+accepted (or one that lost the race to the answer) stops Chrome and agent-browser, answers what
+is in flight with the refusal, and refuses every later call the same way, starting no browser
+again (`chrome/stderr.rs`, `relay.rs`). The messages:
 - Linux, `content/browser/zygote_host/zygote_host_impl_linux.cc`: "No usable sandbox!",
   "Running as root without --no-sandbox is not supported", "Zygote process exited prematurely",
   "Failed to receive boot message from zygote", "Failed to receive hello message from zygote";

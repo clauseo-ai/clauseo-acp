@@ -136,6 +136,46 @@ fn chrome_that_reports_a_sandbox_failure_and_goes_on_is_refused() {
     refused("stay", &format!("sandbox-stay:{line}"));
 }
 
+/// A sandbox failure Chrome prints after its answer on the pipe (here 1 s after; the same path
+/// takes one printed just before the answer that lost the race to it): the guard stops Chrome and
+/// agent-browser, the next call gets the plain refusal, no browser starts again, and the guard
+/// exits 1 saying why.
+#[cfg(unix)]
+#[test]
+fn chrome_that_reports_a_sandbox_failure_after_it_answered_is_stopped_and_refused() {
+    let scratch = Scratch::new("sandbox_late");
+    let (_, line) = FAILURES[0];
+    scratch.chrome_mode(&format!("sandbox-late:{line}"));
+    let log = scratch.log();
+    let mut guard = Guard::start(guard_command(
+        &scratch,
+        &example("echo_stub"),
+        &[log.as_os_str()],
+    ));
+    let answer = guard.call("open");
+    assert!(answer.get("error").is_none(), "the browser ran: {answer}");
+    let chrome = std::fs::read_to_string(scratch.path().join("chrome.pid")).unwrap();
+    let chrome: i32 = chrome.trim().parse().unwrap();
+    guard.stderr_until("Chrome's sandbox could not start");
+    assert!(
+        crate::lifecycle::within(|| !crate::lifecycle::alive(chrome)),
+        "Chrome {chrome} still runs"
+    );
+    let answer = guard.call("again");
+    assert_eq!(answer["error"]["code"], -32603, "{answer}");
+    assert_eq!(answer["error"]["message"], REFUSAL, "{answer}");
+    let (status, (_, stderr)) = guard.finish_with_stderr();
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    let last = stderr.trim_end().lines().last().unwrap_or_default();
+    assert!(
+        last.starts_with("clauseo-mcp browser-guard: Chrome's sandbox could not start")
+            && last.ends_with("the guard never runs Chrome without it"),
+        "{stderr}"
+    );
+    assert_eq!(launches(&scratch), 1, "Chrome started again: {stderr}");
+    assert_eq!(run_files(&scratch.cwd()), Vec::<std::path::PathBuf>::new());
+}
+
 /// The guard's own command line: agent-browser's arguments (what the host passes after `--`)
 /// naming a weakening switch are refused before anything starts.
 #[test]

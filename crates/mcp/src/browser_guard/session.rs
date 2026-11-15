@@ -227,6 +227,7 @@ impl Shared {
                 sent: 0,
                 idle_since: now(),
                 restarted: false,
+                sandbox_refused: None,
                 closing: false,
                 ended: false,
             }),
@@ -255,6 +256,9 @@ pub(crate) struct State {
     idle_since: Instant,
     /// Whether Chrome has died once already; a second death ends the guard.
     pub(crate) restarted: bool,
+    /// Set once a running Chrome said its sandbox cannot start (`relay.rs`): no browser starts
+    /// again, and each later call gets the sandbox's refusal; what Chrome said.
+    pub(crate) sandbox_refused: Option<&'static str>,
     /// Set once the agent has closed stdin: nothing starts or idles any more.
     pub(crate) closing: bool,
     /// Set by the relay's end, under this lock, before its final [`stop`]: from then on no
@@ -364,6 +368,10 @@ pub(crate) fn start(
     parent: &Parent,
     events: &mpsc::Sender<Event>,
 ) -> Result<(), StartFailure> {
+    // A Chrome whose sandbox failed is never started again, nor any other browser.
+    if let Some(said) = state.sandbox_refused {
+        return Err(StartError::Sandbox(Some(said)).into());
+    }
     let started = start_both(shared, state, parent, events);
     if started.is_err() {
         let launcher = &shared.launcher;
@@ -407,6 +415,12 @@ fn start_both(
     {
         let events = events.clone();
         chrome.watch(move || send(&events, Event::ChromeExited(generation)));
+    }
+    {
+        let events = events.clone();
+        chrome.on_sandbox_failure(move |said| {
+            send(&events, Event::SandboxFailed(generation, said));
+        });
     }
     {
         let (shared, events) = (Arc::clone(shared), events.clone());
