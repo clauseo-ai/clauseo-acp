@@ -106,6 +106,16 @@ const BLOCKED_NOTICE = notice(6, {
   text: BLOCKED_ALONE,
   kind: "outside_matter_blocked",
 });
+const OFFLINE =
+  "Clauseo stopped a step: {name} tried to go online by running a command. {name} can use web search instead.";
+const OFFLINE_ALONE =
+  "Clauseo stopped a step: the AI tried to go online by running a command. It can use web search instead.";
+/** Clauseo declined, unasked, a Codex shell command that needed the internet (once a turn). */
+const OFFLINE_NOTICE = notice(6, {
+  level: "warning",
+  text: "Clauseo stopped a step: ChatGPT tried to go online by running a command. ChatGPT can use web search instead.",
+  kind: "shell_network_blocked",
+});
 const OTHER =
   "Clauseo stopped a step: {name} tried to open {matter}'s files. That's another matter.";
 const OTHER_ALONE =

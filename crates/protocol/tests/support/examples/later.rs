@@ -315,6 +315,13 @@ pub(super) fn notices() -> Vec<DomainEvent> {
         },
         Notice {
             level: NoticeLevel::Warning,
+            text: "Clauseo stopped a step: ChatGPT tried to go online by running a command. \
+                   ChatGPT can use web search instead."
+                .to_owned(),
+            kind: Some(NoticeKind::ShellNetworkBlocked),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
             text: "Clauseo stopped a step: the AI tried to read another matter's files (Smith)."
                 .to_owned(),
             kind: Some(NoticeKind::OtherMatterRefused {

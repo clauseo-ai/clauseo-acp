@@ -189,7 +189,11 @@ export function threadHost(state: ThreadState): FakeTransport {
       if (query === "list_matters")
         return {
           matters: [
-            state.folder === undefined ? MATTER : { ...MATTER, folder_support: state.folder },
+            {
+              ...MATTER,
+              ...(state.folder === undefined ? {} : { folder_support: state.folder }),
+              ...(state.matterFolder === undefined ? {} : { folder_display: state.matterFolder }),
+            },
             ...(state.others ?? []),
           ],
         };

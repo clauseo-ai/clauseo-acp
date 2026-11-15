@@ -52,7 +52,6 @@ import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { kindOf, knownPlan } from "./agent.ts";
 import { planLine, useKeyInUse } from "./key-in-use.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
-import { MatterNamesFrom } from "./read-matters.ts";
 import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
 import { RoomNotices } from "./notices.tsx";
@@ -373,7 +372,8 @@ function RoomFrame({
     () => ({ plan: planOfOpen ?? "", openSettings, transport }),
     [planOfOpen, openSettings, transport],
   );
-  // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the frame's words stand in its place
+  // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
+  // frame's words stand in its place
   const scratch = open?.kind === "scratch";
   // the window's own controls, inside the desktop app only
   const [controls] = useState(() =>
@@ -539,29 +539,28 @@ function RoomFrame({
                   <WordOpenContext value={word}>
                     <FolderPlaceContext value={papers?.place}>
                       <AgentPlanContext value={agentPlan}>
-                        <MatterNamesFrom matters={view.matters} lang={w.lang}>
-                          <ToolLineContext value={toolRoom}>
-                            <ProtectionContext value={shield.composer}>
-                              <Work
-                                key={talks.open ?? open?.matter ?? "none"}
-                                transport={transport}
-                                matter={open}
-                                drafts={drafts}
-                                draftKey={talks.open}
-                                conversation={link}
-                                choice={choice}
-                                menus={draftMenus}
-                                plan={plan}
-                                focus={talks.focus?.n ?? null}
-                                archived={talks.archived}
-                                onThread={matters.onThread}
-                                conversations={conversations}
-                                folderShut={folderShut}
-                                openRefused={opened?.act === "open" ? opened.code : null}
-                              />
-                            </ProtectionContext>
-                          </ToolLineContext>
-                        </MatterNamesFrom>
+                        <ToolLineContext value={toolRoom}>
+                          <ProtectionContext value={shield.composer}>
+                            <Work
+                              key={talks.open ?? open?.matter ?? "none"}
+                              transport={transport}
+                              matter={open}
+                              drafts={drafts}
+                              draftKey={talks.open}
+                              conversation={link}
+                              choice={choice}
+                              menus={draftMenus}
+                              plan={plan}
+                              focus={talks.focus?.n ?? null}
+                              archived={talks.archived}
+                              onThread={matters.onThread}
+                              conversations={conversations}
+                              folderShut={folderShut}
+                              openRefused={opened?.act === "open" ? opened.code : null}
+                              allMatters={view.matters}
+                            />
+                          </ProtectionContext>
+                        </ToolLineContext>
                       </AgentPlanContext>
                     </FolderPlaceContext>
                   </WordOpenContext>
