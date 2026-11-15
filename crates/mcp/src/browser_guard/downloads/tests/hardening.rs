@@ -357,3 +357,23 @@ fn a_last_sweeps_fallback_deliveries_are_queued_for_the_host() {
     );
     write::remove_dir_all(&dir).unwrap();
 }
+
+/// A mark error wrapped with the call that failed (as Windows names each call) is classified by
+/// the OS code inside: "not supported" still sends the file to the fallback folder, a busy file
+/// is still retried.
+#[test]
+fn a_wrapped_mark_error_is_classified_by_its_os_code() {
+    use crate::browser_guard::downloads::marks::cannot_keep;
+    #[cfg(unix)]
+    let (unsupported, busy) = (nix::libc::ENOTSUP, nix::libc::EBUSY);
+    #[cfg(windows)]
+    let (unsupported, busy) = (50, 32);
+    let wrapped = |code: i32| {
+        let os = io::Error::from_raw_os_error(code);
+        io::Error::new(os.kind(), os)
+    };
+    assert_eq!(write::os_code(&wrapped(busy)), Some(busy));
+    assert!(cannot_keep(&wrapped(unsupported)));
+    assert!(!cannot_keep(&wrapped(busy)));
+    assert!(cannot_keep(&io::Error::other("the mark did not read back")));
+}

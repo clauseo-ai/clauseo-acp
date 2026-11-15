@@ -5,9 +5,10 @@
 //!   then a link at its name is refused (std's `File::metadata` of the handle);
 //! - a name in it: `NtCreateFile` with `RootDirectory` the folder's handle, `FILE_CREATE` (never
 //!   replaces) and `FILE_OPEN_REPARSE_POINT` (never follows);
-//! - a move or rename into it: `SetFileInformationByHandle(FileRenameInfo)` on the file's own
+//! - a move or rename into it: `NtSetInformationFile(FileRenameInformation)` on the file's own
 //!   handle with `RootDirectory` the folder's handle and `ReplaceIfExists` false (std has no
-//!   rename that never replaces);
+//!   rename that never replaces, and kernel32's `SetFileInformationByHandle(FileRenameInfo)`
+//!   refuses a `RootDirectory`);
 //! - the copy's mark: its `:Zone.Identifier` stream opened with `RootDirectory` the copy's own
 //!   handle;
 //! - a delete: `FileDispositionInfo` on the file's own handle;
@@ -19,8 +20,9 @@
 //! (`write/secret.rs`): `GetFileInformationByHandle` and `delete_by_handle`.
 #![expect(
     unsafe_code,
-    reason = "NtCreateFile, SetFileInformationByHandle and GetFileInformationByHandleEx, relative \
-              to handles; std has none of them; the secret file's GetFileInformationByHandle"
+    reason = "NtCreateFile, NtSetInformationFile, SetFileInformationByHandle and \
+              GetFileInformationByHandleEx, relative to handles; std has none of them; the secret \
+              file's GetFileInformationByHandle"
 )]
 
 use std::ffi::{OsStr, OsString};
@@ -34,7 +36,8 @@ use std::path::Path;
 use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows::Wdk::Storage::FileSystem::{
     FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT,
-    FILE_SYNCHRONOUS_IO_NONALERT, NTCREATEFILE_CREATE_DISPOSITION, NtCreateFile,
+    FILE_RENAME_INFORMATION, FILE_SYNCHRONOUS_IO_NONALERT, FileRenameInformation,
+    NTCREATEFILE_CREATE_DISPOSITION, NtCreateFile, NtSetInformationFile,
 };
 use windows::Win32::Foundation::{
     HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, STATUS_OBJECT_NAME_NOT_FOUND,
@@ -44,10 +47,10 @@ use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_HIDDEN,
     FILE_ATTRIBUTE_NORMAL, FILE_BASIC_INFO, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
     FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_FULL_DIR_INFO, FILE_GENERIC_READ,
-    FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO,
-    FILE_SHARE_DELETE, FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
-    FileBasicInfo, FileDispositionInfo, FileFullDirectoryInfo, FileFullDirectoryRestartInfo,
-    FileRenameInfo, GetFileInformationByHandle, GetFileInformationByHandleEx, SYNCHRONIZE,
+    FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+    FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileBasicInfo,
+    FileDispositionInfo, FileFullDirectoryInfo, FileFullDirectoryRestartInfo,
+    GetFileInformationByHandle, GetFileInformationByHandleEx, SYNCHRONIZE,
     SetFileInformationByHandle,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
@@ -70,7 +73,8 @@ pub(super) fn open_folder(folder: &Path) -> io::Result<OwnedHandle> {
         .access_mode((FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE).0)
         .share_mode(SHARE_ALL.0)
         .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
-        .open(folder)?;
+        .open(folder)
+        .map_err(|error| failed_at("CreateFileW(the folder)", error))?;
     let kind = opened.metadata()?.file_type();
     if kind.is_symlink() || !kind.is_dir() {
         return Err(io::Error::other("the folder is no longer a real folder"));
@@ -123,7 +127,7 @@ fn create_in(
         attributes,
     )
     .map(File::from)
-    .map_err(nt_error)
+    .map_err(|status| nt_error("NtCreateFile(a new file, relative to the folder)", status))
 }
 
 /// Clears `FILE_ATTRIBUTE_HIDDEN` on the open `file` (`FileBasicInfo` through its handle; the
@@ -149,7 +153,12 @@ pub(super) fn unhide(file: &File) -> io::Result<()> {
             size_u32(size_of::<FILE_BASIC_INFO>()),
         )
     }
-    .map_err(|error| io_error(&error))
+    .map_err(|error| {
+        failed_at(
+            "SetFileInformationByHandle(FileBasicInfo, unhide)",
+            io_error(&error),
+        )
+    })
 }
 
 /// Deletes `name` from the folder `dir` holds when it is a plain file: opened relative to the
@@ -165,7 +174,12 @@ pub(super) fn remove_plain_in(dir: &OwnedHandle, name: &OsStr) -> io::Result<()>
         FILE_ATTRIBUTE_NORMAL,
     )
     .map(File::from)
-    .map_err(nt_error)?;
+    .map_err(|status| {
+        nt_error(
+            "NtCreateFile(a file to remove, relative to the folder)",
+            status,
+        )
+    })?;
     let kind = file.metadata()?.file_type();
     if kind.is_symlink() || !kind.is_file() {
         return Err(io::Error::other("not a plain file"));
@@ -249,7 +263,8 @@ pub(super) fn open_source(from: &Path) -> io::Result<File> {
         .access_mode((FILE_GENERIC_READ | DELETE).0)
         .share_mode(SHARE_ALL.0)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
-        .open(from)?;
+        .open(from)
+        .map_err(|error| failed_at("CreateFileW(the staging file)", error))?;
     let kind = opened.metadata()?.file_type();
     if kind.is_symlink() || !kind.is_file() {
         return Err(io::Error::other("not a plain file"));
@@ -265,36 +280,48 @@ pub(super) fn move_new_into(from: &Path, dir: &OwnedHandle, name: &OsStr) -> io:
     rename_into(&open_source(from)?, dir, name)
 }
 
-/// Renames the open `file` to `name` in the folder `dir` holds:
-/// `SetFileInformationByHandle(FileRenameInfo)` with `ReplaceIfExists` false and
-/// `RootDirectory` the folder's handle. `AlreadyExists` for a taken name.
+/// Renames the open `file` to `name` in the folder `dir` holds: ntdll's
+/// `NtSetInformationFile(FileRenameInformation)` with `ReplaceIfExists` false, `RootDirectory`
+/// the folder's handle and `FileName` the plain name relative to it. Not kernel32's
+/// `SetFileInformationByHandle(FileRenameInfo)`, which refuses a `RootDirectory` with
+/// `ERROR_INVALID_PARAMETER`. `AlreadyExists` for a taken name (`STATUS_OBJECT_NAME_COLLISION`),
+/// `CrossesDevices` for another volume (`STATUS_NOT_SAME_DEVICE`).
 pub(super) fn rename_into(file: &File, dir: &OwnedHandle, name: &OsStr) -> io::Result<()> {
     let wide: Vec<u16> = name.encode_wide().collect();
     let name_bytes = wide.len() * size_of::<u16>();
-    let offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
-    let size = (offset + name_bytes + size_of::<u16>()).max(size_of::<FILE_RENAME_INFO>());
-    // `u64`s, so the buffer is aligned for `FILE_RENAME_INFO` (8 bytes at most).
+    let offset = std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName);
+    let size = (offset + name_bytes).max(size_of::<FILE_RENAME_INFORMATION>());
+    // `u64`s, so the buffer is aligned for `FILE_RENAME_INFORMATION` (8 bytes at most).
     let mut buffer = vec![0_u64; size.div_ceil(size_of::<u64>())];
-    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
     let length = u32::try_from(name_bytes).map_err(io::Error::other)?;
     let size = u32::try_from(size).map_err(io::Error::other)?;
-    // SAFETY: `buffer` is zeroed, aligned and at least `size` bytes, which holds the header and
-    // the name with its NUL after `FileName`'s offset; the writes stay inside it. The call reads
-    // `size` bytes and both handles are open for its length (`file` and `dir` are borrowed).
-    unsafe {
-        (*info).Anonymous.ReplaceIfExists = false;
+    let mut status_block = IO_STATUS_BLOCK::default();
+    // SAFETY: `buffer` is zeroed (`Flags` 0: no replace), aligned and at least `size` bytes,
+    // which holds the header and the name after `FileName`'s offset; the writes stay inside it.
+    // The call reads `size` bytes and both handles are open for its length (`file` and `dir`
+    // are borrowed); `status_block` outlives it.
+    let status = unsafe {
         (*info).RootDirectory = handle(dir.as_raw_handle());
         (*info).FileNameLength = length;
         let name_at = info.cast::<u8>().add(offset);
         std::ptr::copy_nonoverlapping(wide.as_ptr().cast::<u8>(), name_at, name_bytes);
-        SetFileInformationByHandle(
+        NtSetInformationFile(
             handle(file.as_raw_handle()),
-            FileRenameInfo,
+            &raw mut status_block,
             info.cast(),
             size,
+            FileRenameInformation,
         )
+    };
+    if status.is_ok() {
+        Ok(())
+    } else {
+        Err(nt_error(
+            "NtSetInformationFile(FileRenameInformation, into the folder)",
+            status,
+        ))
     }
-    .map_err(|error| io_error(&error))
 }
 
 /// `GetFileInformationByHandle` of `file`: its attributes (`dwFileAttributes`) and how many
@@ -322,7 +349,12 @@ pub(super) fn delete_by_handle(file: &File) -> io::Result<()> {
             size_u32(size_of::<FILE_DISPOSITION_INFO>()),
         )
     }
-    .map_err(|error| io_error(&error))
+    .map_err(|error| {
+        failed_at(
+            "SetFileInformationByHandle(FileDispositionInfo, delete)",
+            io_error(&error),
+        )
+    })
 }
 
 /// The stream `stream` (`:Zone.Identifier`) of the open `file`, opened relative to the file's
@@ -347,7 +379,12 @@ pub(crate) fn open_stream(file: &File, stream: &str, create: bool) -> io::Result
         FILE_ATTRIBUTE_NORMAL,
     )
     .map(File::from)
-    .map_err(nt_error)
+    .map_err(|status| {
+        nt_error(
+            "NtCreateFile(the :Zone.Identifier stream, relative to the file)",
+            status,
+        )
+    })
 }
 
 /// `NtCreateFile` of `name` relative to `root`, case-insensitive as Win32 names are, for
@@ -411,15 +448,52 @@ fn handle(raw: RawHandle) -> HANDLE {
     HANDLE(raw)
 }
 
-/// `status` as std's own OS error, through its Win32 code, so `kind()` is right
-/// (`STATUS_OBJECT_NAME_COLLISION` reads as `AlreadyExists`).
-fn nt_error(status: NTSTATUS) -> io::Error {
+/// A failed call's error, naming the call and its step: its `kind()` is the OS error's, and
+/// the OS error is its `source()` (`crate::write::os_code` reads the code through it).
+#[derive(Debug)]
+struct Failed {
+    call: String,
+    source: io::Error,
+}
+
+impl std::fmt::Display for Failed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.call, self.source)
+    }
+}
+
+impl std::error::Error for Failed {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+/// `error` from `call` (the API and the step), keeping its kind.
+fn failed_at(call: impl Into<String>, error: io::Error) -> io::Error {
+    io::Error::new(
+        error.kind(),
+        Failed {
+            call: call.into(),
+            source: error,
+        },
+    )
+}
+
+/// `status` from `call`, as std's own OS error through its Win32 code, so `kind()` is right
+/// (`STATUS_OBJECT_NAME_COLLISION` reads as `AlreadyExists`), named with the call and the
+/// status in hex: `NtCreateFile(...): NTSTATUS 0xc000000d: The parameter is incorrect. (os
+/// error 87)`.
+fn nt_error(call: &str, status: NTSTATUS) -> io::Error {
     // SAFETY: a pure lookup of a status code.
     let code = unsafe { RtlNtStatusToDosError(status) };
-    match i32::try_from(code) {
+    let os = match i32::try_from(code) {
         Ok(code) => io::Error::from_raw_os_error(code),
-        Err(_) => io::Error::other(format!("NTSTATUS {:#x}", status.0)),
-    }
+        Err(_) => io::Error::other("no Win32 error for it"),
+    };
+    failed_at(
+        format!("{call}: NTSTATUS {:#010x}", status.0.cast_unsigned()),
+        os,
+    )
 }
 
 /// The Win32 error inside `error` as std's own OS error, so `kind()` is right:
