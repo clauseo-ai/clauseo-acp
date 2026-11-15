@@ -1,0 +1,46 @@
+{
+  "UC-613": {
+    "en": "Couldn't start a safe connection",
+    "hi": "सुरक्षित कनेक्शन शुरू नहीं हो सका",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Tool line reason (row and \"Browser: off, {reason}.\"): the browser's egress proxy couldn't be opened for the session (no_proxy), so the browser is left out. No \"proxy\" in lawyer-facing words"
+  },
+  "UC-614": {
+    "en": "Clauseo couldn't start its safe connection for the browser, so it won't use one for now. It tries again when a new conversation starts.",
+    "hi": "Clauseo ब्राउज़र के लिए अपना सुरक्षित कनेक्शन शुरू नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। नई बातचीत शुरू होने पर वह फिर से प्रयास करेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Tool line popover, under the browser's reason in full (no_proxy). No \"proxy\" in lawyer-facing words"
+  },
+  "UC-615": {
+    "en": "Couldn't load the unsafe-site list",
+    "hi": "असुरक्षित वेबसाइटों की सूची लोड नहीं हो सकी",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Tool line reason (row and \"Browser: off, {reason}.\"): Clauseo's block list didn't load as the session started (block_list_not_loaded), so the browser is left out rather than let every site through; checked again at the next session launch. \"Unsafe-site list\" as in words-blocklist.ts"
+  },
+  "UC-616": {
+    "en": "Clauseo's unsafe-site list didn't load, so it won't use a browser for now. It tries again when a new conversation starts.",
+    "hi": "Clauseo की असुरक्षित वेबसाइटों की सूची लोड नहीं हुई, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। नई बातचीत शुरू होने पर वह फिर से प्रयास करेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Tool line popover, under the browser's reason in full (block_list_not_loaded)"
+  }
+}

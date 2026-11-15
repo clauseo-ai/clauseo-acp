@@ -411,20 +411,23 @@ fn folders_start_with_the_no_case_law_sentence() {
     assert!(filled.contains("no case-law database"), "{filled}");
 }
 
-/// Claude's tools may not read or edit any session's relay token file, its own included: only
-/// `clauseo-mcp` reads it, and a token read through Claude's tools would land in the transcript.
+/// Claude's tools may not read or edit any session's relay token file or proxy password file,
+/// its own included: only `clauseo-mcp` reads them, and a secret read through Claude's tools
+/// would land in the transcript.
 #[test]
-fn claude_is_denied_every_relay_token_file() {
+fn claude_is_denied_every_relay_token_and_proxy_secret_file() {
     use crate::agent::data_fence::{LaunchDeny, claude_deny_rules};
     let data = std::env::temp_dir().join("clauseo-data");
     let rules = claude_deny_rules(&LaunchDeny::fixed(vec![data]), false);
     for tool in ["Read", "Edit"] {
-        assert!(
-            rules
-                .iter()
-                .any(|rule| rule.starts_with(&format!("{tool}("))
-                    && rule.ends_with("/run/*/relay-token)")),
-            "{tool}: {rules:?}"
-        );
+        for file in ["relay-token", "proxy-secret"] {
+            assert!(
+                rules
+                    .iter()
+                    .any(|rule| rule.starts_with(&format!("{tool}("))
+                        && rule.ends_with(&format!("/run/*/{file})"))),
+                "{tool} {file}: {rules:?}"
+            );
+        }
     }
 }

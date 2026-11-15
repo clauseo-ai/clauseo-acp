@@ -17,4 +17,6 @@ export const BROWSER_REASONS = [
   "Install Chrome or Edge",
   "Blocked by a browser policy",
   "Couldn't check browser settings",
+  "Couldn't start a safe connection",
+  "Couldn't load the unsafe-site list",
 ];

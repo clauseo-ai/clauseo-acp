@@ -21,9 +21,9 @@
 //! messages from the pipe become text frames (`devtools/frames.rs`,
 //! `devtools/nul_framing.rs`), through
 //! [`routes::Routes`], which also carries the guard's own CDP traffic: the relay's commands
-//! ([`Devtools::command`]) and the guard's clients (`devtools/seam.rs`, the contract stage D's
-//! proxy-auth answer plugs into), attached and given their start commands before agent-browser
-//! starts ([`Devtools::start_guard`]).
+//! ([`Devtools::command`]) and the guard's clients (`devtools/seam.rs`: the proxy's credential,
+//! `proxy_auth.rs`), attached and given their start commands before agent-browser starts
+//! ([`Devtools::start_guard`]).
 //!
 //! One `Devtools` lives as long as the browser it relays: a stop ends both, and the next start
 //! makes a new pipe, a new port and a new secret.
@@ -50,11 +50,13 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 
+pub(crate) use handshake::base64;
 pub(crate) use routes::Reply;
 use routes::{FromClient, Routes, ToGuard};
 use seam::{CdpLink, GuardClient};
 
 use super::now;
+use super::proxy_auth::Password;
 
 /// How long a connection has, in all, to send its request head once the peer check let it in.
 /// agent-browser sends its ~250 bytes at once; a slow or idle connection is closed by then.
@@ -212,11 +214,15 @@ impl Devtools {
     }
 
     /// Attaches the guard's clients for this browser (`seam::clients`, given agent-browser's
-    /// environment) and sends their start commands, each answered within
-    /// [`seam::START_COMMAND_WAIT`]. Called before agent-browser starts; an error fails the
-    /// browser's start.
-    pub(crate) fn start_guard(&self, env: &BTreeMap<String, OsString>) -> Result<(), String> {
-        self.attach(&seam::clients(&self.link(), env))
+    /// environment and the proxy's password, if the guard read one) and sends their start
+    /// commands, each answered within [`seam::START_COMMAND_WAIT`]. Called before agent-browser
+    /// starts; an error fails the browser's start.
+    pub(crate) fn start_guard(
+        &self,
+        env: &BTreeMap<String, OsString>,
+        password: Option<&Password>,
+    ) -> Result<(), String> {
+        self.attach(&seam::clients(&self.link(), env, password))
     }
 
     /// The guard's link to this browser (`seam::CdpLink`).

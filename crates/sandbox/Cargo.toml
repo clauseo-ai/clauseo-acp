@@ -20,7 +20,9 @@ name = "clauseo-sandbox-run"
 path = "src/bin/clauseo-sandbox-run.rs"
 
 [features]
-# Exports `windows::test_dacl`, a tests' folder with a protected DACL, for the host's tests.
+# Exports `windows::test_dacl`, a tests' folder with a protected DACL, and
+# `start_proxy_with_names`, the proxy with a fixed name table in place of DNS, for the host's tests.
+# Only dev-dependencies turn it on, so no shipped build has either.
 test-support = []
 
 [dependencies]
@@ -85,9 +87,11 @@ objc2-core-foundation = { workspace = true, features = [
 ] }
 
 # The process's soft open-file limit, which bounds the proxies' socket cap (src/proxy/load.rs);
-# the browser socket folder's owner check (geteuid) and its lock file (open, flock).
+# the browser socket folder's owner check (geteuid) and its lock file (open, flock). libc: the
+# interface list (getifaddrs) of the proxy's own-network check (src/proxy/local_net/unix.rs).
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["fs", "process"] }
+libc = { workspace = true }
 
 # The proxy's listeners bind with SO_EXCLUSIVEADDRUSE (src/ports.rs).
 # The upstream lookup's WinHTTP calls (src/proxy/upstream/windows.rs).
@@ -120,6 +124,8 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # tier B's port check (src/windows/wfp/os_ports.rs): the dynamic range from WMI (System_Wmi,
 # System_Ole, System_Variant) and the listeners from GetExtendedTcpTable
 # (NetworkManagement_IpHelper).
+# The proxy's own-network check (src/proxy/local_net/win.rs): GetAdaptersAddresses
+# (NetworkManagement_IpHelper, gated behind NetworkManagement_Ndis and Networking_WinSock).
 # The admin copy's refresh (src/windows/refresh): its SYSTEM task through ITaskService
 # (System_TaskScheduler, with the BSTR and VARIANT types of System_Ole and System_Variant), and its
 # log lines in the Event Log (System_EventLog). The stop task's process snapshot
@@ -149,6 +155,7 @@ windows = { workspace = true, features = [
   "Win32_Globalization",
   "Win32_Graphics_Gdi",
   "Win32_NetworkManagement_IpHelper",
+  "Win32_NetworkManagement_Ndis",
   "Win32_NetworkManagement_NetManagement",
   "Win32_NetworkManagement_WindowsFilteringPlatform",
   "Win32_NetworkManagement_WindowsFirewall",

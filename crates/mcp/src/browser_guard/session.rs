@@ -36,6 +36,7 @@ use super::downloads::{Held, Saved};
 use super::note;
 use super::parent::Parent;
 use super::port_file::Expected;
+use super::proxy_auth::Password;
 use super::record::{self, ChromeState};
 use super::relay::lines::{Out, ToChild};
 use super::relay::{Event, end_group, pumps, send};
@@ -125,6 +126,10 @@ pub(crate) struct Launcher {
     pub(crate) profile: PathBuf,
     /// `AGENT_BROWSER_PROXY`, if the host gave one.
     pub(crate) proxy: Option<OsString>,
+    /// The proxy's password, read once from the file `CLAUSEO_PROXY_SECRET_FILE` names at the
+    /// guard's start, and only with the proxy: each start hands it to `seam::clients`, whose
+    /// `ProxyAuth` answers Chrome's proxy challenge with it (`proxy_auth.rs`).
+    pub(crate) proxy_secret: Option<Password>,
     /// [`env::chrome_env`].
     pub(crate) chrome_env: BTreeMap<String, OsString>,
     /// agent-browser's file and arguments.
@@ -185,6 +190,7 @@ impl Launcher {
             profile: dir.join("chrome-profile-1-0000abcd"),
             started_with: Mutex::new(None),
             proxy: Some(OsString::from("http://127.0.0.1:9")),
+            proxy_secret: None,
             chrome_env: BTreeMap::new(),
             program: dir.join("agent-browser"),
             args: Vec::new(),

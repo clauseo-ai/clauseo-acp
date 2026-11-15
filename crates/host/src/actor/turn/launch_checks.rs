@@ -130,19 +130,18 @@ pub(crate) struct RunFolders {
     /// (`browser::chrome::find`), or none (`BrowserNotInstalled`). Not a folder, but the
     /// session's like them, and found on the same thread.
     pub(crate) chrome: Option<PathBuf>,
-    /// The session's browser ports, socket folder and agent-browser name
-    /// ([`BrowserSession`]), claimed on the launch-prep thread; none when the session cannot
-    /// get the browser. The one holder is the thread's turn state; clones elsewhere are
-    /// short-lived, so the last reference drops in [`discard`]'s off-actor removal, after the
-    /// agent's tree was killed. Stage C's R17 builds the session's jail policy from it:
-    /// `PolicyBuilder::browser_socket_dir(&session.socket_dir)` and
-    /// `Loopback::Ports(session.ports.loopback())`.
+    /// The session's browser ports, socket folder and agent-browser name ([`BrowserSession`]),
+    /// claimed on the launch-prep thread; none when the session cannot get the browser. Its last
+    /// reference drops in [`discard`]'s off-actor removal, after the agent's tree was killed.
+    /// Stage C's R17 builds the jail policy from it (`browser_socket_dir`, `Loopback::Ports`).
     pub(crate) browser_session: Option<Arc<BrowserSession>>,
     /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`):
     /// a `BrowserBlocked*` reason, `BrowserPolicyUnreadable` or `BrowserPerUserChromeOnly`.
     pub(crate) browser_blocked: Option<clauseo_protocol::ToolsUnavailableReason>,
     /// Whether the launch prep read that policy (it does whenever the browser could come).
     pub(crate) browser_policy_read: bool,
+    /// Why the session's proxy did not open, when that leaves the browser out with its own reason.
+    pub(crate) egress_refused: Option<clauseo_protocol::ToolsUnavailableReason>,
     /// The browser as a shell tool (`ProfileHook::browser_tool`, `tools.browser` on): the
     /// session has it once [`Self::chrome`] is found and its two folders below are made.
     pub(crate) browser_shell: bool,
@@ -170,10 +169,11 @@ pub(crate) struct RunFolders {
     /// siblings of this session's run folder and notes, `run.old-*`, and what of `<data>/agents`
     /// and its runtime folder the shell needs not. Each folder is denied whole until then.
     pub(crate) codex_listed: Listed,
-    /// `<root>/relay-token`: the case-law relay's token file (R24), written by the launch prep
-    /// only when the session's relay opened, and gone with the run folder. R17 passes this to
-    /// `PolicyBuilder::read_only_in_state`.
+    /// `<root>/relay-token`: the case-law relay's token file (R24), written only when the relay
+    /// opened, gone with the run folder; R17 passes it to `PolicyBuilder::read_only_in_state`.
     pub(crate) relay_token: PathBuf,
+    /// `<root>/proxy-secret`, the guard's proxy password file ([`egress::write_secret`]).
+    pub(crate) proxy_secret: PathBuf,
     /// The session's case law ([`relay::CaseLaw`]): its relay, opened on the launch-prep
     /// thread, or why there is none. Like the browser claims, the relay stops when the last
     /// clone drops in [`discard`], after the agent's tree was killed; its token is revoked
@@ -182,10 +182,9 @@ pub(crate) struct RunFolders {
     pub(crate) case_law: relay::CaseLaw,
     /// The session's egress proxy ([`egress`]), opened on the launch-prep thread when the
     /// session can get the browser and its Chrome and claims were found; none otherwise, or
-    /// when it did not open (`NoProxy`). It closes when the last clone drops, normally in
-    /// [`discard`]'s off-actor removal once the agent's tree and Chrome are gone. Last of the
-    /// fields, so the claims and the relay drop first. Stage C's R17 adds its ports to the
-    /// session's policy (`proxy_ports`).
+    /// when it did not open or its password file was not written (`NoProxy`). It closes when
+    /// the last clone drops, normally in [`discard`]'s off-actor removal once the agent's tree
+    /// and Chrome are gone. Last, so the claims and the relay drop first (R17: `proxy_ports`).
     pub(crate) egress: Option<Arc<egress::EgressGuard>>,
     /// The run's lease on its claims, relay and proxy ([`straggler::Lease`]), shared by its
     /// clones: they are freed only after a completed wait, and held until the host stops on
@@ -226,12 +225,14 @@ impl RunFolders {
             agent_browser,
             skill_packs: root.join("skill-packs"),
             relay_token: relay::token_file(&root),
+            proxy_secret: egress::secret_file(&root),
             notes: notes_dir(data, key.matter),
             root,
             chrome: None,
             browser_session: None,
             browser_blocked: None,
             browser_policy_read: false,
+            egress_refused: None,
             browser_shell: false,
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
@@ -557,7 +558,7 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId, tree: TreeWatch) {
 mod browser;
 mod claim;
 use claim::claim;
-mod egress;
+pub(super) mod egress;
 use paths::Claims;
 pub(super) mod folder;
 pub(super) mod relay;

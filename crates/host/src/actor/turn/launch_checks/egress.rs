@@ -7,44 +7,61 @@
 //!
 //! A session gets a proxy only when it can get the browser: a proxy is set
 //! (`HostConfig::with_egress_proxy`), `tools.browser` is on, a browser slot is free and the
-//! profile hook offers a `browser` entry ([`super::browser::BrowserPrep::wanted`]), and then
-//! only once its sidecars, Chrome and ports were found, so a `BrowserNotInstalled` session holds
-//! none of the proxy's ports (Windows' range is 100). A proxy that does not open leaves the
-//! browser out (`NoProxy`), with a log line; the launch goes on.
+//! profile hook offers a `browser` entry that asks for the proxy (`{proxy_port}`, which Codex's
+//! entry holds; [`super::browser::BrowserPrep::wanted`]), and then only once its sidecars,
+//! Chrome and ports were found, so a `BrowserNotInstalled` session holds no proxy. A proxy that
+//! does not open leaves the browser out (`NoProxy`), with a log line; the launch goes on. One
+//! that refuses to start in open mode because no block list is loaded leaves it out with
+//! `BlockListNotLoaded` (fail closed, ADR 0053): the next session launched gets it back. Both
+//! listeners bind outside Windows' 100-port tier-B range (`ListenerFor::Other`: a port the OS
+//! picks), so that range does not bound how many sessions have a proxy.
 //!
 //! Tier C (no jail): the agent's own environment is left alone, with no proxy variable, and only
-//! the browser entry reaches the proxy, through `{proxy_port}`. The proxy is advisory there:
+//! the browser entry reaches the proxy, through `{proxy_port}` and the browser listener's
+//! password ([`EgressGuard::secret`]), which the guard gives Chrome over CDP. The password goes
+//! to the guard in a file, `<run>/proxy-secret` ([`write_secret`]), which the entry names
+//! (`{proxy_secret_file}`) and the guard deletes once read: never in the entry, whose variables
+//! the Claude Agent SDK puts on a command line and Codex receives in `session/new`.
+//! Without the password the proxy answers 407, so a process that reaches loopback (Codex's
+//! sandboxed shell on Windows) cannot use it. The proxy is advisory for the agent itself:
 //! nothing stops the agent going around it until a jail exists (R17 PR-D sets the agent's
 //! variables from `ProxyHandle::env` and puts the ports in the policy's `proxy_ports`).
 //!
-//! What the proxy allows ([`proxy_config`]): the agent kind's built-in hosts
-//! (`clauseo_sandbox::builtin_allowlist`), plus the browser's seed sites
-//! (`browser::seed_sites`). There is no `network.allowed_domains` setting yet, so no firm list
-//! is added. Chrome's background hosts (`browser::deny_hosts`) are refused silently. The
-//! upstream is the OS's (`Upstream::System`; R17 PR-D adds `network.upstream_proxy`). The
-//! block list (0053) is the shared `Current` of the host's `BlockListSeams`, the one its
-//! updater swaps; the proxy reads it per request, so a swap reaches the next connection. With no
-//! seams the list is empty. Refusals go to [`CountDenials`], which counts them on the proxy's
-//! thread and posts each `Denial::Blocked` to the actor (`actor/blocked.rs`, the app's notice);
-//! the guard logs the session's total when the proxy closes, never a host (decision record 0047).
+//! What the proxy allows ([`proxy_config`]): open mode (`ProxyMode::Open`, ADR 0053), any
+//! public host on port 443 (CONNECT) or 80 (plain http), minus the unsafe-site block list and
+//! every loopback, private, link-local, unique-local, CGNAT or multicast address, checked after
+//! DNS against the address connected to. Its allowlist (the agent kind's built-in hosts,
+//! `clauseo_sandbox::builtin_allowlist`, plus the browser's seed sites, `browser::seed_sites`)
+//! no longer decides anything in open mode. Chrome's background hosts (`browser::deny_hosts`)
+//! are refused silently. The upstream is the OS's (`Upstream::System`; R17 PR-D adds
+//! `network.upstream_proxy`). The block list (0053) is the shared `Current` of the host's
+//! `BlockListSeams`, the one its updater swaps; the proxy reads it per request, so a swap
+//! reaches the next connection. With no seams the list is empty. Refusals go to
+//! [`CountDenials`], which counts them on the proxy's thread and posts each `Denial::Blocked` to
+//! the actor (`actor/blocked.rs`, the app's notice); the guard logs the session's total when
+//! the proxy closes, never a host (decision record 0047).
 //! R18 replaces it.
 
 use std::fmt;
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use clauseo_blocklist::{Allowed, Current};
-use clauseo_protocol::{AgentId, AgentKind};
+use clauseo_protocol::{AgentId, AgentKind, ToolAvailability, ToolState, ToolsUnavailableReason};
 use clauseo_sandbox::ports::ListenerFor;
 use clauseo_sandbox::{
-    Allowlist, Denial, DenialSink, LoginKind, ProxyConfig, Upstream, builtin_allowlist,
+    Allowlist, Denial, DenialSink, LoginKind, ProxyConfig, ProxyCredential, ProxyMode, Upstream,
+    builtin_allowlist,
 };
 
 use super::super::super::Actor;
 use super::super::super::input::Input;
+use super::RunFolders;
 use super::browser::BrowserPrep;
+use crate::agent::loads::McpControl;
 use crate::blocklist::{AllowedSites, FirstLoad};
 use crate::browser::deny_hosts::DENY_HOSTS;
 use crate::browser::seed_sites::SEED_SITES;
@@ -59,6 +76,8 @@ pub(crate) struct EgressGuard {
     proxy: Arc<dyn EgressProxy>,
     key: SessionKey,
     denials: Arc<CountDenials>,
+    /// The browser listener's password, read once when the proxy opened; `Debug` hides it.
+    credential: Option<ProxyCredential>,
 }
 
 impl fmt::Debug for EgressGuard {
@@ -73,6 +92,73 @@ impl EgressGuard {
     /// The session's browser listener port, as the proxy answers it.
     pub(crate) fn port(&self) -> Option<u16> {
         self.proxy.port_for(self.key)
+    }
+
+    /// The session's browser listener password (`<run>/proxy-secret`), as the proxy gave it when it
+    /// opened. For the `browser` entry and the agent's stderr redactor only; never logged.
+    pub(crate) fn secret(&self) -> Option<&ProxyCredential> {
+        self.credential.as_ref()
+    }
+}
+
+/// The password file's name in the session's run folder.
+pub(crate) const SECRET_FILE: &str = "proxy-secret";
+
+/// `<root>/proxy-secret`.
+pub(super) fn secret_file(root: &Path) -> PathBuf {
+    root.join(SECRET_FILE)
+}
+
+/// Writes `run`'s proxy password, when its proxy opened with one, to `<run>/proxy-secret`
+/// through `write::replace_private_file` (0600 on Unix, in the 0700 run folder; on Windows it
+/// inherits the run folder's ACL, as the relay token does, decision D8): 64 hex characters and a
+/// line end, read once and deleted by the browser guard. A path that is not UTF-8 (no entry
+/// could name it) or a file not written closes the proxy again, so the browser is left out with
+/// `NoProxy`; a log line names the step, never the password.
+pub(super) fn write_secret(run: &mut RunFolders) {
+    let Some(credential) = run.egress.as_ref().and_then(|egress| egress.secret()) else {
+        return;
+    };
+    let why = if run.proxy_secret.to_str().is_none() {
+        Some("the password file's path is not UTF-8")
+    } else {
+        let mut text = credential.password().as_bytes().to_vec();
+        text.push(b'\n');
+        let written = crate::write::replace_private_file(&run.proxy_secret, &text);
+        text.fill(0);
+        written
+            .err()
+            .map(|_not_written| "the password file was not written")
+    };
+    if let Some(why) = why {
+        tracing::warn!(
+            session = %run.key.id(),
+            why,
+            "the session's egress proxy has no password file; the session has no browser"
+        );
+        run.egress = None;
+    }
+}
+
+/// `run`'s password file, once written: none when the proxy did not open, or the file was not
+/// written (which closed the proxy again, [`write_secret`]).
+pub(in crate::actor::turn) fn written_secret(run: &RunFolders) -> Option<&Path> {
+    let password = run.egress.as_ref().and_then(|egress| egress.secret());
+    password.map(|_password| run.proxy_secret.as_path())
+}
+
+/// The browser entry was left out after the proxy opened (`state`, a managed MCP config that
+/// appeared since the launch prep, or a path that is not UTF-8): no guard will read the file,
+/// so it is removed off the actor. The proxy stays open; its password is then in its memory
+/// alone, where nothing can use it.
+pub(in crate::actor::turn) fn unread_secret(run: &RunFolders, state: Option<&ToolState>) {
+    let available = state.is_some_and(|state| state.availability == ToolAvailability::Available);
+    if let (false, Some(file)) = (available, written_secret(run)) {
+        let file = file.to_path_buf();
+        // Never joined: a remove that fails leaves the file to the run folder's removal.
+        drop(std::thread::spawn(move || {
+            drop(crate::write::remove_old_file(&file));
+        }));
     }
 }
 
@@ -104,13 +190,15 @@ pub(super) struct EgressPrep {
     first_load: Option<FirstLoad>,
     /// The allowed sites' views; the launch takes its matter's when its proxy opens.
     allowed: Arc<AllowedSites>,
+    /// The firm's `managed-mcp.json`, read on the launch-prep thread before the proxy opens.
+    managed_mcp: PathBuf,
 }
 
 /// The egress part of `agent`'s launch prep: a proxy to open only when `browser` will look for
 /// the session's browser.
 pub(super) fn egress_prep(actor: &Actor, agent: &AgentId, browser: &BrowserPrep) -> EgressPrep {
-    // The shell tool has no proxy, nor the plain client's Codex entry: only an entry that asks
-    // for one (`{proxy_port}`, the parked Safe workspace's) reaches the session's proxy.
+    // The shell tool has no proxy: only an entry that asks for one (`{proxy_port}`, Codex's
+    // `browser` entry) reaches the session's proxy.
     let proxy = actor
         .wiring
         .proxy
@@ -126,6 +214,7 @@ pub(super) fn egress_prep(actor: &Actor, agent: &AgentId, browser: &BrowserPrep)
         block: seams.map(|seams| Arc::clone(seams.current())),
         post: actor.post.clone(),
         allowed: Arc::clone(actor.allowed.sites()),
+        managed_mcp: actor.managed_mcp.clone(),
     }
 }
 
@@ -142,13 +231,29 @@ impl EgressPrep {
         Some(Box::pin(first_load.wait(clock, current)))
     }
 
-    /// Opens `key`'s proxy, when the session gets one, its token-free browser listener bound
-    /// only when the launch offers the browser (`browser`, `ProxyConfig::browser`). Under tier C
-    /// a launch without the browser gets no proxy at all: nothing would go through it. The jail
+    /// Opens `key`'s proxy, when the session gets one, its browser listener (which takes the
+    /// password [`EgressGuard::secret`] holds) bound only when the launch offers the browser
+    /// (`browser`, `ProxyConfig::browser`). Under tier C a launch without the browser gets no
+    /// proxy at all: nothing would go through it. The jail
     /// (R17 PR-D) opens one for every session, with `browser` false for those. Starts a thread
-    /// and binds loopback listeners: off the actor.
-    pub(super) fn open(self, key: SessionKey, browser: bool) -> Option<Arc<EgressGuard>> {
-        let proxy = self.proxy.filter(|_| browser)?;
+    /// and binds loopback listeners: off the actor. The second value is the browser's reason
+    /// when the proxy did not open for one with its own words: `BlockListNotLoaded`, when open
+    /// mode refused to start with no block list loaded (the bundled snapshot failed its check,
+    /// or none was bundled and no fetch succeeded yet). The next session launched finds the
+    /// list the updater loaded since and gets the browser; a running session keeps none.
+    pub(super) fn open(
+        self,
+        key: SessionKey,
+        browser: bool,
+    ) -> (Option<Arc<EgressGuard>>, Option<ToolsUnavailableReason>) {
+        let Some(proxy) = self.proxy.filter(|_| browser) else {
+            return (None, None);
+        };
+        // The firm's `managed-mcp.json` leaves the entry out (`ManagedByFirm`): no proxy, and
+        // so no password file nobody reads.
+        if crate::agent::loads::mcp_control(&self.managed_mcp) == McpControl::Managed {
+            return (None, None);
+        }
         let denials = Arc::new(CountDenials::reporting(key, self.post));
         match proxy.open(
             key,
@@ -159,24 +264,34 @@ impl EgressPrep {
                 browser,
             ),
         ) {
-            Ok(()) => Some(Arc::new(EgressGuard {
-                proxy,
-                key,
-                denials,
-            })),
+            Ok(()) => {
+                let credential = proxy.credential_for(key);
+                let guard = EgressGuard {
+                    proxy,
+                    key,
+                    denials,
+                    credential,
+                };
+                (Some(Arc::new(guard)), None)
+            }
             Err(error) => {
                 // The kind only: a config error's text names the host it refused.
-                let why = if matches!(error, clauseo_sandbox::Error::ProxyStart(_)) {
-                    "the proxy did not start"
+                let (why, reason) = if matches!(error, clauseo_sandbox::Error::BlockListNotLoaded) {
+                    (
+                        "no block list is loaded",
+                        Some(ToolsUnavailableReason::BlockListNotLoaded),
+                    )
+                } else if matches!(error, clauseo_sandbox::Error::ProxyStart(_)) {
+                    ("the proxy did not start", None)
                 } else {
-                    "the proxy's config was refused"
+                    ("the proxy's config was refused", None)
                 };
                 tracing::warn!(
                     session = %key.id(),
                     why,
                     "the session's egress proxy did not open; the session has no browser"
                 );
-                None
+                (None, reason)
             }
         }
     }
@@ -210,8 +325,11 @@ pub(crate) fn proxy_config(
         upstream: Upstream::System,
         denials,
         record: None,
-        // Stage C's rule: the token-free listener only for a launch with the browser.
+        // Stage C's rule: the browser listener only for a launch with the browser.
         browser,
+        // ADR 0053: any public host but the listed and private ones, so the block list is what
+        // holds the browser back.
+        mode: ProxyMode::Open,
         // Tier C (the module header): the agent listener stays outside `TIER_B_PORTS` until
         // R17 PR-E passes `ListenerFor::TierB` for a tier-B launch, as for the relay.
         listener: ListenerFor::Other,

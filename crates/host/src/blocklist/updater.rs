@@ -129,7 +129,7 @@ impl Updater {
             );
         } else {
             tracing::info!(
-                "no block list snapshot (a dev build?): no site is blocked until a fetch succeeds"
+                "no block list snapshot (a dev build?): no browser until a fetch succeeds"
             );
         }
     }

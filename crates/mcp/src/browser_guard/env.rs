@@ -1,11 +1,26 @@
 //! The child's environment, built from scratch: the guard clears its own and gives agent-browser
 //! exactly the map [`build`] returns. Every name the child may see is in this file; the rules and
 //! the agent-browser source lines behind them are in `docs/decisions/0029-browser.md`.
+//!
+//! The host gives every guard the session's egress proxy and its password (decision record 0053),
+//! the plain client's Codex entry included. The password is the guard's alone, and comes by file,
+//! never by variable: [`PROXY_SECRET_FILE`] names a file the host wrote in the session's private
+//! run folder, which [`proxy_secret`] reads once at the guard's start and then deletes (as the
+//! case-law connector reads `CLAUSEO_RELAY_TOKEN_FILE`, decision record 0050). No map built here
+//! holds the variable, so neither agent-browser, its daemon nor Chrome learns where the file was.
+//! The proxy variables carry the bare URL, with no credential: agent-browser's own HTTP client
+//! then gets the proxy's 407 and fails closed, and Chrome gets the credential over CDP
+//! (`proxy_auth.rs`). `AGENT_BROWSER_PROXY_USERNAME` and `_PASSWORD` are never set: with them
+//! agent-browser would intercept each page's requests itself.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+
+use super::proxy_auth::Password;
+use crate::write;
 
 /// Which family's rules apply: the names, the folders and how names compare.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,11 +38,20 @@ impl Os {
 
 /// The config file Clauseo owns; an explicit file replaces agent-browser's config discovery.
 pub(crate) const CONFIG: &str = "AGENT_BROWSER_CONFIG";
-/// The session's egress proxy, `http://127.0.0.1:<port>`. Optional: the plain client's Codex
-/// entry has none, and Chrome then goes direct, as Claude's shell browser does; when it is set
-/// it must be valid, and everything the proxy brings (Chrome's `--proxy-server`, the bypass,
-/// the `*_PROXY` variables) follows it.
+/// The session's egress proxy, `http://127.0.0.1:<port>`, in every entry the host makes now.
+/// When it is set it must be valid and come with [`PROXY_SECRET_FILE`] ([`proxy_secret`]), and
+/// everything the proxy brings (Chrome's `--proxy-server`, the bypass, the `*_PROXY` variables,
+/// the credential) follows it. With neither, no proxy variable reaches a child.
 pub(crate) const PROXY: &str = "AGENT_BROWSER_PROXY";
+/// The absolute path of the file holding the proxy's password, which the host writes for the
+/// guard alone (`<data>/run/<session id>/proxy-secret`): mode 0600 in the session's 0700 run
+/// folder, or on Windows with that folder's ACL. It holds exactly 64 of `0-9 a-f`, then at most
+/// one `\n`. The guard reads it once at its start and deletes it, or empties it when it cannot
+/// ([`proxy_secret`]). The variable is never in a child's environment, and the password never
+/// on a command line, in a log or in `Debug`. Valid only with [`PROXY`], and required with it.
+pub(crate) const PROXY_SECRET_FILE: &str = "CLAUSEO_PROXY_SECRET_FILE";
+/// The most of that file the guard reads: twice what a valid one holds.
+const SECRET_FILE_MAX_BYTES: u64 = 128;
 /// agent-browser's proxy bypass, one of [`FIXED`]: set only with [`PROXY`].
 const PROXY_BYPASS: &str = "AGENT_BROWSER_PROXY_BYPASS";
 /// The Chrome the host chose.
@@ -191,6 +215,11 @@ enum Problem {
     NotProxy,
     NotSession,
     NotAbsolute,
+    Unreadable,
+    NotSecret,
+    NotSpent,
+    SecretWithoutProxy,
+    ProxyWithoutSecret,
 }
 
 impl fmt::Display for EnvError {
@@ -209,6 +238,25 @@ impl fmt::Display for EnvError {
             ),
             Problem::NotSession => write!(f, "{name} must be 1 to 64 of A-Z a-z 0-9 _ -"),
             Problem::NotAbsolute => write!(f, "{name} must be an absolute path"),
+            Problem::Unreadable => write!(f, "{name} names a file the guard cannot read"),
+            Problem::NotSecret => write!(
+                f,
+                "{name} must name a file holding exactly 64 of 0-9 a-f, then at most one newline"
+            ),
+            Problem::NotSpent => {
+                write!(
+                    f,
+                    "{name} names a file the guard could neither delete nor empty"
+                )
+            }
+            Problem::ProxyWithoutSecret => write!(
+                f,
+                "{name} is set without {PROXY_SECRET_FILE}, the file of its password; the host \
+                 sets both"
+            ),
+            Problem::SecretWithoutProxy => {
+                write!(f, "{name} is set without {PROXY}, whose password it is")
+            }
         }
     }
 }
@@ -359,6 +407,60 @@ fn windows_join(dir: &OsStr, name: &str) -> OsString {
     joined.push(r"\");
     joined.push(name);
     joined
+}
+
+/// The proxy's password, from the file [`PROXY_SECRET_FILE`] names: `None` when the guard's
+/// environment has neither that variable nor [`PROXY`]. An error when one comes without the
+/// other, or the variable names no local file at an absolute path ([`is_local_file`]), or names
+/// one that cannot be read, is over [`SECRET_FILE_MAX_BYTES`] or does not hold exactly 64 of
+/// `0-9 a-f` and at most one `\n`. A file that was read is deleted at once, whatever it held;
+/// one that cannot be deleted is emptied instead (and noted), and one that can be neither is an
+/// error too, so the password never outlives the guard's start on disk. The error names the
+/// variable, never the file's content.
+pub(crate) fn proxy_secret(source: &Source, os: Os) -> Result<Option<Password>, EnvError> {
+    let Some(value) = source.get(os, PROXY_SECRET_FILE) else {
+        return match source.get(os, PROXY) {
+            Some(_) => Err(EnvError {
+                name: PROXY,
+                problem: Problem::ProxyWithoutSecret,
+            }),
+            None => Ok(None),
+        };
+    };
+    let error = |problem| EnvError {
+        name: PROXY_SECRET_FILE,
+        problem,
+    };
+    if source.get(os, PROXY).is_none() {
+        return Err(error(Problem::SecretWithoutProxy));
+    }
+    if !is_local_file(value, os) {
+        return Err(error(Problem::NotFile));
+    }
+    let file = Path::new(value);
+    let bytes = read_secret_file(file).map_err(|_unreadable| error(Problem::Unreadable))?;
+    if let Err(failed) = write::remove_file(file) {
+        write::empty_file(file).map_err(|_unemptied| error(Problem::NotSpent))?;
+        super::note(&format!(
+            "cannot delete the proxy's secret file {} ({failed}); emptied it instead",
+            file.display()
+        ));
+    }
+    let text = bytes.strip_suffix(b"\n").unwrap_or(bytes.as_slice());
+    std::str::from_utf8(text)
+        .ok()
+        .and_then(Password::parse)
+        .map(Some)
+        .ok_or_else(|| error(Problem::NotSecret))
+}
+
+/// At most [`SECRET_FILE_MAX_BYTES`] of `file`: a longer file then fails the format check.
+fn read_secret_file(file: &Path) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(file)?
+        .take(SECRET_FILE_MAX_BYTES)
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 /// Adds [`CDP`]: the browser endpoint `chrome.rs` read and checked.

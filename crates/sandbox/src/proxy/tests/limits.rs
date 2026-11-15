@@ -326,7 +326,7 @@ fn idle_browser_connections_cannot_lock_out_the_agent_listener() {
         pending: 2,
         ..Limits::default()
     });
-    // The token-free browser listener's pending slots fill, and its next connection is closed.
+    // The browser listener's pending slots fill, and its next connection is closed.
     let _first = rig.browser();
     let _second = rig.browser();
     let mut third = rig.browser();

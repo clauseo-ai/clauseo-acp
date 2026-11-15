@@ -21,7 +21,7 @@
 // path is behind, its updater signature before NSIS, its .sig in both installers, assemble's checks
 // of the published exe and .sig against both installers and the updater key, assemble's check
 // that with the switch off neither installer holds a sandbox file, and the build env its build.rs
-// reads; and the block-list switch (check's output bundle_blocklist, 'false' for launch): the
+// reads; and the block-list switch (check's output bundle_blocklist, 'true' for launch): the
 // `blocklist` job behind it, and every job that passes release.conf.json passing
 // blocklist.conf.json only through $BLOCKLIST_OVERLAY, which the same switch sets, needing
 // `blocklist` and downloading blocklist-snapshot, behind the same switch, before it builds or
@@ -880,7 +880,7 @@ function jobNeeds(text, job) {
 
 /**
  * Every way release.yml breaks the block-list switch: check's bundle_blocklist not the literal
- * 'false'; the `blocklist` job skipped by a job-level `if:` (it runs and succeeds either way, so
+ * 'true'; the `blocklist` job skipped by a job-level `if:` (it runs and succeeds either way, so
  * every job below it runs as with the switch on) or a step of it, other than the off-notice, not
  * behind the switch; and, in each job that passes release.conf.json, blocklist.conf.json passed
  * other than through $BLOCKLIST_OVERLAY, $BLOCKLIST_OVERLAY not set from the switch, no
@@ -892,8 +892,8 @@ function snapshotProblems(text) {
   const problems = [];
   const outputs = jobCommands(text, "check").filter((line) => line.startsWith("bundle_blocklist:"));
   const anywhere = text.split("\n").filter((line) => /^\s*bundle_blocklist:/.test(line));
-  if (outputs.length !== 1 || anywhere.length !== 1 || outputs[0] !== "bundle_blocklist: 'false'") {
-    problems.push(`check: bundle_blocklist is not the one literal 'false' (${outputs.join(" | ")})`);
+  if (outputs.length !== 1 || anywhere.length !== 1 || outputs[0] !== "bundle_blocklist: 'true'") {
+    problems.push(`check: bundle_blocklist is not the one literal 'true' (${outputs.join(" | ")})`);
   }
   if (jobHead(text, "blocklist").some((line) => line.startsWith("if:"))) {
     problems.push("blocklist: skipped by a job-level if:");
@@ -943,7 +943,7 @@ function snapshotProblems(text) {
   return { checked, problems };
 }
 
-test("release.yml bundles the block-list snapshot only behind its one switch, off for launch", () => {
+test("release.yml bundles the block-list snapshot only behind its one switch, on for launch", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
   assert.deepEqual(snapshotProblems(text), { checked: ["build", "sign-windows", "measure-builds"], problems: [] });
   const broken = (from, to) => {
@@ -951,9 +951,9 @@ test("release.yml bundles the block-list snapshot only behind its one switch, of
     assert.notEqual(changed, text, from);
     return snapshotProblems(changed).problems;
   };
-  // The switch: one literal, 'false'.
-  assert.deepEqual(broken("bundle_blocklist: 'false'", "bundle_blocklist: 'true'"), [
-    "check: bundle_blocklist is not the one literal 'false' (bundle_blocklist: 'true')",
+  // The switch: one literal, 'true'.
+  assert.deepEqual(broken("bundle_blocklist: 'true'", "bundle_blocklist: 'false'"), [
+    "check: bundle_blocklist is not the one literal 'true' (bundle_blocklist: 'false')",
   ]);
   // The blocklist job: never skipped, each step but the off-notice behind the switch.
   assert.deepEqual(broken("    name: blocklist\n    needs: check\n", `    name: blocklist\n    needs: check\n    if: ${BLOCKLIST_SWITCH}\n`), [

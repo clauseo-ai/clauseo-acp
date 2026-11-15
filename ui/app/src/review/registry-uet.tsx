@@ -219,6 +219,26 @@ export const UET: Entry[] = [
     ),
     UNREAD,
   ),
+  // the browser's safe connection didn't start, or Clauseo's unsafe-site list didn't load, as the conversation
+  // started: the reason, then in full under it (ids from the blocklist-browser-on brief)
+  entry("UC-613", lineWords("Couldn't start a safe connection"), [browser("no_proxy")]),
+  entry(
+    "UC-614",
+    popWords(
+      "Clauseo couldn't start its safe connection for the browser, so it won't use one for now. It tries again when a new conversation starts.",
+    ),
+    [browser("no_proxy")],
+  ),
+  entry("UC-615", lineWords("Couldn't load the unsafe-site list"), [
+    browser("block_list_not_loaded"),
+  ]),
+  entry(
+    "UC-616",
+    popWords(
+      "Clauseo's unsafe-site list didn't load, so it won't use a browser for now. It tries again when a new conversation starts.",
+    ),
+    [browser("block_list_not_loaded")],
+  ),
   // the foot
   entry("UET-15", popWords("Open Settings"), [web("off")]),
   entry(

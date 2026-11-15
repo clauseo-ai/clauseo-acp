@@ -4,28 +4,32 @@
 //! downloads are delivered (`downloads.rs`): `<matter>/downloads` in a Codex session, made
 //! here if missing; without it, `<cwd>/downloads`.
 //!
-//! In order: note the guard's parent (`parent.rs`; exit 1 if it is gone already), read the
-//! command line (exit 2 on anything else), build the child's environment from the host's
-//! variables (`env.rs`; exit 2 naming a missing or invalid one), on Unix check the socket folder
-//! the host made under `/tmp` (`socket.rs`; exit 2 if it is unsafe or too long), claim the run's
-//! own names after sweeping the stale runs under `--cwd` (`runs.rs`: its profile, its lock file,
-//! its Chrome record (`record.rs`) and its agent-browser session name), make the folders under
-//! `--cwd` the variables point at; on Unix start the reaper (`reaper.rs`), on Windows make the
-//! Job Object (`job.rs`); then relay (`relay.rs`), checking each agent line (`filter.rs`).
+//! In order: note the guard's parent (`parent.rs`; exit 1 if it is gone already), read the command
+//! line (exit 2 on anything else), build the child's environment from the host's variables and read
+//! the proxy's password from the file `CLAUSEO_PROXY_SECRET_FILE` names, deleting the file, which
+//! no child sees (`env.rs`; exit 2 naming a missing or invalid one), on Unix check the socket
+//! folder the host made under `/tmp` (`socket.rs`; exit 2 if it is unsafe or too long), claim
+//! the run's own names after sweeping the stale runs under `--cwd` (`runs.rs`: its profile, its
+//! lock file, its Chrome record (`record.rs`) and its agent-browser session name), make the
+//! folders under `--cwd` the variables point at; on Unix start the reaper (`reaper.rs`), on
+//! Windows make the Job Object (`job.rs`); then relay (`relay.rs`), checking each agent line
+//! (`filter.rs`).
 //!
 //! Chrome starts lazily (`session.rs`): while it is stopped, a request that is no tool call
 //! goes to a one-shot agent-browser with no Chrome (`relay/oneshot.rs`). The first tool call
 //! starts the browser over its `DevTools` pipe (`chrome.rs`; the reaper learns its pid, or the
-//! job holds it, before the guard waits for it) with its download mover (`downloads.rs`), then
-//! agent-browser connected to it; on Windows, after each child line, the guard checks that the
-//! stream server is off and the daemon is on its claimed port (`port_file.rs`). Ten minutes
-//! without a tool call stop Chrome, agent-browser and its daemon, keeping the profile; Chrome's
-//! first unexpected exit stops them too, and its second ends the guard. The guard ends when the
-//! agent's stdin ends, agent-browser exits, a start fails or the guard's parent goes
-//! (`parent.rs`). On the way out, whatever the reason, it ends agent-browser's daemon and Chrome
-//! and deletes the run's profile, its Chrome record and its lock file. [`runs_settled`] and
-//! [`chrome_groups`] let the host read the runs under a `--cwd`.
-//! `docs/decisions/0029-browser.md` gives every rule its reason.
+//! job holds it, before the guard waits for it) with its download mover (`downloads.rs`), has
+//! the guard's own client on that pipe (`devtools/seam.rs`) answer the session proxy's challenge
+//! with the password (`proxy_auth.rs`; the host gives every entry, the plain client's included,
+//! the proxy and its password file, decision record 0053), then agent-browser connected to the
+//! relay; on Windows, after each child line, the guard checks that the stream server is off and
+//! the daemon is on its claimed port (`port_file.rs`). Ten minutes without a tool call stop
+//! Chrome, agent-browser and its daemon, keeping the profile; Chrome's first unexpected exit stops
+//! them too, and its second ends the guard. The guard ends when the agent's stdin ends,
+//! agent-browser exits, a start fails or the guard's parent goes (`parent.rs`). On the way out,
+//! whatever the reason, it ends agent-browser's daemon and Chrome and deletes the run's profile,
+//! its Chrome record and its lock file. [`runs_settled`] and [`chrome_groups`] let the host read
+//! the runs under a `--cwd`. `docs/decisions/0029-browser.md` gives every rule its reason.
 //!
 //! Route 2 (`docs/decisions/0060-browser-devtools-pipe.md`), on every system: the browser has
 //! no debugging port. The guard starts it over a `DevTools` pipe (`chrome/pipe.rs`) and relays the
@@ -53,6 +57,7 @@ mod job;
 mod logon;
 mod parent;
 mod port_file;
+mod proxy_auth;
 mod quiet;
 #[cfg(unix)]
 pub mod reaper;
@@ -158,16 +163,20 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
         code: EXIT_USAGE,
         message: format!("clauseo-mcp browser-guard: {reason}\n{USAGE}"),
     })?;
-    let env = env::build(
-        &env::Source::from_process(),
-        env::Os::CURRENT,
-        &command.cwd,
-        &windows_dirs(),
-    )
-    .map_err(|error| Failure {
+    let source = env::Source::from_process();
+    let refused = |error: env::EnvError| Failure {
         code: EXIT_USAGE,
         message: format!("clauseo-mcp browser-guard: {error}"),
-    })?;
+    };
+    let env =
+        env::build(&source, env::Os::CURRENT, &command.cwd, &windows_dirs()).map_err(refused)?;
+    // The guard's alone: read once and its file deleted, the variable never in `env`, the
+    // children's map, and both forms of the password redacted from all the guard passes on.
+    let secret = env::proxy_secret(&source, env::Os::CURRENT).map_err(refused)?;
+    if let Some(password) = &secret {
+        proxy_auth::hide(password);
+    }
+    drop(source);
     // Nothing that reaches agent-browser's command line or `AGENT_BROWSER_ARGS` may name a switch
     // that weakens Chrome's sandbox, though agent-browser never starts Chrome here (`chrome.rs`).
     if let Some(switch) = command
@@ -244,6 +253,7 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
     serve(
         &command,
         env,
+        secret,
         &session,
         &parent,
         &run,
@@ -290,6 +300,7 @@ fn run_hardened_copy(args: &[OsString], parent: &parent::Parent) -> Result<i32, 
 fn serve(
     command: &Command,
     env: BTreeMap<String, OsString>,
+    proxy_secret: Option<proxy_auth::Password>,
     session: &str,
     parent: &parent::Parent,
     run: &runs::Run,
@@ -316,6 +327,7 @@ fn serve(
         run: run.id().to_owned(),
         profile: run.profile().to_owned(),
         proxy: env.get(env::PROXY).cloned(),
+        proxy_secret,
         chrome_env: env::chrome_env(&env),
         program: command.agent_browser.clone(),
         args: command.child_args.clone(),
@@ -388,16 +400,22 @@ pub fn chrome_groups(cwd: &Path) -> Vec<ChromeState> {
 pub(crate) const PARENT_GONE: &str =
     "the process that started the guard has gone; the guard ended the session's browser";
 
-/// An exit-1 failure with the guard's prefix.
+/// An exit-1 failure with the guard's prefix, redacted (`relay/redact.rs`): a reason can quote
+/// Chrome's stderr.
 fn failed(reason: &str) -> Failure {
     Failure {
         code: EXIT_FAILED,
-        message: format!("clauseo-mcp browser-guard: {reason}"),
+        message: format!(
+            "clauseo-mcp browser-guard: {}",
+            relay::redact::redacted(reason)
+        ),
     }
 }
 
-/// One line on the guard's stderr. Diagnostics only; a failed write has nowhere to go.
+/// One line on the guard's stderr, redacted (`relay/redact.rs`): a note can quote Chrome's
+/// stderr or a CDP error. Diagnostics only; a failed write has nowhere to go.
 pub(crate) fn note(text: &str) {
+    let text = relay::redact::redacted(text);
     let mut stderr = io::stderr().lock();
     if writeln!(stderr, "clauseo-mcp browser-guard: {text}").is_err() {}
 }

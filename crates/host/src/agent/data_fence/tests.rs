@@ -106,11 +106,13 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         "(//d/ata/agents/**)",
         "claude-acp/home/**",
     ] {
-        // The relay token files (R24) and the shell browser's config files are the only things
-        // under `run` denied; the run folders themselves never are.
+        // The relay token files (R24), the proxy's password files (ADR 0053) and the shell
+        // browser's config files are the only things under `run` denied; the run folders
+        // themselves never are.
         let named = |r: &&String| {
             r.contains(kept)
                 && !r.ends_with("/run/*/relay-token)")
+                && !r.ends_with("/run/*/proxy-secret)")
                 && !r.ends_with("/run/*/agent-browser/config.json)")
         };
         assert!(!rules.iter().any(|r| named(&r)), "{kept}: {rules:?}");

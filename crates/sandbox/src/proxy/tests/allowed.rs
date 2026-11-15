@@ -263,7 +263,7 @@ fn ipv6_forms_of_an_allowed_ipv4_stay_blocked() {
     );
 }
 
-/// The browser listener, which takes no token, asks the same allowed set.
+/// The browser listener, with its own credential, asks the same allowed set.
 #[test]
 fn the_browser_listener_passes_an_allowed_host() {
     let rig = rig(Setup {
@@ -276,9 +276,9 @@ fn the_browser_listener_passes_an_allowed_host() {
     rig.net.name("evil.example", &["192.0.2.10"]);
     rig.net.route("192.0.2.10:443", echo());
     let mut stream = rig.browser();
-    stream
-        .write_all(b"CONNECT evil.example:443 HTTP/1.1\r\nHost: evil.example\r\n\r\n")
-        .unwrap();
+    let auth = rig.browser_auth();
+    let request = format!("CONNECT evil.example:443 HTTP/1.1\r\nHost: evil.example\r\n{auth}\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
     assert_eq!(status(&read_head(&mut stream)), 200);
     assert_eq!(round_trip(&mut stream, b"ok"), b"ok");
     assert_eq!(rig.denials(), Vec::<Denial>::new());

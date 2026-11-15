@@ -1,5 +1,5 @@
-//! The seam for the guard's own CDP traffic, the contract PR-3's proxy-auth answer (stage D's
-//! `ProxyAuth`) plugs into, defined here with no reference to it (route 2, decision record 0060).
+//! The seam for the guard's own CDP traffic, the contract the proxy's credential
+//! (`proxy_auth.rs`'s `ProxyAuth`) plugs into (route 2, decision record 0060).
 //!
 //! - **Ids.** The guard's commands take ids from [`FIRST_ID`] to `i32::MAX` ([`is_guard_id`]),
 //!   all from one counter, [`next_guard_id`]. Chromium takes only an `INT32` id
@@ -25,7 +25,9 @@
 //!   [`START_COMMAND_WAIT`] for each reply; a refusal or no answer fails the browser's start.
 //!   The guard never sends `Target.setAutoAttach`.
 //!
-//! [`clients`] is the hook: no client in W1; PR-3 returns its `ProxyAuth` there.
+//! [`clients`] is the hook: it returns the `ProxyAuth` when agent-browser's environment has
+//! `AGENT_BROWSER_PROXY` and the guard read the proxy's password, and no client otherwise. The
+//! guard never starts with one and not the other (`env::proxy_secret` refuses it, exit 2).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -35,6 +37,9 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use serde_json::Value;
+
+use super::super::env;
+use super::super::proxy_auth::{Password, ProxyAuth};
 
 /// The first guard command id: 2^30.
 pub(crate) const FIRST_ID: i64 = 1 << 30;
@@ -55,6 +60,14 @@ pub(crate) fn next_guard_id() -> i64 {
     FIRST_ID + NEXT.fetch_add(1, Ordering::Relaxed).rem_euclid(span)
 }
 
+/// A message's `sessionId` (its value), or `""` for the browser's root session. Chromium takes
+/// a missing or empty one for the root session; a `null` or other non-string one, which it
+/// refuses, is judged as the root session here too, so it is refused where the root session's
+/// would be (`routes.rs`) and taken as the root's where the guard's clients read events.
+pub(crate) fn session_of(value: Option<&Value>) -> &str {
+    value.and_then(Value::as_str).unwrap_or_default()
+}
+
 /// Where the guard's own CDP messages go: the browser's root session unless the message names a
 /// `sessionId`.
 pub(crate) trait CdpLink: Send + Sync {
@@ -62,7 +75,7 @@ pub(crate) trait CdpLink: Send + Sync {
     fn send(&self, message: &Value) -> io::Result<()>;
 }
 
-/// A user of the guard's CDP link (PR-3's `ProxyAuth`).
+/// A user of the guard's CDP link (`ProxyAuth`).
 pub(crate) trait GuardClient: Send + Sync {
     /// The event methods it takes, from the root session only.
     fn events(&self) -> &[&str];
@@ -74,11 +87,23 @@ pub(crate) trait GuardClient: Send + Sync {
     fn on_event(&self, message: &Value);
 }
 
-/// The guard's clients for one browser, given its link and agent-browser's environment (which
-/// holds the session's proxy). None in W1.
+/// The guard's clients for one browser, given its link, agent-browser's environment (which
+/// holds the session's proxy) and the proxy's password, if the guard read one: the
+/// `ProxyAuth` for that proxy when there are both, else none (with neither: the guard refuses
+/// one without the other at its start).
 pub(crate) fn clients(
-    _link: &Arc<dyn CdpLink>,
-    _env: &BTreeMap<String, OsString>,
+    link: &Arc<dyn CdpLink>,
+    env: &BTreeMap<String, OsString>,
+    password: Option<&Password>,
 ) -> Vec<Arc<dyn GuardClient>> {
-    Vec::new()
+    let proxy = env.get(env::PROXY).and_then(|proxy| proxy.to_str());
+    let (Some(proxy), Some(password)) = (proxy, password) else {
+        return Vec::new();
+    };
+    let auth: Arc<dyn GuardClient> = Arc::new(ProxyAuth::new(
+        Arc::clone(link),
+        proxy.to_owned(),
+        password.clone(),
+    ));
+    vec![auth]
 }

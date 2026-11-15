@@ -1,5 +1,5 @@
 //! The proxy's socket counts: client connections still reading their head (per listener, so the
-//! token-free browser listener cannot lock out the agent's), and client and origin sockets per
+//! browser listener's clients cannot lock out the agent's), and client and origin sockets per
 //! launch and across the process, each held by a slot that releases it on drop.
 
 use std::cell::Cell;

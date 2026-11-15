@@ -11,8 +11,10 @@ import type { ToolState } from "../transport/protocol.ts";
 export type WebState = "available" | "off" | "locked_off" | "no_search_on_this_login";
 
 /** Where the browser stands, in the words the popover has. The browser is agent-browser driving the computer's own
- * Chrome (or Edge, on Windows), so the guarded browser's reasons (managed_by_firm, no_proxy, too_many_browsers) never
- * come for it and say nothing. */
+ * Chrome (or Edge, on Windows) through Clauseo's safe connection, which keeps it off Clauseo's unsafe-site list: with
+ * that connection not started for the session (no_proxy), or the list not loaded as it started
+ * (block_list_not_loaded), the browser is left out until a new conversation tries again. The guarded browser's other
+ * reasons (managed_by_firm, too_many_browsers) never come for it and say nothing. */
 export type BrowserState =
   | "available"
   | "off"
@@ -23,7 +25,9 @@ export type BrowserState =
   // Windows only: the one browser installed is blocked by its own policy, or the only Chrome is a per-user copy
   | "browser_blocked_edge"
   | "browser_blocked_chrome"
-  | "browser_per_user_chrome_only";
+  | "browser_per_user_chrome_only"
+  | "no_proxy"
+  | "block_list_not_loaded";
 
 /** One tool the line can speak for. */
 export type KnownTool =
@@ -44,6 +48,8 @@ const BROWSER: ReadonlySet<string> = new Set<BrowserState>([
   "browser_blocked_edge",
   "browser_blocked_chrome",
   "browser_per_user_chrome_only",
+  "no_proxy",
+  "block_list_not_loaded",
 ]);
 
 /** The state of a tool, or null where it says nothing: an availability string it doesn't know, a reason it doesn't
@@ -84,7 +90,7 @@ const LOCKED: ReadonlySet<string> = new Set<WebState | BrowserState>([
 /** The state a tool's glyph shows: on as drawn, the firm's lock for a tool the firm holds off
  * (its browser policy too, for one browser or both), every other off slashed (a login with no search shows web
  * search off: it can't search here; a browser policy Clauseo couldn't read is no firm's lock, nor a per-user
- * Chrome). */
+ * Chrome, nor a safe connection or unsafe-site list that didn't start). */
 export function glyphState(t: KnownTool): ToolGlyphState {
   if (t.state === "available") return "on";
   return LOCKED.has(t.state) ? "locked" : "off";
@@ -102,6 +108,8 @@ const REASON: Record<
   browser_blocked_chrome: "Blocked by a browser policy",
   browser_policy_unreadable: "Couldn't check browser settings",
   browser_per_user_chrome_only: "Can't use your Chrome",
+  no_proxy: "Couldn't start a safe connection",
+  block_list_not_loaded: "Couldn't load the unsafe-site list",
 };
 
 /** Why a tool is off, in a few words; null while it's on. With no browser on the computer, the lawyer's step: what to

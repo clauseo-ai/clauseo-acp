@@ -113,6 +113,16 @@ test.each([
   ],
   [[browser(off("locked_off"))], [["browser", "locked"]], "Browser: off, managed by firm."],
   [[browser(off("browser_not_installed"))], [["browser", "off"]], "Browser: off, install Chrome."],
+  [
+    [browser(off("no_proxy"))],
+    [["browser", "off"]],
+    "Browser: off, couldn't start a safe connection.",
+  ],
+  [
+    [browser(off("block_list_not_loaded"))],
+    [["browser", "off"]],
+    "Browser: off, couldn't load the unsafe-site list.",
+  ],
 ] as [ToolState[], string[][], string][])(
   "each state on its glyph, and in the line's name: %o",
   async (tools, states, name) => {
@@ -162,8 +172,7 @@ test("a tool, an availability or a reason this version doesn't know shows no gly
     { tool: "unknown", availability: "available" },
     web("sideways"),
     browser(off("unknown")),
-    // the guarded browser's reasons never come for #870's shell browser: no words, no glyph
-    browser(off("no_proxy")),
+    // the guarded browser's other reasons never come for #870's shell browser: no words, no glyph
     browser(off("too_many_browsers")),
     browser(off("managed_by_firm")),
   ]);
@@ -180,6 +189,13 @@ test("a tool, an availability or a reason this version doesn't know shows no gly
   expect(rows().map((r) => r.dataset["tool"])).toEqual(["web_search"]);
 });
 
+const NO_CONNECTION =
+  "Clauseo couldn't start its safe connection for the browser, so it won't use one for now. " +
+  "It tries again when a new conversation starts.";
+const NO_LIST =
+  "Clauseo's unsafe-site list didn't load, so it won't use a browser for now. " +
+  "It tries again when a new conversation starts.";
+
 const ROWS: [ToolState, string | null][] = [
   [web("available"), null],
   [web(off("off")), "In Settings"],
@@ -191,6 +207,8 @@ const ROWS: [ToolState, string | null][] = [
   [browser(off("browser_not_installed")), "Install Chrome"],
   [browser(off("browser_blocked_by_policy")), "Blocked by a browser policy"],
   [browser(off("browser_policy_unreadable")), "Couldn't check browser settings"],
+  [browser(off("no_proxy")), "Couldn't start a safe connection"],
+  [browser(off("block_list_not_loaded")), "Couldn't load the unsafe-site list"],
 ];
 
 test.each(ROWS)(
@@ -226,7 +244,11 @@ test.each(ROWS)(
             ? "Clauseo couldn't check this computer's browser settings, so it won't use a browser for " +
               "now. It checks again the next time it needs one." +
               "Try again"
-            : "";
+            : reason === "Couldn't start a safe connection"
+              ? NO_CONNECTION
+              : reason === "Couldn't load the unsafe-site list"
+                ? NO_LIST
+                : "";
     expect(r.textContent).toBe(
       (tool.tool === "web_search" ? "Web search" : "Browser") +
         (reason === null ? "On" : "Off") +
@@ -307,6 +329,63 @@ test.each([
     expect(row("browser")?.querySelector("button")).toBeNull();
     expect(row("browser")?.querySelector('[role="progressbar"]')).toBeNull();
     expect(line()?.getAttribute("aria-label")).toBe(`Browser: off, ${inLine}.`);
+  },
+);
+
+test.each([
+  [
+    "no_proxy",
+    "en",
+    "Browser: off, couldn't start a safe connection.",
+    "Couldn't start a safe connection",
+    NO_CONNECTION,
+  ],
+  [
+    "no_proxy",
+    "hi",
+    "ब्राउज़र: बंद, सुरक्षित कनेक्शन शुरू नहीं हो सका।",
+    "सुरक्षित कनेक्शन शुरू नहीं हो सका",
+    "Clauseo ब्राउज़र के लिए अपना सुरक्षित कनेक्शन शुरू नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। " +
+      "नई बातचीत शुरू होने पर वह फिर से प्रयास करेगा।",
+  ],
+  [
+    "block_list_not_loaded",
+    "en",
+    "Browser: off, couldn't load the unsafe-site list.",
+    "Couldn't load the unsafe-site list",
+    NO_LIST,
+  ],
+  [
+    "block_list_not_loaded",
+    "hi",
+    "ब्राउज़र: बंद, असुरक्षित वेबसाइटों की सूची लोड नहीं हो सकी।",
+    "असुरक्षित वेबसाइटों की सूची लोड नहीं हो सकी",
+    "Clauseo की असुरक्षित वेबसाइटों की सूची लोड नहीं हुई, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। " +
+      "नई बातचीत शुरू होने पर वह फिर से प्रयास करेगा।",
+  ],
+] as const)(
+  "the browser's %s in %s: a slashed glyph, the reason in the line and the row, in full under it, nothing to press",
+  async (reason, language, name, short, full) => {
+    h = await mountRoom({
+      next: { parts: ["app"], query: () => Promise.reject(new Error("not scripted")) },
+      openSettings: () => {},
+      display: { language },
+    });
+    const head = header();
+    head.header!.tools = [browser(off(reason))];
+    await h.deliverAwaited([reset([], head)]);
+    await act(() => settled());
+    await h.settle();
+    expect(glyphs()).toEqual([["browser", "off"]]);
+    expect(line()?.querySelector('[data-part="slash"]')).not.toBeNull();
+    expect(line()?.querySelector('[data-part="lock"]')).toBeNull();
+    expect(line()?.getAttribute("aria-label")).toBe(name);
+    await openPopover();
+    await h.settle();
+    expect(said("browser", "tool-row-reason")).toBe(short);
+    expect(said("browser", "tool-row-full")).toBe(full);
+    expect(row("browser")?.querySelector("button")).toBeNull();
+    expect(settingsButtons()).toEqual([]);
   },
 );
 

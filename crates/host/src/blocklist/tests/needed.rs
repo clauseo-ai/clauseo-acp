@@ -1,6 +1,8 @@
-//! Whether the host fetches the list at all ([`needed`]): the plain build, with the guarded
-//! browser's entry proxy-free (`servers::browser_mcp`) and no sandbox wired, starts no updater
-//! and makes no request; a sandbox wired, or the seams' test switch, starts it and it fetches.
+//! Whether the host fetches the list at all ([`needed`]): a host with no egress proxy and no
+//! sandbox wired starts no updater and makes no request; an egress proxy on an OS where an agent
+//! has the guarded browser (Codex on macOS and Linux), a sandbox wired, or the seams' test
+//! switch, starts it and it fetches. On Windows, where no agent has the browser yet, a proxy
+//! alone does not.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,9 +11,10 @@ use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_sandbox::{Detection, Tier};
 use clauseo_settings::{Effective, Locations, SystemFiles};
 
-use super::super::{BlockListSeams, needed, prepare, start};
+use super::super::{BlockListSeams, needed, needed_on, prepare, start};
 use super::{NEWER, Rig, pair, put};
 use crate::HostConfig;
+use crate::TestProxy;
 use crate::config::Sandbox;
 
 /// A host config under the rig's folder on its clock, with `seams` and `sandbox` when given.
@@ -57,11 +60,10 @@ fn starts_and_fetches(rig: &Rig, config: &HostConfig) {
     drop(running);
 }
 
-/// The plain build: no thread, so no start-up load and no request, now or at any interval; the
-/// first load's teller is gone, so a launch's wait for it would end at once. (This fails once
-/// a shipped entry has a proxy again, which is when the list is fetched for every build.)
+/// No egress proxy and no sandbox: no thread, so no start-up load and no request, now or at any
+/// interval; the first load's teller is gone, so a launch's wait for it would end at once.
 #[test]
-fn the_plain_build_starts_no_updater_and_makes_no_request() {
+fn a_host_with_no_proxy_starts_no_updater_and_makes_no_request() {
     let rig = Rig::new("needed-plain");
     put(&rig.bundled(), "list");
     rig.publish(pair("list-newer"));
@@ -90,4 +92,23 @@ fn seams_marked_enforced_start_the_updater_without_a_sandbox() {
     rig.publish(pair("list-newer"));
     let config = config(&rig, seams(&rig).enforced(), None);
     starts_and_fetches(&rig, &config);
+}
+
+/// The desktop's case: an egress proxy set, so Codex's guarded browser entry gets a session
+/// proxy that enforces the list. Needed on macOS and Linux, where Codex has the browser; not on
+/// Windows, where no agent has it yet (`servers::no_browser_on`).
+#[test]
+fn with_an_egress_proxy_the_list_is_needed_where_the_browser_is_on() {
+    let rig = Rig::new("needed-proxy");
+    put(&rig.bundled(), "list");
+    rig.publish(pair("list-newer"));
+    let config = config(&rig, seams(&rig), None).with_egress_proxy(Arc::new(TestProxy(9)));
+    assert!(needed_on(&config, false), "macOS and Linux");
+    assert!(
+        !needed_on(&config, true),
+        "Windows, no browser for any agent"
+    );
+    if !cfg!(windows) {
+        starts_and_fetches(&rig, &config);
+    }
 }

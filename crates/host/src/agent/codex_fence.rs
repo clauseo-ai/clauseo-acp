@@ -128,6 +128,15 @@ const DATA_DENIED: [&str; 8] = [
 /// shim, and the npm settings files. The rest of `agents` is [`Listed`]'s.
 const AGENTS_DENIED: [&str; 5] = ["downloads", "npm-cache", "signin", "npmrc", "npmrc-global"];
 
+/// The session proxy's password file in the own run folder (ADR 0053), which only the unfenced
+/// browser guard reads: denied by its exact path inside the writable run folder.
+pub(crate) const PROXY_SECRET_FILE: &str = "proxy-secret";
+
+/// Every session's proxy password file, as a glob under `<data>`: a session launched after this
+/// one, whose run folder no listing named, is covered too. Few matches, so bubblewrap's
+/// per-command expansion stays cheap.
+pub(crate) const SECRET_GLOB: &str = "run/*/proxy-secret";
+
 /// The run sweep's set-aside folders (`launch_checks/sweep.rs`), as a glob under `<data>`.
 pub(crate) const SET_ASIDE_GLOB: &str = "run.old-*";
 
@@ -292,7 +301,8 @@ pub(crate) struct Session<'a> {
 /// listed ([`Listed`], each path only under the folder it was listed from). A path that is or
 /// holds the session's run folder, its notes or Codex's home is left out, with a warning. Last,
 /// each of [`SESSION_PARENTS`] and the runtime folder that the launch could not list, whole, and
-/// the session's browser socket folder ([`Session::socket_dir`]): then the session's two folders
+/// the session's browser socket folder ([`Session::socket_dir`]) and the own run folder's
+/// proxy password file ([`PROXY_SECRET_FILE`]): then the session's two folders
 /// are reopened by [`keys`]' `write` entries and the session's `additionalDirectories` for an
 /// ordinary command only, never an escalated one.
 pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf> {
@@ -372,6 +382,8 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
     });
     denied.extend(whole);
     denied.extend(session.socket_dir.map(Path::to_path_buf));
+    // Inside the writable run folder: a deeper deny wins, for escalated commands too.
+    denied.push(session.run_root.join(PROXY_SECRET_FILE));
     let mut seen = std::collections::HashSet::new();
     denied.retain(|path| seen.insert(path.clone()));
     denied
@@ -380,9 +392,9 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
 /// The `CODEX_CONFIG` keys of the fence: `default_permissions` naming [`PROFILE`], and
 /// `permissions.<PROFILE>` extending [`EXTENDS`] with each of [`rules`] as `deny` and the
 /// session's run folder and notes as `write`, scoped under `<data>`, plus [`SET_ASIDE_GLOB`]
-/// when the data folder's path holds no glob character (a scoped glob reads its base as glob
-/// text; decision record 0030 names the gap). A rule outside
-/// `<data>` is keyed by its own path. Empty on Windows (`windows`). A path that is not UTF-8 is
+/// and [`SECRET_GLOB`] when the data folder's path holds no glob character (a scoped glob reads
+/// its base as glob text; decision record 0030 names the gap). A rule outside `<data>` is keyed
+/// by its own path. Empty on Windows (`windows`). A path that is not UTF-8 is
 /// left out with a warning; the launch already fails on a run folder or notes that are not
 /// (`Folders::of`), and those sit in the data folder.
 pub(crate) fn keys(
@@ -420,9 +432,13 @@ pub(crate) fn keys(
         }
     }
     if base.contains(['*', '?', '[', ']', '{', '}']) {
-        tracing::warn!("the data folder's path holds a glob character: run.old-* stays readable");
+        tracing::warn!(
+            "the data folder's path holds a glob character: run.old-* and the other sessions' \
+             proxy password files stay readable"
+        );
     } else {
         scoped.insert(SET_ASIDE_GLOB.to_owned(), Value::from("deny"));
+        scoped.insert(SECRET_GLOB.to_owned(), Value::from("deny"));
     }
     filesystem.insert(base.to_owned(), Value::Object(scoped));
     let mut profile = Map::new();

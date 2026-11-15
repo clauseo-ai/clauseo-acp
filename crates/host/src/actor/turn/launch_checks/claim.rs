@@ -31,7 +31,8 @@ pub(super) fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: boo
     }
     // The launch offers the browser only once its Chrome was found and claimed.
     let offered = run.chrome.is_some() && run.browser_session.is_some();
-    run.egress = egress.open(run.key, offered);
+    (run.egress, run.egress_refused) = egress.open(run.key, offered);
+    super::egress::write_secret(run);
     run.case_law = case_law.open(run);
     let parts = straggler::Parts {
         browser: run.browser_session.clone(),

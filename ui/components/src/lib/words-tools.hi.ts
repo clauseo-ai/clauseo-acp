@@ -42,6 +42,14 @@ export const HI = {
   // (provisional Hindi, app track final)
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.":
     "Clauseo इस कंप्यूटर की ब्राउज़र सेटिंग्स की जाँच नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। अगली बार ब्राउज़र की ज़रूरत होने पर वह फिर से जाँच करेगा।",
+  // under the browser's reason when Clauseo couldn't start its safe connection, in full
+  // (provisional Hindi, app track final)
+  "Clauseo couldn't start its safe connection for the browser, so it won't use one for now. It tries again when a new conversation starts.":
+    "Clauseo ब्राउज़र के लिए अपना सुरक्षित कनेक्शन शुरू नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। नई बातचीत शुरू होने पर वह फिर से प्रयास करेगा।",
+  // under the browser's reason when Clauseo's unsafe-site list didn't load, in full
+  // (provisional Hindi, app track final)
+  "Clauseo's unsafe-site list didn't load, so it won't use a browser for now. It tries again when a new conversation starts.":
+    "Clauseo की असुरक्षित वेबसाइटों की सूची लोड नहीं हुई, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। नई बातचीत शुरू होने पर वह फिर से प्रयास करेगा।",
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

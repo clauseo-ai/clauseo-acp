@@ -310,6 +310,11 @@ pub(crate) fn browser_server() -> McpServer {
                 "AGENT_BROWSER_EXECUTABLE_PATH".to_owned(),
                 "{browser_executable}".to_owned(),
             ),
+            // Last, so the other variables keep their places (`filled_browser`'s indexes).
+            (
+                "CLAUSEO_PROXY_SECRET_FILE".to_owned(),
+                "{proxy_secret_file}".to_owned(),
+            ),
         ],
     }
 }
@@ -328,10 +333,11 @@ pub(crate) fn browser_parts() -> (String, PathBuf, Vec<String>, Vec<(String, Str
     (name, command, args, env)
 }
 
-/// The `browser` entry `session/new` carries once filled, with the proxy on 8123 and Chrome at
-/// `/chrome`, for a template. The claimed ports differ per run, so they match any value, and so
-/// does the session name on Windows: there it is the name the host drew for agent-browser's
-/// daemon port (`browser::session`, tested there), not the session's id.
+/// The `browser` entry `session/new` carries once filled, with the proxy on 8123 (its password
+/// `TestProxy::PASSWORD`) and Chrome at `/chrome`, for a template. The claimed ports differ per
+/// run, so they match any value, and so does the session name on Windows: there it is the name
+/// the host drew for agent-browser's daemon port (`browser::session`, tested there), not the
+/// session's id.
 pub(crate) fn filled_browser() -> Value {
     let session = if cfg!(windows) {
         "{{any}}"
@@ -346,6 +352,8 @@ pub(crate) fn filled_browser() -> Value {
         {"name": "AGENT_BROWSER_PROXY", "value": "http://127.0.0.1:8123"},
         {"name": "AGENT_BROWSER_SESSION", "value": session},
         {"name": "AGENT_BROWSER_EXECUTABLE_PATH", "value": "/chrome"},
+        {"name": "CLAUSEO_PROXY_SECRET_FILE",
+            "value": format!("@RUN@{}proxy-secret", std::path::MAIN_SEPARATOR)},
     ]})
 }
 

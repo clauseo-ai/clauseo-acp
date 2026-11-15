@@ -33,6 +33,14 @@ pub const MATTER_DOWNLOADS: &str = "{matter_downloads}";
 /// The egress proxy's port for the session. Unfillable (no proxy): the host drops `browser`
 /// and shows `NoProxy`.
 pub const PROXY_PORT: &str = "{proxy_port}";
+/// The file holding the password of the session's egress proxy's browser listener,
+/// `<data>/run/<session id>/proxy-secret`, as the browser guard's `CLAUSEO_PROXY_SECRET_FILE`
+/// (ADR 0053): a path, never the password, which would otherwise sit in the agent's
+/// `session/new` and, for Claude, on a command line. The guard reads the file once at its start,
+/// deletes it, answers Chrome's proxy challenge with the password over CDP and passes it to no
+/// child. Filled only with [`PROXY_PORT`], with a `dunce`-simplified path; unfillable (no
+/// proxy, or the file was not written): the host drops `browser` and shows `NoProxy`.
+pub const PROXY_SECRET_FILE: &str = "{proxy_secret_file}";
 /// agent-browser's session name: the session's id on macOS and Linux; on Windows a name the
 /// host draws so that agent-browser's daemon port, a hash of the name, is one it claimed.
 pub const SESSION_ID: &str = "{session_id}";
@@ -81,10 +89,11 @@ pub const IN_INSTRUCTIONS: [&str; 4] = [WORK_FOLDER, MATTER_NOTES, CONNECTORS, B
 /// The tokens the host fills in the `browser` and `case-law` entries. The browser entry holds
 /// [`SOCKET_DIR`] on macOS and Linux only and [`DAEMON_PORT`] on Windows only; the host fills
 /// whichever it finds. Only `case-law` holds [`RELAY_PORT`] and [`RELAY_TOKEN_FILE`].
-pub const IN_SERVERS: [&str; 10] = [
+pub const IN_SERVERS: [&str; 11] = [
     BROWSER_DIR,
     MATTER_DOWNLOADS,
     PROXY_PORT,
+    PROXY_SECRET_FILE,
     SESSION_ID,
     BROWSER_EXECUTABLE,
     SOCKET_DIR,

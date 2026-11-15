@@ -103,6 +103,11 @@ pub enum HostRefusal {
     NotAllowed,
     /// The host resolved to a private, loopback or link-local address.
     PrivateAddress,
+    /// The host's address could not be checked: through an upstream proxy, which gets the name
+    /// unresolved, local DNS failed, timed out or answered nothing for a name no list vouched
+    /// for (open mode's browser listener). A desktop that resolves public names only through
+    /// its proxy gets this for every browser request.
+    DnsUnavailable,
     /// The port is not one the proxy forwards.
     Port,
     /// The request was not a CONNECT (or a scheme the proxy does not carry).

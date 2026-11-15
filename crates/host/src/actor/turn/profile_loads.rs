@@ -12,6 +12,7 @@ use clauseo_protocol::{AgentId, AgentKind, ErrorCode, ThreadId, ToolAvailability
 use serde_json::{Map, Value};
 
 use super::super::Actor;
+use super::launch_checks::egress;
 use super::launch_checks::relay::CaseLaw;
 use super::launch_checks::{Prepared, RunFolders};
 use crate::agent::loads;
@@ -169,6 +170,7 @@ pub(super) fn session_loads(
     let inputs = browser_inputs(actor, &run, (control, browser_switch), &downloads);
     // Codex's `browser` entry (`clauseo_profile::servers::browser_mcp`), filled or left out.
     let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
+    egress::unread_secret(&run, browser_state.as_ref());
     // The shell tool (no agent's for launch); none for an agent offered the entry.
     let shell = shell_browser(actor, &run, &agent_id);
     let absent = none_here.then_some(BrowserPart::Off);
@@ -453,6 +455,8 @@ fn browser_inputs<'a>(
         proxy_set: actor.wiring.proxy.is_some(),
         // Only a proxy that opened for this session gives a port (`launch_checks::egress`).
         port: run.egress.as_ref().and_then(|egress| egress.port()),
+        secret_file: egress::written_secret(run),
+        proxy_refused: run.egress_refused,
         blocked_by_policy: run.browser_blocked,
         executable: run.chrome.as_deref(),
         browser_dir: &run.browser,

@@ -88,6 +88,12 @@ fn other_server() -> McpServer {
     }
 }
 
+/// The browser listener password every test session's proxy gives, which no entry may hold.
+pub(super) const PASSWORD: &str = crate::TestProxy::PASSWORD;
+
+/// The file the launch prep wrote that password to (`{proxy_secret_file}`).
+pub(super) const SECRET_FILE: &str = "/data/run/t-1/proxy-secret";
+
 pub(super) fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> BrowserInputs<'a> {
     BrowserInputs {
         switch: ON,
@@ -95,6 +101,8 @@ pub(super) fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> Bro
         slot_free: true,
         proxy_set: true,
         port: Some(8123),
+        secret_file: Some(Path::new(SECRET_FILE)),
+        proxy_refused: None,
         blocked_by_policy: None,
         executable: chrome,
         browser_dir,

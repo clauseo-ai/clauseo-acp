@@ -94,7 +94,13 @@ fn chrome_that_dies_as_the_agent_goes_is_still_reported() {
     scratch.chrome_mode("answer-exit");
     let log = scratch.log();
     let args = [log.as_os_str()];
-    let mut guard = Guard::start(guard_command(&scratch, &example("echo_stub"), &args));
+    let mut command = guard_command(&scratch, &example("echo_stub"), &args);
+    // No proxy, so no `Fetch.enable` before agent-browser: the stand-in's one answer is then
+    // agent-browser's.
+    command
+        .env_remove("AGENT_BROWSER_PROXY")
+        .env_remove("CLAUSEO_PROXY_SECRET_FILE");
+    let mut guard = Guard::start(command);
     guard.send_call("open");
     let (status, (_, stderr)) = guard.finish_with_stderr();
     assert_eq!(status.code(), Some(1), "{stderr}");

@@ -12,6 +12,7 @@ use std::sync::Mutex;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use base64::Engine as _;
 use clauseo_connectors::fake::{FakeConnector, FakeHandle, FakeOptions, ScratchDir};
 use clauseo_connectors::{ConnectorHandle, Connectors, MemoryStore, SecretStore};
 use clauseo_host::connectors::{FixedOffset, RelayConfig, RelayEvent, RelayEvents, Relays};
@@ -247,12 +248,24 @@ fn both_agents_get_case_law_after_the_other_servers() {
     let tokens: Vec<String> = seen.iter().filter_map(token_of).collect();
     assert_eq!(tokens.len(), 2, "one token file per session");
     assert_ne!(tokens[0], tokens[1]);
-    for (seen, token) in seen.iter().zip(&tokens) {
+    for (at, (seen, token)) in seen.iter().zip(&tokens).enumerate() {
+        // Codex's session (the second) has the browser off Windows, so its proxy's password is
+        // hidden too; Claude's has no browser, so no proxy.
+        let password = TestProxy::PASSWORD.to_owned();
         assert_eq!(
-            seen.redacted,
-            std::slice::from_ref(token),
-            "the stderr tail hides the token"
+            seen.redacted.contains(&password),
+            at == 1 && !cfg!(windows),
+            "the stderr tail hides the proxy password"
         );
+        // And the `Proxy-Authorization: Basic` value it makes.
+        let basic = base64::engine::general_purpose::STANDARD.encode(format!("clauseo:{password}"));
+        assert_eq!(seen.redacted.contains(&basic), at == 1 && !cfg!(windows));
+        let hidden: Vec<&String> = seen
+            .redacted
+            .iter()
+            .filter(|secret| **secret != password && **secret != basic)
+            .collect();
+        assert_eq!(hidden, [token], "the stderr tail hides the token");
         assert!(
             !seen
                 .env

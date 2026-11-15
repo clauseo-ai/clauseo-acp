@@ -6,8 +6,8 @@
 //!   dropped. What goes to the browser is the message as parsed and written again, so a
 //!   duplicate `"id"` key cannot mean one thing here and another there. A root-session command
 //!   (no `sessionId`, or an empty or `null` one: Chromium takes an empty one for the root) in a
-//!   domain the guard's clients take (`Fetch`, once PR-3's `ProxyAuth` is one) is answered here
-//!   with a CDP error too: the guard and agent-browser share the root session, so
+//!   domain the guard's clients take (`Fetch`, while the proxy's `ProxyAuth` is one) is answered
+//!   here with a CDP error too: the guard and agent-browser share the root session, so
 //!   agent-browser's `Fetch.enable`, `Fetch.disable` or `Fetch.continueWithAuth` there would
 //!   cancel or answer for the guard's own. Page-session commands are not judged by domain. A
 //!   forwarded `<Domain>.enable` or `.disable` is noted per session (when forwarded, not when
@@ -25,7 +25,7 @@ use std::sync::mpsc::Sender;
 
 use serde_json::{Value, json};
 
-use super::seam::{FIRST_ID, is_guard_id};
+use super::seam::{FIRST_ID, is_guard_id, session_of};
 
 /// What a reply to the relay's own command carries: the browser's `result`, or its `error`.
 pub(crate) type Reply = Result<Value, Value>;
@@ -134,7 +134,7 @@ impl Routes {
             return FromClient::Refuse(refusal(id, "the id is outside agent-browser's range"));
         }
         if let Some(method) = message.get("method").and_then(Value::as_str) {
-            let session = session_of(message.get("sessionId"));
+            let session = session_of(message.get("sessionId")).to_owned();
             if session.is_empty() && self.domains.contains(domain_of(method)) {
                 return FromClient::Refuse(refusal(
                     id,
@@ -200,11 +200,4 @@ fn refusal(id: &Value, message: &str) -> String {
 /// A CDP method's domain: `Fetch` for `Fetch.enable`; the whole name if it has no dot.
 fn domain_of(method: &str) -> &str {
     method.split_once('.').map_or(method, |(domain, _)| domain)
-}
-
-/// A message's `sessionId`, or `""` for the root session. Chromium takes a missing or empty one
-/// for the root session; a `null` or other non-string one, which it refuses, is judged as the
-/// root session here too, so it is refused where the root session's would be.
-fn session_of(value: Option<&Value>) -> String {
-    value.and_then(Value::as_str).unwrap_or_default().to_owned()
 }

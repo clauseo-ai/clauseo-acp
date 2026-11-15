@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use clauseo_settings::Locations;
 use serde_json::{Map, Value, json};
 
-use super::{EXTENDS, Listed, PROFILE, SET_ASIDE_GLOB, Session, keys};
+use super::{EXTENDS, Listed, PROFILE, SECRET_GLOB, SET_ASIDE_GLOB, Session, keys};
 
 /// What of `<data>` is left readable to a Codex shell on purpose, with why. The guard test checks
 /// that each `Locations` path is denied or here.
@@ -138,21 +138,37 @@ fn compiled(keys: &Map<String, Value>) -> (Vec<(PathBuf, String)>, Vec<String>) 
     (exact, globs)
 }
 
-/// A one-component glob (`*` within a name) matched against `path`'s prefixes.
+/// A glob, each `*` within one name, matched against `path` and its ancestors, name by name.
 fn glob_matches(glob: &str, path: &Path) -> bool {
-    let (dir, name) = glob.rsplit_once('/').expect("a glob with a folder");
-    let (before, after) = name.split_once('*').unwrap_or((name, ""));
+    let want = names(Path::new(glob));
     path.ancestors().any(|ancestor| {
-        ancestor.parent() == Some(Path::new(dir))
-            && ancestor
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    name.len() >= before.len() + after.len()
-                        && name.starts_with(before)
-                        && name.ends_with(after)
-                })
+        let got = names(ancestor);
+        got.len() == want.len()
+            && got
+                .iter()
+                .zip(&want)
+                .all(|(name, pattern)| name_matches(pattern, name))
     })
+}
+
+/// `path`'s names, without its root or drive.
+fn names(path: &Path) -> Vec<&str> {
+    path.components()
+        .filter(|part| matches!(part, Component::Normal(_)))
+        .filter_map(|part| part.as_os_str().to_str())
+        .collect()
+}
+
+/// One name against one glob part, whose one `*` (if any) stands for any run of characters.
+fn name_matches(pattern: &str, name: &str) -> bool {
+    match pattern.split_once('*') {
+        Some((before, after)) => {
+            name.len() >= before.len() + after.len()
+                && name.starts_with(before)
+                && name.ends_with(after)
+        }
+        None => pattern == name,
+    }
 }
 
 fn rank(mode: &str) -> u8 {
@@ -526,6 +542,7 @@ fn a_data_folder_with_a_glob_character_is_named_literally_without_the_set_aside_
         .expect("rules scoped under the literal data folder");
     assert_eq!(scoped.get("search.sqlite"), Some(&json!("deny")));
     assert_eq!(scoped.get(SET_ASIDE_GLOB), None);
+    assert_eq!(scoped.get(SECRET_GLOB), None);
 }
 
 #[test]

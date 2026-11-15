@@ -93,9 +93,9 @@
 //!   [`Denial::Dropped`], and only logs network and device denials. A watcher that fails to
 //!   start or dies is logged and started again at most once a minute; launches run either way.
 //! - [`start_proxy`] with a [`ProxyConfig`] (lists, the shared block list and the launch's
-//!   allowed sites, [`Upstream`], sink; an unloaded block list blocks nothing and is logged
-//!   once); the handle's ports,
-//!   `env()`, `allow` and `revoke`. [`builtin_allowlist`] per [`LoginKind`].
+//!   allowed sites, [`Upstream`], sink, [`ProxyMode`]; an unloaded block list blocks nothing
+//!   and is logged once); the handle's ports, `env()`, `browser_credential()` (a
+//!   [`ProxyCredential`]), `allow` and `revoke`. [`builtin_allowlist`] per [`LoginKind`].
 //!   [`upstream_for`] routes the host's own HTTPS.
 //! - Unix: [`BrowserSocketDir::create`] (a `flock`ed lock file beside it, then one atomic
 //!   `mkdir` at 0700, checked with `lstat`), its `path`, `id` and `canonical`, and
@@ -190,10 +190,13 @@ pub use policy::{
     PathRule, Policy, PolicyBuilder, hfs_ignorable, strip_hfs_ignorables,
 };
 pub use proxy::{
-    Allowlist, Exchange, FailKind, Listener, LoginKind, ProxyConfig, ProxyHandle, Record, Route,
-    Upstream, UpstreamAnswer, Verdict, builtin_allowlist, start_proxy, upstream_answer,
-    upstream_for,
+    Allowlist, Exchange, FailKind, Listener, LoginKind, ProxyConfig, ProxyCredential, ProxyHandle,
+    ProxyMode, Record, Route, Upstream, UpstreamAnswer, Verdict, builtin_allowlist, start_proxy,
+    upstream_answer, upstream_for,
 };
+// Other crates' tests only: the proxy with a fixed name table (`proxy/fixed_names.rs`).
+#[cfg(feature = "test-support")]
+pub use proxy::start_proxy_with_names;
 pub use setup::{Blocked, SandboxSetup, SetAside, SetupError, SetupState};
 #[cfg(windows)]
 pub use windows::UserSetup;

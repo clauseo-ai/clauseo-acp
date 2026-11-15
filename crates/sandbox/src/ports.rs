@@ -140,17 +140,18 @@ pub enum ListenerFor {
     /// A tier-B launch's agent: on Windows a free port in [`TIER_B_PORTS`], the only ports its
     /// static permit opens. Every pool user reaches it, so it must check a secret.
     TierB,
-    /// Anything else: a tier-C launch's listeners, and the proxy's browser listener, which
-    /// takes no token, always. The port a bind of `127.0.0.1:0` gets, asked again when it lands
-    /// in [`TIER_B_PORTS`] or on a held port, so no pool user's static permit reaches it.
+    /// Anything else: a tier-C launch's listeners, and the proxy's browser listener (which
+    /// checks its own credential, not the agent's), always. The port a bind of `127.0.0.1:0`
+    /// gets, asked again when it lands in [`TIER_B_PORTS`] or on a held port, so no pool
+    /// user's static permit reaches it.
     Other,
 }
 
 /// Binds a listener on `127.0.0.1` for one launch, for `whom` ([`ListenerFor`]), never on a
 /// claimed or retired port. Its port is retired as it binds: the listener holds it while it
 /// lives, and once it closes no later launch of this process gets it. A jailed child of this
-/// launch that outlived it keeps the rule for this port, and the proxy's browser listener takes
-/// no token.
+/// launch that outlived it keeps the rule for this port, and the proxy's browser listener
+/// checks its own credential.
 #[cfg(not(windows))]
 pub fn bind_loopback(whom: ListenerFor) -> io::Result<TcpListener> {
     let mut held = Held::lock();
