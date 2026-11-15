@@ -85,7 +85,7 @@ use std::ffi::OsString;
 
 use super::LaunchDeny;
 use forms::{Shells, forms};
-pub(crate) use own_allow::own_shell_allow_rules;
+pub(crate) use own_allow::{own_shell_allow_rules, own_shell_glob_deny_rules};
 
 #[path = "shell_deny_forms.rs"]
 mod forms;

@@ -463,3 +463,6 @@ fn every_deny_still_wins_beside_the_allow() {
 
 #[path = "own_allow_binary_tests.rs"]
 mod binary;
+
+#[path = "own_allow_glob_tests.rs"]
+mod glob;
