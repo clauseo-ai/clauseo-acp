@@ -4,7 +4,8 @@
 //! `blackline.no_word_tool`), the failures (`blackline.failed`: compare exits 1, the view takes
 //! too long, the view prints too much), and after every case `<data>/tmp` holds nothing and the
 //! matter folder is as it was. One test runs the real stetdoc when one is on `PATH`, to a
-//! version and to the folder now.
+//! version and to the folder now. The partial blacklines and stetdoc's own refusals are in
+//! `blackline_partial.rs`, with these helpers.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,21 +22,21 @@ use crate::versions::{matter_events, recorded};
 use crate::write;
 
 /// The fixtures' folder.
-fn fixtures() -> PathBuf {
+pub(crate) fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/blackline")
 }
 
 /// A fixture's bytes.
-fn fixture(name: &str) -> Vec<u8> {
+pub(crate) fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(fixtures().join(name)).unwrap()
 }
 
 /// The document every test compares.
-const DOC: &str = "Lease.docx";
+pub(crate) const DOC: &str = "Lease.docx";
 
 /// The stand-in stetdoc copied into `<root>/fake-stetdoc/`, with the fixture's `view.json`
 /// beside it.
-fn fake_stetdoc(dir: &Dir) -> PathBuf {
+pub(crate) fn fake_stetdoc(dir: &Dir) -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     let examples = exe.parent().unwrap().parent().unwrap().join("examples");
     let name = format!("stetdoc_compare_fake{}", std::env::consts::EXE_SUFFIX);
@@ -54,7 +55,10 @@ fn fake_stetdoc(dir: &Dir) -> PathBuf {
 /// A host with `stetdoc` (none when `None`), and a matter whose `Lease.docx` was the fixture's
 /// `old.docx` at its import and is `new.docx` now. Returns the host, the matter, its import
 /// version and its folder.
-fn lease_matter(dir: &Dir, stetdoc: Option<&Path>) -> (Running, MatterId, CheckpointId, PathBuf) {
+pub(crate) fn lease_matter(
+    dir: &Dir,
+    stetdoc: Option<&Path>,
+) -> (Running, MatterId, CheckpointId, PathBuf) {
     lease_matter_launching(dir, stetdoc, Arc::new(dir.launcher()))
 }
 
@@ -64,19 +68,31 @@ fn lease_matter_launching(
     stetdoc: Option<&Path>,
     launcher: Arc<dyn Launcher>,
 ) -> (Running, MatterId, CheckpointId, PathBuf) {
+    let (old, new) = (fixture("old.docx"), fixture("new.docx"));
+    pair_matter_launching(dir, stetdoc, launcher, &old, &new)
+}
+
+/// As [`lease_matter_launching`], with `Lease.docx` `old` at the version and `new` now.
+pub(crate) fn pair_matter_launching(
+    dir: &Dir,
+    stetdoc: Option<&Path>,
+    launcher: Arc<dyn Launcher>,
+    old: &[u8],
+    new: &[u8],
+) -> (Running, MatterId, CheckpointId, PathBuf) {
     let host = dir.start_launching(0, launcher, |config| match stetdoc {
         Some(program) => config.with_stetdoc(program.to_owned(), "Clauseo".to_owned()),
         None => config,
     });
     let (matter, _, folder) = matter_with_thread(dir, &host, "m", &[], FAKE);
     // The import saw an empty folder; the file comes before a version that holds it.
-    write::write(&folder.join(DOC), &fixture("old.docx"));
+    write::write(&folder.join(DOC), old);
     let thread = host.threads(matter)[0].thread;
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Read the lease.");
     events.until_turn_ended(turn);
     let old = last_version(&host, matter);
-    write::write(&folder.join(DOC), &fixture("new.docx"));
+    write::write(&folder.join(DOC), new);
     (host, matter, old, folder)
 }
 
@@ -86,7 +102,12 @@ fn last_version(host: &Running, matter: MatterId) -> CheckpointId {
 }
 
 /// The blackline query of `path` from `from` to `to`.
-fn query(matter: MatterId, path: &str, from: CheckpointId, to: Option<CheckpointId>) -> HostQuery {
+pub(crate) fn query(
+    matter: MatterId,
+    path: &str,
+    from: CheckpointId,
+    to: Option<CheckpointId>,
+) -> HostQuery {
     HostQuery::WordBlackline {
         matter,
         path: MatterPath::new(path).unwrap(),
@@ -96,7 +117,7 @@ fn query(matter: MatterId, path: &str, from: CheckpointId, to: Option<Checkpoint
 }
 
 /// The blackline of an answer.
-fn blackline(answer: Result<QueryResult, HostError>) -> WordBlackline {
+pub(crate) fn blackline(answer: Result<QueryResult, HostError>) -> WordBlackline {
     match answer {
         Ok(QueryResult::WordBlackline(blackline)) => blackline,
         other => panic!("WordBlackline answered {other:?}"),
@@ -104,7 +125,7 @@ fn blackline(answer: Result<QueryResult, HostError>) -> WordBlackline {
 }
 
 /// What `<data>/tmp` holds: nothing once every blackline is done.
-fn temp_entries(dir: &Dir) -> Vec<PathBuf> {
+pub(crate) fn temp_entries(dir: &Dir) -> Vec<PathBuf> {
     match std::fs::read_dir(dir.data().join("tmp")) {
         Ok(entries) => entries.map(|entry| entry.unwrap().path()).collect(),
         Err(_) => Vec::new(),
@@ -112,7 +133,7 @@ fn temp_entries(dir: &Dir) -> Vec<PathBuf> {
 }
 
 /// Every file of `folder` but Clauseo's own `.clauseo/`, with its bytes, sorted.
-fn files_of(folder: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+pub(crate) fn files_of(folder: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     let mut files = Vec::new();
     for entry in std::fs::read_dir(folder).unwrap() {
         let path = entry.unwrap().path();
@@ -126,7 +147,7 @@ fn files_of(folder: &Path) -> Vec<(PathBuf, Vec<u8>)> {
 }
 
 /// Fails unless `answer` is refused with `code`.
-fn refused(answer: Result<QueryResult, HostError>, code: ErrorCode) {
+pub(crate) fn refused(answer: Result<QueryResult, HostError>, code: ErrorCode) {
     match answer {
         Err(error) => assert_eq!(error.code(), code, "{error}"),
         Ok(other) => panic!("expected {code:?}, got {other:?}"),
@@ -373,7 +394,7 @@ fn the_next_start_removes_leftover_blackline_folders_and_nothing_else() {
     reason = "the real-stetdoc test looks stetdoc up on PATH, as a debug desktop build does; the \
               host itself never does"
 )]
-fn stetdoc_on_path() -> Option<PathBuf> {
+pub(crate) fn stetdoc_on_path() -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     let name = format!("stetdoc{}", std::env::consts::EXE_SUFFIX);
     std::env::split_paths(&path)

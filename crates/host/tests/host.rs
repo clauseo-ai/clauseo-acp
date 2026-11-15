@@ -35,6 +35,9 @@ mod ask_user_question;
 #[path = "host/blackline.rs"]
 mod blackline;
 #[cfg(test)]
+#[path = "host/blackline_partial.rs"]
+mod blackline_partial;
+#[cfg(test)]
 #[path = "host/blobs.rs"]
 mod blobs;
 #[cfg(test)]
