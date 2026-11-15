@@ -1,48 +1,75 @@
 # The agent-browser sidecar the desktop bundles in release builds (ADR 0029, "Bundling (desktop)").
 #
-# Read by two things, both of which must agree with it:
+# Read by four things, all of which must agree with it:
 #   - crates/desktop/sidecars/agent-browser.mjs, `fetchAgentBrowser(triple, destPath)`, which the
 #     release script (.github/scripts/sidecars.mjs) calls once per target. It reads this file with
 #     its own small parser, so keep to the format below.
+#   - crates/desktop/sidecars/agent-browser-build.mjs, which builds our binaries from the upstream
+#     source this file pins (see below).
+#   - ci.yml's real-Chrome gate, which reads the x86_64 Linux table with awk.
 #   - the `agent_browser_pin` test in crates/desktop (crates/desktop/src/agent_browser_pin.rs),
 #     which parses it with the toml crate.
 #
-# Format: `version` is the release's tag without the `v`. Each other table is one Rust target
-# triple, with exactly two keys: `url` (the release asset's download URL, which must start with
-# https://github.com/vercel-labs/agent-browser/releases/download/v<version>/) and `sha256` (the
-# asset's SHA-256, 64 lowercase hex characters). A triple with no build upstream holds
-# `none = true` instead, and the script then leaves that triple's sidecar out. Values are double
-# quoted strings or `true`; no other syntax (no inline tables, arrays or multi-line strings).
+# Format: four keys come before the first table, each once.
+#   - `version` is upstream's release tag without the `v`.
+#   - `patched_tag` names our release of the build, agent-browser-v<version>-clauseo.<n>, n
+#     counting up from 1 for each rebuild of the same version.
+#   - `upstream_commit` is the commit upstream's tag v<version> points at (40 lowercase hex), and
+#     `upstream_tarball_sha256` the SHA-256 of GitHub's source archive of that commit,
+#     https://github.com/vercel-labs/agent-browser/archive/<upstream_commit>.tar.gz.
+# Each table after them is one Rust target triple, with exactly two keys: `url` (the asset's
+# download URL) and `sha256` (the asset's SHA-256, 64 lowercase hex characters). A triple with no
+# build holds `none = true` instead, and the script then leaves that triple's sidecar out. Values
+# are double quoted strings or `true`; no other syntax (no inline tables, arrays or multi-line
+# strings). Each asset is a raw binary (no archive).
 #
-# Each asset is a raw binary (no archive). The hashes were taken from the release's downloads and
-# match the digests GitHub lists for the release assets (v0.41.1, Apache-2.0).
+# macOS and Windows take our build: upstream's source at upstream_commit plus the patches in
+# crates/desktop/agent-browser/patches/, built per triple (natively, except x64 macOS,
+# cross-compiled on an ARM64 Mac) by .github/workflows/agent-browser-build.yml and published as a
+# pre-release of this repository. A url names that release's asset agent-browser-<triple> (.exe
+# on Windows), under https://github.com/clauseo-ai/clauseo-acp/releases/download/<patched_tag>/,
+# and its sha256 is the one the workflow prints; the release trusts this hash, not a rebuild
+# (crates/desktop/agent-browser/README.md says why a rebuild may differ). A sha256 of 64 zeros is
+# the placeholder before the workflow has run, and the fetch refuses it.
 #
-# Upstream ships no Windows ARM64 build. The aarch64-pc-windows-msvc entry is the x64 build, which
-# Windows on ARM runs under x64 emulation; it is pinned to the same asset and hash on purpose.
+# Linux keeps upstream's binary for now: it is used for development and CI only, and the stream
+# server is still on there. Its url is under
+# https://github.com/vercel-labs/agent-browser/releases/download/v<version>/, and its hashes were
+# taken from the release's downloads and match the digests GitHub lists for its assets (v0.41.1,
+# Apache-2.0). The fetch accepts either kind of url for any triple; the agent_browser_pin test
+# pins today's split (macOS and Windows ours, Linux upstream's).
 
 version = "0.41.1"
+patched_tag = "agent-browser-v0.41.1-clauseo.1"
+upstream_commit = "5868f7c05020e047c00e68e4abf9253cce864f41"
+upstream_tarball_sha256 = "ca59c4590a5a265d106c494d7726b9cde8575536d31834709dd525da8d778f6f"
 
+# Our build, see the header. The sha256 is the placeholder until the workflow has run.
 [aarch64-apple-darwin]
-url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-darwin-arm64"
-sha256 = "63b0a97b85a54b4c9b2871318af74104c29b80abd507b53a30316884e062854b"
+url = "https://github.com/clauseo-ai/clauseo-acp/releases/download/agent-browser-v0.41.1-clauseo.1/agent-browser-aarch64-apple-darwin"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
+# Our build, cross-compiled on an ARM64 Mac. The sha256 is the placeholder too.
 [x86_64-apple-darwin]
-url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-darwin-x64"
-sha256 = "7802f053e7fb25e10548ee10ca60d892c73d42ed2dbb7fc30c2d5925a5c82859"
+url = "https://github.com/clauseo-ai/clauseo-acp/releases/download/agent-browser-v0.41.1-clauseo.1/agent-browser-x86_64-apple-darwin"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
+# Upstream's binary (dev and CI only, the stream server still on), see the header.
 [x86_64-unknown-linux-gnu]
 url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-linux-x64"
 sha256 = "2a89295b62ddd497986a9a80b52e1dbe4c1f6bd68ffde67eaae82eec2206af61"
 
+# Upstream's binary, as above.
 [aarch64-unknown-linux-gnu]
 url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-linux-arm64"
 sha256 = "f0b3bdaa40abf2a5111ec08e6d242110aaf56045ef5108cbc633bacc8e53ca17"
 
+# Our build, see the header. The sha256 is the placeholder until the workflow has run.
 [x86_64-pc-windows-msvc]
-url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-win32-x64.exe"
-sha256 = "ddab45e8bae84e5bc6aa1b084bceca9b579aff2e8272474d7d26953cf10965ee"
+url = "https://github.com/clauseo-ai/clauseo-acp/releases/download/agent-browser-v0.41.1-clauseo.1/agent-browser-x86_64-pc-windows-msvc.exe"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 
-# x64 build under emulation, see the header.
+# Our build, native ARM64 (no x64 emulation). The sha256 is the placeholder too.
 [aarch64-pc-windows-msvc]
-url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-win32-x64.exe"
-sha256 = "ddab45e8bae84e5bc6aa1b084bceca9b579aff2e8272474d7d26953cf10965ee"
+url = "https://github.com/clauseo-ai/clauseo-acp/releases/download/agent-browser-v0.41.1-clauseo.1/agent-browser-aarch64-pc-windows-msvc.exe"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
