@@ -511,3 +511,19 @@ fn a_verbatim_windows_stetdoc_path_goes_on_path_plain() {
         Path::new(r"C:\Clauseo\stetdoc\stetdoc.exe")
     );
 }
+
+/// The read invite's part: nothing for no matter; each matter named, quoted, with its folder,
+/// read-only.
+#[test]
+fn the_matter_reads_part_names_each_invited_matter_read_only() {
+    use clauseo_profile::instructions::{matter_reads_part, word_count};
+    assert_eq!(matter_reads_part(&[]), "");
+    let part = matter_reads_part(&[("Smith", "/m/Smith"), ("Jones", "/m/Jones")]);
+    assert!(part.starts_with("\n\n"), "{part}");
+    assert!(
+        part.contains("\"Smith\" (/m/Smith); \"Jones\" (/m/Jones)"),
+        "{part}"
+    );
+    assert!(part.contains("never change"), "{part}");
+    assert!(word_count(&part) <= 60, "{part}");
+}

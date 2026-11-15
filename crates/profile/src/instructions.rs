@@ -129,6 +129,25 @@ pub fn claude_shell(macos: bool) -> Option<&'static str> {
     macos.then(|| CLAUDE_SHELL_MACOS.trim())
 }
 
+/// What the host appends to a session's instructions for the other matters the lawyer let its
+/// conversation read (`reads`: each matter's name and folder), read-only; empty for none.
+/// Provisional words (b4l-mfence).
+pub fn matter_reads_part(reads: &[(&str, &str)]) -> String {
+    if reads.is_empty() {
+        return String::new();
+    }
+    let listed: Vec<String> = reads
+        .iter()
+        .map(|(name, folder)| format!("\"{name}\" ({folder})"))
+        .collect();
+    format!(
+        "\n\nThe lawyer let this conversation read the files of these other matters: {}. Read \
+         them only, with your file-reading tool: never change, move or copy them, and never \
+         save into their folders. Your shell may still be refused there.",
+        listed.join("; ")
+    )
+}
+
 /// Which browser part a session gets in place of `{browser}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserPart {
