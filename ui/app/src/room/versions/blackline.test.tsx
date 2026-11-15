@@ -204,6 +204,24 @@ test("a change with no text of its own shows its object's word, marked in or out
   expect(page()?.querySelector(".ver-del")?.textContent).toBe("[footnote]");
 });
 
+test("what the sheet doesn't mark says so: each changed link by its text, then a comment, a text box, cells", async () => {
+  h = await comparing(() => ({
+    word_blackline: {
+      ...MARKED.word_blackline!,
+      notices: ["comment_changed", "text_box_changed", "cell_format_changed"],
+      changed_links: ["the account", "the bank's site"],
+    },
+  }));
+  expect(lines()).toEqual([
+    "The web address behind 'the account' changed.",
+    "The web address behind 'the bank's site' changed.",
+    "A comment's text changed. Open both versions in Word to see it.",
+    "Text in a text box changed. Open both versions in Word to see it.",
+    "The formatting of some table cells changed.",
+  ]);
+  expect(page()?.querySelectorAll("[data-change]")).toHaveLength(2);
+});
+
 test("changes outside the main text say so over the sheet", async () => {
   h = await comparing(() => ({
     word_blackline: { ...MARKED.word_blackline!, notices: ["changes_outside_text"] },

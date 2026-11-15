@@ -344,8 +344,9 @@ export const failedLine = (lang: Lang, code: string): BandNotice => ({
 });
 
 /** What the lawyer should know about a marked-up document, by the host's notice, said over the sheet: a part not
- * shown (the rest is), hidden text shown like the rest, numbers that may differ from Word's; anything else, and a
- * notice this version doesn't know, says only that some of it may look different in Word. */
+ * shown (the rest is), hidden text shown like the rest, numbers that may differ from Word's, changes outside the main
+ * text, a comment's or a text box's text or some cells' formatting that changed (which the sheet doesn't mark);
+ * anything else, and a notice this version doesn't know, says only that some of it may look different in Word. */
 export function noticeLine(lang: Lang, notice: BlacklineNotice): string {
   switch (notice) {
     case "part_not_shown":
@@ -359,11 +360,22 @@ export function noticeLine(lang: Lang, notice: BlacklineNotice): string {
         lang,
         "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.",
       );
+    case "comment_changed":
+      return vt(lang, "A comment's text changed. Open both versions in Word to see it.");
+    case "text_box_changed":
+      return vt(lang, "Text in a text box changed. Open both versions in Word to see it.");
+    case "cell_format_changed":
+      return vt(lang, "The formatting of some table cells changed.");
     case "may_differ":
     case "unknown":
       return vt(lang, "Some of this may look different in Word.");
   }
 }
+
+/** Over a marked-up document, for a link whose web address changed while its text stayed (the sheet marks no change
+ * for it): the link's text, as the document has it, in the line's own quotes. */
+export const linkLine = (lang: Lang, text: string): string =>
+  vt(lang, "The web address behind '{text}' changed.", { text });
 
 /** The Word tool's refusals that say why, each with its own sentence (words-errors.ts). */
 const MARK_REFUSALS: readonly string[] = [

@@ -19,8 +19,8 @@ import type {
 export type MarkAsk = { path: string; from: CheckpointId; to?: CheckpointId; now: string };
 
 /** How a marking up stands: running, done (its paragraphs, whether the host cut the document short, and what the
- * lawyer should know: a part not shown, hidden text), or failed with the host's code and whether another try may mend
- * it. */
+ * lawyer should know: a part not shown, hidden text, the links whose web address changed), or failed with the host's
+ * code and whether another try may mend it. */
 export type Mark =
   | { kind: "running" }
   | {
@@ -28,6 +28,8 @@ export type Mark =
       paragraphs: readonly BlacklineParagraph[];
       truncated: boolean;
       notices: readonly BlacklineNotice[];
+      /** The text of each link whose web address changed while its text stayed. */
+      changedLinks: readonly string[];
     }
   | { kind: "failed"; code: string; retryable: boolean };
 
@@ -101,8 +103,14 @@ export class Blacklines {
         },
       });
       if ("word_blackline" in r) {
-        const { paragraphs, truncated, notices = [] } = r.word_blackline;
-        this.#set(key, { kind: "shown", paragraphs, truncated, notices });
+        const { paragraphs, truncated, notices = [], changed_links = [] } = r.word_blackline;
+        this.#set(key, {
+          kind: "shown",
+          paragraphs,
+          truncated,
+          notices,
+          changedLinks: changed_links,
+        });
       } else this.#failed(key, "internal", false);
     } catch (e) {
       const { code, retryable } = toHostError(e);

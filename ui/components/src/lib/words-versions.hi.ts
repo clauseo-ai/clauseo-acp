@@ -99,6 +99,14 @@ const OWN = {
   "Some of this may look different in Word.": "इसका कुछ हिस्सा Word में अलग दिख सकता है।",
   "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.":
     "कुछ बदलाव मुख्य पाठ के बाहर हैं, जैसे हेडर या फ़ुटनोट में। वे यहाँ नहीं दिखाए गए हैं।",
+  // what changed that the marked-up document doesn't mark: a link's web address, a comment's or a text box's text,
+  // some cells' formatting; provisional
+  "The web address behind '{text}' changed.": "'{text}' के पीछे का वेब पता बदल गया है।",
+  "A comment's text changed. Open both versions in Word to see it.":
+    "एक टिप्पणी का पाठ बदल गया है। इसे देखने के लिए दोनों संस्करण Word में खोलें।",
+  "Text in a text box changed. Open both versions in Word to see it.":
+    "एक टेक्स्ट बॉक्स का पाठ बदल गया है। इसे देखने के लिए दोनों संस्करण Word में खोलें।",
+  "The formatting of some table cells changed.": "तालिका के कुछ सेल की फ़ॉर्मैटिंग बदल गई है।",
   // over a blackline paragraph: the place couldn't be shown, or it holds text Word hides; provisional
   "This part couldn't be shown.": "यह हिस्सा दिखाया नहीं जा सका।",
   "Hidden in Word": "Word में छिपा हुआ",
