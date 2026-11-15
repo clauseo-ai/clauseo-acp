@@ -6,6 +6,8 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import { NewMatterForm } from "@clauseo/components/clauseo/matter-form.tsx";
 import { NewMatterDialog } from "@clauseo/components/clauseo/new-matter-dialog.tsx";
 import { PlanCard } from "@clauseo/components/clauseo/plan-card.tsx";
+import { locateLine } from "../../room/locate-refusal.ts";
+import { MovedFolder } from "../../room/moved.tsx";
 import { Group, Sample } from "./frame.tsx";
 import { LimitSamples } from "./matters-limits.tsx";
 import { WINDOWS } from "./matters-data.ts";
@@ -32,6 +34,22 @@ function NewMatterTrigger() {
   );
 }
 
+/** The moved folder's line after a Locate the host refused for a folder inside another matter, which the list names. */
+function MovedRefused() {
+  const { lang } = useWords();
+  return (
+    <MovedFolder
+      folder="Documents/Khan Leather Works"
+      refused={locateLine(
+        lang,
+        { code: "matter.folder_inside_matter" },
+        "Khan Leather Works v. Customs",
+      )}
+      onLocate={() => {}}
+    />
+  );
+}
+
 const PLAN_LINK = { label: "Manage plan", href: "https://example.com/plan" };
 
 export function MattersParts() {
@@ -39,6 +57,9 @@ export function MattersParts() {
     <Group title="Matters">
       <RailSamples />
       <QueueSamples />
+      <Sample name="Folder moved, Locate refused: inside another matter">
+        <MovedRefused />
+      </Sample>
       <Sample name="New matter form, first launch">
         <NewMatterForm
           location="Documents/Clauseo"
