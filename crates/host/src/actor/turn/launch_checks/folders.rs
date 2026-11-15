@@ -70,13 +70,15 @@ pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Res
 }
 
 /// The data folder canonicalised, then as configured when that differs; as configured alone
-/// when it does not resolve (the data-folder refusal has refused that launch already).
+/// when it does not resolve (the data-folder refusal has refused that launch already). Each
+/// followed by its full 8.3 short form on Windows (`agent::short_forms`).
 fn data_spellings(data: &Path) -> Vec<PathBuf> {
     let mut spellings: Vec<PathBuf> = dunce::canonicalize(data).into_iter().collect();
     if !spellings.iter().any(|canonical| canonical == data) {
         spellings.push(data.to_owned());
     }
-    spellings
+    let net = crate::network_paths::NetEnv::current();
+    crate::agent::short_forms::with_short_forms(spellings, &net)
 }
 
 /// Claude's data folder deny rules for this launch: every entry of `data` that is not the

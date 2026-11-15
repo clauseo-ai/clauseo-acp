@@ -83,9 +83,22 @@ pub const RELAY_PORT: &str = "{relay_port}";
 /// `dunce`-simplified path. Unfillable (no relay): the host drops `case-law`.
 pub const RELAY_TOKEN_FILE: &str = "{relay_token_file}";
 
+/// The other matters' rule, a line of the legal part's conduct list. The host fills it with
+/// [`crate::instructions::OTHER_MATTERS`] for an agent the launch fences from other matters
+/// (Claude on every OS, Codex on macOS and Linux), and with
+/// [`crate::instructions::other_matters_closed`] for Codex on Windows, which nothing fences.
+/// Instructions only.
+pub const OTHER_MATTERS: &str = "{other_matters}";
+
 /// The tokens the host fills in the instructions. An unfillable one is a host bug: the host
 /// fails the launch with `agent.launch_failed`, naming the token ([`Unfilled`]'s message).
-pub const IN_INSTRUCTIONS: [&str; 4] = [WORK_FOLDER, MATTER_NOTES, CONNECTORS, BROWSER];
+pub const IN_INSTRUCTIONS: [&str; 5] = [
+    WORK_FOLDER,
+    MATTER_NOTES,
+    CONNECTORS,
+    BROWSER,
+    OTHER_MATTERS,
+];
 /// The tokens the host fills in the `browser` and `case-law` entries. The browser entry holds
 /// [`SOCKET_DIR`] on macOS and Linux only and [`DAEMON_PORT`] on Windows only; the host fills
 /// whichever it finds. Only `case-law` holds [`RELAY_PORT`] and [`RELAY_TOKEN_FILE`].

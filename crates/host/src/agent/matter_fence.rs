@@ -16,6 +16,8 @@
 //! paths would take the launch past [`MAX_PATHS`] (Claude's settings would outgrow the file
 //! Claude Code reads): a deny of the whole folder would cover the session's own, so the lawyer
 //! is told instead ([`MatterFence::unfenced`], `NoticeKind::MattersUnfenced`).
+//! On Windows each fence path and spelling is followed by its full 8.3 short form
+//! (`agent::short_forms`), made from the long ones, so a rule also names `CLAUSE~1\…`.
 //!
 //! A matter inside the session's own matter that it is not invited into needs one more thing on
 //! macOS and Linux: Claude's sandbox re-opens the own matter for reading, and its `allowRead`
@@ -38,6 +40,7 @@ use std::path::{Component, Path, PathBuf, Prefix};
 
 use clauseo_protocol::MatterId;
 
+use crate::agent::short_forms::with_short_forms;
 use crate::network_paths::resolve::Disk;
 use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, touchable};
 
@@ -170,6 +173,11 @@ impl MatterFence {
                 self.unfenced.push(other.id);
             }
             other.paths = paths;
+        }
+        // Their full short forms beside them, made from the long ones (`short_forms`).
+        for other in &mut self.others {
+            other.paths = with_short_forms(std::mem::take(&mut other.paths), &net);
+            other.spellings = with_short_forms(std::mem::take(&mut other.spellings), &net);
         }
         self.spend_budget();
         if !self.unfenced.is_empty() {

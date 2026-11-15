@@ -196,6 +196,7 @@ fn claude_gets_agent_browser_rules_only_with_the_browser() {
                 notes: "/n",
                 connectors: "",
                 browser: "",
+                other_matters: "",
             },
             seed_sites: &[],
             forced_ask: false,

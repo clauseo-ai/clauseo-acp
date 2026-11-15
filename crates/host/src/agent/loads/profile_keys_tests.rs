@@ -20,6 +20,7 @@ pub(super) fn folders() -> Folders<'static> {
         notes: "/data/agent-state/m/notes",
         connectors: "",
         browser: "",
+        other_matters: "",
     }
 }
 /// No data folder deny rules (nor a matter): these tests are about the other keys.
