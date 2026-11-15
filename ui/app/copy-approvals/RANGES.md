@@ -1,6 +1,6 @@
 # Copy approval ids: who takes which
 
-Every lawyer-facing string has an id registered in `ui/app/src/review/registry*.tsx` and an entry here. Its status is `approved`, `change` or `provisional`, and Hindi can carry its own `hi_status`. An id has the form `PREFIX-NN`, or `U3-err-<code>` for error codes (`status.ts`). An id in two files fails `copy:check`, and `copy:check` runs on every ui pull request. A `v*` release fails while any entry is not `approved` or has provisional Hindi (`.github/scripts/copy-release-gate.mjs`).
+Every lawyer-facing string has an id registered in `ui/app/src/review/registry*.tsx` and an entry here. Its status is `approved`, `change` or `provisional`, and Hindi can carry its own `hi_status`. An id has the form `PREFIX-NN`, or `U3-err-<code>` for error codes (`status.ts`). An id in two files fails `copy:check`, and `copy:check` runs on every ui pull request. A `v*` release fails while any entry's English is not `approved` (`.github/scripts/copy-release-gate.mjs`); provisional Hindi only warns, with the count and the first ids. Rohan, 2026-11-15: hindi later; provisional Hindi warns.
 
 ## Rules for a new string
 

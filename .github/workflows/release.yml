@@ -218,11 +218,11 @@ jobs:
             if [ "$mode" = dry ]; then echo "version_suffix=dev.${GITHUB_SHA:0:9}"; else echo "version_suffix="; fi
           } | tee -a "$GITHUB_OUTPUT"
 
-      # A v* release ships only words Rohan approved: every entry in ui/app/copy-approvals/*.json
-      # "approved", none with provisional Hindi ("hi_status": "later" passes). A test or dry run
-      # skips it, as a pull request's copy:check lets provisional words through. The ui job runs
-      # copy:check itself in a release, before it builds.
-      - name: Every word in a release is approved
+      # A v* release ships only English Rohan approved: every entry in ui/app/copy-approvals/*.json
+      # "approved". Provisional Hindi only warns (Rohan, 2026-11-15: hindi later; provisional Hindi
+      # warns). A test or dry run skips it, as a pull request's copy:check lets provisional words
+      # through. The ui job runs copy:check itself in a release, before it builds.
+      - name: Every English word in a release is approved
         if: steps.mode.outputs.mode == 'release'
         run: node .github/scripts/copy-release-gate.mjs
 

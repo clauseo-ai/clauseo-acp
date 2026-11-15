@@ -45,6 +45,7 @@ test("all approved passes", () => {
   assert.equal(out.code, 0, out.text);
   assert.match(out.text, /all 2 entries in 1 files are approved/);
   assert.doesNotMatch(out.text, /::error::/);
+  assert.doesNotMatch(out.text, /::warning::/);
 });
 
 test("a provisional entry fails", () => {
@@ -66,11 +67,40 @@ test("an entry marked change fails", () => {
   assert.match(out.text, /^status "change", not "approved": 1\n {2}MN-03 \(MN\.json\)$/m);
 });
 
-test("provisional Hindi fails, even on approved English", () => {
-  const out = run({ "U3.json": { "U3-err-1": approved(hiProvisional) } });
+test("provisional Hindi alone warns and passes", () => {
+  const out = run({
+    "U3.json": { "U3-err-1": approved(hiProvisional), "U3-02": approved(hiProvisional) },
+  });
+  assert.equal(out.code, 0, out.text);
+  assert.match(
+    out.text,
+    /^::warning::copy release gate: 2 Hindi lines are provisional \(not blocking; Rohan, 2026-11-15: hindi later\): U3-err-1, U3-02$/m,
+  );
+  assert.match(out.text, /all 2 entries in 1 files are approved in English/);
+  assert.doesNotMatch(out.text, /::error::/);
+});
+
+test("the Hindi warning names the first five ids", () => {
+  const entries = Object.fromEntries(
+    [1, 2, 3, 4, 5, 6, 7].map((n) => [`U3-0${n}`, approved(hiProvisional)]),
+  );
+  const out = run({ "U3.json": entries });
+  assert.equal(out.code, 0, out.text);
+  assert.match(
+    out.text,
+    /7 Hindi lines are provisional .*: U3-01, U3-02, U3-03, U3-04, U3-05, …$/m,
+  );
+  assert.doesNotMatch(out.text, /U3-06/);
+});
+
+test("provisional English with provisional Hindi fails, printing both", () => {
+  const out = run({
+    "U1.json": { "U1-01": approved({ status: "provisional", by: "app track", ...hiProvisional }) },
+  });
   assert.equal(out.code, 1);
-  assert.match(out.text, /^Hindi "hi_status": "provisional": 1\n {2}U3-err-1 \(U3\.json\)$/m);
-  assert.doesNotMatch(out.text, /not "approved"/);
+  assert.match(out.text, /^::error::copy release gate: 1 entry is not approved/m);
+  assert.match(out.text, /^status "provisional", not "approved": 1\n {2}U1-01 \(U1\.json\)$/m);
+  assert.match(out.text, /^::warning::copy release gate: 1 Hindi line is provisional .*: U1-01$/m);
 });
 
 test("Hindi marked later passes", () => {
@@ -78,7 +108,7 @@ test("Hindi marked later passes", () => {
   assert.equal(out.code, 0, out.text);
 });
 
-test("every offending id is listed, grouped by reason, with one ::error:: line", () => {
+test("every English offender is listed, grouped by reason, with one ::error:: and one ::warning:: line", () => {
   const out = run({
     "UC-x.json": {
       "UC-250": approved({ status: "provisional", ...hiProvisional }),
@@ -88,7 +118,9 @@ test("every offending id is listed, grouped by reason, with one ::error:: line",
   });
   assert.equal(out.code, 1);
   assert.equal(out.text.match(/::error::/g).length, 1);
-  assert.match(out.text, /3 entries are not approved/);
+  assert.equal(out.text.match(/::warning::/g).length, 1);
+  assert.match(out.text, /2 entries are not approved/);
+  assert.match(out.text, /2 Hindi lines are provisional .*: UC-250, UC-002$/m);
   assert.deepEqual(
     offenders({ "a.json": { A: approved({ status: "provisional", ...hiProvisional }) } }),
     {
@@ -96,7 +128,7 @@ test("every offending id is listed, grouped by reason, with one ::error:: line",
       'Hindi "hi_status": "provisional"': ["A (a.json)"],
     },
   );
-  for (const id of ["UC-250 (UC-x.json)", "UC-001 (UC.json)", "UC-002 (UC.json)"])
+  for (const id of ["UC-250 (UC-x.json)", "UC-001 (UC.json)"])
     assert.ok(out.text.includes(`  ${id}\n`), id);
   assert.doesNotMatch(out.text, /UC-251/);
 });
