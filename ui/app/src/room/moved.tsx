@@ -12,6 +12,9 @@ import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { ui } from "@clauseo/components/lib/words-ui.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 
+// Locate's step for a folder Claude can't start in, which the room mounts once beside these (locate-warning-host.tsx).
+export { LocateWarningHost } from "./locate-warning-host.tsx";
+
 /** The moved folder's line: that it moved, where it was (when the host says, H20's folder_display), that nothing is
  * lost, and Locate folder. */
 export function MovedFolder({ folder, onLocate }: { folder?: string; onLocate: () => void }) {

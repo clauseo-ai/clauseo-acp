@@ -13,11 +13,10 @@
 // New matter, as the Mac's native menu does too (room-commands.ts); until its first
 // question, the reading column's top says what it reads, once the matter's papers are counted. A link or paper in an
 // answer opens through the host (open.ts, H11), and so does a matter row's Show in Finder; a Word document's tile, and a
-// change note naming one, open it in Word (word/open-in-word.ts; the tiles are paper-wall.tsx). A
-// refused open or show says why where it came from, with Locate folder for a folder gone or not the
-// matter's (act-refusals.ts; the room gives LocateFolderContext for the open matter). Versions
-// opens and shows files through the
-// transport's own open_file and reveal unless a test or the review page passes stand-ins. Settings opens in its own
+// change note naming one, open it in Word (word/open-in-word.ts; the tiles are paper-wall.tsx). A refused open or show
+// says why where it came from, with Locate folder for a folder gone or not the matter's (act-refusals.ts; the room
+// gives LocateFolderContext for the open matter). Versions opens and shows files through the transport's own open_file
+// and reveal unless a test or the review page passes stand-ins. Settings opens in its own
 // window from the rail's foot and on Ctrl+, (⌘, on the Mac, settings-key.ts), where the host has that window.
 import {
   lazy,
@@ -70,8 +69,7 @@ import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
 import { usePaperLinks } from "./paper-links.ts";
 import { useMatterMoves, usePapers } from "./use-papers.ts";
 import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
-import { LocateGate, MovedFolder } from "./moved.tsx";
-import { LocateWarningHost } from "./locate-warning-host.tsx";
+import { LocateGate, LocateWarningHost, MovedFolder } from "./moved.tsx";
 import { usePickWait } from "./picker-wait.ts";
 import { useDraftMenus } from "./config-menus.ts";
 import { FolderChooserHost } from "./folder-chooser-host.tsx";
