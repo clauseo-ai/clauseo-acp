@@ -220,6 +220,11 @@ mod run {
 fn apple_s_security_says_44_for_a_missing_item() {
     use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
 
+    // Apple's `security` can raise the unlock dialog on a locked login keychain: skip then.
+    if crate::login_keychain_locked() {
+        return;
+    }
+
     let mut signin = crate::config::SigninConfig::from_env();
     signin.allow_real_security = true;
     let program = signin.security_program();
