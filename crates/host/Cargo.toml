@@ -19,8 +19,11 @@ test-support = []
 zip = { version = "9.2.2", default-features = false, features = [
   "deflate-flate2",
 ] }
-# The tracked-changes check's one pass over a .docx part (revisions/marks.rs).
+# The tracked-changes check's one pass over a .docx's relationships (revisions/marks/parts.rs).
 memchr = { workspace = true }
+# The tracked-changes check's read of each .docx part as XML, namespaces resolved
+# (revisions/marks.rs). Already in the lock, as a dev-dependency here.
+quick-xml = { workspace = true }
 clauseo-protocol = { path = "../protocol" }
 clauseo-reducer = { path = "../reducer" }
 clauseo-store = { path = "../store" }
@@ -127,9 +130,9 @@ url = { workspace = true }
 # The reopen bench's fixture.
 clauseo-store = { path = "../store", features = ["test-support"] }
 proptest = { workspace = true }
-# The Word round trip test's reads of a .docx: its zip entry and the document's XML.
+# The Word round trip test's reads of a .docx: its zip entry (the document's XML is read with
+# quick-xml, a normal dependency).
 flate2 = { workspace = true }
-quick-xml = { workspace = true }
 # The search test that checks an aborted host closed search.sqlite (no connection left open).
 rusqlite = { workspace = true }
 criterion = { workspace = true }

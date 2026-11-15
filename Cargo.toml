@@ -154,6 +154,7 @@ unicode-normalization = "0.1.26"
 caseless = "0.2.2"
 # The Word round trip test (crates/host/tests/host/word_round_trip.rs) reads a .docx's zip entry
 # (deflate, from flate2) and its word/document.xml (quick-xml). Both are already in the lock.
+# clauseo-host's tracked-changes check (revisions/marks.rs) reads each .docx part with quick-xml.
 flate2 = "1.1.10"
 # clauseo-blocklist: the block list's minisign check, and clauseo-sandbox: the admin copy's
 # refresh checks the staged setup exe's signature against the updater key (its tests sign with a
