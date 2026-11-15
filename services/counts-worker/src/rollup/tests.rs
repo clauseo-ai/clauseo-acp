@@ -146,37 +146,48 @@ fn the_views_use_the_fills_week_label_and_the_crate_agrees_on_its_edges() {
     let migration = include_str!("../../migrations/0002_rollup.sql");
     assert!(migration.contains(iso_week!("r.day")));
     assert!(FILL_INSTALL_WEEK.contains(iso_week!("r.day")));
-    // The days tests/views.test.mjs labels through v_active.
+    // The days tests/views.test.mjs labels through v_active, and two nearer year turns.
     for (date, week) in [
+        ("2995-12-31", "2995-W53"),
+        ("2996-01-03", "2995-W53"),
+        ("2996-01-04", "2996-W01"),
+        ("2994-12-31", "2995-W01"),
         ("2026-12-31", "2026-W53"),
-        ("2027-01-03", "2026-W53"),
-        ("2027-01-04", "2027-W01"),
         ("2024-12-30", "2025-W01"),
-        ("2026-11-15", "2026-W46"),
     ] {
         assert_eq!(day(date).week().to_string(), week, "{date}");
     }
 }
 
 #[test]
-fn a_run_sends_both_fills_with_their_ranges() {
+fn a_run_sends_every_fill_with_its_range() {
     let statements = fills(day("2026-11-09")).unwrap();
     assert_eq!(statements.len(), FILLS);
+    let text = |s: &str| Param::Text(s.to_owned());
     assert_eq!(
         statements[0],
         (
             FILL_INSTALL_WEEK,
-            vec![
-                Param::Text("2026-08-17".to_owned()),
-                Param::Text("2026-10-25".to_owned())
-            ]
+            vec![text("2026-08-17"), text("2026-10-25")]
         )
     );
     assert_eq!(statements[1].0, FILL_ROLLUP);
-    for (sql, _) in &statements {
-        assert!(
-            sql.contains("INSERT OR IGNORE") && !sql.contains("RETURNING"),
-            "{sql}"
-        );
+    // day_cell: from the first day kept, recomputing from the oldest day still open.
+    assert_eq!(
+        statements[2],
+        (FILL_DAY_CELL, vec![text("2026-08-11"), text("2026-10-25")])
+    );
+    assert_eq!(statements[3], (CLEAR_ACTIVE, Vec::new()));
+    assert_eq!(statements[4], (FILL_ACTIVE, Vec::new()));
+    for (sql, _) in &statements[..2] {
+        assert!(sql.contains("INSERT OR IGNORE"), "{sql}");
     }
+    for (sql, _) in &statements {
+        assert!(!sql.contains("RETURNING"), "{sql}");
+    }
+    // The upsert writes a group only when it changed, and active's day count is its rows.
+    assert!(
+        FILL_DAY_CELL.ends_with("WHERE count <> excluded.count OR installs <> excluded.installs")
+    );
+    assert!(FILL_ACTIVE.contains(iso_week!("day")));
 }

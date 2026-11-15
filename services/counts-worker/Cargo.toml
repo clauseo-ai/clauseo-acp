@@ -1,7 +1,7 @@
 [package]
 name = "clauseo-counts-worker"
 version = "0.1.0"
-description = "The Cloudflare Worker behind t.clauseo.chat: takes the anonymous day reports and weekly tallies, checks them with clauseo-counts' own schema, and keeps them in D1."
+description = "The Cloudflare Worker behind t.clauseo.chat: takes the anonymous day reports and weekly tallies, checks them with clauseo-counts' own schema, keeps them in D1, and serves Rohan's dashboard and a read-only query route behind Cloudflare Access."
 edition = "2024"
 rust-version = "1.99"
 license = "GPL-3.0-or-later"
@@ -25,6 +25,15 @@ flate2 = { version = "1.1.10", default-features = false, features = [
   "rust_backend",
 ] }
 futures-util = { version = "0.3", default-features = false }
+# /v1/query's guard: one SELECT or WITH, parsed in SQLite's dialect, walked with the visitor.
+# Without recursive-protection (stacker), which does not build for wasm32; the parser's own
+# depth limit stays.
+sqlparser = { version = "0.64", default-features = false, features = [
+  "std",
+  "visitor",
+] }
+# The Access JWT's three parts are base64url.
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 
 [profile.release]
 opt-level = "s"

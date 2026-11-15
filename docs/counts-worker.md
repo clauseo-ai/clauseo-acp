@@ -5,12 +5,14 @@
 `services/counts-worker/`, beside the client that sends to it, so anyone can read exactly what it
 accepts and stores. [Decision 0056](decisions/0056-counts-worker.md) records why it is built this
 way and what waits until after launch, and [decision 0062](decisions/0062-counts-crash-route.md)
-the crash route; [decision 0059](decisions/0059-counts-rollup-views.md)
-adds the summaries and views.
+the crash route; [decision 0059](decisions/0059-counts-rollup-views.md) adds the summaries and
+views, and [decision 0061](decisions/0061-counts-dash-query.md) the dashboard and the query route
+behind Cloudflare Access.
 
 ## What it accepts
 
-Three routes, nothing else:
+Three routes take counts and crash reports ([below](#reading-the-counts) for the two that read
+them), nothing else:
 
 | Request | Body |
 | --- | --- |
@@ -47,7 +49,7 @@ committed schema.
 
 ## What it stores
 
-Seven tables (`services/counts-worker/migrations/`), with no index beyond their keys:
+Ten tables (`services/counts-worker/migrations/`), with no index beyond their keys:
 
 - `report`: one row per install and day, keyed `(install, day)`. Columns: `install`, `day`,
   `version`, `channel`, `os`, `os_major`, `arch`, `language`, and `cells`.
@@ -67,6 +69,13 @@ Seven tables (`services/counts-worker/migrations/`), with no index beyond their 
   cell)`. Columns: those, `agent` (the cell's own agent, if it has one), `count` (the cells'
   counts summed) and `installs` (distinct installs, counted while the reports still existed).
   A `_report` row counts each month's reports and installs per version and OS.
+- `day_cell` (filled by the cron): per day, version, OS, event and cell of the last 90 days, the
+  summed `count` and the distinct `installs`, as `rollup` holds them per month. No id.
+- `active` (filled by the cron): distinct installs per day, ISO week and month of the reports
+  kept. No id.
+- `cron_status` (written by the cron): per step (`delete`, `fill_week`, `fill_month`,
+  `fill_day`, `fill_active`) and UTC day, how many runs finished the step (`ok`) and how many
+  did not (`failed`). No id, and no time finer than the day.
 
 Each column is a top-level field of the crate's `DayReport` or `TallyReport`, in its wire form.
 `cells` is the cells as the crate writes them back: compact JSON in a fixed order. The Worker
@@ -74,11 +83,13 @@ stores the value it validated, never the bytes it received. A body with extra sp
 another order is stored exactly like a tidy one.
 
 No table has a column for the time a row arrived. Nothing holds an IP address, a country, a
-user agent or any other header. The Worker's code reads only `Content-Encoding` and
-`Content-Length`. (workers-rs copies the request's headers into memory when it wraps the request;
-they are dropped with it.) A test fails if the code reaches any other header, the request's `cf`
-metadata or the raw JS request, or names a client-address header. `report`, `tally`,
-`install_week` and `rollup` are `WITHOUT ROWID` tables, so the order rows are stored in does not show the order they arrived in.
+user agent or any other header. The Worker's code reads only `Content-Encoding`,
+`Content-Length` and, on `/dash` and `/v1/query`, `Cf-Access-Jwt-Assertion`. (workers-rs
+copies the request's headers into memory when it wraps the request; they are dropped with it.)
+A test fails if the code reaches any other header, the request's `cf` metadata or the raw JS
+request, or names a client-address header. `report`, `tally`, `install_week`, `rollup` and
+`cron_status` are `WITHOUT ROWID` tables, so the order rows are stored in does not show the
+order they arrived in.
 
 ### Crash reports
 
@@ -113,30 +124,40 @@ is the guard.
 
 ## How long it keeps them
 
-A cron runs every day at 03:00 UTC. First it fills `install_week` and `rollup`
-([below](#the-summaries)). Then it deletes:
+A cron runs every day at 03:00 UTC. First it deletes:
 
 - `report` rows whose day is more than 90 days old. A row goes at most 91 days after the day it
   counts;
 - `tally` and `install_week` rows whose week is more than 396 days old. A row goes at most 403
   days after its week's Monday, which is 397 days after the week ends (about 13 months);
 - `crash` rows whose week is more than 365 days old;
-- `rate` rows of days before today.
+- `rate` rows of days before today, and `day_cell` and `cron_status` rows more than 90 days old.
+
+Then it fills `install_week`, `rollup`, `day_cell` and `active` ([below](#the-summaries)),
+and last it adds the run's outcome per step to `cron_status`.
+
+The deletes come first so that the fills' scans of `report` can never use up D1's daily reads
+before them; a quota spent by the fills would otherwise stop the deletes too, every day. The
+order loses nothing: a report the deletes take is more than 90 days old, so every week or month
+it belongs to started before the first day a fill still reads, and its last chance to be filled
+was the day before.
 
 `rollup` is kept indefinitely. An R2 lifecycle rule deletes each crash report's object 90 days
 after its upload. It holds no install id, and each of its rows counts at least the
 installs it says.
 
 The deletes go by the first hex digit of the key, `0` to `f`: 16 ranges for `report`, 16 for
-`tally`, and one each for `install_week`, `crash` and `rate`. With the two fills that is 37
-statements a run (Workers Free allows 50 D1 queries a run). No statement returns rows, so a run
-costs the Worker the same CPU at any backlog, and one run clears it all. A statement that fails
-does not stop the ones after it, so a failing fill never holds back a delete.
+`tally`, and one each for `install_week`, `crash`, `rate`, `day_cell` and `cron_status`.
+With the five fill statements and the health row that is 43 statements a run (Workers Free
+allows 50 D1 queries a run). No statement returns rows, so a run costs the Worker the same CPU
+at any backlog, and one run clears it all. A statement that fails does not stop the ones after
+it, so a failing fill never holds back a delete. `/dash` shows the failures (below).
 
 ### The summaries
 
-Both fills are SQL (`INSERT OR IGNORE … SELECT` with `json_each` over the cells,
-`services/counts-worker/src/rollup.rs`); the Worker only works out two date ranges.
+Every fill is SQL (`INSERT … SELECT` with `json_each` over the cells,
+`services/counts-worker/src/rollup.rs`); the Worker only works out the date ranges.
+`install_week` and `rollup` follow these rules:
 
 - A day report may arrive up to 14 days after its day, so a week or month is **final** once its
   last day is at least 15 days old.
@@ -146,6 +167,17 @@ Both fills are SQL (`INSERT OR IGNORE … SELECT` with `json_each` over the cell
 - Once filled, a period stays as it is: a later run inserts nothing. A period never filled
   while whole is never filled from part of its rows.
 
+`day_cell` and `active` exist so that `v_daily` and `v_active` need not scan `report` on every
+query: D1 bills every row a query touches, the rows `json_each` makes from the cells and the
+sort rows included, and over `report` those two views read about 325,000 and 190,000 rows a
+query at 300 installs.
+
+- `day_cell` is recomputed for the last 15 days (a report may still arrive for them) and for
+  any day it has no row for. A group is written only when its numbers changed, so a quiet day
+  writes nothing.
+- `active` is emptied and recomputed from every report kept, about a hundred rows.
+- Both show what the last run saw: yesterday's reports appear after 03:00 UTC.
+
 D1's Time Travel can also restore the database to any point in the last 7 days on Workers Free
 (30 days on Workers Paid), and it cannot be turned off. So a deleted row can be recovered for
 that long, and a restore to an earlier point can show roughly when rows arrived. There are no
@@ -153,17 +185,18 @@ other backups or exports.
 
 ## The views
 
-The dashboard and `/v1/query` read only these views, never the tables
-(`migrations/0002_rollup.sql` and `0004_crash.sql`). Every view hides a group of fewer than 5:
-distinct installs, or tallies for `v_tally`, reports for `v_crash`. No view has an `install`,
-`tally` or `report` column. An `event` that starts with `_` is a total the view adds, not one
-of the app's events.
+The dashboard's charts and `/v1/query` read only these views, never the tables
+(`migrations/0002_rollup.sql`; `0003_summaries.sql`, which moves `v_daily` and `v_active` onto
+the cron's summaries with the same columns; and `0004_crash.sql`). Every view hides a group of
+fewer than 5: distinct installs, or tallies for `v_tally`, reports for `v_crash`. No view has an
+`install`, `tally` or `report` column. An `event` that starts with `_` is a total the view
+adds, not one of the app's events.
 
 | View | From | One row per | Columns |
 | --- | --- | --- | --- |
-| `v_daily` | `report` (90 days) | day, version, OS, event and cell | `day`, `version`, `os`, `agent`, `event`, `cell`, `count`, `installs`; `_report` counts reports |
+| `v_daily` | `day_cell` (90 days) | day, version, OS, event and cell | `day`, `version`, `os`, `agent`, `event`, `cell`, `count`, `installs`; `_report` counts reports |
 | `v_monthly` | `rollup` (kept) | month, version, OS, event and cell | as `v_daily`, with `month` |
-| `v_active` | `report` (90 days) | day, ISO week or month | `period`, `start`, `installs` |
+| `v_active` | `active` (90 days) | day, ISO week or month | `period`, `start`, `installs` |
 | `v_cohort_week` | `install_week` (13 months) | first week and week | `first_week`, `week`, `installs`, and `days_active`, `questions`, `hit_limit`, `features` summed |
 | `v_paths` | `install_week` (13 months) | combination of buckets | `weeks_active` (1, 2, 4, 8, 16), `questions` in all (0, 1, 10, 100, 1000), `hit_limit` ever, `features` in the busiest week (0, 1, 2, 4), `installs` |
 | `v_tally` | `tally` (13 months) | week, version, OS, event and cell | `week`, `version`, `os`, `event`, `cell`, `count`, `tallies`; `_tally` counts tallies, `_crashed` those with a crash, `_fleet` splits them by install type and managed |
@@ -176,6 +209,74 @@ another can still give the size of hidden groups, as decision 0059 says. In `v_c
 direct: a group's `_all` row minus its visible signature rows is the total of its hidden
 signatures. That is accepted: only the owner and his agents read the views, and no row names a
 report.
+
+## Reading the counts
+
+Two more routes read the views, never the tables, each behind its own Cloudflare Access
+application:
+
+| Request | Who | Answer |
+| --- | --- | --- |
+| `GET /dash` | Rohan, signed in through Access with his email | one HTML page, six charts |
+| `POST /v1/query` | an agent with the service token `clauseo-counts-agent` | the rows of one query, JSON |
+
+**Fail closed.** Each route answers `404` to everything unless the Worker knows the Access team
+(`ACCESS_TEAM`) and the route's application AUD tag (`DASH_AUD`, `QUERY_AUD`). These reach the
+Worker at deploy as `wrangler deploy --var` values ([Access](#access)), never through
+`wrangler.toml`.
+
+**The Access check.** Access refuses anyone without a login or token before the Worker runs. The
+Worker checks Access's JWT again, so a misconfigured application cannot open a route: the
+`Cf-Access-Jwt-Assertion` token must be RS256 (`none` and `HS*` are refused), be unexpired,
+come from `https://<team>.cloudflareaccess.com`, carry that route's own AUD, and be signed by a
+key from `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, checked with WebCrypto. The
+Worker keeps the keys for an hour, and fetches them again sooner only for a token naming a key
+it does not have, at most once a minute. Anything else is `403` with an empty body. The tests
+serve their own key through `ACCESS_CERTS_URL_DEV`, which only `wrangler dev` sets. The Worker
+takes it only as a loopback `http://` address, and `check-deploy.mjs` refuses a config that
+names it.
+
+**`/dash`** is server-rendered HTML with inline SVG: no script and nothing loaded from anywhere,
+under `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'`, with
+`Cache-Control: no-store`. Its six charts: daily, weekly and monthly active installs
+(`v_active`); the last 12 weekly cohorts (`v_cohort_week`); questions per active day per agent,
+answer time and the onboarding funnel (`v_daily`); crash-free weeks per version (`v_tally`).
+Below them, the cron's health: every final week or month that still has reports but no
+`install_week` or `rollup` rows (a fill that has not happened, and will be lost when those
+reports pass 90 days), how many of the last 30 days have a recorded run, and every step that
+failed. It runs the six statements in `services/counts-worker/src/dash.sql` as one batch: the
+charts' four read one view each (`v_cohort_week` and `v_tally` only for the last 14 weeks), and
+the health's two read `report`'s days, `install_week`'s weeks, `rollup`'s keys and
+`cron_status`. At 300 installs, each reporting every day, one load reads about 154,000 D1 rows
+(`tests/access.test.mjs` measures it through the D1 binding against a target of 200,000).
+
+**`/v1/query`** takes `{ "sql": "<one query>" }` as plain JSON, at most 16 KB, and answers a
+JSON array of rows. The query is parsed with `sqlparser` in SQLite's dialect and refused with
+`400` unless it is one `SELECT` or `WITH` whose every table is a `v_*` view or a CTE in an
+enclosing scope. A CTE may not take a base table's name or a `sqlite_` one, a name may not be
+qualified (`main.report`, and `main.v_daily` too, so no `temp.` name can shadow a view), names
+compare without case as SQLite's do, `FROM` takes no table-valued function, and functions come
+from a short list: `count`, `sum`, `total`, `avg`, `min`, `max`, `group_concat`, `date`, `strftime`,
+`coalesce`, `round`, `json_extract`. The Worker runs it as
+`SELECT * FROM (<query>) LIMIT 1000`, written from the parsed statement, and answers `504` after
+10 seconds. A query D1 cannot run is `400` too.
+
+### Querying
+
+For an agent on Rohan's Mac. The service token's two halves live in the Keychain under the
+service `clauseo-counts-query`, as `client-id` and `client-secret`. Read them inside the command,
+at call time, so they never reach a file, a variable you print, or a log:
+
+```sh
+curl -sS https://t.clauseo.chat/v1/query \
+  -H "CF-Access-Client-Id: $(security find-generic-password -s clauseo-counts-query -a client-id -w)" \
+  -H "CF-Access-Client-Secret: $(security find-generic-password -s clauseo-counts-query -a client-secret -w)" \
+  -H "Content-Type: application/json" \
+  --data '{"sql": "SELECT period, start, installs FROM v_active ORDER BY 1, 2"}'
+```
+
+Never echo, log or store either half, and never put them in a script or a commit. Access turns the
+pair into the JWT the Worker checks. To cut an agent off, revoke the token in Zero Trust.
 
 ## No logs
 
@@ -245,15 +346,41 @@ Two workflows, so no workflow that holds the Cloudflare token runs for a pull re
   3. `wrangler.deploy.toml`, a copy of `wrangler.toml` with the database's real id, without
      the R2 binding unless the bucket is there, and without `[build]`, so wrangler uploads what step 1 built and builds nothing with the token present.
      `check-deploy.mjs --deployed` checks it;
-  4. `wrangler d1 migrations apply --remote`, then `wrangler deploy`. The deploy attaches
-     `t.clauseo.chat` as a custom domain; Cloudflare makes its DNS record and certificate.
+  4. `wrangler d1 migrations apply --remote`, then the Access step ([below](#access)), then
+     `wrangler deploy` with the Access values as `--var`. The deploy attaches `t.clauseo.chat`
+     as a custom domain; Cloudflare makes its DNS record and certificate.
 
 Only the steps from 2 on get the secret `CLOUDFLARE_API_TOKEN`, and the optional secret
 `CLOUDFLARE_ACCOUNT_ID`. Without the account ID, wrangler uses the one account the token can see,
 and fails if it can see more than one. Run logs on this public repo are public. So every wrangler
 call goes through `services/counts-worker/scripts/deploy.mjs`, which prints wrangler's output only
-with UUIDs, 32-hex ids, emails and account names masked. It also masks the database id for the
-rest of the job.
+with UUIDs, 32- and 64-hex ids, emails and account names masked. It also masks the database id,
+the Access team and the AUD tags for the rest of the job.
+
+### Access
+
+The deploy step (`node scripts/deploy.mjs deploy`, the Access part in
+`services/counts-worker/scripts/access.mjs`) sets up Cloudflare Access through the API before it
+deploys:
+
+1. It finds, by name, or creates two self-hosted Access applications:
+   - `clauseo-counts-dash` on `t.clauseo.chat/dash`, with one Allow policy for the email in the
+     secret `ACCESS_DASH_EMAIL`;
+   - `clauseo-counts-query` on `t.clauseo.chat/v1/query`, with one Service Auth policy for the
+     service token named `clauseo-counts-agent`. Until that token exists, the application has no
+     policy of ours, so it lets no one in.
+
+   It keeps that one policy up to date (a new email updates it) and leaves any other policy on
+   the application as it is, saying how many there are. An application of that name on another
+   path, or two of one name, fails the job.
+2. It reads both applications' AUD tags and passes them, with the repository variable
+   `ACCESS_TEAM`, as `wrangler deploy --var ACCESS_TEAM:… --var DASH_AUD:… --var QUERY_AUD:…`.
+3. It prints none of them. They are masked like the database id, and errors name the API path
+   without its ids.
+
+If `ACCESS_TEAM` is unset, or the API answers `401` or `403` because the token lacks the Access
+permissions, the step prints one line saying it skipped Access and the deploy goes on. `/dash`
+and `/v1/query` then stay `404`.
 
 ### The live check
 
@@ -297,6 +424,17 @@ Before the first deploy, Rohan creates the token and saves it; no secret is ever
    (Cloudflare asks for a card even on the free tier), and add Account / Workers R2 Storage /
    Edit to the `counts-deploy` token. The next deploy creates the bucket in the EU with its
    90-day rule and binds it.
+5. For `/dash` and `/v1/query` (until then both answer `404`):
+   - In Zero Trust, choose the team name. Set it as the repository variable `ACCESS_TEAM` (not a
+     secret), and his login email as the `counts-deploy` environment secret `ACCESS_DASH_EMAIL`.
+   - Add two permissions to the `counts-deploy` token: Account / Access: Apps and Policies /
+     Edit, and Account / Access: Service Tokens / Read.
+   - In Zero Trust, Access, Service credentials, Service Tokens: create `clauseo-counts-agent`
+     with a 1-year duration. Copy the Client ID and Client Secret once, into the Mac's Keychain:
+     `security add-generic-password -s clauseo-counts-query -a client-id -w` and the same with
+     `-a client-secret` (each prompts for the value). Set a reminder for the expiry.
+   - Turn on strict service-token authentication if it is not on. The next deploy creates the
+     two applications and their policies.
 
 See [Cloudflare's guide to creating an API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/).
 

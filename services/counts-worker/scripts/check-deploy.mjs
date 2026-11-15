@@ -9,7 +9,8 @@
 // The committed file must hold the placeholder database_id and the [build] command; a
 // --deployed copy must hold a real id and no [build], so wrangler deploys what the tokenless
 // build step made and runs no build with the token present. Every other rule is the same: only
-// the keys below, each with exactly the value below.
+// the keys below, each with exactly the value below, and no mention of the dev-only certificate
+// URL override (DEV_CERTS_VAR), which only `wrangler dev` in the tests may set.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -18,6 +19,8 @@ import { isDeepStrictEqual } from "node:util";
 import { parse } from "smol-toml";
 
 export const PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000000";
+/** The variable that points the Access check at test keys; never in a deploy. */
+export const DEV_CERTS_VAR = "ACCESS_CERTS_URL_DEV";
 const D1_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Every top-level key the file may have, with the value it must have. */
@@ -59,6 +62,9 @@ export function problems(text, { deployed = false } = {}) {
     return [`not TOML: ${error.message.split("\n")[0]}`];
   }
   const found = [];
+  if (text.toUpperCase().includes(DEV_CERTS_VAR)) {
+    found.push(`${DEV_CERTS_VAR}: the dev certificate-URL override is not allowed here`);
+  }
   for (const key of Object.keys(config)) {
     if (!(key in expected) && key !== "d1_databases" && key !== "r2_buckets") {
       found.push(`${key}: not allowed (only ${[...Object.keys(expected), "d1_databases", "r2_buckets"].join(", ")})`);

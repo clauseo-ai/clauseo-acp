@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { problems, PLACEHOLDER_ID } from "./check-deploy.mjs";
+import { DEV_CERTS_VAR, problems, PLACEHOLDER_ID } from "./check-deploy.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const committed = readFileSync(join(here, "..", "wrangler.toml"), "utf8");
@@ -101,5 +101,19 @@ test("the R2 binding: required in the committed file, optional in the deploy cop
   ]) {
     assert.notDeepEqual(problems(edited(from, to)), [], `${from} -> ${to}`);
     assert.notDeepEqual(problems(edited(from, to, deployCopy), { deployed: true }), [], `deploy copy: ${from} -> ${to}`);
+  }
+});
+
+test("the dev certificate-URL override is refused in the committed file and the deploy copy", () => {
+  const deployCopy = edited(BUILD, "", edited(PLACEHOLDER_ID, REAL_ID));
+  for (const [from, to] of [
+    ["[observability]\n", `[vars]\n${DEV_CERTS_VAR} = "http://127.0.0.1:9/certs"\n\n[observability]\n`],
+    ["[observability]", `# ${DEV_CERTS_VAR.toLowerCase()}\n[observability]`],
+    ["workers_dev = false", `workers_dev = false\nvars = { ${DEV_CERTS_VAR} = "x" }`],
+  ]) {
+    const committedFound = problems(edited(from, to));
+    assert.ok(committedFound.some((line) => line.startsWith(DEV_CERTS_VAR)), `${to}`);
+    const deployedFound = problems(edited(from, to, deployCopy), { deployed: true });
+    assert.ok(deployedFound.some((line) => line.startsWith(DEV_CERTS_VAR)), `deploy copy: ${to}`);
   }
 });

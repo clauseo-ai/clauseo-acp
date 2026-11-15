@@ -1,7 +1,8 @@
-//! The daily cron's fills (decision 0059), which run before its deletes: `install_week`, one row
-//! per install per final ISO week, and `rollup`, the monthly totals per version, OS, event and
-//! cell with their distinct installs. Both are `INSERT OR IGNORE … SELECT` over `report`, with
-//! `json_each` over the cells, so D1 does the adding up and the Worker decodes no row.
+//! The daily cron's fills (decisions 0059 and 0061), which run after its deletes:
+//! `install_week`, one row per install per final ISO week; `rollup`, the monthly totals per
+//! version, OS, event and cell with their distinct installs; and the two summaries the views read,
+//! `day_cell` and `active`. All are `INSERT … SELECT` over `report`, with `json_each` over the
+//! cells, so D1 does the adding up and the Worker decodes no row.
 //!
 //! A day report is accepted up to 14 days after its day (the crate's `MAX_DAY_AGE`), so a week
 //! or month is final once its last day is at least 15 days before today: no request can add a
@@ -11,7 +12,7 @@
 //! Monday, a month for at least 45 days), so missed runs do not lose it; once filled, a later
 //! run inserts nothing new, because the key of every row it could make is already there and
 //! the period's rows can only have shrunk. A period that is never filled while whole is never
-//! filled from part of its rows.
+//! filled from part of its rows. (`day_cell` and `active` follow other rules, at each const.)
 
 use clauseo_counts::schema::{Day, MAX_DAY_AGE};
 
@@ -36,6 +37,10 @@ macro_rules! iso_week {
         )
     };
 }
+
+/// For `dash.sql`'s test, which checks that its health query labels weeks the same way.
+#[cfg(test)]
+pub(crate) use iso_week;
 
 /// Fills `install_week` from the reports of `?1` to `?2` (whole final weeks). Per install and
 /// week: the days reported, the questions sent, whether a limit was reached, and how many
@@ -77,8 +82,43 @@ pub(crate) const FILL_ROLLUP: &str = "WITH cells AS (\
      SELECT month, version, os, json_extract(cell, '$.agent'), event, cell, SUM(n), \
      COUNT(DISTINCT install) FROM cells GROUP BY month, version, os, event, cell";
 
+/// Fills `day_cell` (migration 0003), `v_daily`'s groups, from the reports of `?1` (the first
+/// day kept) on: every day from `?2` (15 days back, the oldest a report can still arrive for, or
+/// just did) and every day with no row yet. A group already there is updated only if its count
+/// changed, so a quiet day writes nothing. Groups only grow while a day is open (reports are
+/// added, never removed), so nothing needs deleting here.
+pub(crate) const FILL_DAY_CELL: &str = "WITH cells AS (\
+     SELECT r.day AS day, r.version AS version, r.os AS os, r.install AS install, \
+     e.key AS event, json_remove(c.value, '$.n') AS cell, json_extract(c.value, '$.n') AS n \
+     FROM report AS r \
+     CROSS JOIN json_each(json_set(r.cells, '$._report', json('[{\"n\":1}]'))) AS e \
+     CROSS JOIN json_each(e.value) AS c \
+     WHERE r.day >= ?1 AND (r.day >= ?2 OR r.day NOT IN (SELECT day FROM day_cell))) \
+     INSERT INTO day_cell (day, version, os, agent, event, cell, count, installs) \
+     SELECT day, version, os, json_extract(cell, '$.agent'), event, cell, SUM(n), \
+     COUNT(DISTINCT install) FROM cells WHERE true GROUP BY day, version, os, event, cell \
+     ON CONFLICT (day, version, os, event, cell) DO UPDATE \
+     SET count = excluded.count, installs = excluded.installs \
+     WHERE count <> excluded.count OR installs <> excluded.installs";
+
+/// Empties `active` before [`FILL_ACTIVE`] recomputes it: about a hundred rows.
+pub(crate) const CLEAR_ACTIVE: &str = "DELETE FROM active";
+
+/// Fills `active` (migration 0003), `v_active`'s rows, from every report kept: distinct installs
+/// per day, ISO week and month. A day's reports are one per install (the key is `(install,
+/// day)`), so a day counts its rows.
+pub(crate) const FILL_ACTIVE: &str = concat!(
+    "INSERT INTO active (period, start, installs) ",
+    "SELECT 'day', day, COUNT(*) FROM report GROUP BY day ",
+    "UNION ALL SELECT 'week', ",
+    iso_week!("day"),
+    " AS week, COUNT(DISTINCT install) FROM report GROUP BY week ",
+    "UNION ALL SELECT 'month', substr(day, 1, 7) AS month, COUNT(DISTINCT install) ",
+    "FROM report GROUP BY month"
+);
+
 /// How many statements [`fills`] sends.
-pub(crate) const FILLS: usize = 2;
+pub(crate) const FILLS: usize = 5;
 
 /// The last day no request can add a report for: 15 days before today.
 fn last_final(today: Day) -> Option<Day> {
@@ -147,8 +187,9 @@ pub(crate) fn month_span(today: Day) -> Option<(Day, Day)> {
     Some((first, last))
 }
 
-/// The fills of a run at `today`, in order, or `None` when the clock is outside the years a
-/// `Day` holds. An empty range still sends its statement, which then inserts nothing.
+/// The fills of a run at `today`, in order (`install_week`, `rollup`, `day_cell`, then `active`
+/// emptied and refilled), or `None` when the clock is outside the years a `Day` holds. An empty
+/// range still sends its statement, which then inserts nothing.
 pub(crate) fn fills(today: Day) -> Option<Vec<(&'static str, Vec<Param>)>> {
     let range = |(first, last): (Day, Day)| {
         vec![
@@ -159,6 +200,12 @@ pub(crate) fn fills(today: Day) -> Option<Vec<(&'static str, Vec<Param>)>> {
     Some(vec![
         (FILL_INSTALL_WEEK, range(week_span(today)?)),
         (FILL_ROLLUP, range(month_span(today)?)),
+        (
+            FILL_DAY_CELL,
+            range((first_kept(today)?, last_final(today)?)),
+        ),
+        (CLEAR_ACTIVE, Vec::new()),
+        (FILL_ACTIVE, Vec::new()),
     ])
 }
 

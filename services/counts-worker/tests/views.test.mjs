@@ -1,11 +1,11 @@
-// pnpm test (tests/views.test.mjs): the v_* views of migrations/0002_rollup.sql, against rows
-// written straight into a fresh local D1 (dated in the past, as the views do not look at the
-// clock). In every view a group of 4 is hidden and a group of 5 shown, and no view has an
-// install or tally id column.
+// pnpm test (tests/views.test.mjs): the v_* views of migrations 0002 and 0003, against rows
+// written straight into a fresh local D1. v_daily and v_active read the cron's summaries, so
+// their test runs the cron first. In every view a group of 4 is hidden and a group of 5 shown,
+// and no view has an install or tally id column.
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { startWorker, uuid } from "./harness.mjs";
+import { day, startWorker, uuid } from "./harness.mjs";
 
 let worker;
 before(async () => {
@@ -48,31 +48,33 @@ test("every view's columns: no install, tally or report id", () => {
   }
 });
 
-test("v_daily and v_active: 4 installs hidden, 5 shown", () => {
+test("v_daily and v_active: 4 installs hidden, 5 shown, from the cron's summaries", async () => {
   const five = ids(5);
   const four = ids(4);
   const a = ids(5);
   const b = ids(5);
   const c = ids(5);
+  // Days still open (under 15 days old), so the cron fills no week or month from them and the
+  // later tests' views see only their own rows. Far-future days are never deleted or filled
+  // into install_week, and give ISO weeks across a turn of the year.
   const rows = [
-    // 2020-03-02: five send a question, four of them a feature too. 2020-03-03: four send.
-    ...five.map((install, i) => report(install, "2020-03-02", i < 4 ? BOTH : QUESTION)),
-    ...five.slice(0, 4).map((install) => report(install, "2020-03-03", QUESTION)),
-    // A week and month of four alone.
-    ...four.map((install) => report(install, "2020-06-10", QUESTION)),
-    // ISO weeks across the turn of the year.
-    ...a.map((install) => report(install, "2026-12-31", QUESTION)),
-    ...a.map((install) => report(install, "2027-01-03", QUESTION)),
-    ...b.map((install) => report(install, "2027-01-04", QUESTION)),
-    ...c.map((install) => report(install, "2024-12-30", QUESTION)),
+    ...five.map((install, i) => report(install, day(3), i < 4 ? BOTH : QUESTION)),
+    ...five.slice(0, 4).map((install) => report(install, day(4), QUESTION)),
+    ...four.map((install) => report(install, day(5), QUESTION)),
+    ...a.map((install) => report(install, "2995-12-31", QUESTION)),
+    ...a.map((install) => report(install, "2996-01-03", QUESTION)),
+    ...b.map((install) => report(install, "2996-01-04", QUESTION)),
+    ...c.map((install) => report(install, "2994-12-31", QUESTION)),
   ];
   worker.sql(`INSERT INTO report VALUES ${values(rows)}`);
+  assert.deepEqual(worker.sql("SELECT * FROM v_daily"), [], "nothing before the cron fills day_cell");
+  assert.equal((await worker.send("/__scheduled?cron=0+3+*+*+*")).status, 200);
 
-  const daily = worker.sql("SELECT * FROM v_daily WHERE day IN ('2020-03-02', '2020-03-03', '2020-06-10') ORDER BY event");
+  const daily = worker.sql(`SELECT * FROM v_daily WHERE day IN ('${day(3)}', '${day(4)}', '${day(5)}') ORDER BY event`);
   assert.deepEqual(daily, [
-    { day: "2020-03-02", version: "9.0.1", os: "macos", agent: null, event: "_report", cell: "{}", count: 5, installs: 5 },
+    { day: day(3), version: "9.0.1", os: "macos", agent: null, event: "_report", cell: "{}", count: 5, installs: 5 },
     {
-      day: "2020-03-02",
+      day: day(3),
       version: "9.0.1",
       os: "macos",
       agent: "claude",
@@ -82,22 +84,23 @@ test("v_daily and v_active: 4 installs hidden, 5 shown", () => {
       installs: 5,
     },
   ]);
+  // The four installs' feature cell is in day_cell, hidden by the view.
+  assert.equal(worker.sql(`SELECT installs FROM day_cell WHERE day = '${day(3)}' AND event = 'feature_used'`)[0].installs, 4);
 
-  const active = worker.sql("SELECT * FROM v_active ORDER BY period, start");
-  assert.deepEqual(active, [
-    { period: "day", start: "2020-03-02", installs: 5 },
-    { period: "day", start: "2024-12-30", installs: 5 },
-    { period: "day", start: "2026-12-31", installs: 5 },
-    { period: "day", start: "2027-01-03", installs: 5 },
-    { period: "day", start: "2027-01-04", installs: 5 },
-    { period: "month", start: "2020-03", installs: 5 },
-    { period: "month", start: "2024-12", installs: 5 },
-    { period: "month", start: "2026-12", installs: 5 },
-    { period: "month", start: "2027-01", installs: 10 },
-    { period: "week", start: "2020-W10", installs: 5 },
-    { period: "week", start: "2025-W01", installs: 5 },
-    { period: "week", start: "2026-W53", installs: 5 },
-    { period: "week", start: "2027-W01", installs: 5 },
+  const days = worker.sql(`SELECT * FROM v_active WHERE period = 'day' AND start IN ('${day(3)}', '${day(4)}', '${day(5)}')`);
+  assert.deepEqual(days, [{ period: "day", start: day(3), installs: 5 }]);
+  const future = worker.sql("SELECT * FROM v_active WHERE start >= '2994' ORDER BY period, start");
+  assert.deepEqual(future, [
+    { period: "day", start: "2994-12-31", installs: 5 },
+    { period: "day", start: "2995-12-31", installs: 5 },
+    { period: "day", start: "2996-01-03", installs: 5 },
+    { period: "day", start: "2996-01-04", installs: 5 },
+    { period: "month", start: "2994-12", installs: 5 },
+    { period: "month", start: "2995-12", installs: 5 },
+    { period: "month", start: "2996-01", installs: 10 },
+    { period: "week", start: "2995-W01", installs: 5 },
+    { period: "week", start: "2995-W53", installs: 5 },
+    { period: "week", start: "2996-W01", installs: 5 },
   ]);
 });
 

@@ -1,6 +1,7 @@
-//! The three routes, what each may carry, and the statuses the Worker answers with. Every cap here
-//! is the crate's own constant ([`clauseo_counts::schema`]) except the daily caps, which are
-//! the Worker's and live only here.
+//! The routes, what each may carry, and the statuses the Worker answers with. Every cap of the
+//! three storing routes is the crate's own constant ([`clauseo_counts::schema`]) except the daily
+//! caps, which are the Worker's and live only here. `/dash` and `/v1/query` sit behind
+//! Cloudflare Access (`access.rs`).
 
 use clauseo_counts::schema::{
     Invalid, MAX_COUNTS_GZIP, MAX_COUNTS_JSON, MAX_CRASH_GZIP, MAX_CRASH_JSON, MAX_TALLY_GZIP,
@@ -14,6 +15,9 @@ pub(crate) const DAILY_CAP_COUNTS: i64 = 3_000;
 /// The most `/v1/tally` requests the Worker stores in one UTC day, across every sender.
 pub(crate) const DAILY_CAP_TALLY: i64 = 1_000;
 
+/// The largest `/v1/query` body: `{ "sql": … }`, plain JSON.
+pub(crate) const MAX_QUERY_BODY: usize = 16_000;
+
 /// A path the Worker answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Route {
@@ -23,6 +27,10 @@ pub(crate) enum Route {
     Tally,
     /// `POST /v1/crash`: one crash report (`crash.rs`).
     Crash,
+    /// `GET /dash`: Rohan's dashboard, behind Access.
+    Dash,
+    /// `POST /v1/query`: one read-only query over the views, behind Access.
+    Query,
 }
 
 /// Why a request was not stored. Each is answered with a status and an empty body.
@@ -38,6 +46,10 @@ pub(crate) enum Refusal {
     Busy,
     /// `/v1/crash` before its R2 bucket is bound.
     Unavailable,
+    /// `/dash` or `/v1/query` without a valid Access token.
+    Forbidden,
+    /// A query that ran past its 10 seconds.
+    Timeout,
     /// D1 or the clock failed; the sender keeps the report and tries again later.
     Failed,
 }
@@ -50,8 +62,10 @@ impl Refusal {
             Refusal::Method => 405,
             Refusal::Bad => 400,
             Refusal::Busy => 429,
+            Refusal::Forbidden => 403,
             Refusal::Failed => 500,
             Refusal::Unavailable => 503,
+            Refusal::Timeout => 504,
         }
     }
 }
@@ -99,29 +113,49 @@ impl From<std::num::TryFromIntError> for Refusal {
 }
 
 impl Route {
-    /// The route at `path`, if `post`; [`Refusal::Method`] for another method on one of the two
-    /// paths, and [`Refusal::NotFound`] for any other path. The path matches exactly: no
-    /// trailing slash, no other case.
-    pub(crate) fn find(post: bool, path: &str) -> Result<Route, Refusal> {
-        let route = match path {
-            "/v1/counts" => Route::Counts,
-            "/v1/tally" => Route::Tally,
-            "/v1/crash" => Route::Crash,
-            _ => return Err(Refusal::NotFound),
-        };
-        if post {
-            Ok(route)
+    /// The route at `path`, which matches exactly: no trailing slash, no other case.
+    pub(crate) fn at(path: &str) -> Option<Route> {
+        match path {
+            "/v1/counts" => Some(Route::Counts),
+            "/v1/tally" => Some(Route::Tally),
+            "/v1/crash" => Some(Route::Crash),
+            "/dash" => Some(Route::Dash),
+            "/v1/query" => Some(Route::Query),
+            _ => None,
+        }
+    }
+
+    /// Whether the route reads (behind Access) rather than stores.
+    pub(crate) const fn reads(self) -> bool {
+        matches!(self, Route::Dash | Route::Query)
+    }
+
+    /// [`Refusal::Method`] unless `method` is the route's one method.
+    pub(crate) fn allows(self, method: &str) -> Result<(), Refusal> {
+        if method == self.method() {
+            Ok(())
         } else {
             Err(Refusal::Method)
         }
     }
 
-    /// The largest gzip body the route takes.
+    /// The one method the route takes, for `Allow` too.
+    pub(crate) const fn method(self) -> &'static str {
+        match self {
+            Route::Dash => "GET",
+            Route::Counts | Route::Tally | Route::Crash | Route::Query => "POST",
+        }
+    }
+
+    /// The largest body the route takes as sent: gzip for the storing routes, plain JSON for
+    /// `/v1/query`, nothing for `/dash`.
     pub(crate) const fn gzip_cap(self) -> usize {
         match self {
             Route::Counts => MAX_COUNTS_GZIP,
             Route::Tally => MAX_TALLY_GZIP,
             Route::Crash => MAX_CRASH_GZIP,
+            Route::Query => MAX_QUERY_BODY,
+            Route::Dash => 0,
         }
     }
 
@@ -131,15 +165,18 @@ impl Route {
             Route::Counts => MAX_COUNTS_JSON,
             Route::Tally => MAX_TALLY_JSON,
             Route::Crash => MAX_CRASH_JSON,
+            Route::Query => MAX_QUERY_BODY,
+            Route::Dash => 0,
         }
     }
 
-    /// The most requests stored in one UTC day; `/v1/crash` has its hourly cap instead.
+    /// The most requests stored in one UTC day; `/v1/crash` has its hourly cap instead, and the
+    /// read routes store nothing.
     pub(crate) const fn daily_cap(self) -> i64 {
         match self {
             Route::Counts => DAILY_CAP_COUNTS,
             Route::Tally => DAILY_CAP_TALLY,
-            Route::Crash => 0,
+            Route::Crash | Route::Dash | Route::Query => 0,
         }
     }
 
@@ -149,6 +186,8 @@ impl Route {
             Route::Counts => "counts",
             Route::Tally => "tally",
             Route::Crash => "crash",
+            Route::Dash => "dash",
+            Route::Query => "query",
         }
     }
 }
@@ -158,24 +197,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_post_on_the_three_paths_is_a_route() {
-        assert_eq!(Route::find(true, "/v1/counts"), Ok(Route::Counts));
-        assert_eq!(Route::find(true, "/v1/tally"), Ok(Route::Tally));
-        assert_eq!(Route::find(true, "/v1/crash"), Ok(Route::Crash));
-        assert_eq!(Route::find(false, "/v1/counts"), Err(Refusal::Method));
-        assert_eq!(Route::find(false, "/v1/tally"), Err(Refusal::Method));
-        assert_eq!(Route::find(false, "/v1/crash"), Err(Refusal::Method));
+    fn each_path_takes_its_one_method() {
+        let find = |method: &str, path: &str| {
+            let route = Route::at(path).ok_or(Refusal::NotFound)?;
+            route.allows(method).map(|()| route)
+        };
+        assert_eq!(find("POST", "/v1/counts"), Ok(Route::Counts));
+        assert_eq!(find("POST", "/v1/tally"), Ok(Route::Tally));
+        assert_eq!(find("POST", "/v1/crash"), Ok(Route::Crash));
+        assert_eq!(find("POST", "/v1/query"), Ok(Route::Query));
+        assert_eq!(find("GET", "/dash"), Ok(Route::Dash));
+        assert!(Route::Dash.reads() && Route::Query.reads());
+        assert!(!Route::Counts.reads() && !Route::Tally.reads() && !Route::Crash.reads());
+        for (method, path) in [
+            ("GET", "/v1/counts"),
+            ("GET", "/v1/crash"),
+            ("PUT", "/v1/tally"),
+            ("GET", "/v1/query"),
+            ("POST", "/dash"),
+            ("HEAD", "/dash"),
+        ] {
+            assert_eq!(find(method, path), Err(Refusal::Method), "{method} {path}");
+        }
         for path in [
             "/",
             "/v1/counts/",
             "/V1/counts",
             "/v1/crash/",
-            "/v1/query",
-            "/dash",
+            "/v1/releases",
+            "/dash/",
+            "/v1/query/",
             "",
         ] {
-            assert_eq!(Route::find(true, path), Err(Refusal::NotFound), "{path}");
-            assert_eq!(Route::find(false, path), Err(Refusal::NotFound), "{path}");
+            assert_eq!(Route::at(path), None, "{path}");
         }
     }
 
@@ -194,10 +248,12 @@ mod tests {
             Refusal::Method,
             Refusal::Bad,
             Refusal::Busy,
+            Refusal::Forbidden,
             Refusal::Failed,
             Refusal::Unavailable,
+            Refusal::Timeout,
         ]
         .map(Refusal::status);
-        assert_eq!(statuses, [404, 405, 400, 429, 500, 503]);
+        assert_eq!(statuses, [404, 405, 400, 429, 403, 500, 503, 504]);
     }
 }

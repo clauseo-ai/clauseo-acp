@@ -13,20 +13,24 @@
 //     the R2 binding unless the bucket is there, checked with check-deploy.mjs --deployed.
 //     --no-create (the `check` action) fails instead of creating, and skips R2.
 //   node scripts/deploy.mjs migrate    wrangler d1 migrations apply --remote
-//   node scripts/deploy.mjs deploy     wrangler deploy (of the build the tokenless step made)
+//   node scripts/deploy.mjs deploy     the Access step (scripts/access.mjs), then wrangler deploy
+//     (of the build the tokenless step made) with the team and the two AUD tags as --var values,
+//     masked like the database id; without them /dash and /v1/query stay 404.
 //   node scripts/deploy.mjs canary
 //     Prints how many rows the fixed canary install id has in `report` and the canary tally id
 //     has in `tally`, then deletes them, so the live check leaves nothing behind.
 //
 // CLOUDFLARE_API_TOKEN and the optional CLOUDFLARE_ACCOUNT_ID come from the environment (both
 // secrets, which GitHub masks). An empty CLOUDFLARE_ACCOUNT_ID is dropped, so wrangler picks
-// the one account the token can see.
+// the one account the token can see. The deploy step also reads ACCESS_TEAM and
+// ACCESS_DASH_EMAIL.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { problems, PLACEHOLDER_ID } from "./check-deploy.mjs";
+import { setUpAccess, varArgs } from "./access.mjs";
 import { cloudflareApi } from "./cloudflare.mjs";
 import { Refused } from "./errors.mjs";
 import { setUpCrashBucket } from "./r2.mjs";
@@ -43,10 +47,12 @@ const BUILD_TABLE = '[build]\ncommand = "worker-build --release"\n\n';
 /** The R2 binding, as wrangler.toml holds it; the deploy copy drops it while unbound. */
 export const R2_TABLE = '[[r2_buckets]]\nbinding = "CRASH"\nbucket_name = "clauseo-crash"\njurisdiction = "eu"\n';
 
-
-/** `text` with every id, email and account name masked. */
-export function redact(text) {
-  return text
+/** `text` with every id, email and account name masked, and each of `secrets` too. */
+export function redact(text, secrets = []) {
+  let masked = text;
+  for (const secret of secrets) if (secret && secret.length >= 3) masked = masked.split(secret).join("<masked>");
+  return masked
+    .replace(/(?<![0-9a-z])[0-9a-f]{64}(?![0-9a-z])/gi, "<id>")
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<id>")
     .replace(/(?<![0-9a-z])[0-9a-f]{32}(?![0-9a-z])/gi, "<id>")
     .replace(/[^\s@`'"<>()[\]{},;:]+@[^\s@`'"<>()[\]{},;:]+/g, "<email>")
@@ -157,10 +163,10 @@ function runWrangler(args) {
   return { status: run.status, stdout: run.stdout ?? "", stderr: run.stderr ?? "" };
 }
 
-/** Runs wrangler and prints its output redacted; fails when wrangler does. */
-function runShown(args) {
+/** Runs wrangler and prints its output redacted, `secrets` masked too; fails when wrangler does. */
+function runShown(args, secrets = []) {
   const run = runWrangler(args);
-  for (const text of [run.stdout, run.stderr]) if (text.trim() !== "") console.log(redact(text).trimEnd());
+  for (const text of [run.stdout, run.stderr]) if (text.trim() !== "") console.log(redact(text, secrets).trimEnd());
   if (run.status !== 0) throw new Refused(`wrangler ${args[0]} failed`);
 }
 
@@ -187,7 +193,12 @@ async function main([command, ...flags]) {
   } else if (command === "migrate") {
     runShown(["d1", "migrations", "apply", DATABASE, "--remote", "--config", DEPLOY_CONFIG]);
   } else if (command === "deploy") {
-    runShown(["deploy", "--config", DEPLOY_CONFIG]);
+    if (process.env.ACCESS_TEAM) console.log(`::add-mask::${process.env.ACCESS_TEAM}`);
+    const access = await setUpAccess(cloudflareApi(process.env.CLOUDFLARE_API_TOKEN ?? ""), process.env);
+    const secrets = [...Object.values(access.vars ?? {}), process.env.ACCESS_DASH_EMAIL ?? ""];
+    for (const value of Object.values(access.vars ?? {})) console.log(`::add-mask::${value}`);
+    for (const line of access.lines) console.log(redact(line, secrets));
+    runShown(["deploy", "--config", DEPLOY_CONFIG, ...varArgs(access.vars)], secrets);
   } else if (command === "canary") {
     const counts = readCanary(execute(CANARY_COUNT));
     console.log(`canary report rows: ${counts.report}`);
