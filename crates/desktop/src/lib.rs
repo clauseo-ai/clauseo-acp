@@ -306,8 +306,7 @@ pub fn run() -> tauri::Result<()> {
             // The caption buttons' window commands, on Windows and Linux.
             window_frame::grant_caption_commands(app)?;
             let locations = Locations::resolve_without_documents(&SystemDirs, &SystemEnv)?;
-            // Before the window and the host: a crash from here on counts (last_run.rs).
-            last_run::start(app.handle(), locations.data_dir());
+            last_run::start(app.handle(), locations.data_dir()); // a crash from here counts
             // Managed before the window opens: a command reaching unmanaged state fails.
             app.manage(open::AppData(locations.data_dir().to_path_buf()));
             app.manage(open::OpenGates::default());
