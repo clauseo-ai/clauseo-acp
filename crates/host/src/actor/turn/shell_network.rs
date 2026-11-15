@@ -1,5 +1,6 @@
 //! Codex's shell stays offline: a Codex approval that would give a shell command the network is
-//! refused by the host, unseen and unlogged, and the agent is told why once a turn.
+//! refused by the host without asking the lawyer; once a turn the lawyer sees a notice
+//! (`NoticeKind::ShellNetworkBlocked`) and the agent is told why.
 //!
 //! codex-acp 2.2.2 forwards neither the model's `sandbox_permissions` nor its reason (the reason
 //! only in a `JetBrains` Air client's `_meta`, `dist/index.js:32330`), so a plain escalation looks
@@ -23,23 +24,42 @@
 //! `cancelled`. The note ([`AGENT_NOTE`]) goes as a steer into the running turn, never logged,
 //! sent before the answer while the request still holds the turn open, so it cannot start a
 //! turn of its own (codex-acp starts one for a steer when no turn runs).
+//!
+//! The answer cannot carry the note: codex-acp keeps only the chosen option's id
+//! (`selectedDecision`, `dist/index.js:32443-32447`). So when the steer cannot go (no native
+//! steering, an agent not attached) or does not land (`PromptRequired`, `Failed`, an error),
+//! the note is owed: [`OWED_NOTE`] goes first in the thread's next prompt (`prompt.rs`).
 
 use clauseo_acp::SteerResult;
 use clauseo_protocol::{
-    AgentChoiceId, AgentKind, ContentBlock, PermissionKind, PermissionOption, ThreadId,
+    AgentChoiceId, AgentKind, ContentBlock, Notice, NoticeKind, NoticeLevel, PermissionKind,
+    PermissionOption, ThreadId,
 };
 use serde_json::Value;
 
 use super::super::Actor;
+use super::super::input::Input;
 use super::agents::Stage;
 use super::asks::PermissionAsk;
-use super::updates::agent;
-use super::{current, spawn};
+use super::updates::{agent, commit};
+use super::{TurnInput, current, spawn, state};
 use crate::log_file::Cause;
 
 /// What the agent is told after the first refusal of the turn.
-pub(super) const AGENT_NOTE: &str =
-    "Clauseo keeps your shell offline: save files by clicking their link in the browser.";
+pub(super) const AGENT_NOTE: &str = "Clauseo declined that command: your shell has no internet. \
+    Use your web search or web fetch tool instead, or, if you have the browser, save a file by \
+    clicking its link there.";
+
+/// The note owed when the steer did not land, first in the thread's next prompt.
+pub(super) const OWED_NOTE: &str = "Note from Clauseo: in your last turn, Clauseo declined a \
+    command of yours that needed the internet, because your shell has no internet. Use your web \
+    search or web fetch tool instead, or, if you have the browser, save a file by clicking its \
+    link there.";
+
+/// The notice's fallback words, for a view that does not know its kind (TN-13's English with
+/// `ChatGPT`, the name the app gives Codex; the app words the kind itself).
+pub(super) const NOTICE_TEXT: &str = "Clauseo stopped a step: ChatGPT tried to go online by \
+    running a command. ChatGPT can use web search instead.";
 
 /// codex-acp's option that declines a command and lets the turn go on (`dist/index.js:32026`).
 const DECLINE: &str = "decline";
@@ -94,8 +114,9 @@ pub(super) fn asks_for_network(
     amendment || url || enabled("additionalPermissions") || enabled("permissions") || fetcher
 }
 
-/// Answers `decline`, else the reject-once option, else `cancelled`; then, the first time in
-/// the turn, sends the note in the same task, so the agent reads it after the refusal.
+/// Answers `decline`, else the reject-once option, else `cancelled`. The first time in the turn
+/// it logs the notice and sends the note in the same task, so the agent reads it after the
+/// refusal; a note that does not land is owed ([`owe_note`]).
 fn refuse(actor: &mut Actor, thread: ThreadId, ask: &PermissionAsk) {
     let decline = ask
         .options
@@ -103,7 +124,15 @@ fn refuse(actor: &mut Actor, thread: ThreadId, ask: &PermissionAsk) {
         .find(|option| option.option_id == DECLINE)
         .or_else(|| reject_option(&ask.options));
     let option = decline.and_then(|option| AgentChoiceId::new(&option.option_id).ok());
-    let note = tell_once(actor, thread).then(|| ask.session.clone());
+    let note = match tell_once(actor, thread) {
+        Some(Route::Steer) => Some(ask.session.clone()),
+        Some(Route::Owe) => {
+            owe_note(actor, thread);
+            None
+        }
+        None => None,
+    };
+    let post = actor.post.clone();
     let Some(agent) = agent(actor, thread) else {
         return;
     };
@@ -129,18 +158,28 @@ fn refuse(actor: &mut Actor, thread: ThreadId, ask: &PermissionAsk) {
         if let Err(error) = answered {
             tracing::warn!(error = %Cause(&error), "a network refusal did not reach the agent");
         }
-        match steered {
-            None => {}
+        let landed = match steered {
+            None => return,
             Some(Ok(SteerResult::StartedNewTurn)) => {
                 tracing::warn!("the offline-shell note started a turn the host does not track");
+                true
+            }
+            Some(Ok(SteerResult::Injected)) => {
+                tracing::debug!("the offline-shell note reached the agent");
+                true
             }
             Some(Ok(result)) => {
-                tracing::debug!(?result, "the offline-shell note reached the agent");
+                tracing::debug!(?result, "the offline-shell note is owed to the next prompt");
+                false
             }
             Some(Err(error)) => {
                 let error = Cause(&error);
-                tracing::warn!(%error, "the offline-shell note did not reach the agent");
+                tracing::warn!(%error, "the offline-shell note is owed to the next prompt");
+                false
             }
+        };
+        if !landed {
+            let _gone = post.try_send(Input::Turn(TurnInput::OfflineNoteOwed(thread)));
         }
     });
 }
@@ -153,21 +192,44 @@ pub(super) fn reject_option(options: &[PermissionOption]) -> Option<&PermissionO
         .find(|option| option.kind == PermissionKind::RejectOnce)
 }
 
-/// Whether the agent gets the note: the first refusal of the live turn, from an attached agent
-/// with native steering (`clauseo_acp::Client::steer_held`). Later refusals of the same turn
-/// say nothing more.
-fn tell_once(actor: &mut Actor, thread: ThreadId) -> bool {
-    let Some(current) = current(actor, thread) else {
-        return false;
-    };
+/// How the turn's first refusal tells the agent.
+#[derive(Debug, PartialEq, Eq)]
+enum Route {
+    /// A steer into the running turn (`clauseo_acp::Client::steer_held`).
+    Steer,
+    /// First in the next prompt: the agent cannot take the steer.
+    Owe,
+}
+
+/// The first refusal of the live turn logs the notice and says how the agent is told: a steer
+/// to an attached agent with native steering, else owed. Later refusals of the same turn (the
+/// agent retrying) say nothing more (`None`).
+fn tell_once(actor: &mut Actor, thread: ThreadId) -> Option<Route> {
+    let current = current(actor, thread)?;
     if std::mem::replace(&mut current.told.offline, true) {
-        return false;
+        return None;
     }
-    agent(actor, thread)
+    let notice = Notice {
+        level: NoticeLevel::Warning,
+        text: NOTICE_TEXT.to_owned(),
+        kind: Some(NoticeKind::ShellNetworkBlocked),
+    };
+    if let Err(error) = commit(actor, thread, [notice.into()], Vec::new()) {
+        tracing::warn!(%thread, error = %Cause(&error), "a shell-network notice was not logged");
+    }
+    let native = agent(actor, thread)
         .filter(|agent| agent.stage == Stage::Attached)
         .and_then(|agent| agent.info.as_ref())
         .and_then(|info| info.capabilities.steering)
-        .is_some_and(|steering| steering.native)
+        .is_some_and(|steering| steering.native);
+    Some(if native { Route::Steer } else { Route::Owe })
+}
+
+/// The note did not reach the agent: [`OWED_NOTE`] goes first in the thread's next prompt.
+pub(super) fn owe_note(actor: &mut Actor, thread: ThreadId) {
+    if let Some(state) = state(actor, thread) {
+        state.offline_owed = true;
+    }
 }
 
 #[cfg(test)]

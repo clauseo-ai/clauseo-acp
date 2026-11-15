@@ -4192,6 +4192,11 @@ export type NoticeKind =
  *  reached outside this matter (Clauseo's own data folder, another matter). Once a turn.
  */
 "outside_matter_blocked" | 
+/**
+ *  Clauseo declined, without asking the lawyer, a shell command of the agent's that needed
+ *  the internet (curl, wget, a network approval, extra network permissions). Once a turn.
+ */
+"shell_network_blocked" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

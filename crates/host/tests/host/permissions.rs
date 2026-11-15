@@ -2,7 +2,7 @@
 
 use clauseo_protocol::{
     AgentChoiceId, CommandOutcome, DomainEvent, ErrorCode, FileChoice, FileDecision, HostCommand,
-    MatterPath, PermissionChoice, StopReason, StreamId, ThreadId,
+    MatterPath, NoticeKind, PermissionChoice, StopReason, StreamId, ThreadId,
 };
 
 use crate::observe::Events;
@@ -254,8 +254,9 @@ fn a_codex_browser_approval_is_a_card_only_when_the_folder_is_unprotected() {
     }
 }
 
-/// Codex asking to run curl or wget, or for a host's network, is declined by the host with
-/// nothing logged, and its offline note steered once a turn before the answer
+/// Codex asking to run curl or wget, or for a host's network, is declined by the host with no
+/// permission row, one `ShellNetworkBlocked` notice a turn, and its offline note steered once a
+/// turn before the answer
 /// (`actor/turn/shell_network.rs`); `rm -rf` (Codex's dangerous-command prompt) and `echo curl`
 /// reach the lawyer. The scenario checks each answer and each steer the agent gets.
 #[test]
@@ -286,7 +287,17 @@ fn codex_shell_network_is_declined_unseen_with_one_note_a_turn() {
     );
     // The note is never logged as a message.
     let dump = events.dump();
-    assert!(!dump.contains("keeps your shell offline"), "{dump}");
+    assert!(!dump.contains("your shell has no internet"), "{dump}");
+    // One notice a turn, two turns: the lawyer sees what Clauseo declined.
+    let kinds: Vec<_> = events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::Notice(notice) => Some(notice.kind.clone()),
+            _ => None,
+        })
+        .collect();
+    let want = Some(NoticeKind::ShellNetworkBlocked);
+    assert_eq!(kinds, [want.clone(), want], "{dump}");
     host.shutdown();
 }
 

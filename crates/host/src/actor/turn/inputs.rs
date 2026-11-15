@@ -48,6 +48,8 @@ pub(crate) enum TurnInput {
         turn: TurnId,
         reach: super::offline::probe::Reach,
     },
+    /// The offline-shell note's steer to `thread` did not land (`shell_network.rs`).
+    OfflineNoteOwed(ThreadId),
 }
 
 /// An agent call's result.

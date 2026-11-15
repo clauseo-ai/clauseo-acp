@@ -315,6 +315,9 @@ open_data_enum! {
         /// Clauseo's data fence refused a request of the agent's without asking the lawyer: it
         /// reached outside this matter (Clauseo's own data folder, another matter). Once a turn.
         OutsideMatterBlocked = "outside_matter_blocked",
+        /// Clauseo declined, without asking the lawyer, a shell command of the agent's that needed
+        /// the internet (curl, wget, a network approval, extra network permissions). Once a turn.
+        ShellNetworkBlocked = "shell_network_blocked",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -322,6 +325,7 @@ open_data_enum! {
     test mod notice_kind with [
         NoticeKind::ContextNotRestored,
         NoticeKind::OutsideMatterBlocked,
+        NoticeKind::ShellNetworkBlocked,
         NoticeKind::FilesCameBack {
             files: vec![MatterPath::new("Drafts/memo.docx").unwrap()],
             more: 2,

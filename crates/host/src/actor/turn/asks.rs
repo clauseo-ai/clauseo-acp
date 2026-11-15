@@ -8,7 +8,7 @@
 //! A Codex approval of one of the guarded `browser` server's tools is allowed for the session
 //! with nothing logged ([`browser_tool_to_allow`]), and one of a server the lawyer added is
 //! allowed once with nothing logged ([`trusted_tool_to_allow`]); one giving a shell command the
-//! network is refused, unseen (`shell_network.rs`).
+//! network is refused without asking, told by a notice once a turn (`shell_network.rs`).
 
 use std::path::PathBuf;
 

@@ -79,6 +79,16 @@ const BLOCKED_NOTICE = notice(6, {
   text: BLOCKED_ALONE,
   kind: "outside_matter_blocked",
 });
+const OFFLINE =
+  "Clauseo stopped a step: {name} tried to go online by running a command. {name} can use web search instead.";
+const OFFLINE_ALONE =
+  "Clauseo stopped a step: the AI tried to go online by running a command. It can use web search instead.";
+/** Clauseo declined, unasked, a Codex shell command that needed the internet (once a turn). */
+const OFFLINE_NOTICE = notice(6, {
+  level: "warning",
+  text: "Clauseo stopped a step: ChatGPT tried to go online by running a command. ChatGPT can use web search instead.",
+  kind: "shell_network_blocked",
+});
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
   kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
@@ -154,6 +164,23 @@ export const TN: Entry[] = [
     render: (lang: Lang) => (
       <main lang={lang} className="review-alone">
         <p>{th(lang, BLOCKED_ALONE)}</p>
+      </main>
+    ),
+  },
+  {
+    id: "TN-13",
+    words: threadWords(OFFLINE),
+    screen: "room/thread",
+    render: thread(OFFLINE_NOTICE),
+  },
+  {
+    // Where the room knows no agent name, which it never has today: rendered alone, as TN-12.
+    id: "TN-14",
+    words: threadWords(OFFLINE_ALONE),
+    screen: "room/thread",
+    render: (lang: Lang) => (
+      <main lang={lang} className="review-alone">
+        <p>{th(lang, OFFLINE_ALONE)}</p>
       </main>
     ),
   },
