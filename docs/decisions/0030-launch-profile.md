@@ -693,7 +693,7 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     gets no rules at all, the pipe tails included, when (i) it holds `<data>` or lies in it,
     (ii) a place Claude may not read lies in it (`LaunchDeny::denies_inside`; #1085's, with the
     fenced matters, replaces the stand-in that asks only about `<data>`), or (iii) a link,
-    junction or folder link in it leads outside it, or its walk passes 50,000 entries or 2 s,
+    junction or folder link in it leads outside it, or its walk passes 50,000 entries or 2.5 s,
     or fails to read the matter, an entry or an entry's kind (`data_fence/matter_links.rs`; the
     walk never follows a link and runs off the actor), or (iv) the walk finds another matter's
     `.clauseo` in it, at any depth, past #1085's fence cap too. Then the classifier judges.
@@ -708,7 +708,7 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     file once and pins it (`replaceFlagSettingsFilePinnedContent`; its settings watcher skips
     `flagSettings`), so rewriting the file changes nothing until the process ends: probed, a
     rewritten file mid-session still let the H2 line print `<data>`. So each turn's start on a
-    running agent with matter rules walks the matter again, within the same 2 s, before its
+    running agent with matter rules walks the matter again, within the same 2.5 s, before its
     checkpoint (`actor/turn/matter_walk.rs`). A link out, or a walk that fails or runs out,
     stops the agent and starts a new one for the turn, which resumes the session
     (`session/load`, `--resume`) with no matter rules: probed, the H2 line was refused there.

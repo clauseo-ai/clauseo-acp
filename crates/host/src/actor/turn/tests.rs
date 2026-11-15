@@ -15,6 +15,7 @@ mod limit_read;
 mod limit_stop;
 mod limit_timer;
 mod made;
+#[cfg(unix)]
 mod matter_walk;
 mod offline;
 mod offline_backstop;

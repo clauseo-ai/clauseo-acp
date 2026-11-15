@@ -197,7 +197,7 @@ fn an_entry_or_a_kind_the_walk_cannot_read_gives_no_rules() {
                 match bad {
                     Some(0) => entries.push(Err(io::Error::other("unreadable entry"))),
                     Some(_) => {
-                        entries.push(Ok(found(root.join("x"), Err(io::Error::other("kind")))))
+                        entries.push(Ok(found(root.join("x"), Err(io::Error::other("kind")))));
                     }
                     None => {}
                 }
@@ -210,7 +210,7 @@ fn an_entry_or_a_kind_the_walk_cannot_read_gives_no_rules() {
     }
 }
 
-/// A walk slower than [`WALK_BUDGET`] (each listing takes a second on the injected clock, and
+/// A walk slower than [`WALK_BUDGET`] (each listing takes half of it on the injected clock, and
 /// the folders never end) stops itself after its second listing and gives no rules: `lists`
 /// ends once the walk's thread has dropped the stand-in.
 #[test]
@@ -220,7 +220,7 @@ fn a_walk_past_its_time_limit_stops_and_gives_no_rules() {
     let ticking = clock.clone();
     let fs = Fake(move |folder: &Path| {
         listed.send(()).unwrap();
-        ticking.advance(std::time::Duration::from_secs(1));
+        ticking.advance(WALK_BUDGET / 2);
         Ok(vec![Ok(found(folder.join("deeper"), Ok(Kind::Folder)))])
     });
     let walked = walk_within(Arc::new(clock), matter_id(), fs, PathBuf::from(NOWHERE));

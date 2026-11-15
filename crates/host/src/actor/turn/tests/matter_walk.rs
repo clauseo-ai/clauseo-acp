@@ -1,7 +1,7 @@
 //! The matter's link walk at each turn's start (`matter_walk.rs`): with no new link the agent
 //! keeps its matter rules and runs the next turn; a link out of the matter that appeared between
 //! two turns, with no command of the agent's, starts the agent again before the next turn, and the
-//! new agent has no matter rules.
+//! new agent has no matter rules. Unix only: the test makes a symbolic link.
 
 use std::path::PathBuf;
 
@@ -60,7 +60,6 @@ fn ended(log: &[DomainEvent], turn: TurnId) -> Option<StopReason> {
     })
 }
 
-#[cfg(unix)]
 #[test]
 fn a_link_out_that_appears_between_turns_takes_the_matter_rules_away_at_the_next_turn() {
     let mut rig = Rig::start("matter-walk-turn", ANSWERS);
