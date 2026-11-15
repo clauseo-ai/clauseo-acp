@@ -29,11 +29,12 @@ const BOTH = { ...QUESTION, feature_used: [{ feature: "compare", n: 1 }] };
 /** The view's columns, from PRAGMA table_info. */
 const columns = (view) => worker.sql(`PRAGMA table_info(${view})`).map((column) => column.name);
 
-test("every view's columns: no install or tally id", () => {
+test("every view's columns: no install, tally or report id", () => {
   const views = worker.sql("SELECT name FROM sqlite_master WHERE type = 'view' ORDER BY name").map((row) => row.name);
   const expected = {
     v_active: ["period", "start", "installs"],
     v_cohort_week: ["first_week", "week", "installs", "days_active", "questions", "hit_limit", "features"],
+    v_crash: ["week", "version", "os", "arch", "kind", "area", "signature", "reports"],
     v_daily: ["day", "version", "os", "agent", "event", "cell", "count", "installs"],
     v_monthly: ["month", "version", "os", "agent", "event", "cell", "count", "installs"],
     v_paths: ["weeks_active", "questions", "hit_limit", "features", "installs"],
@@ -144,4 +145,19 @@ test("v_tally: 4 tallies hidden, 5 shown", () => {
     { event: "active_week", cell: "{}", count: 5, tallies: 5 },
   ]);
   assert.ok(worker.sql("SELECT * FROM v_tally").every((row) => row.week === "2019-W05" && row.version === "9.0.1"));
+});
+
+test("v_crash: 4 reports hidden, 5 shown, per signature and per kind and area", () => {
+  const crash = (week, signature) => [uuid(), week, "9.0.1", "windows", "x86_64", "panic", "store", signature];
+  const rows = [
+    ...[0, 1, 2, 3, 4].map(() => crash("2019-W05", "crates/store/src/writer.rs:212")),
+    ...[0, 1, 2, 3].map(() => crash("2019-W05", "crates/store/src/log.rs:40")),
+    ...[0, 1, 2, 3].map(() => crash("2019-W06", "crates/store/src/writer.rs:212")),
+  ];
+  worker.sql(`INSERT INTO crash VALUES ${values(rows)}`);
+  const shown = worker.sql("SELECT week, signature, reports FROM v_crash ORDER BY week, signature");
+  assert.deepEqual(shown, [
+    { week: "2019-W05", signature: "_all", reports: 9 },
+    { week: "2019-W05", signature: "crates/store/src/writer.rs:212", reports: 5 },
+  ]);
 });

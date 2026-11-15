@@ -1,9 +1,10 @@
-//! The two routes, what each may carry, and the statuses the Worker answers with. Every cap here
+//! The three routes, what each may carry, and the statuses the Worker answers with. Every cap here
 //! is the crate's own constant ([`clauseo_counts::schema`]) except the daily caps, which are
 //! the Worker's and live only here.
 
 use clauseo_counts::schema::{
-    Invalid, MAX_COUNTS_GZIP, MAX_COUNTS_JSON, MAX_TALLY_GZIP, MAX_TALLY_JSON,
+    Invalid, MAX_COUNTS_GZIP, MAX_COUNTS_JSON, MAX_CRASH_GZIP, MAX_CRASH_JSON, MAX_TALLY_GZIP,
+    MAX_TALLY_JSON,
 };
 
 /// The most `/v1/counts` requests the Worker stores in one UTC day, across every sender. A day
@@ -20,6 +21,8 @@ pub(crate) enum Route {
     Counts,
     /// `POST /v1/tally`: one weekly tally.
     Tally,
+    /// `POST /v1/crash`: one crash report (`crash.rs`).
+    Crash,
 }
 
 /// Why a request was not stored. Each is answered with a status and an empty body.
@@ -31,8 +34,10 @@ pub(crate) enum Refusal {
     Method,
     /// Anything wrong with the headers, the body's size, its gzip or its schema.
     Bad,
-    /// The route's daily cap is spent.
+    /// The route's daily cap, or `/v1/crash`'s hourly one, is spent.
     Busy,
+    /// `/v1/crash` before its R2 bucket is bound.
+    Unavailable,
     /// D1 or the clock failed; the sender keeps the report and tries again later.
     Failed,
 }
@@ -46,6 +51,7 @@ impl Refusal {
             Refusal::Bad => 400,
             Refusal::Busy => 429,
             Refusal::Failed => 500,
+            Refusal::Unavailable => 503,
         }
     }
 }
@@ -100,6 +106,7 @@ impl Route {
         let route = match path {
             "/v1/counts" => Route::Counts,
             "/v1/tally" => Route::Tally,
+            "/v1/crash" => Route::Crash,
             _ => return Err(Refusal::NotFound),
         };
         if post {
@@ -114,6 +121,7 @@ impl Route {
         match self {
             Route::Counts => MAX_COUNTS_GZIP,
             Route::Tally => MAX_TALLY_GZIP,
+            Route::Crash => MAX_CRASH_GZIP,
         }
     }
 
@@ -122,14 +130,16 @@ impl Route {
         match self {
             Route::Counts => MAX_COUNTS_JSON,
             Route::Tally => MAX_TALLY_JSON,
+            Route::Crash => MAX_CRASH_JSON,
         }
     }
 
-    /// The most requests stored in one UTC day.
+    /// The most requests stored in one UTC day; `/v1/crash` has its hourly cap instead.
     pub(crate) const fn daily_cap(self) -> i64 {
         match self {
             Route::Counts => DAILY_CAP_COUNTS,
             Route::Tally => DAILY_CAP_TALLY,
+            Route::Crash => 0,
         }
     }
 
@@ -138,6 +148,7 @@ impl Route {
         match self {
             Route::Counts => "counts",
             Route::Tally => "tally",
+            Route::Crash => "crash",
         }
     }
 }
@@ -147,16 +158,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_post_on_the_two_paths_is_a_route() {
+    fn only_post_on_the_three_paths_is_a_route() {
         assert_eq!(Route::find(true, "/v1/counts"), Ok(Route::Counts));
         assert_eq!(Route::find(true, "/v1/tally"), Ok(Route::Tally));
+        assert_eq!(Route::find(true, "/v1/crash"), Ok(Route::Crash));
         assert_eq!(Route::find(false, "/v1/counts"), Err(Refusal::Method));
         assert_eq!(Route::find(false, "/v1/tally"), Err(Refusal::Method));
+        assert_eq!(Route::find(false, "/v1/crash"), Err(Refusal::Method));
         for path in [
             "/",
             "/v1/counts/",
             "/V1/counts",
-            "/v1/crash",
+            "/v1/crash/",
             "/v1/query",
             "/dash",
             "",
@@ -172,6 +185,8 @@ mod tests {
         assert_eq!(Route::Counts.json_cap(), 64_000);
         assert_eq!(Route::Tally.gzip_cap(), 4_000);
         assert_eq!(Route::Tally.json_cap(), 16_000);
+        assert_eq!(Route::Crash.gzip_cap(), 2_000);
+        assert_eq!(Route::Crash.json_cap(), 2_000);
         assert_eq!(Route::Counts.daily_cap(), 3_000);
         assert_eq!(Route::Tally.daily_cap(), 1_000);
         let statuses = [
@@ -180,8 +195,9 @@ mod tests {
             Refusal::Bad,
             Refusal::Busy,
             Refusal::Failed,
+            Refusal::Unavailable,
         ]
         .map(Refusal::status);
-        assert_eq!(statuses, [404, 405, 400, 429, 500]);
+        assert_eq!(statuses, [404, 405, 400, 429, 500, 503]);
     }
 }

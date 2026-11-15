@@ -32,6 +32,13 @@ database_name = "clauseo-counts"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
+# The crash reports' bucket, in the EU (src/crash.rs). The deploy copy leaves this table out
+# while the bucket does not exist (scripts/r2.mjs), and /v1/crash then answers 503.
+[[r2_buckets]]
+binding = "CRASH"
+bucket_name = "clauseo-crash"
+jurisdiction = "eu"
+
 # Every day at 03:00 UTC: the retention deletes (src/retention.rs).
 [triggers]
 crons = ["0 3 * * *"]

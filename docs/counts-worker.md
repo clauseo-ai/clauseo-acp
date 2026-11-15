@@ -4,33 +4,35 @@
 ([decision 0036](decisions/0036-counts.md)) and keeps them in a D1 database. Its code is in
 `services/counts-worker/`, beside the client that sends to it, so anyone can read exactly what it
 accepts and stores. [Decision 0056](decisions/0056-counts-worker.md) records why it is built this
-way and what waits until after launch; [decision 0059](decisions/0059-counts-rollup-views.md)
+way and what waits until after launch, and [decision 0062](decisions/0062-counts-crash-route.md)
+the crash route; [decision 0059](decisions/0059-counts-rollup-views.md)
 adds the summaries and views.
 
 ## What it accepts
 
-Two routes, nothing else:
+Three routes, nothing else:
 
 | Request | Body |
 | --- | --- |
 | `POST /v1/counts` | 1 to 7 day reports, `{ "days": [...] }`, at most 16 KB gzip and 64 KB of JSON |
 | `POST /v1/tally` | one weekly tally, at most 4 KB gzip and 16 KB of JSON |
+| `POST /v1/crash` | one crash report, at most 2 KB gzip and 2 KB of JSON ([below](#crash-reports)) |
 
 The Worker checks a request in this order and stops at the first step that fails:
 
-1. The method and path. Any other path gets `404`; another method on these two paths gets `405`.
+1. The method and path. Any other path gets `404`; another method on these paths gets `405`.
 2. The headers. `Content-Encoding: gzip` is required. A `Content-Length` over the gzip cap is
    refused.
 3. The body, read up to the gzip cap. A body that passes the cap is refused at once, with or
    without a `Content-Length`. A missing or empty body is refused.
 4. The inflate, which stops one byte past the JSON cap. A body that would inflate further is
    refused.
-5. The schema: `clauseo-counts`' own `parse_batch` or `parse_tally`, the functions and types the
-   app writes with. An unknown field, an unknown value (an unknown `error_shown.code` too), a
+5. The schema: `clauseo-counts`' own `parse_batch`, `parse_tally` or `parse_crash`, the
+   functions and types the app writes with. An unknown field, an unknown value (an unknown `error_shown.code` too), a
    number past its cap, a day older than 14 days or not yet over, more than 7 days, a tally week
    older than 4 weeks or not yet over, or an `install` field in a tally is refused. "Today" and
    "this week" come from the Worker's clock.
-6. The daily cap ([below](#the-daily-caps)).
+6. The daily cap ([below](#the-daily-caps)), or for a crash report the hourly one.
 7. The insert.
 
 Steps 1 to 5 never touch the database. A refusal in steps 2 to 5 is `400` with an empty body, so
@@ -45,7 +47,7 @@ committed schema.
 
 ## What it stores
 
-Five tables (`services/counts-worker/migrations/`), with no index beyond their keys:
+Seven tables (`services/counts-worker/migrations/`), with no index beyond their keys:
 
 - `report`: one row per install and day, keyed `(install, day)`. Columns: `install`, `day`,
   `version`, `channel`, `os`, `os_major`, `arch`, `language`, and `cells`.
@@ -53,6 +55,10 @@ Five tables (`services/counts-worker/migrations/`), with no index beyond their k
   `version`, `channel`, `os`, `os_major`, `arch`, `install_type`, `managed` (1 or 0), and
   `cells`. A tally has no install id, so it cannot be joined to a report.
 - `rate`: one count per route per UTC day, for the caps. It says nothing about who sent what.
+- `crash`: one row per crash report, keyed by its random `report` id. Columns: `report`,
+  `week`, `version`, `os`, `arch`, `kind`, `area` and `signature` (a panic's `file:line`, a
+  signal's `code:<number>`, a renderer's reason, or the kind alone). The report itself is in R2.
+- `crash_rate`: the current UTC hour and how many crash reports it kept.
 - `install_week` (filled by the cron): one row per install per ISO week it reported in, keyed
   `(install, week)`. Columns: `install`, `week`, `first_week` (the install's cohort),
   `days_active`, `questions` (the week's `question_sent` counts), `hit_limit` (1 when a limit
@@ -74,6 +80,26 @@ they are dropped with it.) A test fails if the code reaches any other header, th
 metadata or the raw JS request, or names a client-address header. `report`, `tally`,
 `install_week` and `rollup` are `WITHOUT ROWID` tables, so the order rows are stored in does not show the order they arrived in.
 
+### Crash reports
+
+`POST /v1/crash` takes one crash report of S22's launch cut, as `crates/counts`' `CrashReport`
+(decision 0060): no install or tally id, no time finer than the ISO week, no message, and no
+path but a source file in one of two fixed forms. After the schema (a week older than 5 weeks or
+in the future is refused):
+
+1. Without the R2 bucket bound (the deploy leaves the binding out until the bucket exists), the
+   Worker answers `503` and stores nothing. The app keeps the report and tries again.
+2. The hourly cap: at most 200 reports in one UTC hour, across all senders, counted in
+   `crash_rate` (one hour and its count; past hours are deleted each time). Past it, `429`.
+3. The report, re-serialised by the crate (compact JSON in the crate's field order, never the
+   request's bytes), goes to the R2 bucket `clauseo-crash`, in the EU jurisdiction, as
+   `reports/<report id>.json`.
+4. One `crash` row ([below](#what-it-stores)). A report sent again writes the same object and
+   leaves the row as it was.
+
+R2 keeps each object's upload time, which can show when a report arrived. S22's random delay of
+1 to 24 hours before a report is sent is the guard.
+
 ## How long it keeps them
 
 A cron runs every day at 03:00 UTC. First it fills `install_week` and `rollup`
@@ -83,13 +109,15 @@ A cron runs every day at 03:00 UTC. First it fills `install_week` and `rollup`
   counts;
 - `tally` and `install_week` rows whose week is more than 396 days old. A row goes at most 403
   days after its week's Monday, which is 397 days after the week ends (about 13 months);
+- `crash` rows whose week is more than 365 days old;
 - `rate` rows of days before today.
 
-`rollup` is kept indefinitely. It holds no install id, and each of its rows counts at least the
+`rollup` is kept indefinitely. An R2 lifecycle rule deletes each crash report's object 90 days
+after its upload. It holds no install id, and each of its rows counts at least the
 installs it says.
 
 The deletes go by the first hex digit of the key, `0` to `f`: 16 ranges for `report`, 16 for
-`tally`, one `install_week` delete and one `rate` delete. With the two fills that is 36
+`tally`, and one each for `install_week`, `crash` and `rate`. With the two fills that is 37
 statements a run (Workers Free allows 50 D1 queries a run). No statement returns rows, so a run
 costs the Worker the same CPU at any backlog, and one run clears it all. A statement that fails
 does not stop the ones after it, so a failing fill never holds back a delete.
@@ -115,9 +143,10 @@ other backups or exports.
 ## The views
 
 The dashboard and `/v1/query` read only these views, never the tables
-(`migrations/0002_rollup.sql`). Every view hides a group of fewer than 5: distinct installs, or
-tallies for `v_tally`. No view has an `install` or `tally` column. An `event` that starts with
-`_` is a total the view adds, not one of the app's events.
+(`migrations/0002_rollup.sql` and `0004_crash.sql`). Every view hides a group of fewer than 5:
+distinct installs, or tallies for `v_tally`, reports for `v_crash`. No view has an `install`,
+`tally` or `report` column. An `event` that starts with `_` is a total the view adds, not one
+of the app's events.
 
 | View | From | One row per | Columns |
 | --- | --- | --- | --- |
@@ -127,6 +156,7 @@ tallies for `v_tally`. No view has an `install` or `tally` column. An `event` th
 | `v_cohort_week` | `install_week` (13 months) | first week and week | `first_week`, `week`, `installs`, and `days_active`, `questions`, `hit_limit`, `features` summed |
 | `v_paths` | `install_week` (13 months) | combination of buckets | `weeks_active` (1, 2, 4, 8, 16), `questions` in all (0, 1, 10, 100, 1000), `hit_limit` ever, `features` in the busiest week (0, 1, 2, 4), `installs` |
 | `v_tally` | `tally` (13 months) | week, version, OS, event and cell | `week`, `version`, `os`, `event`, `cell`, `count`, `tallies`; `_tally` counts tallies, `_crashed` those with a crash, `_fleet` splits them by install type and managed |
+| `v_crash` | `crash` (1 year) | week, version, OS, arch, kind, area and signature | `week`, `version`, `os`, `arch`, `kind`, `area`, `signature`, `reports`; signature `_all` groups the same less the signature |
 
 A bucket is named by its lower bound: `questions = 10` means 10 to 99. `cell` is the cell's
 fields without `n`, as compact JSON. The oldest and current periods of `v_active` hold only
@@ -190,12 +220,16 @@ Two workflows, so no workflow that holds the Cloudflare token runs for a pull re
   allows `main` only, and Rohan is its required reviewer. Its steps:
   1. with no secret: the schema snapshot test, `cargo test`, `pnpm test`, `check-deploy.mjs` on
      `wrangler.toml`, and the wasm build (`worker-build --release`);
-  2. the D1 database `clauseo-counts`, found by name. The first deploy creates it with
+  2. the R2 bucket `clauseo-crash`, found or created in the EU jurisdiction, with a lifecycle
+     rule that deletes objects after 90 days (other rules are kept). If the token lacks Workers
+     R2 Storage Edit (the API answers `401` or `403`), the step says so in one line and goes on:
+     the deploy copy then has no R2 binding and `/v1/crash` answers `503`. Then the D1 database
+     `clauseo-counts`, found by name. The first deploy creates it with
      `--jurisdiction=eu`. If Cloudflare refuses that, the job fails; it never creates the
      database anywhere else. A database of that name whose `jurisdiction` is not `eu` fails the
      job too;
-  3. `wrangler.deploy.toml`, a copy of `wrangler.toml` with the database's real id and without
-     `[build]`, so wrangler uploads what step 1 built and builds nothing with the token present.
+  3. `wrangler.deploy.toml`, a copy of `wrangler.toml` with the database's real id, without
+     the R2 binding unless the bucket is there, and without `[build]`, so wrangler uploads what step 1 built and builds nothing with the token present.
      `check-deploy.mjs --deployed` checks it;
   4. `wrangler d1 migrations apply --remote`, then `wrangler deploy`. The deploy attaches
      `t.clauseo.chat` as a custom domain; Cloudflare makes its DNS record and certificate.
@@ -245,6 +279,10 @@ Before the first deploy, Rohan creates the token and saves it; no secret is ever
    account's ID as the environment secret `CLOUDFLARE_ACCOUNT_ID`.
 3. The repository variable `COUNTS_DEPLOY_ENABLED` is set to `true`, and each deploy is approved
    in the `counts-deploy` environment.
+4. For `/v1/crash` (until then it answers `503`): on the R2 overview, complete R2's checkout
+   (Cloudflare asks for a card even on the free tier), and add Account / Workers R2 Storage /
+   Edit to the `counts-deploy` token. The next deploy creates the bucket in the EU with its
+   90-day rule and binds it.
 
 See [Cloudflare's guide to creating an API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/).
 
