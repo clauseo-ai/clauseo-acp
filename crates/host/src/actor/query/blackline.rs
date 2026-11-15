@@ -10,8 +10,11 @@
 //!    `<data>/tmp/blackline-<id>/` (`matter_worker/sides.rs`), and copies only;
 //! 3. where stetdoc runs: on a `clauseo-blackline` thread of its own, never the actor
 //!    (`run.rs`), whose answer is read by `parse.rs`;
-//! 4. what the caller gets: the blackline, or `blackline.failed` for any failure of the runs
-//!    or the read, whose detail goes to the log only (never document text);
+//! 4. what the caller gets: the blackline, with notices when part of it could not be shown or
+//!    stetdoc warned (`parse.rs`); or, when nothing can be shown, a refusal: stetdoc's own
+//!    (`blackline.nested_table` and the others `run.rs` names) or `blackline.failed` for any
+//!    other failure of the runs or the read. The detail goes to the log only, as counts and
+//!    codes (never document text);
 //! 5. how the folder goes: its guard (`BlacklineDir`) removes it on every path, before the
 //!    answer is sent; a folder a crash or quit left is removed at the next start
 //!    ([`sweep_leftovers`]). Nothing is written in the matter.
@@ -40,8 +43,8 @@ const THREAD_NAME: &str = "clauseo-blackline";
 /// The name of the start-up sweep's thread.
 const SWEEP_THREAD: &str = "clauseo-blackline-sweep";
 
-/// What a failed blackline's `HostError.message` says: always this, so no detail of the run
-/// (a path, a code of stetdoc's) reaches the client; the detail is logged.
+/// What a failed blackline's `HostError.message` says: always this, whatever its code, so no
+/// detail of the run (a path, a code of stetdoc's) reaches the client; the detail is logged.
 const FAILED_MESSAGE: &str = "the Word blackline failed; the detail is in the host's log";
 
 /// The prefix of every blackline folder's name in `<data>/tmp/`.
@@ -191,10 +194,24 @@ fn run_stetdoc(ask: Ask, dir: BlacklineDir) {
     let ran = futures::executor::block_on(run::blackline(&*launcher, &timer, &stetdoc, dir.path()));
     drop(dir);
     // The detail goes to the log alone; the caller gets a fixed message.
-    let answer = ran.map(QueryResult::WordBlackline).map_err(|failed| {
-        tracing::warn!(%failed, "the Word blackline failed");
-        Error::refused(ErrorCode::BlacklineFailed, FAILED_MESSAGE)
-    });
+    let answer = ran
+        .map(|read| {
+            if read.skipped > 0 || !read.warnings.is_empty() {
+                let first = read.first_skip.map(|at| at.to_string()).unwrap_or_default();
+                tracing::info!(
+                    skipped = read.skipped,
+                    first = %first,
+                    warnings = read.warnings.len(),
+                    codes = %read.warnings.join(","),
+                    "the Word blackline is shown with notices"
+                );
+            }
+            QueryResult::WordBlackline(read.blackline)
+        })
+        .map_err(|failed| {
+            tracing::warn!(%failed, code = failed.code.as_str(), "the Word blackline failed");
+            Error::refused(failed.code, FAILED_MESSAGE)
+        });
     let _gone = reply.send(answer);
 }
 
