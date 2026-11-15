@@ -130,6 +130,12 @@ fn in_memory() -> Counts {
     Counts::open(&dir, test_about(), true, false, 1)
 }
 
+/// Crash reports that record nothing (never ingested, so never recording).
+fn idle_crashes() -> Crashes {
+    let dir = std::env::temp_dir().join(format!("clauseo-desktop-crash-{}", std::process::id()));
+    Crashes::open(&dir, test_about(), 1)
+}
+
 /// A data folder holding `settings` as its `settings.json` and the first-act marker.
 fn after_first_act(test: &str, settings: &[u8]) -> (Scratch, Locations) {
     let scratch = Scratch::folder(test, &[]);
@@ -224,7 +230,7 @@ fn a_ui_count_goes_into_the_counts_once_they_are_open() {
         feature: UiFeature::Versions,
     });
     let counts = in_memory();
-    state.start(counts.clone());
+    state.start(counts.clone(), idle_crashes());
     state.count(UiCount::FeatureUsed {
         feature: UiFeature::Versions,
     });
@@ -250,7 +256,7 @@ fn a_setup_count_goes_into_the_counts_only_once_they_are_open() {
     state.bump(event);
     let counts = in_memory();
     assert_eq!(counts.today().sign_in.len(), 0);
-    state.start(counts.clone());
+    state.start(counts.clone(), idle_crashes());
     state.bump(event);
     let today = counts.today();
     assert_eq!(today.sign_in.len(), 1);
@@ -263,7 +269,7 @@ fn either_window_holding_the_focus_is_the_foreground() {
     // Focus before the counts open is kept for them.
     state.focused(crate::MAIN_WINDOW, true);
     let counts = in_memory();
-    state.start(counts);
+    state.start(counts, idle_crashes());
     let focus = |state: &CountsState| state.focus.lock().unwrap().contains(&true);
     assert!(focus(&state));
     // From main to settings, in either order of the two events.
@@ -347,9 +353,15 @@ fn the_exit_stops_the_tick_task_for_good() {
     let data = Scratch::folder("ticker-stop-counts", &[]);
     let counts = Counts::open(data.path(), test_about(), true, true, 1);
     let state = CountsState::default();
-    state.start(counts.clone());
+    state.start(counts.clone(), idle_crashes());
     let cell = bridge.cell();
-    state.run_ticker(|| spawn_ticker(counts.clone(), HttpsUpload::to(None), cell));
+    state.run_ticker(|| {
+        spawn_ticker(
+            (counts.clone(), idle_crashes()),
+            HttpsUpload::to(None),
+            cell,
+        )
+    });
     let task = state.stop_ticker().expect("the task had started");
     let ended = block_on(task);
     assert!(ended.is_err(), "the task ended by itself: {ended:?}");

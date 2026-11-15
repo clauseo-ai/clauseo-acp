@@ -11,6 +11,7 @@
 // Then the anonymous counts' switch (D-052), in the first run's words (UD1's "Send anonymous counts" and what they
 // hold), the same `privacy.counts` the first run writes: SettingsView.privacy, a flip one SetPrivacySettings patch,
 // settings_changed to both windows. A firm's lock shows it off and disabled, with "Managed by firm" under its line.
+// After the first run's line, one sentence of Settings' own: crash reports go with counts (0060).
 // Left out until something stands behind them: a case-law source's row, the row for Clauseo's anonymous counts, and
 // the crash report switch.
 //
@@ -123,10 +124,10 @@ function CountsRow({ ctx }: { ctx: SectionContext }) {
           className="py-0"
           control="switch"
           label={fl(w.lang, "Send anonymous counts")}
-          note={fl(
+          note={`${fl(
             w.lang,
             "How many questions, which features, how long answers take. Never your papers, your questions or the answers.",
-          )}
+          )} ${w.s("If Clauseo crashes, a short crash report goes with them, never anything from your papers.")}`}
           managed={locked ? w.s("Managed by firm") : undefined}
           checked={on}
           disabled={locked}

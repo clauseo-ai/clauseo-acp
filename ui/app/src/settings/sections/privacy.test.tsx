@@ -454,7 +454,8 @@ test("a write the host refuses (settings.locked) leaves the switch where it was,
 
 const COUNTS = "Send anonymous counts";
 const COUNTS_NOTE =
-  "How many questions, which features, how long answers take. Never your papers, your questions or the answers.";
+  "How many questions, which features, how long answers take. Never your papers, your questions or the answers." +
+  " If Clauseo crashes, a short crash report goes with them, never anything from your papers.";
 const PRIVACY_ON: PrivacySettings = { counts: true, crash_reports: false, counts_started: true };
 
 test("without the privacy switches from the host, no anonymous counts' switch", async () => {

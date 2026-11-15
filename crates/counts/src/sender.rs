@@ -6,7 +6,8 @@
 //! that the days wait for the next daily send. A 2xx or a `400` takes the days out of the queue;
 //! anything else is a failed try. A tally goes alone, at its random moment in the week after its
 //! week, never within an hour of a day try, with the same retries. One POST is in flight at most;
-//! one with no answer after 10 minutes is a failed try.
+//! one with no answer after 10 minutes is a failed try. None goes within an hour after a crash
+//! report ([`crate::Counts::hold_posts_until`]).
 
 use std::collections::BTreeMap;
 use std::io::Write as _;
@@ -155,6 +156,10 @@ pub(crate) struct Sender {
     /// process and a late answer to a POST from before off cannot match one made after.
     next_id: u64,
     last_day_try: Option<Time>,
+    /// When the last POST of this run started, which a crash report keeps an hour away from.
+    pub(crate) last_post: Option<Time>,
+    /// No POST before this: a crash report went less than an hour ago.
+    pub(crate) hold_until: Option<Time>,
 }
 
 impl Sender {
@@ -163,6 +168,8 @@ impl Sender {
     pub(crate) fn reset(&mut self) {
         *self = Sender {
             next_id: self.next_id,
+            last_post: self.last_post,
+            hold_until: self.hold_until,
             ..Sender::default()
         };
     }
@@ -184,6 +191,7 @@ impl Sender {
     fn post(&mut self, what: What, path: UploadPath, body: Vec<u8>, now: Time) -> Post {
         let id = PostId(self.next_id);
         self.next_id = self.next_id.wrapping_add(1);
+        self.last_post = Some(now);
         let (cancel_tx, cancel_rx) = oneshot::channel();
         self.in_flight = Some(InFlight {
             id,
@@ -207,7 +215,7 @@ impl Sender {
 }
 
 /// `bytes` gzipped, with no name and no time in the header.
-fn gzip(bytes: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn gzip(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(bytes).ok()?;
     encoder.finish().ok()
@@ -217,6 +225,9 @@ fn gzip(bytes: &[u8]) -> Option<Vec<u8>> {
 pub(crate) fn due(state: &mut State, now: Time) -> Option<Post> {
     expire_stale(state, now);
     if state.mode != Mode::Saving || state.sender.in_flight.is_some() {
+        return None;
+    }
+    if state.sender.hold_until.is_some_and(|until| now < until) {
         return None;
     }
     let today = now.day()?;

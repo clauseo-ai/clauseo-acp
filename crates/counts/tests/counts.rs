@@ -17,6 +17,12 @@ mod write;
 #[path = "counts/cells.rs"]
 mod cells;
 #[cfg(test)]
+#[path = "counts/crash.rs"]
+mod crash;
+#[cfg(test)]
+#[path = "counts/crash_send.rs"]
+mod crash_send;
+#[cfg(test)]
 #[path = "counts/first_act.rs"]
 mod first_act;
 #[cfg(test)]

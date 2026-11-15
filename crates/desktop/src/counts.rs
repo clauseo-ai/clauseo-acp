@@ -22,11 +22,16 @@
 //! - `count_ui`'s events ([`UiCount`]): only what the webview alone sees.
 //! - The setup pump's `agent_install` and `sign_in` ([`AppCounts`], `CountsState::bump`).
 //! - The upload ([`upload`]): HTTPS only, to the endpoint of the build.
+//! - Crash reports ([`crashes`], decision record 0060): opened with the counts, taken in and sent
+//!   by the same tick after the counts' half ([`crash_tick`]), which asks the host again just
+//!   before, for `privacy.counts` and whether policy locks `privacy.crash_reports` off. The
+//!   main window's first focus marks later crashes `after_launch`.
 //!
 //! `app_opened` (`cold`) is the host's: it counts it once it has started (`actor/counting.rs`),
 //! so desktop adds none. R23 adds `after_update`.
 
 mod about;
+mod crashes;
 mod ui;
 mod upload;
 
@@ -35,8 +40,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
+use clauseo_counts::schema::RendererGoneReason;
 use clauseo_counts::schema::{Event, Time};
-use clauseo_counts::{About, Counts, Upload, send_due};
+use clauseo_counts::{About, Counts, Crashes, Switch, Upload, send_crash_due, send_due};
 use clauseo_protocol::{HostQuery, Principal, QueryResult};
 use clauseo_settings::{Effective, Locations, Origin, WarningKind};
 use tauri::async_runtime::JoinHandle;
@@ -47,6 +53,9 @@ use crate::host_start::HostCell;
 pub use about::about;
 #[cfg(windows)]
 pub(crate) use about::under_program_files;
+#[cfg(target_os = "macos")]
+pub(crate) use crashes::on_renderer_gone;
+pub(crate) use crashes::watch_renderer;
 pub(crate) use ui::UiCount;
 pub(crate) use upload::HttpsUpload;
 
@@ -58,6 +67,8 @@ const TICK: Duration = Duration::from_secs(60);
 #[derive(Debug, Default)]
 pub(crate) struct CountsState {
     counts: OnceLock<Counts>,
+    /// The crash reports, which arrive with the counts.
+    crashes: OnceLock<Crashes>,
     /// Whether `main` and `settings` have the focus. Its lock also orders the counts' arrival
     /// against focus changes, so neither misses the other.
     focus: Mutex<[bool; 2]>,
@@ -73,9 +84,14 @@ struct Ticker {
 }
 
 impl CountsState {
-    /// Puts `counts` in place (once) and tells them whether a window has the focus already.
-    pub(crate) fn start(&self, counts: Counts) {
+    /// Puts `counts` and `crashes` in place (once) and tells the counts whether a window has the
+    /// focus already, and the crashes whether the main window had it.
+    pub(crate) fn start(&self, counts: Counts, crashes: Crashes) {
         let focus = self.focus.lock().unwrap_or_else(PoisonError::into_inner);
+        if focus.first().copied().unwrap_or(false) {
+            crashes.set_launched();
+        }
+        let _first = self.crashes.set(crashes);
         if self.counts.set(counts).is_ok()
             && let Some(counts) = self.counts.get()
         {
@@ -96,6 +112,12 @@ impl CountsState {
             *slot = focused;
         }
         let after = focus.contains(&true);
+        if place == 0
+            && focused
+            && let Some(crashes) = self.crashes.get()
+        {
+            crashes.set_launched();
+        }
         if before != after
             && let Some(counts) = self.counts.get()
         {
@@ -111,6 +133,15 @@ impl CountsState {
             return;
         };
         counts.bump(event.event());
+    }
+
+    /// A webview's renderer went: its crash report, while recording.
+    pub(crate) fn renderer_gone(&self, reason: RendererGoneReason) {
+        if let Some(crashes) = self.crashes.get()
+            && let Err(err) = crashes.record_renderer_gone(reason, now())
+        {
+            tracing::debug!(kind = %err.kind(), "a renderer gone was not recorded");
+        }
     }
 
     /// Counts one of the app's own events (the setup pump's, `setup/backend/count.rs`). Before
@@ -164,10 +195,21 @@ impl<R: Runtime> crate::setup::SetupCounts for AppCounts<R> {
     }
 }
 
+/// The counts and the crash reports beside them.
+pub(crate) type Opened = (Counts, Crashes);
+
 /// Opens the counts of `locations`' data folder with the effective settings, for an app whose
-/// executable is `exe`; none when the schema cannot describe this machine ([`about`]).
-pub fn open(locations: &Locations, effective: &Effective, exe: Option<&Path>) -> Option<Counts> {
-    Some(open_with(locations, effective, about(effective, exe)?))
+/// executable is `exe`, and the crash reports beside them ([`crashes::open`]); none when the
+/// schema cannot describe this machine ([`about`]).
+pub fn open(
+    locations: &Locations,
+    effective: &Effective,
+    exe: Option<&Path>,
+) -> Option<(Counts, Crashes)> {
+    let about = about(effective, exe)?;
+    let counts = open_with(locations, effective, about);
+    let crashes = crashes::open(locations, effective, about, &counts);
+    Some((counts, crashes))
 }
 
 /// [`open`] with the envelope given.
@@ -216,20 +258,64 @@ pub(crate) async fn host_counts_on(cell: &HostCell) -> Option<bool> {
     }
 }
 
-/// Starts the task that ticks `counts` every 60 s and makes the POSTs that are due through
-/// `upload`, asking the host in `cell` for `privacy.counts` before each. It never ends by
-/// itself: the exit aborts it ([`CountsState::stop_ticker`]).
+/// Puts the counts and crash reports in `app`'s `CountsState` and starts their task, which asks
+/// the bridge's host for the switches.
+pub(crate) fn start<R: Runtime>(app: &AppHandle<R>, opened: Opened) {
+    let (Some(state), Some(bridge)) = (
+        app.try_state::<CountsState>(),
+        app.try_state::<crate::bridge::Bridge>(),
+    ) else {
+        return;
+    };
+    state.start(opened.0.clone(), opened.1.clone());
+    let cell = bridge.cell();
+    state.run_ticker(|| spawn_ticker(opened, HttpsUpload::new(), cell));
+}
+
+/// The crash switch as the host holds it now (`GetSettings`, through
+/// `clauseo_host::crash::crash_switch`); none as [`host_counts_on`] gives none.
+pub(crate) async fn host_switch(cell: &HostCell) -> Option<Switch> {
+    let host = cell.host().await.ok()?;
+    match host
+        .query(Principal::LocalDesktop, HostQuery::GetSettings)
+        .await
+    {
+        Ok(QueryResult::Settings(view)) => Some(clauseo_host::crash::crash_switch(&view)),
+        _ => None,
+    }
+}
+
+/// Starts the task that ticks `counts` and `crashes` every 60 s and makes the POSTs that are
+/// due through `upload`, asking the host in `cell` for the switches before each half. It never
+/// ends by itself: the exit aborts it ([`CountsState::stop_ticker`]).
 pub(crate) fn spawn_ticker(
-    counts: Counts,
+    (counts, crashes): Opened,
     upload: HttpsUpload,
     cell: Arc<HostCell>,
 ) -> JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
         loop {
             tick_once(&counts, &upload, now(), host_counts_on(&cell)).await;
+            crash_tick(&crashes, &counts, &upload, now(), host_switch(&cell)).await;
             async_io::Timer::after(TICK).await;
         }
     })
+}
+
+/// The crash half of a tick at `now`: reads `switch` (no value: nothing changes, nothing is
+/// sent), then takes in new crash reports, deletes what the switch no longer allows, and sends
+/// the report due ([`send_crash_due`]).
+pub(crate) async fn crash_tick(
+    crashes: &Crashes,
+    counts: &Counts,
+    upload: &dyn Upload,
+    now: Time,
+    switch: impl Future<Output = Option<Switch>>,
+) {
+    let Some(switch) = switch.await else {
+        return;
+    };
+    send_crash_due(crashes, counts, upload, now, &|| switch).await;
 }
 
 /// One tick at `now`: saves on a blocking thread, then reads `effective_on` and makes the POST

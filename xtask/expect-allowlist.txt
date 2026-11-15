@@ -696,3 +696,10 @@ crates/pdf/src/lib.rs find_python_with clippy::disallowed_methods
 crates/pdf/src/job.rs - unsafe_code
 crates/pdf/src/lib.rs start clippy::disallowed_methods
 crates/pdf/src/lib.rs start clippy::disallowed_methods
+# S22's launch cut (decision record 0060): the native crash handler's sigaction and unhandled-
+# exception filter, and its test's real fault in a child run of the test binary.
+crates/host/src/crash/native/unix.rs - unsafe_code
+crates/host/src/crash/native/win.rs - unsafe_code
+crates/desktop/src/counts/crashes/win.rs - unsafe_code
+crates/host/src/crash/tests.rs native::native_child unsafe_code
+crates/host/src/crash/tests.rs native::run_child clippy::disallowed_methods

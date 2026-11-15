@@ -1,0 +1,13 @@
+{
+  "UC-261": {
+    "en": "If Clauseo crashes, a short crash report goes with them, never anything from your papers.",
+    "hi": "अगर Clauseo क्रैश हो जाए, तो इनके साथ एक छोटी क्रैश रिपोर्ट जाती है, जिसमें आपके दस्तावेज़ों से कभी कुछ नहीं होता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crash-reports-app (provisional; final English for Rohan's approval)",
+    "note": "Settings, Privacy: the anonymous counts' switch, after UEP-26's line; crash reports follow the counts (decision 0060)"
+  }
+}

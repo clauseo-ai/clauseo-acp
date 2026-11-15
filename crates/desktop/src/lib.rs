@@ -228,7 +228,7 @@ pub fn run() -> tauri::Result<()> {
     // The Mac's menu bar (menu.rs). Windows and Linux get none: a menu would be a bar on the
     // undecorated window.
     #[cfg(target_os = "macos")]
-    let builder = menu::on_builder(builder);
+    let builder = counts::on_renderer_gone(menu::on_builder(builder));
     let builder = builder
         // First, so a second launch ends before any other plugin starts.
         .plugin_rust_only(tauri_plugin_single_instance::init(
@@ -450,9 +450,9 @@ fn start_host<R: Runtime>(
         let config = mcp::with_mcp_confirm(mcp::with_mcp_secrets(config, secrets), app.clone());
         let config = mcp::with_mcp_import(config);
         let config = match counts {
-            Some(counts) => {
-                start_counts(&app, counts.clone());
-                config.with_counts(counts)
+            Some(opened) => {
+                counts::start(&app, opened.clone());
+                config.with_counts(opened.0)
             }
             None => config,
         };
@@ -471,20 +471,6 @@ fn start_host<R: Runtime>(
     #[cfg(windows)]
     admin_refresh::spawn();
     started
-}
-
-/// Puts `counts` in `app`'s `CountsState` and starts their task, which asks the bridge's host
-/// for the switch.
-fn start_counts<R: Runtime>(app: &AppHandle<R>, counts: clauseo_counts::Counts) {
-    let (Some(state), Some(bridge)) = (
-        app.try_state::<counts::CountsState>(),
-        app.try_state::<Bridge>(),
-    ) else {
-        return;
-    };
-    state.start(counts.clone());
-    let cell = bridge.cell();
-    state.run_ticker(|| counts::spawn_ticker(counts, counts::HttpsUpload::new(), cell));
 }
 
 /// Stops the usage counts' task, then, off the UI thread, the agents' jobs (`Agents::shutdown`,
@@ -593,6 +579,7 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     window_size::show_first_frame(&window);
     #[cfg(windows)]
     window_frame::quit_item::add(&window);
+    counts::watch_renderer(&window);
     // Destroyed: the bridge drops main's stream, and the settings window goes too.
     settings_window::on_destroyed(&window, built);
     Ok(())

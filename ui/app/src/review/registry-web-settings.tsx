@@ -136,4 +136,12 @@ export const WEB_SETTINGS: Entry[] = [
     ),
     { tools: ON, privacy: COUNTS },
   ),
+  // 0060: crash reports follow the counts; Settings' own sentence after the first run's line
+  entry(
+    "UC-261",
+    settingsWords(
+      "If Clauseo crashes, a short crash report goes with them, never anything from your papers.",
+    ),
+    { tools: ON, privacy: COUNTS },
+  ),
 ];
