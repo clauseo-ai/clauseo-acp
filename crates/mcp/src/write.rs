@@ -270,6 +270,27 @@ pub(crate) fn needs_copy(error: &io::Error) -> bool {
     }
 }
 
+/// The OS error code in `error`, or in the error it wraps (Windows names each failed call
+/// around the OS error: `write/windows.rs`), however deep.
+pub(crate) fn os_code(error: &io::Error) -> Option<i32> {
+    if let Some(code) = error.raw_os_error() {
+        return Some(code);
+    }
+    let mut inner: Option<&(dyn std::error::Error + 'static)> = error
+        .get_ref()
+        .map(|inner| inner as &(dyn std::error::Error + 'static));
+    while let Some(at) = inner {
+        if let Some(code) = at
+            .downcast_ref::<io::Error>()
+            .and_then(io::Error::raw_os_error)
+        {
+            return Some(code);
+        }
+        inner = at.source();
+    }
+    None
+}
+
 mod copy;
 
 pub(crate) use copy::{CopyFailed, Incoming, Mark};

@@ -70,7 +70,7 @@ pub(crate) fn mark_copy(source: &std::fs::File, copy: &std::fs::File) -> io::Res
 /// Any other error (a sharing violation or a denial while a scanner holds the new file,
 /// `EBUSY`, `EINTR`, a full disk) is not the drive's: the copy is tried again.
 pub(crate) fn cannot_keep(error: &io::Error) -> bool {
-    let Some(code) = error.raw_os_error() else {
+    let Some(code) = crate::write::os_code(error) else {
         return true;
     };
     #[cfg(unix)]

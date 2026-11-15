@@ -39,6 +39,13 @@ fn a_move_onto_a_file_fails_with_already_exists() {
     let folder = open_folder(&into).unwrap();
     let error = move_new_into(&from, &folder, "to.txt".as_ref()).unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::AlreadyExists, "{error}");
+    // The error names the call and the status, and keeps the OS code.
+    assert!(
+        error.to_string().starts_with("NtSetInformationFile("),
+        "{error}"
+    );
+    assert!(error.to_string().contains("NTSTATUS 0x"), "{error}");
+    assert!(crate::write::os_code(&error).is_some(), "{error}");
     assert_eq!(
         std::fs::read_to_string(into.join("to.txt")).unwrap(),
         "kept"
