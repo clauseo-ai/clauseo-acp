@@ -217,3 +217,108 @@ fn a_recursive_commands_operands_and_the_working_folder_are_its_roots() {
         paths(&[".", r"C:\p"])
     );
 }
+
+/// Every spelling PowerShell takes for `-Recurse` makes its walkers walk: any prefix of the
+/// name, its alias `-s`, `-Depth` from `-de`, with an attached value, after an en dash, em dash
+/// or horizontal bar, in any case; `-d` alone (`-Directory`) does not.
+#[test]
+fn every_powershell_spelling_of_recurse_walks() {
+    let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
+    let mut spellings: Vec<String> = (1..="recurse".len())
+        .map(|end| format!("-{}", "recurse".get(..end).unwrap_or_default()))
+        .collect();
+    spellings.extend(
+        [
+            "-RECURSE",
+            "-Rec",
+            "-s",
+            "-S",
+            "-de",
+            "-dep",
+            "-dept",
+            "-depth",
+            "-Depth",
+            "-DE",
+            "-Recurse:$true",
+            "-r:$false",
+            "-Depth:3",
+            "-s:$true",
+        ]
+        .map(str::to_owned),
+    );
+    spellings.extend(
+        ["\u{2013}", "\u{2014}", "\u{2015}"]
+            .iter()
+            .flat_map(|dash| {
+                ["r", "Recurse", "Depth", "s:$true"].map(|name| format!("{dash}{name}"))
+            }),
+    );
+    for spelling in &spellings {
+        for command in ["gci", "Get-ChildItem", "GCI", "dir", "Remove-Item", "cpi"] {
+            for windows in [true, false] {
+                let line = format!("{command} {spelling} /p");
+                assert_eq!(
+                    recursive_roots(&line, windows),
+                    paths(&[".", "/p"]),
+                    "{line}"
+                );
+            }
+        }
+        let line = format!(r"Get-ChildItem {spelling} C:\p");
+        assert_eq!(
+            recursive_roots(&line, true),
+            paths(&[".", r"C:\p"]),
+            "{line}"
+        );
+    }
+    assert_eq!(
+        recursive_roots("Get-ChildItem -Depth 2 -Path:/p", false),
+        paths(&[".", "2", "/p"])
+    );
+    for line in [
+        "gci -d /p",
+        "Get-ChildItem -Directory /p",
+        "gci /p",
+        "gci -Force /p",
+    ] {
+        assert!(recursive_roots(line, false).is_empty(), "{line}");
+    }
+}
+
+/// `ls`, `cp` and `rm` take PowerShell's short spellings only in a line known to be
+/// PowerShell (a `pwsh -Command` script, or a line running a cmdlet); in Bash `sort -r`, `ls -r`
+/// and `tail -s` do not walk. `-Recurse` in full makes any command walk.
+#[test]
+fn powershell_short_spellings_apply_only_to_powershell() {
+    let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
+    for line in [
+        "sort -r memo.txt",
+        "ls -r /p",
+        "ls -s /p",
+        "tail -s 5 x.log",
+        "rm -s /p",
+        "cp -s /p /q",
+        "bash -c 'ls -r /p'",
+        "ls -dep /p",
+    ] {
+        for windows in [true, false] {
+            assert!(recursive_roots(line, windows).is_empty(), "{line}");
+        }
+    }
+    for line in [
+        r#"pwsh -NoProfile -Command "ls -r /p""#,
+        "powershell -Command \"rm \u{2013}Recurse:$true /p\"",
+        "Set-Location /q; ls -r /p",
+        "Write-Output x; rm -Depth 3 /p",
+    ] {
+        let roots = recursive_roots(line, false);
+        assert!(roots.contains(&PathBuf::from("/p")), "{line}: {roots:?}");
+    }
+    for line in [
+        "anything -recurse /p",
+        "Get-Item -Recurse:$false /p",
+        "x \u{2014}RECURSE /p",
+    ] {
+        assert_eq!(recursive_roots(line, false), paths(&[".", "/p"]), "{line}");
+    }
+}

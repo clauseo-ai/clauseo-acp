@@ -89,26 +89,156 @@ const WRAPPERS: [&str; 12] = [
     "stdbuf", "xargs",
 ];
 
+/// PowerShell commands that walk a folder given `-Recurse` in any of its spellings
+/// ([`powershell_recurses`]), whatever shell runs the line: Get-ChildItem, Copy-Item and
+/// Remove-Item (the cmdlets of PowerShell's file system provider that take `-Recurse`; Get-Item
+/// takes none), with their aliases that no POSIX system ships (GNU's `dir` sorts in reverse
+/// with `-r`; walking a folder from it is a rare over-block, as `dir` is mostly PowerShell's).
+const POWERSHELL_WALKERS: [&str; 11] = [
+    "get-childitem",
+    "gci",
+    "dir",
+    "copy-item",
+    "copy",
+    "cpi",
+    "remove-item",
+    "ri",
+    "del",
+    "erase",
+    "rd",
+];
+
+/// The aliases of [`POWERSHELL_WALKERS`]' cmdlets that are POSIX commands too (`ls -r` sorts in
+/// reverse, `rm -s` is no option): read as PowerShell's only in a line known to be PowerShell.
+const POWERSHELL_SHARED: [&str; 4] = ["ls", "cp", "rm", "rmdir"];
+
+/// Verbs of PowerShell's cmdlet names (`Get-Item`): a line running one is PowerShell.
+const POWERSHELL_VERBS: [&str; 24] = [
+    "get", "set", "new", "remove", "copy", "move", "rename", "write", "select", "where", "foreach",
+    "invoke", "test", "out", "format", "measure", "sort", "resolve", "push", "pop", "clear", "add",
+    "import", "export",
+];
+
 /// The folders the recursive commands of a command line walk ([`WALKERS`], or
-/// [`RECURSIVE_WITH_FLAG`] with its flag, or any command given PowerShell's `-Recurse`): each of
-/// its operands (every word after the command that does not start with `-`, a leading `$HOME`
-/// made `~`), and the working folder (`.`), where most start when given none.
+/// [`RECURSIVE_WITH_FLAG`] with its flag, or any command given PowerShell's `-Recurse` in full,
+/// or a PowerShell walker given one of its spellings, [`is_recursive`]): each of its operands
+/// (every word after the command that does not start with a dash, a leading `$HOME` made `~`;
+/// for a PowerShell walker the value of `-Path:x` and `-LiteralPath:x` too), and the working
+/// folder (`.`), where most start when given none.
+///
+/// The fence is not told which tool sent the line (Bash or PowerShell), so it is known to be
+/// PowerShell only by its text ([`segment_groups`]): a script given to `pwsh` or `powershell`
+/// with `-Command`, or a line (or script) one of whose commands is a cmdlet (`Get-…`, a
+/// [`POWERSHELL_VERBS`] verb and a dash) or a [`POWERSHELL_WALKERS`] name.
 pub(crate) fn recursive_roots(line: &str, windows: bool) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for words in segments(line, windows) {
-        let found = command_at(&words).and_then(|at| words.get(at..));
-        let Some((command, args)) = found.and_then(<[String]>::split_first) else {
-            continue;
-        };
-        let name = command_name(command, windows);
-        if !is_recursive(&name, args) {
-            continue;
+    for (group, powershell) in segment_groups(line, windows) {
+        for words in group {
+            let found = command_at(&words).and_then(|at| words.get(at..));
+            let Some((command, args)) = found.and_then(<[String]>::split_first) else {
+                continue;
+            };
+            let name = command_name(command, windows);
+            if !is_recursive(&name, args, powershell) {
+                continue;
+            }
+            out.push(PathBuf::from("."));
+            let walker = powershell_walker(&name, powershell);
+            for word in args {
+                if let Some(value) = walker.then(|| path_value(word)).flatten() {
+                    out.push(PathBuf::from(home_as_tilde(value)));
+                } else if !starts_with_dash(word) {
+                    out.push(PathBuf::from(home_as_tilde(word)));
+                }
+            }
         }
-        out.push(PathBuf::from("."));
-        let operands = args.iter().filter(|word| !word.starts_with('-'));
-        out.extend(operands.map(|word| PathBuf::from(home_as_tilde(word))));
     }
     out
+}
+
+/// A command line's simple commands ([`segments`]) in groups: the line's own, then each
+/// script's, each with whether it is known to be PowerShell: a script given to `pwsh` or
+/// `powershell`, or a group one of whose commands is PowerShell's own ([`powershell_name`]).
+fn segment_groups(line: &str, windows: bool) -> Vec<(Vec<Vec<String>>, bool)> {
+    let outer = split_line(line, windows);
+    let escape = if windows {
+        Escape::Backtick
+    } else {
+        Escape::Backslash
+    };
+    let mut groups = vec![(outer.clone(), false)];
+    for words in &outer {
+        let from = command_at(words).and_then(|at| words.get(at..));
+        if let Some((script, inner)) = from.and_then(|from| shell_script(from, escape)) {
+            let program = from.and_then(<[String]>::first);
+            let name = program.map(|word| command_name(word, windows));
+            let pwsh = matches!(name.as_deref(), Some("pwsh" | "powershell"));
+            let inner = split_line(&script, matches!(inner, Escape::Backtick));
+            groups.push((inner, pwsh));
+        }
+    }
+    for (group, powershell) in &mut groups {
+        *powershell = *powershell
+            || group.iter().any(|words| {
+                let word = command_at(words).and_then(|at| words.get(at));
+                word.is_some_and(|word| powershell_name(&command_name(word, windows)))
+            });
+    }
+    groups
+}
+
+/// Whether the command name `name` is PowerShell's own: a [`POWERSHELL_WALKERS`] name,
+/// `iex`, or a cmdlet (a [`POWERSHELL_VERBS`] verb, a dash and a noun).
+fn powershell_name(name: &str) -> bool {
+    let cmdlet = name.split_once('-').is_some_and(|(verb, noun)| {
+        POWERSHELL_VERBS.contains(&verb) && noun.starts_with(|c: char| c.is_ascii_alphabetic())
+    });
+    cmdlet || name == "iex" || POWERSHELL_WALKERS.contains(&name)
+}
+
+/// Whether `name` is a PowerShell command that takes `-Recurse`: a [`POWERSHELL_WALKERS`] name,
+/// or in a PowerShell line (`powershell`) a [`POWERSHELL_SHARED`] one.
+fn powershell_walker(name: &str, powershell: bool) -> bool {
+    POWERSHELL_WALKERS.contains(&name) || (powershell && POWERSHELL_SHARED.contains(&name))
+}
+
+/// The dashes PowerShell takes before a parameter's name: `-`, en dash, em dash, horizontal bar.
+const DASHES: [char; 4] = ['-', '\u{2013}', '\u{2014}', '\u{2015}'];
+
+/// Whether `word` starts with one of PowerShell's [`DASHES`].
+fn starts_with_dash(word: &str) -> bool {
+    word.starts_with(DASHES)
+}
+
+/// A PowerShell parameter word's name, lowercased, without its dash ([`DASHES`]) and its
+/// attached `:value` (`-Recurse:$true` is `recurse`). None for a word without a dash.
+fn parameter_name(word: &str) -> Option<String> {
+    let rest = word.strip_prefix(DASHES)?;
+    let name = rest.split(':').next().unwrap_or(rest);
+    Some(name.to_lowercase())
+}
+
+/// The value of a `-Path:x` or `-LiteralPath:x` word (any prefix of the name, `-lp:x`).
+fn path_value(word: &str) -> Option<&str> {
+    let name = parameter_name(word)?;
+    let (_, value) = word.split_once(':')?;
+    let path = !name.is_empty()
+        && ("path".starts_with(&name) || "literalpath".starts_with(&name) || name == "lp");
+    path.then_some(value)
+}
+
+/// Whether `word` makes a PowerShell walker recurse: `-Recurse` by any prefix of its name
+/// (`-r`, `-rec`…), its alias `-s` (PowerShell 7), or `-Depth` by a prefix from `-de` (which
+/// recurses, in PowerShell 5.1 too; `-d` alone is `-Directory`'s alias), in any case, after
+/// any of PowerShell's [`DASHES`], with or without an attached `:value` (`-Recurse:$false`
+/// counts too: erring towards a walk only refuses more).
+fn powershell_recurses(word: &str) -> bool {
+    let Some(name) = parameter_name(word) else {
+        return false;
+    };
+    let recurse = !name.is_empty() && "recurse".starts_with(&name);
+    let depth = name.len() >= 2 && "depth".starts_with(&name);
+    recurse || depth || name == "s"
 }
 
 /// Where a simple command's command word is: past assignments (`A=b`) and [`WRAPPERS`] with
@@ -144,9 +274,16 @@ fn command_name(word: &str, windows: bool) -> String {
     name.strip_suffix(".exe").map(str::to_owned).unwrap_or(name)
 }
 
-/// Whether the command `name` with `args` walks the folders it is given.
-fn is_recursive(name: &str, args: &[String]) -> bool {
-    if WALKERS.contains(&name) || args.iter().any(|arg| arg.eq_ignore_ascii_case("-recurse")) {
+/// Whether the command `name` with `args` walks the folders it is given: a [`WALKERS`] one,
+/// any command given `-Recurse` in full (any dash, any `:value`), a PowerShell walker given
+/// any spelling of it ([`powershell_walker`], [`powershell_recurses`]; `powershell`: the line
+/// is known to be PowerShell), or a [`RECURSIVE_WITH_FLAG`] one with its flag.
+fn is_recursive(name: &str, args: &[String], powershell: bool) -> bool {
+    let full = |arg: &String| parameter_name(arg).is_some_and(|name| name == "recurse");
+    if WALKERS.contains(&name) || args.iter().any(full) {
+        return true;
+    }
+    if powershell_walker(name, powershell) && args.iter().any(|arg| powershell_recurses(arg)) {
         return true;
     }
     if !RECURSIVE_WITH_FLAG.contains(&name) {
@@ -195,20 +332,8 @@ pub(crate) fn command_words(line: &str, windows: bool) -> Vec<String> {
 /// them (`pre_write_guard`'s `shell_script`). One level only: a script's own scripts are not
 /// read.
 fn segments(line: &str, windows: bool) -> Vec<Vec<String>> {
-    let outer = split_line(line, windows);
-    let escape = if windows {
-        Escape::Backtick
-    } else {
-        Escape::Backslash
-    };
-    let mut out = outer.clone();
-    for words in &outer {
-        let from = command_at(words).and_then(|at| words.get(at..));
-        if let Some((script, inner)) = from.and_then(|from| shell_script(from, escape)) {
-            out.extend(split_line(&script, matches!(inner, Escape::Backtick)));
-        }
-    }
-    out
+    let groups = segment_groups(line, windows);
+    groups.into_iter().flat_map(|(group, _)| group).collect()
 }
 
 /// A command line's simple commands (split at `;`, `|`, `&`, `(`, `)`, backticks and line
