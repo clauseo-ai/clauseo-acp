@@ -355,17 +355,22 @@ two dependencies, `profile` and `tracing`.
 - **Start-up.** The profile is built once, on the host-start thread (`host_start.rs`), before
   `Host::start`. The window never waits on it, but the host starts after it, and every bridge
   command waits for the host. So loading stetdoc's skill is bounded: both of stetdoc's runs
-  together get `start::FIRST_LIMIT`, 3 s. Past it, the load is dropped, which kills
-  stetdoc's process tree. A `--version` that fails treats stetdoc as absent (no skill, no
+  together get `start::FIRST_LIMIT`, 3 s, and only for a stetdoc already seen to answer (a
+  marker, `<data>/profile/stetdoc-seen`, keeps the path, size and modification time of the
+  stetdoc last seen to answer). One not seen yet, a first run after an install or an update
+  that Defender may be scanning, gets no try at the start: the host starts at once
+  (2026-11-15). Past the limit, the load is dropped, which kills stetdoc's process tree. A `--version` that fails treats stetdoc as absent (no skill, no
   prepend, a warning). A skill that fails or runs past it after a working `--version` leaves
   only the skill out (2026-11-10): stetdoc stays on the agents' `PATH` and in the app
   (`HostConfig::with_stetdoc`).
-  A `--version` that only runs past the limit (a new program's first run while the OS scans
-  it, after an install or an update) keeps stetdoc on, with the skill a previous run cached
-  when one loads, and the same two runs go again once on a thread of their own within 30 s
-  (`clauseo_profile::skills::stetdoc::start`, 2026-11-11). Their answer goes into the
-  profile the hook reads at each call, so the next agent start gets it: the skill, or after a
-  real failure no stetdoc line and no skill. The `PATH` entry and the blackline's program
+  A stetdoc not seen yet, or a `--version` that runs past the limit or does not start, keeps
+  stetdoc on, with the skill a previous run cached when one loads, and the same two runs go
+  again on a thread of their own, one try after another while they time out or do not start:
+  20 s (not seen yet only), 20 s, then 30 s (`clauseo_profile::skills::stetdoc::start`,
+  2026-11-11 and 2026-11-15). An answer is recorded in the marker. It goes into the profile
+  the hook reads at each launch, so the agent starts that follow get it: the skill, or after a
+  real failure no stetdoc line and no skill. An agent already running keeps what it launched
+  with until it starts again (after 300 s idle, for one); nothing is shown to the lawyer. The `PATH` entry and the blackline's program
   were given to the host at its start and stay until the app restarts.
   stetdoc 0.9.3 prints its skill's body with no frontmatter: Clauseo writes one, its
   description stetdoc's first `# ` heading, the body unchanged (2026-11-11).
@@ -420,8 +425,9 @@ two dependencies, `profile` and `tracing`.
   until one is installed.
 - **The stetdoc lookup matches `which`**, not only "a file named stetdoc": a non-program file
   earlier on `PATH` is skipped. The brief's "found by `which`" left this open.
-- **A slow stetdoc is bounded at 3 s** at start-up (`STETDOC_START_LIMIT`), within stetdoc's own
-  10 s per run (`RUN_LIMIT`).
+- **A slow stetdoc is bounded** at start-up: 3 s for a stetdoc seen before, nothing for one not
+  seen yet; the background tries take 20 s, 20 s and 30 s (`start::Limits::APP`).
+  `skills get core` keeps stetdoc's own 10 s per run (`RUN_LIMIT`) inside a try's limit.
 
 ### Tool switches over the wire
 

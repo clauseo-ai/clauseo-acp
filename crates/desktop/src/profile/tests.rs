@@ -427,6 +427,7 @@ printf -- '---\\nname: stetdoc\\ndescription: Edits Word files.\\n---\\nUse it.\
     scratch.executable("tools/stetdoc/stetdoc");
     let folder = scratch.dir("tools/stetdoc");
     let locations = Locations::under_root(&scratch.dir("data"));
+    seen_before(&locations, &folder.join("stetdoc"));
     let hook = DesktopProfile::build_with(&locations, None, Some(folder.as_os_str())).unwrap();
     assert_eq!(hook.path_prepend(), Some(folder));
     let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
@@ -438,6 +439,15 @@ printf -- '---\\nname: stetdoc\\ndescription: Edits Word files.\\n---\\nUse it.\
         "{}",
         developer_instructions(&keys)
     );
+}
+
+/// Records `program` in the marker of the profile under `locations` as seen to answer, so the
+/// build tries it at the start; one not seen yet is tried in the background (`release.rs`).
+#[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
+fn seen_before(locations: &Locations, program: &std::path::Path) {
+    let exe = std::env::current_exe().unwrap();
+    let paths = paths_for(locations, exe, Some(program.to_path_buf())).unwrap();
+    clauseo_profile::skills::stetdoc::start::seen::record(&paths.stetdoc_seen(), paths.stetdoc());
 }
 
 /// A stub stetdoc that answers both runs at once, its skill with a frontmatter that parses.
@@ -456,6 +466,7 @@ fn a_shared_path_folder_is_not_prepended() {
     scratch.executable("shared/git");
     let path = std::env::join_paths([PathBuf::from("/usr/bin"), scratch.dir("shared")]).unwrap();
     let locations = Locations::under_root(&scratch.dir("data"));
+    seen_before(&locations, &scratch.dir("shared").join("stetdoc"));
     let hook = DesktopProfile::build_with(&locations, None, Some(&path)).unwrap();
     assert_eq!(hook.path_prepend(), None);
     let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
@@ -476,36 +487,6 @@ fn a_non_executable_stetdoc_does_not_shadow_the_real_one() {
     let locations = Locations::under_root(&scratch.dir("data"));
     let hook = DesktopProfile::build_with(&locations, None, Some(&path)).unwrap();
     assert_eq!(hook.path_prepend(), Some(scratch.dir("b")));
-}
-
-/// D3: a stetdoc that hangs on `skills get core` is stopped within the first limit
-/// (`start::FIRST_LIMIT`, 3 s): the build returns well before stetdoc's own 10 s limit, with
-/// no stetdoc skill. Its `--version` worked, so it stays on: its folder first on PATH and the
-/// stetdoc line in the instructions.
-#[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
-#[test]
-fn a_stetdoc_slow_to_print_its_skill_stays_on_without_it() {
-    let scratch = Scratch::new("profile-slow-stetdoc", &["data", "slow"]);
-    scratch.file(
-        "slow/stetdoc",
-        b"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'stetdoc 9.9.9'; else sleep 60; fi\n",
-    );
-    scratch.executable("slow/stetdoc");
-    let path = scratch.dir("slow").into_os_string();
-    let locations = Locations::under_root(&scratch.dir("data"));
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _sent = tx.send(DesktopProfile::build_with(&locations, None, Some(&path)));
-    });
-    let hook = rx
-        .recv_timeout(std::time::Duration::from_secs(7))
-        .expect("the build returns within 7 s")
-        .unwrap();
-    assert_eq!(hook.path_prepend(), Some(scratch.dir("slow")));
-    let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
-    assert!(!token.root().join("stetdoc").exists());
-    let line = clauseo_profile::instructions::STETDOC_CLI.trim();
-    assert!(hook.profile().instructions().contains(line));
 }
 
 #[test]

@@ -1,8 +1,9 @@
-//! stetdoc at the app's start (`skills::stetdoc::start`): a `--version` that only passed the
-//! first limit keeps stetdoc on at once (with the cached skill when one loads) and is checked
-//! again in the background, whose answer the next agent start gets; a real failure within the
-//! first limit is absent at once and never checked again. The stub stetdoc runs for real. A slow
-//! stetdoc is the stub held by `stub-hang` with a timer whose waits end at once: the run cannot
+//! stetdoc at the app's start (`skills::stetdoc::start`), for a stetdoc seen to answer before:
+//! a `--version` that passed the 3 s limit keeps stetdoc on at once (with the cached skill when
+//! one loads) and is tried again in the background, whose answer the next agent start gets; a
+//! real failure at the start is absent at once and never checked again. A stetdoc not seen yet,
+//! the limits and the background's tries in turn are in `stetdoc_first.rs`. The stub stetdoc
+//! runs for real. A slow stetdoc is the stub held by `stub-hang` with a timer whose waits end at once: the run cannot
 //! answer, so the deadline wins whichever future `select` polls first. A stetdoc that answers in
 //! time is the stub with a timer whose waits never end. No outcome hangs on the wall clock.
 
@@ -15,7 +16,7 @@ use std::time::Duration;
 use clauseo_process::{PassthroughLauncher, SpawnOptions, Timer};
 use clauseo_profile::instructions::STETDOC_CLI;
 use clauseo_profile::skills::stetdoc::start::{
-    self, FIRST_LIMIT, Found, RECHECK_LIMIT, Start, State, cached_skill,
+    self, FIRST_LIMIT, Found, LONG_LIMIT, Limits, RECHECK_LIMIT, Start, State, cached_skill, seen,
 };
 use clauseo_profile::skills::stetdoc::{STETDOC, skill_source};
 use clauseo_profile::skills::{self, render, write_rendered};
@@ -99,7 +100,7 @@ impl Timer for AtTheSkillRun {
 /// A stub stetdoc in `<root>/bin` printing `version` and 0.9.3's skill text, and the skills
 /// folder of Claude's plugin, which the launch writes fill and the start reads as its cache.
 #[cfg(test)]
-fn stetdoc_in(root: &Scratch, version: &str) -> (PathBuf, PathBuf) {
+pub(crate) fn stetdoc_in(root: &Scratch, version: &str) -> (PathBuf, PathBuf) {
     let bin = root.join("bin");
     write::fresh_dir(&bin).unwrap();
     let real = std::str::from_utf8(REAL_0_9_3).unwrap();
@@ -111,7 +112,7 @@ fn stetdoc_in(root: &Scratch, version: &str) -> (PathBuf, PathBuf) {
 
 /// Holds every run of the stub in `root` until [`answers`]: it prints nothing and does not exit.
 #[cfg(test)]
-fn slow(root: &Scratch) {
+pub(crate) fn slow(root: &Scratch) {
     write::write(&root.join("bin").join("stub-hang"), b"").unwrap();
 }
 
@@ -123,22 +124,49 @@ fn answers(root: &Scratch) {
 
 /// 0.9.3's skill as it loads.
 #[cfg(test)]
-fn skill_0_9_3() -> SkillSource {
+pub(crate) fn skill_0_9_3() -> SkillSource {
     skill_source("stetdoc 0.9.3", REAL_0_9_3).unwrap()
 }
 
-/// [`start::start`] with `timer`.
+/// The marker of the stetdoc seen to answer, of the profile under `<root>` for the stub in
+/// `<root>/bin` ([`stetdoc_in`]).
+#[cfg(test)]
+fn seen_marker(program: &Path) -> PathBuf {
+    let root = program.parent().unwrap().parent().unwrap();
+    profile_paths(root).stetdoc_seen()
+}
+
+/// [`start::start`] with `timer` and the app's limits, of a stetdoc seen to answer before, so
+/// the start tries it within 3 s (one not seen yet is in `stetdoc_first.rs`).
 #[cfg(test)]
 fn first<T: Timer>(timer: &T, program: &Path, cached: &Path) -> Start {
     let launcher = PassthroughLauncher::new(SpawnOptions::new());
-    block_on(start::start(&launcher, timer, program, cached))
+    let seen = seen_marker(program);
+    seen::record(&seen, program);
+    block_on(start::start(
+        &launcher,
+        timer,
+        program,
+        cached,
+        &seen,
+        Limits::APP,
+    ))
 }
 
-/// [`start::recheck`] with `timer`.
+/// [`start::recheck`] with `timer`: one try, within 30 s.
 #[cfg(test)]
 fn again<T: Timer>(timer: &T, program: &Path, cached: &Path, now: &State) -> Option<State> {
     let launcher = PassthroughLauncher::new(SpawnOptions::new());
-    block_on(start::recheck(&launcher, timer, program, cached, now))
+    let seen = seen_marker(program);
+    block_on(start::recheck(
+        &launcher,
+        timer,
+        program,
+        cached,
+        &seen,
+        now,
+        &[RECHECK_LIMIT],
+    ))
 }
 
 /// What the agents are told and given under `state`: whether the instructions hold the
@@ -175,9 +203,19 @@ fn cache_old_skill(cached: &Path) -> SkillSource {
 }
 
 #[test]
-fn the_limits_are_3_s_at_start_and_30_s_in_the_background() {
+fn the_limits_are_3_s_or_20_s_at_start_20_s_for_the_retry_and_30_s_in_the_background() {
     assert_eq!(FIRST_LIMIT, Duration::from_secs(3));
+    assert_eq!(LONG_LIMIT, Duration::from_secs(20));
     assert_eq!(RECHECK_LIMIT, Duration::from_secs(30));
+    assert_eq!(
+        Limits::APP,
+        Limits {
+            seen: FIRST_LIMIT,
+            unseen: LONG_LIMIT,
+            retry: LONG_LIMIT,
+            recheck: RECHECK_LIMIT,
+        }
+    );
 }
 
 /// A timeout with no cached skill: on at once, the instructions' stetdoc line included, with no
@@ -192,7 +230,7 @@ fn a_timeout_then_a_background_success_brings_the_skill() {
         started,
         Start {
             state: State::On(None),
-            recheck: true
+            later: vec![LONG_LIMIT, RECHECK_LIMIT]
         }
     );
     assert_eq!(told(&root, &started.state), (true, None));
@@ -215,7 +253,7 @@ fn a_timeout_then_a_background_failure_turns_stetdoc_off() {
         let (program, cached) = stetdoc_in(&root, "stetdoc 0.9.3\n");
         slow(&root);
         let started = first(&Passed, &program, &cached);
-        assert!(started.recheck, "case {at}");
+        assert!(!started.later.is_empty(), "case {at}");
         assert_eq!(told(&root, &started.state), (true, None), "case {at}");
         if version.is_empty() {
             // The stub with no `stub-version.txt` beside it exits 4.
@@ -250,7 +288,7 @@ fn a_timeout_uses_the_cached_skill_and_the_background_refreshes_it() {
         started,
         Start {
             state: State::On(Some(old)),
-            recheck: true
+            later: vec![LONG_LIMIT, RECHECK_LIMIT]
         }
     );
     let (line, skill) = told(&root, &started.state);
@@ -298,7 +336,7 @@ fn a_real_failure_at_start_is_absent_and_not_checked_again() {
         first(&Never, &program, &cached),
         Start {
             state: State::Off,
-            recheck: false
+            later: Vec::new()
         }
     );
     write::remove_file(&root.join("bin").join("stub-version.txt")).unwrap();
@@ -306,7 +344,7 @@ fn a_real_failure_at_start_is_absent_and_not_checked_again() {
         first(&Never, &program, &cached),
         Start {
             state: State::Off,
-            recheck: false
+            later: Vec::new()
         }
     );
     assert_eq!(told(&root, &State::Off), (false, None));
@@ -323,7 +361,7 @@ fn a_stetdoc_in_time_is_on_with_its_skill_or_without() {
         started,
         Start {
             state: State::On(Some(skill_0_9_3())),
-            recheck: false
+            later: Vec::new()
         }
     );
 
@@ -334,7 +372,7 @@ fn a_stetdoc_in_time_is_on_with_its_skill_or_without() {
         started,
         Start {
             state: State::On(None),
-            recheck: false
+            later: Vec::new()
         }
     );
     assert_eq!(told(&root, &started.state), (true, None));
@@ -346,15 +384,25 @@ fn only_a_skill_or_a_failure_changes_the_state_after_a_recheck() {
     let now = State::On(None);
     let skill = skill_0_9_3();
     assert_eq!(
-        start::after(&now, Found::Skill(skill.clone())),
+        start::after(&now, Found::Skill(skill.clone()), RECHECK_LIMIT),
         Some(State::On(Some(skill)))
     );
-    assert_eq!(start::after(&now, Found::Broken), Some(State::Off));
-    assert_eq!(start::after(&now, Found::NoSkill), None);
-    assert_eq!(start::after(&now, Found::TimedOut), None);
-    assert_eq!(start::first(Found::TimedOut, || None).state, now);
     assert_eq!(
-        start::first(Found::Broken, || Some(skill_0_9_3())).state,
+        start::after(&now, Found::Broken, RECHECK_LIMIT),
+        Some(State::Off)
+    );
+    assert_eq!(
+        start::after(&now, Found::NotStarted, RECHECK_LIMIT),
+        Some(State::Off)
+    );
+    assert_eq!(start::after(&now, Found::NoSkill, RECHECK_LIMIT), None);
+    assert_eq!(start::after(&now, Found::TimedOut, RECHECK_LIMIT), None);
+    assert_eq!(
+        start::first(Found::TimedOut, Limits::APP, || None).state,
+        now
+    );
+    assert_eq!(
+        start::first(Found::Broken, Limits::APP, || Some(skill_0_9_3())).state,
         State::Off
     );
 }
@@ -393,7 +441,7 @@ fn a_failure_at_start_takes_the_cached_skill_off_the_disk() {
         started,
         Start {
             state: State::Off,
-            recheck: false
+            later: Vec::new()
         }
     );
     launch_write(&root, &started.state);
@@ -417,27 +465,34 @@ fn a_skill_past_the_limit_is_left_out_with_no_recheck() {
     ));
     assert_eq!(found, Found::NoSkill);
     assert_eq!(
-        start::first(found, || None),
+        start::first(found, Limits::APP, || None),
         Start {
             state: State::On(None),
-            recheck: false
+            later: Vec::new()
         }
     );
 }
 
-/// A stetdoc that cannot start (a file with no execute bit): absent at once, not checked again.
+/// A stetdoc that cannot start (a file with no execute bit), as a scanning OS may refuse a
+/// program a moment: on at once and tried in the background, where a last try that does not
+/// start either treats it as absent.
 #[cfg(unix)]
 #[test]
-fn a_stetdoc_that_cannot_start_is_absent_and_not_checked_again() {
+fn a_stetdoc_that_cannot_start_is_tried_in_the_background_then_absent() {
     let root = Scratch::new("start-not-a-program");
     let program = root.join("bin").join("stetdoc");
     write::write(&program, b"not a program\n").unwrap();
     let cached = profile_paths(&root).claude_skills();
+    let started = first(&Never, &program, &cached);
     assert_eq!(
-        first(&Never, &program, &cached),
+        started,
         Start {
-            state: State::Off,
-            recheck: false
+            state: State::On(None),
+            later: vec![LONG_LIMIT, RECHECK_LIMIT]
         }
+    );
+    assert_eq!(
+        again(&Never, &program, &cached, &started.state),
+        Some(State::Off)
     );
 }

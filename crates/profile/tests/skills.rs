@@ -18,6 +18,9 @@ mod stetdoc_cli;
 #[path = "skills/stetdoc_start.rs"]
 mod stetdoc_start;
 
+#[path = "skills/stetdoc_first.rs"]
+mod stetdoc_first;
+
 use std::path::{Path, PathBuf};
 
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
