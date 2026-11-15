@@ -12,6 +12,7 @@ import type {
 import { late } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
+import { MatterNamesFrom } from "../read-matters.ts";
 import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
@@ -86,6 +87,9 @@ function commandsPick(): (v: StreamView | undefined) => readonly AvailableComman
 }
 
 /** The work column of the room: the matter's thread, and the composer (disabled with no matter). */
+/** No matters listed: a stable empty list, so the names memo holds. */
+const NO_MATTERS: readonly { matter: MatterId; name: string; kind: string }[] = [];
+
 export function Work({
   transport,
   matter,
@@ -101,6 +105,7 @@ export function Work({
   archived = false,
   folderShut,
   openRefused = null,
+  allMatters = NO_MATTERS,
 }: {
   transport: HostTransport;
   matter: MatterSummary | null;
@@ -129,6 +134,8 @@ export function Work({
   /** A paper's open from an answer or from Find, refused, by its code, until the next try
    * (act-refusals.ts). */
   openRefused?: string | null;
+  /** Every matter the room lists: the names a refusal line and the read pills give other matters (read-matters.ts). */
+  allMatters?: readonly { matter: MatterId; name: string; kind: string }[];
 }) {
   const store = useViewStore();
   const field = useRef<ComposerHandle>(null);
@@ -239,7 +246,7 @@ export function Work({
     closed !== matter.matter &&
     !folderShut?.has(matter.matter);
   return (
-    <>
+    <MatterNamesFrom matters={allMatters} lang={lang}>
       {notice && (
         <Suspense fallback={null}>
           <FolderNotice
@@ -329,6 +336,6 @@ export function Work({
           thread={session.thread}
         />
       )}
-    </>
+    </MatterNamesFrom>
   );
 }
