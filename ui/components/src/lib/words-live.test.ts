@@ -200,6 +200,15 @@ const PLANNED_LINES = [
     "AI ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
   ],
   [
+    "agent.program_blocked",
+    "ChatGPT's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.",
+    "ChatGPT का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
+    "gemini's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.",
+    "gemini का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
+    "The AI's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.",
+    "AI का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
+  ],
+  [
     "agent.start_offline",
     "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.",
     "आप ऑफ़लाइन हैं, इसलिए ChatGPT शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",

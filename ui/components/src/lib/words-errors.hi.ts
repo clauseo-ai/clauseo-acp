@@ -204,6 +204,15 @@ export const HI = {
   "{name} didn't accept that change. Try again.":
     "{name} ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
   "The AI didn't accept that change. Try again.": "AI ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+  // agent.program_blocked: the agent's program is missing or not allowed to run (provisional Hindi)
+  "Claude's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.":
+    "Claude का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
+  "ChatGPT's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.":
+    "ChatGPT का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
+  "{name}'s program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.":
+    "{name} का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
+  "The AI's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.":
+    "AI का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
   // agent.start_offline: the start failed on its connection, confirmed by the host's probe (provisional Hindi)
   "You're offline, so Claude didn't start. Try again when you're back online. Your question is kept.":
     "आप ऑफ़लाइन हैं, इसलिए Claude शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
