@@ -178,6 +178,9 @@
 //!   host thread.
 //! - [`log_file::install`] starts the log file as the process's global subscriber and returns
 //!   its [`log_file::LogGuard`]; the app calls it once, first thing.
+//! - [`crash::record_crashes`] has the panic hook record the first panic of a release build into
+//!   `clauseo_counts::Crashes`, and installs the native crash handler (decision record 0060);
+//!   [`crash::crash_switch`] reads a settings view's counts switch and crash reports' lock.
 //! - The limits (`actor/limits.rs`): the host owns the `clauseo_limits::Limits` model, starts
 //!   its reads on the actor's pool (the reader is [`HostConfig::with_limits_reader`]'s, by
 //!   default `clauseo_limits::ProcessReaders`), feeds it live rate-limit signals, turn ends,
@@ -247,6 +250,7 @@ mod coalesce;
 pub mod codex_input;
 mod config;
 pub mod connectors;
+pub mod crash;
 mod encode;
 mod error;
 mod file_link;

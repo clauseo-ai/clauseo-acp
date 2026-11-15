@@ -1075,6 +1075,8 @@ dependencies = [
  "unicode-normalization",
  "url",
  "uuid",
+ "webkit2gtk",
+ "webview2-com",
  "windows",
  "zeroize",
 ]

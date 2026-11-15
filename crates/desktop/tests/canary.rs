@@ -395,8 +395,10 @@ fn session_in_a_planted_environment() {
     let effective = Effective::load(&locations, &SystemFiles, &[]);
     // On a machine the schema has no value for, desktop opens no counts; the session is still
     // searched, with a fixed envelope, so the test never depends on the runner's OS version.
-    let counts = open(&locations, &effective, Some(&exe))
-        .unwrap_or_else(|| open_with(&locations, &effective, fixed_about()));
+    let counts = open(&locations, &effective, Some(&exe)).map_or_else(
+        || open_with(&locations, &effective, fixed_about()),
+        |(counts, _crashes)| counts,
+    );
     let upload = RecordingUpload::default();
     let on = || {
         Effective::load(&locations, &SystemFiles, &[])

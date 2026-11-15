@@ -87,7 +87,8 @@ plist = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["fs"] }
 # The data folder fence's `~user` paths (agent/data_fence/resolve.rs): the user's home from the
-# user database.
+# user database. With the workspace's `signal`, the native crash handler's sigaction
+# (src/crash/native/unix.rs).
 nix = { workspace = true, features = ["user"] }
 
 # The open matter's folder watch (src/actor/papers/watch.rs, decision record 0055); none on
@@ -103,12 +104,16 @@ libc = { workspace = true }
 # (SystemInformation), the free disk space (Storage_FileSystem), and Authenticode on chrome.exe
 # (Security_WinTrust, whose WINTRUST_DATA needs Security_Cryptography). The offline probe's read
 # of Claude Code's registry policy (System_Registry; actor/turn/offline/probe/settings/os_policy).
+# The native crash handler's unhandled-exception filter (src/crash/native/win.rs):
+# Diagnostics_Debug, and Kernel, which SetUnhandledExceptionFilter and EXCEPTION_POINTERS need.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Security_Cryptography",
   "Win32_Security_WinTrust",
   "Win32_Storage_FileSystem",
+  "Win32_System_Diagnostics_Debug",
+  "Win32_System_Kernel",
   "Win32_System_Registry",
   "Win32_System_SystemInformation",
 ] }

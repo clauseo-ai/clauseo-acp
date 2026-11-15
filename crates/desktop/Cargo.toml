@@ -123,7 +123,10 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # The folder chooser (src/chooser/windows.rs): Storage_FileSystem for the drives and a folder's
 # entries, WindowsProgramming for GetDriveTypeW's DRIVE_* values, Shell for the known folders,
 # NetworkManagement_WNet for WNetGetConnectionW, a network drive's server.
+# The renderer gone of crash reports (src/counts/crashes/win.rs): webview2-com's ProcessFailed
+# handler, at the version wry locks.
 [target.'cfg(windows)'.dependencies]
+webview2-com = { workspace = true }
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Globalization",
@@ -165,6 +168,11 @@ tokio = { version = "1.53.3", default-features = false, features = ["signal"] }
 # above.
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 libc = { workspace = true }
+
+# The renderer gone of crash reports (src/counts/crashes.rs): WebKitGTK's web-process-terminated
+# (v2_20), at the version wry locks.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { workspace = true, features = ["v2_20"] }
 
 # The updater is left out of Linux: Linux always updates through its package manager (R23), so the
 # plugin is never registered there (lib.rs). Its adapter (src/update/plugin.rs) is built there in

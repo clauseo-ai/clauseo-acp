@@ -775,7 +775,8 @@ safe values (`sandbox.required` and `sandbox.allow_unprotected_auto` false, whic
 ignores: the Safe workspace comes after launch; each `network` key unset, empty or false, but
 `network.unsafe_site_list_updates` true). The two `privacy` keys can
 only be turned off by policy: a policy `true` for one is ignored with a warning, and the lawyer
-keeps their own switch. A key this version does not know is only a warning, so one profile can
+keeps their own counts switch (crash reports have no switch of their own: they follow the counts,
+[section 12](#12-crash-reports)). A key this version does not know is only a warning, so one profile can
 serve mixed versions, **unless its name looks like a security section's** (a section holding a
 key marked **Security key** below). A policy key that starts with or contains something like a
 security section's name locks that section's security keys off, whatever its punctuation or
@@ -838,7 +839,7 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 | `tools.browser` | boolean | true on macOS and Windows; false on Linux | `REG_DWORD` 0 or 1 | 0: agents do not get Clauseo's browser. On Windows, Clauseo doesn't run a browser at launch: Claude and ChatGPT read websites with their own web tools. A browser for Windows comes in an update. **Security key** |
 | `tools.connectors` | boolean | true | `REG_DWORD` 0 or 1 | 0: no data connector runs (the paid Indian case-law connector): it is not offered, and agents do not get it. On, nothing runs until a lawyer adds a connector. Amounts the app shows for it include GST; the GST breakdown is on the connector's receipt. **Security key** |
 | `privacy.counts` | boolean | true | `REG_DWORD` 0 or 1 | 0: Clauseo keeps and sends no anonymous usage counts, and deletes what it kept. Policy can only turn it off (1 is ignored with a warning). **Security key** |
-| `privacy.crash_reports` | boolean | false | `REG_DWORD` 0 or 1 | 0: Clauseo sends no crash reports. Policy can only turn it off (1 is ignored with a warning). **Security key** |
+| `privacy.crash_reports` | boolean | false (not read: crash reports follow `privacy.counts`) | `REG_DWORD` 0 or 1 | 0: Clauseo makes and sends no crash reports, and deletes those it kept, while the anonymous counts stay on ([section 12](#12-crash-reports)). Left unset, crash reports follow `privacy.counts`; a lawyer's own value is not used. Policy can only turn it off (1 is ignored with a warning). **Security key** |
 | `plans.<id>` | object: `endpoint` (`https` URL with a host; no user name, password, query or fragment), `provider` (`anthropic`, `bedrock`, `vertex`), `env` (map) | none: the plan login | `REG_SZ`, JSON | value `plans.claude-acp` = `{"endpoint": "https://ai-gateway.firm.example/anthropic", "provider": "anthropic"}`. **Security key**: replaces the user's whole plan for that agent; an unreadable source leaves no plan at all. An `env` name holding `KEY`, `TOKEN`, `SECRET` or `PASSWORD` (any case) is dropped with a warning: keep secrets in your own tools (an AWS profile, Google's application default credentials) |
 | `install.bundle` | absolute path | none: download | `REG_SZ` | `D:\Clauseo\bundle`: an offline bundle folder. **Security key**: unset if a source is unreadable |
 | `install.registry` | `https` URL with a host; no user name, password, query or fragment | none: the public hosts | `REG_SZ` | `https://npm.firm.example/`: a firm npm mirror. **Security key**: unset if a source is unreadable |
@@ -973,7 +974,7 @@ allows only the app's own content and its bridge (`app.security.csp` in
 | Sites the agent searches and opens | Web search and Clauseo's browser | Only while `tools.web_search` or `tools.browser` is on |
 | `github.com` (`/clauseo-ai/blocklist/releases/download/current/blocklist-v1.txt.gz` and `blocklist-v1.txt.gz.minisig`), then `release-assets.githubusercontent.com` | Clauseo's signed unsafe-site list: phishing domains and known botnet C2 addresses, which the egress proxy refuses ([decision 0053](decisions/0053-blocklist.md)). The app checks its signature and never applies an older list | Not at all in this version: nothing enforces the list while the guarded browser and the Safe workspace are parked ([decision 0053](decisions/0053-blocklist.md)). When either returns: once at start, just after the stored or bundled copy is read, then every 6 hours (±30 minutes; 10 minutes after a signature that does not match, once). Clauseo fetches it itself, outside the agent's sandbox and never through the egress proxy, through `network.upstream_proxy` when it is set, otherwise `HTTPS_PROXY` (and `NO_PROXY`), then the OS's proxy settings, PAC included, asked for each request; a proxy setting Clauseo refuses (a URL with a password, say) fails the fetch rather than going around the proxy. TLS trusts the OS's certificate store, so a firm CA installed there works; `network.ca_certs` is not used for this fetch. Redirects are followed only to `release-assets.githubusercontent.com` (where `github.com` answers 302, `curl -sI`, 2026-11-07) and `objects.githubusercontent.com`, https only. A 404 or a failed fetch keeps the list in use. Off when `network.unsafe_site_list_updates` is false (section 6; a change in the policy file takes effect when Clauseo next starts): no request at all, and the list bundled with the app or the last one fetched is still enforced |
 | `data.clauseo.chat` | Clauseo's optional paid data connectors. The first, case-law, is Indian Kanoon through Clauseo's relay: for each call, the tool name and its arguments (search words, document ids) go to `data.clauseo.chat` with the lawyer's token, and that server sends searches on to Indian Kanoon. Also the sign-in, `pricing.json`, account reads and recharges | `pricing.json` when Settings opens (at most once a day, or 10 minutes after a fetch that failed); the rest only after a lawyer adds a connector. Only while `tools.connectors` is on (sign-out and remove excepted). Clauseo makes these calls itself, outside the agent's sandbox; the agent never reaches this host. The host side ships with task R24 |
-| `t.clauseo.chat` | Clauseo's anonymous usage counts, and nothing else: crash reports are not sent yet (task S22). A day report under a random install id (`/v1/counts`: the app's version, the OS, how many questions, which features, how long answers take; never papers, questions or answers) and a weekly tally with no install id (`/v1/tally`: crash counts, and whether the app was used that week), as HTTPS POSTs with `User-Agent: Clauseo`. A Cloudflare Worker keeps them in Cloudflare D1 in Cloudflare's EU jurisdiction. It stores only the report's own fields: no IP address, no time received, and no header but `Content-Encoding` and `Content-Length`; Cloudflare's logs and traces for it are off. Cloudflare's edge still sees each request's IP address, as for any site it serves ([the counts Worker](counts-worker.md)) | A day report once a UTC day and a tally once a week, only while `privacy.counts` is on: on by default, a lawyer can turn it off in Settings, Privacy, and a firm can force it off (section 6). Day reports are deleted at most 91 days after their day, tallies at most 403 days after their week's Monday, and D1's backups (Time Travel) can keep a deleted row up to 7 days more. Past 3,000 day reports or 1,000 tallies a UTC day across all users the server answers 429, and the app keeps the report and sends it later. Clauseo sends them itself, never through the egress proxy: they follow `HTTPS_PROXY`, then the OS's proxy settings, but not a PAC file yet ([decision 0036](decisions/0036-counts.md), "The desktop") |
+| `t.clauseo.chat` | Clauseo's anonymous usage counts and crash reports, and nothing else. A day report under a random install id (`/v1/counts`: the app's version, the OS, how many questions, which features, how long answers take; never papers, questions or answers) and a weekly tally with no install id (`/v1/tally`: crash counts, and whether the app was used that week), and a crash report after a crash, with no install id (`/v1/crash`: [section 12](#12-crash-reports)), as HTTPS POSTs with `User-Agent: Clauseo`. A Cloudflare Worker keeps them in Cloudflare D1 in Cloudflare's EU jurisdiction. It stores only the report's own fields: no IP address, no time received, and no header but `Content-Encoding` and `Content-Length`; Cloudflare's logs and traces for it are off. Cloudflare's edge still sees each request's IP address, as for any site it serves ([the counts Worker](counts-worker.md)) | A day report once a UTC day and a tally once a week, only while `privacy.counts` is on: on by default, a lawyer can turn it off in Settings, Privacy, and a firm can force it off (section 6). Day reports are deleted at most 91 days after their day, tallies at most 403 days after their week's Monday, and D1's backups (Time Travel) can keep a deleted row up to 7 days more. Past 3,000 day reports or 1,000 tallies a UTC day across all users the server answers 429, and the app keeps the report and sends it later. A crash report goes only while counts are on, 1 to 24 hours after the crash, unless policy turns crash reports off. Clauseo sends them itself, never through the egress proxy: they follow `HTTPS_PROXY`, then the OS's proxy settings, but not a PAC file yet ([decision 0036](decisions/0036-counts.md), "The desktop") |
 
 Opening a downloaded installer also makes Windows check it with SmartScreen
 (`nav.smartscreen.microsoft.com`, `checkappexec.microsoft.com`,
@@ -1373,6 +1374,77 @@ as the uninstaller does (above). It refuses a copy that is missing or has no rec
 whose SHA-256 isn't `AdminCopySha256`, or one in a folder that an account other than SYSTEM,
 Administrators or TrustedInstaller owns or can change. Run the Clauseo installer again as an
 administrator to put the copy back; for unsafe owners, put the folders' permissions back first.
+
+## 12. Crash reports
+
+When Clauseo crashes, it can send one short crash report to `t.clauseo.chat`
+([section 7](#7-hosts-clauseo-reaches)), so the crash can be found and fixed. Crash reports follow
+the anonymous counts (`privacy.counts`): Clauseo makes and sends them only while counts are on
+and saving (after the lawyer's first act in the welcome), with no prompt of their own. Settings,
+Privacy says so under the counts switch. This is a launch cut of task S22: no memory dump, no
+stack, no consent card ([decision 0060](decisions/0060-crash-reports-launch-cut.md)).
+
+**What a report holds.** A closed list of fields, each a fixed value or a capped number
+(`CrashReport` in [`crates/counts/src/schema/crash.rs`](../crates/counts/src/schema/crash.rs)):
+
+- `report`: the report's own random id (UUID v4). It is not the install id of the day reports
+  and not the tally's id, so a report can't be joined to either.
+- `week`: the ISO week of the crash (`2026-W46`), never a date or a time.
+- `schema`, the app's `version` and `channel`, the `os`, its major version (`os_major`) and
+  the CPU (`arch`).
+- `process`: `host` (the app) or `webview` (the page). `kind`: `panic`, `signal` (a native
+  crash) or `renderer_gone` (the page's process went). `area`: which of Clauseo's components, by
+  crate name, or `webview` or `other`. `after_launch`: whether the window had shown the app.
+- For a panic, `location`: the source file in Clauseo's code (`crates/<crate>/src/….rs`) or in a
+  dependency (`<dep>-<version>/src/….rs`), and the line; left out for any other file. For a
+  native crash, `code`: the signal number (macOS, Linux) or the exception code (Windows). For
+  the page, `reason`: `crashed`, `out_of_memory`, `unresponsive`, `terminated`,
+  `launch_failed` or `other` (macOS gives no reason, so `other`).
+
+**What a report never holds:** document or matter content, names, prompts or questions, paths on
+the computer, the panic's message, the install id, a time finer than the week, memory, stack
+frames or logs.
+
+**Which crashes.** A panic in the app (one report per run). A native crash: `SIGSEGV`,
+`SIGBUS`, `SIGILL`, `SIGFPE` or `SIGABRT` on macOS and Linux, an unhandled exception on
+Windows; an abort that follows a panic is the panic's report, not a second one. The page's
+process going: WebContent terminated on macOS, WebView2's render process exiting on Windows,
+WebKitGTK's web process crashing or running out of memory on Linux. A user ending Clauseo, a force
+quit, power loss or a Windows shutdown makes no report. While counts are on, each crash also adds
+one `crash` count to the weekly tally, whether or not its report can be sent.
+
+**When it is sent.** The report is stored under `<data_dir>/crash/` at the crash, and the bytes
+stored are the bytes sent (before gzip): at most 5 reports wait, each kept at most 30 days. Each
+goes alone, as one gzip HTTPS POST to `https://t.clauseo.chat/v1/crash`, at a random moment 1 to
+24 hours after the crash and never within an hour of a counts POST, so a report can't be paired
+with a day report. An answer of 204 or 400 deletes the report; 429, 503, any other answer or none
+keeps it for a later try.
+
+**Turning crash reports off.** Turning counts off turns crash reports off too: the lawyer's switch
+in Settings, Privacy, or a policy `privacy.counts` false. To keep counts on and turn crash
+reports off, set `privacy.crash_reports` false in policy (section 6). In `policy.json`:
+
+```json
+{
+  "privacy": {
+    "crash_reports": false
+  }
+}
+```
+
+or in the registry (elevated PowerShell):
+
+```powershell
+New-Item -Path 'HKLM:\SOFTWARE\Policies\Clauseo\Clauseo' -Force | Out-Null
+New-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Clauseo\Clauseo' -Name 'privacy.crash_reports' `
+  -PropertyType DWord -Value 0 -Force | Out-Null
+```
+
+or, on a Mac, `<key>privacy.crash_reports</key><false/>` in the profile's payload. Either way
+Clauseo deletes every report it kept. A policy `true` is ignored with a warning, and a policy
+source Clauseo can't read locks crash reports off with the other security keys. The lawyer has no
+crash report switch, and a `privacy.crash_reports` in their own `settings.json` is not used.
+Policy is read at start-up, so a change applies on the next start.
 
 ## Later
 

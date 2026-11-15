@@ -198,6 +198,21 @@ impl Counts {
         drop(self.apply(&mut disk));
     }
 
+    /// When the last counts POST of this run started (crash reports keep an hour from it).
+    pub fn last_post(&self) -> Option<Time> {
+        self.state().sender.last_post
+    }
+
+    /// Makes no counts POST before `until`: a crash report goes an hour before it.
+    pub fn hold_posts_until(&self, until: Time) {
+        let mut state = self.state();
+        let hold = state
+            .sender
+            .hold_until
+            .map_or(until, |held| held.max(until));
+        state.sender.hold_until = Some(hold);
+    }
+
     /// The lawyer's switch, or policy, after the first act or at a settings reload. Off cancels
     /// a POST in flight, forgets everything and deletes `<data_dir>/counts/`; on makes a new id.
     pub fn set_enabled(&self, on: bool) -> io::Result<()> {

@@ -1,9 +1,10 @@
 //! The std calls that change files: the one place in `counts` that may call them. The workspace
 //! `clippy.toml` bans each of them everywhere else, and the expect below covers only this file.
 //!
-//! What changes: `<data_dir>/first_act_done` (written once, never deleted) and everything under
+//! What changes: `<data_dir>/first_act_done` (written once, never deleted), everything under
 //! `<data_dir>/counts/` (written whole through a temp file and a rename, and deleted whole when
-//! counts turn off).
+//! counts turn off), and everything under `<data_dir>/crash/`: reports written whole the same
+//! way, moved by a rename, and the native crash record opened here for the handler to append to.
 
 #![expect(
     clippy::disallowed_methods,
@@ -36,6 +37,27 @@ pub(crate) fn replace(target: &Path, bytes: &[u8]) -> io::Result<()> {
     file.write_all(bytes).and_then(|()| file.sync_all())?;
     drop(file);
     temp.rename_to(target)
+}
+
+/// Moves the file at `from` to `to`, making `to`'s folder first. The bytes do not change.
+pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    let dir = to.parent().ok_or(io::ErrorKind::InvalidInput)?;
+    std::fs::create_dir_all(dir)?;
+    std::fs::rename(from, to)
+}
+
+/// Opens `path` empty for writing, making its folder first, and writes `header` to it. The
+/// native crash handler appends its one line to the file this returns.
+pub(crate) fn open_record(path: &Path, header: &[u8]) -> io::Result<std::fs::File> {
+    let dir = path.parent().ok_or(io::ErrorKind::InvalidInput)?;
+    std::fs::create_dir_all(dir)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)?;
+    file.write_all(header).and_then(|()| file.sync_all())?;
+    Ok(file)
 }
 
 /// Removes the file at `path`; a missing file is no error.

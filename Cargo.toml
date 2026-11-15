@@ -22,6 +22,11 @@ tauri-build = "2.7.3"
 embed-resource = "3.0.12"
 # Only to name `InitializationScript` in crates/desktop/src/rust_only.rs; tauri does not re-export it.
 tauri-runtime = "2.12.2"
+# The webview's renderer gone, for crash reports (crates/desktop/src/counts/crashes.rs): the
+# versions wry 0.57 already locks, so no new crate. WebView2's ProcessFailed on Windows, WebKitGTK's
+# web-process-terminated on Linux.
+webview2-com = "0.39.1"
+webkit2gtk = "2.0.2"
 tauri-plugin-single-instance = { version = "2.5.4", features = ["deep-link"] }
 tauri-plugin-deep-link = "2.6.2"
 # No `zip` feature: it only unpacks v1-style zipped Windows installers and compressed AppImages, and
