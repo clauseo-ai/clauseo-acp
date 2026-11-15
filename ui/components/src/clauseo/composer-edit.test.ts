@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // A text over UNDOABLE_MAX, such as a long question coming back after its turn stopped, is set in place, which the
-// engine's undo can't take back: Cmd/Ctrl+Z puts the words before it back all the same (#978).
+// engine's undo can't take back: Cmd/Ctrl+Z puts the words before it back all the same (#978), and Cmd/Ctrl+Shift+Z
+// the text again.
 import { afterEach, expect, test } from "vitest";
 import { replaceAll, UNDOABLE_MAX } from "./composer-edit.ts";
 
@@ -38,6 +39,25 @@ test("Cmd+Z after a long text set in place puts the words before back, as an und
   // one step: a second press is the engine's
   expect(press(a, { metaKey: true })).toBe(false);
   expect(a.value).toBe("Draft of the notice");
+});
+
+test("Cmd+Shift+Z after the undo puts the long text back, and Cmd+Z takes it away again", () => {
+  const a = field("Draft");
+  const heard: string[] = [];
+  a.addEventListener("input", (e) => heard.push((e as InputEvent).inputType));
+  replaceAll(a, long, true);
+  expect(press(a, { metaKey: true })).toBe(true);
+  expect(press(a, { metaKey: true, shiftKey: true })).toBe(true);
+  expect(a.value).toBe(long);
+  expect(press(a, { ctrlKey: true })).toBe(true);
+  expect(a.value).toBe("Draft");
+  expect(press(a, { ctrlKey: true, shiftKey: true })).toBe(true);
+  expect(a.value).toBe(long);
+  expect(heard).toEqual(["historyUndo", "historyRedo", "historyUndo", "historyRedo"]);
+  // once the words change, neither is the field's own
+  a.value = "Draft again";
+  expect(press(a, { metaKey: true, shiftKey: true })).toBe(false);
+  expect(press(a, { metaKey: true })).toBe(false);
 });
 
 test("Ctrl+Z takes it back too; Shift, Alt or both modifiers leave the key alone", () => {
