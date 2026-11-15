@@ -26,12 +26,8 @@ fn chrome_pids(scratch: &Scratch) -> Vec<i32> {
     );
     processes()
         .into_iter()
-        .filter(|pid| {
-            std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmd| {
-                cmd.split(|b| *b == 0)
-                    .any(|arg| arg.starts_with(flag.as_bytes()))
-            })
-        })
+        .filter(|process| process.has_arg_starting(&flag))
+        .map(|process| process.pid)
         .collect()
 }
 
