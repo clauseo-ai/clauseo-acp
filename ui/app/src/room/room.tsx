@@ -52,7 +52,7 @@ import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { kindOf, knownPlan } from "./agent.ts";
 import { planLine, useKeyInUse } from "./key-in-use.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
-import { MatterNamesContext, matterNamesOf } from "./read-matters.ts";
+import { MatterNamesFrom } from "./read-matters.ts";
 import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
 import { RoomNotices } from "./notices.tsx";
@@ -230,8 +230,6 @@ function RoomFrame({
     [talks.drafting, talks.options, talks.agent, conversations],
   );
   const open = view.open;
-  // each matter's name, for the thread's lines and the composer's pills that name another matter (read-matters.ts)
-  const matterNames = useMemo(() => matterNamesOf(view.matters, w.lang), [view.matters, w.lang]);
   const draftMenus = useDraftMenus(talks, conversations, open, w.lang);
   const setup = hasSetup(transport);
   const welcome =
@@ -252,8 +250,7 @@ function RoomFrame({
     matters.next.papers,
   );
   const paperLinks = usePaperLinks(open?.matter ?? null, listed, open?.folder_display || null);
-  // the open matter's refused open (an answer's paper, Find's), on the composer's line; Locate
-  // folder for its folder
+  // the open matter's refused open (an answer's paper, Find's), on the composer's line; Locate folder for its folder
   const { refusals } = matters;
   const refused = useSyncExternalStore(refusals.subscribe, refusals.view, refusals.view);
   const opened = open === null ? undefined : refused.get(open.matter);
@@ -376,8 +373,7 @@ function RoomFrame({
     () => ({ plan: planOfOpen ?? "", openSettings, transport }),
     [planOfOpen, openSettings, transport],
   );
-  // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
-  // frame's words stand in its place
+  // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the frame's words stand in its place
   const scratch = open?.kind === "scratch";
   // the window's own controls, inside the desktop app only
   const [controls] = useState(() =>
@@ -453,7 +449,6 @@ function RoomFrame({
       {versions.rail ?? (
         <RoomRail
           transport={transport}
-          store={store}
           matters={matters}
           view={view}
           conversations={conversations}
@@ -544,7 +539,7 @@ function RoomFrame({
                   <WordOpenContext value={word}>
                     <FolderPlaceContext value={papers?.place}>
                       <AgentPlanContext value={agentPlan}>
-                        <MatterNamesContext value={matterNames}>
+                        <MatterNamesFrom matters={view.matters} lang={w.lang}>
                           <ToolLineContext value={toolRoom}>
                             <ProtectionContext value={shield.composer}>
                               <Work
@@ -566,7 +561,7 @@ function RoomFrame({
                               />
                             </ProtectionContext>
                           </ToolLineContext>
-                        </MatterNamesContext>
+                        </MatterNamesFrom>
                       </AgentPlanContext>
                     </FolderPlaceContext>
                   </WordOpenContext>

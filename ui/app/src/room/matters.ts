@@ -186,6 +186,11 @@ export class Matters {
   #live = false;
 
   /** `batch` schedules the app events' one apply: once a frame unless given. */
+  /** The room's view store (the rail reads the open conversation's header from it). */
+  get store(): ViewStore {
+    return this.#store;
+  }
+
   constructor(transport: HostTransport, store: ViewStore, batch: Batch = frameBatch) {
     this.#transport = transport;
     this.#store = store;

@@ -41,7 +41,6 @@ import { isolate } from "@clauseo/components/lib/bidi.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId, ThreadId } from "../transport/protocol.ts";
 import type { ReadPick } from "@clauseo/components/clauseo/rail-triage-items.tsx";
-import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { quietly } from "./open.ts";
 import { allowRead, matterNamesOf, readableOthers, useReadMatters } from "./read-matters.ts";
@@ -129,7 +128,6 @@ const RECENT = 5;
 
 export function RoomRail({
   transport,
-  store,
   matters,
   view,
   conversations,
@@ -148,8 +146,6 @@ export function RoomRail({
 }: {
   /** For Find's search inside the matters, and opening a paper it finds. */
   transport: HostTransport;
-  /** The room's view store: the open conversation's header, for the other matters it may read. */
-  store: ViewStore;
   matters: Matters;
   view: MattersView;
   conversations: Conversations;
@@ -205,7 +201,10 @@ export function RoomRail({
   }, [matterOpen]);
   const sc = { snooze, now, zone, lang: w.lang };
   // the open conversation's Let this conversation read: every other matter in the list it may not read yet
-  const allowed = useReadMatters(store, talks.thread === null ? null : streamOf(talks.thread));
+  const allowed = useReadMatters(
+    matters.store,
+    talks.thread === null ? null : streamOf(talks.thread),
+  );
   const reads = (thread: ThreadId): ReadPick | undefined => {
     if (thread !== talks.thread || talks.matter === null) return undefined;
     // the scratch matter holds quick questions, not a matter's papers: never offered

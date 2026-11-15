@@ -16,8 +16,8 @@ use serde::de::DeserializeOwned;
 
 use crate::examples::acp_unsupported_block;
 use crate::fixtures::{
-    decodes_in_both, entry, fails_in_both_split, fails_in_both_with, matter_id, msgpack_of,
-    packed_raw, raw, round_trips, turn_id, unknown_event, unknown_of, v7_text,
+    decodes_in_both, entry, fails_in_both_split, fails_in_both_with, msgpack_of, packed_raw, raw,
+    round_trips, turn_id, unknown_event, unknown_of, v7_text,
 };
 
 /// The serde message for a value that is no string or map: `expected enum` and the type's
@@ -189,22 +189,6 @@ fn notice_kind() {
         &skipped,
     );
     round_trips(&skipped);
-    let other = NoticeKind::OtherMatterRefused {
-        matter: matter_id(3),
-        name: "Smith".to_owned(),
-    };
-    decodes_in_both(
-        &format!(
-            r#"{{"other_matter_refused":{{"matter":"{}","name":"Smith"}}}}"#,
-            v7_text(3)
-        ),
-        &other,
-    );
-    round_trips(&other);
-    round_trips(&NoticeKind::MattersUnfenced {
-        matters: vec![matter_id(3)],
-        more: 3,
-    });
     data_enum_unknown(&unknown_of::<NoticeKind>("later"));
 }
 

@@ -227,7 +227,6 @@ impl HostCommand {
                 done: _,
             }
             | Self::SweepDone { day_start: _ }
-            // Whether the matter is another known one is the host's check.
             | Self::AllowMatterRead {
                 thread: _,
                 matter: _,
