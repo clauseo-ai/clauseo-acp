@@ -5,8 +5,14 @@
 //!   writes its arguments, one per line, to `args-compare.txt`, writes the `-o` file, and prints
 //!   `{}`; with `compare-exit.txt` beside it, exits with the code in it instead, first printing
 //!   `compare-out.json` from beside itself when there is one (stetdoc's JSON error).
-//! - `view`: writes its arguments to `args-view.txt` and prints `view.json` from beside itself;
-//!   `view-mode.txt` may say `hang` (never answers), `big` (prints 9 MiB) or `exit <code>`.
+//! - `view` of the redline: writes its arguments to `args-view.txt` and prints `view.json` from
+//!   beside itself; `view-mode.txt` may say `hang` (never answers), `big` (prints 9 MiB) or
+//!   `exit <code>`.
+//! - `view` of a version (`old.docx`, `new.docx`): writes its arguments to `args-view-old.txt`
+//!   or `args-view-new.txt` and prints `view-old.json` or `view-new.json` from beside itself, or,
+//!   with none there, a view of an empty document.
+//! - `check`: writes its arguments to `args-check.txt` and prints `check.json` from beside
+//!   itself; with none there, exits 2 (as a stetdoc that can't check).
 //!
 //! Any other first argument exits 2; a file it needs and can't read exits 3.
 
@@ -31,6 +37,7 @@ fn main() -> ExitCode {
     let done = match args.first().map(String::as_str) {
         Some("compare") => compare(&dir, &args),
         Some("view") => view(&dir, &args),
+        Some("check") => check(&dir, &args),
         _ => return ExitCode::from(2),
     };
     done.unwrap_or(ExitCode::from(3))
@@ -57,8 +64,32 @@ fn compare(dir: &Path, args: &[String]) -> Option<ExitCode> {
     Some(ExitCode::SUCCESS)
 }
 
-/// The `view` run: `view --all --json REDLINE`.
+/// A view of an empty document, for a version with no view of its own beside the stand-in.
+const EMPTY_VIEW: &str = r#"{"mode":"final","next":null,"text":"{stet 1 view=body mode=final}\n"}"#;
+
+/// The `check` run: `check --json --author=A REDLINE`.
+fn check(dir: &Path, args: &[String]) -> Option<ExitCode> {
+    std::fs::write(dir.join("args-check.txt"), args.join("\n")).ok()?;
+    let Ok(out) = std::fs::read(dir.join("check.json")) else {
+        return Some(ExitCode::from(2));
+    };
+    std::io::stdout().write_all(&out).ok()?;
+    Some(ExitCode::SUCCESS)
+}
+
+/// The `view` run: `view --all --json REDLINE`, or `view --all --json --mode final VERSION`.
 fn view(dir: &Path, args: &[String]) -> Option<ExitCode> {
+    let input = Path::new(args.last()?).file_name()?.to_str()?;
+    if let Some(side) = input
+        .strip_suffix(".docx")
+        .filter(|s| ["old", "new"].contains(s))
+    {
+        std::fs::write(dir.join(format!("args-view-{side}.txt")), args.join("\n")).ok()?;
+        let out = std::fs::read(dir.join(format!("view-{side}.json")))
+            .unwrap_or_else(|_none| EMPTY_VIEW.as_bytes().to_vec());
+        std::io::stdout().write_all(&out).ok()?;
+        return Some(ExitCode::SUCCESS);
+    }
     std::fs::write(dir.join("args-view.txt"), args.join("\n")).ok()?;
     let mode = std::fs::read_to_string(dir.join("view-mode.txt")).unwrap_or_default();
     let mode = mode.trim();

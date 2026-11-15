@@ -55,7 +55,9 @@ use serde::de::IgnoredAny;
 use line::{Mark, Seen, marker, paragraph};
 
 mod count;
+pub(crate) mod ledger;
 mod line;
+pub(crate) mod sides;
 
 /// The deepest table the reader shows, counting a top-level table as 1. stetdoc reads no XML
 /// deeper than 256 elements and each level of a table is three (`w:tbl`, `w:tr`, `w:tc`), so it
@@ -121,6 +123,9 @@ pub(crate) struct Read {
     pub(crate) first_skip: Option<Unreadable>,
     /// stetdoc's warnings by code alone (`other` for a code that is not a plain word).
     pub(crate) warnings: Vec<String>,
+    /// The ids of the changes the body's lines name, for the check against stetdoc's own list
+    /// (`ledger.rs`).
+    pub(crate) ids: BTreeSet<u64>,
 }
 
 /// The fields of the view's JSON the read needs; the others are ignored.
@@ -193,25 +198,34 @@ pub(crate) fn read_view(json: &str) -> Result<Read, ViewFailure> {
     }
     let warnings: Vec<String> = view.warnings.iter().map(|w| code_word(&w.code)).collect();
     found.extend(warnings.iter().filter_map(|code| notice_of(code)));
-    let notices = BlacklineNotice::ALL
-        .into_iter()
-        .filter(|notice| found.contains(notice))
-        .collect();
+    order(&mut found);
     Ok(Read {
         blackline: WordBlackline {
             paragraphs: text.paragraphs,
             truncated,
-            notices,
+            notices: found,
+            changed_links: Vec::new(),
         },
         skipped: text.skipped,
         first_skip: text.first_skip,
         warnings,
+        ids: text.ids,
     })
+}
+
+/// Puts `notices` in the order of [`BlacklineNotice::ALL`], each once.
+pub(crate) fn order(notices: &mut Vec<BlacklineNotice>) {
+    let found = std::mem::take(notices);
+    notices.extend(
+        BlacklineNotice::ALL
+            .into_iter()
+            .filter(|notice| found.contains(notice)),
+    );
 }
 
 /// Whether the view's text starts with a `stet 1` header (`{stet 1 view=body … mode=redline}`),
 /// blank lines before it aside.
-fn stet_1(text: &str) -> bool {
+pub(crate) fn stet_1(text: &str) -> bool {
     let header = text
         .lines()
         .find(|line| !line.is_empty())
@@ -346,7 +360,7 @@ pub(crate) fn read_text(text: &str) -> Text {
         }
         read.line_ids.clear();
         if !HEAD.iter().any(|head| line.starts_with(head)) {
-            count::ids_in(line, &mut read.line_ids);
+            read.seen.unknown |= count::ids_in(line, &mut read.line_ids);
             read.ids.extend(read.line_ids.iter().copied());
         }
         if line == "{/table}" {
@@ -502,7 +516,7 @@ fn whole(levels: &[Level]) -> Mark {
 
 /// The view's lines, each with the number of its first physical line (from 1): a line that ends
 /// in an odd number of backslashes has its last one taken off and the next line joined on.
-fn logical_lines(text: &str) -> Vec<(usize, String)> {
+pub(crate) fn logical_lines(text: &str) -> Vec<(usize, String)> {
     let mut lines = Vec::new();
     let mut open: Option<(usize, String)> = None;
     for (index, physical) in text.lines().enumerate() {
@@ -524,28 +538,44 @@ fn logical_lines(text: &str) -> Vec<(usize, String)> {
 }
 
 /// Checks a `t` line's content: its cell tags (`{+}` for a table that is a later block of its
-/// cell, or the cell's own tags when it is the first), a format change (`{rev table #3 C}`),
-/// then `{table …}`. Whether it has a format change, which no paragraph shows, so the caller
-/// says the blackline may differ.
+/// cell, or the cell's own tags when it is the first), `{table …}`, and format changes
+/// (`{rev table #3 C}`, `{rev grid #4 C}`) before it or after. Whether it has a format change
+/// (or markup after the table's own that a newer stetdoc adds), which no paragraph shows, so
+/// the caller says the blackline may differ.
 fn table(content: &str) -> Result<bool, &'static str> {
     let mut rest = content;
     let mut formatted = false;
-    while !rest.starts_with("{table") {
-        let (body, after) =
-            marker(rest).map_err(|_no_marker| "a table or row line without its marker")?;
-        if body.starts_with("rev ") {
+    let mut opened = false;
+    // The cell's tags and format changes come before `{table …}` or after it (stetdoc 0.9.3
+    // prints `t1 {table cols=2} {rev table #23 R} {rev grid #24 R}`).
+    while !rest.is_empty() {
+        let Ok((body, after)) = marker(rest) else {
+            // Markup after the table's own that does not read: a newer stetdoc's, noted.
+            if opened {
+                return Ok(true);
+            }
+            return Err("a table or row line without its marker");
+        };
+        if body == "table" || body.starts_with("table ") {
+            opened = true;
+        } else if body.starts_with("rev ") || opened {
+            // A format change, or a word a newer stetdoc adds after the table's own.
             formatted = true;
         } else if !line::cell_tag(body) {
             return Err("a table or row line without its marker");
         }
         rest = after.strip_prefix(' ').unwrap_or(after);
     }
-    Ok(formatted)
+    if opened {
+        Ok(formatted)
+    } else {
+        Err("a table or row line without its marker")
+    }
 }
 
 /// A block line's ref letters and its content: `p12 text` is `("p", "text")`, and a bare
 /// `p12` has empty content. `None` when the line does not start with a ref.
-fn block_ref(line: &str) -> Option<(&str, &str)> {
+pub(crate) fn block_ref(line: &str) -> Option<(&str, &str)> {
     let letters = line.find(|c: char| !c.is_ascii_lowercase())?;
     let after = line.get(letters..)?;
     let digits = after

@@ -1,0 +1,14 @@
+{
+  "existing": [],
+  "exit_status": 0,
+  "report": {
+    "by_code": [],
+    "findings": [],
+    "notes": 0,
+    "ok": true,
+    "parts": 1,
+    "unchecked": 0,
+    "violations": 0
+  },
+  "strict": false
+}

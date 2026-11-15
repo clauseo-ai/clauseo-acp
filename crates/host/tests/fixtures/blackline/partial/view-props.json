@@ -1,0 +1,51 @@
+{
+  "base": "5a34aab6c7a26de4:0:5a34aab6c7a26de4",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Reviewer",
+        "count": 7
+      }
+    ],
+    "count": 7,
+    "first": [
+      {
+        "author": "Reviewer",
+        "block": "t1",
+        "change": 0,
+        "deleted": null,
+        "inserted": null,
+        "kind": "table format"
+      },
+      {
+        "author": "Reviewer",
+        "block": "t1",
+        "change": 1,
+        "deleted": null,
+        "inserted": null,
+        "kind": "grid change"
+      },
+      {
+        "author": "Reviewer",
+        "block": "r1",
+        "change": 2,
+        "deleted": null,
+        "inserted": null,
+        "kind": "row format"
+      }
+    ]
+  },
+  "position": {
+    "first": "p1",
+    "last": "p7",
+    "remaining_tokens": 0,
+    "scope": "p1..p7",
+    "shown": 6,
+    "total": 6
+  },
+  "text": "{stet 1 view=body base=5a34aab6c7a26de4:0:5a34aab6c7a26de4 mode=redline common-style=\"Normal\" range=p1..p7}\n{authors: R \"Reviewer\"}\n{summary: 7 tracked changes (R 7) · 1 section}\np1 Intro.\nt1 {table cols=2} {rev table #23 R} {rev grid #24 R}\nr1 {row} {rev row #22 R}\np2 Price\np3 100\n{/table}\np4 {§\"1.\"} {rev para #25 R} Numbered now.\np5 {--Moved text.--}{#31 R move to -}\np6 Middle.\np7 {++Moved text.++}{#33 R move from -}\n{position: p1..p7 of p1..p7 (6 of 6 blocks)}\n",
+  "tokens": 119,
+  "warnings": []
+}

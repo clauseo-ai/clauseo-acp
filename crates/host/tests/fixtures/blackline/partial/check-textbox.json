@@ -1,0 +1,46 @@
+{
+  "existing": [
+    {
+      "author": "Clauseo",
+      "changes": [
+        {
+          "block": "p2",
+          "date": "2026-11-15T20:32:41Z",
+          "ids": [
+            1
+          ],
+          "kind": "deletion"
+        },
+        {
+          "block": "p2",
+          "date": "2026-11-15T20:32:41Z",
+          "ids": [
+            0
+          ],
+          "kind": "insertion"
+        }
+      ],
+      "counts": [
+        [
+          "insertion",
+          1
+        ],
+        [
+          "deletion",
+          1
+        ]
+      ]
+    }
+  ],
+  "exit_status": 0,
+  "report": {
+    "by_code": [],
+    "findings": [],
+    "notes": 0,
+    "ok": true,
+    "parts": 1,
+    "unchecked": 0,
+    "violations": 0
+  },
+  "strict": false
+}

@@ -1,0 +1,156 @@
+{
+  "existing": [
+    {
+      "author": "Clauseo",
+      "changes": [
+        {
+          "block": "p2",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            7
+          ],
+          "kind": "deletion"
+        },
+        {
+          "block": "p2",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            6
+          ],
+          "kind": "insertion"
+        },
+        {
+          "block": "p3",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            3,
+            2
+          ],
+          "kind": "paragraph_deleted"
+        },
+        {
+          "block": "p4",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            9
+          ],
+          "kind": "deletion"
+        },
+        {
+          "block": "p4",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            8
+          ],
+          "kind": "insertion"
+        },
+        {
+          "block": "p6",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            10
+          ],
+          "kind": "insertion"
+        },
+        {
+          "block": "p8",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            15
+          ],
+          "kind": "deletion"
+        },
+        {
+          "block": "p8",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            14
+          ],
+          "kind": "insertion"
+        },
+        {
+          "block": "p12",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            12
+          ],
+          "kind": "deletion"
+        },
+        {
+          "block": "p12",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            11
+          ],
+          "kind": "insertion"
+        },
+        {
+          "block": "p13",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            13
+          ],
+          "kind": "run_format"
+        },
+        {
+          "block": "p14",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            5,
+            4
+          ],
+          "kind": "paragraph_inserted"
+        },
+        {
+          "block": "p16",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            17
+          ],
+          "kind": "deletion"
+        },
+        {
+          "block": "p16",
+          "date": "2026-11-15T20:33:00Z",
+          "ids": [
+            16
+          ],
+          "kind": "insertion"
+        }
+      ],
+      "counts": [
+        [
+          "insertion",
+          6
+        ],
+        [
+          "deletion",
+          5
+        ],
+        [
+          "paragraph_inserted",
+          1
+        ],
+        [
+          "paragraph_deleted",
+          1
+        ],
+        [
+          "run_format",
+          1
+        ]
+      ]
+    }
+  ],
+  "exit_status": 0,
+  "report": {
+    "by_code": [],
+    "findings": [],
+    "notes": 0,
+    "ok": true,
+    "parts": 8,
+    "unchecked": 2,
+    "violations": 0
+  },
+  "strict": false
+}

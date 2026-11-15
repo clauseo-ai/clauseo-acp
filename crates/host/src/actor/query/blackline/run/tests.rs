@@ -10,7 +10,9 @@ use clauseo_protocol::ErrorCode;
 
 use clauseo_protocol::{BlacklineNotice, BlacklineParagraph, ParagraphChange, WordBlackline};
 
+use super::cross::{LINKS_MAX, note_what_compare_missed};
 use super::{author_arg, error_of, note_a_silent_difference, refusal_code, stetdoc_env};
+use crate::actor::query::blackline::parse::sides::Crossed;
 
 /// A lookup over `pairs`, the name matched in any case.
 fn host(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<OsString> {
@@ -139,6 +141,7 @@ fn a_difference_the_blackline_does_not_show_may_differ() {
         }],
         truncated: false,
         notices: Vec::new(),
+        changed_links: Vec::new(),
     };
     let noted = |mut blackline: WordBlackline, differ| {
         note_a_silent_difference(&mut blackline, differ);
@@ -159,12 +162,79 @@ fn a_difference_the_blackline_does_not_show_may_differ() {
     );
     assert_eq!(noted(hidden, false), [BlacklineNotice::HiddenText]);
     // One that already says part may be missing does.
+    // One that already says part may be missing, or names what changed, does.
     for said in [
         BlacklineNotice::PartNotShown,
         BlacklineNotice::ChangesOutsideText,
+        BlacklineNotice::CommentChanged,
+        BlacklineNotice::TextBoxChanged,
+        BlacklineNotice::CellFormatChanged,
     ] {
         let mut blackline = blackline(ParagraphChange::Same);
         blackline.notices.push(said);
         assert_eq!(noted(blackline, true), [said]);
     }
+    let mut linked = blackline(ParagraphChange::Same);
+    linked.changed_links.push("the account".to_owned());
+    assert_eq!(noted(linked, true), []);
+}
+
+/// What the versions' views found goes on the blackline: the links by text, to the cap (past it,
+/// may differ), a link with no text as may differ, and a comment's and a text box's notices, in
+/// order.
+#[test]
+fn what_compare_missed_is_said() {
+    let empty = WordBlackline {
+        paragraphs: Vec::new(),
+        truncated: false,
+        notices: vec![BlacklineNotice::MayDiffer, BlacklineNotice::HiddenText],
+        changed_links: Vec::new(),
+    };
+    let mut said = empty.clone();
+    note_what_compare_missed(
+        &mut said,
+        Crossed {
+            links: vec!["the account".to_owned()],
+            unnamed_link: false,
+            comments: true,
+            boxes: true,
+        },
+    );
+    assert_eq!(said.changed_links, ["the account"]);
+    assert_eq!(
+        said.notices,
+        [
+            BlacklineNotice::HiddenText,
+            BlacklineNotice::CommentChanged,
+            BlacklineNotice::TextBoxChanged,
+            BlacklineNotice::MayDiffer,
+        ]
+    );
+    let mut many = WordBlackline {
+        notices: Vec::new(),
+        ..empty
+    };
+    let links: Vec<String> = (0..=LINKS_MAX).map(|n| format!("link {n}")).collect();
+    note_what_compare_missed(
+        &mut many,
+        Crossed {
+            links,
+            ..Crossed::default()
+        },
+    );
+    assert_eq!(many.changed_links.len(), LINKS_MAX);
+    assert_eq!(many.notices, [BlacklineNotice::MayDiffer]);
+    let mut unnamed = WordBlackline {
+        notices: Vec::new(),
+        ..many.clone()
+    };
+    unnamed.changed_links.clear();
+    note_what_compare_missed(
+        &mut unnamed,
+        Crossed {
+            unnamed_link: true,
+            ..Crossed::default()
+        },
+    );
+    assert_eq!(unnamed.notices, [BlacklineNotice::MayDiffer]);
 }
