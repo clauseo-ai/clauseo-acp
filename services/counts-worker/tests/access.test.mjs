@@ -16,6 +16,9 @@ import { day as daysAgo, root, startWorker } from "./harness.mjs";
 const TEAM = "clauseo-test";
 const DASH_AUD = "dash-aud-test";
 const QUERY_AUD = "query-aud-test";
+/** The owner's email (DASH_EMAIL) and the agents' service token's client id (QUERY_CLIENT_ID). */
+const OWNER = "owner@example.org";
+const CLIENT = "agent-client-test.access";
 const ISSUER = `https://${TEAM}.cloudflareaccess.com`;
 const KID = "test-key-1";
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -35,6 +38,8 @@ before(async () => {
       ACCESS_TEAM: TEAM,
       DASH_AUD,
       QUERY_AUD,
+      DASH_EMAIL: OWNER,
+      QUERY_CLIENT_ID: CLIENT,
       ACCESS_CERTS_URL_DEV: `http://127.0.0.1:${certs.address().port}/certs`,
     },
   });
@@ -47,10 +52,14 @@ after(async () => {
 const b64 = (value) => Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString("base64url");
 const now = () => Math.floor(Date.now() / 1000);
 
-/** An Access-like JWT for `aud`, RS256 with the test key unless `edit` says otherwise. */
+/**
+ * An Access-like JWT for `aud`, RS256 with the test key unless `edit` says otherwise: the
+ * owner's email for the dashboard, the agent token's common_name for the query route.
+ */
 function jwt(aud, edit = {}) {
   const header = { alg: "RS256", kid: KID, typ: "JWT", ...edit.header };
-  const claims = { aud: [aud], iss: ISSUER, exp: now() + 600, iat: now(), nbf: now(), type: "app", ...edit.claims };
+  const caller = aud === DASH_AUD ? { email: OWNER } : { common_name: CLIENT };
+  const claims = { aud: [aud], iss: ISSUER, exp: now() + 600, iat: now(), nbf: now(), type: "app", ...caller, ...edit.claims };
   const signed = `${b64(header)}.${b64(claims)}`;
   let signature;
   if (header.alg === "none") signature = "";
@@ -68,9 +77,10 @@ const query = (sql, token = jwt(QUERY_AUD), { body, headers = {} } = {}) =>
     headers: { "content-type": "application/json", ...(token ? { "cf-access-jwt-assertion": token } : {}), ...headers },
   });
 
-test("the dashboard needs a valid RS256 token with its own aud", async () => {
+test("the dashboard needs a valid RS256 token with its own aud and the owner's email", async () => {
   const good = await dash(jwt(DASH_AUD));
   assert.equal(good.status, 200);
+  assert.equal((await dash(jwt(DASH_AUD, { claims: { email: OWNER.toUpperCase() } }))).status, 200, "any case");
   assert.equal(good.headers.get("content-security-policy"), "default-src 'none'; style-src 'unsafe-inline'");
   assert.match(good.headers.get("content-type"), /^text\/html/);
   assert.equal(good.headers.get("cache-control"), "no-store");
@@ -88,6 +98,9 @@ test("the dashboard needs a valid RS256 token with its own aud", async () => {
     "another issuer": jwt(DASH_AUD, { claims: { iss: "https://other.cloudflareaccess.com" } }),
     "an unknown kid": jwt(DASH_AUD, { header: { kid: "nope" } }),
     "another key": jwt(DASH_AUD, { key: other.privateKey }),
+    "another email": jwt(DASH_AUD, { claims: { email: "someone@example.org" } }),
+    "no email": jwt(DASH_AUD, { claims: { email: undefined } }),
+    "the agents' service token": jwt(DASH_AUD, { claims: { email: undefined, common_name: CLIENT } }),
     "garbage": "a.b.c",
   };
   for (const [name, token] of Object.entries(refused)) {
@@ -115,9 +128,24 @@ test("a query over the views returns its rows as JSON", async () => {
     { event: "_report", installs: 5 },
     { event: "app_opened", installs: 5 },
   ]);
-  const capped = await query("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000) SELECT i FROM n");
+  const values = Array.from({ length: 40 }, (_, i) => `(${i})`).join(", ");
+  const capped = await query(`WITH t(x) AS (VALUES ${values}) SELECT a.x FROM t a, t b`);
   assert.equal(capped.status, 200);
-  assert.equal((await capped.json()).length, 1000, "capped at 1,000 rows");
+  assert.equal((await capped.json()).length, 1000, "1,600 rows capped at 1,000");
+});
+
+test("a recursive query, or one over eight tables, is refused before it reaches D1", async () => {
+  for (const sql of [
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n) SELECT count(*) FROM n",
+    "WITH n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n) SELECT count(*) FROM n",
+    `SELECT count(*) FROM ${Array.from({ length: 9 }, (_, i) => `v_daily t${i}`).join(", ")}`,
+  ]) {
+    const response = await query(sql);
+    assert.equal(response.status, 400, sql);
+    assert.equal(await response.text(), "", sql);
+  }
+  const eight = await query(`SELECT count(*) AS n FROM ${Array.from({ length: 8 }, (_, i) => `v_daily t${i}`).join(", ")}`);
+  assert.equal(eight.status, 200, "eight tables pass");
 });
 
 test("the query route refuses writes, base tables, bad bodies and bad tokens", async () => {
@@ -160,6 +188,10 @@ test("the query route refuses writes, base tables, bad bodies and bad tokens", a
   assert.equal(gzip.status, 400, "a gzip body");
   assert.equal((await query("SELECT 1", null)).status, 403, "no token");
   assert.equal((await query("SELECT 1", jwt(DASH_AUD))).status, 403, "the dashboard's token");
+  const owner = jwt(QUERY_AUD, { claims: { common_name: undefined, email: OWNER } });
+  assert.equal((await query("SELECT 1", owner)).status, 403, "the owner, not a service token");
+  const another = jwt(QUERY_AUD, { claims: { common_name: "other.access" } });
+  assert.equal((await query("SELECT 1", another)).status, 403, "another service token");
   assert.equal((await query("SELECT 1", jwt(QUERY_AUD, { header: { alg: "HS256" } }))).status, 403, "HS256");
   assert.equal((await worker.send("/v1/query", { headers: { "cf-access-jwt-assertion": jwt(QUERY_AUD) } })).status, 405);
 });

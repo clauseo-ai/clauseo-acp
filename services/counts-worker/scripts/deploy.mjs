@@ -14,8 +14,9 @@
 //     --no-create (the `check` action) fails instead of creating, and skips R2.
 //   node scripts/deploy.mjs migrate    wrangler d1 migrations apply --remote
 //   node scripts/deploy.mjs deploy     the Access step (scripts/access.mjs), then wrangler deploy
-//     (of the build the tokenless step made) with the team and the two AUD tags as --var values,
-//     masked like the database id; without them /dash and /v1/query stay 404.
+//     (of the build the tokenless step made) with the team, the two AUD tags and the two callers
+//     (DASH_EMAIL, QUERY_CLIENT_ID) as --var values, masked like the database id; without them
+//     /dash and /v1/query stay 404.
 //   node scripts/deploy.mjs canary
 //     Prints how many rows the fixed canary install id has in `report` and the canary tally id
 //     has in `tally`, then deletes them, so the live check leaves nothing behind.
@@ -144,6 +145,15 @@ export function readCanary(output) {
   return counts;
 }
 
+/**
+ * The deploy step's values to mask: every --var value (team, AUDs, the owner's email, the agent
+ * token's client id) and ACCESS_DASH_EMAIL; and the ::add-mask:: lines that mask them for the job.
+ */
+export function accessMasks(vars, env) {
+  const secrets = [...Object.values(vars ?? {}), env.ACCESS_DASH_EMAIL ?? ""].filter((value) => value !== "");
+  return { secrets, maskLines: secrets.map((value) => `::add-mask::${value}`) };
+}
+
 /** The environment wrangler runs with: an empty CLOUDFLARE_ACCOUNT_ID is left out. */
 export function wranglerEnv(env) {
   const out = { ...env, WRANGLER_SEND_METRICS: "false" };
@@ -195,8 +205,8 @@ async function main([command, ...flags]) {
   } else if (command === "deploy") {
     if (process.env.ACCESS_TEAM) console.log(`::add-mask::${process.env.ACCESS_TEAM}`);
     const access = await setUpAccess(cloudflareApi(process.env.CLOUDFLARE_API_TOKEN ?? ""), process.env);
-    const secrets = [...Object.values(access.vars ?? {}), process.env.ACCESS_DASH_EMAIL ?? ""];
-    for (const value of Object.values(access.vars ?? {})) console.log(`::add-mask::${value}`);
+    const { secrets, maskLines } = accessMasks(access.vars, process.env);
+    for (const line of maskLines) console.log(line);
     for (const line of access.lines) console.log(redact(line, secrets));
     runShown(["deploy", "--config", DEPLOY_CONFIG, ...varArgs(access.vars)], secrets);
   } else if (command === "canary") {

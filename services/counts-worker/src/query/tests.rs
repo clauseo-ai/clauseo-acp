@@ -22,8 +22,6 @@ fn a_query_over_the_views_is_wrapped_in_the_cap() {
         "SELECT * FROM \"v_tally\" WHERE event = '_crashed'",
         "WITH c AS (SELECT * FROM v_cohort_week) SELECT * FROM c",
         "WITH a AS (SELECT 1 AS x), b AS (SELECT x FROM a) SELECT * FROM b",
-        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000) \
-         SELECT i FROM n",
         "SELECT * FROM v_daily d JOIN v_monthly m ON d.version = m.version",
         "SELECT * FROM (SELECT * FROM v_paths) AS p",
         "SELECT (SELECT COUNT(*) FROM v_active) AS n",
@@ -258,5 +256,63 @@ fn the_privacy_cases_are_refused() {
         "WITH cron_status AS (SELECT 1) SELECT * FROM cron_status",
     ] {
         assert_eq!(refused(sql), Refused::CteName, "{sql}");
+    }
+}
+
+#[test]
+fn recursive_ctes_are_refused() {
+    for sql in [
+        // The review's case: unbounded, it kept D1 busy and blocked the counts writes.
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n) SELECT count(*) FROM n",
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000) \
+         SELECT i FROM n",
+        // The keyword alone, even over a CTE that does not recurse.
+        "WITH RECURSIVE c AS (SELECT * FROM v_daily) SELECT * FROM c",
+        // SQLite runs a CTE that names itself as recursive without the keyword.
+        "WITH n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n) SELECT count(*) FROM n",
+        "WITH n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM (SELECT * FROM N)) SELECT * FROM n",
+        "WITH a AS (SELECT 1), n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM a, n) SELECT * FROM n",
+        "WITH a AS (SELECT * FROM b), b AS (SELECT * FROM v_daily) SELECT * FROM a",
+        "WITH v_daily AS (SELECT * FROM v_daily) SELECT * FROM v_daily",
+        "SELECT * FROM (WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n) \
+         SELECT i FROM n)",
+        "SELECT (WITH n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n) SELECT count(*) FROM n)",
+    ] {
+        assert_eq!(refused(sql), Refused::Recursive, "{sql}");
+    }
+    // An earlier CTE is still readable from a later one.
+    assert!(
+        guard("WITH a AS (SELECT * FROM v_daily), b AS (SELECT * FROM a) SELECT * FROM b").is_ok()
+    );
+}
+
+/// A query with `n` `FROM` items: `v_daily` joined to itself.
+fn joined(n: usize) -> String {
+    let items: Vec<String> = (0..n).map(|i| format!("v_daily t{i}")).collect();
+    format!("SELECT count(*) FROM {}", items.join(", "))
+}
+
+#[test]
+fn a_query_names_at_most_eight_tables() {
+    assert_eq!(MAX_TABLES, 8);
+    assert!(guard(&joined(8)).is_ok(), "eight passes");
+    assert_eq!(refused(&joined(9)), Refused::Tables);
+    // Every kind of item counts: joins, CTE references, subqueries and what they read.
+    let at_cap = "WITH c AS (SELECT * FROM v_daily) \
+                  SELECT * FROM c JOIN v_monthly ON 1 JOIN (SELECT * FROM v_paths) p ON 1, \
+                  v_tally, v_active WHERE os IN (SELECT os FROM v_cohort_week)";
+    assert!(guard(at_cap).is_ok(), "{at_cap}");
+    for sql in [
+        "WITH c AS (SELECT * FROM v_daily) \
+         SELECT * FROM c, c c2, c c3, c c4, c c5, c c6, c c7, c c8",
+        "SELECT * FROM v_daily a JOIN v_daily b ON 1 JOIN v_daily c ON 1 JOIN v_daily d ON 1 \
+         JOIN v_daily e ON 1 JOIN v_daily f ON 1 JOIN v_daily g ON 1 JOIN v_daily h ON 1 \
+         JOIN v_daily i ON 1",
+        "SELECT (SELECT count(*) FROM v_daily, v_daily b, v_daily c, v_daily d), \
+         (SELECT count(*) FROM v_daily, v_daily b, v_daily c, v_daily d, v_daily e)",
+        "SELECT * FROM (((v_daily a JOIN v_daily b ON 1) JOIN v_daily c ON 1)), v_daily d, \
+         v_daily e, v_daily f, v_daily g, v_daily h, v_daily i",
+    ] {
+        assert_eq!(refused(sql), Refused::Tables, "{sql}");
     }
 }

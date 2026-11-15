@@ -204,16 +204,19 @@ adds, not one of the app's events.
 
 A bucket is named by its lower bound: `questions = 10` means 10 to 99. `cell` is the cell's
 fields without `n`, as compact JSON. The oldest and current periods of `v_active` hold only
-part of their days. The rule hides each small group from direct view; subtracting one view from
-another can still give the size of hidden groups, as decision 0059 says. In `v_crash` this is
-direct: a group's `_all` row minus its visible signature rows is the total of its hidden
-signatures. That is accepted: only the owner and his agents read the views, and no row names a
-report.
+part of their days. The under-5 rule holds for each view on its own, not for a query that
+combines views: subtracting one view from another (`v_monthly` minus `v_daily`'s days, or a
+total row minus its visible groups) can still give the size of hidden groups, as decision 0059
+says. In `v_crash` this is direct: a group's `_all` row minus its visible signature rows is the
+total of its hidden signatures. That is accepted because only Rohan and his agents can read the
+views at all, and no row names a report.
 
 ## Reading the counts
 
 Two more routes read the views, never the tables, each behind its own Cloudflare Access
-application:
+application. They are for Rohan and his agents only, no one else: `/v1/query` can combine
+views, so the under-5 rule does not protect its answers the way it protects each view
+([The views](#the-views)).
 
 | Request | Who | Answer |
 | --- | --- | --- |
@@ -221,17 +224,22 @@ application:
 | `POST /v1/query` | an agent with the service token `clauseo-counts-agent` | the rows of one query, JSON |
 
 **Fail closed.** Each route answers `404` to everything unless the Worker knows the Access team
-(`ACCESS_TEAM`) and the route's application AUD tag (`DASH_AUD`, `QUERY_AUD`). These reach the
-Worker at deploy as `wrangler deploy --var` values ([Access](#access)), never through
-`wrangler.toml`.
+(`ACCESS_TEAM`), the route's application AUD tag (`DASH_AUD`, `QUERY_AUD`) and the route's one
+caller: Rohan's email (`DASH_EMAIL`) for `/dash`, the client id of the service token
+`clauseo-counts-agent` (`QUERY_CLIENT_ID`) for `/v1/query`. So `/v1/query` is `404` until that
+token exists. These reach the Worker at deploy as `wrangler deploy --var` values
+([Access](#access)), never through `wrangler.toml`.
 
 **The Access check.** Access refuses anyone without a login or token before the Worker runs. The
 Worker checks Access's JWT again, so a misconfigured application cannot open a route: the
 `Cf-Access-Jwt-Assertion` token must be RS256 (`none` and `HS*` are refused), be unexpired,
-come from `https://<team>.cloudflareaccess.com`, carry that route's own AUD, and be signed by a
+come from `https://<team>.cloudflareaccess.com`, carry that route's own AUD, name the route's
+caller (for `/dash` an `email` equal to `DASH_EMAIL`, ignoring case; for `/v1/query` a
+`common_name` equal to `QUERY_CLIENT_ID`, which a person's token never has), and be signed by a
 key from `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, checked with WebCrypto. The
 Worker keeps the keys for an hour, and fetches them again sooner only for a token naming a key
-it does not have, at most once a minute. Anything else is `403` with an empty body. The tests
+it does not have, at most once a minute. Anything else is `403` with an empty body. So a policy
+added to an application by hand still lets no one else through the Worker. The tests
 serve their own key through `ACCESS_CERTS_URL_DEV`, which only `wrangler dev` sets. The Worker
 takes it only as a loopback `http://` address, and `check-deploy.mjs` refuses a config that
 names it.
@@ -255,7 +263,11 @@ JSON array of rows. The query is parsed with `sqlparser` in SQLite's dialect and
 `400` unless it is one `SELECT` or `WITH` whose every table is a `v_*` view or a CTE in an
 enclosing scope. A CTE may not take a base table's name or a `sqlite_` one, a name may not be
 qualified (`main.report`, and `main.v_daily` too, so no `temp.` name can shadow a view), names
-compare without case as SQLite's do, `FROM` takes no table-valued function, and functions come
+compare without case as SQLite's do, `FROM` takes no table-valued function, no CTE is recursive
+(`WITH RECURSIVE`, or a CTE naming itself or a later one, which SQLite runs as recursive
+anyway: an unbounded one kept D1 busy and blocked the counts writes), a query has at most 8
+`FROM`/`JOIN` items in all (each view, CTE reference and parenthesised subquery counts one,
+wherever it sits), and functions come
 from a short list: `count`, `sum`, `total`, `avg`, `min`, `max`, `group_concat`, `date`, `strftime`,
 `coalesce`, `round`, `json_extract`. The Worker runs it as
 `SELECT * FROM (<query>) LIMIT 1000`, written from the parsed statement, and answers `504` after
@@ -370,11 +382,17 @@ deploys:
      service token named `clauseo-counts-agent`. Until that token exists, the application has no
      policy of ours, so it lets no one in.
 
-   It keeps that one policy up to date (a new email updates it) and leaves any other policy on
-   the application as it is, saying how many there are. An application of that name on another
-   path, or two of one name, fails the job.
-2. It reads both applications' AUD tags and passes them, with the repository variable
-   `ACCESS_TEAM`, as `wrangler deploy --var ACCESS_TEAM:… --var DASH_AUD:… --var QUERY_AUD:…`.
+   It keeps that one policy up to date (a new email updates it) and deletes every other policy
+   on the two applications, one added by hand included, so each application's policies are
+   exactly the one it made, again at every deploy. A reusable policy (one shared between
+   applications) is not deleted from here: the job fails, naming the application, to be fixed
+   by hand. An application of that name on another path, or two of one name, fails the job.
+2. It reads both applications' AUD tags, and the client id (not the secret) of the service
+   token `clauseo-counts-agent` through the service tokens API, and passes them, with the
+   repository variable `ACCESS_TEAM` and `ACCESS_DASH_EMAIL`, as `wrangler deploy
+   --var ACCESS_TEAM:… --var DASH_AUD:… --var DASH_EMAIL:… --var QUERY_AUD:…
+   --var QUERY_CLIENT_ID:…`. Without the email or the token, that caller's variable is left out
+   and its route stays `404`.
 3. It prints none of them. They are masked like the database id, and errors name the API path
    without its ids.
 

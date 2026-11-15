@@ -1,13 +1,20 @@
 // The Access step of the counts deploy (docs/counts-worker.md, "Access"). /dash and /v1/query
 // answer 404 unless the Worker knows the Access team and each route's application AUD, and those
 // reach it at deploy as `wrangler deploy --var`, never through wrangler.toml. This module finds or
-// creates the two self-hosted Access applications by name, keeps their one policy each, and
+// creates the two self-hosted Access applications by name, keeps exactly one policy on each, and
 // returns the values to pass:
 //
-// - clauseo-counts-dash on t.clauseo.chat/dash: Allow, for the email in ACCESS_DASH_EMAIL;
+// - clauseo-counts-dash on t.clauseo.chat/dash: Allow, for the email in ACCESS_DASH_EMAIL, which
+//   also reaches the Worker as DASH_EMAIL: /dash takes only a token with that email;
 // - clauseo-counts-query on t.clauseo.chat/v1/query: Service Auth, for the service token named
-//   clauseo-counts-agent. While that token does not exist the application has no policy of ours,
-//   so it lets no one in.
+//   clauseo-counts-agent, whose client id (not its secret) reaches the Worker as QUERY_CLIENT_ID:
+//   /v1/query takes only a token with that common_name. While that token does not exist the
+//   application has no policy of ours, so it lets no one in, and the Worker answers 404.
+//
+// Any other policy on the two applications, one added by hand included, is deleted, so each
+// application's policy set is exactly the one made here, at every deploy. A reusable policy
+// (shared between applications) is not deleted from here: the step fails and names the
+// application, to be fixed by hand. The Worker's own check of the caller holds either way.
 //
 // Run logs on this public repo are public: nothing here prints an id, an AUD, the team or an
 // email. Errors name the API path's shape, not its ids. Without ACCESS_TEAM, or when the API
@@ -19,10 +26,15 @@ import { Refused } from "./errors.mjs";
 export const API = "https://api.cloudflare.com/client/v4";
 export const SERVICE_TOKEN = "clauseo-counts-agent";
 
-/** The two applications, and the variable each one's AUD reaches the Worker as. */
+/** The two applications, the variable each one's AUD reaches the Worker as, and its caller's. */
 export const APPS = [
-  { name: "clauseo-counts-dash", domain: "t.clauseo.chat/dash", variable: "DASH_AUD" },
-  { name: "clauseo-counts-query", domain: "t.clauseo.chat/v1/query", variable: "QUERY_AUD" },
+  { name: "clauseo-counts-dash", domain: "t.clauseo.chat/dash", variable: "DASH_AUD", callerVariable: "DASH_EMAIL" },
+  {
+    name: "clauseo-counts-query",
+    domain: "t.clauseo.chat/v1/query",
+    variable: "QUERY_AUD",
+    callerVariable: "QUERY_CLIENT_ID",
+  },
 ];
 
 /** The API answered 401 or 403: the token has no Access scopes yet. */
@@ -74,13 +86,19 @@ async function accountId(api, env) {
   return accounts[0].id;
 }
 
+/** The caller each application's Worker route takes, or undefined when there is none yet. */
+function caller(app, env, token) {
+  if (app.variable === "DASH_AUD") return env.ACCESS_DASH_EMAIL || undefined;
+  return token?.client_id || undefined;
+}
+
 /** The policy each application must have, or undefined when it should have none of ours. */
 function wantedPolicy(app, env, token) {
   if (app.variable === "DASH_AUD") {
     if (!env.ACCESS_DASH_EMAIL) return undefined;
     return { name: `${app.name} owner`, decision: "allow", include: [{ email: { email: env.ACCESS_DASH_EMAIL } }] };
   }
-  if (token === undefined) return undefined;
+  if (token === undefined || !token.client_id) return undefined;
   return { name: `${app.name} agent`, decision: "non_identity", include: [{ service_token: { token_id: token.id } }] };
 }
 
@@ -134,9 +152,17 @@ export async function setUpAccess(api, env) {
           lines.push(`Access: ${wanted.name}'s policy updated`);
         }
       }
-      const others = policies.filter((p) => p.name !== policy?.name).length;
-      if (others > 0) lines.push(`Access: ${wanted.name} has ${others} other policy(ies), left as they are`);
+      // The application's own policies, and any the application lists (reusable ones too).
+      const listed = [...policies, ...(Array.isArray(app.policies) ? app.policies : [])];
+      const others = [...new Map(listed.filter((p) => p.name !== policy?.name).map((p) => [p.id, p])).values()];
+      if (others.some((p) => p.reusable === true || !policies.some((own) => own.id === p.id))) {
+        throw new Refused(`${wanted.name} has a reusable Access policy attached; remove it by hand`);
+      }
+      for (const other of others) await call(api, "DELETE", `${base}/apps/${app.id}/policies/${other.id}`);
+      if (others.length > 0) lines.push(`Access: ${wanted.name}: ${others.length} other policy(ies) deleted`);
       vars[wanted.variable] = app.aud;
+      const who = caller(wanted, env, token);
+      if (who !== undefined) vars[wanted.callerVariable] = who;
     }
   } catch (error) {
     if (!(error instanceof AccessUnavailable)) throw error;
@@ -145,7 +171,10 @@ export async function setUpAccess(api, env) {
       lines: [`Access: skipped, the API answered ${error.message} (the token lacks the Access scopes); /dash and /v1/query stay 404`],
     };
   }
-  lines.push("Access: the team and both AUD tags go to the Worker as deploy variables");
+  const callers = APPS.filter((app) => vars[app.callerVariable] !== undefined).map((app) => app.callerVariable);
+  lines.push(
+    `Access: the team, both AUD tags and ${callers.length === 0 ? "no caller" : callers.join(" and ")} go to the Worker as deploy variables`,
+  );
   return { vars, lines };
 }
 

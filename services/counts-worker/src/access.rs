@@ -2,9 +2,12 @@
 //! of both routes, and the Worker checks its JWT again, so a misconfigured Access application
 //! cannot open them: the `Cf-Access-Jwt-Assertion` token must be RS256 (`none` and `HS*` are
 //! refused), name a `kid` from the team's certificates, be unexpired, come from
-//! `https://<team>.cloudflareaccess.com`, and carry the route's own `aud`. The signature itself
-//! is checked behind [`Verifier`], `WebCrypto` in the Worker (`webcrypto.rs`), so the claims are
-//! tested natively. Nothing here reads a claim beyond those, and nothing is kept.
+//! `https://<team>.cloudflareaccess.com`, carry the route's own `aud`, and name the route's one
+//! caller: the owner's `email` on `/dash`, the agents' service token's `common_name` (its client
+//! id) on `/v1/query`. So a policy added to an Access application by hand lets no one else in.
+//! The signature itself is checked behind [`Verifier`], `WebCrypto` in the Worker
+//! (`webcrypto.rs`), so the claims are tested natively. Nothing here reads a claim beyond those,
+//! and nothing is kept.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -35,6 +38,8 @@ pub(crate) enum Denied {
     Issuer,
     /// Not this route's `aud`.
     Audience,
+    /// Not this route's caller: another email, another service token, or none.
+    Identity,
     /// The signature does not verify.
     Signature,
 }
@@ -94,25 +99,39 @@ pub(crate) fn parse_keys(json: &[u8]) -> Option<Vec<Key>> {
     )
 }
 
-/// A route's Access settings: the team and the application's `aud`. `None` when either is
-/// missing or the team is not a plain name, and then the route answers `404`.
+/// Who may call a route, and the claim that names them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Caller {
+    /// `/dash`: a person, whose token's `email` must be `DASH_EMAIL` (case-insensitive).
+    Owner,
+    /// `/v1/query`: a service token, whose token's `common_name` must be `QUERY_CLIENT_ID`.
+    Agent,
+}
+
+/// A route's Access settings: the team, the application's `aud` and the one caller let in.
+/// `None` when any is missing or the team is not a plain name, and then the route answers `404`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Access {
     team: String,
     aud: String,
+    caller: Caller,
+    who: String,
 }
 
 impl Access {
-    /// The settings, if both are set and the team is a plain DNS label.
-    pub(crate) fn new(team: &str, aud: &str) -> Option<Access> {
+    /// The settings, if all are set and the team is a plain DNS label. `who` is the owner's
+    /// email or the service token's client id, as `caller` says.
+    pub(crate) fn new(team: &str, aud: &str, caller: Caller, who: &str) -> Option<Access> {
         let label = !team.is_empty()
             && team.len() <= 63
             && team
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
-        (label && !aud.is_empty()).then(|| Access {
+        (label && !aud.is_empty() && !who.trim().is_empty()).then(|| Access {
             team: team.to_owned(),
             aud: aud.to_owned(),
+            caller,
+            who: who.trim().to_owned(),
         })
     }
 
@@ -149,6 +168,12 @@ struct Claims {
     nbf: Option<u64>,
     iss: String,
     aud: Audience,
+    /// A person's login email; absent from a service token's token.
+    #[serde(default)]
+    email: Option<String>,
+    /// A service token's client id; absent from a person's token.
+    #[serde(default)]
+    common_name: Option<String>,
 }
 
 /// A token split and decoded, its algorithm already pinned to RS256.
@@ -199,7 +224,8 @@ impl Token {
         &self.kid
     }
 
-    /// `exp`, `nbf`, `iss` and `aud` against the route's settings at `now` (Unix seconds).
+    /// `exp`, `nbf`, `iss`, `aud` and the caller against the route's settings at `now`
+    /// (Unix seconds).
     pub(crate) fn check_claims(&self, access: &Access, now: u64) -> Result<(), Denied> {
         let claims = &self.claims;
         if now >= claims.exp || claims.nbf.is_some_and(|nbf| nbf > now + SKEW_SECS) {
@@ -212,7 +238,21 @@ impl Token {
             Audience::One(aud) => *aud == access.aud,
             Audience::Many(auds) => auds.contains(&access.aud),
         };
-        if ours { Ok(()) } else { Err(Denied::Audience) }
+        if !ours {
+            return Err(Denied::Audience);
+        }
+        let caller = match access.caller {
+            Caller::Owner => claims
+                .email
+                .as_deref()
+                .is_some_and(|email| email.eq_ignore_ascii_case(&access.who)),
+            Caller::Agent => claims.common_name.as_deref() == Some(access.who.as_str()),
+        };
+        if caller {
+            Ok(())
+        } else {
+            Err(Denied::Identity)
+        }
     }
 }
 
@@ -249,7 +289,7 @@ pub(crate) async fn check(
 }
 
 /// The variable `wrangler dev` sets to serve test keys (tests/access.test.mjs). It is never
-/// set in production: the deploy passes only `ACCESS_TEAM` and the AUDs, and
+/// set in production: the deploy passes only `ACCESS_TEAM`, the AUDs and the two callers, and
 /// `check-deploy.mjs` refuses a config that names it. Even if it were set, only a loopback URL
 /// is taken, which the edge cannot reach, so the check would fail closed.
 pub(crate) const DEV_CERTS_VAR: &str = "ACCESS_CERTS_URL_DEV";
