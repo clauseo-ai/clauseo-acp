@@ -19,10 +19,8 @@ test-support = []
 zip = { version = "9.2.2", default-features = false, features = [
   "deflate-flate2",
 ] }
-# The tracked-changes check's one pass over a .docx's relationships (revisions/marks/parts.rs).
-memchr = { workspace = true }
 # The tracked-changes check's read of each .docx part as XML, namespaces resolved
-# (revisions/marks.rs). Already in the lock, as a dev-dependency here.
+# (revisions/marks.rs).
 quick-xml = { workspace = true }
 clauseo-protocol = { path = "../protocol" }
 clauseo-reducer = { path = "../reducer" }
