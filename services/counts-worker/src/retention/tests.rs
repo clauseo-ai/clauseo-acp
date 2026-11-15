@@ -1,4 +1,4 @@
-//! The run's deletes against an in-memory stand-in for the three tables, which does what each
+//! The run's deletes against an in-memory stand-in for the four tables, which does what each
 //! statement says: the cut-offs, the ranges covering every id, and a backlog larger than any one
 //! range cleared in one run.
 
@@ -8,12 +8,13 @@ use clauseo_counts::schema::Day;
 
 use super::*;
 
-/// The three tables, as their keys and the column each delete compares.
+/// The four tables, as their keys and the column each delete compares.
 #[derive(Default)]
 struct Tables {
     rates: BTreeSet<String>,
     tallies: BTreeMap<String, String>,
     reports: BTreeSet<(String, String)>,
+    install_weeks: BTreeSet<(String, String)>,
 }
 
 fn text(param: &Param) -> &str {
@@ -24,7 +25,7 @@ fn text(param: &Param) -> &str {
 }
 
 impl Tables {
-    /// Runs one of the three statements, as SQLite would.
+    /// Runs one of the four statements, as SQLite would.
     fn run(&mut self, sql: &str, values: &[Param]) {
         match sql {
             DELETE_RATES => {
@@ -42,6 +43,10 @@ impl Tables {
                 self.reports.retain(|(install, day)| {
                     !(install.as_str() >= low && install.as_str() < high && day.as_str() < cut)
                 });
+            }
+            DELETE_INSTALL_WEEKS => {
+                let cut = text(&values[0]).to_owned();
+                self.install_weeks.retain(|(_, week)| *week >= cut);
             }
             other => panic!("unknown statement {other}"),
         }
@@ -71,16 +76,16 @@ fn id(n: usize) -> String {
 fn the_cut_offs_are_today_90_days_and_396_days_back() {
     let statements = deletes(monday()).unwrap();
     assert_eq!(statements.len(), STATEMENTS);
-    assert_eq!(STATEMENTS, 33);
+    assert_eq!(STATEMENTS, 34);
     assert_eq!(
         statements[0],
         (DELETE_RATES, vec![Param::Text("2026-11-09".to_owned())])
     );
     // 2025-10-09 is a Thursday in ISO week 41 of 2025; 90 days before is 2026-08-11.
     for (sql, values) in &statements[1..] {
-        let cut = text(&values[2]);
+        let cut = text(values.last().unwrap());
         match *sql {
-            DELETE_TALLIES => assert_eq!(cut, "2025-W41"),
+            DELETE_TALLIES | DELETE_INSTALL_WEEKS => assert_eq!(cut, "2025-W41"),
             DELETE_REPORTS => assert_eq!(cut, "2026-08-11"),
             other => panic!("unexpected {other}"),
         }
@@ -136,10 +141,34 @@ fn a_backlog_larger_than_any_range_is_cleared_in_one_run_and_kept_rows_stay() {
         tables.tallies.insert(id(n), "2025-W40".to_owned());
     }
     tables.tallies.insert(id(99_999), "2025-W41".to_owned());
+    for (n, week) in ["2025-W40", "2025-W41", "2026-W45"].into_iter().enumerate() {
+        tables.install_weeks.insert((id(n), week.to_owned()));
+    }
 
-    assert_eq!(tables.prune(monday()), 33);
+    assert_eq!(tables.prune(monday()), 34);
+    let weeks: Vec<&str> = tables
+        .install_weeks
+        .iter()
+        .map(|(_, week)| week.as_str())
+        .collect();
+    assert_eq!(weeks, ["2025-W41", "2026-W45"]);
     assert_eq!(tables.rates, BTreeSet::from(["2026-11-09".to_owned()]));
     assert_eq!(tables.tallies.into_keys().collect::<Vec<_>>(), [id(99_999)]);
     assert_eq!(tables.reports.len(), 2_500);
     assert!(tables.reports.iter().all(|(_, day)| day == "2026-08-11"));
+}
+
+#[test]
+fn a_run_fills_first_then_deletes_within_the_budget() {
+    let statements = plan(monday()).unwrap();
+    assert_eq!(statements.len(), PLAN);
+    assert_eq!(PLAN, 36);
+    let fills = fills(monday().day().unwrap()).unwrap();
+    assert_eq!(statements[..FILLS], fills[..]);
+    assert_eq!(statements[FILLS..], deletes(monday()).unwrap()[..]);
+    assert!(
+        statements[FILLS..]
+            .iter()
+            .all(|(sql, _)| sql.starts_with("DELETE"))
+    );
 }

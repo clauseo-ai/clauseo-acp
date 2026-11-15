@@ -17,7 +17,7 @@ use worker::{
 use clauseo_counts::schema::Time;
 
 use crate::body::{Limited, check_headers, inflate};
-use crate::retention::deletes;
+use crate::retention::plan;
 use crate::route::{Refusal, Route};
 use crate::rows::{Accepted, BUMP_RATE, Param, accept};
 
@@ -132,18 +132,25 @@ fn statement(db: &D1Database, sql: &str, values: &[Param]) -> Result<D1PreparedS
     Ok(db.prepare(sql).bind(&values)?)
 }
 
-/// The daily deletes ([`deletes`]), one statement at a time, so each finished range stays
-/// deleted if a later one fails. A failed run is not retried or recorded (the Worker keeps no
-/// logs); the next day's run deletes the same rows.
+/// The daily run ([`plan`]): the fills, then the deletes, one statement at a time. A statement
+/// that fails does not stop the ones after it, so a failing fill never holds back a delete, and
+/// each finished range stays deleted. A failed run is not retried or recorded (the Worker keeps
+/// no logs); the next day's run sends the same statements, and a fill that already happened
+/// inserts nothing.
 #[event(scheduled)]
 async fn scheduled(_event: ScheduledEvent, env: Env, _context: ScheduleContext) {
-    prune(&env).await.unwrap_or_default();
+    daily(&env).await.unwrap_or_default();
 }
 
-async fn prune(env: &Env) -> Result<(), Refusal> {
+async fn daily(env: &Env) -> Result<(), Refusal> {
     let db = env.d1(DB)?;
-    for (sql, values) in deletes(now()).ok_or(Refusal::Failed)? {
-        statement(&db, sql, &values)?.run().await?;
+    let mut outcome = Ok(());
+    for (sql, values) in plan(now()).ok_or(Refusal::Failed)? {
+        let ran = match statement(&db, sql, &values) {
+            Ok(prepared) => prepared.run().await.map(drop).map_err(Refusal::from),
+            Err(refusal) => Err(refusal),
+        };
+        outcome = outcome.and(ran);
     }
-    Ok(())
+    outcome
 }

@@ -27,7 +27,17 @@ export function day(daysAgo) {
 
 /** The ISO week `weeksAgo` weeks before this one, as YYYY-Www. */
 export function week(weeksAgo) {
-  const date = new Date(Date.now() - weeksAgo * 7 * DAY_MS);
+  return weekOf(new Date(Date.now() - weeksAgo * 7 * DAY_MS));
+}
+
+/** How many days ago the Monday of the week `daysAgo` days back was. */
+export function mondayAgo(daysAgo) {
+  return daysAgo + ((new Date(Date.now() - daysAgo * DAY_MS).getUTCDay() + 6) % 7);
+}
+
+/** The ISO week of a date (a Date, or YYYY-MM-DD), as YYYY-Www. */
+export function weekOf(date) {
+  if (typeof date === "string") date = new Date(`${date}T00:00:00Z`);
   const thursday = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   thursday.setUTCDate(thursday.getUTCDate() + 3 - ((thursday.getUTCDay() + 6) % 7));
   const year = thursday.getUTCFullYear();

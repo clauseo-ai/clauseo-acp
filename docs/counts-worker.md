@@ -4,7 +4,8 @@
 ([decision 0036](decisions/0036-counts.md)) and keeps them in a D1 database. Its code is in
 `services/counts-worker/`, beside the client that sends to it, so anyone can read exactly what it
 accepts and stores. [Decision 0056](decisions/0056-counts-worker.md) records why it is built this
-way and what waits until after launch.
+way and what waits until after launch; [decision 0059](decisions/0059-counts-rollup-views.md)
+adds the summaries and views.
 
 ## What it accepts
 
@@ -44,7 +45,7 @@ committed schema.
 
 ## What it stores
 
-Three tables (`services/counts-worker/migrations/0001_init.sql`), with no index beyond their keys:
+Five tables (`services/counts-worker/migrations/`), with no index beyond their keys:
 
 - `report`: one row per install and day, keyed `(install, day)`. Columns: `install`, `day`,
   `version`, `channel`, `os`, `os_major`, `arch`, `language`, and `cells`.
@@ -52,6 +53,14 @@ Three tables (`services/counts-worker/migrations/0001_init.sql`), with no index 
   `version`, `channel`, `os`, `os_major`, `arch`, `install_type`, `managed` (1 or 0), and
   `cells`. A tally has no install id, so it cannot be joined to a report.
 - `rate`: one count per route per UTC day, for the caps. It says nothing about who sent what.
+- `install_week` (filled by the cron): one row per install per ISO week it reported in, keyed
+  `(install, week)`. Columns: `install`, `week`, `first_week` (the install's cohort),
+  `days_active`, `questions` (the week's `question_sent` counts), `hit_limit` (1 when a limit
+  was reached that week) and `features` (how many distinct features were used).
+- `rollup` (filled by the cron): monthly totals with no id, keyed `(month, version, os, event,
+  cell)`. Columns: those, `agent` (the cell's own agent, if it has one), `count` (the cells'
+  counts summed) and `installs` (distinct installs, counted while the reports still existed).
+  A `_report` row counts each month's reports and installs per version and OS.
 
 Each column is a top-level field of the crate's `DayReport` or `TallyReport`, in its wire form.
 `cells` is the cells as the crate writes them back: compact JSON in a fixed order. The Worker
@@ -62,28 +71,67 @@ No table has a column for the time a row arrived. Nothing holds an IP address, a
 user agent or any other header. The Worker's code reads only `Content-Encoding` and
 `Content-Length`. (workers-rs copies the request's headers into memory when it wraps the request;
 they are dropped with it.) A test fails if the code reaches any other header, the request's `cf`
-metadata or the raw JS request, or names a client-address header. `report` and `tally` are
-`WITHOUT ROWID` tables, so the order rows are stored in does not show the order they arrived in.
+metadata or the raw JS request, or names a client-address header. `report`, `tally`,
+`install_week` and `rollup` are `WITHOUT ROWID` tables, so the order rows are stored in does not show the order they arrived in.
 
 ## How long it keeps them
 
-A cron runs every day at 03:00 UTC. It deletes:
+A cron runs every day at 03:00 UTC. First it fills `install_week` and `rollup`
+([below](#the-summaries)). Then it deletes:
 
 - `report` rows whose day is more than 90 days old. A row goes at most 91 days after the day it
   counts;
-- `tally` rows whose week is more than 396 days old. A row goes at most 403 days after its
-  week's Monday, which is 397 days after the week ends (about 13 months);
+- `tally` and `install_week` rows whose week is more than 396 days old. A row goes at most 403
+  days after its week's Monday, which is 397 days after the week ends (about 13 months);
 - `rate` rows of days before today.
 
+`rollup` is kept indefinitely. It holds no install id, and each of its rows counts at least the
+installs it says.
+
 The deletes go by the first hex digit of the key, `0` to `f`: 16 ranges for `report`, 16 for
-`tally` and one `rate` delete, 33 statements a run (Workers Free allows 50 D1 queries a run).
-No statement returns rows, so a run costs the Worker the same CPU at any backlog, and one run
-clears it all.
+`tally`, one `install_week` delete and one `rate` delete. With the two fills that is 36
+statements a run (Workers Free allows 50 D1 queries a run). No statement returns rows, so a run
+costs the Worker the same CPU at any backlog, and one run clears it all. A statement that fails
+does not stop the ones after it, so a failing fill never holds back a delete.
+
+### The summaries
+
+Both fills are SQL (`INSERT OR IGNORE … SELECT` with `json_each` over the cells,
+`services/counts-worker/src/rollup.rs`); the Worker only works out two date ranges.
+
+- A day report may arrive up to 14 days after its day, so a week or month is **final** once its
+  last day is at least 15 days old.
+- A run fills a period only if it is final and **whole**: none of its days is older than the 90
+  days `report` keeps, so all of its rows still exist. A week can be filled from 15 to 90 days
+  after its Monday and a month for at least 45 days, so a few failed runs lose nothing.
+- Once filled, a period stays as it is: a later run inserts nothing. A period never filled
+  while whole is never filled from part of its rows.
 
 D1's Time Travel can also restore the database to any point in the last 7 days on Workers Free
 (30 days on Workers Paid), and it cannot be turned off. So a deleted row can be recovered for
 that long, and a restore to an earlier point can show roughly when rows arrived. There are no
 other backups or exports.
+
+## The views
+
+The dashboard and `/v1/query` read only these views, never the tables
+(`migrations/0002_rollup.sql`). Every view hides a group of fewer than 5: distinct installs, or
+tallies for `v_tally`. No view has an `install` or `tally` column. An `event` that starts with
+`_` is a total the view adds, not one of the app's events.
+
+| View | From | One row per | Columns |
+| --- | --- | --- | --- |
+| `v_daily` | `report` (90 days) | day, version, OS, event and cell | `day`, `version`, `os`, `agent`, `event`, `cell`, `count`, `installs`; `_report` counts reports |
+| `v_monthly` | `rollup` (kept) | month, version, OS, event and cell | as `v_daily`, with `month` |
+| `v_active` | `report` (90 days) | day, ISO week or month | `period`, `start`, `installs` |
+| `v_cohort_week` | `install_week` (13 months) | first week and week | `first_week`, `week`, `installs`, and `days_active`, `questions`, `hit_limit`, `features` summed |
+| `v_paths` | `install_week` (13 months) | combination of buckets | `weeks_active` (1, 2, 4, 8, 16), `questions` in all (0, 1, 10, 100, 1000), `hit_limit` ever, `features` in the busiest week (0, 1, 2, 4), `installs` |
+| `v_tally` | `tally` (13 months) | week, version, OS, event and cell | `week`, `version`, `os`, `event`, `cell`, `count`, `tallies`; `_tally` counts tallies, `_crashed` those with a crash, `_fleet` splits them by install type and managed |
+
+A bucket is named by its lower bound: `questions = 10` means 10 to 99. `cell` is the cell's
+fields without `n`, as compact JSON. The oldest and current periods of `v_active` hold only
+part of their days. The rule hides each small group from direct view; subtracting one view from
+another can still give the size of hidden groups, as decision 0059 says.
 
 ## No logs
 
@@ -116,8 +164,11 @@ and 500 MB per database:
 - **Writes.** At both caps a day writes at most 3,000 × 8 rows (7 reports and the count) plus
   1,000 × 2 (the tally and the count), about 26,000. The cron's deletes also count as writes: at
   most about 22,000 a day once rows start expiring. That stays under 48,000.
-- **Reads.** Each insert reads a handful of rows. The cron reads each table about once a run.
-  Even at the caps, `report` holds about 91 × 21,000 ≈ 1.9 million rows, which is under 5 million.
+- **Reads.** Each insert reads a handful of rows. The cron reads `report` three times a run (two
+  fills and the deletes) and each other table about once: about 115,000 rows a day at 300
+  installs. At the caps `report` would hold about 91 × 21,000 ≈ 1.9 million rows, and three
+  scans of it (about 5.7 million) would pass Free's 5 million: a flood at the caps for 90 days
+  would stop every query for the rest of that day, until 00:00 UTC.
 - **Storage.** A realistic day report is about 1 KB, so 3,000 requests of 7 days add about
   21 MB a day. A deliberate flood of the largest valid bodies (64 KB each) could add about 192 MB
   a day and fill the 500 MB within days. Once the database is full, inserts fail until rows
@@ -204,10 +255,11 @@ target), `worker-build` on `PATH` (`cargo install --locked worker-build --versio
 pnpm:
 
 ```sh
-cargo test --locked          # the request rules, rows and the cron's plan, natively
+cargo test --locked          # the request rules, rows, the cron's plan and fill ranges
 pnpm install --frozen-lockfile
 pnpm test                    # the guards, then the Worker under wrangler dev --local
 ```
 
 `pnpm test` builds the Worker, gives each test file its own local D1 under `.wrangler/`, and
-deletes it afterwards. It needs no Cloudflare account.
+deletes it afterwards. `tests/rollup.test.mjs` runs the cron's fills and
+`tests/views.test.mjs` checks every view's under-5 rule and columns. It needs no Cloudflare account.
