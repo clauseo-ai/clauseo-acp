@@ -97,5 +97,38 @@
     "at": "2026-11-15",
     "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
     "note": "agent.setting_refused with no name at all"
+  },
+  "UC-383": {
+    "en": "ChatGPT's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.",
+    "hi": "ChatGPT का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "startmsg helper (provisional; review of #1114: no Try again where it can't help)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "startmsg helper (provisional; review of #1114: no Try again where it can't help)",
+    "note": "agent.program_blocked: the agent's program is missing or not allowed to run (was \"didn't start. Try again.\", where trying again can't help)"
+  },
+  "UC-384": {
+    "en": "{name}'s program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.",
+    "hi": "{name} का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "startmsg helper (provisional; review of #1114: no Try again where it can't help)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "startmsg helper (provisional; review of #1114: no Try again where it can't help)",
+    "note": "agent.program_blocked for an agent of no kind by its name"
+  },
+  "UC-385": {
+    "en": "The AI's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.",
+    "hi": "AI का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "startmsg helper (provisional; review of #1114: no Try again where it can't help)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "startmsg helper (provisional; review of #1114: no Try again where it can't help)",
+    "note": "agent.program_blocked with no name at all"
   }
 }

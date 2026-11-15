@@ -1131,5 +1131,16 @@
     "at": "2026-11-15",
     "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
     "note": "agent.start_offline: the start request failed on its connection and the host's probe did not get through"
+  },
+  "U3-err-agent.program_blocked": {
+    "en": "Claude's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.",
+    "hi": "Claude का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "startmsg helper (provisional; review of #1114: no Try again where it can't help)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "startmsg helper (provisional; review of #1114: no Try again where it can't help)",
+    "note": "agent.program_blocked: Claude's program is missing or not allowed to run; no Try again, which can't help (id required by status.test.ts: one U3-err per code)"
   }
 }
