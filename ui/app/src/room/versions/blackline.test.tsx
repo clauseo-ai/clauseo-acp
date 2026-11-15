@@ -180,6 +180,30 @@ test("a document shown in part, or with hidden text, says so, a line for each no
   expect(fallback()).toBeNull();
 });
 
+test("a change with no text of its own shows its object's word, marked in or out", async () => {
+  h = await comparing(() => ({
+    word_blackline: {
+      paragraphs: [
+        {
+          change: "changed",
+          runs: [
+            { kind: "same", text: "Signed: " },
+            { kind: "ins", text: "", object: "picture" },
+            { kind: "del", text: "", object: "note" },
+            { kind: "ins", text: "", object: "unknown" },
+          ],
+        },
+      ],
+      truncated: false,
+    },
+  }));
+  expect([...(page()?.querySelectorAll(".ver-ins") ?? [])].map((e) => e.textContent)).toEqual([
+    "[picture]",
+    "[object]",
+  ]);
+  expect(page()?.querySelector(".ver-del")?.textContent).toBe("[footnote]");
+});
+
 test("changes outside the main text say so over the sheet", async () => {
   h = await comparing(() => ({
     word_blackline: { ...MARKED.word_blackline!, notices: ["changes_outside_text"] },

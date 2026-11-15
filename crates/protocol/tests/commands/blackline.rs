@@ -2,8 +2,8 @@
 //! missing or `null` for the folder now, as for `CompareVersions`.
 
 use clauseo_protocol::{
-    BlacklineNotice, BlacklineParagraph, BlacklineRun, HostQuery, ParagraphChange, QueryResult,
-    RunKind, WordBlackline,
+    BlacklineNotice, BlacklineObject, BlacklineParagraph, BlacklineRun, HostQuery, ParagraphChange,
+    QueryResult, RunKind, WordBlackline,
 };
 
 use super::fixtures::{checkpoint_id, matter_id, path, round_trips, v7_text};
@@ -165,10 +165,45 @@ fn hidden_text_formatting_and_places_not_shown_on_the_wire() {
     );
 }
 
+/// An inserted picture is a run with no text, its object named; a text run writes no
+/// `object`, and a later kind of object reads as `unknown`.
+#[test]
+fn an_object_run_on_the_wire() {
+    let answer = QueryResult::WordBlackline(WordBlackline {
+        paragraphs: vec![BlacklineParagraph {
+            change: ParagraphChange::Changed,
+            runs: vec![
+                run(RunKind::Same, "Signed: "),
+                BlacklineRun {
+                    kind: RunKind::Ins,
+                    text: String::new(),
+                    object: Some(BlacklineObject::Picture),
+                },
+            ],
+            hidden: false,
+        }],
+        truncated: false,
+        notices: Vec::new(),
+    });
+    round_trips(&answer);
+    assert_eq!(
+        serde_json::to_string(&answer).unwrap(),
+        concat!(
+            r#"{"word_blackline":{"paragraphs":[{"change":"changed","runs":[{"kind":"same","#,
+            r#""text":"Signed: "},{"kind":"ins","text":"","object":"picture"}]}],"#,
+            r#""truncated":false}}"#
+        )
+    );
+    let later = r#"{"kind":"del","text":"","object":"zz_later"}"#;
+    let read: BlacklineRun = serde_json::from_str(later).unwrap();
+    assert_eq!(read.object, Some(BlacklineObject::Unknown));
+}
+
 /// A run of `kind` with `text`.
 fn run(kind: RunKind, text: &str) -> BlacklineRun {
     BlacklineRun {
         kind,
         text: text.to_owned(),
+        object: None,
     }
 }

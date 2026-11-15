@@ -102,6 +102,13 @@ const OWN = {
   // over a blackline paragraph: the place couldn't be shown, or it holds text Word hides; provisional
   "This part couldn't be shown.": "यह हिस्सा दिखाया नहीं जा सका।",
   "Hidden in Word": "Word में छिपा हुआ",
+  // in a marked-up paragraph, for a change that holds no text of its own; provisional
+  "[picture]": "[चित्र]",
+  "[chart]": "[चार्ट]",
+  "[shape]": "[आकृति]",
+  "[footnote]": "[फ़ुटनोट]",
+  "[field]": "[फ़ील्ड]",
+  "[object]": "[वस्तु]",
   // why the Word tool refused to mark a document up, each said over the sheet with no Try again; provisional
   "Clauseo couldn't compare these two versions because of a table inside a table. Open both in Word to compare them.":
     "तालिका के अंदर एक तालिका होने के कारण Clauseo इन दो संस्करणों की तुलना नहीं कर सका। तुलना के लिए दोनों को Word में खोलें।",

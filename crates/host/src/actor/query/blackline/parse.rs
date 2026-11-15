@@ -180,7 +180,10 @@ pub(crate) fn read_view(json: &str) -> Result<Read, ViewFailure> {
     if text.seen.hidden {
         found.push(BlacklineNotice::HiddenText);
     }
-    if text.seen.unknown {
+    // A view with no summary can't be checked; and a change a line names that no paragraph
+    // shows as changed (a marker this reader drops, a format it does not model) may be missing.
+    let uncovered = !text.ids.is_subset(&text.covered);
+    if text.seen.unknown || !text.summary_seen || uncovered {
         found.push(BlacklineNotice::MayDiffer);
     }
     let truncated = view.position.shown < view.position.total || view.next.is_some();
@@ -265,6 +268,13 @@ pub(crate) struct Text {
     pub(crate) counted: usize,
     /// The ids of the changes the body's lines name (`count.rs`).
     pub(crate) ids: BTreeSet<u64>,
+    /// The ids of the changes a paragraph shows as changed (its line's, and those of the rows and
+    /// cells that mark it), or a placeholder stands for: every id in `ids` should be here.
+    pub(crate) covered: BTreeSet<u64>,
+    /// Whether the view has a summary line, whose count the ids are checked against.
+    pub(crate) summary_seen: bool,
+    /// The ids the line being read names.
+    line_ids: BTreeSet<u64>,
     /// Whether the last block line was left out, so the next one left out shares its place.
     last_skipped: bool,
 }
@@ -275,6 +285,7 @@ impl Text {
     fn skip(&mut self, at: Unreadable) {
         self.skipped += 1;
         self.first_skip.get_or_insert(at);
+        self.covered.extend(self.line_ids.iter().copied());
         if !self.last_skipped {
             self.paragraphs.push(BlacklineParagraph {
                 change: ParagraphChange::NotShown,
@@ -322,17 +333,21 @@ pub(crate) fn read_text(text: &str) -> Text {
         match count::summary_count(line) {
             count::Summary::Count(counted) => {
                 read.counted = counted;
+                read.summary_seen = true;
                 continue;
             }
             // A summary whose count this reader can't read: the check can't be made, so say so.
             count::Summary::Unreadable => {
                 read.seen.unknown = true;
+                read.summary_seen = true;
                 continue;
             }
             count::Summary::Other => {}
         }
+        read.line_ids.clear();
         if !HEAD.iter().any(|head| line.starts_with(head)) {
-            count::ids_in(line, &mut read.ids);
+            count::ids_in(line, &mut read.line_ids);
+            read.ids.extend(read.line_ids.iter().copied());
         }
         if line == "{/table}" {
             if past > 0 {
@@ -372,7 +387,7 @@ pub(crate) fn read_text(text: &str) -> Text {
                 continue;
             }
             // A table that starts a cell carries the cell's tags.
-            enter_cell(&mut levels, content, &mut read.seen);
+            enter_cell(&mut levels, content, &read.line_ids, &mut read.seen);
             levels.push(Level::default());
             match table(content) {
                 Ok(formatted) => read.seen.unknown |= formatted,
@@ -388,10 +403,17 @@ pub(crate) fn read_text(text: &str) -> Text {
             "p" => {
                 // What the paragraph held counts only once it reads.
                 let mut seen = read.seen;
-                enter_cell(&mut levels, content, &mut seen);
+                enter_cell(&mut levels, content, &read.line_ids, &mut seen);
                 match paragraph(content, &mut seen, whole(&levels)) {
                     Ok(paragraph) => {
                         read.seen = seen;
+                        if paragraph.change != ParagraphChange::Same {
+                            read.covered.extend(read.line_ids.iter().copied());
+                            for level in &levels {
+                                read.covered.extend(level.row_ids.iter().copied());
+                                read.covered.extend(level.cell_ids.iter().copied());
+                            }
+                        }
                         read.paragraphs.push(paragraph);
                         read.last_skipped = false;
                     }
@@ -407,6 +429,8 @@ pub(crate) fn read_text(text: &str) -> Text {
                     *level = Level {
                         row: mark,
                         cell: Mark::None,
+                        row_ids: marked_ids(mark, &read.line_ids),
+                        cell_ids: Vec::new(),
                     };
                     read.seen.unknown |= unknown || !after.trim().is_empty();
                 }
@@ -418,11 +442,14 @@ pub(crate) fn read_text(text: &str) -> Text {
     read
 }
 
-/// One open table: the change of its current row and of its current cell.
-#[derive(Debug, Clone, Copy)]
+/// One open table: the change of its current row and of its current cell, with the ids of the
+/// lines that marked them (none when unmarked).
+#[derive(Debug, Clone)]
 struct Level {
     row: Mark,
     cell: Mark,
+    row_ids: Vec<u64>,
+    cell_ids: Vec<u64>,
 }
 
 impl Default for Level {
@@ -430,19 +457,31 @@ impl Default for Level {
         Self {
             row: Mark::None,
             cell: Mark::None,
+            row_ids: Vec::new(),
+            cell_ids: Vec::new(),
         }
+    }
+}
+
+/// `ids` when `mark` is a change, else none.
+fn marked_ids(mark: Mark, ids: &BTreeSet<u64>) -> Vec<u64> {
+    if mark == Mark::None {
+        Vec::new()
+    } else {
+        ids.iter().copied().collect()
     }
 }
 
 /// A block line inside a table: unless it goes on its cell (`{+}`), it starts a new cell, whose
 /// change its tags give; a cell tag this reader does not know is noted in `seen`.
-fn enter_cell(levels: &mut [Level], content: &str, seen: &mut Seen) {
+fn enter_cell(levels: &mut [Level], content: &str, ids: &BTreeSet<u64>, seen: &mut Seen) {
     let Some(level) = levels.last_mut() else {
         return;
     };
     let tags = line::cell_tags(content);
     if !tags.continues {
         level.cell = tags.mark;
+        level.cell_ids = marked_ids(tags.mark, ids);
     }
     seen.unknown |= tags.unknown;
 }

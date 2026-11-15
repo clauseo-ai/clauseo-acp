@@ -9,10 +9,11 @@
 //! each run may take ([`COMPARE_LIMIT`], [`VIEW_LIMIT`], on the host clock); how much it may print
 //! ([`STDOUT_MAX`]); what counts as a failure ([`Failed`]): a launch that fails, an exit
 //! other than 0, the deadline, stdout past the cap or not UTF-8, and a view with nothing in it
-//! that can be shown (a view that reads in part, or warns, is a blackline with notices); and
-//! which code a failure gets ([`refusal_code`]): stetdoc's own refusals (a table inside a table,
-//! a compare it refused, a version it can't read, a size limit) their own, the rest
-//! `blackline.failed`.
+//! that can be shown (a view that reads in part, or warns, is a blackline with notices); that
+//! the blackline may differ when the two files differ but it shows no change
+//! ([`note_a_silent_difference`]); and which code a failure gets ([`refusal_code`]): stetdoc's
+//! own refusals (a table inside a table, a compare it refused, a version it can't read, a size
+//! limit) their own, the rest `blackline.failed`.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -22,7 +23,7 @@ use std::pin::pin;
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, Timer};
-use clauseo_protocol::ErrorCode;
+use clauseo_protocol::{BlacklineNotice, ErrorCode, ParagraphChange, WordBlackline};
 use futures::AsyncReadExt as _;
 use futures::future::{Either, join, select};
 
@@ -98,7 +99,7 @@ pub(crate) async fn blackline<T: Timer>(
         path(REDLINE),
     ];
     let printed = run(launcher, timer, stetdoc, dir, "view", view, VIEW_LIMIT).await?;
-    read_view(&printed).map_err(|failure| Failed {
+    let mut read = read_view(&printed).map_err(|failure| Failed {
         step: "view",
         why: failure.to_string(),
         code: match failure {
@@ -107,7 +108,27 @@ pub(crate) async fn blackline<T: Timer>(
                 ErrorCode::BlacklineFailed
             }
         },
-    })
+    })?;
+    // Two copies the host just wrote; one that can't be read counts as different.
+    let differ = match (std::fs::read(dir.join(OLD)), std::fs::read(dir.join(NEW))) {
+        (Ok(old), Ok(new)) => old != new,
+        _ => true,
+    };
+    note_a_silent_difference(&mut read.blackline, differ);
+    Ok(read)
+}
+
+/// Adds [`BlacklineNotice::MayDiffer`] when the two files differ (`differ`) but the blackline
+/// shows no change and says nothing: stetdoc marks no change for some differences (a link's
+/// address with the same text), and "no changes" must never stand for two different files.
+pub(crate) fn note_a_silent_difference(blackline: &mut WordBlackline, differ: bool) {
+    let shown = blackline
+        .paragraphs
+        .iter()
+        .any(|paragraph| paragraph.change != ParagraphChange::Same);
+    if differ && !shown && blackline.notices.is_empty() {
+        blackline.notices.push(BlacklineNotice::MayDiffer);
+    }
 }
 
 /// `--author=<name>` as one argument, so a name that starts with `-` is never read as a flag.

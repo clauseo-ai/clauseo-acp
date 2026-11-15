@@ -209,7 +209,7 @@ wire_types! {
         PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, Principal,
     },
     blackline::{
-        BlacklineNotice, BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind, WordBlackline,
+        BlacklineNotice, BlacklineObject, BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind, WordBlackline,
     },
     browser_install::{BrowserInstallFailure, BrowserInstallState},
     browser_policy::{BrowserPolicyState},

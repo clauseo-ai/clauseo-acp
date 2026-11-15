@@ -19,6 +19,9 @@
 //!   text box its text); a field (`{field PAGE "2"}`) its result, math its text, a page or column
 //!   break a line break, hidden text (`{hidden "…"}`, `{looks-hidden white "…"}`) its text, as
 //!   stetdoc's view shows it;
+//! - what a change with no text of its own is (an inserted `{img}`, a deleted `{fn1}`, an empty
+//!   `{----}`): an object run of its kind, inserted or deleted, naming what the first marker in
+//!   it stood for (a picture, a chart, a shape, a note, a field, or other), never nothing;
 //! - how a paragraph changed: `added` when it has `{¶+ …}` and all its text is inserted,
 //!   `removed` when it has `{¶- …}` and all of it is deleted, `formatted` when nothing in it is
 //!   inserted or deleted but it has a format change (`{rev …}`, which stetdoc prints for a
@@ -30,7 +33,9 @@
 //! not parse (a brace or escape out of place, a change with no id, changes nested past
 //! [`MAX_CHANGE_DEPTH`]) is an error naming the rule, never the text.
 
-use clauseo_protocol::{BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind};
+use clauseo_protocol::{
+    BlacklineObject, BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind,
+};
 
 /// The deepest a change may sit inside other changes; stetdoc nests one in another (a deletion
 /// inside an insertion), and the cap keeps the reader's recursion small on any input.
@@ -201,7 +206,7 @@ pub(super) fn paragraph(
                 (Mark::Inserted, RunKind::Same) | (Mark::Deleted, _) => to,
                 (_, kind) => kind,
             };
-            push(&mut marked, kind, &run.text);
+            push_run(&mut marked, kind, run);
         }
         runs = marked;
         mark = whole;
@@ -237,7 +242,7 @@ pub(super) fn paragraph(
         let mut numbered = Vec::with_capacity(runs.len() + 1);
         push(&mut numbered, kind, &format!("{number} "));
         for run in runs {
-            push(&mut numbered, run.kind, &run.text);
+            push_run(&mut numbered, run.kind, run);
         }
         runs = numbered;
     }
@@ -265,8 +270,9 @@ fn inline(
     end: Option<(&str, usize)>,
     runs: &mut Vec<BlacklineRun>,
     seen: &mut Seen,
-) -> Result<(), &'static str> {
+) -> Result<Read, &'static str> {
     let mut text = String::new();
+    let mut read = Read::default();
     let depth = end.map_or(0, |(_, depth)| depth);
     loop {
         if let Some((end, _)) = end
@@ -302,7 +308,18 @@ fn inline(
                     (RunKind::Del, "--}")
                 };
                 *rest = rest.get(3..).unwrap_or_default();
-                inline(rest, inner, Some((close, depth + 1)), runs, seen)?;
+                let change = inline(rest, inner, Some((close, depth + 1)), runs, seen)?;
+                // A change that holds no text (an inserted picture, a deleted note's
+                // reference, an empty deletion) is never dropped: it stands as an object run.
+                if change.text == 0 {
+                    runs.push(BlacklineRun {
+                        kind: inner,
+                        text: String::new(),
+                        object: Some(change.object.unwrap_or(BlacklineObject::Other)),
+                    });
+                }
+                read.text += change.text;
+                read.object = read.object.or(change.object);
                 let (body, after) = marker(rest).map_err(|_no_marker| "a change without its id")?;
                 let ids = body.strip_prefix('#').unwrap_or_default();
                 if !ids.starts_with(|c: char| c.is_ascii_digit()) {
@@ -312,7 +329,9 @@ fn inline(
             }
             '{' => {
                 let (body, after) = marker(rest)?;
-                text.push_str(&inline_marker(body, seen)?);
+                let (shown, object) = inline_marker(body, seen)?;
+                text.push_str(&shown);
+                read.object = read.object.or(object);
                 *rest = after;
             }
             '}' => return Err("a closing brace that is not escaped"),
@@ -322,14 +341,26 @@ fn inline(
             }
         }
     }
+    read.text += text.len();
     push(runs, kind, &text);
-    Ok(())
+    Ok(read)
+}
+
+/// What one stretch of a line read: how many bytes of text it gave, and the first thing it
+/// dropped that holds no text (a picture, a note's reference, a field Word fills in).
+#[derive(Debug, Default, Clone, Copy)]
+struct Read {
+    text: usize,
+    object: Option<BlacklineObject>,
 }
 
 /// What an inline marker reads as, by its first word (the module doc lists them); words after
 /// the ones it needs are ignored. A first word this reader does not know reads as nothing and
 /// is noted in `seen`.
-fn inline_marker(body: &str, seen: &mut Seen) -> Result<String, &'static str> {
+fn inline_marker(
+    body: &str,
+    seen: &mut Seen,
+) -> Result<(String, Option<BlacklineObject>), &'static str> {
     let toks = tokens(body)?;
     let Some(Tok::Word(first)) = toks.first() else {
         return Err("a marker that does not start with a word");
@@ -346,6 +377,14 @@ fn inline_marker(body: &str, seen: &mut Seen) -> Result<String, &'static str> {
         first
             .strip_prefix(prefix)
             .is_some_and(|n| n == "." || (!n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())))
+    };
+    let object = match first {
+        "img" => Some(BlacklineObject::Picture),
+        "chart" => Some(BlacklineObject::Chart),
+        "shape" | "textbox" => Some(BlacklineObject::Shape),
+        "page" | "date" | "value" | "field" => Some(BlacklineObject::Field),
+        _ if numbered("fn") || numbered("en") => Some(BlacklineObject::Note),
+        _ => Some(BlacklineObject::Other),
     };
     let text = match first {
         "/link" | "/ctl" | "link" | "ctl" | "page" | "date" | "value" => String::new(),
@@ -379,7 +418,7 @@ fn inline_marker(body: &str, seen: &mut Seen) -> Result<String, &'static str> {
             String::new()
         }
     };
-    Ok(text)
+    Ok((text, object))
 }
 
 /// The body of the marker `rest` starts with (between its braces) and what follows it. Quoted
@@ -466,10 +505,20 @@ fn push(runs: &mut Vec<BlacklineRun>, kind: RunKind, text: &str) {
         return;
     }
     match runs.last_mut() {
-        Some(last) if last.kind == kind => last.text.push_str(text),
+        Some(last) if last.kind == kind && last.object.is_none() => last.text.push_str(text),
         _ => runs.push(BlacklineRun {
             kind,
             text: text.to_owned(),
+            object: None,
         }),
+    }
+}
+
+/// Adds `run` to `runs` as `kind`: an object run as it is, a text run as [`push`] adds it.
+fn push_run(runs: &mut Vec<BlacklineRun>, kind: RunKind, run: BlacklineRun) {
+    if run.object.is_some() {
+        runs.push(BlacklineRun { kind, ..run });
+    } else {
+        push(runs, kind, &run.text);
     }
 }

@@ -8,7 +8,9 @@ use std::path::Path;
 
 use clauseo_protocol::ErrorCode;
 
-use super::{author_arg, error_of, refusal_code, stetdoc_env};
+use clauseo_protocol::{BlacklineNotice, BlacklineParagraph, ParagraphChange, WordBlackline};
+
+use super::{author_arg, error_of, note_a_silent_difference, refusal_code, stetdoc_env};
 
 /// A lookup over `pairs`, the name matched in any case.
 fn host(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<OsString> {
@@ -122,4 +124,33 @@ fn stetdoc_refusals_have_codes_of_their_own() {
     assert_eq!(error_of(b"oops"), ("none".to_owned(), String::new()));
     let odd = br#"{"error":{"code":"a b","message":"m"}}"#;
     assert_eq!(error_of(odd), ("none".to_owned(), "m".to_owned()));
+}
+
+/// Two files that differ, blacklined with no change shown and nothing said (a link's address
+/// changed, which stetdoc does not mark), say the blackline may differ; the same files, or a
+/// change or notice already shown, add nothing.
+#[test]
+fn a_difference_the_blackline_does_not_show_may_differ() {
+    let blackline = |change| WordBlackline {
+        paragraphs: vec![BlacklineParagraph {
+            change,
+            runs: Vec::new(),
+            hidden: false,
+        }],
+        truncated: false,
+        notices: Vec::new(),
+    };
+    let noted = |mut blackline: WordBlackline, differ| {
+        note_a_silent_difference(&mut blackline, differ);
+        blackline.notices
+    };
+    assert_eq!(
+        noted(blackline(ParagraphChange::Same), true),
+        [BlacklineNotice::MayDiffer]
+    );
+    assert_eq!(noted(blackline(ParagraphChange::Same), false), []);
+    assert_eq!(noted(blackline(ParagraphChange::Changed), true), []);
+    let mut hidden = blackline(ParagraphChange::Same);
+    hidden.notices.push(BlacklineNotice::HiddenText);
+    assert_eq!(noted(hidden, true), [BlacklineNotice::HiddenText]);
 }

@@ -207,6 +207,10 @@
     display: block;
     white-space: normal;
   }
+  /* a change with no text of its own, named in brackets: an inserted picture, a deleted footnote */
+  .ver-object {
+    font-style: italic;
+  }
   /* a place the blackline couldn't show, said plainly where the paragraph stood */
   .ver-not-shown {
     @apply text-muted;

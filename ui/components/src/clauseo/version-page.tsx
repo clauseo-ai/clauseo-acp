@@ -10,15 +10,36 @@ import { Heading } from "./heading.tsx";
 import { keepIds } from "./matter.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
-import type { ParaDiff, RowDiff, Run } from "./versions-diff.ts";
+import type { MarkedObject, ParaDiff, RowDiff, Run } from "./versions-diff.ts";
+import type { VersionKey } from "../lib/words-versions.ts";
 import { useStuck } from "./stuck.ts";
 
-/** Words as runs: the same, came in, or went out; the lawyer's own at 600. */
+/** The word for a marked-up run that stands for an object, in brackets: an inserted picture is "[picture]". */
+const OBJECT_WORDS: Readonly<Record<MarkedObject, VersionKey>> = {
+  picture: "[picture]",
+  chart: "[chart]",
+  shape: "[shape]",
+  note: "[footnote]",
+  field: "[field]",
+  other: "[object]",
+  unknown: "[object]",
+};
+
+/** Words as runs: the same, came in, or went out; the lawyer's own at 600. A run that stands for an object (a
+ * picture put in, a footnote taken out) shows its bracketed word, marked in or out the same way. */
 export function Runs({ runs }: { runs: readonly Run[] }) {
+  const w = useVersionWords();
   return (
     <>
       {runs.map((r, i) => {
-        const words = <Say>{keepIds(r.text)}</Say>;
+        const words =
+          r.object === undefined ? (
+            <Say>{keepIds(r.text)}</Say>
+          ) : (
+            <span className="ver-object">
+              <Say>{w.v(OBJECT_WORDS[r.object])}</Say>
+            </span>
+          );
         const inner = r.mine ? <b className="ver-mine">{words}</b> : words;
         if (r.kind === "ins")
           return (
