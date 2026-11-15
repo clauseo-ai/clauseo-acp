@@ -31,6 +31,9 @@ fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
         claude_home: &data.join("agents/claude-acp/home"),
         data: &run.data_deny.spellings,
         other_matters: &[],
+        matter_open: None,
+        matter_unlisted: false,
+        matter_inside: &[],
     };
     let sandbox = ClaudeSandbox::for_os(SandboxOs::Mac, &paths).unwrap();
     let text = |path: &Path| path.to_str().unwrap().to_owned();

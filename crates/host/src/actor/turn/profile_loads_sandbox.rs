@@ -54,6 +54,12 @@ fn claude_sandbox(
     let claude_home = actor.effective.locations().agent_home(agent_id.as_str());
     // Every other matter's folder the launch knew (forgotten ones too), but those the lawyer
     // let this conversation read (`agent::matter_fence`); one registered later is the residual.
+    let fence = &run.data_deny.matters;
+    let inside: Vec<PathBuf> = fence
+        .inside_own
+        .iter()
+        .map(|(path, _)| path.clone())
+        .collect();
     let other_matters: Vec<PathBuf> = run
         .data_deny
         .matters
@@ -75,6 +81,9 @@ fn claude_sandbox(
         claude_home: &claude_home,
         data: &run.data_deny.spellings,
         other_matters: &other_matters,
+        matter_open: fence.own_open.as_deref(),
+        matter_unlisted: fence.own_unlisted,
+        matter_inside: &inside,
     };
     ClaudeSandbox::for_os(SandboxOs::CURRENT, &paths)
 }

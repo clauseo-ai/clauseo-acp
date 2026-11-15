@@ -728,3 +728,7 @@ crates/host/src/crash/native/win.rs - unsafe_code
 crates/desktop/src/counts/crashes/win.rs - unsafe_code
 crates/host/src/crash/tests.rs native::native_child unsafe_code
 crates/host/src/crash/tests.rs native::run_child clippy::disallowed_methods
+
+# The shared "does this matter hold a denied folder?" answer (#1085); stage D's matter allow
+# rules (#1065) are its caller, unused until that lands.
+crates/host/src/agent/data_fence/launch.rs LaunchDeny::denies_inside dead_code

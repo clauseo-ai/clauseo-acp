@@ -178,15 +178,16 @@ pub fn claude_scale(research: bool) -> Option<String> {
 }
 
 /// What the host appends to a session's instructions for the other matters the lawyer let its
-/// conversation read (`reads`: each matter's name and folder), read-only; empty for none.
-/// Provisional words (b4l-mfence).
+/// conversation read (`reads`: each matter's name and folder), read-only; empty for none. Each
+/// name and folder is a JSON string, escaped, so neither can read as an instruction (a folder
+/// named with a quote and a line break). Provisional words (b4l-mfence).
 pub fn matter_reads_part(reads: &[(&str, &str)]) -> String {
     if reads.is_empty() {
         return String::new();
     }
     let listed: Vec<String> = reads
         .iter()
-        .map(|(name, folder)| format!("\"{name}\" ({folder})"))
+        .map(|(name, folder)| format!("{} ({})", json_text(name), json_text(folder)))
         .collect();
     format!(
         "\n\nThe lawyer let this conversation read the files of these other matters: {}. Read \
@@ -194,6 +195,11 @@ pub fn matter_reads_part(reads: &[(&str, &str)]) -> String {
          save into their folders. Your shell may still be refused there.",
         listed.join("; ")
     )
+}
+
+/// `text` as a JSON string, quotes included.
+fn json_text(text: &str) -> String {
+    serde_json::to_string(text).unwrap_or_else(|_| String::from("\"\""))
 }
 
 /// Which browser part a session gets in place of `{browser}`.

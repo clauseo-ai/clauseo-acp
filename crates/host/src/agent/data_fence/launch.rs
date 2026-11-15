@@ -22,7 +22,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use super::{DENIED, READ_ONLY, SHARED, escape};
-use crate::agent::matter_fence::MatterFence;
+use crate::agent::matter_fence::{MatterFence, key};
 
 /// Stands for any one name in an own folder's place ([`claude_projects`]'s session id). A
 /// file name can't hold a NUL, so no real name is this. Followed by text, it stands for any name
@@ -102,6 +102,33 @@ pub(crate) struct LaunchDeny {
 }
 
 impl LaunchDeny {
+    /// Whether the matter folder, spelled each of `matter` ways, holds a folder Clauseo denies
+    /// reading: a spelling of `<data>` (and so every target under it), the fence path of
+    /// another matter this conversation is not invited into (`MatterFence::denied_reads`), or
+    /// a matter inside it the launch could not list down to (`MatterFence::own_unlisted`). A
+    /// place equal to the matter counts. Names compare as the matter fence compares them
+    /// (`matter_fence::key`: folded where the file system folds, the drive too, `\\?\` forms
+    /// as plain ones). Paths only, after the launch prep resolved the fence.
+    ///
+    /// The one shared answer to "does this matter contain a denied folder?": Claude's allow
+    /// rules for the matter (stage D, #1065) are left out when it is true, as an allow there
+    /// would sit over a deny (Claude Code's deny wins, but its sandbox's `allowRead` does not).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "stage D's matter allow rules (#1065) call it")
+    )]
+    pub(crate) fn denies_inside(&self, matter: &[&Path]) -> bool {
+        if self.matters.own_unlisted {
+            return true;
+        }
+        let matter: Vec<_> = matter.iter().map(|place| key(place)).collect();
+        let holds = |path: &Path| {
+            let path = key(path);
+            matter.iter().any(|place| path.starts_with(place))
+        };
+        self.spellings.iter().any(|data| holds(data)) || self.matters.denied_reads().any(holds)
+    }
+
     /// The rules for `spellings` of `<data>` before the launch prep enumerates it: [`DENIED`]
     /// and Claude's config folder's names (`claude_home::CLAUDE_HOME`).
     pub(crate) fn fixed(spellings: Vec<PathBuf>) -> Self {

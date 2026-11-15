@@ -84,14 +84,18 @@ pub(super) fn launch_keys(
             .profile
             .codex_config(&agent_id, written.as_ref(), packs);
         codex.keys = profile::codex_keys(keys, web_search, folders)?;
-        let reads = super::fence::reads_part(&prepared.run);
+        if !cfg!(windows) {
+            let unfenced = prepared.run.data_deny.matters.unfenced.clone();
+            super::fence::tell_unfenced(actor, thread, unfenced);
+        }
+        let reads = super::fence::reads_part(&prepared.run, false);
         if let Some(text) = codex.keys.get_mut("developer_instructions") {
             super::fence::append_part(text, &reads);
         }
         // The data-folder fence (`agent::codex_fence`), in every Codex session, and the other
         // matters' (`agent::matter_fence`).
         let matters = &prepared.run.data_deny.matters;
-        let other_matters: Vec<PathBuf> = matters.denied_reads().map(Path::to_path_buf).collect();
+        let other_matters = matters.codex_denied();
         let session = crate::agent::codex_fence::Session {
             run_root: &prepared.run.root,
             notes: &prepared.run.notes,
