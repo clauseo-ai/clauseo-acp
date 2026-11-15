@@ -1558,7 +1558,8 @@ expression: counts_schema()
         "word.too_large",
         "agent.start_offline",
         "agent.answer_failed",
-        "agent.mode_missing"
+        "agent.mode_missing",
+        "agent.setting_refused"
       ],
       "type": "string"
     },
