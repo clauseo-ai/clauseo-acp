@@ -330,7 +330,7 @@ fn denies_inside_answers_for_a_child_the_data_folder_and_nothing() {
     assert!(with(&[], matter.join("data")).denies_inside(&own));
     assert!(!with(&[(root.join("outside"), false)], outside_data.clone()).denies_inside(&own));
     let mut unlisted = with(&[], outside_data);
-    unlisted.matters.own_unlisted = true;
+    unlisted.matters.own_shut = true;
     assert!(unlisted.denies_inside(&own));
 }
 

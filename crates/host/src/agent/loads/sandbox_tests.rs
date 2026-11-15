@@ -35,7 +35,7 @@ struct Session {
     claude_tmp: Option<PathBuf>,
     data: Vec<PathBuf>,
     other_matters: Vec<PathBuf>,
-    matter_open: Option<Vec<PathBuf>>,
+    matter_shut: bool,
     matter_inside: Vec<PathBuf>,
 }
 
@@ -65,7 +65,7 @@ impl Session {
             claude_tmp: Some(PathBuf::from(SHORT)),
             data: vec![data.to_path_buf()],
             other_matters: vec![PathBuf::from("/Users/l/Clients/B")],
-            matter_open: None,
+            matter_shut: false,
             matter_inside: Vec::new(),
             run,
         }
@@ -87,7 +87,7 @@ impl Session {
             claude_home: &self.home,
             data: &self.data,
             other_matters: &self.other_matters,
-            matter_open: self.matter_open.as_deref(),
+            matter_shut: self.matter_shut,
             matter_inside: &self.matter_inside,
         }
     }

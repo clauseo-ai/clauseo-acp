@@ -150,23 +150,20 @@ fn a_drive_letter_in_another_case_still_holds_the_matter() {
     }
 }
 
-/// A matter inside the session's own, then one deeper down: the own matter's entries down to
-/// it are what the sandbox re-opens, never the matter itself nor the matter inside; an invited
-/// matter inside is re-opened with the rest and listed for a write deny.
+/// A matter inside the session's own, then one deeper down: the own matter is shut to the
+/// sandbox (`own_shut`), and every matter inside, invited or not, is listed for a write deny.
 #[test]
-fn a_fenced_matter_inside_the_own_one_splits_what_the_sandbox_opens() {
+fn a_fenced_matter_inside_the_own_one_shuts_it_to_the_sandbox() {
     let (_dir, root) = tree(
-        "mfence-own-open",
+        "mfence-own-shut",
         &[
             "own/Sub/x",
             "own/Drafts",
             "own/p/q/Deep",
-            "own/p/other",
             "own/Shared",
             "data",
         ],
     );
-    write::write_file(&root.join("own/lease.pdf"), b"x").unwrap();
     let fence = fence(
         &root,
         "own",
@@ -176,19 +173,8 @@ fn a_fenced_matter_inside_the_own_one_splits_what_the_sandbox_opens() {
             ("own/Shared", true),
         ],
     );
-    let mut open = fence.own_open.clone().expect("split");
-    open.sort();
+    assert!(fence.own_shut);
     let own = root.join("own");
-    assert_eq!(
-        open,
-        [
-            own.join("Drafts"),
-            own.join("Shared"),
-            own.join("lease.pdf"),
-            own.join("p/other"),
-        ]
-    );
-    assert!(!fence.own_unlisted);
     let mut inside: Vec<(PathBuf, bool)> = fence.inside_own;
     inside.sort();
     assert_eq!(
@@ -199,9 +185,18 @@ fn a_fenced_matter_inside_the_own_one_splits_what_the_sandbox_opens() {
             (own.join("p/q/Deep"), false),
         ]
     );
-    // No matter inside: the matter is re-opened whole.
-    let plain = self::fence(&root, "own", &[("data", false)]);
-    assert_eq!(plain.own_open, None);
+}
+
+/// Only an invited matter inside the own one, or none: the own matter is re-opened whole.
+#[test]
+fn an_invited_matter_inside_the_own_one_leaves_it_open() {
+    let (_dir, root) = tree("mfence-own-invited", &["own/Shared", "other", "data"]);
+    let invited = fence(&root, "own", &[("own/Shared", true), ("other", false)]);
+    assert!(!invited.own_shut);
+    assert_eq!(invited.inside_own, [(root.join("own/Shared"), true)]);
+    let plain = fence(&root, "own", &[("other", false)]);
+    assert!(!plain.own_shut);
+    assert_eq!(plain.inside_own, []);
 }
 
 /// A parent whose siblings of the own matter pass the launch's limit is left unfenced and
@@ -245,50 +240,4 @@ fn the_budget_fences_the_smallest_matters_first() {
     let fence = fence(&root, "big/own", &[("big", false), ("small", false)]);
     assert_eq!(fence.unfenced, [fence.others[0].id]);
     assert_eq!(fence.others[1].paths, [root.join("small")]);
-}
-
-/// A link among the own matter's entries is never re-opened for the sandbox: it could lead into
-/// another matter.
-#[cfg(unix)]
-#[test]
-fn a_link_in_the_own_matter_is_not_re_opened() {
-    let (_dir, root) = tree(
-        "mfence-own-link",
-        &["own/Sub", "own/Drafts", "other", "data"],
-    );
-    write::symlink(&root.join("other"), &root.join("own/x")).unwrap();
-    let fence = fence(&root, "own", &[("own/Sub", false), ("other", false)]);
-    let open = fence.own_open.clone().expect("split");
-    assert_eq!(open, [root.join("own/Drafts")]);
-    assert!(!fence.own_unlisted);
-}
-
-/// Nothing the agent makes in its matter turns the sandbox off: a name with `?` is left out of
-/// what the sandbox re-opens; past the entries' limit, or with a link on the way down to the
-/// matter inside, the sandbox re-opens none of the matter (`own_unlisted`, the lawyer told).
-#[test]
-fn what_the_agent_makes_in_its_matter_never_widens_or_drops_the_sandbox() {
-    let (_dir, root) = tree("mfence-agent-made", &["own/Sub", "own/Drafts", "data"]);
-    write::write_file(&root.join("own/what?.txt"), b"x").unwrap();
-    let fence = fence(&root, "own", &[("own/Sub", false)]);
-    assert_eq!(fence.own_open, Some(vec![root.join("own/Drafts")]));
-    assert!(!fence.own_unlisted);
-
-    for n in 0..=super::MAX_PATHS {
-        write::write_file(&root.join(format!("own/f{n}")), b"").unwrap();
-    }
-    let crowded = self::fence(&root, "own", &[("own/Sub", false)]);
-    assert_eq!(crowded.own_open, Some(Vec::new()));
-    assert!(crowded.own_unlisted);
-}
-
-/// A link on the way down to the matter inside: none of the own matter is re-opened.
-#[cfg(unix)]
-#[test]
-fn a_link_on_the_way_down_re_opens_none_of_the_matter() {
-    let (_dir, root) = tree("mfence-link-way", &["own/Drafts", "elsewhere/Sub", "data"]);
-    write::symlink(&root.join("elsewhere"), &root.join("own/p")).unwrap();
-    let fence = fence(&root, "own", &[("own/p/Sub", false)]);
-    assert_eq!(fence.own_open, Some(Vec::new()));
-    assert!(fence.own_unlisted);
 }

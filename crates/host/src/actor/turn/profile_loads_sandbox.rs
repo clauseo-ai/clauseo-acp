@@ -55,24 +55,8 @@ fn claude_sandbox(
     // Every other matter's folder the launch knew (forgotten ones too), but those the lawyer
     // let this conversation read (`agent::matter_fence`); one registered later is the residual.
     let fence = &run.data_deny.matters;
-    // Each as registered, and where it leads when the sandbox can name it (`nameable`).
-    let stored: Vec<&Path> = fence
-        .others
-        .iter()
-        .map(|other| other.folder.as_path())
-        .collect();
-    let named = |path: &Path| crate::agent::loads::sandbox::nameable(path, &stored);
-    let inside: Vec<PathBuf> = fence
-        .inside_own
-        .iter()
-        .map(|(path, _)| path.clone())
-        .filter(|path| named(path))
-        .collect();
-    let other_matters: Vec<PathBuf> = fence
-        .fenced_folders()
-        .filter(|path| named(path))
-        .map(Path::to_path_buf)
-        .collect();
+    let denies = sandbox_denies(run);
+    let (inside, other_matters) = (denies.inside, denies.other_matters);
     let paths = SandboxPaths {
         matter,
         work: &run.work,
@@ -88,8 +72,47 @@ fn claude_sandbox(
         claude_home: &claude_home,
         data: &run.data_deny.spellings,
         other_matters: &other_matters,
-        matter_open: fence.own_open.as_deref(),
+        matter_shut: fence.own_shut,
         matter_inside: &inside,
     };
     ClaudeSandbox::for_os(SandboxOs::CURRENT, &paths)
+}
+
+/// The other matters' folders Claude's sandbox denies, each as `deny_form` writes it, and
+/// whether one had to be widened to a folder above it (the session's commands are limited).
+pub(super) struct SandboxDenies {
+    /// The other matters' folders inside the matter: denied writes.
+    pub(super) inside: Vec<PathBuf>,
+    /// Every fenced other matter's folder: denied reads.
+    pub(super) other_matters: Vec<PathBuf>,
+    /// Whether a deny was widened to a folder above what it names.
+    pub(super) limited: bool,
+}
+
+/// [`SandboxDenies`] of `run`'s fence: each folder as registered, and where it leads
+/// (`agent::loads::sandbox::deny_form`). Paths only.
+pub(super) fn sandbox_denies(run: &RunFolders) -> SandboxDenies {
+    let fence = &run.data_deny.matters;
+    let stored: Vec<&Path> = fence
+        .others
+        .iter()
+        .map(|other| other.folder.as_path())
+        .collect();
+    let mut limited = false;
+    let mut form = |path: &Path| {
+        let (path, widened) = crate::agent::loads::sandbox::deny_form(path, &stored);
+        limited |= widened;
+        path
+    };
+    let inside = fence
+        .inside_own
+        .iter()
+        .map(|(path, _)| form(path))
+        .collect();
+    let other_matters = fence.fenced_folders().map(&mut form).collect();
+    SandboxDenies {
+        inside,
+        other_matters,
+        limited,
+    }
 }

@@ -69,15 +69,11 @@
 //!   launch, `/Volumes` and `/Users/Shared`; the data fence's `Read(…)` deny rules become read
 //!   denies too. A matter registered after the launch is in no list: the accepted residual.
 //! - `filesystem.allowRead` ([`ClaudeSandbox::allow_read`]): re-opens, within those denies,
-//!   what a sandboxed command needs: the matter folder, or, when a matter the session is not
-//!   invited into lies inside it, the matter's entries one by one down to that matter
-//!   (`matter_fence::MatterFence::own_open`; Claude Code's `allowRead` beats `denyRead`, so a
-//!   whole matter re-opened would re-open the one inside it, even for `rg x .`), each written as
-//!   a pattern the runtime never resolves through a link ([`reopen_pattern`]). Then a
-//!   sandboxed command can't list the matter's top folder or the folders on the way, the
-//!   accepted cost. Where that list can't be made safely (a folder that can't be listed, a
-//!   link, too many entries), the sandbox stays on and re-opens none of the matter: nothing the
-//!   agent controls in the matter turns the sandbox off.
+//!   what a sandboxed command needs: the matter folder, unless a matter the session is not
+//!   invited into lies inside it (`matter_fence::MatterFence::own_shut`; Claude Code's
+//!   `allowRead` beats `denyRead`, so the matter re-opened would re-open the one inside it,
+//!   even for `rg x .`): then none of the matter, so Claude's commands can't open it (its file
+//!   tools still can) and the lawyer is told. Nothing the agent makes turns the sandbox off.
 //!   Also the `PATH` file Claude Code reads into each command
 //!   (`<run>/clauseo-env.sh`, `agent::shell_path`), the trust roots file on macOS
 //!   (`<data>/tls/roots.pem`, [`super::tls_roots`], the file alone) and each folder first on
@@ -212,11 +208,10 @@ pub(crate) struct SandboxPaths<'a> {
     pub(crate) data: &'a [PathBuf],
     /// Every other matter's folder the host knows.
     pub(crate) other_matters: &'a [PathBuf],
-    /// When a fenced matter lies inside this one: what of the matter folder to re-open for
-    /// reading instead of the whole folder (its entries down to that matter,
-    /// `matter_fence::MatterFence::own_open`). Claude Code's `allowRead` beats its `denyRead`,
-    /// so a whole matter re-opened would re-open the matter inside it.
-    pub(crate) matter_open: Option<&'a [PathBuf]>,
+    /// Whether a fenced matter lies inside this one: the matter folder is then not re-opened
+    /// for reading (`matter_fence::MatterFence::own_shut`). Claude Code's `allowRead` beats its
+    /// `denyRead`, so the matter re-opened would re-open the matter inside it.
+    pub(crate) matter_shut: bool,
     /// Every other matter's folder inside this one, invited or not: denied writes.
     pub(crate) matter_inside: &'a [PathBuf],
 }
@@ -259,14 +254,6 @@ impl ClaudeSandbox {
         sandbox
             .allow_read
             .extend(tool_results(paths.claude_home, paths.matter));
-        // The matter's own entries, as patterns (`reopen_pattern`): after the wildcard check,
-        // which their names, the agent's, must never reach (`matter_fence::reopen_safe`).
-        let open = paths.matter_open.unwrap_or_default();
-        sandbox.allow_read.extend(
-            open.iter()
-                .filter_map(|entry| reopen_pattern(entry))
-                .flatten(),
-        );
         Ok(sandbox)
     }
 
@@ -314,10 +301,11 @@ impl ClaudeSandbox {
     /// its standard library and site-packages beside it. Never a `PATH` folder's parent
     /// otherwise: it could be the home itself.
     fn allow_read(paths: &SandboxPaths<'_>, claude_tmp: &Path) -> Vec<String> {
-        // With a matter inside it, the matter's entries go in as patterns ([`Self::for_os`]).
-        let mut folders: Vec<PathBuf> = match paths.matter_open {
-            Some(_) => Vec::new(),
-            None => vec![paths.matter.to_path_buf()],
+        // With a fenced matter inside it, none of the matter.
+        let mut folders: Vec<PathBuf> = if paths.matter_shut {
+            Vec::new()
+        } else {
+            vec![paths.matter.to_path_buf()]
         };
         folders.extend(
             [
@@ -400,38 +388,20 @@ pub(crate) fn escape_brackets(text: &str) -> String {
     text.replace('[', "[[]")
 }
 
-/// Whether another matter's folder `path` goes in the sandbox's lists: always as the lawyer
-/// registered it (`stored`); where it only leads there (through a link the agent could make in
-/// its matter), only when the sandbox can name it, UTF-8 with no `*` or `?`: nothing the agent
-/// makes may turn the sandbox off ([`Off::NotUtf8`], [`Off::Wildcard`]).
-pub(crate) fn nameable(path: &Path, stored: &[&Path]) -> bool {
-    stored.contains(&path) || path.to_str().is_some_and(|text| !text.contains(WILDCARDS))
-}
-
-/// A re-opened entry of the matter (`matter_fence::MatterFence::own_open`) as a pattern, itself
-/// and with `/**`: the first letter or digit of its name as a one-letter class (`Acme/[d]ocs`),
-/// every `[` escaped. Claude Code turns a pattern into a regular expression matched against the
-/// path the file system reaches, never resolving it (`W4t`, Seatbelt's `(regex …)`), so a link
-/// put in an entry's place after the launch (`mv docs d && ln -s ~/Other docs`) re-opens
-/// nothing; a plain path it would resolve to where the link leads. `None` for an entry
-/// `matter_fence::reopen_safe` refuses.
-pub(crate) fn reopen_pattern(entry: &Path) -> Option<[String; 2]> {
-    if !crate::agent::matter_fence::reopen_safe(entry) {
-        return None;
+/// How another matter's folder `path` is denied in the sandbox's lists, and whether it had to
+/// be widened: as the lawyer registered it (`stored`) always; where it only leads there
+/// (through a link the agent could make in its matter) as itself when the sandbox can write it
+/// (UTF-8, no `*` or `?`), else as the longest folder above it that it can write, which covers
+/// it (`true`: the session's commands are limited, `NoticeKind::ShellLimited`). A deny is never
+/// dropped, and nothing the agent makes turns the sandbox off ([`Off::NotUtf8`],
+/// [`Off::Wildcard`]).
+pub(crate) fn deny_form(path: &Path, stored: &[&Path]) -> (PathBuf, bool) {
+    let writable = |path: &Path| path.to_str().is_some_and(|text| !text.contains(WILDCARDS));
+    if stored.contains(&path) || writable(path) {
+        return (path.to_path_buf(), false);
     }
-    let parent = entry.parent()?.to_str()?;
-    let name = entry.file_name()?.to_str()?;
-    let at = name.find(|c: char| c.is_ascii_alphanumeric())?;
-    let (head, rest) = name.split_at(at);
-    let mut rest = rest.chars();
-    let letter = rest.next()?;
-    let pattern = format!(
-        "{}/{}[{letter}]{}",
-        escape_brackets(parent.trim_end_matches('/')),
-        escape_brackets(head),
-        escape_brackets(rest.as_str())
-    );
-    Some([pattern.clone(), format!("{pattern}/**")])
+    let above = path.ancestors().skip(1).find(|above| writable(above));
+    (above.unwrap_or_else(|| Path::new("/")).to_path_buf(), true)
 }
 
 /// An allowed path's entries: itself, and with `/**` too once escaped (a glob allow opens only
