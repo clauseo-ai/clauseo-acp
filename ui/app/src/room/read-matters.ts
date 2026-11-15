@@ -3,7 +3,7 @@
 // the thread's own log and answers Done; the header then lists the matter, or no longer does, so nothing here holds
 // state of its own. The room gives the names (room.tsx, from its matters list) to the thread and the composer; the
 // rail reads its own view.
-import { createContext, use, useMemo } from "react";
+import { createContext, createElement, use, useMemo, type ReactNode } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { t } from "@clauseo/components/lib/words.ts";
 import { useStreamPart } from "../store/hooks.ts";
@@ -31,6 +31,20 @@ export function matterNamesOf(
   return new Map(
     matters.map((m) => [m.matter, m.kind === "scratch" ? t(lang, "Scratch matter") : m.name]),
   );
+}
+
+/** Gives the room's matter names (`matters`, in `lang`) to the thread's lines and the composer's pills. */
+export function MatterNamesFrom({
+  matters,
+  lang,
+  children,
+}: {
+  matters: readonly { matter: MatterId; name: string; kind: string }[];
+  lang: Lang;
+  children: ReactNode;
+}): ReactNode {
+  const names = useMemo(() => matterNamesOf(matters, lang), [matters, lang]);
+  return createElement(MatterNamesContext, { value: names }, children);
 }
 
 /** The header's read matters as one string, so a header that changes for anything else re-renders nothing. */

@@ -142,3 +142,24 @@ fn without_variables_the_lists_are_shorter_and_still_deny_the_path() {
         r"type C:\Users\clauseo-lawyer\Matters\Smith\a"
     ));
 }
+
+/// A matter inside the session's matter is denied for both shells beside stage D's own allows,
+/// as a deny beats an allow; the session's matter itself is not.
+#[test]
+fn a_child_matter_inside_the_own_matter_is_denied_and_the_matter_is_not() {
+    let deny = launch("Acme", &[(r"AcmeChild", &[r"AcmeChild"], false)]);
+    let rules = all_rules(&deny);
+    assert!(denied(
+        &rules,
+        r"type C:\Users\clauseo-lawyer\Matters\Acme\Child\deed.pdf"
+    ));
+    assert!(denied(
+        &rules,
+        r"cat C:/Users/clauseo-lawyer/Matters/Acme/Child/deed.pdf"
+    ));
+    assert!(!denied(
+        &rules,
+        r"type C:\Users\clauseo-lawyer\Matters\Acme\memo.docx"
+    ));
+    assert!(!denied(&rules, r"dir C:\Users\clauseo-lawyer\Matters\Acme"));
+}

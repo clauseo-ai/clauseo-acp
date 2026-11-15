@@ -2,22 +2,22 @@
 // with Base UI's CSP mode inside, then the window: the toolbar, the rail, the work and the wall, laid out by shell.css
 // and responsive.css. Three columns from 1200 px, the rail folded behind Matters as a floating panel from 1000 px, one
 // column below. The rail is U2's (rail.tsx over matters.ts); the work is the live thread (thread/work.tsx). The window
-// draws its own frame (H19): the toolbar is the title bar, with the caption buttons wired to the window off the Mac and macOS's own traffic
-// lights over the corner lights' place on it, inside the desktop app; elsewhere (tests, the probe, a browser) the
-// buttons log their presses and the lights are painted. The plan is the open conversation's agent's (limits/live-plan.tsx, U12); until a host query no search, and
-// until H5 nothing under a matter's title (the scratch matter's line stands). The wall
-// lists H8's papers (host-next.ts's papers part, which the desktop gives through host-wire.ts). Folded, the rail closes
-// on Escape and on opening a matter or making one, and focus goes back to Matters; opening a conversation or starting
-// one closes it too, and the field takes the focus. Matters carries the court-yellow dot while another matter waits on
-// the lawyer. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new conversation in the open matter, and Shift with it opens
-// New matter, as the Mac's native menu does too (room-commands.ts); until its first
-// question, the reading column's top says what it reads, once the matter's papers are counted. A link or paper in an
-// answer opens through the host (open.ts, H11), and so does a matter row's Show in Finder; a Word document's tile, and a
-// change note naming one, open it in Word (word/open-in-word.ts; the tiles are paper-wall.tsx). A refused open or show
-// says why where it came from, with Locate folder for a folder gone or not the matter's (act-refusals.ts; the room
-// gives LocateFolderContext for the open matter). Versions opens and shows files through the transport's own open_file
-// and reveal unless a test or the review page passes stand-ins. Settings opens in its own
-// window from the rail's foot and on Ctrl+, (⌘, on the Mac, settings-key.ts), where the host has that window.
+// draws its own frame (H19): the toolbar is the title bar, with the caption buttons wired to the window off the Mac and
+// macOS's own traffic lights over the corner lights' place on it, inside the desktop app; elsewhere (tests, the probe,
+// a browser) the buttons log their presses and the lights are painted. The plan is the open conversation's agent's
+// (limits/live-plan.tsx, U12); until a host query no search, and until H5 nothing under a matter's title (the scratch
+// matter's line stands). The wall lists H8's papers (host-next.ts's papers part, which the desktop gives through
+// host-wire.ts). Folded, the rail closes on Escape and on opening a matter or making one, and focus goes back to
+// Matters; opening a conversation or starting one closes it too, and the field takes the focus. Matters carries the
+// court-yellow dot while another matter waits on the lawyer. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new
+// conversation in the open matter, and Shift with it opens New matter, as the Mac's native menu does too
+// (room-commands.ts); until its first question, the reading column's top says what it reads, once the matter's papers
+// are counted. A link or paper in an answer opens through the host (open.ts, H11), and so does a matter row's Show in
+// Finder; a Word document's tile, and a change note naming one, open it in Word (word/open-in-word.ts; the tiles are
+// paper-wall.tsx). A refused open or show says why where it came from, with Locate folder for a folder gone or not the
+// matter's (act-refusals.ts; the room gives LocateFolderContext for the open matter). Versions opens and shows files
+// through the transport's own open_file and reveal unless a test or the review page passes stand-ins. Settings opens in
+// its own window from the rail's foot and on Ctrl+, (⌘, on the Mac, settings-key.ts), where the host has that window.
 import {
   lazy,
   Suspense,
@@ -56,7 +56,7 @@ import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { kindOf, knownPlan } from "./agent.ts";
 import { planLine, useKeyInUse } from "./key-in-use.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
-import { MatterNamesContext, matterNamesOf } from "./read-matters.ts";
+import { MatterNamesFrom } from "./read-matters.ts";
 import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
 import { useRailShown } from "@clauseo/components/clauseo/rail-shown.ts";
@@ -262,8 +262,6 @@ function RoomFrame({
     [talks.drafting, talks.options, talks.agent, conversations],
   );
   const open = view.open;
-  // each matter's name, for the thread's lines and the composer's pills that name another matter (read-matters.ts)
-  const matterNames = useMemo(() => matterNamesOf(view.matters, w.lang), [view.matters, w.lang]);
   const draftMenus = useDraftMenus(talks, conversations, open, w.lang);
   const setup = hasSetup(transport);
   const welcome =
@@ -284,8 +282,7 @@ function RoomFrame({
     matters.next.papers,
   );
   const paperLinks = usePaperLinks(open?.matter ?? null, listed, open?.folder_display || null);
-  // the open matter's refused open (an answer's paper, Find's), on the composer's line; Locate
-  // folder for its folder
+  // the open matter's refused open (an answer's paper, Find's), on the composer's line; Locate folder for its folder
   const { refusals } = matters;
   const refused = useSyncExternalStore(refusals.subscribe, refusals.view, refusals.view);
   const opened = open === null ? undefined : refused.get(open.matter);
@@ -393,8 +390,7 @@ function RoomFrame({
     () => ({ plan: planOfOpen ?? "", openSettings, transport }),
     [planOfOpen, openSettings, transport],
   );
-  // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
-  // frame's words stand in its place
+  // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the frame's words stand in its place
   const scratch = open?.kind === "scratch";
   // the window's own controls, inside the desktop app only
   const [controls] = useState(() =>
@@ -470,7 +466,6 @@ function RoomFrame({
       {versions.rail ?? (
         <RoomRail
           transport={transport}
-          store={store}
           matters={matters}
           view={view}
           conversations={conversations}
@@ -560,7 +555,7 @@ function RoomFrame({
                   <WordOpenContext value={word}>
                     <FolderPlaceContext value={papers?.place}>
                       <AgentPlanContext value={agentPlan}>
-                        <MatterNamesContext value={matterNames}>
+                        <MatterNamesFrom matters={view.matters} lang={w.lang}>
                           <ToolLineContext value={toolRoom}>
                             <ProtectionContext value={shield.composer}>
                               <Work
@@ -582,7 +577,7 @@ function RoomFrame({
                               />
                             </ProtectionContext>
                           </ToolLineContext>
-                        </MatterNamesContext>
+                        </MatterNamesFrom>
                       </AgentPlanContext>
                     </FolderPlaceContext>
                   </WordOpenContext>
