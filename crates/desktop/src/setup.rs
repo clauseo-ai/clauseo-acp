@@ -75,7 +75,7 @@ pub(crate) use confirm::NativeSetupConfirm;
 pub(crate) use events::SetupEvents;
 pub(crate) use hook::{SetupHook, plans_of};
 pub(crate) use host_calls::CellHost;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub(crate) use host_calls::SetupHost;
 pub(crate) use keys::{KeyNotes, KeySlot};
 pub(crate) use login_check::{DesktopLoginCheck, ReusedLogins};

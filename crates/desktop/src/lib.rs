@@ -125,7 +125,7 @@ mod machine_memory;
 #[cfg(feature = "marks")]
 mod marks;
 mod mcp;
-#[cfg(any(test, target_os = "macos"))]
+#[cfg(any(test, target_os = "macos", windows))]
 mod menu;
 mod native_mark;
 mod navigation;
@@ -333,7 +333,7 @@ pub fn run() -> tauri::Result<()> {
             app.manage(dialogs::LastPick::default());
             app.manage(chooser::Chooser::started());
             open_main_window(app)?;
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             menu::follow_language(app.handle().clone());
             start_host(app.handle().clone(), start, locations, parts, egress::manage(app))?;
             Ok(())
@@ -591,6 +591,8 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     startup::mark("main window built");
     window_size::paint_first_frame(&window);
     window_frame::after_build(&window);
+    #[cfg(windows)]
+    window_frame::quit_item::add(&window);
     // Destroyed: the bridge drops main's stream, and the settings window goes too.
     settings_window::on_destroyed(&window, built);
     Ok(())
