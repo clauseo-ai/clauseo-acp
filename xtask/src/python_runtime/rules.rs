@@ -20,6 +20,7 @@ pub(crate) fn problems(lock: &Lock) -> Vec<String> {
     packages(lock, &mut found);
     closure(lock, &mut found);
     super::pandoc::problems(lock, &mut found);
+    super::tesseract::problems(lock, &mut found);
     found
 }
 

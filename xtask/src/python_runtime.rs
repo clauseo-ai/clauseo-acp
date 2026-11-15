@@ -22,6 +22,8 @@ mod online;
 mod pandoc;
 mod rules;
 mod target;
+mod tesseract;
+mod tesseract_build;
 mod tree;
 mod wheel;
 

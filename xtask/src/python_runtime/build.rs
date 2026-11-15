@@ -6,8 +6,9 @@
 //!    pandoc's release archive and its source tarball are downloaded to `<out>/downloads` and
 //!    must have the lock's sha256 and size; PBS's Sigstore build attestation is checked with `gh
 //!    attestation verify`, and pandoc's archive with GitHub's release attestation (`gh release
-//!    verify-asset`, see `pandoc.rs`), both failing closed. `--download-only` stops here, on any
-//!    machine.
+//!    verify-asset`, see `pandoc.rs`), both failing closed; tesseract's and leptonica's source
+//!    tarballs and the `tessdata_fast` models must have the lock's sha256 and size
+//!    (`tesseract.rs`). `--download-only` stops here, on any machine.
 //! 2. unpack PBS into `<out>/stage/python`; macOS symlinks become copies of their files, and no
 //!    symlink may remain anywhere (Clauseo's extractor skips links).
 //! 3. pip installs the wheels with the runtime's own pip: `--no-index --find-links --require-hashes
@@ -16,13 +17,18 @@
 //! 4. trim (`tree::MACOS_TRIM`, `tree::WINDOWS_TRIM`), and numpy's and pandas's own test suites
 //!    (`tree::PACKAGES_WITHOUT_TESTS`).
 //! 5. the overlay: PR 2's hook (`overlay`); then pandoc: only its binary, copied out of the
-//!    archive to `bin/pandoc` (macOS) or `clauseo-bin/pandoc.exe` (Windows).
-//! 6. notices: every licence file in the runtime, and pandoc's `COPYING.md` and `COPYRIGHT` from
-//!    its source tarball (and the Windows archive's `COPYRIGHT.txt`), must be in
+//!    archive to `bin/pandoc` (macOS) or `clauseo-bin/pandoc.exe` (Windows); then tesseract,
+//!    compiled with leptonica from source (`tesseract_build.rs`) to `bin/tesseract` or
+//!    `clauseo-bin/tesseract.exe`, signed ad hoc on macOS, with the models in `tessdata/` beside
+//!    it.
+//! 6. notices: every licence file in the runtime, pandoc's `COPYING.md` and `COPYRIGHT` from
+//!    its source tarball (and the Windows archive's `COPYRIGHT.txt`), and the licences of
+//!    tesseract, leptonica and the models, must be in
 //!    `THIRD-PARTY-NOTICES.txt` word for word, which is copied to the runtime's root.
 //! 7. `compileall --invalidation-mode unchecked-hash`, so nothing writes `__pycache__` later.
 //! 8. the smoke test (`python-runtime/smoke/smoke.py`), which must leave the runtime unchanged; it
-//!    also runs `pandoc --version` and a .docx to Markdown and back.
+//!    also runs `pandoc --version` and a .docx to Markdown and back, and `tesseract --version` and
+//!    OCR of an English and Hindi page it draws.
 //! 9. pack a deterministic `.tar.gz` (`python-runtime/tools/pack.py`, run by the runtime itself)
 //!    and print its name, sha256, size and unpacked size, also written to `<out>/build.json`.
 
@@ -81,6 +87,11 @@ pub(crate) fn run<W: Write>(
     let out_dir = absolute(&options.out)?;
     let downloads = out_dir.join("downloads");
     let (asset, pandoc_archive) = inputs(lock, options, &downloads, out)?;
+    let tesseract_inputs = super::tesseract::inputs(&lock.tesseract, &downloads)?;
+    out.note(format!(
+        "build: tesseract {}'s and leptonica {}'s sources and the models match the lock",
+        lock.tesseract.version, lock.tesseract.leptonica
+    ));
     if options.download_only {
         out.note("build: --download-only, so it stops with the inputs checked");
         return Ok(());
@@ -149,6 +160,7 @@ pub(crate) fn run<W: Write>(
         lock.pandoc.version,
         pandoc.display()
     ));
+    tesseract(lock, target, &tesseract_inputs, &out_dir, &runtime, out)?;
     ship_notices(root, lock, target, &runtime, &python, &downloads)?;
     let compile = python_cmd(
         &python,
@@ -353,6 +365,30 @@ fn overlay<W: Write>(runtime: &Path, out: &mut Printer<W>) {
     ));
 }
 
+/// Step 5's tesseract: compiles it from the checked tarballs in `inputs`, installs it and the
+/// models into `runtime`, and removes the build folder.
+fn tesseract<W: Write>(
+    lock: &Lock,
+    target: Target,
+    inputs: &Path,
+    out_dir: &Path,
+    runtime: &Path,
+    out: &mut Printer<W>,
+) -> Result<(), Failure> {
+    let t = &lock.tesseract;
+    let built = super::tesseract_build::compile(t, target, inputs, out_dir)?;
+    let program = super::tesseract_build::install(t, target, &built, inputs, runtime)?;
+    net::remove(out_dir, "tesseract-build")?;
+    out.note(format!(
+        "build: tesseract {} is {} ({} bytes), with {}",
+        t.version,
+        program.display(),
+        program.metadata().map_or(0, |m| m.len()),
+        t.languages.join(", ")
+    ));
+    Ok(())
+}
+
 /// Step 6: every licence file under `runtime`, and pandoc's, must be in the notices; then the
 /// notices go to its root.
 fn ship_notices(
@@ -392,6 +428,16 @@ fn ship_notices(
             ));
         }
     }
+    let texts =
+        super::tesseract::licence_texts(&lock.tesseract, &python.to_string_lossy(), downloads)?;
+    for (path, body) in texts {
+        if !notices::covers(&text, &body) {
+            return Err(Failure::new(
+                format!("{NOTICES} does not hold the licence file {path}"),
+                "run `cargo xtask python-runtime bump` to write the notices again",
+            ));
+        }
+    }
     write::write_file_in(runtime, "THIRD-PARTY-NOTICES.txt", text.as_bytes())
         .map_err(|error| Failure::io("copying the notices into the runtime", &error))
 }
@@ -420,6 +466,7 @@ fn smoke<W: Write>(
             &root.join(SMOKE_DIR),
             &work,
             Path::new(&lock.pandoc.version),
+            Path::new(&lock.tesseract.version),
         ],
         SMOKE_TIMEOUT,
     );
