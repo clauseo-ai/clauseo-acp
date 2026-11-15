@@ -59,7 +59,13 @@ const quietStopped = (agent: AgentId) => () => (
 const folderStopped = (code: ErrorCode, agent: AgentId) => () => (
   <RoomOver
     host={() =>
-      threadHost({ entries: [QUESTION, step(7, { stop: "failed", failure: code })], agent })
+      threadHost({
+        entries: [QUESTION, step(7, { stop: "failed", failure: code })],
+        agent,
+        // matter.folder_backslash's line as on the Mac, for the matter folder's own name
+        platform: "mac",
+        matterFolder: "Documents/Acme\\ Traders",
+      })
     }
   />
 );

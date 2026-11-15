@@ -7,15 +7,18 @@ import type { Platform } from "@clauseo/components/lib/display.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import { hasBackslash } from "./folder-backslash.ts";
 
-/** A pick held back: the matter, the folder as it shows, and the step's two ways on. */
-export type HeldLocate = {
-  matter: MatterId;
+/** A pick held back for the step: the folder as it shows, and the step's two ways on. */
+export type HeldPick = {
   display: string;
-  /** Choose another folder: the picker again, for the same matter. */
+  /** Choose another folder: the picker again. */
   again: () => Promise<void>;
-  /** Locate anyway: relocate_matter with the folder held. */
+  /** The other button: go on with the folder held. */
   anyway: () => Promise<void>;
 };
+
+/** A Locate held back: the matter, the folder as it shows, and the step's two ways on: the picker again for the same
+ * matter, or relocate_matter with the folder held. */
+export type HeldLocate = HeldPick & { matter: MatterId };
 
 export class LocateHeld {
   #platform: Platform | null = null;

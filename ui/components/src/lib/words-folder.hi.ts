@@ -46,6 +46,20 @@ export const HI = {
   "This folder's name has a backslash (\\).": "इस फ़ोल्डर के नाम में बैकस्लैश (\\) है।",
   "Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.":
     "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+  // FR24 on Linux, whose file manager has no one name (draft, Rohan to approve; Hindi provisional)
+  "Claude can't work in a folder like this; ChatGPT can. Rename it in your file manager first, or choose another folder.":
+    "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले अपने फ़ाइल मैनेजर में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+  // FR24 when the backslash is in a folder above the one picked, named by {folder} (draft, Rohan to approve; Hindi
+  // provisional): its name, its title, and its body on the Mac and on Linux
+  "A folder in this folder's path has a backslash": "इस फ़ोल्डर के पाथ में किसी फ़ोल्डर के नाम में बैकस्लैश है",
+  'The folder "{folder}" in this folder\'s path has a backslash (\\).':
+    'इस फ़ोल्डर के पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है।',
+  "Claude can't work in a folder like this; ChatGPT can. Rename that folder in Finder first, or choose another folder.":
+    "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में उस फ़ोल्डर का नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+  "Claude can't work in a folder like this; ChatGPT can. Rename that folder in your file manager first, or choose another folder.":
+    "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
   // FR25 (draft): Locate's other button, which locates the matter in the folder warned about
   "Locate anyway": "फिर भी यही फ़ोल्डर चुनें",
+  // FR30 (draft): the first screen's other button, which opens the folder warned about as a matter
+  "Open anyway": "फिर भी खोलें",
 } as const;

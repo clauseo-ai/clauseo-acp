@@ -209,5 +209,49 @@
     "at": "2026-11-15",
     "by": "app track (draft; Rohan to approve)",
     "note": "Locate's step's other button: relocates the matter to the folder with a backslash anyway"
+  },
+  "FR-27": {
+    "en": "Claude can't work in a folder like this; ChatGPT can. Rename it in your file manager first, or choose another folder.",
+    "hi": "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले अपने फ़ाइल मैनेजर में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On Linux, New matter's warning for a folder whose own name has a backslash: its body, naming the file manager (title and name as FR-24); Locate's step and the first screen's say the same"
+  },
+  "FR-28": {
+    "en": "The folder \"{folder}\" in this folder's path has a backslash (\\). / Claude can't work in a folder like this; ChatGPT can. Rename that folder in Finder first, or choose another folder. / A folder in this folder's path has a backslash",
+    "hi": "इस फ़ोल्डर के पाथ में मौजूद फ़ोल्डर \"{folder}\" के नाम में बैकस्लैश (\\) है। / Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में उस फ़ोल्डर का नाम बदलें, या दूसरा फ़ोल्डर चुनें। / इस फ़ोल्डर के पाथ में किसी फ़ोल्डर के नाम में बैकस्लैश है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On the Mac, New matter's warning when a folder above the one picked has the backslash, named by {folder} (the nearest): its title, body and accessible name; Locate's step and the first screen's say the same"
+  },
+  "FR-29": {
+    "en": "Claude can't work in a folder like this; ChatGPT can. Rename that folder in your file manager first, or choose another folder.",
+    "hi": "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On Linux, the same as FR-28: its body, naming the file manager"
+  },
+  "FR-30": {
+    "en": "Open anyway",
+    "hi": "फिर भी खोलें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On macOS and Linux, the first screen's Open the folder, a folder picked whose path has a backslash: the step's other button, which opens the folder as a matter anyway (the step's words as FR-24 or FR-28; Choose another folder as FR-09)"
   }
 }

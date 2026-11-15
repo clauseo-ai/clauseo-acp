@@ -88,7 +88,6 @@ const slashed = () => (
 const locateStep = () => (
   <LocateWarning
     held={{
-      matter: MATTER.matter,
       display: "Documents/Rathi\\ Steels",
       again: async () => {},
       anyway: async () => {},

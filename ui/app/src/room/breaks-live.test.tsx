@@ -17,7 +17,14 @@ import {
 } from "../testing/stream-script.ts";
 import type { ErrorCode, ViewEntry } from "../transport/protocol.ts";
 import { stamp } from "./thread/clock.ts";
-import { defaultOutcome, mountRoom, summary, type Harness, type Script } from "./thread/harness.ts";
+import {
+  defaultOutcome,
+  mountRoom,
+  summary,
+  THE_MATTER,
+  type Harness,
+  type Script,
+} from "./thread/harness.ts";
 
 const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
 
@@ -271,7 +278,7 @@ test.each([
 ] as const)(
   "a turn failed with %s: Claude's line and Try again, no Restart",
   async (code, said) => {
-    h = await asked({ next: H10 });
+    h = await asked({ next: H10, platform: "mac" });
     h.deliver(failed(code));
     await h.settle();
     const row = h.one("turn-stopped");
@@ -281,6 +288,45 @@ test.each([
     expect(h.one("restart")).toBeNull();
     expect(h.one("agent-stopped")).toBeNull();
     expect(field().value).toBe("");
+  },
+);
+
+// matter.folder_backslash's line by the matter's folder (folder_display) and the OS: the folder's own name, or the
+// nearest folder above it whose name has the backslash, by name; Finder on the Mac, "your file manager" on Linux
+const SLASHED = "\u2068Old\\Work\u2069";
+test.each([
+  [
+    "mac",
+    "Documents/Acme\\ Traders",
+    "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+  ],
+  [
+    "linux",
+    "Documents/Acme\\ Traders",
+    "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.",
+  ],
+  [
+    "mac",
+    "Documents/Old\\Work/Acme Traders",
+    `Claude can't work in this matter's folder because the folder "${SLASHED}" in its path has a backslash (\\). Rename that folder in Finder, then Try again.`,
+  ],
+  [
+    "linux",
+    "Documents/Old\\Work/Acme Traders",
+    `Claude can't work in this matter's folder because the folder "${SLASHED}" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.`,
+  ],
+  [
+    "linux",
+    "",
+    "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.",
+  ],
+] as const)(
+  "matter.folder_backslash on %s, the matter folder %j: %s",
+  async (platform, folder, said) => {
+    h = await asked({ platform, matters: [{ ...THE_MATTER, folder_display: folder }] });
+    h.deliver(failed("matter.folder_backslash"));
+    await h.settle();
+    expect(h.one("turn-stopped")?.textContent).toBe(said);
   },
 );
 
@@ -410,7 +456,8 @@ test.each([
   ],
 ] as const)("a Codex thread's %s names ChatGPT on the step's row", async (code, said) => {
   const agent = "codex-acp";
-  h = await asked({ threads: [{ ...summary(), agent }], next: H10 }, agent);
+  // on the Mac, where matter.folder_backslash's line says Finder
+  h = await asked({ threads: [{ ...summary(), agent }], next: H10, platform: "mac" }, agent);
   h.deliver(failed(code, NOW, agent));
   await h.settle();
   expect(h.one("turn-stopped")?.textContent).toContain(said);
