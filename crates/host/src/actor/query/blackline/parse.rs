@@ -329,7 +329,7 @@ pub(crate) fn read_text(text: &str) -> Text {
                 read.seen.unknown = true;
                 continue;
             }
-            count::Summary::NotSummary => {}
+            count::Summary::Other => {}
         }
         if !HEAD.iter().any(|head| line.starts_with(head)) {
             count::ids_in(line, &mut read.ids);
