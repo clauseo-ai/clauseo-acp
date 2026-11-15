@@ -26,6 +26,16 @@ use crate::write;
 const MAC_BINARY: &str =
     "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
 
+/// Chrome for Testing's `Info.plist`, as far as the host reads it: its bundle id.
+const CFT_INFO: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+<key>CFBundleIdentifier</key>
+<string>com.google.chrome.for.testing</string>
+</dict>
+</plist>
+"#;
+
 /// A zip with no entry: only its end of central directory record.
 const EMPTY_ZIP: [u8; 22] = [
     0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -113,6 +123,8 @@ impl InstallTools for Fake {
             .fold(into.to_owned(), |path, part| path.join(part));
         write::create_dir_all(binary.parent().unwrap());
         write::write(&binary, b"chrome");
+        let contents = binary.parent().unwrap().parent().unwrap();
+        write::write(&contents.join("Info.plist"), CFT_INFO.as_bytes());
         Ok(())
     }
 

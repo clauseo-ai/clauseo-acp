@@ -13,7 +13,7 @@
 //!   `HKCU` (a `REG_DWORD`, or a `REG_SZ` holding an integer; 0 is false, any other true);
 //!   and under the same keys `DeveloperToolsAvailability` ([`DEVTOOLS_VALUE`]), whose 2
 //!   (developer tools disallowed) also turns it off, the computer's value over the user's;
-//!   [`read_registry`] over a [`Registry`]. macOS and Linux read `RemoteDebuggingAllowed` only.
+//!   [`read_registry`] over a [`Registry`].
 //! - macOS: the managed preferences files of `com.google.Chrome`, `com.microsoft.Edge`,
 //!   `org.chromium.Chromium` and `com.brave.Browser`, the computer's and the login user's (a
 //!   boolean, or the integer 0 or 1); [`read_managed_prefs`]. Brave only here: the host looks
@@ -22,6 +22,11 @@
 //!   boolean, or the integer 0 or 1), at most [`MAX_FILES`] files of [`MAX_FILE_BYTES`] each
 //!   (Chrome takes this policy only as mandatory, never as recommended: its definition does not
 //!   set `can_be_recommended`); [`read_linux`].
+//!
+//! On every OS a `DeveloperToolsAvailability` of 2 turns developer tools off, and with them
+//! remote debugging, so it counts as a false ([`DEVTOOLS_VALUE`], one reading of the number,
+//! [`devtools_says`]): on Windows per browser, the computer's value over the user's; on macOS
+//! and Linux in each file beside `RemoteDebuggingAllowed`, a false from either winning.
 //!
 //! Every store comes in through a trait ([`Registry`], [`PolicyTree`]), so the tests use fakes,
 //! and every reader's logic is compiled and tested on every OS. Each place says one of three
@@ -43,9 +48,10 @@ use std::path::{Path, PathBuf};
 /// The policy's name in every store.
 pub const VALUE: &str = "RemoteDebuggingAllowed";
 
-/// The developer tools policy, read on Windows beside [`VALUE`]: 2 disallows the developer
-/// tools, and a browser so set will not let a client attach to its pages, so it counts as
-/// [`Found::Disallowed`]; 0, 1 and 3 say nothing about remote debugging.
+/// Chrome's developer tools policy, read beside [`VALUE`] on every OS ([`devtools_says`]): 2
+/// ([`DEVTOOLS_DISALLOWED`]) disallows the developer tools, and a browser so set will not let a
+/// client attach to its pages, so it counts as [`Found::Disallowed`]; 0, 1 and 3 say nothing
+/// about remote debugging, leaving it to [`VALUE`]; any other value is a bad one.
 pub const DEVTOOLS_VALUE: &str = "DeveloperToolsAvailability";
 
 /// [`DEVTOOLS_VALUE`]'s value that disallows the developer tools.
@@ -318,11 +324,12 @@ pub fn read_registry(registry: &dyn Registry) -> RemoteDebugging {
     RemoteDebugging { found }
 }
 
-/// One browser's `DeveloperToolsAvailability`, the computer's value over the user's as Chrome
-/// merges its policies: the computer's when it holds one, else the user's. The place that holds
-/// 2 says [`Found::Disallowed`]; nothing set, or any other value, adds nothing; a failed read
-/// says [`Found::Unreadable`] (the user's is still read when the computer's failed, since a 2
-/// there blocks whatever the computer holds); a value Chrome would not take, [`Found::BadValue`].
+/// One browser's `DeveloperToolsAvailability` ([`devtools_says`]), the computer's value over
+/// the user's as Chrome merges its policies: the computer's when it holds a good one, else the
+/// user's. The place that holds 2 says [`Found::Disallowed`]; nothing set, 0, 1 or 3 adds
+/// nothing; a failed read says [`Found::Unreadable`] (the user's is still read when the
+/// computer's failed, since a 2 there blocks whatever the computer holds); a value Chrome would
+/// not take says [`Found::BadValue`] and, ignored as Chrome ignores it, leaves it to the user's.
 fn devtools_from_registry(
     registry: &dyn Registry,
     browser: Browser,
@@ -336,16 +343,21 @@ fn devtools_from_registry(
         let place = Place { browser, scope };
         match registry.value(hive, key, DEVTOOLS_VALUE) {
             Ok(None) => {}
-            Ok(Some(value)) => match registry_integer(&value) {
-                Ok(number) => {
-                    if number == DEVTOOLS_DISALLOWED {
+            Ok(Some(value)) => {
+                let said = match registry_integer(&value) {
+                    Ok(number) => devtools_says(Some(number)),
+                    Err(why) => Found::BadValue(why.to_owned()),
+                };
+                match said {
+                    bad @ Found::BadValue(_) => found.push((place, bad)),
+                    // A good value set here decides it: the user's is not read.
+                    Found::Disallowed => {
                         found.push((place, Found::Disallowed));
+                        return found;
                     }
-                    // A value set here decides it: the user's is not read.
-                    return found;
+                    Found::Absent | Found::Allowed | Found::Unreadable(_) => return found,
                 }
-                Err(why) => found.push((place, Found::BadValue(why.to_owned()))),
-            },
+            }
             Err(code) => found.push((
                 place,
                 Found::Unreadable(format!("the registry read failed ({code})")),
@@ -427,7 +439,8 @@ fn plist_file(tree: &dyn PolicyTree, path: &Path) -> Found {
     }
 }
 
-/// What a property list's `RemoteDebuggingAllowed` says.
+/// What a property list's `RemoteDebuggingAllowed` and `DeveloperToolsAvailability` say
+/// ([`both`]).
 pub fn plist_says(bytes: &[u8]) -> Found {
     let Some(dict) = plist::Value::from_reader(io::Cursor::new(bytes))
         .ok()
@@ -435,12 +448,42 @@ pub fn plist_says(bytes: &[u8]) -> Found {
     else {
         return Found::BadValue("not a property list dictionary".to_owned());
     };
-    match dict.get(VALUE) {
+    let remote = match dict.get(VALUE) {
         None => Found::Absent,
         Some(plist::Value::Boolean(false)) => Found::Disallowed,
         Some(plist::Value::Boolean(true)) => Found::Allowed,
         Some(plist::Value::Integer(number)) => zero_or_one(number.as_signed()),
         Some(_) => Found::BadValue(NOT_A_BOOLEAN.to_owned()),
+    };
+    let devtools = match dict.get(DEVTOOLS_VALUE) {
+        None => Found::Absent,
+        Some(plist::Value::Integer(number)) => devtools_says(number.as_signed()),
+        Some(_) => Found::BadValue(NOT_DEVTOOLS.to_owned()),
+    };
+    both(remote, devtools)
+}
+
+/// Why a `DeveloperToolsAvailability` is bad when it is no integer from 0 to 3.
+const NOT_DEVTOOLS: &str = "the developer tools value is not 0, 1, 2 or 3";
+
+/// What a `DeveloperToolsAvailability` number says, in every store (the registry, a property
+/// list, a JSON file): [`DEVTOOLS_DISALLOWED`] is a false; 0, 1 and 3 say nothing of remote
+/// debugging; any other number, or one that is no integer (`None`), is a bad value.
+pub fn devtools_says(number: Option<i64>) -> Found {
+    match number {
+        Some(DEVTOOLS_DISALLOWED) => Found::Disallowed,
+        Some(0 | 1 | 3) => Found::Absent,
+        _ => Found::BadValue(NOT_DEVTOOLS.to_owned()),
+    }
+}
+
+/// One file's word from its two values: a false from either wins; otherwise
+/// `RemoteDebuggingAllowed`'s, unless that says nothing and the developer tools value is bad.
+fn both(remote: Found, devtools: Found) -> Found {
+    match (remote, devtools) {
+        (_, Found::Disallowed) => Found::Disallowed,
+        (Found::Absent, bad @ Found::BadValue(_)) => bad,
+        (remote, _) => remote,
     }
 }
 
@@ -497,16 +540,23 @@ pub fn read_linux(tree: &dyn PolicyTree) -> RemoteDebugging {
     RemoteDebugging { found }
 }
 
-/// What a JSON policy file's `RemoteDebuggingAllowed` says.
+/// What a JSON policy file's `RemoteDebuggingAllowed` and `DeveloperToolsAvailability` say
+/// ([`both`]).
 pub fn json_says(bytes: &[u8]) -> Found {
     let Ok(serde_json::Value::Object(map)) = serde_json::from_slice(bytes) else {
         return Found::BadValue("a file is not a JSON object".to_owned());
     };
-    match map.get(VALUE) {
+    let remote = match map.get(VALUE) {
         None => Found::Absent,
         Some(serde_json::Value::Bool(false)) => Found::Disallowed,
         Some(serde_json::Value::Bool(true)) => Found::Allowed,
         Some(serde_json::Value::Number(number)) => zero_or_one(number.as_i64()),
         Some(_) => Found::BadValue(NOT_A_BOOLEAN.to_owned()),
-    }
+    };
+    let devtools = match map.get(DEVTOOLS_VALUE) {
+        None => Found::Absent,
+        Some(serde_json::Value::Number(number)) => devtools_says(number.as_i64()),
+        Some(_) => Found::BadValue(NOT_DEVTOOLS.to_owned()),
+    };
+    both(remote, devtools)
 }

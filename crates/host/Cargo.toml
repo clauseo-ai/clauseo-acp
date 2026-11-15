@@ -80,7 +80,8 @@ zeroize = { workspace = true }
 toml = "1"
 # Claude Code's macOS managed preferences (XML or binary) that the offline probe checks
 # (actor/turn/offline/probe/settings/os_policy.rs); plain Rust, so tested on every OS. 1.10.1 is
-# already in the lock through clauseo-settings.
+# already in the lock through clauseo-settings. Also a macOS browser bundle's
+# `CFBundleIdentifier` (browser/chrome.rs).
 plist = { workspace = true }
 
 # The Chrome for Testing download's free-space check (browser/install/system.rs): statvfs, safe.

@@ -14,6 +14,20 @@ pub(super) const VERSION: &str = "131.0.6778.85";
 pub(super) const MAC_BINARY: &str =
     "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
 
+/// Its bundle's `Info.plist`, which [`Made::File`] fills with Chrome for Testing's bundle id.
+pub(super) const MAC_INFO: &str =
+    "chrome-mac-arm64/Google Chrome for Testing.app/Contents/Info.plist";
+
+/// Chrome for Testing's `Info.plist`, as far as the host reads it.
+const CFT_INFO: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+<key>CFBundleIdentifier</key>
+<string>com.google.chrome.for.testing</string>
+</dict>
+</plist>
+"#;
+
 /// One zip entry: its name, its bytes, and a Unix mode (`0o120777` makes it a link).
 pub(super) struct ZipEntry<'a> {
     pub(super) name: &'a str,
@@ -151,7 +165,7 @@ impl Fake {
             versions: versions(VERSION, &google_url(VERSION)),
             zip: zip(&[file(MAC_BINARY, b"chrome")]),
             length: Length::Right,
-            made: vec![Made::File(MAC_BINARY)],
+            made: vec![Made::File(MAC_BINARY), Made::File(MAC_INFO)],
             signed: Ok(()),
             cancel_in_download: false,
             calls: Mutex::new(Vec::new()),
@@ -215,7 +229,12 @@ impl InstallTools for Fake {
                 Made::File(name) => {
                     let path = into.join(name);
                     write::create_dir_all(path.parent().unwrap()).unwrap();
-                    write::write_file(&path, b"chrome").unwrap();
+                    let bytes = if name.ends_with("Info.plist") {
+                        CFT_INFO.as_bytes()
+                    } else {
+                        b"chrome"
+                    };
+                    write::write_file(&path, bytes).unwrap();
                 }
                 #[cfg(unix)]
                 Made::Link(name, target) => {

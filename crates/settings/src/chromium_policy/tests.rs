@@ -183,7 +183,7 @@ fn each_registry_place_says_nothing_false_true_bad_or_unreadable() {
 }
 
 // `DeveloperToolsAvailability` 2 (developer tools disallowed) turns it off as a false does, for
-// every key; the computer's value wins over the user's, and other values add nothing.
+// every key; the computer's value wins over the user's, and 0, 1 and 3 add nothing.
 #[test]
 fn developer_tools_disallowed_turns_it_off_the_computers_value_first() {
     use Hive::{CurrentUser as User, LocalMachine as Machine};
@@ -245,6 +245,19 @@ fn developer_tools_disallowed_turns_it_off_the_computers_value_first() {
         ));
         assert_eq!(bad.bad_values().count(), 1, "{key}");
         assert_eq!(bad.turned_off_by(), None, "{key}");
+        // A number Chrome would not take is set aside, as on macOS and Linux, so the user's
+        // value decides.
+        let out_of_range = read_registry(
+            &FakeRegistry::default()
+                .with_devtools(Machine, key, dword(7))
+                .with_devtools(User, key, dword(2)),
+        );
+        assert_eq!(out_of_range.bad_values().count(), 1, "{key}");
+        assert_eq!(
+            out_of_range.turned_off_by(),
+            Some(place(browser, Scope::User)),
+            "{key}"
+        );
     }
     // Remote debugging allowed does not lift developer tools disallowed: either one blocks.
     let both = FakeRegistry::default()
@@ -284,6 +297,54 @@ fn the_registry_reasons_name_no_value_or_code_beyond_the_error() {
         )]
     );
     assert_eq!(read.bad_values().count(), 0);
+}
+
+/// `DeveloperToolsAvailability` 2 is a false in a macOS or Linux file, whatever
+/// `RemoteDebuggingAllowed` says; 0, 1 and 3 leave it to that value; another is a bad value
+/// only when `RemoteDebuggingAllowed` says nothing.
+#[test]
+fn developer_tools_off_turns_remote_debugging_off() {
+    let devtools = |n: plist::Value| {
+        let mut dict = plist::Dictionary::new();
+        dict.insert(crate::chromium_policy::DEVTOOLS_VALUE.to_owned(), n);
+        let mut bytes = Vec::new();
+        plist::Value::Dictionary(dict)
+            .to_writer_xml(&mut bytes)
+            .unwrap();
+        bytes
+    };
+    assert_eq!(plist_says(&devtools(2.into())), Found::Disallowed);
+    for n in [0, 1, 3] {
+        assert_eq!(plist_says(&devtools(n.into())), Found::Absent, "{n}");
+    }
+    let bad = Found::BadValue("the developer tools value is not 0, 1, 2 or 3".into());
+    assert_eq!(plist_says(&devtools(4.into())), bad);
+    assert_eq!(plist_says(&devtools("2".into())), bad);
+    for (json, said) in [
+        (
+            &br#"{"DeveloperToolsAvailability": 2}"#[..],
+            Found::Disallowed,
+        ),
+        (
+            br#"{"DeveloperToolsAvailability": 2, "RemoteDebuggingAllowed": true}"#,
+            Found::Disallowed,
+        ),
+        (
+            br#"{"DeveloperToolsAvailability": 1, "RemoteDebuggingAllowed": false}"#,
+            Found::Disallowed,
+        ),
+        (
+            br#"{"DeveloperToolsAvailability": 0, "RemoteDebuggingAllowed": true}"#,
+            Found::Allowed,
+        ),
+        (
+            br#"{"DeveloperToolsAvailability": 9, "RemoteDebuggingAllowed": true}"#,
+            Found::Allowed,
+        ),
+        (br#"{"DeveloperToolsAvailability": 9}"#, bad),
+    ] {
+        assert_eq!(json_says(json), said, "{}", String::from_utf8_lossy(json));
+    }
 }
 
 #[test]
