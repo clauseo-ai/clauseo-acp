@@ -2,14 +2,17 @@
 //! dialog. Nothing here runs once Tauri has started.
 #![expect(
     unsafe_code,
-    reason = "FFI to the Win32 task dialog, DPI awareness, COM and ShellExecuteW"
+    reason = "FFI to the Win32 task dialog, message box hook, DPI awareness, COM and ShellExecuteW"
 )]
 
-use windows::Win32::Foundation::{HINSTANCE, HMODULE};
+use std::cell::Cell;
+
+use windows::Win32::Foundation::{HINSTANCE, HMODULE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::{
     COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx,
 };
 use windows::Win32::System::LibraryLoader::{FindResourceW, GetModuleHandleW};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::{
     TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TASKDIALOGCONFIG_0, TDF_ALLOW_DIALOG_CANCELLATION,
     TaskDialogIndirect,
@@ -19,12 +22,16 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    MB_ICONWARNING, MB_OK, MessageBoxW, RT_GROUP_ICON, SW_SHOWNORMAL,
+    CallNextHookEx, HCBT_ACTIVATE, IDCANCEL, IDOK, MB_ICONWARNING, MB_OK, MB_OKCANCEL, MessageBoxW,
+    RT_GROUP_ICON, SW_SHOWNORMAL, SetDlgItemTextW, SetWindowsHookExW, UnhookWindowsHookEx, WH_CBT,
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
 use super::DOWNLOAD_URL;
-use super::dialog::{APP_ICON, CLOSE, Next, buttons, main_icon, message_box_text, next};
+use super::dialog::{
+    APP_ICON, CLOSE, Next, after_message_box, buttons, main_icon, message_box_labels,
+    message_box_text, next,
+};
 use super::version::{MINIMUM, Version, verdict};
 use super::words::{Words, words};
 
@@ -45,7 +52,11 @@ pub(super) fn check() -> bool {
     match next(&show(words)) {
         Next::Download => open_download_page(),
         Next::Close => {}
-        Next::MessageBox => message_box(words),
+        Next::MessageBox => {
+            if message_box(words) == Next::Download {
+                open_download_page();
+            }
+        }
     }
     true
 }
@@ -115,21 +126,61 @@ fn show(words: &Words) -> windows::core::Result<i32> {
     Ok(pressed)
 }
 
-/// The plain fallback when the task dialog failed: the title, the main line and the body, with
-/// an OK button. Best effort: if it fails too, the app exits as it would anyway.
-fn message_box(words: &Words) {
+/// The plain fallback when the task dialog failed: the title, the main line and the body. With
+/// an action, OK and Cancel are renamed to it and Close while the box opens ([`on_cbt`]), and
+/// OK opens the download page; without one, OK alone. Best effort: if it fails too, the app
+/// exits as it would anyway, and a failed rename leaves OK and Cancel, OK still downloading.
+fn message_box(words: &Words) -> Next {
     let title = HSTRING::from(words.title);
     let text = HSTRING::from(message_box_text(words));
+    let labels = message_box_labels(words);
+    let style = if labels.is_some() { MB_OKCANCEL } else { MB_OK };
+    let hook = labels.and_then(|(action, close)| {
+        LABELS.set(Some((HSTRING::from(action), HSTRING::from(close))));
+        // SAFETY: `on_cbt` has HOOKPROC's signature and lives in this binary; a hook on this
+        // thread's own id needs no module handle.
+        unsafe { SetWindowsHookExW(WH_CBT, Some(on_cbt), None, GetCurrentThreadId()) }.ok()
+    });
     // SAFETY: both strings are valid null-terminated wide strings that outlive the call; no
     // owner window.
-    let _ = unsafe {
+    let answer = unsafe {
         MessageBoxW(
             None,
             PCWSTR(text.as_ptr()),
             PCWSTR(title.as_ptr()),
-            MB_OK | MB_ICONWARNING,
+            style | MB_ICONWARNING,
         )
     };
+    if let Some(hook) = hook {
+        // SAFETY: the hook set above, unhooked once. A hook that stays renames nothing more:
+        // the labels are gone.
+        drop(unsafe { UnhookWindowsHookEx(hook) });
+    }
+    LABELS.set(None);
+    after_message_box(words, answer.0)
+}
+
+thread_local! {
+    /// The message box's labels for OK and Cancel while it opens, for [`on_cbt`].
+    static LABELS: Cell<Option<(HSTRING, HSTRING)>> = const { Cell::new(None) };
+}
+
+/// The CBT hook while the message box opens: as its window activates, OK and Cancel take the
+/// labels in [`LABELS`], once.
+unsafe extern "system" fn on_cbt(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if u32::try_from(code) == Ok(HCBT_ACTIVATE)
+        && let Some((action, close)) = LABELS.take()
+    {
+        let dialog = HWND(std::ptr::with_exposed_provenance_mut(wparam.0));
+        // Best effort: a refused rename leaves Windows' own OK and Cancel.
+        // SAFETY: `dialog` is the message box activating on this thread; both strings are
+        // valid null-terminated wide strings that outlive the calls.
+        drop(unsafe { SetDlgItemTextW(dialog, IDOK.0, PCWSTR(action.as_ptr())) });
+        // SAFETY: as above.
+        drop(unsafe { SetDlgItemTextW(dialog, IDCANCEL.0, PCWSTR(close.as_ptr())) });
+    }
+    // SAFETY: the hook's own arguments, passed on unchanged.
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
 /// Opens [`DOWNLOAD_URL`] in the default browser. Best effort: if it fails, the dialog's words
