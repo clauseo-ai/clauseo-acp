@@ -2,10 +2,12 @@
 //!
 //! agent-browser holds the relay's URL (`AGENT_BROWSER_CDP`, `devtools.rs`), and an error or a
 //! reply of its that prints the URL would otherwise put the secret in the agent's logs, which a
-//! command in Codex's sandbox may read. So [`MARK`] takes the place of:
+//! command in Codex's sandbox may read. On Windows it holds the session key too
+//! (`AGENT_BROWSER_SESSION_KEY`, `env.rs`), which keeps every process without it off its
+//! daemon's pipe. So [`MARK`] takes the place of:
 //! - the whole URL, its letters in any case;
-//! - the secret (64 hex digits) in any case, wherever it appears;
-//! - a run of [`MIN_PREFIX`] or more characters that is the secret's start, in any case: a
+//! - the secret and the session key (64 hex digits each) in any case, wherever they appear;
+//! - a run of [`MIN_PREFIX`] or more characters that is the start of either, in any case: a
 //!   message cut short.
 //!
 //! Two streams carry it. agent-browser's stderr is a pipe, and [`forward`] copies it to the
@@ -44,11 +46,12 @@ pub(crate) const MARK: &[u8] = b"[relay url redacted]";
 /// by chance.
 pub(crate) const MIN_PREFIX: usize = 16;
 
-/// The relay's URL and its secret (the URL's last path segment).
+/// The relay's URL, its secret (the URL's last path segment) and, on Windows, the session key.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Secrets {
     url: Vec<u8>,
-    secret: Vec<u8>,
+    /// The secret, then the session key when agent-browser has one.
+    hex: Vec<Vec<u8>>,
 }
 
 /// Whether a pattern is at the start of some text.
@@ -61,19 +64,27 @@ enum Found {
 }
 
 impl Secrets {
-    /// The URL in agent-browser's environment `env`; none when it has none (a one-shot
-    /// agent-browser).
+    /// The URL and the session key in agent-browser's environment `env`; none when it has no
+    /// URL (a one-shot agent-browser, which gets no key either: `env::agent_env`).
     pub(crate) fn of(env: &BTreeMap<String, OsString>) -> Option<Secrets> {
         let url = env.get(env::CDP).and_then(|url| url.to_str())?;
         let secret = url.rsplit('/').next().unwrap_or_default();
+        let key = env
+            .get(env::SESSION_KEY)
+            .and_then(|key| key.to_str())
+            .filter(|key| !key.is_empty());
         (!url.is_empty() && !secret.is_empty()).then(|| Secrets {
             url: url.as_bytes().to_vec(),
-            secret: secret.as_bytes().to_vec(),
+            hex: [Some(secret), key]
+                .into_iter()
+                .flatten()
+                .map(|hex| hex.as_bytes().to_vec())
+                .collect(),
         })
     }
 
-    /// Whether `text` starts with the URL, the secret or a long enough start of the secret.
-    /// Undecided only while `text` may still grow (`more`).
+    /// Whether `text` starts with the URL, the secret, the key or a long enough start of
+    /// either. Undecided only while `text` may still grow (`more`).
     fn at_start(&self, text: &[u8], more: bool) -> Found {
         if text.len() >= self.url.len() {
             if text
@@ -90,17 +101,23 @@ impl Secrets {
         {
             return Found::Undecided;
         }
-        let same = text
-            .iter()
-            .zip(&self.secret)
-            .take_while(|(a, b)| a.eq_ignore_ascii_case(b))
-            .count();
-        if same == self.secret.len() {
-            Found::Hit(same)
-        } else if more && same == text.len() {
+        let (mut undecided, mut longest) = (false, 0);
+        for hex in &self.hex {
+            let same = text
+                .iter()
+                .zip(hex)
+                .take_while(|(a, b)| a.eq_ignore_ascii_case(b))
+                .count();
+            if same == hex.len() {
+                return Found::Hit(same);
+            }
+            undecided |= more && same == text.len();
+            longest = longest.max(same);
+        }
+        if undecided {
             Found::Undecided
-        } else if same >= MIN_PREFIX {
-            Found::Hit(same)
+        } else if longest >= MIN_PREFIX {
+            Found::Hit(longest)
         } else {
             Found::No
         }
@@ -290,6 +307,44 @@ mod tests {
         for step in [1, 3, 16, 17, 4096] {
             assert_eq!(redacted(&input, step), expected, "reads of {step} bytes");
         }
+    }
+
+    /// The session key (Windows) is taken out as the secret is, from stderr and from stdout.
+    #[test]
+    fn the_session_key_is_taken_out_wherever_it_appears() {
+        const KEY: &str = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100";
+        let env = BTreeMap::from([
+            ("AGENT_BROWSER_CDP".to_owned(), OsString::from(url())),
+            ("AGENT_BROWSER_SESSION_KEY".to_owned(), OsString::from(KEY)),
+        ]);
+        let with_key = Secrets::of(&env).unwrap();
+        let mark = mark();
+        let input = format!(
+            "key {KEY}\nupper {}\ncut {}\nsecret {SECRET}\n",
+            KEY.to_ascii_uppercase(),
+            &KEY[..20]
+        );
+        let expected = format!("key {mark}\nupper {mark}\ncut {mark}\nsecret {mark}\n");
+        for step in [1, 5, 64, 4096] {
+            let mut redactor = Redactor::new(with_key.clone());
+            let mut out = Vec::new();
+            for chunk in input.as_bytes().chunks(step) {
+                out.extend(redactor.push(chunk));
+            }
+            out.extend(redactor.finish());
+            assert_eq!(
+                String::from_utf8(out).unwrap(),
+                expected,
+                "reads of {step} bytes"
+            );
+        }
+        remember(&with_key);
+        let reply = format!("{{\"text\":\"{KEY}\"}}");
+        let out = line(reply.as_bytes()).expect("the line held the key");
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!("{{\"text\":\"{mark}\"}}")
+        );
     }
 
     #[test]
