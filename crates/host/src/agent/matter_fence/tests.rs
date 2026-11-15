@@ -256,3 +256,25 @@ fn the_budget_fences_the_smallest_matters_first() {
     assert_eq!(fence.unfenced, [fence.others[0].id]);
     assert_eq!(fence.others[1].paths, [root.join("small")]);
 }
+
+/// The own matter by its short form too: a failed read of `CLAUSE~1\…\Acme\Deal\missing.docx`,
+/// the own matter inside the registered parent Acme, names no other matter (no offer).
+#[test]
+fn a_short_path_into_the_own_matter_names_no_parent() {
+    let at = |path: &str| PathBuf::from(crate::testing::abs(path));
+    let (long, short) = (
+        "/Users/clauseo-lawyer/Matters/Acme",
+        "/Users/CLAUSE~1/Matters/Acme",
+    );
+    let mut acme = Other::new(id(1), "Acme".to_owned(), at(long), false);
+    acme.spellings = vec![at(long), at(short)];
+    let mut fence = MatterFence::asked(vec![acme]);
+    fence.own = vec![at(&format!("{long}/Deal")), at(&format!("{short}/Deal"))];
+    let missing = at(&format!("{short}/Deal/missing.docx"));
+    assert!(innermost(&fence, &missing).is_none());
+    let beside = at(&format!("{short}/Old/memo.docx"));
+    assert_eq!(
+        innermost(&fence, &beside).map(|other| other.id),
+        Some(id(1))
+    );
+}

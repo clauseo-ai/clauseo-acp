@@ -218,9 +218,11 @@ anything the agent starts.
   and the lawyer is told, `ShellLimited`); a deny the sandbox can't spell is widened to a folder
   above it, never dropped. Not on Windows: there is no OS fence there, so a command in the own
   matter (`rg x .`, `dir /s`) reads a matter nested inside it, and Codex on Windows has no fence
-  between matters at all: its instructions name the matters closed to it and tell it never to
-  open them (`instructions::other_matters_closed`). On Windows each fenced folder and the data
-  folder are also named by their full 8.3 short form (`agent::short_forms`); a path with
+  between matters at all: its instructions, naming no other matter, tell it a folder holding
+  `.clauseo` is a matter, to open only its own and those invited, to name a skipped one to the
+  lawyer and never to search for `.clauseo` outside its own
+  (`instructions::other_matters_unfenced`). On Windows each fenced folder, the data
+  folder and the own matter are also named by their full 8.3 short form (`agent::short_forms`); a path with
   only some names short is in no rule, a known gap until the file tools' hook. The invite's offer names only a matter a
   refused call's own arguments targeted, never one its output printed. A lawyer's
   per-conversation read invite is read-only: Claude reads through its Read tool, writes stay

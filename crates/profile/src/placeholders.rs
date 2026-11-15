@@ -78,7 +78,7 @@ pub const RELAY_TOKEN_FILE: &str = "{relay_token_file}";
 /// The other matters' rule, a line of the legal part's conduct list. The host fills it with
 /// [`crate::instructions::OTHER_MATTERS`] for an agent the launch fences from other matters
 /// (Claude on every OS, Codex on macOS and Linux), and with
-/// [`crate::instructions::other_matters_closed`] for Codex on Windows, which nothing fences.
+/// [`crate::instructions::other_matters_unfenced`] for Codex on Windows, which nothing fences.
 /// Instructions only.
 pub const OTHER_MATTERS: &str = "{other_matters}";
 

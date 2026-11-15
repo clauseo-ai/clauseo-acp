@@ -148,15 +148,11 @@ fn the_budgets_hold_for_a_long_macos_path_with_the_folders_filled() {
     let shared = fill(&profile.instructions_for(AgentKind::Claude), fenced);
     assert!(word_count(&shared) <= 1800, "{} words", word_count(&shared));
     // What `codex_keys` sends after a successful write (checked on disk in `tests/skills`), with
-    // the other matters' rule as Codex on Windows gets it, past its listed folders, each with
-    // spaces: the project's count of Codex's whole text (`instructions::word_count`).
-    let folders: Vec<String> = (0..20)
-        .map(|n| format!(r"C:\Users\Ann Mary\Clients\Sharma v State {n}"))
-        .collect();
-    let closed: Vec<&str> = folders.iter().map(String::as_str).collect();
-    let windows = clauseo_profile::instructions::other_matters_closed(&closed);
+    // the other matters' rule each way Codex gets it: the project's count of Codex's whole text
+    // (`instructions::word_count`).
+    let windows = clauseo_profile::instructions::other_matters_unfenced();
     let codex_text = format!("{}\n\n{index}", profile.instructions_for(AgentKind::Codex));
-    let words: Vec<usize> = [fenced, windows.as_str()]
+    let words: Vec<usize> = [fenced, windows]
         .iter()
         .map(|rule| word_count(&fill(&codex_text, rule)))
         .collect();

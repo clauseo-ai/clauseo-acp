@@ -112,25 +112,16 @@ pub(crate) fn append_part(text: &mut Value, part: &str) {
 }
 
 /// The other matters' rule (`{other_matters}`) for a Codex launch: on Windows (`windows`),
-/// where nothing fences Codex from them, the folders of the matters this conversation may not
-/// read (`clauseo_profile::instructions::other_matters_closed`); elsewhere its sandbox fences them
-/// and it gets the fenced rule, as Claude does everywhere. A folder that is no UTF-8 is named
-/// lossily.
-pub(crate) fn codex_rule(run: &RunFolders, windows: bool) -> String {
-    use clauseo_profile::instructions::{OTHER_MATTERS, other_matters_closed};
-    if !windows {
-        return OTHER_MATTERS.trim().to_owned();
+/// where nothing fences Codex from them, the name-free rule that knows a matter by its
+/// `.clauseo` folder (`clauseo_profile::instructions::other_matters_unfenced`); elsewhere its
+/// sandbox fences them and it gets the fenced rule, as Claude does everywhere.
+pub(crate) fn codex_rule(windows: bool) -> &'static str {
+    use clauseo_profile::instructions::{OTHER_MATTERS, other_matters_unfenced};
+    if windows {
+        other_matters_unfenced()
+    } else {
+        OTHER_MATTERS.trim()
     }
-    let closed: Vec<String> = run
-        .data_deny
-        .matters
-        .others
-        .iter()
-        .filter(|other| !other.invited)
-        .map(|other| other.folder.to_string_lossy().into_owned())
-        .collect();
-    let named: Vec<&str> = closed.iter().map(String::as_str).collect();
-    other_matters_closed(&named)
 }
 
 /// What a Claude session's `meta` gets from the fence after its instructions are filled: the

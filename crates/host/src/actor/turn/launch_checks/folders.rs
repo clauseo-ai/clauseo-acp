@@ -42,8 +42,13 @@ pub(super) fn launch_deny(
     });
     let spellings = data_spellings(data);
     let real = dunce::canonicalize(&cwd).ok();
-    let mut own_matter = vec![cwd.as_path(), stored];
-    own_matter.extend(real.as_deref());
+    let mut own_matter = vec![cwd, stored.to_path_buf()];
+    own_matter.extend(real);
+    // The own matter by its short forms too, as the other matters go (`agent::short_forms`), so
+    // a path through `CLAUSE~1` into it is never taken for a parent matter's.
+    let net = crate::network_paths::NetEnv::current();
+    let own_matter = crate::agent::short_forms::with_short_forms(own_matter, &net);
+    let own_matter: Vec<&Path> = own_matter.iter().map(PathBuf::as_path).collect();
     let data_places: Vec<&Path> = spellings.iter().map(PathBuf::as_path).collect();
     let matters = run
         .data_deny
