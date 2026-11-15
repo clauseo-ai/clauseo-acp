@@ -19,7 +19,6 @@ mod close;
 mod codex_cap;
 mod end;
 mod failure;
-pub(crate) mod fence;
 mod forced_mode;
 mod idle;
 mod inputs;
@@ -38,7 +37,6 @@ mod profile_loads;
 mod prompt;
 mod queue;
 mod reconcile;
-mod refused_call;
 mod restore;
 mod route;
 mod session;
@@ -112,11 +110,8 @@ pub(crate) struct TurnState {
     run: Option<launch_checks::RunFolders>,
     /// The skill packs its launches skipped, each pack and reason told once for the host's run.
     packs: launch_checks::PackNotices,
-    /// The thread was told Claude's auto mode is not available (`session/claude_mode.rs`), once
-    /// for the host's run.
-    auto_told: bool,
-    /// The other matters the thread was told its agent's shell rules left out (`fence.rs`).
-    unfenced_told: Vec<clauseo_protocol::MatterId>,
+    /// What the thread was told once for the host's run (`state::ToldOnce`).
+    told_once: state::ToldOnce,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
     /// The thread's sources in progress: the browser's opens and the agents' web calls that have

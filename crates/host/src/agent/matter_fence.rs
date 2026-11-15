@@ -70,9 +70,9 @@ impl Other {
     }
 }
 
-/// What a launch's fence was made of, to tell when it is out of date (`actor::turn::fence`): a
-/// hash of every matter's id and folder the host knows, and one of the thread's invites. In
-/// memory only.
+/// What a launch's fence was made of, to tell when it is out of date
+/// (`actor::turn::outside::fence`): a hash of every matter's id and folder the host knows, and
+/// one of the thread's invites. In memory only.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct FenceKey {
     /// The matters' ids and folders, hashed.

@@ -32,7 +32,7 @@ pub(super) fn tool_call(
     // folder across calls: then no shell call's starting folder is known.
     let start = agent(actor, thread).map(|agent| agent.shell_start.clone());
     let fields = crate::sent::CallFields::of_call(&call);
-    super::super::refused_call::seen(
+    super::super::outside::refused_call::seen(
         actor,
         thread,
         &call.acp_id,
@@ -125,7 +125,13 @@ pub(super) fn tool_update(
     // logged reads it: the sources, and `build.rs`'s inline or blob decision.
     if matches!(context, Context::Live(_)) {
         let fields = crate::sent::CallFields::of_patch(&patch);
-        super::super::refused_call::seen(actor, thread, acp_id, &fields, patch.raw_output.as_ref());
+        super::super::outside::refused_call::seen(
+            actor,
+            thread,
+            acp_id,
+            &fields,
+            patch.raw_output.as_ref(),
+        );
     }
     if let Some(current) = current(actor, thread) {
         if matches!(context, Context::Live(_)) {

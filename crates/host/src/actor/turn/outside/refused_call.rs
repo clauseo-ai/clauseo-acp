@@ -18,8 +18,8 @@ use clauseo_protocol::{
     ContentBlock, TextOrBlob, ThreadId, ToolCallContent, ToolCallStatus, ToolLocation,
 };
 
-use super::super::Actor;
-use super::current;
+use super::super::super::Actor;
+use super::super::current;
 use crate::agent::matter_fence::innermost;
 use crate::sent::CallFields;
 
@@ -40,7 +40,7 @@ const CODES: [&str; 3] = ["error_access_denied", "eacces", "eperm"];
 
 /// A live tool call's start or update (`acp_id`, `fields`, its `raw_output`): its paths are
 /// kept, and when it has failed as refused on a path in another matter, the lawyer is told.
-pub(super) fn seen(
+pub(in crate::actor::turn) fn seen(
     actor: &mut Actor,
     thread: ThreadId,
     acp_id: &str,
@@ -91,7 +91,7 @@ pub(super) fn seen(
         .iter()
         .find_map(|path| innermost(fence, path).map(|other| other.id));
     if let Some(matter) = matter {
-        super::outside::tell_other_matter(actor, thread, matter);
+        super::tell_other_matter(actor, thread, matter);
     }
 }
 

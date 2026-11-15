@@ -85,11 +85,11 @@ pub(super) fn launch_keys(
         codex.keys = profile::codex_keys(keys, web_search, folders)?;
         if !cfg!(windows) {
             let unfenced = prepared.run.data_deny.matters.unfenced.clone();
-            super::fence::tell_unfenced(actor, thread, unfenced);
+            super::outside::fence::tell_unfenced(actor, thread, unfenced);
         }
-        let reads = super::fence::reads_part(&prepared.run, false);
+        let reads = super::outside::fence::reads_part(&prepared.run, false);
         if let Some(text) = codex.keys.get_mut("developer_instructions") {
-            super::fence::append_part(text, &reads);
+            super::outside::fence::append_part(text, &reads);
         }
         // The data-folder fence (`agent::codex_fence`), in every Codex session, and the other
         // matters' (`agent::matter_fence`).
@@ -263,7 +263,7 @@ pub(super) fn session_loads(
         claude.as_ref(),
     );
     profile::fill_meta(&mut meta, folders)?;
-    super::fence::after_meta(actor, thread, &run, &mut meta);
+    super::outside::fence::after_meta(actor, thread, &run, &mut meta);
     super::offline::probe::session_meta(actor, thread, &meta);
     if run.browser_policy_read {
         // What the app heard from a "Try again" follows this newer read.

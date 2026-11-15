@@ -129,7 +129,7 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
             kind,
         },
     };
-    run.data_deny.matters = super::super::fence::matter_fence(actor, thread, row.matter);
+    run.data_deny.matters = super::super::outside::fence::matter_fence(actor, thread, row.matter);
     let matter = actor.check_matter(row.matter)?.row.skill_packs.as_ref();
     let packs = pack_prep(actor, &row.agent, matter);
     Ok(LaunchPaths {

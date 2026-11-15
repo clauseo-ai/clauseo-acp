@@ -20,6 +20,9 @@
 //! corrects the adapter's "you declined" for the lawyer. An agent that answers
 //! `StartedNewTurn` runs a turn the host does not track, which is logged as a warning.
 
+pub(super) mod fence;
+pub(super) mod refused_call;
+
 use clauseo_acp::SteerResult;
 use clauseo_protocol::{
     AgentChoiceId, ContentBlock, MatterId, Notice, NoticeKind, NoticeLevel, StopReason, ThreadId,
@@ -142,7 +145,7 @@ fn tell_once(actor: &mut Actor, thread: ThreadId) -> bool {
 /// A matter the conversation may read already gets the plain outside-the-matter notice: there
 /// is nothing to offer.
 pub(super) fn tell_other_matter(actor: &mut Actor, thread: ThreadId, matter: MatterId) -> bool {
-    let invited = super::fence::read_matters(actor, thread).contains(&matter);
+    let invited = fence::read_matters(actor, thread).contains(&matter);
     let name = actor
         .matters
         .get(&matter)

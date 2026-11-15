@@ -4338,6 +4338,11 @@ export type NoticeKind =
  */
 "outside_matter_blocked" | 
 /**
+ *  Clauseo declined, without asking the lawyer, a shell command of the agent's that needed
+ *  the internet (curl, wget, a network approval, extra network permissions). Once a turn.
+ */
+"shell_network_blocked" | 
+/**
  *  Clauseo kept the agent out of another matter's files: a refused permission request,
  *  or a tool call that failed as refused on a path in that matter (the innermost, when
  *  matters nest). The app offers to let this conversation read that matter's files.
