@@ -1,0 +1,128 @@
+// @vitest-environment happy-dom
+// The notice after Clauseo closed unexpectedly (crash-notice.tsx), over a transport that answers `last_exit`: the
+// general lines after an unclean exit with nothing recorded, a line per unfinished action by kind and count (with its
+// matter's name, never the Scratch matter's), nothing after a clean quit or a refused query, and Got it once per run,
+// kept across a reload.
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, expect, test } from "vitest";
+import type { HostTransport } from "../transport/host-transport.ts";
+import type { InterruptedAction, LastExit, MatterSummary } from "../transport/protocol.ts";
+import { CrashNotice } from "./crash-notice.tsx";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const MATTER = "00000000-0000-4000-8000-000000000001";
+const SCRATCH = "00000000-0000-4000-8000-000000000002";
+const THREAD = "00000000-0000-4000-8000-000000000003";
+let root: Root | null = null;
+let host: HTMLDivElement | null = null;
+
+beforeEach(() => localStorage.clear());
+afterEach(async () => {
+  await act(async () => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+});
+
+const MATTERS = [
+  { matter: MATTER, name: "Acme lease", kind: "folder" },
+  { matter: SCRATCH, name: "Scratch", kind: "scratch" },
+] as unknown as MatterSummary[];
+
+const exit = (over: Partial<LastExit> = {}): LastExit => ({
+  unclean: true,
+  run_started: 1_790_000_000_000,
+  ...over,
+});
+
+async function settle() {
+  for (let i = 0; i < 3; i += 1)
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+}
+
+/** The notice over a host that answers `last_exit` with `answer`, or refuses when it is an Error. */
+async function mount(answer: LastExit | Error) {
+  const transport = {
+    lastExitWire: true,
+    query: async (query: unknown) => {
+      expect(query).toBe("last_exit");
+      if (answer instanceof Error) throw answer;
+      return { last_exit: answer };
+    },
+  } as unknown as HostTransport;
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => root?.render(<CrashNotice transport={transport} matters={MATTERS} />));
+  await settle();
+  return host;
+}
+
+const card = () => host?.querySelector(".crash-notice") ?? null;
+
+test("an unclean exit with nothing recorded says only that the conversations are kept", async () => {
+  await mount(exit());
+  expect(card()?.getAttribute("aria-label")).toBe("Last session");
+  expect(card()?.querySelector(".rail-notice-title")?.textContent).toBe(
+    "Clauseo closed unexpectedly.",
+  );
+  expect(card()?.querySelector(".rail-notice-line")?.textContent).toBe(
+    "Your conversations are kept.",
+  );
+});
+
+test("each unfinished action is named by kind and count, with its matter, then where the copies are", async () => {
+  const actions: InterruptedAction[] = [
+    { kind: "undo", matter: MATTER, thread: THREAD, files: 3 },
+    { kind: "restore", matter: SCRATCH },
+    { kind: "accept_changes", matter: MATTER, files: 1 },
+  ];
+  await mount(exit({ interrupted: actions }));
+  expect(card()?.querySelector(".rail-notice-line")?.textContent).toBe(
+    "Your conversations are kept. Undo of 3 files in Acme lease may not have finished. A restore may not " +
+      "have finished. Accepting tracked changes in Acme lease may not have finished. Versions has the earlier copies.",
+  );
+});
+
+test("one file, a counted restore and a rejection read in the singular and by name", async () => {
+  await mount(
+    exit({
+      interrupted: [
+        { kind: "undo", matter: SCRATCH, files: 1 },
+        { kind: "restore", matter: SCRATCH, files: 2 },
+        { kind: "reject_changes", matter: SCRATCH, files: 1 },
+      ],
+    }),
+  );
+  expect(card()?.querySelector(".rail-notice-line")?.textContent).toBe(
+    "Your conversations are kept. Undo of 1 file may not have finished. Restore of 2 files may not have " +
+      "finished. Rejecting tracked changes may not have finished. Versions has the earlier copies.",
+  );
+});
+
+test("a clean quit and a refused query show nothing", async () => {
+  await mount(exit({ unclean: false }));
+  expect(card()).toBeNull();
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(new Error("refused"));
+  expect(card()).toBeNull();
+});
+
+test("Got it hides it for this run, across a reload; the next unclean exit shows it again", async () => {
+  await mount(exit());
+  const button = host?.querySelector<HTMLButtonElement>('[data-testid="crash-got-it"]');
+  expect(button?.textContent).toBe("Got it");
+  await act(async () => button?.click());
+  expect(card()).toBeNull();
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(exit());
+  expect(card()).toBeNull();
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(exit({ run_started: 1_790_000_100_000 }));
+  expect(card()).not.toBeNull();
+});

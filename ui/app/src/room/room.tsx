@@ -59,7 +59,7 @@ import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
 import { useRailShown } from "@clauseo/components/clauseo/rail-shown.ts";
-import { UpdateNotice } from "./update-notice.tsx";
+import { RoomNotices } from "./notices.tsx";
 import { useHostFullScreen } from "./host-full-screen.ts";
 import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
@@ -404,11 +404,11 @@ function RoomFrame({
   // the caption buttons' commands, off the Mac: frame.json grants the Mac none, so asking would be refused each resize
   const wired = useMemo(() => (platform === "mac" ? null : controls), [platform, controls]);
   const caption = useWindowFrame(wired);
-  // R23's update notice: at the rail's foot where the rail stands beside the work, else at the head of the wall
+  // Clauseo's own notices (notices.tsx): at the rail's foot where the rail stands beside the work, else at the wall's head
   const atRail = useRailShown() && versions.rail == null;
   // the desktop's own word on macOS's full screen: a notched Mac's full-screen window is shorter than its screen
   const hostFullScreen = useHostFullScreen(transport);
-  const notice = <UpdateNotice transport={transport} threads={threads} />;
+  const notice = <RoomNotices transport={transport} threads={threads} matters={view.matters} />;
   const title =
     open !== null
       ? scratch
