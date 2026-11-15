@@ -14,7 +14,11 @@ use windows::Win32::System::Threading::{
     PROCESS_SYNCHRONIZE, PROCESS_VM_READ,
 };
 
-use super::super::harden::Hardened;
+use std::os::windows::io::AsRawHandle;
+
+use windows::Win32::Foundation::HANDLE;
+
+use super::super::harden::{Hardened, is_hardened};
 use super::{Io, Job, Launch};
 
 /// `WRITE_DAC`, as a process access right.
@@ -55,6 +59,44 @@ fn example(name: &str) -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     let profile = exe.parent().and_then(Path::parent).unwrap();
     profile.join("examples").join(format!("{name}.exe"))
+}
+
+/// A hanging `echo_stub` started in `job`.
+fn hanging_child(job: &Job) -> super::Child {
+    let dir = std::env::temp_dir();
+    let args = [
+        dir.join(format!("clauseo-harden-{}.log", std::process::id()))
+            .into_os_string(),
+        OsString::from("hang"),
+    ];
+    job.spawn(&Launch {
+        program: &example("echo_stub"),
+        args: &args,
+        cwd: &dir,
+        env: &BTreeMap::new(),
+        stdin: Io::Piped,
+        stdout: Io::Piped,
+        stderr: Io::Null,
+        inherit: &[],
+    })
+    .unwrap()
+}
+
+/// The check the guard's hardened copy makes of itself (`Hardened::verified`): a process
+/// created with the descriptors passes it, an ordinary one does not, so a forged
+/// `--hardened-copy` makes a guard that refuses to start.
+#[test]
+fn the_check_of_the_copy_passes_a_process_created_hardened_and_no_other() {
+    for (job, expected) in [
+        (Job::new(Hardened::apply().unwrap()).unwrap(), true),
+        (Job::unhardened().unwrap(), false),
+    ] {
+        let mut child = hanging_child(&job);
+        let handle = HANDLE(child.as_raw_handle());
+        assert_eq!(is_hardened(handle).unwrap(), expected);
+        assert!(job.kill());
+        drop(child.wait());
+    }
 }
 
 #[test]

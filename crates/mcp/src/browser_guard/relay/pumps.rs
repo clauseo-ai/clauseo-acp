@@ -1,6 +1,7 @@
 //! The two pumps and agent-browser's start. The agent pump reads the agent's lines, runs each
 //! through `filter.rs` and routes what passes (`route`); one stdout pump per start of
-//! agent-browser copies its lines to the agent, whole lines and unchanged bytes.
+//! agent-browser copies its lines to the agent, whole lines and unchanged bytes. agent-browser's
+//! stderr reaches the guard's through `redact.rs`, without the relay's URL.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -20,6 +21,7 @@ use super::super::parent::Parent;
 use super::super::port_file::{Expected, Status};
 use super::super::session::{self, Request, Shared, StartError};
 use super::lines::{Line, Overflow, answer_all, emit, lock, read_line, write_child};
+use super::redact;
 use super::{
     CHILD_MAX_LINE_BYTES, CLOSE_REQUEST, CLOSE_TOOL, ENDED, Event, OPEN_TOOL, PROFILES_TOOL,
     closed_reply, oneshot, send,
@@ -45,6 +47,7 @@ pub(crate) fn spawn_child(
 ) -> io::Result<Child> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
+    let secrets = redact::secrets_of(env);
     let mut command = Command::new(program);
     command
         .args(args)
@@ -53,10 +56,24 @@ pub(crate) fn spawn_child(
         .envs(env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(if secrets.is_empty() {
+            Stdio::inherit()
+        } else {
+            Stdio::piped()
+        })
         // A group of its own, which `end_group` kills whole.
         .process_group(0);
-    command.spawn()
+    let mut child = command.spawn()?;
+    forward_stderr(&mut child, secrets);
+    Ok(child)
+}
+
+/// Copies the child's piped stderr to the guard's on a thread of its own, without `secrets`
+/// (`redact.rs`).
+fn forward_stderr(child: &mut Child, secrets: Vec<Vec<u8>>) {
+    if let Some(stderr) = child.stderr.take() {
+        redact::start(stderr, secrets);
+    }
 }
 
 /// Windows: agent-browser as on Unix, created in the guard's job (`job/spawn.rs`), hardened from
@@ -73,16 +90,23 @@ pub(crate) fn spawn_child(
     job: &super::super::job::Job,
 ) -> io::Result<Child> {
     use super::super::job::{Io, Launch};
-    job.spawn(&Launch {
+    let secrets = redact::secrets_of(env);
+    let mut child = job.spawn(&Launch {
         program,
         args,
         cwd,
         env,
         stdin: Io::Piped,
         stdout: Io::Piped,
-        stderr: Io::Inherit,
+        stderr: if secrets.is_empty() {
+            Io::Inherit
+        } else {
+            Io::Piped
+        },
         inherit: &[],
-    })
+    })?;
+    forward_stderr(&mut child, secrets);
+    Ok(child)
 }
 
 /// Agent to child: every line through the filter, then [`route`]. On EOF, sends the close

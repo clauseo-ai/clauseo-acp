@@ -33,9 +33,10 @@
 //! agent-browser's own processes (`devtools.rs`, `devtools/peer.rs`); `--cdp-port` is unused,
 //! and agent-browser is told to start no stream server (`env.rs`, `port_file.rs`). The guard
 //! first hides itself from other processes of the user (`harden.rs`; exit 1 if it cannot): on
-//! Windows a protected DACL, which every child it starts gets too, and on Linux
-//! `PR_SET_DUMPABLE` 0. On Windows the browser is Edge, or else a Program Files Chrome
-//! (`browsers.rs`).
+//! Windows a protected DACL from its creation, by running as a copy of itself that its first
+//! process starts hardened (passing on its exit code), which every child it starts gets too; on
+//! Linux `PR_SET_DUMPABLE` 0, its first act. On Windows the browser is Edge, or else a Program
+//! Files Chrome (`browsers.rs`).
 
 #[cfg(any(windows, test))]
 mod browsers;
@@ -95,6 +96,8 @@ const USAGE_WINDOWS: &str = "usage: clauseo-mcp browser-guard --agent-browser <f
 const EXIT_USAGE: i32 = 2;
 /// agent-browser's download folder variable, set to `--downloads`.
 const DOWNLOAD_PATH: &str = "AGENT_BROWSER_DOWNLOAD_PATH";
+/// How long the guard waits on its way out for agent-browser's last stderr (`relay/redact.rs`).
+const STDERR_DRAIN: Duration = Duration::from_secs(2);
 /// The exit code when the guard cannot make its folders or start agent-browser.
 const EXIT_FAILED: i32 = 1;
 
@@ -128,22 +131,29 @@ fn windows_dirs() -> env::WindowsDirs {
 /// Runs the guard with the arguments after `browser-guard`. Returns agent-browser's exit code
 /// (1 when a signal killed it), or a [`Failure`].
 pub fn run(args: &[OsString]) -> Result<i32, Failure> {
-    // First, before anything slow: a parent that dies later is then still the one watched.
-    let parent = parent::Parent::now().ok_or_else(|| failed(PARENT_GONE))?;
-    // Windows: before any secret or browser handle exists, and before any child; refused
-    // outright when Windows will not take it (fail closed).
-    #[cfg(windows)]
-    let hardened = harden::Hardened::apply().map_err(|error| {
-        failed(&format!(
-            "cannot harden the guard's process, so it starts no browser: {error}"
-        ))
-    })?;
+    // Linux: the very first act, so as little as can be opened before it (`harden.rs`).
     #[cfg(target_os = "linux")]
     harden::not_dumpable().map_err(|error| {
         failed(&format!(
             "cannot hide the guard's process, so it starts no browser: {error}"
         ))
     })?;
+    // First, before anything slow: a parent that dies later is then still the one watched.
+    let parent = parent::Parent::now().ok_or_else(|| failed(PARENT_GONE))?;
+    // Windows: only the copy created hardened goes on, refusing to when it is not (fail closed);
+    // the first process starts it and waits (`harden.rs`).
+    #[cfg(windows)]
+    let (args, hardened) = match args.split_first() {
+        Some((marker, rest)) if marker == harden::HARDENED_COPY => {
+            let hardened = harden::Hardened::verified().map_err(|error| {
+                failed(&format!(
+                    "the guard's copy was not created hardened, so it starts no browser: {error}"
+                ))
+            })?;
+            (rest, hardened)
+        }
+        _ => return run_hardened_copy(args, &parent),
+    };
     let command = parse(args, env::Os::CURRENT).map_err(|reason| Failure {
         code: EXIT_USAGE,
         message: format!("clauseo-mcp browser-guard: {reason}\n{USAGE}"),
@@ -242,6 +252,39 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
     )
 }
 
+/// Windows: the guard's first process. Hardens itself, starts its hardened copy with `args` and
+/// the same standard handles (`job::start_copy`), and returns the copy's exit code. If this
+/// process's parent goes first it exits 1 at once: the copy, which watches this process as its
+/// parent, then ends the browser, cleans up and says so on the shared stderr.
+#[cfg(windows)]
+fn run_hardened_copy(args: &[OsString], parent: &parent::Parent) -> Result<i32, Failure> {
+    let hardened = harden::Hardened::apply().map_err(|error| {
+        failed(&format!(
+            "cannot harden the guard's process, so it starts no browser: {error}"
+        ))
+    })?;
+    let copy = job::start_copy(&hardened, args).map_err(|error| {
+        failed(&format!(
+            "cannot start the guard's hardened copy, so it starts no browser: {error}"
+        ))
+    })?;
+    drop(hardened);
+    let (tell, ended) = std::sync::mpsc::channel();
+    let gone = tell.clone();
+    parent.watch(move || drop(gone.send(None)));
+    // Never joined: it ends with the copy, or with this process.
+    drop(std::thread::spawn(move || {
+        drop(tell.send(Some(copy.wait())));
+    }));
+    match ended.recv() {
+        Ok(Some(Ok(code))) => Ok(i32::from_ne_bytes(code.to_ne_bytes())),
+        Ok(Some(Err(error))) => Err(failed(&format!(
+            "cannot wait for the guard's hardened copy: {error}"
+        ))),
+        Ok(None) | Err(_) => Ok(EXIT_FAILED),
+    }
+}
+
 /// Relays, starting Chrome and agent-browser at the first tool call (`session.rs`); ends both,
 /// whatever happens, and deletes the run's profile before returning.
 fn serve(
@@ -292,6 +335,8 @@ fn serve(
     let shared = Arc::new(session::Shared::new(launcher));
     // Stops whatever runs (Chrome's tree, agent-browser's, the daemon) before it returns.
     let outcome = relay::run(&shared, parent);
+    // agent-browser and its daemon are ended: their last stderr lines, redacted, before the exit.
+    relay::redact::drain(STDERR_DRAIN);
     chrome::remove_profile(run.profile());
     // Chrome is reaped: the record goes, before the run's lock (`runs::Run`'s drop).
     record::clear(&command.cwd, run.id());

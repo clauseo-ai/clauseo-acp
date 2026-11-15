@@ -146,7 +146,7 @@ fn trickle(bytes: Vec<u8>, step: usize) -> Trickle {
 }
 
 /// A masked client frame.
-fn client_frame(fin: bool, opcode: u8, payload: &[u8]) -> Vec<u8> {
+pub(super) fn client_frame(fin: bool, opcode: u8, payload: &[u8]) -> Vec<u8> {
     let mask = [0x37_u8, 0xFA, 0x21, 0x3D];
     let mut frame = vec![if fin { 0x80 } else { 0 } | opcode];
     match payload.len() {
@@ -320,8 +320,14 @@ fn guard_ids_and_agent_ids_never_meet() {
 #[test]
 fn a_root_fetch_event_goes_to_the_guard_and_to_agent_browser_only_after_its_own_root_enable() {
     let mut routes = Routes::default();
+    // An enable noted before the guard took the domain (never so in the relay, whose clients
+    // are attached first) is the only way agent-browser gets a root event of a taken method.
+    routes.client_message(r#"{"id":9,"method":"Fetch.enable"}"#);
     routes.take_events(["Fetch.requestPaused", "Fetch.authRequired"]);
     let root = br#"{"method":"Fetch.authRequired","params":{}}"#;
+    assert!(routes.browser_message(root).forward);
+    // A new client starts with nothing enabled.
+    routes.client_connected();
     let page = br#"{"method":"Fetch.authRequired","sessionId":"S1","params":{}}"#;
     // Root: the guard's; agent-browser never enabled Fetch there.
     let routed = routes.browser_message(root);
@@ -340,12 +346,11 @@ fn a_root_fetch_event_goes_to_the_guard_and_to_agent_browser_only_after_its_own_
         !routes.browser_message(root).forward,
         "a page enable is no root enable"
     );
-    // agent-browser's own root enable: both get it, until it disables.
-    routes.client_message(r#"{"id":2,"method":"Fetch.enable"}"#);
+    // agent-browser's own root enable is refused now: the guard takes Fetch there.
+    let refused = routes.client_message(r#"{"id":2,"method":"Fetch.enable"}"#);
+    assert!(matches!(refused, FromClient::Refuse(_)), "{refused:?}");
     let routed = routes.browser_message(root);
-    assert!(routed.forward && matches!(routed.guard, ToGuard::Event(_)));
-    routes.client_message(r#"{"id":3,"method":"Fetch.disable"}"#);
-    assert!(!routes.browser_message(root).forward);
+    assert!(!routed.forward && matches!(routed.guard, ToGuard::Event(_)));
     // Any other event: agent-browser's.
     let other = routes.browser_message(br#"{"method":"Page.loadEventFired","params":{}}"#);
     assert_eq!(

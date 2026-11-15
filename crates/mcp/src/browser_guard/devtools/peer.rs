@@ -10,9 +10,9 @@
 //! - Linux: the socket's inode in `/proc/net/tcp`, then a process among agent-browser's
 //!   descendants (by `/proc/<pid>/stat`'s parent pid) holding `socket:[<inode>]` in its
 //!   `/proc/<pid>/fd`.
-//! - macOS: a process among agent-browser's descendants (`proc_listchildpids`) holding a TCP
-//!   socket with that pair (`proc_pidinfo(PROC_PIDLISTFDS)`,
-//!   `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)`).
+//! - macOS: a process among agent-browser's descendants (`proc_listchildpids`) holding an IPv4
+//!   TCP socket with that pair, both addresses 127.0.0.1 (`proc_pidinfo(PROC_PIDLISTFDS)`,
+//!   `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)`, read through `proc_info.rs`'s mirror of the header).
 //! - Windows: the socket's owning pid from `GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL)`, then
 //!   its parent chain (a Toolhelp snapshot) up to agent-browser, each parent created no later
 //!   than its child, so a parent pid Windows reused is never taken for agent-browser. A process
@@ -22,6 +22,15 @@
 //! On macOS and Linux the walk goes down from agent-browser, so a process another one reparented
 //! is never found: an orphan's parent becomes init or launchd, not agent-browser. The browser
 //! (the guard's child, beside agent-browser) is never let in.
+//!
+//! **Pid reuse.** The tree is read before the sockets, so a pid in it may name another process by
+//! the time its socket matches. On macOS and Linux a match is therefore checked again at once:
+//! the walk goes up from the matching pid by its parent pids, read now, to agent-browser, and the
+//! socket must still be that pid's afterwards. A parent pid always names a live process (a dead
+//! parent's children are reparented), so only a parent dying and its pid going to one of
+//! agent-browser's own descendants between two reads of the walk could fool it. On Windows the
+//! socket's owner must have been created no later than the connection was accepted, so a pid
+//! reused since is refused, and each parent no later than its child, as above.
 
 use std::net::TcpStream;
 
@@ -34,7 +43,10 @@ pub(crate) fn allowed(stream: &TcpStream, root: u32) -> bool {
     let (Ok(peer), Ok(local)) = (stream.peer_addr(), stream.local_addr()) else {
         return false;
     };
-    peer.ip().is_loopback() && os::owned_within(peer.port(), local.port(), root)
+    let loopback = std::net::IpAddr::from(std::net::Ipv4Addr::LOCALHOST);
+    peer.ip() == loopback
+        && local.ip() == loopback
+        && os::owned_within(peer.port(), local.port(), root)
 }
 
 /// One `/proc/net/tcp` line's inode, when it is the client socket from `client` to `relay`, both
@@ -84,7 +96,25 @@ mod os {
             return false;
         };
         let link = format!("socket:[{inode}]");
-        descendants(root).into_iter().any(|pid| holds(pid, &link))
+        descendants(root)
+            .into_iter()
+            .filter(|pid| holds(*pid, &link))
+            .any(|pid| descends_now(pid, root) && holds(pid, &link))
+    }
+
+    /// Whether `pid` is `root` or below it now, by its parent pids read now (pid reuse, above).
+    fn descends_now(mut pid: u32, root: u32) -> bool {
+        for _ in 0..MAX_PROCESSES {
+            if pid == root {
+                return true;
+            }
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+            match stat_parent(&stat) {
+                Some(parent) if parent != pid && parent != 0 => pid = parent,
+                _ => return false,
+            }
+        }
+        false
     }
 
     /// `root` and every process below it.
@@ -136,30 +166,56 @@ mod os {
     use std::collections::VecDeque;
     use std::ffi::{c_int, c_void};
 
+    use super::super::proc_info::{READ_BYTES, SocketFdInfo, is_client_socket};
     use super::MAX_PROCESSES;
 
     /// `PROC_PIDFDSOCKETINFO` (`sys/proc_info.h`).
     const PROC_PIDFDSOCKETINFO: c_int = 3;
-    /// `SOCKINFO_TCP`, a `socket_info`'s `soi_kind`.
-    const SOCKINFO_TCP: i32 = 2;
-    /// `AF_INET`.
-    const AF_INET: i32 = 2;
-    /// Offsets into `struct socket_fdinfo` (`sys/proc_info.h`): `pfi` is a 24-byte
-    /// `proc_fileinfo`; in `psi`, `soi_family` sits at 160 and `soi_kind` at 232 (after the
-    /// 136-byte `vinfo_stat`, two `uint64_t`, three `int`, eight `short`, a `uint32_t` and two
-    /// 24-byte `sockbuf_info`), and `soi_proto` at 240, whose `tcp_sockinfo` starts with the
-    /// `in_sockinfo` fields `insi_fport` and `insi_lport` (ports in network order in an `int`).
-    const FAMILY_AT: usize = 24 + 160;
-    const KIND_AT: usize = 24 + 232;
-    const FOREIGN_PORT_AT: usize = 24 + 240;
-    const LOCAL_PORT_AT: usize = 24 + 244;
-    /// Room for a whole `socket_fdinfo` (about 800 bytes in every macOS so far).
+    /// Room for a whole `socket_fdinfo` (792 bytes, `proc_info.rs`), with some to spare.
     const SOCKET_INFO_BYTES: usize = 2048;
+    const _: () = assert!(size_of::<SocketFdInfo>() <= SOCKET_INFO_BYTES);
 
     pub(super) fn owned_within(client: u16, relay: u16, root: u32) -> bool {
+        let Ok(top) = i32::try_from(root) else {
+            return false;
+        };
         descendants(root)
             .into_iter()
-            .any(|pid| holds(pid, client, relay))
+            .filter(|pid| holds(*pid, client, relay))
+            .any(|pid| descends_now(pid, top) && holds(pid, client, relay))
+    }
+
+    /// Whether `pid` is `root` or below it now, by its parent pids read now (pid reuse, above).
+    fn descends_now(mut pid: i32, root: i32) -> bool {
+        for _ in 0..MAX_PROCESSES {
+            if pid == root {
+                return true;
+            }
+            match parent(pid) {
+                Some(parent) if parent != pid && parent > 0 => pid = parent,
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    /// `pid`'s parent pid now (`PROC_PIDT_SHORTBSDINFO`).
+    fn parent(pid: i32) -> Option<i32> {
+        // SAFETY: `proc_bsdshortinfo` is plain integers and bytes, for which zero is valid.
+        let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
+        let bytes = c_int::try_from(size_of::<libc::proc_bsdshortinfo>()).ok()?;
+        // SAFETY: `info` is `bytes` writable bytes of the struct the flavour fills, live for
+        // the call.
+        let filled = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDT_SHORTBSDINFO,
+                0,
+                (&raw mut info).cast(),
+                bytes,
+            )
+        };
+        (filled == bytes).then(|| i32::try_from(info.pbsi_ppid).ok())?
     }
 
     /// `root` and every process below it.
@@ -234,20 +290,14 @@ mod os {
                 bytes,
             )
         };
-        if usize::try_from(filled).unwrap_or(0) < LOCAL_PORT_AT + 4 {
+        if usize::try_from(filled).unwrap_or(0) < READ_BYTES {
             return false;
         }
-        let raw: Vec<u8> = info.iter().flat_map(|word| word.to_ne_bytes()).collect();
-        let int_at = |at: usize| {
-            raw.get(at..at + 4)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map_or(-1, i32::from_ne_bytes)
-        };
-        let port_at = |at: usize| u16::from_be(u16::try_from(int_at(at) & 0xFFFF).unwrap_or(0));
-        int_at(KIND_AT) == SOCKINFO_TCP
-            && int_at(FAMILY_AT) == AF_INET
-            && port_at(LOCAL_PORT_AT) == client
-            && port_at(FOREIGN_PORT_AT) == relay
+        // SAFETY: `info` holds at least `size_of::<SocketFdInfo>()` initialised bytes (asserted
+        // above), aligned for it (`u64` words), and every bit pattern is a valid
+        // `SocketFdInfo`: integers and arrays of them only. What the call did not fill is 0.
+        let info = unsafe { std::ptr::read(info.as_ptr().cast::<SocketFdInfo>()) };
+        is_client_socket(&info, client, relay)
     }
 }
 
@@ -270,6 +320,7 @@ mod os {
         CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
         TH32CS_SNAPPROCESS,
     };
+    use windows::Win32::System::SystemInformation::GetSystemTimePreciseAsFileTime;
     use windows::Win32::System::Threading::{
         GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
@@ -277,9 +328,15 @@ mod os {
     use super::MAX_PROCESSES;
 
     pub(super) fn owned_within(client: u16, relay: u16, root: u32) -> bool {
+        // SAFETY: no arguments; it returns the time.
+        let accepted = filetime(unsafe { GetSystemTimePreciseAsFileTime() });
         let Some(owner) = owner(client, relay) else {
             return false;
         };
+        // A process created since the accept holds a reused pid, not the client's socket.
+        if created(owner).is_none_or(|born| born > accepted) {
+            return false;
+        }
         let parents = parents();
         let mut pid = owner;
         for _ in 0..MAX_PROCESSES {
@@ -385,6 +442,11 @@ mod os {
         // SAFETY: `handle` is open with PROCESS_QUERY_LIMITED_INFORMATION; the four FILETIMEs
         // are live locals the call writes.
         unsafe { GetProcessTimes(handle, creation, exit, kernel, user) }.ok()?;
-        Some((u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime))
+        Some(filetime(*creation))
+    }
+
+    /// A FILETIME as one number of 100 ns units.
+    fn filetime(time: FILETIME) -> u64 {
+        (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime)
     }
 }

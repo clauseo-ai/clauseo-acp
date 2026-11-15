@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use serde_json::{Value, json};
 
 use super::seam::{CdpLink, GuardClient, next_guard_id};
-use super::tests::{read_frame, relay, right_path, upgrade};
+use super::tests::{client_frame, read_frame, relay, right_path, upgrade};
 
 /// A fake guard client: records what it gets, answers each root event through its link, and
 /// has one start command.
@@ -100,4 +100,58 @@ fn a_start_command_without_an_answer_fails_the_start() {
         replies: std::sync::Mutex::default(),
     });
     assert!(devtools.attach(&[client]).is_err());
+}
+
+#[test]
+fn agent_browsers_root_commands_in_a_taken_domain_are_refused_and_its_page_ones_are_not() {
+    let (devtools, mut browser_reads, mut browser_writes) = relay();
+    let client = std::sync::Arc::new(FakeClient {
+        link: devtools.link(),
+        events: std::sync::Mutex::default(),
+        replies: std::sync::Mutex::default(),
+    });
+    let browser = std::thread::spawn(move || {
+        let start: Value = serde_json::from_slice(&browser_reads.next().unwrap().unwrap()).unwrap();
+        let reply = format!("{{\"id\":{},\"result\":{{}}}}\0", start["id"]);
+        browser_writes.write_all(reply.as_bytes()).unwrap();
+        // The next message is the first that got through: the page-session enable.
+        let next: Value = serde_json::from_slice(&browser_reads.next().unwrap().unwrap()).unwrap();
+        (next, browser_reads, browser_writes)
+    });
+    devtools.attach(&[client]).unwrap();
+    let (_, mut agent) = upgrade(&devtools, &right_path(&devtools));
+    for (id, method) in [(5, "Fetch.enable"), (6, "Fetch.continueWithAuth")] {
+        let command = json!({"id": id, "method": method, "params": {}}).to_string();
+        agent
+            .write_all(&client_frame(true, 0x1, command.as_bytes()))
+            .unwrap();
+        let reply: Value = serde_json::from_slice(&read_frame(&mut agent)).unwrap();
+        assert_eq!(reply["id"], id, "{reply}");
+        assert_eq!(reply["error"]["code"], -32600, "{method}: {reply}");
+    }
+    let page = json!({"id": 7, "method": "Fetch.enable", "sessionId": "S1", "params": {}});
+    agent
+        .write_all(&client_frame(true, 0x1, page.to_string().as_bytes()))
+        .unwrap();
+    let (forwarded, _reads, _writes) = browser.join().unwrap();
+    assert_eq!(
+        forwarded, page,
+        "the page session's enable reaches the browser"
+    );
+}
+
+#[test]
+fn with_no_client_the_seam_refuses_nothing() {
+    let (devtools, mut browser_reads, _browser_writes) = relay();
+    // W1's hook: no client, so no domain is the guard's.
+    devtools
+        .start_guard(&std::collections::BTreeMap::new())
+        .unwrap();
+    let (_, mut agent) = upgrade(&devtools, &right_path(&devtools));
+    let root = json!({"id": 5, "method": "Fetch.enable", "params": {}});
+    agent
+        .write_all(&client_frame(true, 0x1, root.to_string().as_bytes()))
+        .unwrap();
+    let forwarded: Value = serde_json::from_slice(&browser_reads.next().unwrap().unwrap()).unwrap();
+    assert_eq!(forwarded, root);
 }

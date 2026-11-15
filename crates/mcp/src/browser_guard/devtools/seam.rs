@@ -16,6 +16,10 @@
 //!   event (no `sessionId`) of such a method goes to [`GuardClient::on_event`], and to
 //!   agent-browser too only while agent-browser itself has that domain enabled on the root
 //!   session. Page-session events, and every other event, go to agent-browser as before.
+//! - **Domains.** The domains of a client's events and start commands are the guard's on the
+//!   root session: agent-browser's root-session commands in them (`Fetch.enable`,
+//!   `Fetch.continueWithAuth`) are refused with a CDP error and never reach the browser, so it
+//!   cannot cancel or answer for the guard's own. Its page-session commands are not affected.
 //! - **Order.** Before agent-browser is started, and so before anything may connect to the
 //!   relay, the guard sends each client's [`GuardClient::start_commands`] and waits up to
 //!   [`START_COMMAND_WAIT`] for each reply; a refusal or no answer fails the browser's start.
@@ -55,10 +59,6 @@ pub(crate) fn next_guard_id() -> i64 {
 /// `sessionId`.
 pub(crate) trait CdpLink: Send + Sync {
     /// Writes `message` to the browser.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "PR-3's ProxyAuth sends through it")
-    )]
     fn send(&self, message: &Value) -> io::Result<()>;
 }
 

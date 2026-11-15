@@ -89,14 +89,15 @@ pub(crate) struct Launch<'a> {
     pub(crate) inherit: &'a [RawHandle],
 }
 
-/// Starts `launch` in `job`, running. Every handle made here closes on every way out.
+/// Starts `launch` in `job` (none: in the guard's own jobs, as any child; only the guard's
+/// hardened copy, `job::start_copy`), running. Every handle made here closes on every way out.
 ///
 /// Refuses a relative program, which `CreateProcessW` would resolve against the guard's own
 /// folder, and a batch file (`is_batch`), which it would run through `cmd.exe`, whose quoting
 /// is not the one `command_line.rs` applies (CVE-2024-24576); std quotes for `cmd.exe` there or
 /// refuses. Both callers pass absolute executables the guard checked; this keeps it so.
 pub(super) fn spawn(
-    job: HANDLE,
+    job: Option<HANDLE>,
     hardened: Option<&Hardened>,
     launch: &Launch<'_>,
 ) -> io::Result<Child> {
@@ -327,9 +328,10 @@ struct Attributes {
 }
 
 impl Attributes {
-    /// The list for `job` and, unless none, `handles`.
-    fn new(job: HANDLE, handles: Vec<HANDLE>) -> io::Result<Attributes> {
-        let count = if handles.is_empty() { 1 } else { 2 };
+    /// The list for `job` and `handles`, each unless none.
+    fn new(job: Option<HANDLE>, handles: Vec<HANDLE>) -> io::Result<Attributes> {
+        // At least one slot, used or not: a list of none is no list.
+        let count = (u32::from(job.is_some()) + u32::from(!handles.is_empty())).max(1);
         let mut size = 0_usize;
         // SAFETY: with no list the call only writes the size a list of `count` needs into the
         // live `size`; it reports ERROR_INSUFFICIENT_BUFFER, which is expected.
@@ -340,7 +342,7 @@ impl Attributes {
         let mut attributes = Attributes {
             storage: vec![0; size.div_ceil(size_of::<usize>())].into_boxed_slice(),
             initialised: false,
-            jobs: Box::new([job]),
+            jobs: job.into_iter().collect(),
             handles: handles.into_boxed_slice(),
         };
         // SAFETY: `storage` is at least `size` writable bytes, aligned for pointers, which
@@ -350,22 +352,25 @@ impl Attributes {
         }
         .map_err(io::Error::from)?;
         attributes.initialised = true;
-        let job_list = usize::try_from(PROC_THREAD_ATTRIBUTE_JOB_LIST).map_err(io::Error::other)?;
-        // SAFETY: the list is initialised for `count` attributes; `jobs` is an array of one job
-        // handle, open while the caller's `Job` lives, of the size given, owned by
-        // `attributes`, so it outlives the list, which its drop deletes first.
-        unsafe {
-            UpdateProcThreadAttribute(
-                attributes.list(),
-                0,
-                job_list,
-                Some(attributes.jobs.as_ptr().cast()),
-                size_of_val(&*attributes.jobs),
-                None,
-                None,
-            )
+        if !attributes.jobs.is_empty() {
+            let job_list =
+                usize::try_from(PROC_THREAD_ATTRIBUTE_JOB_LIST).map_err(io::Error::other)?;
+            // SAFETY: the list is initialised for `count` attributes; `jobs` is an array of one
+            // job handle, open while the caller's `Job` lives, of the size given, owned by
+            // `attributes`, so it outlives the list, which its drop deletes first.
+            unsafe {
+                UpdateProcThreadAttribute(
+                    attributes.list(),
+                    0,
+                    job_list,
+                    Some(attributes.jobs.as_ptr().cast()),
+                    size_of_val(&*attributes.jobs),
+                    None,
+                    None,
+                )
+            }
+            .map_err(io::Error::from)?;
         }
-        .map_err(io::Error::from)?;
         if attributes.handles.is_empty() {
             return Ok(attributes);
         }
