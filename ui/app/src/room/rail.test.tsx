@@ -7,7 +7,7 @@
 import { act } from "react";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import type { MatterSummary } from "../transport/protocol.ts";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
@@ -39,6 +39,17 @@ afterEach(async () => {
   root = null;
   host = null;
   vi.useRealTimers();
+});
+
+// The room's first mount loads its chunks (the rail's, Find's results, the thread's): on a cold, busy machine that
+// takes seconds, past a test's 5 s, and a test that times out mid-mount leaves the next ones an empty rail. So the
+// room is mounted once here, under the hook's own timeout, and every test mounts it warm.
+beforeAll(async () => {
+  await mount(today([A, B]));
+  await act(async () => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
 });
 
 const SCRATCH: MatterSummary = { matter: uuid(9, 2), name: "Scratch", kind: "scratch" };
