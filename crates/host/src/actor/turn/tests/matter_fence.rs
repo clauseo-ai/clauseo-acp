@@ -13,6 +13,7 @@ use super::idle::{TWO_ANSWERS, idle_stops, live, rig, until_ended, until_idle};
 use super::rig::Rig;
 use crate::actor::Actor;
 use crate::actor::input::Input;
+use crate::actor::turn::agents::Stage;
 use crate::agent::AgentInput;
 use crate::agent::data_fence::{claude_allow_rules, claude_deny_rules, rule_path};
 use crate::pipeline::tests::support::TempDir;
@@ -170,5 +171,80 @@ fn a_new_matter_stops_the_idle_agent_and_its_relaunch_fences_it() {
         .find(|id| **id != rig.matter())
         .unwrap();
     assert_eq!(rules_for(&rig, thread, jones), (true, true, false));
+    rig.finish();
+}
+
+/// Whether `input` is the agent's or the matter's work on a turn: held to keep a turn running.
+fn turn_work(_: &Actor, input: &Input) -> bool {
+    matches!(
+        input,
+        Input::Agent { .. } | Input::Matter { .. } | Input::Turn(_)
+    )
+}
+
+/// A prompt as command `n`, with the turn's work held.
+fn prompt_held(rig: &mut Rig, thread: ThreadId, n: u128) {
+    let command = HostCommand::SendPrompt {
+        thread,
+        content: vec![clauseo_protocol::PromptBlock::Text {
+            text: "And the other lease?".to_owned(),
+        }],
+        delivery: clauseo_protocol::DeliveryRequest::Queue,
+    };
+    rig.dispatch_holding(n, command, turn_work).unwrap();
+}
+
+/// An invite while a turn runs with a prompt queued behind it: the agent is not stopped in the
+/// turn, but at its end, before the queued prompt starts; that prompt runs on the relaunched
+/// agent, whose rules read the matter. The same holds for a withdrawal (one rule).
+#[test]
+fn a_busy_agent_with_a_queued_prompt_is_stopped_at_its_turns_end() {
+    let mut rig = rig("mfence-busy", TWO_ANSWERS, "exit");
+    let papers = TempDir::new("mfence-busy-papers");
+    let thread = rig.thread();
+    let other = other_matter(&mut rig, papers.path(), "Smith", 5);
+    turn(&mut rig, thread, 10);
+    until_idle(&mut rig, thread);
+    let before = idle_stops(&mut rig, thread);
+    prompt_held(&mut rig, thread, 11);
+    let allow = HostCommand::AllowMatterRead {
+        thread,
+        matter: other,
+    };
+    rig.dispatch_holding(12, allow, turn_work).unwrap();
+    prompt_held(&mut rig, thread, 13);
+    assert!(live(&rig.actor, thread), "not stopped in its turn");
+    assert_eq!(
+        rules_for(&rig, thread, other),
+        (true, true, false),
+        "the old rules still"
+    );
+    rig.release_held();
+    rig.run_until("both turns' ends on the relaunched agent", |actor| {
+        let state = &actor.threads[&thread].turn;
+        state.current.is_none()
+            && state.queue.is_empty()
+            && state
+                .agent
+                .as_deref()
+                .is_some_and(|agent| agent.stage == Stage::Attached)
+            && actor.work.commits == 0
+    });
+    assert_eq!(
+        idle_stops(&mut rig, thread),
+        before + 1,
+        "one stop, at the turn's end"
+    );
+    let log = rig.log(thread);
+    let ended = log.iter().filter(|event| {
+        matches!(event, clauseo_protocol::DomainEvent::TurnEnded(ended)
+            if ended.stop == clauseo_protocol::StopReason::EndTurn)
+    });
+    assert_eq!(ended.count(), 3);
+    assert_eq!(
+        rules_for(&rig, thread, other),
+        (false, true, true),
+        "the relaunch reads it"
+    );
     rig.finish();
 }

@@ -135,3 +135,101 @@ fn a_refused_path_names_the_innermost_other_matter_but_never_the_own() {
     assert_eq!(named("shelf/own/draft.docx"), None);
     assert_eq!(named("elsewhere/x"), None);
 }
+
+/// Names compare folded, the drive letter too, so another matter stored as `c:\clients` is the
+/// parent of this one at `C:\Clients\Acme`, never a sibling to fence whole.
+#[test]
+fn a_drive_letter_in_another_case_still_holds_the_matter() {
+    let parent = super::key_as(Path::new("c:/clients"), true);
+    let own = super::key_as(Path::new("C:/Clients/Acme"), true);
+    assert!(own.starts_with(&parent), "{own:?} {parent:?}");
+    #[cfg(windows)]
+    {
+        let verbatim = super::key_as(Path::new(r"\\?\C:\Clients\Acme"), true);
+        assert_eq!(verbatim, own);
+    }
+}
+
+/// A matter inside the session's own, then one deeper down: the own matter's entries down to
+/// it are what the sandbox re-opens, never the matter itself nor the matter inside; an invited
+/// matter inside is re-opened with the rest and listed for a write deny.
+#[test]
+fn a_fenced_matter_inside_the_own_one_splits_what_the_sandbox_opens() {
+    let (_dir, root) = tree(
+        "mfence-own-open",
+        &[
+            "own/Sub/x",
+            "own/Drafts",
+            "own/p/q/Deep",
+            "own/p/other",
+            "own/Shared",
+            "data",
+        ],
+    );
+    write::write_file(&root.join("own/lease.pdf"), b"x").unwrap();
+    let fence = fence(
+        &root,
+        "own",
+        &[
+            ("own/Sub", false),
+            ("own/p/q/Deep", false),
+            ("own/Shared", true),
+        ],
+    );
+    let mut open = fence.own_open.clone().expect("split");
+    open.sort();
+    let own = root.join("own");
+    assert_eq!(
+        open,
+        [
+            own.join("Drafts"),
+            own.join("Shared"),
+            own.join("lease.pdf"),
+            own.join("p/other"),
+        ]
+    );
+    assert!(!fence.own_unlisted);
+    let mut inside: Vec<(PathBuf, bool)> = fence.inside_own.clone();
+    inside.sort();
+    assert_eq!(
+        inside,
+        [
+            (own.join("Shared"), true),
+            (own.join("Sub"), false),
+            (own.join("p/q/Deep"), false),
+        ]
+    );
+    // No matter inside: the matter is re-opened whole.
+    let plain = self::fence(&root, "own", &[("data", false)]);
+    assert_eq!(plain.own_open, None);
+}
+
+/// A parent whose siblings of the own matter pass the launch's limit is left unfenced and
+/// reported (Claude's settings file would outgrow what Claude Code reads); a later small matter
+/// is still fenced.
+#[test]
+fn a_parent_past_the_limit_is_reported_unfenced() {
+    let (_dir, root) = tree("mfence-unfenced", &["big/own", "small", "data"]);
+    for n in 0..=super::MAX_PATHS {
+        write::write_file(&root.join(format!("big/f{n}")), b"").unwrap();
+    }
+    let fence = fence(&root, "big/own", &[("big", false), ("small", false)]);
+    assert_eq!(fence.unfenced, [fence.others[0].id]);
+    assert!(fence.others[0].paths.is_empty());
+    assert_eq!(fence.others[1].paths, [root.join("small")]);
+}
+
+/// For Codex an invited matter inside the own one stays denied (it could not be read-only); one
+/// beside it is in no deny.
+#[test]
+fn codex_keeps_an_invited_matter_inside_the_own_one_denied() {
+    let (_dir, root) = tree("mfence-codex", &["own/Inner", "beside", "fenced", "data"]);
+    let fence = fence(
+        &root,
+        "own",
+        &[("own/Inner", true), ("beside", true), ("fenced", false)],
+    );
+    let mut denied = fence.codex_denied();
+    denied.sort();
+    assert_eq!(denied, [root.join("fenced"), root.join("own/Inner")]);
+}

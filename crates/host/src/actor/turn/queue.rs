@@ -475,6 +475,8 @@ fn closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, stop: StopReason) {
         queue.held = true;
         queue.held_for_limit = stop == StopReason::AtLimit;
     }
+    // A withdrawn read (or a new matter) closes before the next prompt runs.
+    super::idle::stop_stale_at_turn_end(actor, thread);
     move_on(actor, thread);
     sync_held(actor, thread);
     sign_in::on_closed(actor, thread, turn);

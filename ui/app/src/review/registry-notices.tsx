@@ -1,5 +1,5 @@
 // Host notices' copy review entries (TN-01 on; UC-346 to UC-350 the read invite's: another matter's files refused, with
-// the offer, and matters Claude's commands may reach), apart from registry.tsx to keep that file under the size limit: a
+// the offer, and matters Clauseo couldn't fully keep the agent out of), apart from registry.tsx to keep that file under the size limit: a
 // notice the host sends with its kind, in the room's thread, shown in the app's words (notice-words.ts). Each over the
 // thread the notice is in, as the host sends it.
 import type { ReactNode } from "react";
@@ -126,12 +126,13 @@ const OFFLINE_NO_SEARCH_NOTICE = notice(6, {
   text: "Clauseo stopped a step: ChatGPT tried to go online by running a command.",
   kind: "shell_network_blocked_no_web_search",
 });
-const UNFENCED = "Clauseo couldn't keep {name}'s commands out of these matters: {matters}.";
-const UNFENCED_ALONE = "Clauseo couldn't keep the AI's commands out of these matters: {matters}.";
-/** Claude on Windows: two matters named, and three more. */
+const UNFENCED = "Clauseo couldn't fully keep {name} out of these matters: {matters}.";
+const UNFENCED_ALONE = "Clauseo couldn't fully keep the AI out of these matters: {matters}.";
+/** Matters Clauseo couldn't fully fence (too many for Claude on Windows, or a parent folder on a network share): two
+ * named, and three more. */
 const UNFENCED_NOTICE = notice(6, {
   level: "warning",
-  text: "Clauseo couldn't keep the agent's commands out of some matters.",
+  text: "Clauseo couldn't fully keep the agent out of some matters.",
   kind: { matters_unfenced: { matters: [JOSHI.matter, KAPOOR.matter], more: 3 } },
 });
 const iso = (name: string) => `\u2068${name}\u2069`;

@@ -350,8 +350,9 @@ open_data_enum! {
             /// Its name when the host gave the notice (display only; it may have changed).
             name: String,
         },
-        /// Too many matters to fence off from the agent's commands (Claude on Windows, whose
-        /// settings file has a size limit): its commands may still reach these matters' files.
+        /// Matters Clauseo could not fully fence off from the agent: a folder on the way to
+        /// them could not be listed or is on a network share, there were too many paths to name,
+        /// or (Claude on Windows, whose settings file has a size limit) too many shell rules.
         MattersUnfenced = "matters_unfenced" {
             /// The first of them, at most five.
             matters: Vec<MatterId>,

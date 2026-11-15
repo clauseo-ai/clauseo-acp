@@ -12,8 +12,16 @@
 //! down to each kept place, listed now (as `codex_fence::down_to` does for `<data>`), so a deny
 //! never covers the session's own matter. A matter inside the session's matter is fenced whole;
 //! the session's own matter never is. A folder on the way that can't be listed (or a matter on
-//! a share that holds a kept place) leaves that spelling unfenced, with a warning: a deny of
-//! the whole folder would cover the session's own.
+//! a share that holds a kept place) leaves that matter unfenced, and so does a matter whose
+//! paths would take the launch past [`MAX_PATHS`] (Claude's settings would outgrow the file
+//! Claude Code reads): a deny of the whole folder would cover the session's own, so the lawyer
+//! is told instead ([`MatterFence::unfenced`], `NoticeKind::MattersUnfenced`).
+//!
+//! A matter inside the session's own matter needs one more thing on macOS and Linux: Claude's
+//! sandbox re-opens the own matter for reading, and its `allowRead` beats its `denyRead`, so it
+//! re-opens the own matter's entries one by one down to that matter instead
+//! ([`MatterFence::own_open`]). Windows has no OS fence: there a command in the own matter that
+//! never names the nested one (`rg x .`) reads it.
 //!
 //! Who uses which: Claude's `Read` deny rules and Codex's profile name the fence paths of the
 //! matters not invited, Claude's `Edit` deny rules and its Windows shell rules those of every
@@ -24,7 +32,7 @@
 //! matter after the launch is in no rule until the next launch.
 
 use std::ffi::OsString;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 
 use clauseo_protocol::MatterId;
 
@@ -82,7 +90,28 @@ pub(crate) struct MatterFence {
     pub(crate) key: FenceKey,
     /// The session's own matter folder, each spelling ([`Self::resolve`]).
     pub(crate) own: Vec<PathBuf>,
+    /// When another matter the session is not invited into lies inside its own matter: what
+    /// of the own matter Claude's sandbox re-opens for reading instead of the whole folder, its
+    /// entries down to each such matter ([`down_to`]), so the fence holds for a command that
+    /// never names the path (`rg x .`). `None` when no such matter lies inside it.
+    pub(crate) own_open: Option<Vec<PathBuf>>,
+    /// Whether [`Self::own_open`] was needed but a folder on the way could not be listed, is on
+    /// a network share, or holds more than [`MAX_PATHS`] entries: the sandbox is then off
+    /// (`agent::loads::sandbox::Off::NestedMatter`), never the matter re-opened whole.
+    pub(crate) own_unlisted: bool,
+    /// Every other matter's folder (each spelling, invited or not) inside the own matter:
+    /// Claude's sandbox denies writes there, Codex's profile gives an invited one `read`.
+    pub(crate) inside_own: Vec<(PathBuf, bool)>,
+    /// The other matters left unfenced ([`Self::resolve`]): one inside a folder that could not
+    /// be listed or on a network share, or past the launch's [`MAX_PATHS`]. The lawyer is told
+    /// (`NoticeKind::MattersUnfenced`).
+    pub(crate) unfenced: Vec<MatterId>,
 }
+
+/// The most fence paths a launch names, all matters together, and the most entries of the own
+/// matter Claude's sandbox re-opens: past them, Claude's settings would near the 2 MiB file
+/// Claude Code reads (`agent::launch_settings`), and the launch would fail.
+pub(crate) const MAX_PATHS: usize = 2000;
 
 impl MatterFence {
     /// No other matter (a unit test's keys).
@@ -94,6 +123,10 @@ impl MatterFence {
             invited: 0,
         },
         own: Vec::new(),
+        own_open: None,
+        own_unlisted: false,
+        inside_own: Vec::new(),
+        unfenced: Vec::new(),
     };
 
     /// The fence before the launch prep resolves it: `others`, sorted by id, so a launch's rules
@@ -122,30 +155,84 @@ impl MatterFence {
             .filter(|other| other.invited)
             .flat_map(|other| other.spellings.iter().cloned())
             .collect();
-        let mut kept_out = 0_usize;
+        let mut total = 0_usize;
         for other in &mut self.others {
             let mut keep: Vec<&Path> = own.iter().chain(data).copied().collect();
             if !other.invited {
                 keep.extend(invited.iter().map(PathBuf::as_path));
             }
             let mut paths = Vec::new();
+            let mut whole = true;
             for spelling in &other.spellings {
                 match fence_paths(spelling, &keep, &net) {
-                    Some(found) => paths.extend(found),
-                    None => kept_out += 1,
+                    Ok(found) => paths.extend(found),
+                    Err(()) => whole = false,
                 }
             }
             let mut seen = std::collections::HashSet::new();
             paths.retain(|path| seen.insert(path.clone()));
+            if total + paths.len() > MAX_PATHS {
+                paths.clear();
+                whole = false;
+            }
+            total += paths.len();
+            if !whole {
+                self.unfenced.push(other.id);
+            }
             other.paths = paths;
         }
-        if kept_out > 0 {
+        if !self.unfenced.is_empty() {
+            let unfenced = self.unfenced.len();
             tracing::warn!(
-                kept_out,
-                "another matter's folder holds this one and was not fenced"
+                unfenced,
+                "other matters could not be fenced; the lawyer is told"
             );
         }
+        self.split_own(&net);
         self
+    }
+
+    /// Fills [`Self::inside_own`], [`Self::own_open`] and [`Self::own_unlisted`].
+    fn split_own(&mut self, net: &NetEnv) {
+        let inside = |path: &Path, own: &Path| {
+            let (path, own) = (key(path), key(own));
+            path.len() > own.len() && path.starts_with(&own)
+        };
+        for other in &self.others {
+            for spelling in &other.spellings {
+                if self.own.iter().any(|own| inside(spelling, own)) {
+                    self.inside_own.push((spelling.clone(), other.invited));
+                }
+            }
+        }
+        let fenced: Vec<&Path> = self
+            .inside_own
+            .iter()
+            .filter(|(_, invited)| !invited)
+            .map(|(path, _)| path.as_path())
+            .collect();
+        if fenced.is_empty() {
+            return;
+        }
+        let mut open = Vec::new();
+        let mut listed = true;
+        for own in &self.own {
+            let ways: Vec<Vec<OsString>> = fenced
+                .iter()
+                .filter(|path| inside(path, own))
+                .map(|path| below(path, key(own).len()))
+                .collect();
+            if ways.is_empty() {
+                continue;
+            }
+            listed &= !net.is_network(own) && down_to(own, &ways, &mut open).is_some();
+        }
+        if listed && open.len() <= MAX_PATHS {
+            self.own_open = Some(open);
+        } else {
+            tracing::warn!("a matter inside this one could not be fenced off for the sandbox");
+            self.own_unlisted = true;
+        }
     }
 
     /// The fence paths of the matters this session is not invited into.
@@ -154,6 +241,18 @@ impl MatterFence {
             .iter()
             .filter(|other| !other.invited)
             .flat_map(|other| other.paths.iter().map(PathBuf::as_path))
+    }
+
+    /// What Codex's profile denies (`agent::codex_fence::Session::other_matters`): the fence
+    /// paths of the matters not invited, and each invited matter inside the own one, which Codex
+    /// can't make read-only (its turns keep deny entries alone, and the working folder is
+    /// writable).
+    pub(crate) fn codex_denied(&self) -> Vec<PathBuf> {
+        let invited_inside = self.inside_own.iter().filter(|(_, invited)| *invited);
+        self.denied_reads()
+            .map(Path::to_path_buf)
+            .chain(invited_inside.map(|(path, _)| path.clone()))
+            .collect()
     }
 
     /// The fence paths of every other matter.
@@ -194,25 +293,48 @@ fn spellings(folder: &Path, disk: &Disk<'_>) -> Vec<PathBuf> {
     out
 }
 
-/// `path`'s names for a prefix comparison, folded where the file system folds.
+/// `path`'s names for a prefix comparison, folded where the file system folds ([`key_as`]).
 pub(crate) fn key(path: &Path) -> Vec<OsString> {
+    key_as(path, FOLD_CASE)
+}
+
+/// `path`'s names for a prefix comparison, every one folded when `insensitive` (the drive too,
+/// as `data_fence::key` folds), and a drive or share prefix in one form: `\\?\C:` is `c:`,
+/// `\\?\UNC\srv\s` is `\\srv\s`.
+pub(crate) fn key_as(path: &Path, insensitive: bool) -> Vec<OsString> {
+    let fold = |text: &str| -> OsString {
+        if insensitive {
+            OsString::from(fold_name(text))
+        } else {
+            OsString::from(text)
+        }
+    };
     path.components()
         .map(|part| match part {
-            Component::Normal(name) if FOLD_CASE => {
-                OsString::from(fold_name(&name.to_string_lossy()))
+            Component::Prefix(prefix) => match prefix.kind() {
+                Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+                    fold(&format!("{}:", char::from(drive)))
+                }
+                Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => fold(&format!(
+                    r"\\{}\{}",
+                    server.to_string_lossy(),
+                    share.to_string_lossy()
+                )),
+                Prefix::Verbatim(_) | Prefix::DeviceNS(_) => {
+                    fold(&prefix.as_os_str().to_string_lossy())
+                }
+            },
+            Component::Normal(name) => fold(&name.to_string_lossy()),
+            other @ (Component::RootDir | Component::CurDir | Component::ParentDir) => {
+                other.as_os_str().to_owned()
             }
-            other @ (Component::Normal(_)
-            | Component::Prefix(_)
-            | Component::RootDir
-            | Component::CurDir
-            | Component::ParentDir) => other.as_os_str().to_owned(),
         })
         .collect()
 }
 
 /// The fence paths of one spelling of another matter's folder (the module doc), kept places
-/// `keep`: `None` when it is one of them, or holds one and can't be listed down to it.
-fn fence_paths(spelling: &Path, keep: &[&Path], net: &NetEnv) -> Option<Vec<PathBuf>> {
+/// `keep`: none when it is one of them; `Err` when it holds one and can't be listed down to it.
+fn fence_paths(spelling: &Path, keep: &[&Path], net: &NetEnv) -> Result<Vec<PathBuf>, ()> {
     let at = key(spelling);
     let mut inside: Vec<Vec<OsString>> = Vec::new();
     for place in keep {
@@ -221,25 +343,28 @@ fn fence_paths(spelling: &Path, keep: &[&Path], net: &NetEnv) -> Option<Vec<Path
             continue;
         }
         if place_key.len() == at.len() {
-            return None;
+            return Ok(Vec::new());
         }
-        // Its names below `spelling`, as the place spells them.
-        let below: Vec<OsString> = place
-            .components()
-            .skip(at.len())
-            .map(|part| part.as_os_str().to_owned())
-            .collect();
-        inside.push(below);
+        inside.push(below(place, at.len()));
     }
     if inside.is_empty() {
-        return Some(vec![spelling.to_owned()]);
+        return Ok(vec![spelling.to_owned()]);
     }
     if net.is_network(spelling) {
-        return None;
+        return Err(());
     }
     let mut out = Vec::new();
-    down_to(spelling, &inside, &mut out)?;
-    Some(out)
+    down_to(spelling, &inside, &mut out).ok_or(())?;
+    Ok(out)
+}
+
+/// `place`'s names after its first `depth`, as it spells them.
+fn below(place: &Path, depth: usize) -> Vec<OsString> {
+    place
+        .components()
+        .skip(depth)
+        .map(|part| part.as_os_str().to_owned())
+        .collect()
 }
 
 /// Every entry of `parent`, and of each folder on the way to each of `ways` (names below

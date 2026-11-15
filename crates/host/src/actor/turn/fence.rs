@@ -82,14 +82,21 @@ pub(crate) fn matters_hash(actor: &Actor) -> u64 {
 }
 
 /// The instructions part for the matters `run`'s conversation may read
-/// (`clauseo_profile::instructions::matter_reads_part`): each one's name and folder as stored.
-pub(crate) fn reads_part(run: &RunFolders) -> String {
-    let reads: Vec<(&str, &str)> = run
-        .data_deny
-        .matters
+/// (`clauseo_profile::instructions::matter_reads_part`): each one's name and folder as stored;
+/// for Codex (`inside` false) not one inside the own matter, which stays fenced for it
+/// (`agent::codex_fence::Session::other_matters`).
+pub(crate) fn reads_part(run: &RunFolders, inside: bool) -> String {
+    let fence = &run.data_deny.matters;
+    let within = |other: &crate::agent::matter_fence::Other| {
+        other
+            .spellings
+            .iter()
+            .any(|spelling| fence.inside_own.iter().any(|(p, _)| p == spelling))
+    };
+    let reads: Vec<(&str, &str)> = fence
         .others
         .iter()
-        .filter(|other| other.invited)
+        .filter(|other| other.invited && (inside || !within(other)))
         .filter_map(|other| Some((other.name.as_str(), other.folder.to_str()?)))
         .collect();
     clauseo_profile::instructions::matter_reads_part(&reads)
@@ -105,30 +112,35 @@ pub(crate) fn append_part(text: &mut Value, part: &str) {
 }
 
 /// What a Claude session's `meta` gets from the fence after its instructions are filled: the
-/// invited matters' part appended to them, and the lawyer told of matters its Windows shell
-/// rules left out ([`tell_unfenced`]).
+/// invited matters' part appended to them, and the lawyer told of the matters the launch could
+/// not fence and those its Windows shell rules left out ([`tell_unfenced`]).
 pub(crate) fn after_meta(
     actor: &mut Actor,
     thread: ThreadId,
     run: &RunFolders,
     meta: &mut serde_json::Map<String, Value>,
 ) {
-    let reads = reads_part(run);
+    let reads = reads_part(run, true);
     let prompt = meta.get_mut("systemPrompt");
     if let Some(text) = prompt.and_then(|prompt| prompt.get_mut("append")) {
         append_part(text, &reads);
     }
-    let unfenced =
-        crate::agent::loads::profile::unfenced_matters(meta, &run.data_deny, cfg!(windows));
+    let mut unfenced = run.data_deny.matters.unfenced.clone();
+    let shell = crate::agent::loads::profile::unfenced_matters(meta, &run.data_deny, cfg!(windows));
+    let new: Vec<MatterId> = shell
+        .into_iter()
+        .filter(|m| !unfenced.contains(m))
+        .collect();
+    unfenced.extend(new);
     tell_unfenced(actor, thread, unfenced);
 }
 
 /// The words the unfenced notice falls back to, for a view that does not know its kind.
-const UNFENCED_TEXT: &str =
-    "Clauseo couldn't keep the AI's commands out of some other matters: there are too many.";
+const UNFENCED_TEXT: &str = "Clauseo couldn't fully keep the AI out of some other matters.";
 
-/// Tells the lawyer the other matters a Claude launch on Windows could not fit into its shell
-/// rules (`agent::loads::profile::unfenced_matters`): one notice naming at most five of them,
+/// Tells the lawyer the other matters a launch left unfenced (`MatterFence::unfenced`, and for
+/// Claude on Windows those its shell rules could not fit,
+/// `agent::loads::profile::unfenced_matters`): one notice naming at most five of them,
 /// when that set differs from the one the thread was last told in this host run. Counts only in
 /// the log.
 pub(crate) fn tell_unfenced(actor: &mut Actor, thread: ThreadId, unfenced: Vec<MatterId>) {

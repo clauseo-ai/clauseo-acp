@@ -302,7 +302,9 @@ pub(crate) struct Session<'a> {
     /// What of every other matter the session is kept out of: the fence paths of each matter
     /// the lawyer did not let this conversation read (`agent::matter_fence`), denied by their
     /// own paths. An invited matter is in no deny, and never in `additionalDirectories`, which
-    /// is writable.
+    /// is writable; but one inside the session's own matter keeps its deny: the working folder's
+    /// write root covers it, and a `read` entry does not survive a turn's rebuilt policy, which
+    /// keeps the deny entries alone (see the module doc), so it could not be read-only.
     pub(crate) other_matters: &'a [PathBuf],
 }
 

@@ -2,7 +2,7 @@
 // Letting this conversation read another matter's files: the refusal's offer under the host's other_matter_refused
 // notice sends one allow_matter_read for this thread and that matter, and is gone once the header lists the matter
 // (or from the start, when it does already); the composer's pill for each matter the header lists sends
-// withdraw_matter_read from its ×.
+// withdraw_matter_read from its ×, and stays, closing and with no ×, while a turn that can still read runs.
 import { afterEach, expect, test } from "vitest";
 import { header, reset, THREAD, upsert, userMessage, uuid } from "../../testing/stream-script.ts";
 import type { MatterSummary, ViewEntry } from "../../transport/protocol.ts";
@@ -31,8 +31,11 @@ const refused = (matter: string, name: string): ViewEntry => ({
 });
 
 /** The header, with the other matters the thread may read. */
-const reading = (matters: string[]): ViewEntry => {
-  const head = header();
+const reading = (
+  matters: string[],
+  status: "idle" | "starting" | "running" | "needs_you" = "idle",
+): ViewEntry => {
+  const head = header(status);
   head.header!.read_matters = matters;
   return head;
 };
@@ -92,4 +95,56 @@ test("the pill's × sends withdraw_matter_read, named for assistive technology",
   h.deliver([upsert(reading([]))]);
   await h.settle();
   expect(h.one("read-chips")).toBeNull();
+});
+
+test("× while a turn runs keeps a closing pill with no × until the turn ends; × while idle drops it at once", async () => {
+  h = await mount();
+  h.deliver([
+    reset([userMessage(1, 1, "Compare the two leases")], reading([OTHER.matter], "running")),
+  ]);
+  await h.settle();
+  await h.click(h.one("read-chip-stop"));
+  expect(h.sent("withdraw_matter_read")).toEqual([{ thread: THREAD, matter: OTHER.matter }]);
+  // the header drops the matter at once, but the running turn reads on until it ends
+  h.deliver([upsert(reading([], "running"))]);
+  await h.settle();
+  expect(h.one("read-chips")?.textContent).toBe(
+    `Can read ${iso("Joshi v. Joshi")}'s files until this answer ends`,
+  );
+  expect(h.one("read-chip-stop")).toBeNull();
+  // a permission mid-turn is still the same turn
+  h.deliver([upsert(reading([], "needs_you"))]);
+  await h.settle();
+  expect(h.one("read-chips")).not.toBeNull();
+  // the turn ends: the host relaunches without the matter, and the pill goes
+  h.deliver([upsert(reading([], "idle"))]);
+  await h.settle();
+  expect(h.one("read-chips")).toBeNull();
+  // allowed again, then withdrawn while idle: gone at once, with no closing pill
+  h.deliver([upsert(reading([OTHER.matter], "idle"))]);
+  await h.settle();
+  await h.click(h.one("read-chip-stop"));
+  h.deliver([upsert(reading([], "idle"))]);
+  await h.settle();
+  expect(h.one("read-chips")).toBeNull();
+  // and a later turn shows no stale closing pill
+  h.deliver([upsert(reading([], "running"))]);
+  await h.settle();
+  expect(h.one("read-chips")).toBeNull();
+});
+
+test("a closing pill turns back into a plain one if the matter is allowed again in the same turn", async () => {
+  h = await mount();
+  h.deliver([
+    reset([userMessage(1, 1, "Compare the two leases")], reading([OTHER.matter], "running")),
+  ]);
+  await h.settle();
+  await h.click(h.one("read-chip-stop"));
+  h.deliver([upsert(reading([], "running"))]);
+  await h.settle();
+  expect(h.one("read-chip-stop")).toBeNull();
+  h.deliver([upsert(reading([OTHER.matter], "running"))]);
+  await h.settle();
+  expect(h.one("read-chips")?.textContent).toBe(`Can read ${iso("Joshi v. Joshi")}'s files`);
+  expect(h.one("read-chip-stop")).not.toBeNull();
 });
