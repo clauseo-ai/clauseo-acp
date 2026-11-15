@@ -1,8 +1,10 @@
 //! Which Chrome a session's browser runs (S27, "Which Chrome"; decision record 0029). The host
 //! looks on the launch-prep thread, never on the actor, and fills `{browser_executable}` with
 //! what it found. None found is `BrowserNotInstalled`. On macOS and Linux the launch prep asks
-//! the firm's Chrome and Edge policy (`super::rd_policy`) before it looks, so nothing here runs
-//! when that blocks; on Windows it asks each browser's own policy over [`windows_installed`].
+//! the firm's Chrome, Edge, Chromium and (on macOS) Brave policy (`super::rd_policy`) before it
+//! looks, so nothing here runs when that blocks; on Windows it asks each browser's own policy over
+//! [`windows_installed`]. Nothing found is kept: every launch looks again, so a browser installed
+//! while Clauseo runs is there for the next conversation.
 //!
 //! On macOS, in this order:
 //! 1. Google Chrome installed on the machine:
@@ -10,7 +12,17 @@
 //!    `~/Applications`.
 //! 2. Chrome for Testing that Clauseo downloaded into `<app data>/browsers/chrome-<version>/`,
 //!    the highest version first, with the binary where the Chrome for Testing zip puts it.
-//! 3. Otherwise none.
+//! 3. The other Chromium browsers a lawyer may have, last ([`ChromeRoots::others`]): Microsoft
+//!    Edge, Brave, then Chromium, each under `/Applications` then `~/Applications` as
+//!    `<App>.app/Contents/MacOS/<binary>` ([`MAC_OTHERS`]). Arc is not looked for: it is no
+//!    Chromium build that takes Chromium's switches (`--headless=new`, a fresh `--user-data-dir`),
+//!    it starts with its own sign-in, and agent-browser v0.41.1's own search
+//!    (`cli/src/native/cdp/chrome.rs` `find_chrome`) does not list it.
+//!
+//!    All take the flags the guard and agent-browser give Chrome (`browser_guard/chrome.rs`):
+//!    every one is a Chromium build, and agent-browser's own macOS search lists Brave and
+//!    Chromium.
+//! 4. Otherwise none.
 //!
 //! On Windows, in this order, and only from Program Files:
 //! 1. Microsoft Edge (`%ProgramFiles(x86)%`, then `%ProgramFiles%`, with
@@ -46,6 +58,14 @@ use clauseo_settings::chromium_policy::Browser;
 /// installs itself; Chrome may be a per-user install, which cannot. Off, Windows has only a
 /// Program Files Chrome.
 pub const EDGE_ALLOWED: bool = true;
+
+/// The other Chromium browsers looked for on macOS, in order, after Chrome: each app's folder
+/// under `Applications` and its binary in `Contents/MacOS`.
+pub const MAC_OTHERS: [(&str, &str); 3] = [
+    ("Microsoft Edge.app", "Microsoft Edge"),
+    ("Brave Browser.app", "Brave Browser"),
+    ("Chromium.app", "Chromium"),
+];
 
 /// The folder under the app data folder that holds Chrome for Testing downloads.
 pub const BROWSERS_DIR: &str = "browsers";
@@ -169,6 +189,33 @@ impl ChromeRoots {
         }
     }
 
+    /// The places for the other Chromium browsers, in order, after Chrome and Chrome for
+    /// Testing: on macOS each of [`MAC_OTHERS`] under `/Applications`, then `~/Applications`;
+    /// none elsewhere (Windows takes Edge first, from [`windows_installed`]).
+    pub fn others(&self) -> Vec<PathBuf> {
+        match self.platform {
+            Platform::MacArm64 | Platform::MacX64 => MAC_OTHERS
+                .iter()
+                .flat_map(|(app, binary)| {
+                    let relative = Path::new("Applications")
+                        .join(app)
+                        .join("Contents")
+                        .join("MacOS")
+                        .join(binary);
+                    self.applications().map(move |base| base.join(&relative))
+                })
+                .collect(),
+            Platform::WindowsX64 | Platform::WindowsArm64 | Platform::Linux | Platform::Other => {
+                Vec::new()
+            }
+        }
+    }
+
+    /// macOS's bases for `Applications`: the root, then the home folder.
+    fn applications(&self) -> impl Iterator<Item = &PathBuf> {
+        [Some(&self.root), self.home.as_ref()].into_iter().flatten()
+    }
+
     /// Windows' places for Microsoft Edge, in order: `%ProgramFiles(x86)%` (where Edge installs
     /// itself), then `%ProgramFiles%`. None on any other machine.
     pub fn edge(&self) -> Vec<PathBuf> {
@@ -199,9 +246,8 @@ impl ChromeRoots {
             .join("Application")
             .join("chrome.exe");
         match self.platform {
-            Platform::MacArm64 | Platform::MacX64 => [Some(&self.root), self.home.as_ref()]
-                .into_iter()
-                .flatten()
+            Platform::MacArm64 | Platform::MacX64 => self
+                .applications()
                 .map(|base| base.join(&chrome_app))
                 .collect(),
             Platform::WindowsX64 | Platform::WindowsArm64 => {
@@ -226,7 +272,7 @@ pub fn find(roots: &ChromeRoots) -> Option<PathBuf> {
     find_with(roots, EDGE_ALLOWED)
 }
 
-/// [`find`] with the Edge switch given, so its test covers both values.
+/// [`find`] with Windows' Edge switch given, so its test covers both values.
 fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
     if roots.platform.is_windows() {
         return windows_installed_with(roots, edge_allowed)
@@ -240,13 +286,7 @@ fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
         .into_iter()
         .find(|path| is_file(path))
         .or_else(|| chrome_for_testing(roots))
-        .or_else(|| {
-            edge_allowed
-                .then(|| roots.edge())
-                .into_iter()
-                .flatten()
-                .find(|path| is_file(path))
-        })
+        .or_else(|| roots.others().into_iter().find(|path| is_file(path)))
 }
 
 /// What Windows has: the browsers the host can take, and a Chrome it found but cannot use.

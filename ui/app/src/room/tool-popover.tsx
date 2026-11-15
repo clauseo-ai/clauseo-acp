@@ -1,6 +1,7 @@
 // The tool line's popover: one row per tool the open conversation's header speaks for, its glyph and name, an On or
 // Off chip, and only when off, the reason in a few words (DESIGN.md §Icons). Under the browser with no Chrome (or
-// Edge, on Windows), what to install, in full. Under the browser the firm's policy blocks, or whose policy Clauseo
+// Edge, on Windows), what to install, in full, and on a Mac Download Chrome, which opens Chrome's download page in the
+// default browser; a browser installed then is there in the next new conversation, as the words say. Under the browser the firm's policy blocks, or whose policy Clauseo
 // couldn't check, the reason in full; for the policy not checked, Try again, which asks the host to read it now and
 // waits (disabled, busy) until the read ends, then the row follows what it found: Ready for new conversations.
 // A tool
@@ -156,6 +157,18 @@ export function ToolPopover({
               </p>
             )}
             {row.recheck !== null && <Recheck part={row.recheck} onRecheck={onRecheck} />}
+            {row.download !== null && room.openChromeDownload !== null && (
+              <div className="tool-row-sub flex items-center gap-s2">
+                <Button
+                  kind="tone"
+                  size="small"
+                  data-testid="tool-download-chrome"
+                  onClick={room.openChromeDownload}
+                >
+                  {row.download}
+                </Button>
+              </div>
+            )}
           </li>
         ))}
       </ul>

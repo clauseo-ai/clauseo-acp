@@ -1,7 +1,8 @@
 //! The browser as a shell tool (`ProfileHook::browser_tool`): a session whose launch prep
 //! finds a Chrome gets agent-browser's variables, the tools folder on its agent's `PATH`, the
 //! instructions' browser part and `Available` in its header; a session with no Chrome, or with
-//! `tools.browser` off, gets none of them, a no-browser line and the reason in its header.
+//! `tools.browser` off, gets none of them, a no-browser line and the reason in its header; a
+//! browser installed while the host runs reaches the next session.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -297,6 +298,88 @@ fn a_session_with_the_browser_off_gets_no_browser() {
             ClauseoTool::Browser,
             Some(ToolsUnavailableReason::Off)
         ))
+    );
+}
+
+/// A browser installed while Clauseo runs is there for the next conversation, with no restart:
+/// the launch prep looks again at every launch and keeps no "none found". A first conversation on
+/// a Mac with no browser gets none; Brave then lands in `~/Applications`, and a second
+/// conversation on the same host gets it as its `AGENT_BROWSER_EXECUTABLE_PATH`.
+#[test]
+fn a_browser_installed_while_clauseo_runs_reaches_the_next_conversation() {
+    let name = "shell_browser_redetect";
+    let dir = Dir::new(name, &[]);
+    let codex = template(&dir, name, &codex_lines(name, &json!({})));
+    settings(
+        &dir,
+        agents(&[(CODEX, &codex, json!({}))]),
+        serde_json::from_str(ON).unwrap(),
+    );
+    let tools = dir.data().join("tools");
+    write::write(
+        &tools.join(format!("agent-browser{}", std::env::consts::EXE_SUFFIX)),
+        b"stand-in",
+    );
+    let hook = Hook {
+        profile: Some(Arc::new(profile(dir.data()))),
+        browser_tool: Some(tools),
+        ..Hook::default()
+    };
+    let home = dir.data().join("mac-home");
+    let roots = ChromeRoots {
+        platform: Platform::MacArm64,
+        root: dir.data().join("mac-root"),
+        home: Some(home.clone()),
+        program_files: None,
+        program_files_x86: None,
+        local_app_data: None,
+        app_data: dir.data().join("no-app"),
+    };
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| {
+        config
+            .with_profile_hook(Box::new(hook))
+            .with_chrome_roots(roots)
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let first = host.create_thread(matter, CODEX);
+    turn(&host, first);
+    let before = first_frame_tools(&host, first);
+
+    let brave = [
+        "Applications",
+        "Brave Browser.app",
+        "Contents",
+        "MacOS",
+        "Brave Browser",
+    ]
+    .into_iter()
+    .fold(home, |path, part| path.join(part));
+    write::write(&brave, b"stand-in");
+    let second = host.create_thread(matter, CODEX);
+    turn(&host, second);
+    let after = first_frame_tools(&host, second);
+    host.shutdown();
+
+    let [seen_before, seen_after]: [Seen; 2] = launcher.seen().try_into().unwrap();
+    if clauseo_profile::servers::no_browser(Some(clauseo_protocol::AgentKind::Codex)) {
+        return;
+    }
+    assert_eq!(var(&seen_before, "AGENT_BROWSER_EXECUTABLE_PATH"), None);
+    assert_eq!(
+        header_browser(&before),
+        Some(tool(
+            ClauseoTool::Browser,
+            Some(ToolsUnavailableReason::BrowserNotInstalled)
+        ))
+    );
+    assert_eq!(
+        var(&seen_after, "AGENT_BROWSER_EXECUTABLE_PATH"),
+        Some(brave)
+    );
+    assert_eq!(
+        header_browser(&after),
+        Some(tool(ClauseoTool::Browser, None))
     );
 }
 

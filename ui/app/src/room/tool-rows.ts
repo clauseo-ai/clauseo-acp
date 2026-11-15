@@ -1,6 +1,6 @@
 // Each row of the tool line's popover, in the fewest words (DESIGN.md §Icons): the tool's glyph and name, an On or
 // Off chip, the reason in a few words only when off; under the browser with no Chrome (or Edge, on Windows), what to
-// install and that a new conversation then finds it; under the browser the firm's policy blocks, whose policy
+// install and that a new conversation then finds it, and on a Mac Download Chrome, which opens Chrome's download page; under the browser the firm's policy blocks, whose policy
 // Clauseo couldn't check, or whose safe connection or unsafe-site list didn't start, the reason in full, and for the policy not checked, Try again (browser-policy.ts). Pure, so
 // the tests can read every state; loaded with the popover only.
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
@@ -35,6 +35,9 @@ export type ToolRowWords = {
   settings: boolean;
   /** Under the browser whose policy Clauseo couldn't check, Try again; else null. */
   recheck: RecheckPart | null;
+  /** Under the browser with none on a Mac (any OS but Windows), Download Chrome's words: it opens Chrome's download
+   * page (tool-line-context.ts's CHROME_DOWNLOAD); else null. */
+  download: string | null;
 };
 
 export type ToolRowRoom = {
@@ -68,8 +71,10 @@ const NO_LIST: ToolsKey =
   "Clauseo's unsafe-site list didn't load, so it won't use a browser for now. It tries again when a new conversation starts.";
 
 /** What to install, in full: the browser's skill loads as each conversation starts, so a browser installed later
- * is there in the next new conversation. Windows takes Edge too. */
-const INSTALL_MAC: ToolsKey = "Install Google Chrome, then start a new conversation.";
+ * is there in the next new conversation. On a Mac, the browsers Clauseo looks for (host's browser/chrome.rs);
+ * Windows takes Edge too. */
+const INSTALL_MAC: ToolsKey =
+  "Clauseo didn't find Google Chrome, Microsoft Edge, Brave or Chromium on this computer. Install one, then start a new conversation.";
 const INSTALL_WINDOWS: ToolsKey =
   "Install Google Chrome or Microsoft Edge, then start a new conversation.";
 
@@ -122,5 +127,11 @@ export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRow
     note: tool.tool === "browser" && !ready ? browserNote(lang, room.platform, tool.state) : null,
     settings: tool.state === "off" && room.settings,
     recheck: unread ? recheckPart(lang, room.policy) : null,
+    download:
+      tool.tool === "browser" &&
+      tool.state === "browser_not_installed" &&
+      room.platform !== "windows"
+        ? tw(lang, "Download Chrome")
+        : null,
   };
 }

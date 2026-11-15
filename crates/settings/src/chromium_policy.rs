@@ -1,9 +1,9 @@
-//! Chrome's, Edge's and Chromium's own `RemoteDebuggingAllowed` policy, as a firm's IT sets it
-//! for those browsers. Every browser Clauseo drives needs remote debugging (agent-browser speaks
-//! CDP), and false turns it off. Chrome for Testing reads its own policy location, and
-//! chrome-headless-shell none, so a browser Clauseo downloaded would not refuse by itself. The
-//! host reads the firm's values here, before it picks any browser, and starts none when one is
-//! false or a place cannot be read, unless Clauseo's own policy allows it
+//! Chrome's, Edge's and Chromium's own `RemoteDebuggingAllowed` policy (and Brave's, on macOS), as
+//! a firm's IT sets it for those browsers. Every browser Clauseo drives needs remote debugging
+//! (agent-browser speaks CDP), and false turns it off. Chrome for Testing reads its own policy
+//! location, and chrome-headless-shell none, so a browser Clauseo downloaded would not refuse by
+//! itself. The host reads the firm's values here, before it picks any browser, and starts none
+//! when one is false or a place cannot be read, unless Clauseo's own policy allows it
 //! (`browser.allow_when_remote_debugging_disabled`).
 //!
 //! Where it is read, for the computer and the user, taking what Chrome's own policy conversion
@@ -14,9 +14,10 @@
 //!   and under the same keys `DeveloperToolsAvailability` ([`DEVTOOLS_VALUE`]), whose 2
 //!   (developer tools disallowed) also turns it off, the computer's value over the user's;
 //!   [`read_registry`] over a [`Registry`]. macOS and Linux read `RemoteDebuggingAllowed` only.
-//! - macOS: the managed preferences files of `com.google.Chrome`, `com.microsoft.Edge` and
-//!   `org.chromium.Chromium`, the computer's and the login user's (a boolean, or the integer 0
-//!   or 1); [`read_managed_prefs`].
+//! - macOS: the managed preferences files of `com.google.Chrome`, `com.microsoft.Edge`,
+//!   `org.chromium.Chromium` and `com.brave.Browser`, the computer's and the login user's (a
+//!   boolean, or the integer 0 or 1); [`read_managed_prefs`]. Brave only here: the host looks
+//!   for Brave on macOS alone (`clauseo_host::browser::chrome`).
 //! - Linux: every `*.json` in Chrome's, Edge's and Chromium's `managed` policy folders (a
 //!   boolean, or the integer 0 or 1), at most [`MAX_FILES`] files of [`MAX_FILE_BYTES`] each
 //!   (Chrome takes this policy only as mandatory, never as recommended: its definition does not
@@ -59,6 +60,8 @@ pub enum Browser {
     Edge,
     /// Chromium-branded builds (a forced browser path can point at one).
     Chromium,
+    /// Brave, which the host looks for on macOS.
+    Brave,
 }
 
 /// Whose policy: the computer's or the user's.
@@ -181,10 +184,11 @@ pub const REGISTRY_KEYS: [(Browser, &str); 3] = [
 ];
 
 /// The managed preferences domains, by browser.
-pub const MAC_DOMAINS: [(Browser, &str); 3] = [
+pub const MAC_DOMAINS: [(Browser, &str); 4] = [
     (Browser::Chrome, "com.google.Chrome"),
     (Browser::Edge, "com.microsoft.Edge"),
     (Browser::Chromium, "org.chromium.Chromium"),
+    (Browser::Brave, "com.brave.Browser"),
 ];
 
 /// The Linux folders of mandatory policy, by browser.
@@ -226,6 +230,7 @@ impl fmt::Display for Place {
             Browser::Chrome => "Chrome",
             Browser::Edge => "Edge",
             Browser::Chromium => "Chromium",
+            Browser::Brave => "Brave",
         };
         let scope = match self.scope {
             Scope::Machine => "computer",
@@ -376,8 +381,8 @@ pub fn registry_says(value: &RegValue) -> Found {
     }
 }
 
-/// The six macOS places: the computer's file then the user's, Chrome, Edge, then Chromium in
-/// each.
+/// The eight macOS places: the computer's file then the user's, Chrome, Edge, Chromium, then
+/// Brave in each.
 /// `looked_up` is the login user ([`managed_prefs::login_user`]); without one, the user's
 /// file cannot be found, so the user's places are read errors.
 pub fn read_managed_prefs(

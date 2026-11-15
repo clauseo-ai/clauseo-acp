@@ -10,15 +10,18 @@ export const HI = {
   "Open Settings": "सेटिंग्स खोलें",
   "Changes apply to new conversations.": "बदलाव नई बातचीत पर लागू होते हैं।",
   // under the browser's Install Chrome (or Chrome or Edge, on Windows), in full: the browser's skill loads as each
-  // conversation starts, so a browser installed later is there in the next new conversation
+  // conversation starts, so a browser installed later is there in the next new conversation. On a Mac it names the
+  // browsers Clauseo looked for (crates/host/src/browser/chrome.rs)
   // (provisional Hindi, app track final)
-  "Install Google Chrome, then start a new conversation.":
-    "Google Chrome इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
+  "Clauseo didn't find Google Chrome, Microsoft Edge, Brave or Chromium on this computer. Install one, then start a new conversation.":
+    "Clauseo को इस कंप्यूटर पर Google Chrome, Microsoft Edge, Brave या Chromium नहीं मिला। इनमें से कोई एक इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
   "Install Google Chrome or Microsoft Edge, then start a new conversation.":
     "Google Chrome या Microsoft Edge इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
   // a policy read found nothing blocking: the browser row's reason, and its tooltip on when the browser comes
   "Ready for new conversations": "नई बातचीत के लिए तैयार",
   "The browser comes with your next conversation.": "ब्राउज़र आपकी अगली बातचीत के साथ आएगा।",
+  // under the Mac's no-browser line: opens Chrome's download page in the default browser (provisional Hindi)
+  "Download Chrome": "Chrome डाउनलोड करें",
   // under the browser whose policy Clauseo couldn't check: read it again now
   "Try again": "फिर से प्रयास करें",
   // under the browser's reason when the firm's policy blocks it, in full: installing a browser doesn't help

@@ -337,4 +337,8 @@ fn a_place_is_named_without_a_path() {
         place(Browser::Chromium, Scope::User).to_string(),
         "Chromium's user policy"
     );
+    assert_eq!(
+        place(Browser::Brave, Scope::Machine).to_string(),
+        "Brave's computer policy"
+    );
 }

@@ -242,15 +242,15 @@
     "note": "No browser on Windows (browser_not_installed): the host takes Edge when it finds no Chrome"
   },
   "UET-49": {
-    "en": "Install Google Chrome, then start a new conversation.",
-    "hi": "Google Chrome इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
+    "en": "Clauseo didn't find Google Chrome, Microsoft Edge, Brave or Chromium on this computer. Install one, then start a new conversation.",
+    "hi": "Clauseo को इस कंप्यूटर पर Google Chrome, Microsoft Edge, Brave या Chromium नहीं मिला। इनमें से कोई एक इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-10",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-16",
-    "by": "Rohan (review page, 2026-11-16)",
-    "note": "Under Install Chrome on a Mac: the browser's skill loads as each conversation starts (#899), so a new conversation finds it"
+    "hi_at": "2026-11-15",
+    "hi_by": "macchromium (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "macchromium (provisional; Rohan approved the earlier words, 'Install Google Chrome, then start a new conversation.', on the review page 2026-11-16; these reworded words to approve on the screenshots page, UET room/status)",
+    "note": "Under Install Chrome on a Mac: names the browsers Clauseo looks for (Chrome, then Edge, Brave, Chromium); the browser's skill loads as each conversation starts (#899), so a new conversation finds one installed later"
   },
   "UET-50": {
     "en": "Install Google Chrome or Microsoft Edge, then start a new conversation.",
