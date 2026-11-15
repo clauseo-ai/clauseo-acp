@@ -1,10 +1,11 @@
 // The limits view in the window (U12): the latest `AgentLimitsView` per agent kind, from the channel's
 // `limits_view_changed` (transport/limits-feed.ts), and `refresh_limits` to ask the host for a read. The store changes
 // only when a view arrives, and then only for an agent whose entry changed: an unchanged entry keeps its object, so a
-// part that reads one agent renders again only when that agent's figures move. No timers: the host publishes a new
-// view at each shown reset and at the stale mark (and focus asks for a read), and the parts format their times
-// against the clock at each render (useNow), so a later render, for whatever reason, names the day it renders on;
-// nothing renders on its own for the clock.
+// part that reads one agent renders again only when that agent's figures move. No timers here: the host publishes a
+// new view after each read (a turn's end, a focus, Settings' minute tick), at each shown reset and at the stale mark,
+// and the parts format their times against the clock at each render (useNow), so a later render, for whatever reason,
+// names the day it renders on; nothing renders on its own for the clock. `refresh` keeps one request in flight per
+// agent and reason: asks that arrive while it is out join it, so triggers that come together send one.
 //
 // For a part (the toolbar's plan, the composer's note, Settings' Plan and usage):
 //   const store = limitsStoreOf(transport)          one store per transport, made on first ask
@@ -25,8 +26,9 @@ export type LimitsStore = {
   view: () => LimitsView;
   /** One agent's entry; undefined before a view names it. */
   agent: (kind: AgentKind) => AgentLimitsView | undefined;
-  /** Asks the host to read the limits (`refresh_limits`): `shown` reads only figures older than 5 minutes,
-   * `try_again` reads now. A refusal goes to the console; the next view says what came of it. */
+  /** Asks the host to read the limits (`refresh_limits`): `shown` reads only figures older than 2 minutes (Claude) or 1 (Codex),
+   * `try_again` reads now. While the same ask is in flight another joins it and sends nothing. A refusal goes to the
+   * console; the next view says what came of it. */
   refresh: (kind: AgentKind | undefined, why: RefreshWhy) => void;
 };
 
@@ -57,6 +59,7 @@ export function createLimitsStore(transport: HostTransport): LimitsStore {
     for (const listener of listeners) listener();
   };
   if (isLimitsSource(transport)) transport.onLimits(take);
+  const inFlight = new Set<string>();
   return {
     subscribe: (listener) => {
       listeners.add(listener);
@@ -67,12 +70,16 @@ export function createLimitsStore(transport: HostTransport): LimitsStore {
     view: () => view,
     agent: (kind) => view[kind],
     refresh: (kind, why) => {
+      const key = `${kind ?? "every"}:${why}`;
+      if (inFlight.has(key)) return;
+      inFlight.add(key);
       transport
         .dispatch({
           command_id: crypto.randomUUID(),
           command: { refresh_limits: kind === undefined ? { why } : { agent: kind, why } },
         })
-        .catch((error: unknown) => console.warn(`refresh_limits failed: ${JSON.stringify(error)}`));
+        .catch((error: unknown) => console.warn(`refresh_limits failed: ${JSON.stringify(error)}`))
+        .finally(() => inFlight.delete(key));
     },
   };
 }

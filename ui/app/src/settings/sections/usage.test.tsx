@@ -2,7 +2,8 @@
 // Settings, Plan and usage over FakeTransport (U12): each agent's plan, windows and "Updated at", in every state the
 // room shows (stale, loading with its checking line, none with Try again, pay as you go, a window whose reset passed,
 // and missing_scope, live_only and a newer state as none); never blank, with one line when no plan has an entry; shown
-// sent once on opening, try_again from the button, and nothing left on a timer.
+// sent on opening and each minute while the page is in view (paused while hidden, gone once closed), try_again from
+// the button, and a view the host pushes after a turn's end read shown at once.
 import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
 import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import axe from "axe-core";
@@ -438,13 +439,75 @@ test("axe finds nothing with both plans, one of them stale and one with nothing 
   expect(results.violations.map((v) => v.id)).toEqual([]);
 });
 
-test("a view leaves nothing on a timer", async () => {
+/** Fakes the interval timers too, from before the page mounts; settled() keeps its real timeout. */
+const fakeTicks = () =>
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"], now: NOW });
+const tick = (ms: number) => act(async () => vi.advanceTimersByTime(ms));
+const SHOWN = { agent: undefined, why: "shown" };
+
+test("a view leaves no timer but the minute's", async () => {
+  fakeTicks();
   await mount();
-  vi.useFakeTimers();
   await view({ claude: entry(96) });
-  await act(async () => {
-    await vi.runAllTimersAsync();
-  });
   expect(card("claude")).not.toBeNull();
+  expect(vi.getTimerCount()).toBe(1);
+});
+
+test("while the page is open, shown goes each minute and never faster; closing it stops the tick", async () => {
+  fakeTicks();
+  await mount();
+  expect(transport.refreshes()).toEqual([SHOWN]);
+  await tick(59_999);
+  expect(transport.refreshes()).toEqual([SHOWN]);
+  await tick(1);
+  expect(transport.refreshes()).toEqual([SHOWN, SHOWN]);
+  await tick(60_000);
+  expect(transport.refreshes()).toEqual([SHOWN, SHOWN, SHOWN]);
+  await act(async () => root?.unmount());
+  root = null;
   expect(vi.getTimerCount()).toBe(0);
+  await tick(5 * 60_000);
+  expect(transport.refreshes()).toHaveLength(3);
+});
+
+test("a hidden window pauses the tick; shown again, it ticks from then", async () => {
+  fakeTicks();
+  await mount();
+  let state: DocumentVisibilityState = "hidden";
+  const spy = vi.spyOn(document, "visibilityState", "get").mockImplementation(() => state);
+  await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+  expect(vi.getTimerCount()).toBe(0);
+  await tick(3 * 60_000);
+  expect(transport.refreshes()).toEqual([SHOWN]);
+  state = "visible";
+  await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+  await tick(60_000);
+  expect(transport.refreshes()).toEqual([SHOWN, SHOWN]);
+  spy.mockRestore();
+});
+
+test("a tick while the last ask is still out sends nothing more", async () => {
+  fakeTicks();
+  await mount();
+  let answer: (() => void) | undefined;
+  transport.host.dispatch = () =>
+    new Promise<"done">((resolve) => (answer = () => resolve("done")));
+  await tick(60_000);
+  await tick(60_000);
+  await tick(60_000);
+  expect(transport.refreshes()).toEqual([SHOWN, SHOWN]);
+  await act(async () => answer?.());
+  await tick(60_000);
+  expect(transport.refreshes()).toEqual([SHOWN, SHOWN, SHOWN]);
+});
+
+test("a turn's end read pushed by the host shows at once, with no ask from the page", async () => {
+  await mount();
+  await view({ claude: entry(30) });
+  expect(card("claude")?.querySelector(".set-numeral")?.textContent).toBe("70%");
+  // the host read after the turn ended and sent the view to every window that follows limits
+  await view({ claude: entry(55, { checked_at: today(17, 0) }) });
+  expect(card("claude")?.querySelector(".set-numeral")?.textContent).toBe("45%");
+  expect(group("claude")?.querySelector(".set-aside-time")?.textContent).toBe("Updated at 5:00 pm");
+  expect(transport.refreshes()).toEqual([SHOWN]);
 });
