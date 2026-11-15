@@ -8,8 +8,8 @@
 
 use clauseo_host::codex_input::CODEX_MAX_INPUT_CHARS;
 use clauseo_protocol::{
-    DomainEvent, ErrorCode, FileChoice, FileDecision, HostCommand, MatterPath, StopReason,
-    StreamId, ThreadId,
+    CheckpointKind, DomainEvent, ErrorCode, FileChoice, FileDecision, HostCommand, MatterPath,
+    RestoreRequest, StopReason, StreamId, ThreadId,
 };
 use serde_json::{Value, json};
 
@@ -18,6 +18,7 @@ use crate::codex_cap::written;
 use crate::limits_host::CLAUDE;
 use crate::observe::Events;
 use crate::support::{Dir, Running, Scenario, matter_with_thread};
+use crate::versions::matter_events;
 use crate::write;
 
 /// The bundled scenarios' folder.
@@ -301,4 +302,49 @@ fn a_failed_claude_prompt_then_a_restart_keeps_the_note() {
     let mut steps = answered("p4", &[&brief, NEXT]).to_vec();
     steps.extend(answered("p5", &[AFTER]));
     after_restart(&dir, thread, CLAUDE, "undo-note-failed-run1", steps);
+}
+
+/// A Versions restore of brief.txt, then a restart before any prompt: the next prompt tells the
+/// restore once (from its `VersionRestored`, which lists the file), and the one after does not.
+#[test]
+fn a_restore_then_a_restart_is_told_once() {
+    let dir = Dir::new("undo_note_restart_restore", &[]);
+    let scenario = written(
+        &dir,
+        "undo-note-restore",
+        "claude-handshake.jsonl",
+        edits("p1", "brief.txt"),
+    );
+    dir.set_agents(&[(CLAUDE, scenario)]);
+    let host = dir.start(0);
+    let files = [("brief.txt", "draft\n")];
+    let (matter, thread, folder) = matter_with_thread(&dir, &host, "m", &files, CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    assert_eq!(
+        run_prompt(&host, &mut events, thread, "Finish the brief."),
+        StopReason::EndTurn
+    );
+    let import = matter_events(&host, matter)
+        .checkpoint(CheckpointKind::Import)
+        .unwrap();
+    host.ok(HostCommand::RestoreVersion {
+        thread: None,
+        undoes: None,
+        matter,
+        checkpoint: import,
+        scope: RestoreRequest::Files {
+            paths: vec![MatterPath::new("brief.txt").unwrap()],
+        },
+    });
+    let brief = std::fs::read_to_string(folder.join("brief.txt")).unwrap();
+    assert_eq!(brief, "draft\n", "the restore put brief.txt back");
+    events.assert_no_mismatch();
+    host.shutdown();
+
+    // Run 0's clock stands at its start (`Dir::clock`), as in `versions.rs`'s restore note.
+    let restored = "Note from Clauseo: The lawyer restored brief.txt from Versions; it's back as \
+        of 2026-09-21 14:13 UTC. Read them again before relying on what you remember about them.";
+    let mut steps = answered("p2", &[restored, NEXT]).to_vec();
+    steps.extend(answered("p3", &[AFTER]));
+    after_restart(&dir, thread, CLAUDE, "undo-note-restore-run1", steps);
 }
