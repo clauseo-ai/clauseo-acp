@@ -17,6 +17,20 @@ export const vt = wordsOf("versions");
 
 export { listOf };
 
+/** The word for a marked-up run that stands for an object (the host's BlacklineObject), in brackets: an inserted
+ * picture shows as "[picture]". A kind from a newer host reads as the generic word. */
+export const OBJECT_WORDS: Readonly<
+  Record<"picture" | "chart" | "shape" | "note" | "field" | "other" | "unknown", VersionKey>
+> = {
+  picture: "[picture]",
+  chart: "[chart]",
+  shape: "[shape]",
+  note: "[footnote]",
+  field: "[field]",
+  other: "[object]",
+  unknown: "[object]",
+};
+
 /** Word's file names, each in single quotes, joined as the language joins a list: 'Lease.docx' and 'Notice.docx'. */
 export function wordFiles(lang: Lang, names: readonly string[]): string {
   return new Intl.ListFormat(lang, { type: "conjunction" }).format(names.map((n) => `'${n}'`));

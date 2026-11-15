@@ -4,26 +4,14 @@
 import type { ReactNode, RefObject } from "react";
 import { Button } from "../ui/button.tsx";
 import { IconOpen, IconPaperBookPage } from "../icons/icons.tsx";
-import { useVersionWords } from "../lib/words-versions.ts";
+import { OBJECT_WORDS, useVersionWords } from "../lib/words-versions.ts";
 import { rdt } from "../lib/words-reader.ts";
 import { Heading } from "./heading.tsx";
 import { keepIds } from "./matter.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
-import type { MarkedObject, ParaDiff, RowDiff, Run } from "./versions-diff.ts";
-import type { VersionKey } from "../lib/words-versions.ts";
+import type { ParaDiff, RowDiff, Run } from "./versions-diff.ts";
 import { useStuck } from "./stuck.ts";
-
-/** The word for a marked-up run that stands for an object, in brackets: an inserted picture is "[picture]". */
-const OBJECT_WORDS: Readonly<Record<MarkedObject, VersionKey>> = {
-  picture: "[picture]",
-  chart: "[chart]",
-  shape: "[shape]",
-  note: "[footnote]",
-  field: "[field]",
-  other: "[object]",
-  unknown: "[object]",
-};
 
 /** Words as runs: the same, came in, or went out; the lawyer's own at 600. A run that stands for an object (a
  * picture put in, a footnote taken out) shows its bracketed word, marked in or out the same way. */
