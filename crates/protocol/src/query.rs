@@ -9,11 +9,11 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, AgentPrefs, AllowedSite, BlobHash, CheckpointId, ClientName, CompactString,
-    ConfigOption, Count, Date, Error, FileChange, FileRefId, FolderPlace, LastExit, LastStop,
-    MatterId, MatterKind, MatterPath, MatterSource, MatterStatus, PackList, PackStatus, Protection,
-    ProtectionView, QueueHoldReason, RestoreRequest, RevisionList, SearchAnswer, SearchRequest,
-    Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId,
-    UpdateView, ViewEntry, WordBlackline,
+    ConfigOption, Count, Date, Error, FileChange, FileRefId, FolderPlace, KeptPermission, LastExit,
+    LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus, PackList, PackStatus,
+    Protection, ProtectionView, QueueHoldReason, RestoreRequest, RevisionList, SearchAnswer,
+    SearchRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp,
+    TurnId, UpdateView, ViewEntry, WordBlackline,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -223,6 +223,14 @@ pub enum HostQuery {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         to: Option<CheckpointId>,
     },
+    /// The rules Clauseo keeps for a matter from the lawyer's "Always for this matter" answers
+    /// to Claude's permission requests, in the order they were kept, read off the host thread.
+    /// None when the matter has none. Answered `QueryResult::KeptPermissions`.
+    /// JSON: `{"kept_permissions": {"matter": "…"}}`.
+    KeptPermissions {
+        /// The matter.
+        matter: MatterId,
+    },
     /// The tracked changes of one Word file of a matter, read with stetdoc from a private copy
     /// (`revisions.rs`). Answered `QueryResult::Revisions`. Writes nothing. A file that is not
     /// a `.docx` or does not read as one is `word.not_docx`; one over stetdoc's limits,
@@ -301,6 +309,8 @@ pub enum QueryResult {
     WordBlackline(WordBlackline),
     /// For `ListRevisions`.
     Revisions(RevisionList),
+    /// For `KeptPermissions`.
+    KeptPermissions(Vec<KeptPermission>),
 }
 
 /// A picked folder's check, for `FolderSupport`. A struct, so later fields are additive; it

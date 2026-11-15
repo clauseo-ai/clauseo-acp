@@ -59,7 +59,6 @@ pub(super) struct AlwaysAsk {
 #[derive(Debug)]
 pub(super) struct Answered {
     pub(super) once: AgentChoiceId,
-    #[expect(dead_code, reason = "the lawyer's notice uses it, in the next commit")]
     pub(super) not_kept: Option<NotKept>,
 }
 
@@ -313,10 +312,6 @@ fn allow(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) -> Result<(), 
 
 /// The lawyer removed `rule` from `matter`'s kept rules: no agent of the matter applies it any
 /// more.
-#[expect(
-    dead_code,
-    reason = "the lawyer's list of kept rules uses it, in the next commit"
-)]
 pub(crate) fn forget(actor: &mut Actor, matter: clauseo_protocol::MatterId, rule: &str) {
     for entry in actor.threads.values_mut() {
         if entry.row.matter != matter {

@@ -1,0 +1,16 @@
+{"scenario":"claude-always-not-kept","description":"The lawyer picks Always for this matter on a PowerShell call (no rule form) and on Bash ls *.docx (a wildcard): each reaches the agent as allow-once and keeps nothing","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"Get-ChildItem","name":"PowerShell","kind":"execute","status":"pending","rawInput":{"command":"Get-ChildItem"}}}}
+{"note":"no rule form: allowed once only","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-1","title":"Get-ChildItem","rawInput":{"command":"Get-ChildItem"}},"options":[{"optionId":"allow-once","name":"Yes","kind":"allow_once"},{"optionId":"allow-with-updates","name":"Yes, and don't ask again for Get-ChildItem","kind":"allow_always"},{"optionId":"reject","name":"No","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-2","title":"ls *.docx","name":"Bash","kind":"execute","status":"pending","rawInput":{"command":"ls *.docx","description":"List Word files"}}}}
+{"note":"a wildcard: allowed once only","request":{"id":"perm-2","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-2","title":"ls *.docx","rawInput":{"command":"ls *.docx","description":"List Word files"}},"options":[{"optionId":"allow-once","name":"Yes","kind":"allow_once"},{"optionId":"allow-with-updates","name":"Yes, and don't ask again for ls *.docx","kind":"allow_always"},{"optionId":"reject","name":"No","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-2","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-2","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-p1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

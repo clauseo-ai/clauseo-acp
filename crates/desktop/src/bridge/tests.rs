@@ -482,6 +482,7 @@ mod admit_mcp;
 mod allowed_sites;
 mod app;
 mod connectors;
+mod kept_permissions;
 mod limits;
 mod mcp;
 mod permission;

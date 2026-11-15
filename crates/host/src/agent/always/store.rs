@@ -65,10 +65,6 @@ pub(crate) fn read(file: &Path) -> Vec<String> {
 }
 
 /// The rules kept in `file`, for the lawyer's list: [`read`].
-#[expect(
-    dead_code,
-    reason = "the lawyer's list of kept rules uses it, in the next commit"
-)]
 pub(crate) fn list(file: &Path) -> Vec<String> {
     read(file)
 }
@@ -139,13 +135,6 @@ pub(crate) fn store_now(file: &Path, rule: String) -> std::io::Result<()> {
 
 /// Removes `rule` from `file`: whether it was there. A file this host cannot take is left as it
 /// is (it holds no rule this host applies). File system calls: off the actor.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the lawyer's list of kept rules uses it, in the next commit"
-    )
-)]
 pub(crate) fn remove_now(file: &Path, rule: &str) -> std::io::Result<bool> {
     let _held = locked();
     let Kept::Rules(mut rules) = read_unlocked(file) else {

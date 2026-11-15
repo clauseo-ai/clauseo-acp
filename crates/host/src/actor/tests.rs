@@ -79,7 +79,8 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::Protection(_)
         | QueryResult::AllowedSites(_)
         | QueryResult::WordBlackline(_)
-        | QueryResult::Revisions(_)) => panic!("not matters: {other:?}"),
+        | QueryResult::Revisions(_)
+        | QueryResult::KeptPermissions(_)) => panic!("not matters: {other:?}"),
     }
 }
 

@@ -21,6 +21,8 @@
 //! `AllowBlockedSite` from a block's notice and `RevokeAllowedSite`, and the settings window
 //! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
 //! agent shows or runs, may lift a block.
+//! `RemoveKeptPermission` (a matter's kept "Always" rules, from the rail's matter menu) is
+//! `main`'s alone, and only takes a rule back.
 //! The network signal `SetNetwork` (D-050) is `main`'s alone: its webview hears `online` and
 //! `offline`. The lawyer's MCP server commands (Settings › Tools) are the settings window's
 //! alone: each server is a program that runs with the lawyer's access.
@@ -139,6 +141,9 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // The room's tracked changes in a Word file: a matter, a path inside it that the host
         // resolves and refuses unless it is a `.docx`, and change ids. Writes as a restore does.
         | HostCommand::DecideRevisions(_)
+        // A matter's kept "Always" rules (the rail's matter menu): a removal only takes a rule
+        // back, so the agent asks again; it never allows anything.
+        | HostCommand::RemoveKeptPermission { .. }
         // The pickers: a choice of a config option, which the host takes only for a model or
         // effort option of the thread's (`turn/picks.rs`), refusing every other.
         | HostCommand::SetConfigOption {

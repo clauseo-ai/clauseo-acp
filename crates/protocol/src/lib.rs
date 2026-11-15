@@ -154,6 +154,7 @@ mod error_code;
 mod event;
 mod excluded;
 mod ids;
+mod kept;
 mod last_exit;
 mod limits;
 mod lists;
@@ -214,6 +215,7 @@ wire_types! {
     },
     browser_install::{BrowserInstallFailure, BrowserInstallState},
     browser_policy::{BrowserPolicyState},
+    kept::{KeptKind, KeptPermission},
     command::{
         CommandEnvelope, CommandOutcome, ConfigValue, ConnectorCommand, DeliveryRequest,
         HostCommand, MatterSource, McpCommand, McpSecretEdit, McpSecretValue, McpServerEdit,
@@ -282,7 +284,7 @@ wire_types! {
     session::{
         AgentCapabilities, AvailableCommand, CompactionStatus, ConfigCategory, ConfigChoice,
         ConfigOption, ConfigOptionKind, Cost, DetachReason, DoneBy, NoticeKind, NoticeLevel,
-        PackSkipReason, SnoozeBy, PlanEntry, PlanPriority,
+        NotKeptReason, PackSkipReason, SnoozeBy, PlanEntry, PlanPriority,
         PlanStatus, PromptCapabilities, RenameSource, SessionCapabilities, SteeringCapability,
         TextKind, TurnUsage,
     },
@@ -343,6 +345,7 @@ pub use command::{
     // A checked command inside Rust; never serialised (the client sends `CommandEnvelope`).
     ValidatedCommand,
 };
+pub use kept::MAX_KEPT_RULE_BYTES;
 pub use mcp::MCP_SKIPPED_MAX;
 // The text a `RedactedString` encodes and prints as.
 pub use connectors::REDACTED_TEXT;

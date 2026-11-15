@@ -165,6 +165,7 @@ pub(super) fn query(
             let _gone = reply.send(Ok(QueryResult::Protection(view)));
         }
         HostQuery::AllowedSites => super::allowed::list(actor, reply),
+        HostQuery::KeptPermissions { matter } => super::kept::list(actor, matter, reply),
         HostQuery::WordBlackline { .. } => blackline::word_blackline(actor, query, reply),
         HostQuery::ListRevisions { matter, ref path } => {
             super::revisions::list(actor, matter, path.clone(), reply);

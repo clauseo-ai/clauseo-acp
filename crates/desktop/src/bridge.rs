@@ -285,7 +285,10 @@ impl Bridge {
             | HostQuery::AllowedSites
             // The room's tracked changes in a Word file: the host reads a private copy with
             // stetdoc and writes nothing.
-            | HostQuery::ListRevisions { .. } => {}
+            | HostQuery::ListRevisions { .. }
+            // A matter's kept "Always" rules (the rail's matter menu): one small file read, no
+            // matter file named.
+            | HostQuery::KeptPermissions { .. } => {}
             HostQuery::Search(request) => return search::page(self, label, request.clone()).await,
             // The New matter dialog's folder warning: only a ref this run's picker issued, as
             // for `CreateMatter`.

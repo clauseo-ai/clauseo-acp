@@ -340,6 +340,12 @@ open_data_enum! {
             /// How many.
             more: u32,
         },
+        /// The lawyer chose "Always for this matter" on a Claude permission request, but Clauseo
+        /// kept nothing: the request was allowed this once only, for `reason`.
+        AlwaysNotKept = "always_not_kept" {
+            /// Why nothing was kept.
+            reason: NotKeptReason,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -364,7 +370,26 @@ open_data_enum! {
             reason: PackSkipReason::Changed,
         },
         NoticeKind::AutoModeUnavailable,
+        NoticeKind::AlwaysNotKept {
+            reason: NotKeptReason::NoRule,
+        },
     ];
+}
+
+open_unit_enum! {
+    /// Why "Always for this matter" kept no rule, as `NoticeKind::AlwaysNotKept` names it.
+    pub enum NotKeptReason {
+        /// The tool has no rule Clauseo keeps (a shell other than Bash, a tool it doesn't know).
+        NoRule,
+        /// Its command, address or path would not stay one exact rule (a wildcard, a bracket, a
+        /// line break, a relative path).
+        Refused,
+        /// A file outside the matter folder, or in its `.clauseo` or a `.claude` folder.
+        OutsideMatter,
+        /// The matter keeps the most rules it may.
+        Full,
+    }
+    test mod not_kept_reason;
 }
 
 open_unit_enum! {

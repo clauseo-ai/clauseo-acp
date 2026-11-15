@@ -46,6 +46,7 @@ pub(crate) mod documents;
 mod folder_state;
 pub(crate) mod header_tools;
 pub(crate) mod input;
+mod kept;
 pub(crate) mod last_exit;
 pub(crate) mod limits;
 mod locate;
@@ -533,6 +534,7 @@ impl Actor {
             Input::Mcp(input) => mcp::on_input(self, *input),
             Input::Protection(done) => protection::work::on_done(self, *done),
             Input::Allowed(input) => allowed::on_input(self, *input),
+            Input::Kept(removed) => kept::on_removed(self, *removed),
             Input::SiteBlocked { session, site } => blocked::site_blocked(self, session, site),
             #[cfg(not(windows))]
             Input::PapersChanged(changed) => papers::on_changed(self, changed),

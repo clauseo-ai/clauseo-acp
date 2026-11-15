@@ -5,9 +5,9 @@
 //! steer outcomes, which it chains on last.
 
 use clauseo_protocol::{
-    AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PackId,
-    PackSkipReason, PageVia, PageVisited, SearchSource, SteerOutcome, SteerResolved, StopReason,
-    TurnEnded, TurnFailed, WebResult, WebSearchRecorded,
+    AgentId, DomainEvent, ErrorCode, MatterPath, NotKeptReason, Notice, NoticeKind, NoticeLevel,
+    PackId, PackSkipReason, PageVia, PageVisited, SearchSource, SteerOutcome, SteerResolved,
+    StopReason, TurnEnded, TurnFailed, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{checkpoint_id, message_id, tool_call_id, turn_id};
@@ -329,6 +329,33 @@ pub(super) fn notices() -> Vec<DomainEvent> {
             kind: Some(NoticeKind::GuardStepsMore { more: 3 }),
         },
     ];
+    notices.extend(
+        [
+            (
+                NotKeptReason::NoRule,
+                "Clauseo can't keep \u{201c}Always\u{201d} for this kind of request.",
+            ),
+            (
+                NotKeptReason::Refused,
+                "Clauseo keeps \u{201c}Always\u{201d} only for one exact command, site or file.",
+            ),
+            (
+                NotKeptReason::OutsideMatter,
+                "Clauseo keeps \u{201c}Always\u{201d} only for files in this matter's folder.",
+            ),
+            (
+                NotKeptReason::Full,
+                "This matter keeps as many permissions as it can. Remove some from Kept \
+                 permissions to keep more.",
+            ),
+        ]
+        .into_iter()
+        .map(|(reason, words)| Notice {
+            level: NoticeLevel::Info,
+            text: format!("Allowed this once only: {words}"),
+            kind: Some(NoticeKind::AlwaysNotKept { reason }),
+        }),
+    );
     notices.extend(
         [
             (

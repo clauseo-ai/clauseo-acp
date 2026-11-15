@@ -149,6 +149,10 @@ golden! { HostCommand::name_of {
         scope: AllowScope::Matter,
         matter: Some(matter_id(1)),
     };
+    RemoveKeptPermission => remove_kept_permission: HostCommand::RemoveKeptPermission {
+        matter: matter_id(1),
+        rule: "Bash(npm test)".to_owned(),
+    };
     DecideRevisions => decide_revisions: HostCommand::DecideRevisions(DecideRevisions {
         matter: matter_id(1),
         path: path("Lease.docx"),

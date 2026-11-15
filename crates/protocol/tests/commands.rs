@@ -77,6 +77,10 @@ mod blackline;
 mod revisions;
 
 #[cfg(test)]
+#[path = "commands/kept.rs"]
+mod kept;
+
+#[cfg(test)]
 #[path = "commands/picks.rs"]
 mod picks;
 
