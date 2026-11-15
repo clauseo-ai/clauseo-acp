@@ -21,6 +21,9 @@ mod stetdoc_start;
 #[path = "skills/stetdoc_first.rs"]
 mod stetdoc_first;
 
+#[path = "skills/stetdoc_kill.rs"]
+mod stetdoc_kill;
+
 use std::path::{Path, PathBuf};
 
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};

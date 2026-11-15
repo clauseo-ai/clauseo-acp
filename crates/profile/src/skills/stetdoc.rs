@@ -19,8 +19,8 @@ use std::pin::pin;
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, Timer};
-use futures::AsyncReadExt as _;
 use futures::future::{Either, join, select};
+use futures::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use super::{SKILL_MD, SkillFile, SkillSource, frontmatter, is_current};
 use crate::error::ProfileError;
@@ -336,7 +336,8 @@ impl std::fmt::Display for RunFailure {
 
 /// Runs stetdoc with `args` in its own folder, with `options.env` added to the environment the
 /// launcher gives it, and returns how it exited, whatever the code, within `options.limit`.
-/// Past the limit or `options.stdout_max` bytes of stdout its process tree is killed. Waits on
+/// Its stdin ends at once. Past the limit or `options.stdout_max` bytes of stdout its process
+/// tree is killed, and the handle's drop ends it on every path. Waits on
 /// `timer` and stetdoc's pipes: run it off any thread that must stay responsive.
 pub async fn run_for<T: Timer>(
     launcher: &dyn Launcher,
@@ -350,7 +351,7 @@ pub async fn run_for<T: Timer>(
     let spec = LaunchSpec::new(stetdoc.to_owned(), args.to_vec(), options.env.clone(), cwd)
         .map_err(|err| RunFailure::Launch(err.to_string()))?;
     let Launched {
-        stdin,
+        mut stdin,
         stdout,
         stderr,
         mut handle,
@@ -358,10 +359,12 @@ pub async fn run_for<T: Timer>(
     } = launcher
         .launch(&spec)
         .map_err(|err| RunFailure::Launch(err.to_string()))?;
-    drop(stdin);
     let mut out = Vec::new();
     let ran = {
         let work = async {
+            // Closed, not only dropped: the handle holds the pipe too, so a stetdoc that read
+            // stdin would wait on it until the deadline. A failed close changes nothing.
+            drop(stdin.close().await);
             let mut limited = stdout.take(max.saturating_add(1));
             let mut drain = pin!(stderr.drain());
             let (read, drained) = {

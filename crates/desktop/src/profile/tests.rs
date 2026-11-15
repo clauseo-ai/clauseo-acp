@@ -402,7 +402,11 @@ fn no_profile_leaves_the_host_without_a_hook() {
 fn build_puts_the_profile_under_the_data_folder() {
     let scratch = Scratch::new("profile-build", &[]);
     let locations = Locations::under_root(scratch.path());
-    let hook = DesktopProfile::build(&locations, None).unwrap();
+    // No `PATH`: a debug build would run the stetdoc on the machine's `PATH` from a background
+    // thread this test never joins. On Windows a test that exits while that thread is between
+    // starting stetdoc suspended and putting it in its job leaves it suspended for good, holding
+    // the test's output pipes (the gates' 40-minute LEAK of `stetdoc --version`, 11-15).
+    let hook = DesktopProfile::build_with(&locations, None, None).unwrap();
     let meta = Value::Object(hook.session_meta(&agent(CLAUDE), None).unwrap());
     let plugin = scratch.path().join("profile").join("claude-plugin");
     assert_eq!(
