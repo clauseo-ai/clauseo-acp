@@ -127,7 +127,8 @@ export type Matter = {
   unsaved?: boolean;
   /** compare_versions' answer. */
   compare?: FileChange[];
-  /** preview_restore's answer, past its changes. */
+  /** preview_restore's answer: its changes (the notice, modified, by default), and the rest. */
+  changes?: FileChange[];
   kept?: string[];
   added?: string[];
   /** The unsaved change was made this many days ago (today by default). */
@@ -252,7 +253,7 @@ export function versionsHost(m: Matter): FakeTransport {
   };
   const status = m.running === true ? "running" : "idle";
   const preview: RestorePreview = {
-    changes: [file(NOTICE)],
+    changes: m.changes ?? [file(NOTICE)],
     added_since: m.added ?? [],
     kept: m.kept ?? [],
     locked: m.locked ?? [],
@@ -377,7 +378,12 @@ const WINDOW = { width: 1280, height: 760 } as const;
 export const compared = (id: string, words: WordsRef, m: Matter): Entry =>
   state(id, words, m, [OPEN, EARLIER, COMPARE]);
 
-const state = (id: string, words: WordsRef, m: Matter, clicks: readonly string[]): Entry => ({
+export const state = (
+  id: string,
+  words: WordsRef,
+  m: Matter,
+  clicks: readonly string[],
+): Entry => ({
   id,
   words,
   screen: "room/versions",

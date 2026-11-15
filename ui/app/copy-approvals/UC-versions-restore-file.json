@@ -1,0 +1,112 @@
+{
+  "UC-316": {
+    "en": "Restore this document",
+    "hi": "यह दस्तावेज़ पुनर्स्थापित करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "host follow-ups (versions-restore-file: restore one document; Rohan to review)",
+    "note": "Versions, comparing a version with now: beside the documents that differ, for the document in view (not for one added since)"
+  },
+  "UC-317": {
+    "en": "Restore '{paper}' to how it was at {time} today?",
+    "hi": "'{paper}' को वैसा पुनर्स्थापित करें जैसा वह आज {time} बजे था?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "host follow-ups (versions-restore-file: restore one document; Rohan to review)",
+    "note": "Restore dialog title for one document, a version from today; {paper} the file name, {time} the version's time"
+  },
+  "UC-318": {
+    "en": "Restore '{paper}' to how it was at {time} on {date}?",
+    "hi": "'{paper}' को वैसा पुनर्स्थापित करें जैसा वह {date} को {time} बजे था?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "host follow-ups (versions-restore-file: restore one document; Rohan to review)",
+    "note": "Restore dialog title for one document, a version from another day"
+  },
+  "UC-319": {
+    "en": "This replaces '{paper}' as it is now. The copy you have now stays in Versions, so you can undo this.",
+    "hi": "इससे '{paper}' का अभी वाला रूप बदल जाएगा। आपकी अभी वाली प्रति संस्करणों में रहेगी, इसलिए आप इसे पूर्ववत कर सकते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "host follow-ups (versions-restore-file: restore one document; Rohan to review)",
+    "note": "Restore dialog body: the document is there now and differs"
+  },
+  "UC-320": {
+    "en": "'{paper}' comes back as it was then. You can undo this.",
+    "hi": "'{paper}' वैसा ही वापस आ जाएगा जैसा तब था। आप इसे पूर्ववत कर सकते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "host follow-ups (versions-restore-file: restore one document; Rohan to review)",
+    "note": "Restore dialog body: the document was removed since"
+  },
+  "UC-321": {
+    "en": "Nothing will change.",
+    "hi": "कुछ नहीं बदलेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "host follow-ups (versions-restore-file: restore one document; Rohan to review)",
+    "note": "Restore dialog body when the document can't be restored; the existing line \"'{papers}' can't be restored and stays as it is.\" follows"
+  },
+  "UC-322": {
+    "en": "Nothing will change. '{paper}' already stands as it did then.",
+    "hi": "कुछ नहीं बदलेगा। '{paper}' पहले से वैसा ही है जैसा तब था।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "host follow-ups (versions-restore-file: restore one document; Rohan to review)",
+    "note": "Restore dialog body: the document already matches the version"
+  },
+  "UC-323": {
+    "en": "Restored {paper} to how it was at {time} today.",
+    "hi": "{paper} को वैसा पुनर्स्थापित किया गया जैसा वह आज {time} बजे था।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "host follow-ups (versions-restore-file: restore one document; Rohan to review)",
+    "note": "Versions' line after a one-document restore to a version from today, with Undo"
+  },
+  "UC-324": {
+    "en": "Restored {paper} to how it was at {time} on {date}.",
+    "hi": "{paper} को वैसा पुनर्स्थापित किया गया जैसा वह {date} को {time} बजे था।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "host follow-ups (versions-restore-file: restore one document; Rohan to review)",
+    "note": "Versions' line after a one-document restore to a version from another day, with Undo"
+  },
+  "U3-err-matter.file_folder_clash": {
+    "en": "Clauseo can't restore this paper: a folder now has its name, or the folder it was in is now a file. Nothing has changed.",
+    "hi": "Clauseo यह दस्तावेज़ पुनर्स्थापित नहीं कर सकता: अब एक फ़ोल्डर का यही नाम है, या जिस फ़ोल्डर में यह था वह अब एक फ़ाइल है। कुछ नहीं बदला है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "host follow-ups (versions-restore-file: restore one document; Rohan to review)",
+    "note": "matter.file_folder_clash: Versions' Restore this document refused, the paper's name now a folder or its folder now a file; nothing written. Id form required by status.test.ts (one U3-err-<code> per ErrorCode)"
+  }
+}
