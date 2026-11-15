@@ -21,7 +21,11 @@
 //!   ([`search_name`]; any port outside tier B's range, S15 PR7); agent-browser issue
 //!   vercel-labs/agent-browser#2313 would let the host pass the port instead.
 //!
-//! Dropping a [`BrowserSession`] releases the claims and removes the folder. The launch's
+//! Dropping a [`BrowserSession`] releases the claims and removes the folder, first ending the
+//! agent-browser daemon listening in it when the launch named its program
+//! ([`BrowserSession::reap_daemon_of`], the sandbox crate's `reap`): the daemon leaves the
+//! agent's tree, so the stop of that tree does not end it, and the guard that knows it is killed
+//! with the tree. [`sweep_stale`] does the same for the folders a crashed host left. The launch's
 //! `RunFolders` holds it, and it drops off the actor when the run folder goes
 //! (`launch_checks::discard`): after the agent's tree was killed, or when the agent never
 //! started. Shutdown waits for that removal, so the folder is gone once it answers.
@@ -31,9 +35,18 @@ use std::io;
 use std::ops::RangeInclusive;
 #[cfg(unix)]
 use std::path::Path;
+#[cfg(unix)]
+use std::time::Duration;
 
 #[cfg(unix)]
-use clauseo_sandbox::BrowserSocketDir;
+use clauseo_sandbox::{BrowserSocketDir, DaemonProgram, Reap, Reaped};
+
+#[cfg(unix)]
+use crate::clock::Clock;
+
+/// The most the start-up sweep's daemon reap takes in all, on the host's clock.
+#[cfg(unix)]
+const SWEEP_REAP_BUDGET: Duration = Duration::from_secs(2);
 use clauseo_sandbox::ports::{self, PortClaim};
 
 /// The loopback ports the host claimed for one browser session.
@@ -143,27 +156,78 @@ impl BrowserSession {
             chrome_in_tree: super::BrowserLaunch::InJail.chrome_in_tree(),
         })
     }
+
+    /// Makes the socket folder's drop end the daemon of `program` (the agent-browser the guard
+    /// runs, its `--agent-browser`) listening in it, after the sandbox crate's identity checks.
+    /// A program that cannot be resolved leaves the daemon to its idle timeout, with a warning.
+    #[cfg(unix)]
+    pub(crate) fn reap_daemon_of(&mut self, program: &Path) {
+        match DaemonProgram::new(program) {
+            Ok(program) => self.socket_dir.reap_on_drop(program),
+            Err(error) => tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "agent-browser's path was not resolved; its daemon is left to its idle timeout"
+            ),
+        }
+    }
 }
 
 /// macOS and Linux, at host start: removes the browser socket folders (and their lock files)
 /// an earlier host left in `/tmp` (or `root`, for tests), through
-/// [`BrowserSocketDir::sweep_stale`]. No launch of this host is live yet, so no id is kept; a
-/// folder whose lock another live host holds is left. Runs once the store is open, after which
-/// the host is the data folder's only one. A failure to read the folder is a warning.
+/// [`BrowserSocketDir::sweep_stale_reaping`], which first ends the daemon of `program` (the
+/// bundled agent-browser, `HostConfig::with_agent_browser`) listening in each, within
+/// [`SWEEP_REAP_BUDGET`] on `clock`; with no program it only removes the folders. No launch of
+/// this host is live yet, so no id is kept; a folder whose lock another live host holds is left,
+/// and so is one whose daemon is still there or was not reached in time, for the next start.
+/// Runs once the store is open, after which the host is the data folder's only one, and before
+/// any launch. A failure to read the folder is a warning. Answers what the reap did, for the
+/// start-up sweep's summary.
 #[cfg(unix)]
-pub(crate) fn sweep_stale(root: Option<&Path>) {
-    let swept = match root {
-        Some(root) => BrowserSocketDir::sweep_stale_in(root, |_| false),
-        None => BrowserSocketDir::sweep_stale(|_| false),
+pub(crate) fn sweep_stale(
+    root: Option<&Path>,
+    program: Option<&Path>,
+    clock: &dyn Clock,
+) -> Reaped {
+    let program = program.and_then(|path| match DaemonProgram::new(path) {
+        Ok(program) => Some(program),
+        Err(error) => {
+            tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "agent-browser's path was not resolved; stale daemons are left"
+            );
+            None
+        }
+    });
+    let at = clock.now().mono.saturating_add(SWEEP_REAP_BUDGET);
+    let left = || at.saturating_sub(clock.now().mono);
+    let root = root.unwrap_or(Path::new("/tmp"));
+    let swept = match &program {
+        Some(program) => {
+            BrowserSocketDir::sweep_stale_reaping_in(root, |_| false, &Reap::new(program, &left))
+        }
+        None => BrowserSocketDir::sweep_stale_in(root, |_| false).map(|folders| {
+            clauseo_sandbox::Swept {
+                folders,
+                ..clauseo_sandbox::Swept::default()
+            }
+        }),
     };
     match swept {
-        Ok(0) => {}
-        Ok(removed) => tracing::info!(removed, "removed stale browser socket folders"),
+        Ok(swept) => {
+            if swept.folders > 0 {
+                tracing::info!(
+                    removed = swept.folders,
+                    "removed stale browser socket folders"
+                );
+            }
+            swept.daemons
+        }
         Err(error) => {
             tracing::warn!(
                 error = %crate::log_file::Cause(&error),
                 "the stale browser socket folders were not swept"
             );
+            Reaped::default()
         }
     }
 }

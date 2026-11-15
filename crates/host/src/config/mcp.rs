@@ -1,5 +1,5 @@
-//! The keychain seam of the lawyer's MCP servers (Settings › Tools), kept apart from
-//! `config.rs`.
+//! The keychain seam of the lawyer's MCP servers (Settings › Tools), and the agent-browser the
+//! browser's MCP entry runs, kept apart from `config.rs`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -106,6 +106,16 @@ impl HostConfig {
     #[must_use]
     pub fn with_mcp_import(mut self, find: McpFinder) -> Self {
         self.wiring.mcp_find = Some(find);
+        self
+    }
+
+    /// macOS and Linux: the bundled agent-browser (default: none). The start-up sweep ends the
+    /// daemon of this program listening in a browser socket folder a crashed run left, after
+    /// checking the listener's user and executable; with none it only removes the folders.
+    #[cfg(unix)]
+    #[must_use]
+    pub fn with_agent_browser(mut self, program: PathBuf) -> Self {
+        self.wiring.agent_browser = Some(program);
         self
     }
 }

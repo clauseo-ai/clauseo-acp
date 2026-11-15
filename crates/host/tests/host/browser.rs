@@ -385,7 +385,9 @@ fn the_socket_folder_lives_until_the_agents_tree_has_exited() {
 }
 
 /// macOS and Linux: socket folders an earlier host left (with their unlocked lock files) are
-/// swept when the host starts, before any launch; a name that is not one of the host's stays.
+/// swept when the host starts, before any launch, through the daemon reap of the agent-browser
+/// named (a file named `s.sock` is no socket, so nothing is signalled); a name that is not one
+/// of the host's stays.
 #[cfg(unix)]
 #[test]
 fn stale_socket_folders_are_swept_at_start() {
@@ -399,7 +401,13 @@ fn stale_socket_folders_are_swept_at_start() {
     write::write(&lock, b"");
     let other = sockets.join("clauseo-ab-not-ours");
     write::create_dir_all(&other);
-    let host = dir.start_with(0, |config| config.with_browser_socket_root(sockets));
+    let program = dir.data().join("clauseo-agent-browser");
+    write::write(&program, b"");
+    let host = dir.start_with(0, |config| {
+        config
+            .with_browser_socket_root(sockets)
+            .with_agent_browser(program)
+    });
     assert!(
         std::fs::symlink_metadata(&stale).is_err(),
         "the stale folder went"

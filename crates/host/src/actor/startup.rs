@@ -41,6 +41,10 @@ pub(super) async fn open(
     write::create_dir_all(&matter_settings(&data_dir).matters_root)
         .map_err(|error| Error::Store(error.into()))?;
     let store = Store::open(StoreOptions::new(data_dir.clone())).await?;
+    // With the store's lock held, before the actor serves and so before any launch: the browser
+    // socket folders a crashed run left, each one's agent-browser daemon ended first.
+    #[cfg(unix)]
+    sweep_browser_daemons(&parts.wiring, parts.clock.as_ref());
     // The index opens (or rebuilds) on its own thread: start-up does not wait for it.
     let search = crate::search::Search::start(
         data_dir,
@@ -48,8 +52,6 @@ pub(super) async fn open(
         Arc::clone(&parts.clock),
         &parts.search,
     )?;
-    #[cfg(unix)]
-    crate::browser::session::sweep_stale(parts.wiring.browser_socket_root.as_deref());
     // Once the store is open this host is the data folder's only one.
     super::query::blackline::sweep_leftovers(parts.effective.data_dir(), parts.clock.now().wall);
     let heads = store.heads().await?;
@@ -293,4 +295,26 @@ async fn registry(store: &Store) -> Result<Registry, Error> {
         forgotten,
         threads,
     })
+}
+
+/// The start-up sweep of the browser socket folders a crashed run left, each one's agent-browser
+/// daemon ended first (`browser::session::sweep_stale`), with one lifecycle line when a daemon
+/// was found. It runs where the sweep of the agents' process groups is to run, and joins that
+/// sweep's summary once both are one.
+#[cfg(unix)]
+fn sweep_browser_daemons(wiring: &crate::config::LaunchWiring, clock: &dyn crate::clock::Clock) {
+    let daemons = crate::browser::session::sweep_stale(
+        wiring.browser_socket_root.as_deref(),
+        wiring.agent_browser.as_deref(),
+        clock,
+    );
+    if daemons != clauseo_sandbox::Reaped::default() {
+        tracing::info!(
+            target: crate::log_file::LIFECYCLE,
+            ended = daemons.ended,
+            refused = daemons.refused,
+            left = daemons.left,
+            "the browser daemons an earlier run left were swept"
+        );
+    }
 }

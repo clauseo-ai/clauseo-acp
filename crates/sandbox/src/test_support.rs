@@ -25,6 +25,18 @@ impl TempDir {
         TempDir(path)
     }
 
+    /// A fresh, empty folder under `/tmp` named for `test` and this process: short enough for
+    /// a Unix socket path in a folder below it (104 bytes on macOS, whose temp folder is long).
+    #[cfg(unix)]
+    pub(crate) fn short(test: &str) -> TempDir {
+        let path = Path::new("/tmp").join(format!("cs-{test}-{}", std::process::id()));
+        if path.exists() {
+            std::fs::remove_dir_all(&path).unwrap();
+        }
+        std::fs::create_dir_all(&path).unwrap();
+        TempDir(path)
+    }
+
     /// The folder.
     pub(crate) fn path(&self) -> &Path {
         &self.0
@@ -131,6 +143,18 @@ pub(crate) fn symlink_dir_at(link: &Path, target: &Path) {
 #[cfg(windows)]
 pub(crate) fn symlink_file_at(link: &Path, target: &Path) {
     std::os::windows::fs::symlink_file(target, link).unwrap();
+}
+
+/// Starts `command`: a test's own helper process.
+#[cfg(unix)]
+pub(crate) fn spawn(command: &mut std::process::Command) -> std::process::Child {
+    command.spawn().unwrap()
+}
+
+/// A Unix socket listener bound at `path`.
+#[cfg(unix)]
+pub(crate) fn bind(path: &Path) -> std::os::unix::net::UnixListener {
+    std::os::unix::net::UnixListener::bind(path).unwrap()
 }
 
 /// Removes the file at `path`.

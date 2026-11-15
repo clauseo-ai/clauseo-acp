@@ -11,15 +11,24 @@
 //! Beside each folder sits its lock file, `/tmp/clauseo-ab-<id>.lock`, made first and held
 //! with `flock` for the folder's whole life, outside the folder so the jail cannot touch it:
 //! a sweep skips a folder whose lock another live host process holds.
+//!
+//! agent-browser's daemon leaves the agent's process tree, so the host's stop does not end it.
+//! Before a folder goes, its drop (once [`BrowserSocketDir::reap_on_drop`] named the program)
+//! and the start-up sweep ([`BrowserSocketDir::sweep_stale_reaping`]) end the daemon listening
+//! on a socket in it, after checking it is Clauseo's own agent-browser ([`reap`]).
 
 use std::fs::{File, Metadata};
 use std::io;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use rustix::fs::{FlockOperation, Mode, OFlags};
 
+mod reap;
 mod write;
+
+pub use reap::{DaemonProgram, Reap, Reaped};
 
 /// Every folder's name starts with this.
 const PREFIX: &str = "clauseo-ab-";
@@ -29,6 +38,9 @@ const LOCK_SUFFIX: &str = ".lock";
 const ID_LEN: usize = 16;
 /// The id's letters.
 const ALPHABET: &[u8; 36] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+/// The time the drop's reap has: each wait is still capped on its own (`reap.rs`), and a folder
+/// holds one socket per launch.
+const DROP_REAP_TIME: Duration = Duration::from_secs(2);
 /// How many ids [`BrowserSocketDir::create`] draws before it gives up.
 const TRIES: usize = 32;
 /// The folder's mode.
@@ -37,23 +49,27 @@ const MODE: u32 = 0o700;
 /// One launch's browser socket folder, `/tmp/clauseo-ab-<16 letters of a-z and 0-9>`, mode
 /// 0700, owned by this process's effective user, with its lock file
 /// `/tmp/clauseo-ab-<id>.lock` held (`flock`) for as long as the value lives. Dropping it
-/// removes the folder (with what is in it), then the lock file, then releases the lock.
+/// removes the folder (with what is in it), then the lock file, then releases the lock; with a
+/// program named ([`BrowserSocketDir::reap_on_drop`]) it first ends the agent-browser daemon
+/// listening in the folder ([`reap`]).
 ///
 /// Drop it only after the launch's whole process tree has exited, as far as the host can tell:
 /// the host drops it once the agent's tree was killed, and two processes can still outlive that
 /// (an agent that ignores its kill, the process crate's `Unresponsive` step, and agent-browser's
-/// Unix daemon, which leaves the tree with `setsid` and lives until its idle timeout, G17 item
-/// 6; decision record 0029). The jail's rules match
-/// paths, not owners: a jailed process that outlived its session could meet a folder another
-/// local user made again at the same path once this one is gone. The random 16-letter name,
-/// the drop order and agent-browser's daemon living inside the launch make that unlikely, not
-/// impossible.
+/// Unix daemon, which leaves the tree with `setsid`, G17 item 6; decision record 0029: the
+/// drop's reap ends it, and without a program named it lives until its idle timeout). The
+/// jail's rules match paths, not owners: a jailed process that outlived its session could meet
+/// a folder another local user made again at the same path once this one is gone. The random
+/// 16-letter name, the drop order and agent-browser's daemon living inside the launch make that
+/// unlikely, not impossible.
 #[derive(Debug)]
 pub struct BrowserSocketDir {
     path: PathBuf,
     canonical: PathBuf,
     id: String,
     lock_path: PathBuf,
+    /// The program whose daemon the drop ends ([`BrowserSocketDir::reap_on_drop`]).
+    daemon: Option<DaemonProgram>,
     /// Held with `flock(LOCK_EX)` until the value drops; closing it releases the lock.
     _lock: File,
 }
@@ -145,6 +161,7 @@ impl BrowserSocketDir {
             canonical,
             id: id.to_owned(),
             lock_path,
+            daemon: None,
             _lock: lock,
         })
     }
@@ -152,6 +169,12 @@ impl BrowserSocketDir {
     /// The folder as made, `/tmp/clauseo-ab-<id>`: the path the browser guard gets.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Makes the drop end the daemon of `program` (Clauseo's agent-browser) listening on a
+    /// socket in the folder, before the folder goes; see [`reap`] for the checks.
+    pub fn reap_on_drop(&mut self, program: DaemonProgram) {
+        self.daemon = Some(program);
     }
 
     /// The id, 16 letters of `a-z` and `0-9`.
@@ -184,41 +207,73 @@ impl BrowserSocketDir {
     /// [`BrowserSocketDir::sweep_stale`] in `root` instead of `/tmp`, for tests.
     #[doc(hidden)]
     pub fn sweep_stale_in(root: &Path, keep: impl Fn(&str) -> bool) -> io::Result<usize> {
-        let mut removed = 0;
-        for entry in std::fs::read_dir(root)? {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(error) => {
-                    tracing::warn!(%error, "browser socket sweep: an entry could not be read");
-                    continue;
-                }
-            };
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                continue;
-            };
-            let path = root.join(name);
-            let swept = if let Some(id) = id_of(name) {
-                if keep(id) {
-                    continue;
-                }
-                sweep_folder(&path)
-            } else if let Some(id) = name.strip_suffix(LOCK_SUFFIX).and_then(id_of) {
-                if keep(id) {
-                    continue;
-                }
-                sweep_lone_lock(&path, &root.join(format!("{PREFIX}{id}")))
-            } else {
-                continue;
-            };
-            match swept {
-                Ok(true) => removed += usize::from(id_of(name).is_some()),
-                Ok(false) => {}
-                Err(error) => tracing::warn!(%name, %error, "browser socket sweep: entry left"),
-            }
-        }
-        Ok(removed)
+        sweep(root, keep, None).map(|swept| swept.folders)
     }
+
+    /// [`BrowserSocketDir::sweep_stale`] that first ends, in each stale folder, the daemon of
+    /// `reap`'s program listening on a socket there ([`reap`]), for host start after a crash. A
+    /// folder whose daemon is still there after the waits, or that the time left did not reach,
+    /// stays (with its lock file) for the next start.
+    pub fn sweep_stale_reaping(keep: impl Fn(&str) -> bool, reap: &Reap<'_>) -> io::Result<Swept> {
+        BrowserSocketDir::sweep_stale_reaping_in(Path::new("/tmp"), keep, reap)
+    }
+
+    /// [`BrowserSocketDir::sweep_stale_reaping`] in `root` instead of `/tmp`, for tests.
+    #[doc(hidden)]
+    pub fn sweep_stale_reaping_in(
+        root: &Path,
+        keep: impl Fn(&str) -> bool,
+        reap: &Reap<'_>,
+    ) -> io::Result<Swept> {
+        sweep(root, keep, Some(reap))
+    }
+}
+
+/// What a sweep did.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Swept {
+    /// Folders removed.
+    pub folders: usize,
+    /// The daemons in them ([`Reaped`]); all zero for a sweep with no reap.
+    pub daemons: Reaped,
+}
+
+/// The sweep of `root`, with the daemon reap when `reap` is given.
+fn sweep(root: &Path, keep: impl Fn(&str) -> bool, reap: Option<&Reap<'_>>) -> io::Result<Swept> {
+    let mut swept = Swept::default();
+    for entry in std::fs::read_dir(root)? {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                tracing::warn!(%error, "browser socket sweep: an entry could not be read");
+                continue;
+            }
+        };
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let path = root.join(name);
+        let outcome = if let Some(id) = id_of(name) {
+            if keep(id) {
+                continue;
+            }
+            sweep_folder(&path, reap, &mut swept.daemons)
+        } else if let Some(id) = name.strip_suffix(LOCK_SUFFIX).and_then(id_of) {
+            if keep(id) {
+                continue;
+            }
+            sweep_lone_lock(&path, &root.join(format!("{PREFIX}{id}")))
+        } else {
+            continue;
+        };
+        match outcome {
+            Ok(true) => swept.folders += usize::from(id_of(name).is_some()),
+            Ok(false) => {}
+            Err(error) => tracing::warn!(%name, %error, "browser socket sweep: entry left"),
+        }
+    }
+    Ok(swept)
 }
 
 impl Drop for BrowserSocketDir {
@@ -226,6 +281,13 @@ impl Drop for BrowserSocketDir {
     /// closes, after this body. Drop only after the launch's process tree has exited (see the
     /// type's documentation).
     fn drop(&mut self) {
+        if let Some(program) = &self.daemon {
+            let left = || DROP_REAP_TIME;
+            let reaped = reap::reap_folder(&self.path, &Reap::new(program, &left));
+            if reaped != Reaped::default() {
+                tracing::debug!(id = %self.id, ?reaped, "browser daemon reap at drop");
+            }
+        }
         // `remove_dir_all` removes a link without following it.
         if let Err(error) = write::remove_tree(&self.path) {
             tracing::debug!(id = %self.id, %error, "browser socket folder left");
@@ -302,8 +364,9 @@ fn take_lock(path: &Path) -> io::Result<Lock> {
     }
 }
 
-/// Removes a stale folder of ours and then its lock file. `Ok(true)` when the folder went.
-fn sweep_folder(path: &Path) -> io::Result<bool> {
+/// Removes a stale folder of ours and then its lock file, after ending its daemon when `reap` is
+/// given (adding what it did to `daemons`). `Ok(true)` when the folder went.
+fn sweep_folder(path: &Path, reap: Option<&Reap<'_>>, daemons: &mut Reaped) -> io::Result<bool> {
     let meta = std::fs::symlink_metadata(path)?;
     if !ours(&meta) {
         return Ok(false);
@@ -316,6 +379,14 @@ fn sweep_folder(path: &Path) -> io::Result<bool> {
         Lock::Keep | Lock::Missing => return Ok(false),
         Lock::Taken(held) => held,
     };
+    if let Some(reap) = reap {
+        let reaped = reap::reap_folder(path, reap);
+        *daemons += reaped;
+        if reaped.left > 0 {
+            // A daemon still there, or not reached: the folder stays for the next start.
+            return Ok(false);
+        }
+    }
     write::remove_tree(path)?;
     write::remove_file(&lock_path)?;
     Ok(true)

@@ -570,6 +570,10 @@ pub(crate) fn with_profile(
     };
     // The PDF tools' folder follows the Python runtime's on the agents' PATH (setup/hook.rs).
     let hook = hook.with_pdf_tools(profile.pdf_tools.clone());
+    // The start-up sweep ends a crashed run's agent-browser daemons, this program's only.
+    #[cfg(unix)]
+    let config =
+        config.with_agent_browser(profile.profile().paths().browser().agent_browser.clone());
     config.with_profile_hook(Box::new(hook.over(Box::new(profile))))
 }
 

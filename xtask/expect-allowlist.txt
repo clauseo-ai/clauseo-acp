@@ -206,6 +206,8 @@ crates/host/tests/host/revisions_real.rs stetdoc_on_path clippy::disallowed_meth
 crates/sandbox/examples/run_sandboxed.rs jail::catch_termination unsafe_code
 # Added by S16: the upstream lookup's FFI to CFNetwork (macOS) and WinHTTP (Windows).
 crates/sandbox/src/proxy/upstream/macos.rs - unsafe_code
+# The browser daemon reap's listener lookup on macOS: getsockopt(LOCAL_PEERPID), getpeereid, proc_pidpath.
+crates/sandbox/src/browser_dir/reap/macos.rs - unsafe_code
 crates/sandbox/src/proxy/upstream/windows.rs - unsafe_code
 # The folder check (src/windows/folder.rs): its Win32 calls, and its test's DACL setup.
 crates/sandbox/src/windows/folder.rs - unsafe_code

@@ -170,6 +170,15 @@ impl BrowserPrep {
         );
         match claimed {
             Ok(session) => {
+                // The guard's `--agent-browser`: the program whose daemon the folder's drop ends.
+                #[cfg(unix)]
+                let session = {
+                    let mut session = session;
+                    if let Some(program) = self.sidecars.get(1) {
+                        session.reap_daemon_of(program);
+                    }
+                    session
+                };
                 tracing::debug!(
                     %session_id,
                     ports = ?session.ports.loopback(),

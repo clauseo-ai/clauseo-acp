@@ -50,6 +50,10 @@ pub(crate) struct LaunchWiring {
     /// `None` is `/tmp`. Tests pass a folder of their own.
     #[cfg(unix)]
     pub(crate) browser_socket_root: Option<PathBuf>,
+    /// macOS and Linux: the bundled agent-browser, whose daemons the start-up sweep ends in the
+    /// stale browser socket folders (`HostConfig::with_agent_browser`); `None` ends none.
+    #[cfg(unix)]
+    pub(crate) agent_browser: Option<PathBuf>,
     /// The environment an agent's spec starts from, in place of the host's own
     /// (`std::env::vars_os` at launch), for tests; `None` reads the host's.
     pub(crate) inherited_env: Option<Vec<(OsString, OsString)>>,
@@ -111,6 +115,8 @@ impl Default for LaunchWiring {
             browser_slots: BrowserSlots::new(None),
             #[cfg(unix)]
             browser_socket_root: None,
+            #[cfg(unix)]
+            agent_browser: None,
             inherited_env: None,
             install_tools: None,
             sign_in: SignIn::default(),
