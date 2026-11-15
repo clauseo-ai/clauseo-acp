@@ -221,8 +221,37 @@ fn in_history(root: &Path, error: &Error) -> bool {
         Error::Matters(clauseo_matters::Error::History { .. })
     ) || matches!(
         error,
-        Error::Matters(clauseo_matters::Error::Io { path, .. }) if path.starts_with(root)
+        Error::Matters(clauseo_matters::Error::Io { path, .. }) if is_under(root, path)
     )
+}
+
+/// Whether `path` lies under `root`. On Windows R8 does its history I/O through the verbatim
+/// form of the git dir (`\\?\C:\…`, `\\?\UNC\srv\…`; `clauseo_matters`' `long_path`), so an
+/// error's path may carry that prefix while `root` is plain: both are compared in their plain
+/// text form too. Text only; nothing is resolved.
+fn is_under(root: &Path, path: &Path) -> bool {
+    if path.starts_with(root) {
+        return true;
+    }
+    let (root, path) = (plain_text(root), plain_text(path));
+    let root = root.trim_end_matches(['\\', '/']);
+    !root.is_empty()
+        && path
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.starts_with(['\\', '/']))
+}
+
+/// `path`'s text without a verbatim prefix: `\\?\UNC\srv\x` is `\\srv\x`, `\\?\C:\x` is
+/// `C:\x`; any other text as it is.
+fn plain_text(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        text.into_owned()
+    }
 }
 
 /// After a panic or a history failure: an open matter is dropped and opened again from its
