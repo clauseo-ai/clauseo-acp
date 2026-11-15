@@ -94,3 +94,36 @@ sends no verdict, so a command no rule allows asks the local classifier. Off Win
 path is a relative one, inside the working folder. Git Bash's `/c/…` is absolute there, so
 those cases are left out. An unquoted trailing `\` goes to a classifier: Claude Code reads its
 own parse, not the text.
+
+## The matter's reads
+
+A file may give `"cwd"` (the folder Claude Code works in, default a temp folder) and `"env"`
+(variables for the binary). With `"CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"` and `pwsh` on the
+`PATH` (PowerShell 7's Linux tarball works unpacked anywhere), 2.1.293 offers its real
+PowerShell tool off Windows, so PowerShell cases run instead of "no tool". `PROBE_VERBOSE=1`
+also prints each case's request count, its local classifier requests and the beta headers.
+
+`CLAUSEO_MAC_MATTER_PROBE_OUT=<dir> cargo test -p clauseo-host --lib mac_probe_cases` makes a
+laptop-like data folder and a matter under `<dir>/root` (real paths, a fake `stetdoc` first on
+the files' `PATH` and a planted one in the matter) and writes five files with the launch's
+`Read`/`Edit` denies and allow rules, the profile's stetdoc rules, the matter as the working
+folder and the own folders in `additionalDirectories` (decision record 0030, "The matter's
+reads"). The files' `PATH` is the one the test ran with, so put `pwsh` on it first.
+
+- `flagged.json`: the server flags every call. Matter reads run with no classifier request;
+  outside paths, `..` and links out, siblings, chained commands, writes, network and the
+  left-out commands are refused; protected places are denied.
+- `local.json`: no server verdict, so what no rule allows asks the local classifier (or, when
+  Claude Code counts it read-only, runs unjudged: reported only).
+- `baseline.json`: flagged, without the matter rules: the matter reads are refused.
+- `grep.json`: flagged, with a `grep` rule of the matter's shape. `grep --context x <outside>
+  <matter>` runs unchecked, which is why `grep` has no rule.
+- `powershell.json`: flagged, PowerShell 7 with the matter's PowerShell rules for this path and
+  the Windows stetdoc rules. A mixed line (`Get-ChildItem <matter>; stetdoc --help`) runs; a
+  line read-only as a whole is still refused (the server's); `./stetdoc` matches no rule.
+
+```sh
+ulimit -f 1048576  # a case that writes where it reads must not fill the disk
+export DOTNET_EnableWriteXorExecute=0  # else pwsh's .NET dies under that cap
+python3 scripts/claude-rule-probe/probe.py <package/claude> <dir>/flagged.json
+```

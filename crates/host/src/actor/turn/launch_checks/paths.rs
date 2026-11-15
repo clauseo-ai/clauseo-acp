@@ -142,3 +142,6 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
         claims,
     })
 }
+
+#[cfg(test)]
+mod tests;

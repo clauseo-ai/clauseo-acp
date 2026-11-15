@@ -226,10 +226,15 @@ impl Rule {
         &self.tool
     }
 
-    /// The longest literal text a command must hold to match, or `None` for a prefix rule.
+    /// The longest literal text a command must hold to match, or `None` for a prefix rule. A
+    /// rule whose ` *` tail is optional (`head *`) is keyed without that space, since the bare
+    /// command (`head`) matches it too.
     pub(super) fn key(&self) -> Option<&str> {
         if self.prefix.is_some() {
             return None;
+        }
+        if self.optional_tail {
+            return self.parts.first().map(|head| head.trim_end_matches(' '));
         }
         self.parts
             .iter()

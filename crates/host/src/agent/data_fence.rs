@@ -56,7 +56,8 @@ pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
 pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
 pub(crate) use shell_deny::{
-    own_shell_allow_rules, windows_shell_deny_rules, windows_shell_deny_rules_without_variables,
+    matter_shell_allow_rules, own_shell_allow_rules, windows_shell_deny_rules,
+    windows_shell_deny_rules_without_variables,
 };
 pub(crate) use variables::launch_vars;
 
@@ -192,7 +193,9 @@ pub(crate) const BUILT_IN_SKILLS: [&str; 3] = ["profile", "claude-plugin", "skil
 /// each of [`READ_ONLY`] and all under it, for each spelling of `<data>`; then the session's
 /// own work and notes folders' (`LaunchDeny::own_reads`): `Read` of each and all under it, and
 /// a command that lists or reads one ([`own_shell_allow_rules`]), so the auto-mode classifiers
-/// never see those. Nothing wider; a deny rule (another session's, a link's) still beats each.
+/// never see those; and a command that reads the matter folder and a pipe's `head` or `tail`
+/// ([`matter_shell_allow_rules`]). Nothing wider; a deny rule (another session's, a
+/// link's) still beats each.
 /// A spelling that is not UTF-8 gets none.
 pub(crate) fn claude_allow_rules(deny: &LaunchDeny) -> Vec<String> {
     claude_allow_rules_on(deny, cfg!(windows))
@@ -217,6 +220,7 @@ pub(crate) fn claude_allow_rules_on(deny: &LaunchDeny, windows: bool) -> Vec<Str
         }
     }
     rules.extend(own_shell_allow_rules(deny, windows));
+    rules.extend(matter_shell_allow_rules(deny, windows));
     rules
 }
 

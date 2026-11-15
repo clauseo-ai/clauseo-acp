@@ -13,7 +13,7 @@ use crate::pipeline::tests::support::TempDir;
 
 /// Claude Code 2.1.293's tables of the commands whose path arguments it checks (`own_allow.rs`'s
 /// [`BASH`] and [`POWERSHELL`] docs): Bash's `D9`/`W_r` (54 commands) and PowerShell's `pt`.
-const PATH_CHECKED_BASH: [&str; 54] = [
+pub(super) const PATH_CHECKED_BASH: [&str; 54] = [
     "cd",
     "ls",
     "find",

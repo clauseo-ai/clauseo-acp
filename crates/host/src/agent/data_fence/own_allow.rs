@@ -48,6 +48,28 @@
 //! allow rule lets through: Claude Code's sandbox choice (`xy`) reads the input and the settings,
 //! never the permission result, and `loads::sandbox` sets no `excludedCommands` and no
 //! unsandboxed commands.
+//!
+//! The matter folder gets rules too ([`matter_shell_allow_rules`], decision record 0030, "The
+//! matter's reads"). It is the working folder, so a read of it was allowed as read-only and in
+//! `auto` went to the server-side classifier, which may refuse it (Windows: "[Unauthorized
+//! Access]"). That classifier stays on: on macOS turning it off would leave the sandbox's own
+//! allows ("Auto-allowed with sandbox", `L4e`: a write, `curl`, `python3 -c`) unjudged. So the
+//! reads get rules and everything else keeps its classifier. The rules are [`MATTER_BASH`] in
+//! Bash and, on Windows, [`POWERSHELL`], before the matter's path in each spelling
+//! ([`LaunchDeny::matter`]) in the own rules' shape, and [`PIPE_TAILS`] with any arguments, for
+//! a pipe's last part (`ls <matter> | head`). Off Windows `\` is no boundary: Bash reads
+//! `<matter>\2` as the sibling `<matter>2`. In PowerShell a line that is read-only as a whole
+//! (`Get-ChildItem <matter>`) still goes to the server-side classifier: Claude Code allows it as
+//! read-only (`tgt`) before its part-by-part check, the only one that reads wildcard rules
+//! (`yt` in "exact" mode skips them). So the PowerShell rules help only a mixed line, matched
+//! part by part, such as `Get-ChildItem <matter>; stetdoc --help`. The rules allow no more than
+//! the Read tool, which reads the working folder with no classifier, and the same checks keep
+//! them narrow: a deny rule wins, every part of a line must be allowed, a redirection asks, and
+//! so does any path argument outside the working folders, a `..` step or a link out resolved.
+//! A command a rule allows still runs in the sandbox on macOS. A link out of the matter that
+//! `ls -L` walks is the residual the own rules share (after launch).
+
+use std::path::{Path, PathBuf};
 
 use super::{Piece, join, parse, render, text};
 use crate::agent::data_fence::LaunchDeny;
@@ -70,8 +92,28 @@ const BASH: [&str; 3] = ["ls", "cat", "head"];
 /// and path parameter is a path, and an unknown parameter makes the path unvalidatable (asks).
 const POWERSHELL: [&str; 2] = ["Get-ChildItem", "Get-Content"];
 
+/// The commands that read the matter folder in Bash: [`BASH`] and `tail`, each in `W_r`
+/// and read by `D9`'s `Nu` (`function Nu(e){…if(r||s)n.push(g);else if(g==="--")r=!0;else
+/// if(g==="-"||!g?.startsWith("-"))n.push(g),s=!0;return n}`, byte 215479137): every argument
+/// from the first that is not a flag on is a path, a flag's value too. None of the four takes a
+/// file name as a flag's value (GNU's or macOS's). Not `grep`, though in `W_r`: `D9`'s grep
+/// (`_Ye`) takes `--context`'s next word as its value, macOS's grep (FreeBSD's, `{"context",
+/// optional_argument, NULL, 'C'}`) does not, so `grep --context x /secret <matter>` reads
+/// `/secret` with no check. Not `rg`: `--pre` runs a program.
+const MATTER_BASH: [&str; 4] = ["ls", "cat", "head", "tail"];
+
+/// The commands a pipe's part may be with any arguments, in Bash: Claude Code checks each
+/// argument of theirs as a path (`Nu`, [`MATTER_BASH`]), so none reads a file it does not
+/// check, and none writes. Not `sort` (`-o` writes a file), `wc` (`--files0-from` reads names
+/// from a file unchecked), nor `uniq` (its second file is written).
+const PIPE_TAILS: [&str; 2] = ["head", "tail"];
+
 /// What may follow an own folder's path, besides the end: a separator, a quote, a space.
 const BOUNDARY: [&str; 5] = ["\\", "/", "\"", "'", " "];
+
+/// What may follow the matter's path, besides the end: [`BOUNDARY`] without `\`, which off
+/// Windows is no separator (Bash reads `<matter>\2` as the sibling `<matter>2`).
+const UNIX_BOUNDARY: [&str; 4] = ["/", "\"", "'", " "];
 
 /// One way of writing an own folder: `<data>`'s spelling, the separator it goes on with, and
 /// whether PowerShell writes it too.
@@ -85,6 +127,78 @@ struct Lead {
 /// ([`LaunchDeny::own_reads`]) under each of its spellings of `<data>`, the PowerShell ones and
 /// Windows' spellings when `windows`. A spelling that is not UTF-8 gets none.
 pub(crate) fn own_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
+    let leads = leads(&deny.spellings, windows);
+    let mut rules = Vec::new();
+    for place in &deny.own_reads {
+        let (names, _) = parse(place);
+        for lead in &leads {
+            let mut path = text(&lead.text);
+            for name in &names {
+                path = join(&[&path, &text(lead.sep), name]);
+            }
+            let tools: &[(&str, &[&str])] = if windows && lead.powershell {
+                &[("Bash", &BASH), ("PowerShell", &POWERSHELL)]
+            } else {
+                &[("Bash", &BASH)]
+            };
+            for (tool, commands) in tools {
+                path_rules(tool, commands, &path, &BOUNDARY, &mut rules);
+            }
+        }
+    }
+    rules
+}
+
+/// The allow rules for reading the session's matter folder (the module doc's last part):
+/// [`MATTER_BASH`] before each of [`LaunchDeny::matter`]'s spellings in Bash and, on Windows
+/// (`windows`), [`POWERSHELL`] before its `C:\…` and `C:/…` spellings, in the own rules'
+/// shape and spellings; and [`PIPE_TAILS`] with any arguments. None before the launch prep has
+/// the matter, and none but the pipe tails when the matter holds a spelling of `<data>` or lies
+/// in one.
+pub(crate) fn matter_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
+    let mut rules = Vec::new();
+    if deny.matter.is_empty() {
+        return rules;
+    }
+    let near_data = deny.matter.iter().any(|matter| {
+        deny.spellings
+            .iter()
+            .any(|data| holds(data, matter, windows) || holds(matter, data, windows))
+    });
+    if !near_data {
+        let boundary: &[&str] = if windows { &BOUNDARY } else { &UNIX_BOUNDARY };
+        for lead in leads(&deny.matter, windows) {
+            let path = text(&lead.text);
+            path_rules("Bash", &MATTER_BASH, &path, boundary, &mut rules);
+            if windows && lead.powershell {
+                path_rules("PowerShell", &POWERSHELL, &path, boundary, &mut rules);
+            }
+        }
+    }
+    for command in PIPE_TAILS {
+        push_rule(&mut rules, format!("Bash({command} *)"));
+    }
+    rules
+}
+
+/// Whether `outer` is `inner` or holds it; on Windows (`windows`) by text, ignoring case and
+/// which separator.
+fn holds(outer: &Path, inner: &Path, windows: bool) -> bool {
+    if !windows {
+        return inner.starts_with(outer);
+    }
+    let fold = |path: &Path| {
+        let text = path.to_string_lossy().to_lowercase().replace('/', "\\");
+        text.trim_end_matches('\\').to_owned()
+    };
+    let (outer, inner) = (fold(outer), fold(inner));
+    inner == outer || inner.starts_with(&format!("{outer}\\"))
+}
+
+/// The literal leads of `spellings`: off Windows each spelling with `/`, on Windows (`windows`)
+/// `C:\…`, `C:/…`, Bash's `C:\\…` and `/c/…`; without a trailing separator, without repeats. A
+/// spelling that is not UTF-8 gets none.
+fn leads(spellings: &[PathBuf], windows: bool) -> Vec<Lead> {
     let mut leads: Vec<Lead> = Vec::new();
     let mut push = |text: String, sep: &'static str, powershell: bool| {
         if !text.is_empty() && !leads.iter().any(|known| known.text == text) {
@@ -95,11 +209,7 @@ pub(crate) fn own_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<Str
             });
         }
     };
-    for spelling in deny
-        .spellings
-        .iter()
-        .filter_map(|spelling| spelling.to_str())
-    {
+    for spelling in spellings.iter().filter_map(|spelling| spelling.to_str()) {
         if !windows {
             push(spelling.trim_end_matches('/').to_owned(), "/", false);
             continue;
@@ -122,37 +232,33 @@ pub(crate) fn own_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<Str
             );
         }
     }
-    let mut rules = Vec::new();
-    let mut add = |rule: String| {
-        if !rules.contains(&rule) {
-            rules.push(rule);
-        }
-    };
-    for place in &deny.own_reads {
-        let (names, _) = parse(place);
-        for lead in &leads {
-            let mut path = text(&lead.text);
-            for name in &names {
-                path = join(&[&path, &text(lead.sep), name]);
-            }
-            let tools: &[(&str, &[&str])] = if windows && lead.powershell {
-                &[("Bash", &BASH), ("PowerShell", &POWERSHELL)]
-            } else {
-                &[("Bash", &BASH)]
-            };
-            for (tool, commands) in tools {
-                for command in *commands {
-                    let head = join(&[&text(&format!("{command} ")), &[Piece::Any], &path]);
-                    add(format!("{tool}({})", render(&head, true)));
-                    for after in BOUNDARY {
-                        let pieces = join(&[&head, &text(after), &[Piece::Any]]);
-                        add(format!("{tool}({})", render(&pieces, false)));
-                    }
-                }
-            }
+    leads
+}
+
+/// `tool`'s rules for each of `commands` followed by anything, then `path`, then the end or one
+/// of `boundary` and anything, added to `rules` without repeats.
+fn path_rules(
+    tool: &str,
+    commands: &[&str],
+    path: &[Piece],
+    boundary: &[&str],
+    rules: &mut Vec<String>,
+) {
+    for command in commands {
+        let head = join(&[&text(&format!("{command} ")), &[Piece::Any], path]);
+        push_rule(rules, format!("{tool}({})", render(&head, true)));
+        for after in boundary {
+            let pieces = join(&[&head, &text(after), &[Piece::Any]]);
+            push_rule(rules, format!("{tool}({})", render(&pieces, false)));
         }
     }
-    rules
+}
+
+/// `rule` added to `rules` unless it is there.
+fn push_rule(rules: &mut Vec<String>, rule: String) {
+    if !rules.contains(&rule) {
+        rules.push(rule);
+    }
 }
 
 #[cfg(test)]

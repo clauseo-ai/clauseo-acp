@@ -631,6 +631,62 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     does an own path written another way (a variable, `~`, a mixed separator, a `.\` step, an
     unquoted trailing `\` in Bash). The PowerShell side is read from the code (no Windows
     host ran it); Bash's was run on Linux.
+- **The matter's reads (2026-11-15).** The matter folder is Claude's working folder, so a read
+  of it (`ls`, `cat`, `Get-ChildItem`) was allowed only as read-only, and in `auto` that allow
+  went to Anthropic's server-side classifier, which refused some on the laptop ("[Unauthorized
+  Access]"). Turning that classifier off (`CLAUDE_CODE_AUTO_MODE_SERVER=0`, the first shape of
+  #1065) was dropped: on macOS the sandbox's own allow ("Auto-allowed with sandbox", `L4e`)
+  goes to the same classifier, and with it off a sandboxed `curl -T`, `python3 -c` or
+  `rm -rf` in the matter would run unjudged. The classifier stays on everywhere, and allow
+  rules fix what rules can (`data_fence/own_allow.rs` `matter_shell_allow_rules`); everything
+  else keeps its classifier.
+  - **Scope.** Bash on every OS (Git Bash on Windows): `ls`, `cat`, `head`, `tail`, each
+    followed by anything, then the matter's path (its real path, the working folder, and the
+    path as stored when that differs) in the own folders' spellings (`C:\…`, `C:/…`, `C:\\…`,
+    `/c/…` on Windows), then the end or a separator, a quote or a space and anything; and
+    `head *`, `tail *` for a pipe's last part. On Windows also PowerShell's `Get-ChildItem`
+    and `Get-Content` (and their aliases) before `C:\…` and `C:/…`, as for the own folders.
+    Off Windows `\` is no boundary (Bash reads `<m>\2` as `<m>2`). None but the pipe tails
+    when the matter holds `<data>` or lies in it (a home folder chosen as the matter).
+    Growth: +42 rules (+3.6 KB) on macOS and Linux for a matter with two spellings; on Windows
+    see `matter_allow_windows_tests`.
+  - **PowerShell, what the rules can't do.** A PowerShell line that is read-only as a whole
+    (`Get-ChildItem <matter>`, `Get-Content <m>\x | Select-Object -First 5`) still goes to the
+    server-side classifier: Claude Code allows it as read-only (`tgt`, "Command is read-only
+    and safe to execute") before its part-by-part rule check, and its whole-line check skips
+    wildcard rules (`yt` in "exact" mode). So the PowerShell rules help only a mixed line,
+    matched part by part, such as `Get-ChildItem <matter>; stetdoc --help`. A later PR covers
+    the rest with a hook allowlist.
+  - **stetdoc.** `clauseo_profile::claude::stetdoc_allowed`: the five read-only subcommands as
+    prefix rules, `stetdoc --help` and `stetdoc --version` exact, and on Windows the same for
+    PowerShell, so the mixed line above needs no classifier. A rule names the bare `stetdoc`
+    only; it resolves through `PATH`, where stetdoc's folder is first
+    (`launch_checks/paths.rs` `PathPrep::resolve`, pinned by
+    `stetdocs_folder_is_first_on_the_session_path`). The working folder is not searched:
+    Claude Code sets `NoDefaultCurrentDirectoryInExePath=1` at start, and `./stetdoc`,
+    `.\stetdoc` or `& ./stetdoc` match no rule (a planted one ran only after the classifier
+    allowed it). `stetdoc view <any path>` is a prefix rule: on Windows the shell deny rules
+    still refuse it for a `<data>` path (tested); off Windows no rule does, since Claude Code
+    does not check stetdoc's paths, and the sandbox's `denyRead` of `<data>` and the other
+    matters is what keeps it off them (macOS). stetdoc's own path handling is not relied on.
+  - **Each Bash command, against 2.1.293's path check** (`W_r`, `D9`). `ls`, `cat`, `head`,
+    `tail`: in `W_r`; `D9` reads them with `Nu`, every argument from the first that is not a
+    flag on is a path, and none takes a file name as a flag's value, so an outside path, a `..`
+    step out or a link out beside the matter asks. `grep`: left out. `D9`'s `_Ye` takes
+    `--context`'s next word as its value; macOS's grep (FreeBSD's) has `{"context",
+    optional_argument, NULL, 'C'}`, so `grep --context x /secret <matter>` reads `/secret`
+    unchecked (the probe shows Claude Code's side). `rg`: `--pre` runs a program. Pipe tails:
+    `head` and `tail` take no file input Claude Code doesn't check; not `sort` (`-o` writes),
+    `wc` (`--files0-from` reads names unchecked) or `uniq` (writes its second file).
+  - **Why it is enough.** The rules allow no more than the Read tool, which reads the working
+    folder with no classifier. Deny beats allow; a compound line is allowed only when every part
+    is; a redirection asks; a path outside the working folders asks, `..` and links resolved; a
+    rule never matches a write, `rm`, `curl`, `python3 -c` or `Invoke-WebRequest`, so the
+    sandbox's allows of those still go to the classifier. Another letter case is in no Bash rule
+    (Claude Code matches Bash rules by case); a PowerShell rule matches it, and on Windows it is
+    the same folder. Forced ask's `Bash` and `PowerShell` ask rules beat these allows.
+  - **Residual.** A link out of the matter walked by `ls -L` (as for the own folders); after
+    launch.
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the

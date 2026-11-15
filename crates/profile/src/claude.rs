@@ -12,6 +12,39 @@ use serde_json::{Map, Value};
 /// :612-624, `capabilities` :696-707), allowed without asking.
 pub const STETDOC_READ_ONLY: [&str; 5] = ["view", "inspect", "check", "lookup", "capabilities"];
 
+/// stetdoc's whole-command forms that only print: its help and its version. `stetdoc <sub>
+/// --help` is in each `<sub>:*` rule already.
+pub const STETDOC_PRINTS: [&str; 2] = ["--help", "--version"];
+
+/// Claude's allow rules for stetdoc: `Bash(stetdoc <sub>:*)` for each of
+/// [`STETDOC_READ_ONLY`] and `Bash(stetdoc <form>)` for each of [`STETDOC_PRINTS`] (exact, so
+/// nothing may follow), then on Windows (`windows`) the same as `PowerShell(…)`, the shell
+/// Claude Code uses there most. Claude Code 2.1.293 reads `<prefix>:*` the same way for both
+/// tools (`yt`): the command is the prefix alone or the prefix, a space and anything. Without
+/// these a line such as `Get-ChildItem <matter>; stetdoc --help` goes to the auto-mode
+/// classifier for its stetdoc part (decision record 0030, "The matter's reads").
+pub fn stetdoc_allowed(windows: bool) -> Vec<String> {
+    let tools: &[&str] = if windows {
+        &["Bash", "PowerShell"]
+    } else {
+        &["Bash"]
+    };
+    let mut rules = Vec::new();
+    for tool in tools {
+        rules.extend(
+            STETDOC_READ_ONLY
+                .iter()
+                .map(|sub| format!("{tool}(stetdoc {sub}:*)")),
+        );
+        rules.extend(
+            STETDOC_PRINTS
+                .iter()
+                .map(|form| format!("{tool}(stetdoc {form})")),
+        );
+    }
+    rules
+}
+
 /// agent-browser's subcommands at v0.41.1 allowed without asking (`cli/src/commands.rs` at the
 /// tag: `open` :399, `snapshot` :974, `click` :448, `dblclick` :467, `fill` :474, `type` :481,
 /// `press` :603, `hover` :524, `focus` :531, `select` :552, `check` :538, `uncheck` :545,
@@ -234,7 +267,7 @@ pub const SETTINGS_KEYS: [&str; 1] = ["disableSkillShellExecution"];
 pub struct ClaudeOptions {
     /// The instructions; still holds `{work_folder}` and `{matter_notes}`.
     system_prompt_append: String,
-    /// `Bash(stetdoc <sub>:*)` for each of [`STETDOC_READ_ONLY`]. agent-browser's rules are the
+    /// [`stetdoc_allowed`] for the platform this is built for. agent-browser's rules are the
     /// host's, per session ([`agent_browser_allowed`], [`agent_browser_denied`]).
     allowed_tools: Vec<String>,
     /// None from the profile: the web tools are the host's, from `tools.web_search`, and so are
@@ -251,10 +284,7 @@ pub struct ClaudeOptions {
 impl ClaudeOptions {
     /// The options for `instructions` and the plugin at `plugin_dir`.
     pub fn new(instructions: String, plugin_dir: Option<PathBuf>) -> Self {
-        let allowed_tools = STETDOC_READ_ONLY
-            .iter()
-            .map(|sub| format!("Bash(stetdoc {sub}:*)"))
-            .collect();
+        let allowed_tools = stetdoc_allowed(cfg!(windows));
         let mut settings = Map::new();
         settings.insert("disableSkillShellExecution".to_owned(), Value::Bool(true));
         Self {

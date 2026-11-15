@@ -93,6 +93,10 @@ pub(crate) struct LaunchDeny {
     /// ([`own_reads`]): what Claude may list and read with no question to the auto-mode
     /// classifier (`super::own_allow_rules`). None before the launch prep has them.
     pub(crate) own_reads: Vec<String>,
+    /// The matter folder: the real path Claude works in (`agent::session_folder`), then the
+    /// path as stored when that differs. Claude may list and read it with no classifier
+    /// (`super::matter_shell_allow_rules`). None before the launch prep has it.
+    pub(crate) matter: Vec<PathBuf>,
 }
 
 impl LaunchDeny {
@@ -116,6 +120,7 @@ impl LaunchDeny {
             targets,
             kept,
             own_reads: Vec::new(),
+            matter: Vec::new(),
         }
     }
 }

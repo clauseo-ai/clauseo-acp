@@ -28,6 +28,7 @@ static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence:
     targets: Vec::new(),
     kept: Vec::new(),
     own_reads: Vec::new(),
+    matter: Vec::new(),
 };
 
 fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {

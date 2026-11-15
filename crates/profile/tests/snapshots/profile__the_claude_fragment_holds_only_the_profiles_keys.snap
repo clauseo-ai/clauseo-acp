@@ -10,7 +10,9 @@ expression: "pretty(&Value::Object(meta))"
         "Bash(stetdoc inspect:*)",
         "Bash(stetdoc check:*)",
         "Bash(stetdoc lookup:*)",
-        "Bash(stetdoc capabilities:*)"
+        "Bash(stetdoc capabilities:*)",
+        "Bash(stetdoc --help)",
+        "Bash(stetdoc --version)"
       ],
       "plugins": [
         {

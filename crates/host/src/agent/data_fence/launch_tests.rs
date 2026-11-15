@@ -279,7 +279,7 @@ fn the_sessions_own_tool_results_stay_readable_and_the_rest_of_projects_does_not
 
 /// Whether the rule pattern `target` (`/`-separated, gitignore's `*` within a name and a
 /// trailing `**`, glob characters escaped by `\\`) covers the place `file` under `<data>`.
-fn covers(target: &str, file: &str) -> bool {
+pub(super) fn covers(target: &str, file: &str) -> bool {
     let unescape = |text: &str| text.replace('\\', "");
     let parts: Vec<&str> = target.split('/').collect();
     let names: Vec<&str> = file.split('/').collect();
