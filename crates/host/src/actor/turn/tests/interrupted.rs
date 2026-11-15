@@ -1,7 +1,7 @@
 //! The file actions a run leaves unfinished (`last_exit.rs`): an undo's record is durable before
-//! R8 touches a file, a crash keeps it and the next start names it in `LastExit`, keeping the row
-//! until its own clean stop (so a second crash names it again), a finished undo leaves none, and
-//! an unclean exit with nothing recorded says only that.
+//! R8 touches a file, a crash keeps it and the next start names it in `LastExit` (and clears
+//! it, so a start after one with no host stop names nothing), a finished undo leaves none, and an
+//! unclean exit with nothing recorded says only that.
 
 use clauseo_protocol::{
     CommandEnvelope, ExpiryReason, FileChoice, FileDecision, HostCommand, InterruptedAction,
@@ -107,14 +107,33 @@ fn an_undo_is_recorded_before_r8_runs_and_named_after_a_crash() {
             files: Some(clauseo_protocol::Count::new(1).unwrap()),
         }]
     );
-    // Still in the store: a second crash now leaves it for the start after to name.
-    assert_eq!(pending(&mut rig).len(), 1, "start-up keeps the record");
-    // This run stops cleanly, which deletes it: the start after names nothing.
+    assert_eq!(pending(&mut rig), Vec::new(), "start-up cleared the record");
+    // The start after names nothing.
     let mut rig = rig.restart(2);
-    assert_eq!(pending(&mut rig), Vec::new(), "the clean stop deleted it");
     let view = last_exit(&mut rig);
     assert!(!view.unclean);
     assert_eq!(view.interrupted, Vec::new());
+    rig.finish();
+}
+
+#[test]
+fn a_start_after_a_run_whose_host_never_stopped_names_nothing() {
+    let mut rig = Rig::start("interrupted-unstopped", "");
+    let matter: MatterId = rig.matter();
+    let at = rig.actor.now().wall;
+    let row = crate::actor::last_exit::action(matter, InterruptedKind::Undo, Some(1), None, at);
+    let store = rig.actor.store.clone();
+    rig.run(async move { store.put_pending_action(row).await })
+        .unwrap();
+    // The start that names it, then a clean quit that does not stop the host (macOS Quit when
+    // idle, a Windows logoff, a stop whose wait ran out).
+    let mut rig = rig.restart(1);
+    assert_eq!(last_exit(&mut rig).interrupted.len(), 1);
+    let mut rig = rig.restart_unstopped(2);
+    let view = last_exit(&mut rig);
+    assert!(!view.unclean);
+    assert_eq!(view.interrupted, Vec::new());
+    assert_eq!(pending(&mut rig), Vec::new());
     rig.finish();
 }
 

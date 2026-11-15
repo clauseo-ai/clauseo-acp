@@ -75,11 +75,16 @@ impl Rig {
         Self::open(dir, 0, None)
     }
 
-    /// Shuts the host down and starts it again on the same data folder, minting ids with run
-    /// number `run` so they never repeat the earlier runs' ids.
+    /// Stops the host and starts it again on the same folder; run `run` mints fresh ids.
     pub(super) fn restart(self, run: u16) -> Self {
         let dir = self.close();
         Self::open(dir, run, None)
+    }
+
+    /// [`Rig::restart`] after a clean quit that never stopped the host (an idle quit, a logoff).
+    pub(super) fn restart_unstopped(self, run: u16) -> Self {
+        drop(self.actor);
+        Self::open(self._dir, run, None)
     }
 
     /// [`Rig::restart`], with the start-up load of `stream` failing as a corrupt store fails.
