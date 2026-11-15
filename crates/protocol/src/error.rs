@@ -118,6 +118,8 @@ pub enum Measure {
     TitleChars,
     /// A revision request's change ids.
     ChangeIds,
+    /// A kept permission's rule, in bytes.
+    RuleBytes,
 }
 
 impl Measure {
@@ -134,6 +136,7 @@ impl Measure {
             Self::HostBytes => "host in bytes",
             Self::TitleChars => "title in characters",
             Self::ChangeIds => "change ids",
+            Self::RuleBytes => "rule in bytes",
         }
     }
 }

@@ -243,6 +243,7 @@ impl HostCommand {
             Self::AllowBlockedSite { .. } | Self::RevokeAllowedSite { .. } => {
                 validate_allowed_sites(self)
             }
+            Self::RemoveKeptPermission { matter: _, rule } => crate::kept::check_rule(rule),
             Self::SetUpdateMode { mode } => check_update_mode(*mode),
             // Ids by shape; whether the connector or pack is known, live or added is state.
             Self::Connector(command) => command.check(),

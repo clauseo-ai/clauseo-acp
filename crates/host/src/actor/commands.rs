@@ -309,6 +309,9 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         } => {
             super::allowed::revoke(actor, ctx, &host, scope, matter);
         }
+        HostCommand::RemoveKeptPermission { matter, rule } => {
+            super::kept::remove(actor, ctx, matter, rule);
+        }
         HostCommand::DecideRevisions(decide) => super::revisions::decide(actor, *ctx, decide),
         HostCommand::SetNetwork { online } => turn::set_network(actor, ctx, online),
     }

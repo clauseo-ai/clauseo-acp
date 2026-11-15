@@ -297,6 +297,8 @@ pub(crate) enum Input {
     /// The allowed sites' start-up read or a save's outcome, from their thread, or the read's
     /// deadline (`allowed/saving.rs`).
     Allowed(Box<super::allowed::AllowedInput>),
+    /// A `RemoveKeptPermission`'s removal, from its thread (`kept.rs`).
+    Kept(Box<super::kept::Removed>),
     /// The open matter's folder changed and went quiet, from its watch (`papers/watch.rs`).
     #[cfg(not(windows))]
     PapersChanged(super::papers::FolderChanged),
@@ -345,6 +347,7 @@ impl std::fmt::Debug for Input {
             #[cfg(feature = "test-support")]
             Self::StateForTest(_) => "StateForTest",
             Self::Allowed(_) => "Allowed",
+            Self::Kept(_) => "Kept",
             #[cfg(not(windows))]
             Self::PapersChanged(_) => "PapersChanged",
             #[cfg(not(windows))]

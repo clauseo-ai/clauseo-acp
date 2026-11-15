@@ -227,6 +227,9 @@ mod idle_stop_during;
 #[path = "host/import.rs"]
 mod import;
 #[cfg(test)]
+#[path = "host/kept.rs"]
+mod kept;
+#[cfg(test)]
 #[path = "host/key_retry.rs"]
 mod key_retry;
 #[path = "host/key_unreadable.rs"]

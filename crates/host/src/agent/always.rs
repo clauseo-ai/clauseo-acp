@@ -37,12 +37,7 @@ use serde_json::Value;
 
 mod store;
 
-#[expect(
-    unused_imports,
-    reason = "the lawyer's list of kept rules uses them, in the next commit"
-)]
-pub(crate) use store::{list, remove_now};
-pub(crate) use store::{read_beside, store};
+pub(crate) use store::{list, read_beside, remove_now, store};
 
 /// The file's name, in `<data>/agent-state/<matter>`.
 pub(crate) const FILE: &str = "claude-allow.json";
@@ -274,10 +269,6 @@ pub(crate) fn file_beside(notes: &Path) -> Option<PathBuf> {
 }
 
 /// `<data>/agent-state/<matter>/claude-allow.json`, as [`file_beside`] the matter's notes.
-#[expect(
-    dead_code,
-    reason = "the lawyer's list of kept rules uses it, in the next commit"
-)]
 pub(crate) fn file_of(data: &Path, matter: clauseo_protocol::MatterId) -> PathBuf {
     data.join("agent-state").join(matter.to_string()).join(FILE)
 }

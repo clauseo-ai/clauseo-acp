@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::RemoveKeptPermission\n{ matter: matter_id(1), rule: \"Bash(npm test)\".to_owned(), }"
+---
+{
+  "remove_kept_permission": {
+    "matter": "01900000-0000-7000-8000-000000000001",
+    "rule": "Bash(npm test)"
+  }
+}

@@ -6,14 +6,16 @@ use clauseo_acp::PendingKey;
 use clauseo_protocol::{
     AgentChoiceId, CommandOutcome, CompactString, ConfigOption, ConfigOptionsReplaced, ConfigValue,
     ElicitationId, ElicitationOutcome, ElicitationRequest, ElicitationResolved,
-    ElicitationResponse, ErrorCode, ModeChanged, PermissionChoice, PermissionKind,
-    PermissionRequestId, PermissionResolved, Principal, RawPayload, StopReason, StreamId, ThreadId,
+    ElicitationResponse, ErrorCode, ModeChanged, NotKeptReason, Notice, NoticeKind, NoticeLevel,
+    PermissionChoice, PermissionKind, PermissionRequestId, PermissionResolved, Principal,
+    RawPayload, StopReason, StreamId, ThreadId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::{Actor, Tag, limits};
 use super::out::Out;
 use super::{Then, TurnTag, current, spawn, state};
+use crate::agent::always::NotKept;
 use crate::error::Error;
 use crate::log_file::Cause;
 
@@ -81,12 +83,45 @@ pub(super) fn answer_permission(
         held_open: None,
     };
     out.push(actor, resolved)?;
+    // "Always" kept nothing: the lawyer reads that it was allowed this once only, and why.
+    if let Some(why) = answered.and_then(|answered| answered.not_kept) {
+        out.push(actor, not_kept_notice(why))?;
+    }
     send_answer(actor, ctx, thread, out, then)?;
     // The lawyer's last answer decides how an agent's own cancel of the turn reads.
     if let Some(current) = current(actor, thread) {
         current.refused = refused;
     }
     Ok(())
+}
+
+/// The notice an "Always for this matter" answer that kept nothing logs beside its
+/// `PermissionResolved`, its English `text` the fallback for the app's own words.
+fn not_kept_notice(why: NotKept) -> Notice {
+    let (reason, text) = match why {
+        NotKept::NoRule => (
+            NotKeptReason::NoRule,
+            "Clauseo can't keep \u{201c}Always\u{201d} for this kind of request.",
+        ),
+        NotKept::Refused => (
+            NotKeptReason::Refused,
+            "Clauseo keeps \u{201c}Always\u{201d} only for one exact command, site or file.",
+        ),
+        NotKept::OutsideMatter => (
+            NotKeptReason::OutsideMatter,
+            "Clauseo keeps \u{201c}Always\u{201d} only for files in this matter's folder.",
+        ),
+        NotKept::Full => (
+            NotKeptReason::Full,
+            "This matter keeps as many permissions as it can. Remove some from Kept permissions \
+             to keep more.",
+        ),
+    };
+    Notice {
+        level: NoticeLevel::Info,
+        text: format!("Allowed this once only: {text}"),
+        kind: Some(NoticeKind::AlwaysNotKept { reason }),
+    }
 }
 
 /// Sends an answer's commit with its receipt; `then` tells the agent once it is durable.

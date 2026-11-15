@@ -553,6 +553,16 @@ pub enum HostCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         matter: Option<MatterId>,
     },
+    /// Remove one rule `HostQuery::KeptPermissions` lists: no agent of the matter applies it
+    /// any more, a running one included. Removing a rule that is not there does nothing.
+    /// Answers `Done`, with no receipt. Only the main window sends it.
+    /// JSON: `{"remove_kept_permission": {"matter": "…", "rule": "Bash(npm test)"}}`.
+    RemoveKeptPermission {
+        /// The matter.
+        matter: MatterId,
+        /// The rule's exact text, as the list gave it.
+        rule: String,
+    },
     /// Accept or reject tracked changes of a matter's Word file (`revisions.rs`); refused
     /// while a turn runs in the matter. Answers `RevisionsDecided`; undo it with
     /// `RestoreVersion` of its `before` for its one file. JSON: `{"decide_revisions": {..}}`.
