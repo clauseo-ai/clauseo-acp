@@ -1,6 +1,7 @@
 //! Undoing a step: restore and delete, edits made since, "Undo anyway", undoing an undo, and
 //! the lock check.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -91,10 +92,19 @@ const DOCX: &[u8] =
 const PDF: &[u8] = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n\
 << /Root 1 0 R >>\n%%EOF\n";
 
+/// The turn's shell writes as the host reads them from the delete commands (`rm Contract.docx
+/// "bundle/Exhibit A.pdf"`, `Remove-Item` on Windows: `shell_writes::deletes`).
+fn shell_deleted() -> BTreeSet<String> {
+    ["Contract.docx", "bundle/Exhibit A.pdf"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
 /// An agent's shell command (`rm`, `Remove-Item`) deletes a `.docx` and a `.pdf` behind the
-/// matter's back: no tool call names them, the file system call is a plain `remove_file`. The
-/// after-turn checkpoint lists both as deleted, each flagged as possibly the lawyer's (no tool
-/// call or shell command of the turn named it, `diff::flag`), and undo puts back the exact bytes.
+/// matter's back: no tool call names them, the file system call is a plain `remove_file`, and
+/// the command names them. The after-turn checkpoint lists both as deleted, the agent's (not
+/// flagged, `diff::flag`), and undo puts back the exact bytes.
 #[test]
 fn undo_restores_docx_and_pdf_deleted_by_a_shell_command() {
     let fx = Fixture::new("undo-shell-delete");
@@ -105,12 +115,14 @@ fn undo_restores_docx_and_pdf_deleted_by_a_shell_command() {
 
     crate::support::remove_file(fx.file("Contract.docx"));
     crate::support::remove_file(fx.file("bundle/Exhibit A.pdf"));
-    let after = matter.after_turn(&meta(3), &tools(&[])).unwrap();
+    let after = matter
+        .after_turn_named(&meta(3), &tools(&[]), &shell_deleted())
+        .unwrap();
     assert_eq!(
         created(after, 3),
         [
-            deleted("Contract.docx", DOCX).with_lawyer_edits(),
-            deleted("bundle/Exhibit A.pdf", PDF).with_lawyer_edits(),
+            deleted("Contract.docx", DOCX),
+            deleted("bundle/Exhibit A.pdf", PDF),
         ]
     );
 
@@ -133,6 +145,42 @@ fn undo_restores_docx_and_pdf_deleted_by_a_shell_command() {
     assert_eq!(fx.read("Contract.docx"), DOCX);
     assert_eq!(fx.read("bundle/Exhibit A.pdf"), PDF);
     assert_no_temp_files(&fx.folder);
+}
+
+/// The same deletes with no tool call or shell command of the turn naming them (a sync client,
+/// the lawyer, a script whose deletes the host can't read): each flagged as possibly the
+/// lawyer's, since Clauseo can't tell who deleted it.
+#[test]
+fn a_delete_nothing_in_the_turn_names_is_flagged() {
+    let fx = Fixture::new("undo-shell-delete-unnamed");
+    fx.write("Contract.docx", DOCX);
+    fx.write("bundle/Exhibit A.pdf", PDF);
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    crate::support::remove_file(fx.file("Contract.docx"));
+    crate::support::remove_file(fx.file("bundle/Exhibit A.pdf"));
+    let after = matter.after_turn(&meta(3), &tools(&[])).unwrap();
+    assert_eq!(
+        created(after, 3),
+        [
+            deleted("Contract.docx", DOCX).with_lawyer_edits(),
+            deleted("bundle/Exhibit A.pdf", PDF).with_lawyer_edits(),
+        ]
+    );
+    // Named only by a longer name, or by another file's: still flagged.
+    let fx = Fixture::new("undo-shell-delete-misnamed");
+    fx.write("Contract.docx", DOCX);
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    crate::support::remove_file(fx.file("Contract.docx"));
+    let commands = BTreeSet::from(["Contract.docx.bak".to_owned(), "Contract".to_owned()]);
+    let after = matter
+        .after_turn_named(&meta(3), &tools(&[]), &commands)
+        .unwrap();
+    assert_eq!(
+        created(after, 3),
+        [deleted("Contract.docx", DOCX).with_lawyer_edits()]
+    );
 }
 
 /// What undo cannot bring back, pinned as it is today: a file never versioned, deleted by a

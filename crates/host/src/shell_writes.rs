@@ -6,8 +6,9 @@
 //!
 //! Only the command text in a shell call's input is read, never its output: a listing or a
 //! `grep` names files it does not write. Only write targets count: `>` and `>>` redirects,
-//! `-o` and `--output` values, `tee`'s files, the last argument of `cp` (a `mv` only moves
-//! a file, so it writes none), and what a `stetdoc` command writes, read with its real options
+//! `-o` and `--output` values, `tee`'s files, the last argument of `cp`, every path a delete or a
+//! move names (`rm`, `unlink`, `mv`'s both sides, `Remove-Item`, `del`: [`deletes`]), and what a
+//! `stetdoc` command writes, read with its real options
 //! by the parser the pre-write guard shares (`crate::stetdoc_args::written`): its output, else
 //! with `--in-place` the document, else `NAME.edited.docx` beside it; nothing for `--dry-run`,
 //! `view` and the other reading subcommands. The command is split as a shell does (quotes kept
@@ -35,6 +36,7 @@ use std::str::Chars;
 
 use crate::stetdoc_args;
 
+pub(crate) mod deletes;
 mod folder;
 mod powershell;
 
@@ -156,6 +158,12 @@ impl Word {
     }
 }
 
+impl AsRef<str> for Word {
+    fn as_ref(&self) -> &str {
+        &self.text
+    }
+}
+
 /// What joins a simple command to the next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Sep {
@@ -241,6 +249,11 @@ fn add_segment(
             }
             _ => {}
         }
+        found.extend(
+            deletes::removed(program, args)
+                .into_iter()
+                .filter_map(|i| args.get(i)),
+        );
         // `--output=Reply.docx`
         for arg in args {
             if let Some(value) = arg.text.strip_prefix("--output=")
