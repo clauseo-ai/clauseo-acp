@@ -535,10 +535,23 @@ export type BlacklineNotice =
 /**  Some list or clause numbers may not match the ones Word shows. */
 "numbers_may_differ" | 
 /**
- *  stetdoc counted more tracked changes than the blackline shows: the others are outside
- *  the main text (headers, footers, footnotes, endnotes, comments), which it does not show.
+ *  stetdoc lists tracked changes (by id, `stetdoc check`) or counts more (its summary)
+ *  than the blackline's body names: the others are outside the main text (headers,
+ *  footers, footnotes, endnotes), which it does not show.
  */
 "changes_outside_text" | 
+/**
+ *  The text of a comment differs between the two versions; the blackline does not show
+ *  comments, and stetdoc 0.9.3's compare marks no change for it.
+ */
+"comment_changed" | 
+/**  The text in a text box changed; the blackline does not show the old text. */
+"text_box_changed" | 
+/**
+ *  The formatting of some table cells changed (a tracked cell change), which the
+ *  blackline does not mark.
+ */
+"cell_format_changed" | 
 /**
  *  stetdoc warned about something else this version does not know: some of the
  *  blackline may not match the document in Word exactly.
@@ -7686,6 +7699,13 @@ export type WordBlackline = {
 	 *  still decodes.
 	 */
 	notices?: BlacklineNotice[],
+	/**
+	 *  The text of each link whose web address differs between the two versions while its text
+	 *  does not (stetdoc 0.9.3's compare marks no change for it), each once, in the newer
+	 *  version's order: the app names each. Empty when none; missing reads as empty, and empty is
+	 *  left out.
+	 */
+	changed_links?: string[],
 };
 
 /* Tauri Specta runtime */
