@@ -1062,5 +1062,27 @@
     "at": "2026-11-13",
     "by": "orchestrator",
     "note": "agent.quiet (D-050's backstop): the agent sent nothing for 5 minutes with no tool running and no question waiting, so the host ended the turn; Try again under the answer, never Restart; Claude's, as U3-err-agent.service_error names Claude; ChatGPT's is U6F-22"
+  },
+  "U3-err-matter.folder_backslash": {
+    "en": "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "hi": "Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "matter.folder_backslash: the matter folder's path has a backslash on macOS or Linux, where Claude Code can't start, so the host didn't start the agent; Try again under the turn, never Restart; Claude's; ChatGPT's is U6F-25"
+  },
+  "U3-err-agent.folder_inaccessible": {
+    "en": "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    "hi": "Claude मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "agent.folder_inaccessible: the agent couldn't open the matter folder as it started (Claude Code's \"Can't access working directory\"); Try again under the turn, never Restart; Claude's; ChatGPT's is U6F-28"
   }
 }

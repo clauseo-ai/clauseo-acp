@@ -68,8 +68,8 @@ pub(super) struct PathPrep {
     tls_roots: Option<(PathBuf, Arc<dyn Clock>)>,
     /// The profile hook's absolute folders (`agent::session_path`), and whether there are any.
     hook: (Vec<PathBuf>, bool),
-    /// The agent's kind.
-    kind: Option<AgentKind>,
+    /// The agent's kind; the launch's folder-name refusal reads it too (`agent/folder_name.rs`).
+    pub(super) kind: Option<AgentKind>,
 }
 
 impl PathPrep {

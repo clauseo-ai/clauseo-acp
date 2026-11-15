@@ -1,6 +1,7 @@
 // U3's entries for a turn's failure that is never a send's refusal: going offline mid-answer (D-050), the agent's
 // service giving up on its side (agent.service_error, #1030), and the agent going quiet for 5 minutes (agent.quiet,
-// D-050's backstop); and which error codes need no send-refusal entry, split from registry.tsx for its length.
+// D-050's backstop), and a folder Claude can't start in (matter.folder_backslash, agent.folder_inaccessible); and which
+// error codes need no send-refusal entry, split from registry.tsx for its length.
 import { MARK_KEYS, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
 import { agentText, step, userMessage } from "../testing/stream-script.ts";
 import type { ErrorCode } from "../transport/protocol.ts";
@@ -10,12 +11,15 @@ import { RoomOver } from "./states.tsx";
 import { errorWords } from "./words.ts";
 
 /** Whether an error code's sentence needs no "U3-err-<code>" refusal on a send: Versions' own (the Word blackline's,
- * words-errors.ts's MARK_KEYS, UC-114 and UC-115), and agent.offline, agent.service_error and agent.quiet, a turn's
- * failures with their own entries below. Only the false answer narrows: a key it refuses is never one of MARK_KEYS. */
+ * words-errors.ts's MARK_KEYS, UC-114 and UC-115), and agent.offline, agent.service_error, agent.quiet,
+ * matter.folder_backslash and agent.folder_inaccessible, a turn's failures with their own entries below. Only the false
+ * answer narrows: a key it refuses is never one of MARK_KEYS. */
 export const ownEntry = (code: ErrorCode, key: ErrorKey): key is (typeof MARK_KEYS)[number] =>
   code === "agent.offline" ||
   code === "agent.service_error" ||
   code === "agent.quiet" ||
+  code === "matter.folder_backslash" ||
+  code === "agent.folder_inaccessible" ||
   (MARK_KEYS as readonly string[]).includes(key);
 
 /** agent.offline is never a send's refusal: the stop line under the answer so far, with Try again. */
@@ -88,13 +92,44 @@ const QUIET: Entry[] = [
   },
 ];
 
-/** The entries in place of a refusal for a code `ownEntry` names: agent.offline's, agent.service_error's and
- * agent.quiet's own, in their code's place. */
-export const ownEntries = (code: ErrorCode): Entry[] =>
-  code === "agent.offline"
-    ? OFFLINE
-    : code === "agent.service_error"
-      ? SERVICE
-      : code === "agent.quiet"
-        ? QUIET
-        : [];
+/** A turn Claude couldn't start in the matter's folder, never a send's refusal: the question and the stop line under it,
+ * with Try again and never Restart. Draft English (Rohan to approve). ChatGPT's, an agent's by its name and the
+ * nameless line are U6F-25 to U6F-30. */
+const folderStop = (code: ErrorCode, key: Parameters<typeof errorWords>[0]): Entry[] => [
+  {
+    id: `U3-err-${code}`,
+    words: errorWords(key),
+    screen: "room/thread",
+    render: () => (
+      <RoomOver
+        host={() =>
+          threadHost({
+            entries: [
+              userMessage(5, 1, "What does clause nine of the lease say about notice?"),
+              step(9, { stop: "failed", failure: code }),
+            ],
+          })
+        }
+      />
+    ),
+  },
+];
+
+/** The entries in place of a refusal for a code `ownEntry` names, in their code's place. */
+const OWN: Partial<Record<ErrorCode, Entry[]>> = {
+  "agent.offline": OFFLINE,
+  "agent.service_error": SERVICE,
+  "agent.quiet": QUIET,
+  "matter.folder_backslash": folderStop(
+    "matter.folder_backslash",
+    "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+  ),
+  "agent.folder_inaccessible": folderStop(
+    "agent.folder_inaccessible",
+    "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+  ),
+};
+
+/** The entries in place of a refusal for a code `ownEntry` names: agent.offline's, agent.service_error's, agent.quiet's
+ * and the two folder codes' own, in their code's place. */
+export const ownEntries = (code: ErrorCode): Entry[] => OWN[code] ?? [];

@@ -117,6 +117,8 @@ export type ErrorCode =
   | "agent.service_error"
   | "agent.quiet"
   | "mcp.import_too_large"
+  | "matter.folder_backslash"
+  | "agent.folder_inaccessible"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -325,6 +327,14 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // an import whose servers are too long to show whole in one confirm: nothing was added
   "mcp.import_too_large":
     "There are too many tools to import at once, so nothing was imported. Add them one at a time.",
+  // the host didn't start Claude: the matter folder's path has a backslash, on macOS or Linux, where Claude Code can't
+  // start. Try again under the turn once the folder is renamed. Draft English (Rohan to approve); Hindi provisional
+  "matter.folder_backslash":
+    "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+  // Claude couldn't open the matter folder as it started ("Can't access working directory"): Try again, never
+  // Restart. Draft English (Rohan to approve); Hindi provisional
+  "agent.folder_inaccessible":
+    "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -394,6 +404,26 @@ const PLANNED: Partial<
     chatgpt: "ChatGPT stopped answering. Try again.",
     named: "{name} stopped answering. Try again.",
     nameless: "The AI stopped answering. Try again.",
+  },
+  // a folder whose path has a backslash, where the agent can't start (see ERROR_WORDS). Draft English (Rohan to
+  // approve); the Hindi is provisional
+  "matter.folder_backslash": {
+    chatgpt:
+      "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    named:
+      "{name} can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    nameless:
+      "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+  },
+  // the agent couldn't open the matter folder as it started (see ERROR_WORDS). Draft English (Rohan to approve); the
+  // Hindi is provisional
+  "agent.folder_inaccessible": {
+    chatgpt:
+      "ChatGPT couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    named:
+      "{name} couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    nameless:
+      "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
   },
 };
 

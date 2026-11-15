@@ -176,5 +176,38 @@
     "at": "2026-11-10",
     "by": "app track (provisional; orchestrator settled the words 2026-11-10, copy review pending)",
     "note": "macOS only: the line under Open Privacy settings"
+  },
+  "FR-24": {
+    "en": "This folder's name has a backslash (\\). / Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder. / This folder's name has a backslash",
+    "hi": "इस फ़ोल्डर के नाम में बैकस्लैश (\\) है। / Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें। / इस फ़ोल्डर के नाम में बैकस्लैश है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On macOS and Linux, New matter's warning for a folder whose name has a backslash, where Claude can't start (the host refuses it as matter.folder_backslash); Choose another folder (FR-09) and Create anyway (FR-10)"
+  },
+  "FR-25": {
+    "en": "This folder's name has a backslash (\\). / Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.",
+    "hi": "इस फ़ोल्डर के नाम में बैकस्लैश (\\) है। / Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "Locate's step for a folder picked whose name has a backslash, on macOS and Linux: FR-24's title and body, then Choose another folder (FR-09) and Locate anyway (FR-26)"
+  },
+  "FR-26": {
+    "en": "Locate anyway",
+    "hi": "फिर भी यही फ़ोल्डर चुनें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "Locate's step's other button: relocates the matter to the folder with a backslash anyway"
   }
 }

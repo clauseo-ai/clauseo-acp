@@ -240,6 +240,8 @@ its step card, and compare (below) lists the files between any two versions.
 | Folder missing (the locate-folder flow) | `ErrorCode::MatterFolderMissing` | the matter's name |
 | Folder there without its `.clauseo/matter.json`, or with another matter's (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | the matter's name |
 | The privacy settings keep Clauseo out of the folder (macOS Files and Folders; the app's Privacy settings button) | `ErrorCode::MatterFolderPermission` | the turn is refused before the agent starts, or as its session opens |
+| The folder's path has a backslash (`\`), where Claude can't start (macOS, Linux): the stop line names the agent ("Claude can't work in this matter's folder because its name has a backslash (\). Rename the folder in Finder, then Try again.") | `ErrorCode::MatterFolderBackslash` | the turn is refused before the agent starts |
+| The agent couldn't open the matter's folder as it started (Claude Code's "Can't access working directory"): the stop line names the agent ("Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.") | `ErrorCode::AgentFolderInaccessible` | the turn fails as the session opens |
 | Checkpoint failed | `ErrorCode::MatterCheckpointFailed` | the turn is refused before it starts |
 
 ## 7. Matter
@@ -358,6 +360,8 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Sandbox set-up needed, or required by the firm and not available (0051) | `ErrorCode::SandboxSetupRequired`, `ErrorCode::SandboxRequired` | no |
 | The matter's folder is there without its Clauseo file (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | no |
 | The computer's privacy settings keep Clauseo out of the matter's folder (macOS Files and Folders) | `ErrorCode::MatterFolderPermission` | no |
+| The matter's folder has a backslash (`\`) in its path, where Claude can't start (macOS, Linux); New matter and Locate warn first, with Choose another folder and Create anyway (New matter) or Locate anyway (Locate) | `ErrorCode::MatterFolderBackslash` | no |
+| The agent couldn't open the matter's folder as it started (Claude Code's "Can't access working directory") | `ErrorCode::AgentFolderInaccessible` | yes |
 | Sandbox blocked by a Windows setting or security tool, such as its set-up program missing (S15) | `ErrorCode::SandboxBlocked` | no |
 | "Allow this site" is turned off, by the firm's policy or in settings (0053) | `ErrorCode::BlocklistOverrideOff` | no |
 | "Allow this site" from a notice the host no longer keeps (0053) | `ErrorCode::BlocklistNoticeExpired` | no |

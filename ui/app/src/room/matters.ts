@@ -12,6 +12,7 @@ import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { pickReopenMatter } from "../store/reopen.ts";
 import { ActRefusals } from "./act-refusals.ts";
+import { LocateHeld } from "./locate-held.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type {
   FolderRefId,
@@ -170,6 +171,8 @@ export class Matters {
   readonly #listeners = new Set<() => void>();
   /** What the lawyer's last open or show on each matter was refused with (act-refusals.ts). */
   readonly refusals = new ActRefusals();
+  /** A Locate held for its step: a folder picked whose name has a backslash (locate-held.ts). */
+  readonly located = new LocateHeld();
   #view: MattersView;
   /** Thread views the room watches without the matters part, for their headers: the open thread, and threads of left
    * matters still working. */
@@ -322,15 +325,26 @@ export class Matters {
   }
 
   /** H3: asks for the folder of a matter that moved, and tells the host where it is now. `around` runs the picker, so a
-   * caller can show its wait; left out, the pick runs as it is. */
+   * caller can show its wait; left out, the pick runs as it is. A folder Claude can't start in waits for Locate's step
+   * (`located`), which picks again or relocates there. */
   async locate(
     matter: MatterId,
     around: <T>(pick: () => Promise<T>) => Promise<T> = (pick) => pick(),
   ): Promise<void> {
     const picked = await around(() => this.#transport.pickFolder());
     if (picked === null) return;
+    if (this.located.warns(picked.display)) {
+      const { folder, display } = picked;
+      const again = () => this.locate(matter, around);
+      const anyway = () => this.#relocate(matter, folder);
+      return this.located.hold({ matter, display, again, anyway });
+    }
+    await this.#relocate(matter, picked.folder);
+  }
+
+  async #relocate(matter: MatterId, folder: FolderRefId): Promise<void> {
     this.refusals.clear(matter);
-    await this.#command({ relocate_matter: { matter, folder: picked.folder } }, "relocate_matter");
+    await this.#command({ relocate_matter: { matter, folder } }, "relocate_matter");
   }
 
   /** H11: shows the matter's folder in Finder or File Explorer; a refusal stands in `refusals`

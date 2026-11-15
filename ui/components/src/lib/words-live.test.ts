@@ -217,6 +217,24 @@ const PLANNED_LINES = [
     "The AI stopped answering. Try again.",
     "AI ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
   ],
+  [
+    "matter.folder_backslash",
+    "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "gemini can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "gemini इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+    "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  ],
+  [
+    "agent.folder_inaccessible",
+    "ChatGPT couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    "ChatGPT मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+    "gemini couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    "gemini मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+    "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    "AI मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  ],
 ] as const;
 
 test.each(PLANNED_LINES)(

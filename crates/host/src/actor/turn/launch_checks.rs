@@ -9,20 +9,19 @@
 //! they answer, launches the agent on the actor with what they found ([`agents::launch_now`]), or
 //! fails the waiting work.
 //!
-//! After both refusals, the same thread makes the session's folders ([`RunFolders`]: its
-//! stand-in `run/<session id>` folder with `work` and `browser` under it, and the matter's
-//! notes folder) and, for an agent with a kind, writes the profile's skills
-//! (`ProfileHook::launch_writes`, `clauseo_profile::write_skills`). A skill write that fails is
-//! a warning, never a failed launch. The first write's token goes in [`Prepared`], so only that
-//! launch's Codex keys carry the skills index; a failed write leaves none. Then the launch's
-//! skill packs go into its own plugin under the run folder ([`packs`]). The notes folder
-//! stays; the run folder is the launch's own (its id is in the name) and is removed off the
-//! actor on every way out: by the prep thread when nobody waits for its answer any more
-//! ([`codex::prepare::off_actor_or_undo`]), and otherwise from the actor ([`discard`]) when
-//! the answer is for an earlier launch, the host is stopping, the profile keys or the launch
-//! fail, or the agent ends ([`remove_run`]). No launch
-//! removes another's folder: a prep that came late can only take its own. Shutdown waits for
-//! the actor's removals in flight, so the host answers it with the run folders gone.
+//! After both refusals, the same thread makes the session's folders ([`RunFolders`]: its stand-in
+//! `run/<session id>` folder with `work` and `browser` under it, and the matter's notes folder)
+//! and, for an agent with a kind, writes the profile's skills (`ProfileHook::launch_writes`,
+//! `clauseo_profile::write_skills`). A skill write that fails is a warning, never a failed launch.
+//! The first write's token goes in [`Prepared`], so only that launch's Codex keys carry the skills
+//! index; a failed write leaves none. Then the launch's skill packs go into its own plugin under
+//! the run folder ([`packs`]). The notes folder stays; the run folder is the launch's own (its id
+//! is in the name) and is removed off the actor on every way out: by the prep thread when nobody
+//! waits for its answer any more ([`codex::prepare::off_actor_or_undo`]), and otherwise from the
+//! actor ([`discard`]) when the answer is for an earlier launch, the host is stopping, the profile
+//! keys or the launch fail, or the agent ends ([`remove_run`]). No launch removes another's folder:
+//! a prep that came late can only take its own. Shutdown waits for the actor's removals in flight,
+//! so the host answers it with the run folders gone.
 //!
 //! For a session that can get the browser, the same thread checks that the browser entry's
 //! sidecars (`clauseo-mcp` and agent-browser) exist, finds its Chrome, and claims its ports and,
@@ -363,8 +362,8 @@ pub(super) fn prepare(
             job,
             move || {
                 data_folder::refuse_data_folder(&stored, &data)?;
-                // The working folder the agent starts in, as spawn takes it (`session_folder`).
-                crate::matter_worker::refuse_too_deep(&crate::agent::session_folder(&stored))?;
+                // The working folder the agent starts in, unless too deep or named with a `\`.
+                let cwd = crate::agent::folder_name::launch_cwd(claims.path.kind, &stored)?;
                 let mut answer = None;
                 let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
                 let codex = match codex_home {
@@ -383,7 +382,7 @@ pub(super) fn prepare(
                 };
                 // Claude is never refused for its folder: the answer decides its forced ask.
                 if let Some(home) = &claude_home {
-                    answer = Some(check.run(&crate::agent::session_folder(&stored)));
+                    answer = Some(check.run(&cwd));
                     codex::make_agent_home(&data, home, "Claude Code")?;
                     if let Err(error) = crate::agent::home::write_claude_settings(home) {
                         tracing::warn!(

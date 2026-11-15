@@ -40,4 +40,12 @@ export const HI = {
   // FR20 (provisional): the room's notice for a folder the host couldn't check
   "Clauseo couldn't check this folder, so Claude asks before every change.":
     "Clauseo इस फ़ोल्डर की जाँच नहीं कर सका, इसलिए Claude हर बदलाव से पहले पूछता है।",
+  // FR24 (draft, Rohan to approve; Hindi provisional): New matter's warning and Locate's step for a folder whose path
+  // has a backslash, on macOS and Linux, where Claude can't start: its name, its title, and its body
+  "This folder's name has a backslash": "इस फ़ोल्डर के नाम में बैकस्लैश है",
+  "This folder's name has a backslash (\\).": "इस फ़ोल्डर के नाम में बैकस्लैश (\\) है।",
+  "Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.":
+    "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+  // FR25 (draft): Locate's other button, which locates the matter in the folder warned about
+  "Locate anyway": "फिर भी यही फ़ोल्डर चुनें",
 } as const;

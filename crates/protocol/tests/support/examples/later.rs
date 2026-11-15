@@ -127,7 +127,8 @@ pub(super) fn failures() -> Vec<DomainEvent> {
 }
 
 /// The later agent codes of a turn's end (D-050's offline and quiet, the too-long prompt, the
-/// service's own failure), in the order the corpus first saw them.
+/// service's own failure, a folder the agent can't start in), in the order the corpus first saw
+/// them.
 fn agent_failures() -> Vec<DomainEvent> {
     vec![
         failed(
@@ -145,6 +146,14 @@ fn agent_failures() -> Vec<DomainEvent> {
         failed(
             ErrorCode::AgentQuiet,
             "the agent sent nothing for 300 s with no tool running and no question waiting",
+        ),
+        failed(
+            ErrorCode::MatterFolderBackslash,
+            "the matter folder's path has a backslash, where Claude Code cannot start",
+        ),
+        failed(
+            ErrorCode::AgentFolderInaccessible,
+            "the agent could not open the matter folder as its working folder",
         ),
     ]
 }

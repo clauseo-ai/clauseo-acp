@@ -1,0 +1,5 @@
+{"scenario":"claude-new-cwd-inaccessible","description":"claude-agent-acp's answer to a session/new when Claude Code 2.1.293 exits at start in a working folder it can't access (Rohan's MacBook, a folder named with backslashes): -32603 Internal error, data {details} holding Claude Code's stderr; the host must fail the turn as agent.folder_inaccessible, never agent.protocol_error","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/claude-agent-acp","version":"0.89.1"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","error":{"code":-32603,"message":"Internal error","data":{"details":"Claude Code process exited with code 1. stderr: Error: Can't access working directory /Users/lawyer/Quarrington\\ Holdings: Path \"/Users/lawyer/Quarrington\\ Holdings\" does not exist"}}}}
