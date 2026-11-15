@@ -24,6 +24,7 @@
 crates/desktop/src/bridge/pump.rs now clippy::disallowed_methods
 crates/desktop/src/frame.rs StreamMessage dead_code
 crates/desktop/src/last_run.rs open_lock clippy::disallowed_methods
+crates/desktop/src/last_run.rs sleep clippy::disallowed_methods
 crates/desktop/src/open.rs check_document clippy::disallowed_methods
 crates/desktop/src/open.rs check_document clippy::disallowed_methods
 crates/desktop/src/open/gate.rs now clippy::disallowed_methods
