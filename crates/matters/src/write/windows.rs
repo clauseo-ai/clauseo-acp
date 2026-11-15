@@ -1,12 +1,15 @@
-//! Windows: `SetFileAttributesW`, the one Win32 call that changes a file here, for
-//! [`super::hide_dir`].
-#![expect(unsafe_code, reason = "FFI to SetFileAttributesW")]
+//! Windows: `SetFileAttributesW` for [`super::hide_dir`], and `ReplaceFileW` for a rewrite of a
+//! lawyer's file ([`super::Staged::rename`]): the two Win32 calls that change a file here.
+#![expect(unsafe_code, reason = "FFI to SetFileAttributesW and ReplaceFileW")]
 
 use std::io;
 use std::path::Path;
 
-use windows::Win32::Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, SetFileAttributesW};
-use windows::core::HSTRING;
+use windows::Win32::Storage::FileSystem::{
+    FILE_FLAGS_AND_ATTRIBUTES, REPLACEFILE_IGNORE_ACL_ERRORS, REPLACEFILE_IGNORE_MERGE_ERRORS,
+    ReplaceFileW, SetFileAttributesW,
+};
+use windows::core::{HSTRING, PCWSTR};
 
 use crate::long_path::long_path;
 
@@ -18,6 +21,21 @@ pub(super) fn set_attributes(path: &Path, attributes: u32) -> io::Result<()> {
     // SAFETY: `wide` is a NUL-terminated UTF-16 string that outlives the call, and the call
     // keeps no pointer to it.
     unsafe { SetFileAttributesW(&wide, FILE_FLAGS_AND_ATTRIBUTES(attributes)) }
+        .map_err(win32_io_error)
+}
+
+/// Puts the file `replacement` in the place of the file `replaced`, which keeps its attributes
+/// (read-only, hidden), its ACL, its alternate data streams (`Zone.Identifier`, the mark of a
+/// downloaded file), its creation time and its short name: what a rename over it drops. An
+/// attribute or ACL that cannot be merged does not fail it. No backup file. Both paths go
+/// through [`long_path`], as in [`set_attributes`].
+pub(super) fn replace_file(replaced: &Path, replacement: &Path) -> io::Result<()> {
+    let replaced = HSTRING::from(long_path(replaced).as_path());
+    let replacement = HSTRING::from(long_path(replacement).as_path());
+    let flags = REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS;
+    // SAFETY: both are NUL-terminated UTF-16 strings that outlive the call; the backup name,
+    // the exclude and the reserved pointers are null, as the call allows; it keeps no pointer.
+    unsafe { ReplaceFileW(&replaced, &replacement, PCWSTR::null(), flags, None, None) }
         .map_err(win32_io_error)
 }
 

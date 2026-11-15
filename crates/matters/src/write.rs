@@ -202,6 +202,12 @@ static HIDE_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 #[cfg(windows)]
 mod windows;
 
+#[cfg(unix)]
+mod keep;
+
+#[cfg(target_os = "macos")]
+mod macos;
+
 /// Sets the modification time of the file `path`.
 #[cfg(test)]
 pub(crate) fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> io::Result<()> {
@@ -232,12 +238,14 @@ pub(crate) fn overwrite(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// The most temp names [`replace`] tries in one folder before giving up.
 const TEMP_TRIES: u32 = 1000;
 
-/// Replaces (or creates) `target` with what `fill` writes: [`stage`], then [`Staged::commit`].
+/// Replaces (or creates) `target`, one of Clauseo's own files, with what `fill` writes: staged
+/// as [`stage`] does but with the defaults' permissions and nothing kept of the old file, then
+/// [`Staged::commit`].
 pub(crate) fn replace(
     target: &Path,
     fill: &mut dyn FnMut(&mut File) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    stage(target, fill)?.commit()
+    stage_as(target, false, fill)?.commit()
 }
 
 /// A temp file beside its target, written and synced, waiting to be renamed over it. Dropped
@@ -246,24 +254,57 @@ pub(crate) fn replace(
 pub(crate) struct Staged {
     temp: Option<PathBuf>,
     target: PathBuf,
+    /// Whether the target keeps its metadata: a lawyer's file, staged by [`stage`].
+    keep: bool,
+    /// The things of the target's metadata the temp file could not take ([`keep::copy`]).
+    lost: u32,
+}
+
+/// A staged file renamed into place ([`Staged::rename`]).
+#[derive(Debug)]
+pub(crate) struct Renamed {
+    /// The target's folder, which the caller syncs.
+    pub(crate) dir: PathBuf,
+    /// How many of the old file's attributes the new one did not keep: its permissions, an
+    /// extended attribute, its ACL (Unix), or all of them when `ReplaceFileW` failed (Windows).
+    /// Never a failure of the write; the caller logs the total once.
+    pub(crate) lost: u32,
 }
 
 /// Writes what `fill` writes to a new temp file in `target`'s folder, named `.clauseo-<n>.tmp`
 /// (excluded from every checkpoint), and syncs it. Never touches `target` itself; the temp file
-/// is removed if anything fails.
+/// is removed if anything fails. A rewrite of a lawyer's file: the temp file takes the target's
+/// permissions and extended attributes (Unix, [`keep::copy`]), and the rename keeps the rest
+/// (Windows, `ReplaceFileW`). A missing target leaves the defaults.
 pub(crate) fn stage(
     target: &Path,
+    fill: &mut dyn FnMut(&mut File) -> Result<(), Error>,
+) -> Result<Staged, Error> {
+    stage_as(target, true, fill)
+}
+
+/// [`stage`], keeping the target's metadata when `keep`.
+fn stage_as(
+    target: &Path,
+    keep: bool,
     fill: &mut dyn FnMut(&mut File) -> Result<(), Error>,
 ) -> Result<Staged, Error> {
     let dir = target
         .parent()
         .ok_or_else(|| Error::io("replace", target, io::ErrorKind::InvalidInput.into()))?;
     let (temp, mut file) = new_temp(dir)?;
-    let staged = Staged {
+    let mut staged = Staged {
         temp: Some(temp),
         target: target.to_owned(),
+        keep,
+        lost: 0,
     };
     fill(&mut file)?;
+    #[cfg(unix)]
+    if keep && let Some(temp) = &staged.temp {
+        // Before the sync, which then covers the metadata too.
+        staged.lost = keep::copy(target, temp, &file);
+    }
     fsync::sync_file(&file).map_err(|err| Error::io("sync", target, err))?;
     Ok(staged)
 }
@@ -272,23 +313,58 @@ impl Staged {
     /// Renames the temp file over the target, then syncs the folder. Never truncates the
     /// target in place.
     pub(crate) fn commit(self) -> Result<(), Error> {
-        let dir = self.rename()?;
+        let Renamed { dir, .. } = self.rename()?;
         fsync::sync_dir(&dir).map_err(|err| Error::io("sync", &dir, err))
     }
 
     /// Renames the temp file over the target without syncing the folder; returns the folder,
     /// which the caller syncs (once for many renames in it) before relying on the rename.
-    pub(crate) fn rename(mut self) -> Result<PathBuf, Error> {
+    pub(crate) fn rename(mut self) -> Result<Renamed, Error> {
         let dir = self.target.parent().unwrap_or(&self.target).to_owned();
         let Some(temp) = self.temp.take() else {
-            return Ok(dir);
+            return Ok(Renamed {
+                dir,
+                lost: self.lost,
+            });
         };
-        if let Err(err) = rename(&temp, &self.target) {
-            self.temp = Some(temp);
-            return Err(Error::io("rename", &self.target, err));
+        let renamed = if self.keep {
+            replace_keeping(&temp, &self.target)
+        } else {
+            rename(&temp, &self.target).map(|()| 0)
+        };
+        match renamed {
+            Ok(lost) => Ok(Renamed {
+                dir,
+                lost: self.lost + lost,
+            }),
+            Err(err) => {
+                self.temp = Some(temp);
+                Err(Error::io("rename", &self.target, err))
+            }
         }
-        Ok(dir)
     }
+}
+
+/// Windows: `temp` in the place of `target` by `ReplaceFileW`, which keeps the target's
+/// attributes, ACL, streams and creation time; 0 lost. A missing target, or a failed
+/// `ReplaceFileW` (a share or drive without it), falls back to the plain rename, whose error is
+/// the one returned: after a failed call the target is either untouched or gone, and the rename
+/// suits both. A fallback over an existing target loses its metadata: 1 lost.
+#[cfg(windows)]
+fn replace_keeping(temp: &Path, target: &Path) -> io::Result<u32> {
+    match windows::replace_file(target, temp) {
+        Ok(()) => Ok(0),
+        Err(err) => {
+            rename(temp, target)?;
+            Ok(u32::from(err.kind() != io::ErrorKind::NotFound))
+        }
+    }
+}
+
+/// Elsewhere the plain rename: [`stage`] gave the temp file the target's metadata already.
+#[cfg(not(windows))]
+fn replace_keeping(temp: &Path, target: &Path) -> io::Result<u32> {
+    rename(temp, target).map(|()| 0)
 }
 
 impl Drop for Staged {
@@ -318,5 +394,7 @@ fn new_temp(dir: &Path) -> Result<(PathBuf, File), Error> {
     ))
 }
 
+#[cfg(test)]
+mod keep_tests;
 #[cfg(test)]
 mod tests;

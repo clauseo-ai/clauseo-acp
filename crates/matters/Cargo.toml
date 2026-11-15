@@ -32,6 +32,14 @@ dunce = { workspace = true }
 # The stale owner-file rule's `F_GETLK` (locks/stale.rs) is `fs` too.
 [target.'cfg(target_os = "macos")'.dependencies]
 nix = { workspace = true, features = ["fs", "mount"] }
+# `copyfile` with `COPYFILE_ACL`: a rewritten file keeps its ACL (write/macos.rs). Already in the
+# tree through nix.
+libc = { workspace = true }
+
+# The extended attributes a rewritten file keeps (write/keep.rs), through rustix's safe calls.
+# Already in the tree through gix and tempfile.
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+rustix = { workspace = true, features = ["fs"] }
 
 # The running Word processes and their starts, for the stale owner-file rule (locks/stale.rs).
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
