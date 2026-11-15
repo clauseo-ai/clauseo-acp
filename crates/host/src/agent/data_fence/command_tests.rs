@@ -5,8 +5,10 @@
 
 use serde_json::json;
 
-use super::ShellKind;
+use std::path::PathBuf;
+
 use super::tests::{check, check_as, layout, text};
+use super::{ShellKind, command};
 
 /// Requests that should be refused (`deny`) and ones that should pass (`pass`), each listed
 /// when it does not.
@@ -104,8 +106,8 @@ fn grep_told_to_recurse_by_directories_walks() {
 }
 
 /// PowerShell's short spellings of `-Recurse` walk as `-Recurse` does: `gci -r` from the data
-/// folder's parent is denied, from the matter folder it passes, and Bash's `ls -r` (reverse
-/// order) of the parent passes.
+/// folder's parent is denied, from the matter folder it passes (Bash's `ls -r`, reverse order,
+/// is [`the_tools_shell_decides_whether_ls_r_walks`]'s: with no tool name on Windows it walks).
 #[test]
 fn powershell_short_recurse_spellings_walk() {
     let dir = layout("cmd-ps-recurse");
@@ -124,7 +126,6 @@ fn powershell_short_recurse_spellings_walk() {
     ];
     let pass = [
         format!("gci -r {matter}"),
-        format!("ls -r {parent}"),
         format!("sort -r {matter}/sub/a.txt"),
         format!("gci -d {parent}"),
     ];
@@ -164,4 +165,89 @@ fn the_tools_shell_decides_whether_ls_r_walks() {
     }
     assert!(judge(ShellKind::Posix, format!("dir -R {parent}")));
     assert!(judge(ShellKind::Posix, format!("ls -R {parent}")));
+}
+
+/// A folder named with a leading en dash, em dash or horizontal bar (a junction `–j` to the
+/// data folder's parent) is a starting folder in Bash and PowerShell alike: only `-` marks an
+/// option.
+#[cfg(unix)]
+#[test]
+fn a_folder_named_with_a_dash_like_character_is_still_walked() {
+    let dir = layout("cmd-dash-name");
+    let root = dir.path();
+    let matter = root.join("matter");
+    for dash in ['\u{2013}', '\u{2014}', '\u{2015}'] {
+        crate::write::symlink(root, &matter.join(format!("{dash}j"))).unwrap();
+    }
+    let judge = |shell, line: &str| {
+        let input = json!({ "command": line });
+        check_as(root, &[], Some(&input), shell).touches_data()
+    };
+    for dash in ['\u{2013}', '\u{2014}', '\u{2015}'] {
+        for (shell, line) in [
+            (ShellKind::Posix, format!("grep -r token {dash}j")),
+            (ShellKind::Posix, format!("ls -R {dash}j")),
+            (ShellKind::PowerShell, format!("gci -r {dash}j")),
+            (
+                ShellKind::PowerShell,
+                format!("Remove-Item -Recurse {dash}j"),
+            ),
+            (ShellKind::Unknown, format!("grep -r token {dash}j")),
+        ] {
+            assert!(judge(shell, &line), "{shell:?} passed: {line}");
+        }
+    }
+    assert!(!judge(ShellKind::Posix, "grep -r token sub"));
+}
+
+/// A walker inside a PowerShell script block (`1 | % { gci -r <parent> }`, `ForEach-Object`,
+/// a joined `%{`) or a POSIX shell's `{ …; }` group is still read as the command.
+#[test]
+fn a_walker_in_a_script_block_is_read() {
+    let dir = layout("cmd-block");
+    let root = dir.path();
+    let parent = text(root);
+    let matter = text(&root.join("matter"));
+    let deny = [
+        format!("1 | % {{ gci -r {parent} }}"),
+        format!("1 | %{{gci -r {parent}}}"),
+        format!("1 | ForEach-Object -Process {{ Get-ChildItem -s {parent} }}"),
+        format!("foreach ($x in 1) {{ gci -Depth 2 {parent} }}"),
+        format!("{{ grep -r x {parent}; }}"),
+    ];
+    let pass = [
+        format!("1 | % {{ gci -r {matter} }}"),
+        format!("1 | % {{ gci {parent} }}"),
+    ];
+    judged(root, &deny, &pass);
+}
+
+/// With no tool name and Windows' rules, `ls`, `cp` and `rm` are read as PowerShell's, erring
+/// towards walking (`ls -r /p` walks `/p`); with POSIX rules and no tool name `ls -r` is a
+/// reverse listing, and a `bash -c` script is Bash's either way.
+#[test]
+fn with_no_tool_name_on_windows_ls_cp_rm_are_powershells() {
+    let walks = |line: &str, windows| {
+        command::recursive_roots(line, windows, ShellKind::Unknown).contains(&PathBuf::from("/p"))
+    };
+    for line in [
+        "ls -r /p",
+        "cp -s /p /q",
+        "rm -de 1 /p",
+        "rmdir -r /p",
+        "ls -Recurse:$false /p",
+    ] {
+        assert!(walks(line, true), "Windows: {line}");
+    }
+    for line in [
+        "ls -r /p",
+        "cp -s /p /q",
+        "rm -s /p",
+        "sort -r /p",
+        "tail -s 1 /p",
+    ] {
+        assert!(!walks(line, false), "POSIX: {line}");
+    }
+    assert!(!walks("sort -r /p", true));
+    assert!(!walks("bash -c 'ls -r /p'", true));
 }

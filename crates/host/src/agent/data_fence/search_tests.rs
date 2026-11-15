@@ -259,13 +259,21 @@ fn every_powershell_spelling_of_recurse_walks() {
                 ["r", "Recurse", "Depth", "s:$true"].map(|name| format!("{dash}{name}"))
             }),
     );
+    // A word after another dash stays a starting folder too (a folder may be named so).
+    let roots_of = |spelling: &str, path: &str| {
+        let mut want = vec![".", path];
+        if !spelling.starts_with('-') {
+            want.insert(1, spelling);
+        }
+        paths(&want)
+    };
     for spelling in &spellings {
         for command in ["gci", "Get-ChildItem", "GCI", "dir", "Remove-Item", "cpi"] {
             for windows in [true, false] {
                 let line = format!("{command} {spelling} /p");
                 assert_eq!(
                     recursive_roots(&line, windows),
-                    paths(&[".", "/p"]),
+                    roots_of(spelling, "/p"),
                     "{line}"
                 );
             }
@@ -273,7 +281,7 @@ fn every_powershell_spelling_of_recurse_walks() {
         let line = format!(r"Get-ChildItem {spelling} C:\p");
         assert_eq!(
             recursive_roots(&line, true),
-            paths(&[".", r"C:\p"]),
+            roots_of(spelling, r"C:\p"),
             "{line}"
         );
     }
@@ -307,9 +315,7 @@ fn powershell_short_spellings_apply_only_to_powershell() {
         "bash -c 'ls -r /p'",
         "ls -dep /p",
     ] {
-        for windows in [true, false] {
-            assert!(recursive_roots(line, windows).is_empty(), "{line}");
-        }
+        assert!(recursive_roots(line, false).is_empty(), "{line}");
     }
     for line in [
         r#"pwsh -NoProfile -Command "ls -r /p""#,
@@ -320,13 +326,13 @@ fn powershell_short_spellings_apply_only_to_powershell() {
         let roots = recursive_roots(line, false);
         assert!(roots.contains(&PathBuf::from("/p")), "{line}: {roots:?}");
     }
-    for line in [
-        "anything -recurse /p",
-        "Get-Item -Recurse:$false /p",
-        "x \u{2014}RECURSE /p",
-    ] {
+    for line in ["anything -recurse /p", "Get-Item -Recurse:$false /p"] {
         assert_eq!(recursive_roots(line, false), paths(&[".", "/p"]), "{line}");
     }
+    assert_eq!(
+        recursive_roots("x \u{2014}RECURSE /p", false),
+        paths(&[".", "\u{2014}RECURSE", "/p"])
+    );
 }
 
 /// Told the tool, the fence reads its line as that shell does: from PowerShell's tool `ls`,

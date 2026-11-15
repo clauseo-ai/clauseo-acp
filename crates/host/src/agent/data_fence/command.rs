@@ -122,16 +122,19 @@ const POWERSHELL_VERBS: [&str; 24] = [
 /// The folders the recursive commands of a command line walk ([`WALKERS`], or
 /// [`RECURSIVE_WITH_FLAG`] with its flag, or any command given PowerShell's `-Recurse` in full,
 /// or a PowerShell walker given one of its spellings, [`is_recursive`]): each of its operands
-/// (every word after the command that does not start with a dash, a leading `$HOME` made `~`;
-/// for a PowerShell walker the value of `-Path:x` and `-LiteralPath:x` too), and the working
-/// folder (`.`), where most start when given none.
+/// (every word after the command that does not start with `-`, a leading `$HOME` made `~`,
+/// a closing `}` of a script block cut; for a PowerShell walker the value of `-Path:x` and
+/// `-LiteralPath:x` too), and the working folder (`.`), where most start when given none. A
+/// word starting with an en dash, em dash or horizontal bar stays a folder in every shell: Bash
+/// takes it for a name (a folder or junction `–j`), and in PowerShell it only adds a root.
 ///
 /// Which shell reads each part of the line ([`segment_groups`]): `shell`, the tool that sent
 /// it, for the line itself; a script's shell for a script given to `pwsh` or `powershell`
 /// (PowerShell) or `sh` and its kin (POSIX); the line's for `eval`'s. Where the tool is not
 /// known ([`ShellKind::Unknown`]) a group of commands is PowerShell by its text: one of them is a
 /// cmdlet (`Get-…`, a [`POWERSHELL_VERBS`] verb and a dash), `iex` or a
-/// [`POWERSHELL_WALKERS`] name.
+/// [`POWERSHELL_WALKERS`] name; with Windows' rules (`windows`) it is PowerShell either way, as
+/// Codex's commands there are and so that `ls`, `cp` and `rm` err towards walking.
 pub(crate) fn recursive_roots(line: &str, windows: bool, shell: ShellKind) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for (group, group_shell) in segment_groups(line, windows, shell) {
@@ -149,7 +152,11 @@ pub(crate) fn recursive_roots(line: &str, windows: bool, shell: ShellKind) -> Ve
             for word in args {
                 if let Some(value) = walker.then(|| path_value(word)).flatten() {
                     out.push(PathBuf::from(home_as_tilde(value)));
-                } else if !starts_with_dash(word) {
+                } else if !word.starts_with('-') && word != "}" {
+                    let word = match word.strip_suffix('}') {
+                        Some(cut) if !word.contains('{') => cut,
+                        _ => word.as_str(),
+                    };
                     out.push(PathBuf::from(home_as_tilde(word)));
                 }
             }
@@ -195,7 +202,12 @@ fn segment_groups(
     } else {
         Escape::Backslash
     };
-    let mut groups = vec![(outer.clone(), shell)];
+    let line_shell = if shell == ShellKind::Unknown && windows {
+        ShellKind::PowerShell
+    } else {
+        shell
+    };
+    let mut groups = vec![(outer.clone(), line_shell)];
     for words in &outer {
         let from = command_at(words).and_then(|at| words.get(at..));
         if let Some((script, inner)) = from.and_then(|from| shell_script(from, escape)) {
@@ -204,7 +216,7 @@ fn segment_groups(
             let script_shell = match name.as_deref() {
                 Some("pwsh" | "powershell") => ShellKind::PowerShell,
                 Some("sh" | "bash" | "zsh" | "dash" | "ksh") => ShellKind::Posix,
-                _ => shell,
+                _ => line_shell,
             };
             let inner = split_line(&script, matches!(inner, Escape::Backtick));
             groups.push((inner, script_shell));
@@ -249,11 +261,6 @@ fn powershell_walker(name: &str, shell: ShellKind) -> bool {
 /// The dashes PowerShell takes before a parameter's name: `-`, en dash, em dash, horizontal bar.
 const DASHES: [char; 4] = ['-', '\u{2013}', '\u{2014}', '\u{2015}'];
 
-/// Whether `word` starts with one of PowerShell's [`DASHES`].
-fn starts_with_dash(word: &str) -> bool {
-    word.starts_with(DASHES)
-}
-
 /// A PowerShell parameter word's name, lowercased, without its dash ([`DASHES`]) and its
 /// attached `:value` (`-Recurse:$true` is `recurse`). None for a word without a dash.
 fn parameter_name(word: &str) -> Option<String> {
@@ -285,15 +292,21 @@ fn powershell_recurses(word: &str) -> bool {
     recurse || depth || name == "s"
 }
 
-/// Where a simple command's command word is: past assignments (`A=b`) and [`WRAPPERS`] with
-/// their options (and `timeout`'s duration).
+/// Words that run the script block after them (`1 | % { gci -r x }`), with their own options
+/// first, and the block's opening `{` (a POSIX shell's `{ grep -r x /p; }` too).
+const BLOCK_STARTS: [&str; 4] = ["%", "foreach-object", "foreach", "{"];
+
+/// Where a simple command's command word is: past assignments (`A=b`), [`WRAPPERS`] with
+/// their options (and `timeout`'s duration), and [`BLOCK_STARTS`] with theirs. A `{` joined to
+/// the command word (`{gci`, `%{gci`) is cut by [`command_name`].
 fn command_at(words: &[String]) -> Option<usize> {
     let mut at = 0;
     while let Some(word) = words.get(at) {
         let assignment = word
             .split_once('=')
             .is_some_and(|(name, _)| !name.is_empty() && !name.contains(['/', '\\', '-']));
-        let wrapper = WRAPPERS.contains(&word.as_str());
+        let block = BLOCK_STARTS.contains(&word.to_lowercase().as_str());
+        let wrapper = WRAPPERS.contains(&word.as_str()) || block;
         if !assignment && !wrapper {
             return Some(at);
         }
@@ -311,8 +324,10 @@ fn command_at(words: &[String]) -> Option<usize> {
     None
 }
 
-/// A command word's name: its last path part, lowercased, without `.exe`.
+/// A command word's name: its last path part, lowercased, without `.exe` and a script block's
+/// `{` or `%{` joined before it.
 fn command_name(word: &str, windows: bool) -> String {
+    let word = word.trim_start_matches(['%', '{']);
     let separator = |c: char| c == '/' || (windows && c == '\\');
     let name = word.rsplit(separator).next().unwrap_or(word).to_lowercase();
     name.strip_suffix(".exe").map(str::to_owned).unwrap_or(name)
