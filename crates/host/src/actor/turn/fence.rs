@@ -8,10 +8,15 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
-use clauseo_protocol::{HeaderEntry, MatterId, StreamId, ThreadId};
+use clauseo_protocol::{
+    HeaderEntry, MatterId, Notice, NoticeKind, NoticeLevel, StreamId, ThreadId,
+};
+use serde_json::Value;
 
 use super::super::Actor;
+use super::launch_checks::RunFolders;
 use crate::agent::matter_fence::{FenceKey, MatterFence, Other};
+use crate::log_file::Cause;
 
 /// The thread's header: the loaded stream's, else the one kept when it was unloaded.
 fn header(actor: &Actor, thread: ThreadId) -> Option<&HeaderEntry> {
@@ -74,4 +79,61 @@ pub(crate) fn matters_hash(actor: &Actor) -> u64 {
         }
     }
     hasher.finish()
+}
+
+/// The instructions part for the matters `run`'s conversation may read
+/// (`clauseo_profile::instructions::matter_reads_part`): each one's name and folder as stored.
+pub(crate) fn reads_part(run: &RunFolders) -> String {
+    let reads: Vec<(&str, &str)> = run
+        .data_deny
+        .matters
+        .others
+        .iter()
+        .filter(|other| other.invited)
+        .filter_map(|other| Some((other.name.as_str(), other.folder.to_str()?)))
+        .collect();
+    clauseo_profile::instructions::matter_reads_part(&reads)
+}
+
+/// `part` appended to the instructions at `text`, when it is a string and `part` is not empty.
+pub(crate) fn append_part(text: Option<&mut Value>, part: &str) {
+    if let Some(Value::String(text)) = text
+        && !part.is_empty()
+    {
+        text.push_str(part);
+    }
+}
+
+/// The words the unfenced notice falls back to, for a view that does not know its kind.
+const UNFENCED_TEXT: &str =
+    "Clauseo couldn't keep the AI's commands out of some other matters: there are too many.";
+
+/// Tells the lawyer the other matters a Claude launch on Windows could not fit into its shell
+/// rules (`agent::loads::profile::unfenced_matters`): one notice naming at most five of them,
+/// when that set differs from the one the thread was last told in this host run. Counts only in
+/// the log.
+pub(crate) fn tell_unfenced(actor: &mut Actor, thread: ThreadId, unfenced: Vec<MatterId>) {
+    let Some(state) = actor.threads.get_mut(&thread).map(|entry| &mut entry.turn) else {
+        return;
+    };
+    if state.unfenced_told == unfenced {
+        return;
+    }
+    state.unfenced_told.clone_from(&unfenced);
+    if unfenced.is_empty() {
+        return;
+    }
+    tracing::warn!(%thread, matters = unfenced.len(), "other matters left out of the shell rules");
+    let more = u32::try_from(unfenced.len().saturating_sub(5)).unwrap_or(u32::MAX);
+    let notice = Notice {
+        level: NoticeLevel::Warning,
+        text: UNFENCED_TEXT.to_owned(),
+        kind: Some(NoticeKind::MattersUnfenced {
+            matters: unfenced.into_iter().take(5).collect(),
+            more,
+        }),
+    };
+    if let Err(error) = super::updates::commit(actor, thread, [notice.into()], Vec::new()) {
+        tracing::warn!(%thread, error = %Cause(&error), "the unfenced notice was not logged");
+    }
 }
