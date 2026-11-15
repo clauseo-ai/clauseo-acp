@@ -8,7 +8,8 @@
 //! `AGENT_BROWSER_CDP` (no Chrome exists), writing the request, closing its stdin and relaying
 //! its whole lines until it exits; the next start of the running agent-browser needs no replayed
 //! handshake. The answer is agent-browser's own, so no copy of its tool list can drift from it;
-//! a `tools/list` reply only loses the tools the guard refuses (`filter::only_allowed_tools`).
+//! a `tools/list` reply only loses the tools and argument keys the guard refuses
+//! (`filter::advertised_tools`).
 //!
 //! It runs as the running one does: its own process group (Unix) or the guard's job (Windows),
 //! told to the reaper, and killed whole once it ends. It has [`ONESHOT_WAIT`] to exit; then the
@@ -43,9 +44,9 @@ enum Once {
 }
 
 /// Answers request `text` (its `method`, if it has one) with a one-shot agent-browser; a
-/// `tools/list` reply loses the tools the guard refuses (`filter::only_allowed_tools`). `false`
-/// when the guard ends: the
-/// one-shot exited with a code other than 0, or after `shutdown`, or wrote an oversize line, or
+/// `tools/list` reply loses the tools and argument keys the guard refuses
+/// (`filter::advertised_tools`). `false` when the guard ends: the one-shot exited with a code
+/// other than 0, or after `shutdown`, or wrote an oversize line, or
 /// could not start; the event that says so is sent. Once the relay has ended, request `id` gets
 /// an error and no one-shot starts.
 pub(crate) fn answer(
@@ -126,7 +127,7 @@ fn run_once(shared: &Arc<Shared>, text: &str, list: bool) -> io::Result<Once> {
             match read_line(&mut input, &mut line, CHILD_MAX_LINE_BYTES, Overflow::Stop) {
                 Ok(Line::Whole) => {
                     if list
-                        && let Some(only) = crate::browser_guard::filter::only_allowed_tools(&line)
+                        && let Some(only) = crate::browser_guard::filter::advertised_tools(&line)
                     {
                         line = only;
                     }

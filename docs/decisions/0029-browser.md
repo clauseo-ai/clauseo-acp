@@ -212,6 +212,25 @@ on Windows.
    `params.arguments` checked. Arguments that are absent or not an object pass: agent-browser
    refuses a non-object before running anything (`mcp.rs:3967-3975`). Keys match exactly, as
    agent-browser's do (`mcp.rs:2264-2308`).
+   - **`allowedDomains`, first:** in any spelling (`allowedDomains`, `allowed_domains`,
+     `allowed-domains`, `--allowed-domains`, any case), as a key at any depth or as a string at
+     any depth that starts with `-` (`extraArgs` included, `--allowed-domains=x` too), gets
+     "Clauseo already controls which sites the browser may open; open the page without
+     allowedDomains." agent-browser turns it into `--allowed-domains` (`mcp.rs:4167-4180`),
+     which it cannot apply to a Chrome it reached over CDP (`actions.rs:3797-3801`), and the
+     failure stuck on its session: every later call failed the same way, a plain `open`
+     included, `agent_browser_close` too (stage C, and the release binary run with
+     `AGENT_BROWSER_CDP` set). Should agent-browser still answer a call with that refusal, its
+     error field (`structuredContent.response.error`, or a JSON-RPC `error.message`) being
+     exactly "--allowed-domains is not supported with --cdp because WebRTC containment cannot be
+     installed before existing page scripts run", the guard stops Chrome and agent-browser as its
+     idle stop does, keeping the profile, before that reply goes out; the reply and each request
+     in flight get the same sentence with "Clauseo restarted the browser, so the next call starts
+     clean." (`relay/pumps.rs`). Text that only holds the sentence (a page's thrown error comes
+     back as "Evaluation error: ...") stops nothing, and the guard stops the browser this way
+     once per run: a later refusal gets "The browser is stuck on a site restriction; close it with
+     agent_browser_close, then open the page again without allowedDomains. ...", and a close's
+     reply stops the browser whatever it says.
    - **Refused keys:** `session`, `namespace`, `idleTimeout`, `restore`, `restoreSave`, `restoreCheckUrl`, `restoreCheckText`, `restoreCheckFn`, `caCert`, `useSystemCa`, `clearCaCert`, `headed`, `screenshotDir`, `path`.
      Present with any value, even `false` or `null`. `path` on any tool: `screenshot.path` writes
      any file the process can reach (`screenshot.rs:626-649`), past the agent's own write
@@ -222,8 +241,10 @@ on Windows.
      files, so a hostile page could get `file:`, `chrome:` or `data:` pages opened.
      `webgpu: true` adds `--enable-unsafe-webgpu` (`chrome.rs:483-486`). Any other value, even
      `null`, is refused by the key's name.
-   - **`timeoutMs`:** refused unless a whole number up to 300000. The MCP server runs one call at
-     a time (`mcp.rs:586`), so a huge value would stall it and the guard's shutdown.
+   - **`timeoutMs`, `waitTimeoutMs`, `ms`, `delayMs`, `readTimeoutMs`:** each refused unless a
+     whole number up to 300000 ("a waitTimeoutMs other than a whole number up to 300000"). The MCP
+     server runs one call at a time (`mcp.rs:586`), so a huge value would stall it and the
+     guard's shutdown.
    - **`selector` on `agent_browser_screenshot`:** refused when it holds `/` or `\`, or ends in
      `.png`, `.jpg`, `.jpeg` or `.webp` in any case: "Clauseo does not allow a file path as the
      screenshot selector in the browser." The selector is the screenshot command's one
@@ -250,8 +271,13 @@ on Windows.
      anything else (another flag, a `--flag=value`, a positional) is refused by the token's name
      before any `=`, and a non-array or a non-string entry as `extraArgs`. None of the allowed
      tokens takes a value, and agent-browser lets positional tokens through unexamined
-     (`mcp.rs:2679-2681`).
-   - **`extraArgs` tokens allowed:** `--json`, `--full`, `-i`, `--quiet`, `-q`, `--annotate`.
+     (`mcp.rs:2679-2681`). Each allowed token is a global flag, which the CLI reads wherever it
+     stands (`GLOBAL_BOOL_FLAGS`, `flags.rs:1298-1324`). `-i` and `--full` are not: on a
+     command that does not read them they become a positional (`screenshot <selector> -i` wrote a
+     file named `-i`, `commands.rs:906-929`; `read -i` fetched `https://-i`,
+     `commands.rs:2445-2452`), and the typed `interactive`, `full` and `fullPage` do their
+     work, as `annotate` does `--annotate`'s.
+   - **`extraArgs` tokens allowed:** `--json`, `--quiet`, `-q`.
    - **Any other string shaped like a flag:** a string at any depth of the arguments (except
      inside `extraArgs`) that is `-` or `--`, then a name of ASCII letters, digits and
      inner dashes that starts with a letter and does not end in a dash, then optionally `=` and
@@ -262,16 +288,60 @@ on Windows.
      `-Rohan` are refused; `-5`, `-10`, `-`, `--`, `---x`, `- item`, `--Select--` and `-Select-`
      (placeholder options on Indian government forms) pass. The rule is a shape, not a list of
      flag names, so a flag added upstream is refused too.
+   - **Last, the pass list** (`filter/keys.rs`): a key not on the tool's list gets "This option
+     is not supported in Clauseo." (fixed: it never repeats the key) and never reaches agent-browser, so nothing passes by being unknown
+     and a key added upstream is refused until it is read. Every tool takes `extraArgs` and
+     `timeoutMs` (checked above), and its own keys below, from agent-browser v0.41.1's schemas
+     (`mcp.rs:832-1058`, `2044-2170`). Left off besides the keys refused by name: `webmcp`
+     on `agent_browser_open` (an experimental Chrome feature for tools a page offers, which
+     Clauseo does not offer) and `all` on `agent_browser_close` (every session in the socket
+     folder; the guard runs one). A unit test reads agent-browser's own `tools/list` reply and
+     fails on a key of its schemas that is neither passed nor refused.
+     - `agent_browser_tools_profiles`: none.
+     - `agent_browser_open`: `url`, `webgpu`.
+     - `agent_browser_read`: `filter`, `outline`, `raw`, `readTimeoutMs`.
+     - `agent_browser_snapshot`: `compact`, `delta`, `depth`, `full`, `includeUrls`, `interactive`, `selector`.
+     - `agent_browser_back`: none.
+     - `agent_browser_forward`: none.
+     - `agent_browser_reload`: none.
+     - `agent_browser_click`: `selector`, `human`, `newTab`.
+     - `agent_browser_fill`: `selector`, `text`.
+     - `agent_browser_type`: `selector`, `text`, `clear`, `delayMs`.
+     - `agent_browser_press`: `key`.
+     - `agent_browser_check`: `selector`.
+     - `agent_browser_uncheck`: `selector`.
+     - `agent_browser_select`: `selector`, `values`.
+     - `agent_browser_scroll`: `selector`, `direction`, `amount`.
+     - `agent_browser_wait_ms`: `ms`.
+     - `agent_browser_wait_for_selector`: `selector`, `waitTimeoutMs`.
+     - `agent_browser_wait_for_text`: `text`, `waitTimeoutMs`.
+     - `agent_browser_wait_for_load`: `state`, `waitTimeoutMs`.
+     - `agent_browser_screenshot`: `selector`, `annotate`, `format`, `fullPage`, `ifChanged`, `quality`, `threshold`.
+     - `agent_browser_get_text`: `selector`.
+     - `agent_browser_get_url`: none.
+     - `agent_browser_get_title`: none.
+     - `agent_browser_tab_new`: `url`, `label`.
+     - `agent_browser_tab_list`: none.
+     - `agent_browser_tab_switch`: `tab`.
+     - `agent_browser_tab_close`: `tab`.
+     - `agent_browser_close`: none.
 6. A refused request is answered with its own id:
    `{"jsonrpc":"2.0","id":<same>,"result":{"content":[{"type":"text","text":"Clauseo does not allow <name> in the browser."}],"isError":true}}`
-   for rule 5, with the text of rule 4 in place of that sentence for a tool refusal, and it never
+   for rule 5, with the text of rule 4 in place of that sentence for a tool refusal (and the
+   `allowedDomains` and pass-list sentences above for theirs), and it never
    reaches the child. A refused notification (no `id`) is dropped unanswered.
-7. Everything else passes: other methods (`initialize`, `tools/list`, ...), calls to the core
-   tools that rule 5 does not refuse, and `allowedDomains`, which can only narrow.
+7. Everything else passes: other methods (`initialize`, `tools/list`, ...) and calls to the
+   core tools that rule 5 does not refuse.
 8. The reply to a `tools/list` (from the running agent-browser or the one-shot) loses every tool
-   off the allowlist (`only_allowed_tools`), so the agent is never offered `agent_browser_eval`.
+   off the allowlist, and each tool kept loses from its input schema every key off its pass
+   list and the keys refused unless `false` (`advertised_tools`, `filter/schema.rs`), so
+   neither agent is offered `agent_browser_eval`, `allowedDomains`, `session`, `path` or any
+   other refused key; `extraArgs` is advertised as an `enum` of the allowed tokens, each time
+   key above with its `maximum` of 300000, and `agent_browser_read` as "Read the open tab as
+   agent-readable text." (title "Read page"), in place of agent-browser's text offering a `url`. The guard takes no agent argument: Codex and
+   Claude get the same filter and the same list.
 
-A unit test in `filter.rs` fails when the three lists above differ from the code's.
+A unit test in `filter.rs` fails when the lists above differ from the code's.
 
 ### Chrome on the claimed port (the S27 launch fix)
 

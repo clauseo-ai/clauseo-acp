@@ -28,7 +28,7 @@ const IDLE_NOTE: &str = "stopped Chrome and agent-browser, keeping the profile";
 
 /// A guard in front of `daemon_stub`, with the idle stop at `idle_ms` when given.
 #[cfg(unix)]
-fn guard(scratch: &Scratch, idle_ms: Option<u64>) -> Guard {
+pub(crate) fn guard(scratch: &Scratch, idle_ms: Option<u64>) -> Guard {
     let mut command = guard_command(scratch, &example("daemon_stub"), &no_args());
     if let Some(ms) = idle_ms {
         command.env(IDLE_KNOB, ms.to_string());
@@ -38,14 +38,14 @@ fn guard(scratch: &Scratch, idle_ms: Option<u64>) -> Guard {
 
 /// The profile the guard's last Chrome was given (`chrome_stub` records it).
 #[cfg(unix)]
-fn profile_of(scratch: &Scratch, guard: &Guard) -> PathBuf {
+pub(crate) fn profile_of(scratch: &Scratch, guard: &Guard) -> PathBuf {
     let file = scratch.path().join(format!("profile-of-{}", guard.pid()));
     PathBuf::from(std::fs::read_to_string(file).unwrap())
 }
 
 /// A call `daemon_stub` never answers: in flight until the guard answers it.
 #[cfg(unix)]
-fn held_call(id: &str) -> Value {
+pub(crate) fn held_call(id: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
         "params": {"name": "agent_browser_wait_for_text", "arguments": {"text": "stub_hold"}}})
 }
@@ -130,7 +130,7 @@ fn the_idle_stop_ends_chrome_and_the_daemon_and_the_next_call_restarts() {
 }
 
 #[cfg(unix)]
-fn write_marker(profile: &std::path::Path) {
+pub(crate) fn write_marker(profile: &std::path::Path) {
     crate::write::write(profile.join("marker"), "kept").unwrap();
 }
 

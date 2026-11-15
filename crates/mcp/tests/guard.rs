@@ -53,6 +53,9 @@ mod sandbox;
 #[path = "guard/saved.rs"]
 mod saved;
 #[cfg(test)]
+#[path = "guard/stuck.rs"]
+mod stuck;
+#[cfg(test)]
 #[cfg(windows)]
 #[path = "guard/tree.rs"]
 mod tree;

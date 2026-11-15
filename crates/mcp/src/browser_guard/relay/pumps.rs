@@ -16,7 +16,7 @@ use super::super::Child;
 use super::super::chrome::STAGING;
 use super::super::chrome::sandbox::REFUSAL;
 use super::super::downloads::{self, OPEN_WAIT};
-use super::super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict};
+use super::super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict, domains};
 use super::super::parent::Parent;
 use super::super::port_file::{Expected, Status};
 use super::super::session::{self, Request, Shared, StartError};
@@ -225,10 +225,14 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
 /// Child to agent, for the start of agent-browser numbered `generation`: each whole line as
 /// read (a tool call's result with the download notes added, `downloads/held.rs` and
 /// `downloads/saved.rs`; an `open` that became a download answered as saved; the profiles
-/// without JavaScript eval, `filter::without_eval`; and the tool list without the tools the
-/// guard refuses, `filter::only_allowed_tools`), but the
+/// without JavaScript eval, `filter::without_eval`; and the tool list without the tools and
+/// argument keys the guard refuses, `filter::advertised_tools`), but the
 /// reply to the close request, and nothing once the guard has ended this start
-/// (it answered what was in flight itself). After each line, every one of the port checks.
+/// (it answered what was in flight itself). A tool call's reply that is agent-browser's
+/// refusal of `--allowed-domains` (`filter::domains`) stops this start first, as the idle stop
+/// does, and goes to the agent as [`domains::RESTARTED`]; only once per run, after which it
+/// goes as [`domains::STUCK`] and stops nothing. After each line, every one of the
+/// port checks.
 /// Returns the event that ends it: [`Event::ChildEnded`], [`Event::ChildOversize`] or
 /// [`Event::PortRefused`].
 pub(crate) fn pump_child(
@@ -258,12 +262,42 @@ pub(crate) fn pump_child(
             send(events, Event::CloseAnswered);
             continue;
         }
+        // Before the lock: a byte search, and a parse only when it finds the sentence.
+        let restricted = domains::domain_restricted(&line);
         let answered = {
             let mut state = lock(&shared.state);
             if state.generation != generation {
                 continue;
             }
-            let answered = reply_id(&line).and_then(|id| state.answered(&id));
+            let id = reply_id(&line);
+            let answered = id.as_ref().and_then(|id| state.answered(id));
+            // agent-browser refused `--allowed-domains` after all, and the restriction sticks on
+            // its session: the first time in the run, stopped here, under the lock, before the
+            // reply is out, so the agent's next call waits for the stop and then starts a clean
+            // session; any later time, the reply says how to get out: a close, whose reply goes
+            // on as read and stops the browser as every close's does (`relay.rs`).
+            if restricted
+                && answered.is_some_and(Request::is_call)
+                && let Some(id) = id
+            {
+                if state.domain_restarts > 0 {
+                    if answered != Some(Request::Close) {
+                        drop(state);
+                        note("agent-browser refused --allowed-domains again; it restarts once");
+                        let mut reply = domains::replacement(&id, domains::STUCK);
+                        reply.push(b'\n');
+                        drop(emit(&shared.out, &reply));
+                        continue;
+                    }
+                } else {
+                    state.domain_restarts += 1;
+                    drop(session::stop(&shared.launcher, &mut state));
+                    let in_flight = state.take_in_flight();
+                    drop(state);
+                    restart_after_restriction(shared, &id, &in_flight);
+                    continue;
+                }
+            }
             (answered, state.sent_count())
         };
         let (answered, sent) = answered;
@@ -276,7 +310,7 @@ pub(crate) fn pump_child(
                 downloads::open_reply(&line, &shared.saved, &staging, OPEN_WAIT)
             }
             Some(Request::Profiles) => filter::without_eval(&line),
-            Some(Request::List) => filter::only_allowed_tools(&line),
+            Some(Request::List) => filter::advertised_tools(&line),
             Some(Request::Call | Request::Close | Request::Other) | None => None,
         };
         if let Some(changed) = first {
@@ -306,6 +340,20 @@ pub(crate) fn pump_child(
             return Event::PortRefused(generation, reason);
         }
     }
+}
+
+/// After the stop for agent-browser's domain-restriction error: the reply to `id` becomes
+/// [`domains::RESTARTED`], and each request still in flight (`in_flight`, which the stopped
+/// agent-browser will never answer) gets that text as an error.
+fn restart_after_restriction(shared: &Shared, id: &Value, in_flight: &[Value]) {
+    note(
+        "agent-browser refused --allowed-domains on the guard's Chrome; stopped Chrome and \
+         agent-browser, keeping the profile, so the next browser call starts clean",
+    );
+    let mut reply = domains::replacement(id, domains::RESTARTED);
+    reply.push(b'\n');
+    drop(emit(&shared.out, &reply));
+    answer_all(&shared.out, in_flight, domains::RESTARTED);
 }
 
 /// The id of a reply (a message with an id and no method), if `line` is one. Read with the
