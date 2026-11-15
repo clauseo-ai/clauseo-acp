@@ -11,10 +11,10 @@
 //!   next (stetdoc wraps a paragraph past about 1,500 characters so), and the two are one line;
 //! - which lines are blocks: `<ref>` or `<ref> <content>`, where a `p` ref is a paragraph (a
 //!   table cell's included), a `t` ref opens a table (`{table cols=2}`) and an `r` ref a row
-//!   (`{row}`, `{row inserted #16 C}`; another row marker is noted as unknown); a line that starts with `{` is the view's own
-//!   (`{stet ...}`, `{summary: ...}`, `{warning ...}`, `{section 1 ends: ...}`,
-//!   `{position: ...}`), and everything after `{appendix}` (the notes and comments the page
-//!   cites) is skipped;
+//!   (`{row}`, `{row inserted #16 C}`; another row marker is noted as unknown); a line that
+//!   starts with `{` is the view's own (`{stet ...}`, `{summary: ...}`, `{warning ...}`,
+//!   `{section 1 ends: ...}`, `{position: ...}`), and everything after `{appendix}` (the
+//!   notes and comments the page cites) is skipped;
 //! - how tables nest: a table inside a cell is a `t` line inside the outer table, tagged `{+}`
 //!   when it is not the cell's first block, with its own rows and its own `{/table}`. Each
 //!   `{/table}` closes the innermost open table. A cell's paragraphs are paragraphs of the
@@ -29,8 +29,9 @@
 //! and the blackline says part of it is not shown ([`BlacklineNotice::PartNotShown`]). Only a
 //! view that is not a redline, or one with lines and none of them readable, gives no blackline
 //! ([`ViewFailure`]). A marker a newer stetdoc adds is left out with
-//! [`BlacklineNotice::MayDiffer`] (`line.rs`). stetdoc's `warnings` become notices by their codes ([`notice_of`]); the
-//! log gets the counts and codes, never a line's text or a warning's message.
+//! [`BlacklineNotice::MayDiffer`] (`line.rs`). stetdoc's `warnings` become notices by their
+//! codes ([`notice_of`]); the log gets the counts and codes, never a line's text or a warning's
+//! message.
 
 use std::fmt;
 
