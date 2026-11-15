@@ -302,8 +302,9 @@ else exit 2; fi\n";
 
 /// A stetdoc not seen yet holds nothing at the start: with 60 s for its background try, the
 /// build still returns within 10 s, stetdoc on (its folder on `PATH`, the stetdoc line) with no
-/// skill, which cannot have loaded before the test lets the stand-in answer. Once it answers,
-/// the background try brings the skill to the agent starts that follow.
+/// skill, which cannot have loaded before the test lets the stand-in answer. A launch meanwhile
+/// waits for the try (`ProfileHook::launch_wait`); once the stand-in answers, that launch and
+/// those that follow get the skill, and a launch after it does not wait.
 #[test]
 fn an_unseen_stetdoc_holds_nothing_at_the_start_and_gets_its_skill_in_the_background() {
     let long = Limits {
@@ -325,10 +326,27 @@ fn an_unseen_stetdoc_holds_nothing_at_the_start_and_gets_its_skill_in_the_backgr
     assert_eq!(written_skill(&hook), None);
     assert_eq!(hook.path_prepend(), folder_of(&program));
     assert_eq!(both_have_the_stetdoc_line(&hook), [true; 2]);
+    // A launch now waits for the try in flight, and gets the skill once the try answers.
+    let launch = hook
+        .launch_wait(&agent(CLAUDE))
+        .expect("a launch waits while the try is in flight");
     scratch.file("Clauseo.app/Contents/Helpers/stetdoc/go", b"");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _sent = tx.send(futures::executor::block_on(launch));
+    });
+    let writes = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the launch's wait ends with the try");
+    let token = write_skills(&writes[0]).unwrap();
+    assert!(token.root().join("stetdoc").join("SKILL.md").is_file());
     assert!(
-        eventually(&hook, |hook| written_skill(hook).is_some()),
-        "the background try brings the skill"
+        written_skill(&hook).is_some(),
+        "later launches get the skill too"
+    );
+    assert!(
+        hook.launch_wait(&agent(CLAUDE)).is_none(),
+        "no try in flight: a launch does not wait"
     );
 }
 

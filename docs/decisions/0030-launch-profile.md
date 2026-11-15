@@ -370,9 +370,14 @@ two dependencies, `profile` and `tracing`.
   20 s (not seen yet only), 20 s, then 30 s (`clauseo_profile::skills::stetdoc::start`,
   2026-11-11 and 2026-11-15). An answer is recorded in the marker. It goes into the profile
   the hook reads at each launch, so the agent starts that follow get it: the skill, or after a
-  real failure no stetdoc line and no skill. An agent already running keeps what it launched
-  with until it starts again (after 300 s idle, for one); nothing is shown to the lawyer. The `PATH` entry and the blackline's program
-  were given to the host at its start and stay until the app restarts.
+  real failure no stetdoc line and no skill. An agent launch while a try is in flight waits
+  for that try, on its launch-prep task, never the host thread, and at most 20 s from the
+  launch (`ProfileHook::launch_wait`, `LAUNCH_WAIT_LIMIT`, 2026-11-15): the turn stays
+  "starting" meanwhile, and the launch writes the skill the try brought, or on a timeout or a
+  failure what it had. A launch with no try in flight does not wait. An agent already running
+  keeps what it launched with until it starts again (after 300 s idle, for one); nothing is
+  shown to the lawyer. The `PATH` entry and the blackline's program were given to the host at
+  its start and stay until the app restarts.
   stetdoc 0.9.3 prints its skill's body with no frontmatter: Clauseo writes one, its
   description stetdoc's first `# ` heading, the body unchanged (2026-11-11).
   The rest of the build is file reads and rendering. The build finds the

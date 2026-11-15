@@ -6,8 +6,9 @@
 //! its skill (one 3 s try for a stetdoc seen to answer before, none for one not seen yet), and
 //! renders the skills. When the start has no answer from stetdoc, the background tries (20 s for
 //! one not seen yet, then 20 s, then 30 s) run on a thread of their own and put the profile they
-//! render in place for the next agent start (`profile/stetdoc.rs`). The hook's
-//! methods then only map what it holds, as the trait requires: they read no file, start nothing
+//! render in place for the next agent start (`profile/stetdoc.rs`); an agent launch while one
+//! is in flight waits for it (`ProfileHook::launch_wait`, at most 20 s). The hook's methods
+//! then only map what it holds, as the trait requires: they read no file, start nothing
 //! and keep nothing between calls.
 
 use std::collections::BTreeMap;
@@ -16,8 +17,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use clauseo_host::{HostConfig, McpServer, PackRequest, ProfileHook};
-use clauseo_profile::skills::stetdoc::start::{Limits, State};
+use clauseo_host::{HostConfig, LaunchWait, McpServer, PackRequest, ProfileHook};
+use clauseo_profile::skills::stetdoc::start::{Limits, State, Tries};
 use clauseo_profile::{
     BrowserSidecars, ClauseoProfile, PackWrite, PacksWritten, ProfileError, ProfilePaths,
     ProfileServer, SkillWrite, SkillsWritten,
@@ -64,6 +65,9 @@ impl fmt::Display for BuildError {
 pub(crate) struct DesktopProfile {
     /// Read at each hook call, so an agent start gets the profile as it is then.
     profile: Live,
+    /// stetdoc's background tries: an agent launch waits for the one in flight
+    /// (`ProfileHook::launch_wait`).
+    tries: Tries,
     prepend_stetdoc: bool,
     /// `<data>/tools`, holding the `agent-browser` command, when its copy is there
     /// ([`install_browser`]): the host's `ProfileHook::browser_tool`.
@@ -143,10 +147,12 @@ impl DesktopProfile {
         let with_browser = browser_tool.is_some();
         let base = ClauseoProfile::new(paths, None);
         let live = Live::new(stetdoc::render(base.clone(), &state, with_browser));
+        let tries = Tries::new();
         if let (Some(program), Some(start)) = (&program, &start)
             && !start.later.is_empty()
         {
             let recheck = stetdoc::Recheck {
+                held: tries.begin(),
                 program: program.clone(),
                 cached,
                 seen,
@@ -160,6 +166,7 @@ impl DesktopProfile {
         Ok(Self {
             stetdoc: program,
             pdf_tools,
+            tries,
             ..Self::over(live, prepend)
         }
         .with_browser_tool(browser_tool))
@@ -182,6 +189,7 @@ impl DesktopProfile {
     fn over(profile: Live, prepend_stetdoc: bool) -> Self {
         Self {
             profile,
+            tries: Tries::new(),
             prepend_stetdoc,
             browser_tool: None,
             stetdoc: None,
@@ -510,6 +518,15 @@ impl ProfileHook for DesktopProfile {
 
     fn launch_writes(&self, agent: &AgentId) -> Vec<SkillWrite> {
         self.profile().launch_writes(AgentKind::of(agent))
+    }
+
+    fn launch_wait(&self, agent: &AgentId) -> Option<LaunchWait> {
+        let end = self.tries.wait()?;
+        let (live, kind) = (self.profile.clone(), AgentKind::of(agent));
+        Some(Box::pin(async move {
+            end.await;
+            live.get().launch_writes(kind)
+        }))
     }
 
     fn pack_write(&self, agent: &AgentId, request: &PackRequest) -> Option<PackWrite> {

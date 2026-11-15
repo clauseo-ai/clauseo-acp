@@ -454,6 +454,9 @@ mod skill_packs;
 #[path = "host/skill_packs_cap.rs"]
 mod skill_packs_cap;
 #[cfg(test)]
+#[path = "host/skill_wait.rs"]
+mod skill_wait;
+#[cfg(test)]
 #[path = "host/steer.rs"]
 mod steer;
 #[cfg(test)]

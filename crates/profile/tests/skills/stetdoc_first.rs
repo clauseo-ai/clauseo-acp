@@ -16,8 +16,10 @@ use clauseo_process::{
     Error, LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions, Timer,
 };
 use clauseo_profile::skills::stetdoc::start::{
-    self, FIRST_LIMIT, LONG_LIMIT, Limits, RECHECK_LIMIT, Start, State, cached_skill, seen,
+    self, FIRST_LIMIT, LONG_LIMIT, Later, Limits, RECHECK_LIMIT, Start, State, Tries, TryEnd,
+    cached_skill, seen,
 };
+use futures::FutureExt as _;
 use futures::executor::block_on;
 
 use super::stetdoc_start::{skill_0_9_3, slow, stetdoc_in};
@@ -148,9 +150,14 @@ fn later_in(
     later: &[Duration],
 ) -> Option<State> {
     let seen = marker(root);
+    let later = Later {
+        limits: later,
+        held: Tries::new().begin(),
+    };
     block_on(start::recheck(
         launcher, clock, program, cached, &seen, now, later,
     ))
+    .state
 }
 
 /// The background tries' limits for a stetdoc not seen yet.
@@ -413,4 +420,52 @@ fn an_unseen_stetdoc_that_cannot_start_is_tried_three_times_then_absent() {
     assert_eq!(next, Some(State::Off));
     assert_eq!(launcher.runs(), 3);
     assert_eq!(clock.waits(), unseen_tries(APART));
+}
+
+/// Whether `end` has ended, polled once.
+#[cfg(test)]
+fn ended(end: &mut TryEnd) -> bool {
+    let waker = std::task::Waker::noop();
+    end.poll_unpin(&mut std::task::Context::from_waker(waker))
+        .is_ready()
+}
+
+/// The background tries are in flight for a launch to wait on: the first from before the
+/// thread runs it, the next from the moment the first moves on, and the last until the caller,
+/// having put the answer in place, drops it. A launch's wait on a try that moved on ends then.
+#[test]
+fn each_background_try_is_in_flight_until_it_moves_on_or_its_answer_is_in_place() {
+    let root = Scratch::new("first-in-flight");
+    let (program, cached) = stetdoc_in(&root, "stetdoc 0.9.3\n");
+    slow(&root);
+    let clock = Clock::new(|limit| limit == APART.unseen).releasing(APART.retry, &root);
+    let tries = Tries::new();
+    let later = Later {
+        limits: &unseen_tries(APART),
+        held: tries.begin(),
+    };
+    let mut first = tries.wait().expect("in flight before the thread runs it");
+    assert!(!ended(&mut first));
+    let seen = marker(&root);
+    let answered = block_on(start::recheck(
+        &Counted::new(),
+        &clock,
+        &program,
+        &cached,
+        &seen,
+        &State::On(None),
+        later,
+    ));
+    assert_eq!(answered.state, Some(State::On(Some(skill_0_9_3()))));
+    assert!(ended(&mut first), "the first try timed out and moved on");
+    let mut last = tries
+        .wait()
+        .expect("the answering try is in flight until dropped");
+    assert!(!ended(&mut last));
+    drop(answered.held);
+    assert!(ended(&mut last));
+    assert!(
+        tries.wait().is_none(),
+        "no try in flight: a launch does not wait"
+    );
 }

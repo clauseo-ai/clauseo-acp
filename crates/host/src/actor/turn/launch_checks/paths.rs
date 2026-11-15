@@ -1,12 +1,11 @@
 //! What a launch reads on the actor before its checks go to the launch-prep thread
 //! ([`super::prepare`]): the matter folder, the agent's home, the session's folders, its skill
-//! writes, its skill packs, its egress proxy and its browser and case-law claims. Reads only;
-//! nothing is made here.
+//! writes and their wait (`skill_wait.rs`), its skill packs, its egress proxy and its browser
+//! and case-law claims. Reads only; nothing is made here.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clauseo_profile::SkillWrite;
 use clauseo_protocol::{AgentKind, ThreadId};
 
 use super::RunFolders;
@@ -14,6 +13,7 @@ use super::browser::{BrowserPrep, browser_prep};
 use super::egress::{EgressPrep, egress_prep};
 use super::packs::{PackPrep, pack_prep};
 use super::relay::{self, CaseLawPrep};
+use super::skill_wait::{SkillsPrep, skills_prep};
 use crate::actor::Actor;
 use crate::agent::loads::tls_roots;
 use crate::agent::shell_path::{self, SessionPath};
@@ -33,8 +33,9 @@ pub(super) struct LaunchPaths {
     pub(super) claude: bool,
     /// The session's folders, not yet made.
     pub(super) run: RunFolders,
-    /// The profile's skill writes for the agent; none for an agent without a kind.
-    pub(super) skills: Vec<SkillWrite>,
+    /// The profile's skill writes for the agent and their wait; none for an agent without a
+    /// kind.
+    pub(super) skills: SkillsPrep,
     /// The launch's skill packs (`packs.rs`).
     pub(super) packs: PackPrep,
     /// The egress proxy, the browser claims and the case-law relay, made on the launch-prep
@@ -110,10 +111,7 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
     if kind == Some(AgentKind::Claude) && !cfg!(windows) {
         run.claude_tmp = crate::agent::claude_tmp::claude_tmp_dir();
     }
-    let skills = match kind {
-        Some(_) => actor.profile.launch_writes(&row.agent),
-        None => Vec::new(),
-    };
+    let skills = skills_prep(actor, &row.agent);
     let browser = browser_prep(actor, &row.agent, key);
     let claims = Claims {
         egress: egress_prep(actor, &row.agent, &browser),

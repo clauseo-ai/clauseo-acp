@@ -304,7 +304,7 @@ fn no_proxy_no_browser() {
 }
 
 /// A profile whose one skill is a small stetdoc stand-in, its folders under `root`.
-fn profile(root: &Path) -> ClauseoProfile {
+pub(crate) fn profile(root: &Path) -> ClauseoProfile {
     let paths = ProfilePaths::new(
         &Locations::under_root(root),
         root.join("app").join("clauseo"),
