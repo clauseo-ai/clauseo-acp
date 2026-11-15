@@ -147,14 +147,29 @@ function dottedRun(text: string): boolean {
   );
 }
 
+/** `word` without its closing full stop: the run of `.` and curly closing quotes it ends in, when that run holds a
+ * `.` ("आदेश." reads "आदेश", "the “order”." "the “order"). Nothing follows the stop in the word, so it joins no
+ * labels into a host (open/ask.rs's `without_closing_stop`). */
+function withoutClosingStop(word: string): string {
+  let end = word.length;
+  let stop = false;
+  while (end > 0 && ".\u2019\u201D".includes(word[end - 1]!)) {
+    end -= 1;
+    stop ||= word[end] === ".";
+  }
+  return stop ? word.slice(0, end) : word;
+}
+
 /**
  * Whether link text could hide a host from shownHosts (open/ask.rs's `could_hide_a_host`, the same rule): an
- * ignorable character or an image; or in a word holding a character outside ASCII, such a character next to an
- * ASCII letter, digit or `.`, as written or folded, or once folded a `.` between two letters or digits.
+ * ignorable character or an image; or in a word holding a character outside ASCII, its closing full stop left out
+ * (withoutClosingStop), such a character next to an ASCII letter, digit or `.`, as written or
+ * folded, or once folded a `.` between two letters or digits.
  */
 function couldHideAHost(text: string): boolean {
   if (HIDING.test(text) || Array.from(text).some(ignorable)) return true;
-  return text.split(/[\t\n\f\r ]/).some((word) => {
+  return text.split(/[\t\n\f\r ]/).some((whole) => {
+    const word = withoutClosingStop(whole);
     if (!Array.from(word).some((c) => c.charCodeAt(0) > 0x7f)) return false;
     const folded = fold(word);
     return touchesAscii(word) || touchesAscii(folded) || dottedRun(folded);

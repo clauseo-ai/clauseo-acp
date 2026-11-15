@@ -18,6 +18,8 @@ export const HI = {
   "Running a task.": "एक काम चल रहा है।",
   "Running {program} on {name}.": "{name} पर {program} चल रहा है।",
   "Running {program}.": "{program} चल रहा है।",
+  // a chained command, counted rather than named by its first program (UC-301; provisional)
+  "Running {n} tasks.": "{n} काम चल रहे हैं।",
   "Searching {site} for '{query}'.": "{site} पर '{query}' खोजा जा रहा है।",
   "Thinking it through.": "विचार किया जा रहा है।",
   "Working on it.": "काम चल रहा है।",

@@ -6,13 +6,38 @@ import { sharedStart } from "./composer-diff.ts";
 /** The longest text replaceAll puts in through the engine's editing. Chromium's insertText puts multi-line text in a
  * line at a time, each line an edit and two input events of its own, so its time grows with the square of the text: in
  * a bare textarea 150 KB took 0.7 s, 300 KB 2.7 s and 600 KB 13.6 s, where a paste of 6 MiB takes 0.5 s. Longer text,
- * such as a long question coming back after its turn stopped, is set in place, and that one step can't be undone. */
+ * such as a long question coming back after its turn stopped, is set in place, and that one step is the field's own to
+ * undo (placedUndo), since the engine's undo can't take back a value set in place. */
 export const UNDOABLE_MAX = 64 * 1024;
+
+/** A text over UNDOABLE_MAX set in place, per field: what the field held before and the text set. Cmd/Ctrl+Z puts the
+ * words before back while the field still holds that text, as the engine's undo would have (#978). One step, the
+ * last; any other replaceAll forgets it. */
+const placed = new WeakMap<HTMLTextAreaElement, { before: string; text: string }>();
+/** The fields placedUndo listens on. */
+const listening = new WeakSet<HTMLTextAreaElement>();
+
+/** Cmd/Ctrl+Z on a field whose last replaceAll set a long text in place, and that still holds it: the words before
+ * back, told to the field as the engine's undo tells it (an input event of historyUndo). */
+function placedUndo(e: KeyboardEvent) {
+  const a = e.currentTarget;
+  if (!(a instanceof HTMLTextAreaElement)) return;
+  const step = placed.get(a);
+  if (step === undefined || e.isComposing || e.shiftKey || e.altKey) return;
+  // either modifier, never both: on a Mac Ctrl+Z does nothing of its own in a field
+  if (e.metaKey === e.ctrlKey || e.key.toLowerCase() !== "z") return;
+  placed.delete(a);
+  if (a.value !== step.text) return;
+  e.preventDefault();
+  a.value = step.before;
+  a.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "historyUndo" }));
+}
 
 /** Replaces all the field holds with `text` through the engine's editing, so undo takes it back; where the engine
  * refuses (a disabled field, or no execCommand, as in happy-dom), or the text is over UNDOABLE_MAX, the value is set
- * in place. True when the engine did it, in which case its own input event has already told the field. */
+ * in place, a text over UNDOABLE_MAX with its own undo step (placedUndo). True when the engine did it, in which case its own input event has already told the field. */
 export function replaceAll(a: HTMLTextAreaElement, text: string, focus: boolean): boolean {
+  placed.delete(a);
   if (a.value === text) return true;
   const focused = a.ownerDocument.activeElement === a;
   if (
@@ -28,7 +53,15 @@ export function replaceAll(a: HTMLTextAreaElement, text: string, focus: boolean)
     const ok = text === "" ? doc.execCommand("delete") : doc.execCommand("insertText", false, text);
     if (ok && a.value === text) return true;
   }
+  const before = a.value;
   a.value = text;
+  if (text.length > UNDOABLE_MAX) {
+    placed.set(a, { before, text });
+    if (!listening.has(a)) {
+      listening.add(a);
+      a.addEventListener("keydown", placedUndo);
+    }
+  }
   return false;
 }
 

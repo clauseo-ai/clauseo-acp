@@ -272,6 +272,7 @@ export function doingOf(lang: Lang, entry: ToolCallEntry): string {
         const tool = toolNameOf(entry.title)?.as;
         return stepLive(lang, tool == null ? "Running a task." : TOOL_LIVE[tool]);
       }
+      if (t.count > 1) return stepLive(lang, "Running {n} tasks.", { n: String(t.count) });
       return t.paper === null
         ? stepLive(lang, "Running {program}.", { program: t.program })
         : stepLive(lang, "Running {program} on {name}.", { program: t.program, name: t.paper });

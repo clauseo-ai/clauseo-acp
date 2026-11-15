@@ -156,3 +156,22 @@ test("a task's permission prompt says what it would do in plain words, its comma
     'python3 read.py "papers/Legal notice.pdf"',
   );
 });
+
+test("a chained command's row and prompt count its tasks, not name the first; the fold shows it whole", async () => {
+  h = await mount();
+  const chained = `New-Item -ItemType Directory "${ROOT}/drafts"; Copy-Item notice.docx drafts`;
+  const raw = { inline: JSON.stringify({ command: ["pwsh", "-c", chained] }) };
+  h.deliver([reset([ASKED, python("pending", { raw_input: raw }), permission(8, 201)])]);
+  await h.settle();
+  const prompt = h.one("permission")!;
+  expect(prompt.querySelector(".perm-title bdi")?.textContent).toBe("Run 2 tasks.");
+  h.deliver([reset([ASKED, python("completed", { raw_input: raw }), ANSWER, step(30)])]);
+  await h.settle();
+  await h.click(h.one("step-group")?.querySelector("button"));
+  const row = h.all("tool-call")[0]!;
+  expect(row.querySelector(".step-row-text bdi")?.textContent).toBe("Ran 2 tasks.");
+  await h.click(row.querySelector("[data-testid=task-command-press]"));
+  expect(row.querySelector("[data-testid=task-command]")?.textContent).toBe(
+    'New-Item -ItemType Directory "drafts"; Copy-Item notice.docx drafts',
+  );
+});

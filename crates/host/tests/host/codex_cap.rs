@@ -397,3 +397,60 @@ fn the_undo_note_kept_by_a_refusal_goes_out_with_the_next_chatgpt_question() {
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
     host.shutdown();
 }
+
+/// `codex-resume`'s handshake (`session/resume` of `sess-1`, then `set_mode`), then one
+/// `session/prompt` that must start with the undo note: the agent of a host started again.
+fn resumed_expecting_the_note(dir: &Dir) -> Scenario {
+    let bundled = std::fs::read_to_string(format!("{SCENARIOS}/codex-resume.jsonl")).unwrap();
+    let cut = bundled
+        .find("{\"expect\":{\"method\":\"session/prompt\"")
+        .expect("codex-resume prompts");
+    let mut text = bundled[..cut].to_owned();
+    for step in [
+        json!({"expect": {"method": "session/prompt", "as": "p1", "params": {
+            "sessionId": "sess-1", "prompt": [{"type": "text", "text": BRIEF_NOTE},
+                {"type": "text", "text": NEXT}]}}}),
+        end_turn("p1"),
+    ] {
+        text.push_str(&step.to_string());
+        text.push('\n');
+    }
+    let file = dir.data().join("scenarios").join("undo-note-resumed.jsonl");
+    write::write(&file, text.as_bytes());
+    Scenario::Written(file)
+}
+
+/// The undo note a refusal kept survives a restart (#985): the refused turn's step, failed
+/// `prompt.too_long`, told the agent nothing, so the host started again reads the note from the
+/// log and the next question's `session/prompt` still starts with it.
+#[test]
+fn the_undo_note_kept_by_a_refusal_survives_a_restart() {
+    let dir = Dir::new("codex_cap_undo_note_restart", &[]);
+    let scenario = written(
+        &dir,
+        "undo-note-restart",
+        "codex-handshake.jsonl",
+        edits_the_brief(),
+    );
+    dir.set_agents(&[(CODEX, scenario)]);
+    let host = dir.start(0);
+    let files = [("brief.txt", "Clause 4 draft\n")];
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &files, CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    edit_and_undo(&host, &mut events, thread);
+    let (refused, _) = host.prompt(thread, &just_under());
+    assert_eq!(events.until_turn_ended(refused).stop, StopReason::Failed);
+    host.shutdown();
+
+    dir.set_agents(&[(CODEX, resumed_expecting_the_note(&dir))]);
+    let host = dir.start(1);
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let (next, _) = host.prompt(thread, NEXT);
+    let ended = events.until_turn_ended(next);
+    host.settle();
+    events.drain_ready();
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    host.shutdown();
+}

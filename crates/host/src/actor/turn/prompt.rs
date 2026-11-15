@@ -4,7 +4,7 @@
 //! The note is added here, after `SendPrompt` checked the question alone, so a Codex prompt is
 //! checked against Codex's cap again as it will be sent (`codex_cap::refuse`): over
 //! it, the turn ends failed with `prompt.too_long` before anything reaches the agent, the queue
-//! held, and the note kept for the next prompt.
+//! held, and the note kept for the next prompt, after a restart too (`ensure_note`).
 
 use clauseo_protocol::{ContentBlock, ErrorCode, StreamId, ThreadId, TurnId, ViewEntry};
 use futures::future::{AbortHandle, Abortable, join};
@@ -158,7 +158,9 @@ fn clear_note(actor: &mut Actor, thread: ThreadId) {
 }
 
 /// Reads the note from the loaded state the first time it is needed: the files undone since
-/// the last turn's step, with the restores held until then put among them by time.
+/// the last turn's step, with the restores held until then put among them by time. A step that
+/// failed `prompt.too_long` was refused before anything was sent (`codex_cap`), so it does not
+/// count as a turn: the note it kept is still due after a restart (#985).
 pub(super) fn ensure_note(actor: &mut Actor, thread: ThreadId) {
     if state(actor, thread).is_none_or(|state| state.note.is_some()) {
         return;
@@ -173,8 +175,11 @@ pub(super) fn ensure_note(actor: &mut Actor, thread: ThreadId) {
         None => undo_note::since_last_turn([], restores),
         Some(state) => {
             let inputs = state.entries().values().filter_map(|entry| {
-                if matches!(entry, ViewEntry::Step(_)) {
-                    Some(NoteInput::TurnStarted)
+                if let ViewEntry::Step(step) = entry {
+                    // A turn refused as it went out, over Codex's cap with the note in, told the
+                    // agent nothing: the note it kept stays, read again after a restart too.
+                    (step.failure != Some(ErrorCode::PromptTooLong))
+                        .then_some(NoteInput::TurnStarted)
                 } else if let ViewEntry::Marker(marker) = entry
                     && let clauseo_protocol::MarkerKind::StepUndone { restored, .. } = &marker.kind
                 {

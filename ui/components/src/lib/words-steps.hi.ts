@@ -50,6 +50,9 @@ export const HI = {
   "Tried to run a task.": "एक काम चलाने की कोशिश की गई।",
   "Tried to run {program} on {name}.": "{name} पर {program} चलाने की कोशिश की गई।",
   "Tried to run {program}.": "{program} चलाने की कोशिश की गई।",
+  // a chained command, counted rather than named by its first program (UC-300; provisional); done, it says the
+  // folded line's "Ran {n} tasks."
+  "Tried to run {n} tasks.": "{n} काम चलाने की कोशिश की गई।",
   "Tried to search {site} for '{query}'.": "{site} पर '{query}' खोजने की कोशिश की गई।",
   "Tried to think it through.": "विचार करने की कोशिश की गई।",
   "Tried one other thing.": "एक अन्य काम करने की कोशिश की गई।",

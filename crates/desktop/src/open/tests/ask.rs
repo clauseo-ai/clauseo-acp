@@ -450,6 +450,32 @@ fn plain_words_outside_ascii_open_and_mixed_ones_ask() {
     }
 }
 
+/// #1007's after-launch row: a word in Hindi ending in an ASCII `.`, or a curly quote before the
+/// `.`, opens unasked, since a stop that ends a word joins no host. A lookalike host still asks
+/// with one.
+#[test]
+fn a_closing_stop_after_hindi_or_a_curly_quote_opens() {
+    for shown in [
+        "आदेश देखें.",
+        "निर्णय.",
+        "the “judgment”.",
+        "“आदेश”.",
+        "the court’s order’.",
+    ] {
+        assert_eq!(confirms("https://example.com/", Some(shown)), 0, "{shown}");
+    }
+    for shown in [
+        "बैंक.com",
+        "bank“.com",
+        "ｂａｎｋ．ｃｏｍ.",
+        "bank\u{00B7}com.",
+        "Résumé.",
+        "naïve”.",
+    ] {
+        assert_eq!(confirms("https://evil.io/", Some(shown)), 1, "{shown}");
+    }
+}
+
 /// `Ask::Always` asks for a link that would open unasked, and can never remove a confirm.
 #[test]
 fn always_ask_adds_a_confirm() {

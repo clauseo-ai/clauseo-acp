@@ -60,6 +60,41 @@ test("a title is the command only when it reads as one; with nothing, a task as 
   expect(doneOf("en", task(null))).toBe("Ran a task.");
 });
 
+test("a chained command is counted, not named by its first program; its command kept whole for the fold", () => {
+  const ps = {
+    command: [
+      "powershell",
+      "-c",
+      "New-Item -ItemType Directory drafts; Copy-Item notice.docx drafts | Out-Null",
+    ],
+  };
+  const t = taskOf(task(ps));
+  expect(t).toMatchObject({ program: "New-Item", count: 3 });
+  expect(t.command).toBe(
+    "New-Item -ItemType Directory drafts; Copy-Item notice.docx drafts | Out-Null",
+  );
+  expect(doneOf("en", task(ps))).toBe("Ran 3 tasks.");
+  expect(doneOf("en", task(ps, { status: "failed" }))).toBe("Tried to run 3 tasks.");
+  expect(doingOf("en", task(ps, { status: "in_progress" }))).toBe("Running 3 tasks.");
+  expect(doneOf("hi", task(ps))).toBe("3 काम चलाए गए।");
+  expect(doneOf("hi", task(ps, { status: "failed" }))).toBe("3 काम चलाने की कोशिश की गई।");
+  expect(doingOf("hi", task(ps, { status: "in_progress" }))).toBe("3 काम चल रहे हैं।");
+  expect(doneOf("en", task({ command: "mkdir out && pandoc a.md -o out/a.docx" }))).toBe(
+    "Ran 2 tasks.",
+  );
+  // a cd, a quoted or escaped separator and 2>&1 chain nothing: one program, named as before
+  expect(doneOf("en", task({ command: "cd papers && wc -l notes.txt" }))).toBe(
+    "Ran wc on notes.txt.",
+  );
+  expect(doneOf("en", task({ command: `python3 -c "a = 1; print(a)" 2>&1` }))).toBe("Ran python3.");
+  expect(taskOf(task({ command: "find . -name '*.tmp' -exec rm {} \\;" })).count).toBe(1);
+  expect(taskOf(task({ command: "grep -c 'a|b' notes.txt || true" })).count).toBe(2);
+  // the agent's own words still lead
+  expect(doneOf("en", task({ ...ps, description: "Copy the notice into drafts" }))).toBe(
+    "Copy the notice into drafts.",
+  );
+});
+
 test("paths inside the matter read from the matter, through the home folder or a whole path", () => {
   expect(inMatter(`cat "${ROOT}/papers/a b.pdf" ~/${FOLDER}/x.txt`, FOLDER)).toBe(
     `cat "papers/a b.pdf" x.txt`,

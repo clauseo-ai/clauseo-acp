@@ -76,9 +76,11 @@ function Permission({
       : (task.own ??
         (task.program === null
           ? null
-          : task.paper === null
-            ? w.th("Run {program}.", { program: task.program })
-            : w.th("Run {program} on {name}.", { program: task.program, name: task.paper })));
+          : task.count > 1
+            ? w.th("Run {n} tasks.", { n: String(task.count) })
+            : task.paper === null
+              ? w.th("Run {program}.", { program: task.program })
+              : w.th("Run {program} on {name}.", { program: task.program, name: task.paper })));
   const command = plain !== null ? (task?.command ?? null) : null;
   const onAnswer = useCallback(
     (a: PermissionAnswer) => {
