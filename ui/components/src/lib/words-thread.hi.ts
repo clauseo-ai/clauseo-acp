@@ -182,11 +182,30 @@ export const HI = {
     "Clauseo ने एक काम रोक दिया: {name} ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
   "Clauseo stopped a step: the AI tried to go online by running a command.":
     "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
+  // Clauseo kept the agent out of another matter's files, and offers to let this conversation
+  // read them; {matter} is that matter's name, isolated; {name} as above, the AI where none is
+  // known (provisional, TN-13 to TN-15)
+  "Clauseo stopped a step: {name} tried to open {matter}'s files. That's another matter.":
+    "Clauseo ने एक काम रोक दिया: {name} ने {matter} की फ़ाइलें खोलने की कोशिश की। वह दूसरा मामला है।",
+  "Clauseo stopped a step: the AI tried to open {matter}'s files. That's another matter.":
+    "Clauseo ने एक काम रोक दिया: AI ने {matter} की फ़ाइलें खोलने की कोशिश की। वह दूसरा मामला है।",
+  "Let this conversation read {matter}'s files": "इस बातचीत को {matter} की फ़ाइलें पढ़ने दें",
+  // Claude on Windows: too many matters to keep out of its commands; {matters} lists them, with
+  // "{n} more" at the end (provisional, TN-16 and TN-17)
+  "Clauseo couldn't keep {name}'s commands out of these matters: {matters}.":
+    "Clauseo {name} की कमांड को इन मामलों से बाहर नहीं रख सका: {matters}।",
+  "Clauseo couldn't keep the AI's commands out of these matters: {matters}.":
+    "Clauseo AI की कमांड को इन मामलों से बाहर नहीं रख सका: {matters}।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",
   "Papers for this question": "इस प्रश्न के दस्तावेज़",
   "Remove {title}": "{title} हटाएँ",
+  // over the composer: the other matters this conversation may read, each a pill with its × (provisional, MR-02)
+  "Other matters this conversation can read": "दूसरे मामले जिन्हें यह बातचीत पढ़ सकती है",
+  "Can read {matter}'s files": "{matter} की फ़ाइलें पढ़ सकती है",
+  "Stop letting this conversation read {matter}'s files":
+    "इस बातचीत को {matter} की फ़ाइलें पढ़ने देना बंद करें",
   // the composer's `/` menu, the agent's commands, named for assistive technology
   Commands: "कमांड",
   // and said politely as the menu opens, for a screen reader
