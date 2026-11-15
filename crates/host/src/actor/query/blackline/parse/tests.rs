@@ -8,6 +8,7 @@ use clauseo_protocol::{
 
 use super::{Unreadable, ViewFailure, read_text, read_view};
 
+mod forms;
 mod partial;
 
 /// `stetdoc view --all --json` on the fixture's redline (`tests/fixtures/blackline/`).

@@ -103,8 +103,8 @@ pub(crate) enum Mark {
     Deleted,
 }
 
-/// What a table row's marker body (`row`, `row header`, `row inserted #11 R`) says: its
-/// change, and whether it holds a word this reader does not know (a newer stetdoc's).
+/// What a table row's marker body (`row`, `row header`, `row item=2`, `row inserted #11 R`)
+/// says: its change, and whether it holds a word this reader does not know (a newer stetdoc's).
 pub(super) fn row_of(body: &str) -> (Mark, bool) {
     let mut words = body.split(' ');
     if words.next() != Some("row") {
@@ -113,7 +113,11 @@ pub(super) fn row_of(body: &str) -> (Mark, bool) {
     let mut mark = Mark::None;
     for word in words {
         match word {
+            // `item=2`: a repeating section's row (a newer stetdoc's word), no change.
             "header" => {}
+            _ if word
+                .strip_prefix("item=")
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) => {}
             "inserted" => mark = Mark::Inserted,
             "deleted" => mark = Mark::Deleted,
             // The change's id and author come last.
@@ -357,7 +361,7 @@ struct Read {
 /// What an inline marker reads as, by its first word (the module doc lists them); words after
 /// the ones it needs are ignored. A first word this reader does not know reads as nothing and
 /// is noted in `seen`.
-fn inline_marker(
+pub(super) fn inline_marker(
     body: &str,
     seen: &mut Seen,
 ) -> Result<(String, Option<BlacklineObject>), &'static str> {
@@ -446,7 +450,7 @@ pub(super) fn marker(rest: &str) -> Result<(&str, &str), &'static str> {
 }
 
 /// The text of the quoted string `body` starts with, its escapes read, and what follows it.
-fn quoted(body: &str) -> Result<(String, &str), &'static str> {
+pub(super) fn quoted(body: &str) -> Result<(String, &str), &'static str> {
     let mut rest = body
         .strip_prefix('"')
         .ok_or("a marker without its quoted text")?;
@@ -474,7 +478,7 @@ fn quoted(body: &str) -> Result<(String, &str), &'static str> {
 }
 
 /// The character the escape `rest` starts with stands for, and what follows it.
-fn escape(rest: &str) -> Result<(char, &str), &'static str> {
+pub(super) fn escape(rest: &str) -> Result<(char, &str), &'static str> {
     let after = rest.get(1..).unwrap_or_default();
     let mut chars = after.chars();
     let c = match chars.next() {
