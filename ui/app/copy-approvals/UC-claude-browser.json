@@ -1,0 +1,13 @@
+{
+  "UC-510": {
+    "en": "Clauseo couldn't start Claude's safeguards for this matter, so Claude asks before running commands and has no browser in this conversation.",
+    "hi": "Clauseo इस मामले के लिए Claude के सुरक्षा उपाय शुरू नहीं कर सका, इसलिए Claude कमांड चलाने से पहले पूछता है और इस बातचीत में उसके पास ब्राउज़र नहीं है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "browser1 (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "browser1 (provisional; Rohan to approve on the copy page)",
+    "note": "Host notice NoticeKind::SandboxOff: Claude's sandbox fell back off on macOS or Linux (a * or ? in a path, a path that is not UTF-8, no short temp folder; agent::loads::sandbox::Off::holds_auto_back), so Claude runs in acceptEdits and asks before running commands, and the session gets no browser entry (actor/turn/profile_loads/claude.rs); once a thread for the host's run. One notice for both, per the orchestrator 2026-11-15. The host's own notice text is this English"
+  }
+}

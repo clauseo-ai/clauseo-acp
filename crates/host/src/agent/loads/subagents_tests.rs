@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{Map, Value, json};
 
 use super::browser::Switch;
-use super::profile::{ClaudeKeys, Folders, Login};
+use super::profile::{ClaudeBrowser, ClaudeKeys, Folders, Login};
 use super::subagents::helpers;
 use super::{McpControl, session_meta};
 use crate::browser::seed_sites::SEED_SITES;
@@ -46,7 +46,11 @@ fn keys(web_search: Switch, login: Login, browser: bool) -> ClaudeKeys<'static> 
         forced_ask: false,
         data: &NO_DENY,
         case_law: false,
-        browser,
+        browser: if browser {
+            ClaudeBrowser::Shell
+        } else {
+            ClaudeBrowser::None
+        },
         sandbox: None,
         matter: None,
         trusted_servers: &[],

@@ -109,7 +109,7 @@ fn claude_gets_allow_rules_unless_forced_ask() {
             forced_ask,
             data: &crate::agent::data_fence::LaunchDeny::default(),
             case_law,
-            browser: false,
+            browser: crate::agent::loads::profile::ClaudeBrowser::None,
             sandbox: None,
             matter: None,
             trusted_servers: trusted,

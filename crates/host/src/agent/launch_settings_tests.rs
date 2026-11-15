@@ -37,7 +37,7 @@ fn claude_meta(deny: &LaunchDeny, run: &Path, notes: &Path, matter: &Path) -> Ma
         forced_ask: false,
         data: deny,
         case_law: true,
-        browser: true,
+        browser: crate::agent::loads::profile::ClaudeBrowser::Shell,
         sandbox: None,
         matter: Some(matter),
         trusted_servers: &[],

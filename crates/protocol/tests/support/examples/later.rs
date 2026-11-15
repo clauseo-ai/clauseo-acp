@@ -361,6 +361,13 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 name: "judgment.pdf".to_owned(),
             }),
         },
+        Notice {
+            level: NoticeLevel::Info,
+            text: "Clauseo couldn't start Claude's safeguards for this matter, so Claude asks \
+                   before running commands and has no browser in this conversation."
+                .to_owned(),
+            kind: Some(NoticeKind::SandboxOff),
+        },
     ];
     notices.extend(
         [

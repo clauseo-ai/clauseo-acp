@@ -364,7 +364,7 @@ fn launch_deny_rules(
         forced_ask: false,
         data: deny,
         case_law: false,
-        browser: false,
+        browser: crate::agent::loads::profile::ClaudeBrowser::None,
         sandbox,
         matter: None,
         trusted_servers: &[],

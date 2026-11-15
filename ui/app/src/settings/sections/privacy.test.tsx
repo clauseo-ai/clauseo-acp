@@ -237,7 +237,7 @@ test("with the tools, each switch shows its value, and a flip sends set_tool_set
 });
 
 const SEARCH_NOTE = "Search the web and read pages.";
-const BROWSER_NOTE = "ChatGPT uses it. Runs on this computer.";
+const BROWSER_NOTE = "Claude and ChatGPT use it. Runs on this computer.";
 // the room popover's lock wording, one for both
 const LOCKED = "Managed by firm";
 // UEP-16, retired after #870: the browser runs without a website check, so this never shows
@@ -375,11 +375,11 @@ test.each([true, false])(
 );
 
 test.each(["mac", "linux"] as const)(
-  "on %s, the Browser switch says ChatGPT uses it, and that the browser runs on this computer",
+  "on %s, the Browser switch says Claude and ChatGPT use it, and that the browser runs on this computer",
   async (platform) => {
     const { el } = await mount({ tools: ON, platform });
     const row = switchNamed(el, "Browser")?.closest(".set-row");
-    expect(row?.textContent).toBe("BrowserChatGPT uses it. Runs on this computer.");
+    expect(row?.textContent).toBe("BrowserClaude and ChatGPT use it. Runs on this computer.");
     expect(row?.querySelector("label")?.textContent).toBe("Browser");
   },
 );

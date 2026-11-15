@@ -1,6 +1,6 @@
 //! The MCP servers the profile adds: `browser`, agent-browser's MCP server behind S27's guard
-//! (Codex only, [`browser_mcp`]), then `case-law`, the paid case-law connector through the
-//! host's relay (R24).
+//! (Codex and Claude off Windows, [`browser_mcp`]), then `case-law`, the paid case-law
+//! connector through the host's relay (R24).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -17,7 +17,8 @@ use crate::placeholders::{
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
 pub const BROWSER: &str = "browser";
 
-/// Whether an agent of `kind` gets the `browser` MCP entry ([`browser`]): Codex only.
+/// Whether an agent of `kind` gets the `browser` MCP entry ([`browser`]): Codex and Claude,
+/// on macOS and Linux.
 ///
 /// In a Codex turn the shell `agent-browser` cannot work: an approved command still runs under
 /// Seatbelt, because Clauseo's permission profile has deny entries, with no network, and
@@ -25,8 +26,11 @@ pub const BROWSER: &str = "browser";
 /// child instead, with no Seatbelt and no permission profile (codex 0.162.1
 /// `codex-mcp/src/rmcp_client.rs:1216-1238`, `rmcp-client/src/stdio_server_launcher.rs:262-288`),
 /// so the guard, which refuses every tool off agent-browser's `core` profile and every argument
-/// naming a file, is what holds the browser to its own folder there. Claude has no browser
-/// for launch ([`no_browser`]).
+/// naming a file, is what holds the browser to its own folder there. Claude Code starts a stdio
+/// MCP server itself too, outside the sandbox it puts Bash commands in, so the same guard holds
+/// Claude's browser; its sandboxed shell is refused loopback and the daemon's socket folder (the
+/// host's `agent::loads::sandbox`), and a Claude session whose sandbox falls back off gets no
+/// entry (the host's `profile_loads::claude`).
 ///
 /// Not on Windows ([`no_browser`]).
 pub fn browser_mcp(kind: Option<AgentKind>) -> bool {
@@ -35,7 +39,7 @@ pub fn browser_mcp(kind: Option<AgentKind>) -> bool {
 
 /// [`browser_mcp`] as it is on Windows when `windows` is true, and elsewhere when it is false.
 pub fn browser_mcp_on(kind: Option<AgentKind>, windows: bool) -> bool {
-    kind == Some(AgentKind::Codex) && !windows
+    matches!(kind, Some(AgentKind::Codex | AgentKind::Claude)) && !windows
 }
 
 /// Whether an agent of `kind` gets no browser at all, neither the entry nor the shell command,
@@ -48,20 +52,15 @@ pub fn browser_mcp_on(kind: Option<AgentKind>, windows: bool) -> bool {
 ///   agent-browser's daemon port and Chrome's debugging port are unauthenticated, so with the
 ///   entry a shell command Codex runs without a prompt could drive the unfenced guard's browser
 ///   past its filter. The way back is the elevated sandbox or an authenticated daemon.
-/// - Claude on every OS. On macOS and Linux, whether or not its sandbox ends up on, the shell
-///   command would
-///   have to run outside Claude Code's sandbox (`excludedCommands`), and Claude Code's exclusion
-///   check strips `env` and reworks `VAR=` prefixes before it matches, so
-///   `PATH=<a folder Claude writes> agent-browser …` would run Claude's own program unsandboxed,
-///   and quoting (`-q "upload"`, `e"v"al`, a tab) would run unsandboxed past the ask rules too.
-///   On Windows, where Claude Code has no sandbox, the shell command ran on deny rules alone,
+/// - Claude on Windows, for now (Claude's guarded entry there is a later change). Claude Code
+///   has no sandbox there; the shell command ran on deny rules alone,
 ///   and no deny list is complete: brace expansion (`{upload,}`), globs (`upl?ad`), a variable
 ///   (`S=eval; agent-browser $S`), `${IFS}`, `cmd //c`, `xargs`, `npx`, `.exe` and letter case
 ///   each spell a refused command no rule sees (security review round 4 of #1014).
 ///   The way back is Clauseo's own `agent-browser` shim, after launch.
 ///
-/// So no agent has a browser on Windows, and only Codex, through its guarded entry, on macOS and
-/// Linux.
+/// So no agent has a browser on Windows, and both have it, through the guarded entry only, on
+/// macOS and Linux. No agent gets the shell command anywhere ([`shell_browser`]).
 pub fn no_browser(kind: Option<AgentKind>) -> bool {
     no_browser_on(kind, cfg!(windows))
 }
@@ -69,23 +68,26 @@ pub fn no_browser(kind: Option<AgentKind>) -> bool {
 /// [`no_browser`] as it is on Windows when `windows` is true, and elsewhere when it is false.
 pub fn no_browser_on(kind: Option<AgentKind>, windows: bool) -> bool {
     match kind {
-        Some(AgentKind::Codex) => windows,
-        Some(AgentKind::Claude) => true,
+        Some(AgentKind::Codex | AgentKind::Claude) => windows,
         None => false,
     }
 }
 
 /// Whether any agent gets the `agent-browser` shell command on this OS: none, on any OS, for
-/// launch (Claude has no browser, [`no_browser`]; Codex has the `browser` entry instead,
-/// [`browser_mcp`]). The app copies the command into `<data>/tools`, and renders the browser's
-/// skill, only when it is true, so it copies nothing now.
+/// launch (both agents have the guarded `browser` entry instead, [`browser_mcp`], or no
+/// browser, [`no_browser`]). On macOS and Linux the command would have to run outside Claude
+/// Code's sandbox (`excludedCommands`), and Claude Code's exclusion check strips `env` and
+/// reworks `VAR=` prefixes before it matches, so `PATH=<a folder Claude writes> agent-browser …`
+/// would run Claude's own program unsandboxed; quoting (`-q "upload"`, `e"v"al`, a tab) would
+/// run it unsandboxed past the ask rules too. The app copies the command into `<data>/tools`,
+/// and renders the browser's skill, only when it is true, so it copies nothing now.
 pub fn shell_browser() -> bool {
     shell_browser_on(cfg!(windows))
 }
 
 /// [`shell_browser`] as it is on Windows when `windows` is true, and elsewhere when it is false.
-pub fn shell_browser_on(windows: bool) -> bool {
-    !no_browser_on(Some(AgentKind::Claude), windows)
+pub fn shell_browser_on(_windows: bool) -> bool {
+    false
 }
 
 /// The case-law connector's reserved server name (R24): a `mcp.servers.case-law` entry in the

@@ -349,7 +349,9 @@ pub(super) fn browser_prep(
         .mcp_servers(agent)
         .into_iter()
         .find(|server| server.name() == clauseo_profile::servers::BROWSER);
-    if let (None, Some(tools)) = (&entry, actor.profile.browser_tool()) {
+    // Claude never gets the shell tool (its browser is the guarded entry or none).
+    let claude = kind == Some(clauseo_protocol::AgentKind::Claude);
+    if let (None, Some(tools), false) = (&entry, actor.profile.browser_tool(), claude) {
         if !settings.tools.browser {
             return skip;
         }

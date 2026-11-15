@@ -6,8 +6,8 @@
 //! (not offered, the switch refused, or the agent moving off it at once) the session runs in
 //! `acceptEdits`, with one notice. An answer with no modes, one offering neither mode, and a
 //! refused fallback each fail the launch before any prompt. A matter whose folder Claude's
-//! sandbox cannot name runs in `acceptEdits` with no notice. Forced ask starts in `default`
-//! instead (`forced_ask.rs`).
+//! sandbox cannot name runs in `acceptEdits` with no auto notice, and the sandbox's one notice.
+//! Forced ask starts in `default` instead (`forced_ask.rs`).
 
 use clauseo_protocol::{
     AgentChoiceId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, NoticeKind, StopReason,
@@ -231,8 +231,9 @@ fn a_session_that_moves_to_bypass_or_dont_ask_goes_back_to_auto() {
 }
 
 /// A matter folder whose name holds a `*` cannot be named in Claude's sandbox, so the session
-/// gets none and runs in `acceptEdits` though `auto` is offered, with no notice (the account
-/// has auto); a move to `bypassPermissions` goes back to `acceptEdits`, not `auto`.
+/// gets none and runs in `acceptEdits` though `auto` is offered, with no auto notice (the
+/// account has auto) and one `SandboxOff` notice, which says Claude asks before commands (and
+/// has no browser); a move to `bypassPermissions` goes back to `acceptEdits`, not `auto`.
 #[cfg(unix)]
 #[test]
 fn a_matter_the_sandbox_cannot_name_runs_in_accept_edits() {
@@ -251,5 +252,13 @@ fn a_matter_the_sandbox_cannot_name_runs_in_accept_edits() {
         events.dump()
     );
     assert_eq!(auto_notices(&events), 0, "{}", events.dump());
+    let sandbox_off = events
+        .events()
+        .filter(|event| {
+            matches!(event, DomainEvent::Notice(notice)
+                if notice.kind == Some(NoticeKind::SandboxOff))
+        })
+        .count();
+    assert_eq!(sandbox_off, 1, "{}", events.dump());
     host.shutdown();
 }
