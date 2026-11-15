@@ -80,6 +80,7 @@ import { BACKSLASH_ENTRIES } from "./registry-backslash.tsx";
 import { PROGRAM_ENTRIES } from "./registry-program.tsx";
 import { FOLDER_CHOOSER } from "./registry-folder-chooser.tsx";
 import { TN } from "./registry-notices.tsx";
+import { MR } from "./registry-mr.tsx";
 import { UBL } from "./registry-blocklist.tsx";
 import { R23 } from "./registry-update.tsx";
 import { UC_CRASH } from "./registry-uc-crash.tsx";
@@ -569,6 +570,7 @@ export const REGISTRY: readonly Entry[] = [
   ...PROGRAM_ENTRIES,
   ...FOLDER_CHOOSER,
   ...TN,
+  ...MR,
   ...UBL,
   ...R23,
   ...UC_CRASH,

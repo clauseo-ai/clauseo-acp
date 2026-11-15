@@ -1,11 +1,19 @@
-// Host notices' copy review entries (TN-01 on), apart from registry.tsx to keep that file under the size limit: a
+// Host notices' copy review entries (TN-01 on; TN-13 to TN-17 the read invite's: another matter's files refused, with
+// the offer, and matters Claude's commands may reach), apart from registry.tsx to keep that file under the size limit: a
 // notice the host sends with its kind, in the room's thread, shown in the app's words (notice-words.ts). Each over the
 // thread the notice is in, as the host sends it.
 import type { ReactNode } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
+import { listOf } from "@clauseo/components/lib/words-core.ts";
 import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
+import { t } from "@clauseo/components/lib/words.ts";
 import { uuid, userMessage } from "../testing/stream-script.ts";
-import type { NoticeEntry, PackSkipReason, ViewEntry } from "../transport/protocol.ts";
+import type {
+  MatterSummary,
+  NoticeEntry,
+  PackSkipReason,
+  ViewEntry,
+} from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost } from "./hosts.ts";
 import { RoomOver } from "./states.tsx";
@@ -40,7 +48,16 @@ const packSkipped = (reason: PackSkipReason): ViewEntry =>
     kind: { skill_pack_not_loaded: { pack: "nda-kit", reason } },
   });
 
-/** The lawyer's question, then the host's notice, in a thread of claude-acp. */
+/** Other matters in the list, for the notices that name one. */
+const JOSHI: MatterSummary = { matter: uuid(2, 6), name: "Joshi v. Joshi", kind: "folder" };
+const KAPOOR: MatterSummary = {
+  matter: uuid(3, 6),
+  name: "Kapoor Exports v. State Bank of India",
+  kind: "folder",
+};
+
+/** The lawyer's question, then the host's notice, in a thread of claude-acp; the list holds Joshi's and Kapoor's
+ * matters beside the thread's own. */
 const thread =
   (notice: ViewEntry): (() => ReactNode) =>
   () => (
@@ -51,9 +68,19 @@ const thread =
             userMessage(5, 1, "What does clause nine of the lease say about notice?"),
             notice,
           ],
+          others: [JOSHI, KAPOOR],
         })
       }
     />
+  );
+
+/** A line rendered alone, as the room would draw it where it knows no agent name. */
+const alone =
+  (line: (lang: Lang) => string) =>
+  (lang: Lang): ReactNode => (
+    <main lang={lang} className="review-alone">
+      <p>{line(lang)}</p>
+    </main>
   );
 
 /** A host notice at `order`, with its kind and text as given. */
@@ -79,15 +106,16 @@ const BLOCKED_NOTICE = notice(6, {
   text: BLOCKED_ALONE,
   kind: "outside_matter_blocked",
 });
-const OFFLINE =
-  "Clauseo stopped a step: {name} tried to go online by running a command. {name} can use web search instead.";
-const OFFLINE_ALONE =
-  "Clauseo stopped a step: the AI tried to go online by running a command. It can use web search instead.";
-/** Clauseo declined, unasked, a Codex shell command that needed the internet (once a turn). */
-const OFFLINE_NOTICE = notice(6, {
+const OTHER =
+  "Clauseo stopped a step: {name} tried to open {matter}'s files. That's another matter.";
+const OTHER_ALONE =
+  "Clauseo stopped a step: the AI tried to open {matter}'s files. That's another matter.";
+const OFFER = "Let this conversation read {matter}'s files";
+/** Clauseo kept Claude out of Joshi's files: the line, and the offer to let this conversation read them. */
+const OTHER_NOTICE = notice(6, {
   level: "warning",
-  text: "Clauseo stopped a step: ChatGPT tried to go online by running a command. ChatGPT can use web search instead.",
-  kind: "shell_network_blocked",
+  text: "Clauseo kept the agent out of another matter's files.",
+  kind: { other_matter_refused: { matter: JOSHI.matter, name: JOSHI.name } },
 });
 const OFFLINE_NO_SEARCH = "Clauseo stopped a step: {name} tried to go online by running a command.";
 const OFFLINE_NO_SEARCH_ALONE =
@@ -98,6 +126,15 @@ const OFFLINE_NO_SEARCH_NOTICE = notice(6, {
   text: "Clauseo stopped a step: ChatGPT tried to go online by running a command.",
   kind: "shell_network_blocked_no_web_search",
 });
+const UNFENCED = "Clauseo couldn't keep {name}'s commands out of these matters: {matters}.";
+const UNFENCED_ALONE = "Clauseo couldn't keep the AI's commands out of these matters: {matters}.";
+/** Claude on Windows: two matters named, and three more. */
+const UNFENCED_NOTICE = notice(6, {
+  level: "warning",
+  text: "Clauseo couldn't keep the agent's commands out of some matters.",
+  kind: { matters_unfenced: { matters: [JOSHI.matter, KAPOOR.matter], more: 3 } },
+});
+const iso = (name: string) => `\u2068${name}\u2069`;
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
   kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
@@ -170,10 +207,42 @@ export const TN: Entry[] = [
     id: "TN-12",
     words: threadWords(BLOCKED_ALONE),
     screen: "room/thread",
-    render: (lang: Lang) => (
-      <main lang={lang} className="review-alone">
-        <p>{th(lang, BLOCKED_ALONE)}</p>
-      </main>
+    render: alone((lang) => th(lang, BLOCKED_ALONE)),
+  },
+  {
+    id: "TN-13",
+    words: threadWords(OTHER),
+    screen: "room/thread",
+    render: thread(OTHER_NOTICE),
+  },
+  {
+    // Where the room knows no agent name: rendered alone, as TN-12.
+    id: "TN-14",
+    words: threadWords(OTHER_ALONE),
+    screen: "room/thread",
+    render: alone((lang) => th(lang, OTHER_ALONE, { matter: iso(JOSHI.name) })),
+  },
+  {
+    // The offer under TN-13's line, while the matter is in the list and not yet allowed.
+    id: "TN-15",
+    words: threadWords(OFFER),
+    screen: "room/thread",
+    render: thread(OTHER_NOTICE),
+  },
+  {
+    id: "TN-16",
+    words: threadWords(UNFENCED),
+    screen: "room/thread",
+    render: thread(UNFENCED_NOTICE),
+  },
+  {
+    id: "TN-17",
+    words: threadWords(UNFENCED_ALONE),
+    screen: "room/thread",
+    render: alone((lang) =>
+      th(lang, UNFENCED_ALONE, {
+        matters: listOf(lang, [iso(JOSHI.name), iso(KAPOOR.name), t(lang, "{n} more", { n: 3 })]),
+      }),
     ),
   },
   {
