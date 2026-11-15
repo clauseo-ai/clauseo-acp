@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { approve, layout, parseArgs, summaryText, today } from "./copy-approve.mjs";
+import { approve, layout, parseArgs, parseIds, summaryText, today } from "./copy-approve.mjs";
 
 const DATE = "2026-11-16";
 const BY = `Rohan (review page, ${DATE})`;
@@ -98,6 +98,7 @@ describe("copy:approve", () => {
     expect(parseArgs(["--all", "--except", "A-01, B-02", "--change", "--date", DATE], "d")).toEqual(
       {
         all: true,
+        only: null,
         except: ["A-01", "B-02"],
         change: true,
         dir: "d",
@@ -105,9 +106,75 @@ describe("copy:approve", () => {
       },
     );
     expect(() => parseArgs([], "d")).toThrow(/--all/);
+    expect(parseArgs(["--only", "ids.txt"], "d")).toMatchObject({ all: false, only: "ids.txt" });
+    expect(() => parseArgs(["--all", "--only", "ids.txt"], "d")).toThrow(/not both/);
     expect(() => parseArgs(["--all", "--change"], "d")).toThrow(/--except/);
     expect(() => parseArgs(["--all", "--except"], "d")).toThrow(/needs a value/);
     expect(() => parseArgs(["--all", "--yes"], "d")).toThrow(/unknown/);
     expect(today(new Date(2026, 10, 5, 23, 30))).toBe("2026-11-05");
+  });
+
+  describe("--only", () => {
+    const text = (a) => JSON.parse(a);
+    const list = (...lines) =>
+      parseIds(`# main 0123456789 2026-11-16 09:00 UTC\n${lines.join("\n")}\n`);
+
+    test("reads ids, with or without their English, and skips comments and blank lines", () => {
+      expect(list("U1-02", "", "  # a comment", "UC-10 # trailing", 'UC-11\t"Again"')).toEqual([
+        { id: "U1-02", en: null },
+        { id: "UC-10", en: null },
+        { id: "UC-11", en: "Again" },
+      ]);
+      expect(() => list("UC-11\tAgain")).toThrow(/line 2/);
+      expect(() => list("UC 11")).toThrow(/line 2/);
+    });
+
+    test("approves only the listed ids; one added after the list was made stays provisional", () => {
+      // UC-10 was added after the page was built, so the list names only U1-02
+      const r = approve(files(), { only: list('U1-02\t"Close"'), date: DATE });
+      expect(r.approved).toEqual([["U1.json", "U1-02"]]);
+      expect(Object.keys(r.texts)).toEqual(["U1.json"]);
+      expect(text(r.texts["U1.json"])["U1-02"]).toMatchObject({
+        status: "approved",
+        at: DATE,
+        by: BY,
+      });
+      expect(r.texts["UC.json"]).toBeUndefined();
+    });
+
+    test("an unknown id fails, naming it, and nothing is written", () => {
+      expect(() => approve(files(), { only: list("U1-02", "U9-99"), date: DATE })).toThrow(
+        /U9-99: no copy-approvals file has it/,
+      );
+    });
+
+    test("an approved id with the listed words is already approved; with other words it fails", () => {
+      const r = approve(files(), { only: list('U1-01\t"Open"', "U1-02"), date: DATE });
+      expect(r.already).toEqual([["U1.json", "U1-01"]]);
+      expect(r.approved).toEqual([["U1.json", "U1-02"]]);
+      expect(summaryText(r, "dir")).toContain("already approved: U1-01");
+      expect(() => approve(files(), { only: list('U1-01\t"Open it"'), date: DATE })).toThrow(
+        /U1-01: the list has "Open it", but U1\.json has "Open" \(approved\)/,
+      );
+    });
+
+    test("a waiting id whose words changed since the list was made fails", () => {
+      expect(() => approve(files(), { only: list('U1-02\t"Close it"'), date: DATE })).toThrow(
+        /U1-02/,
+      );
+    });
+
+    test("combines with --except and --change, whose ids must be in the list", () => {
+      const only = list("U1-02", "UC-10");
+      const kept = approve(files(), { only, except: ["UC-10"], date: DATE });
+      expect(kept.approved).toEqual([["U1.json", "U1-02"]]);
+      expect(kept.kept).toEqual([["UC.json", "UC-10"]]);
+      const changed = approve(files(), { only, except: ["UC-10"], change: true, date: DATE });
+      expect(changed.changed).toEqual([["UC.json", "UC-10"]]);
+      // UC-11 waits, but isn't listed
+      expect(() => approve(files(), { only, except: ["UC-11"], date: DATE })).toThrow(
+        /in the --only list/,
+      );
+    });
   });
 });
