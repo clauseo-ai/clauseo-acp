@@ -4,10 +4,10 @@
 //! import's fit). So the cap counts the text as the lawyer reads it, after quoting and escaping,
 //! and what is allowed is never longer than what was shown.
 //!
-//! - A program is its command and arguments joined by spaces, each quoted as a shell reads it
-//!   back ([`program`]); a URL is shown whole ([`address`]); names are joined by `, `
-//!   ([`names`]). The writing out of invisible characters, backslashes and right-to-left text is
-//!   the host's one rule for approved text (`crate::shown`).
+//! - A program is its command and arguments joined by spaces, each in the app's own quoting
+//!   notation, not a shell's ([`program`]); a URL is shown whole ([`address`]); names are
+//!   joined by `, ` ([`names`]). The writing out of invisible characters, backslashes and
+//!   right-to-left text is the host's one rule for approved text (`crate::shown`).
 //! - Nothing here cuts text. An ask over the cap is refused (a save) or left out whole (an
 //!   import's server), never shortened.
 
@@ -24,8 +24,8 @@ pub const MAX_ASK_CHARS: usize = 2000;
 /// 50 typical names, and the dialog stays bounded.
 pub const MAX_LEFT_OUT_CHARS: usize = MAX_ASK_CHARS / 4;
 
-/// A local server's command and arguments, verbatim and whole, joined by spaces, each quoted as
-/// a shell would when it is empty or holds whitespace or a quote ([`quoted`]).
+/// A local server's command and arguments, verbatim and whole, joined by spaces, each in the
+/// app's own quoting notation (`crate::shown::argv`).
 #[must_use]
 pub fn program(program: &[String]) -> String {
     argv(program)

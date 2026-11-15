@@ -53,10 +53,10 @@ fn the_tables_are_unicode_17() {
 #[test]
 fn right_to_left_parts_are_isolated() {
     let shown = program(&["x".to_owned(), "א".to_owned(), "2".to_owned()]);
-    assert_eq!(shown, "x \u{2068}א\u{2069} 2");
+    assert_eq!(shown, "x \u{2066}\u{2067}א\u{2069}\u{2069} 2");
     assert_eq!(
         text("https://a.example/\u{5d0}"),
-        "\u{2068}https://a.example/א\u{2069}"
+        "\u{2066}https://a.example/\u{2067}א\u{2069}\u{2069}"
     );
     assert_eq!(program(&["a b".to_owned()]), "'a b'");
 }
@@ -65,7 +65,7 @@ fn right_to_left_parts_are_isolated() {
 fn read_back(shown: &str) -> Vec<String> {
     let text: Vec<char> = shown
         .chars()
-        .filter(|c| !matches!(c, '\u{2068}' | '\u{2069}'))
+        .filter(|c| !matches!(c, '\u{2066}'..='\u{2069}'))
         .collect();
     let mut parts = Vec::new();
     let mut at = 0;
@@ -128,7 +128,8 @@ fn unescape(raw: &[char]) -> String {
 
 const PIECES: &[char] = &[
     'a', 'n', 'u', '{', '}', '2', 'e', '\\', '\n', '\t', ' ', '\'', '"', '\u{202e}', '\u{2028}',
-    '\u{2068}', '\u{2069}', '\u{3164}', 'א', '٣', 'é',
+    '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{3164}', 'א', 'ב', '٣', 'ع', 'é', '1', '.',
+    '/', '\u{0301}', '\u{05b4}', '\u{e000}',
 ];
 
 fn parts() -> impl Strategy<Value = Vec<String>> {
@@ -172,4 +173,65 @@ fn free_text_is_written_out_on_one_line() {
         "Run it?\\u{2028}\\u{3164}rm"
     );
     assert_eq!(text("a\\nb\n"), "a\\\\nb\\n");
+}
+
+/// Hebrew or Arabic beside digits, punctuation and paths: the part is forced left to right and
+/// each right-to-left run is isolated on its own, so the digits stay where they run.
+#[test]
+fn right_to_left_runs_are_isolated_one_by_one_in_a_left_to_right_part() {
+    const LRI: char = '\u{2066}';
+    const RLI: char = '\u{2067}';
+    const PDI: char = '\u{2069}';
+    assert_eq!(text("cp א 1 2"), format!("{LRI}cp {RLI}א{PDI} 1 2{PDI}"));
+    assert_eq!(
+        program(&["sh".to_owned(), "-c".to_owned(), "cp א 1 2".to_owned()]),
+        format!("sh -c {LRI}'cp {RLI}א{PDI} 1 2'{PDI}")
+    );
+    // Two words, a path between: each word its own run, the path left to right between them.
+    assert_eq!(
+        text("שלום /tmp/a.txt עולם"),
+        format!("{LRI}{RLI}שלום{PDI} /tmp/a.txt {RLI}עולם{PDI}{PDI}")
+    );
+    // Arabic-Indic digits are isolated as the letters are; European digits stay outside.
+    assert_eq!(
+        text("ملف ٣ (2).pdf"),
+        format!("{LRI}{RLI}ملف{PDI} {RLI}٣{PDI} (2).pdf{PDI}")
+    );
+    // A mark on a Hebrew letter stays inside its run.
+    assert_eq!(
+        text("א\u{05b4}1"),
+        format!("{LRI}{RLI}א\u{05b4}{PDI}1{PDI}")
+    );
+}
+
+/// Private-use and unassigned characters draw as escapes, never as an icon or as whatever a later
+/// Unicode makes them.
+#[test]
+fn private_use_and_unassigned_characters_are_written_out() {
+    for c in [
+        '\u{f8ff}',
+        '\u{e000}',
+        '\u{100000}',
+        '\u{10fffd}',
+        '\u{0378}',
+        '\u{fffe}',
+    ] {
+        assert_eq!(text(&format!("a{c}b")), format!("a{}b", c.escape_default()));
+    }
+}
+
+/// At most three combining marks draw on one letter; the rest are written out, so a stack can't
+/// cover the line above.
+#[test]
+fn combining_marks_past_the_third_are_written_out() {
+    assert_eq!(text("e\u{301}\u{302}\u{303}"), "e\u{301}\u{302}\u{303}");
+    let stacked = format!("a{}", "\u{369}".repeat(60));
+    let shown = text(&stacked);
+    assert!(
+        shown.starts_with("a\u{369}\u{369}\u{369}\\u{369}"),
+        "{shown}"
+    );
+    assert_eq!(shown.matches('\u{369}').count(), 3);
+    // A new letter starts a new count.
+    assert_eq!(text("a\u{301}b\u{301}"), "a\u{301}b\u{301}");
 }
