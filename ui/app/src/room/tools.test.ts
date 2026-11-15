@@ -159,7 +159,9 @@ const NO_CONNECTION =
 const NO_LIST =
   "Clauseo's unsafe-site list didn't load, so it won't use a browser for now. " +
   "It tries again when a new conversation starts.";
-const INSTALL_MAC = "Install Google Chrome, then start a new conversation.";
+const INSTALL_MAC =
+  "Clauseo didn't find Google Chrome, Microsoft Edge, Brave or Chromium on this computer. " +
+  "Install one, then start a new conversation.";
 const INSTALL_WINDOWS = "Install Google Chrome or Microsoft Edge, then start a new conversation.";
 
 const POLICY_BOTH =
@@ -226,6 +228,8 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
       settings: tool.state === "off",
       // without the app feed, no Try again
       recheck: null,
+      // with no browser on a Mac, Download Chrome
+      download: tool.state === "browser_not_installed" ? "Download Chrome" : null,
     });
   }
 });
@@ -246,15 +250,19 @@ test("no browser on the computer: what to install, by the OS, and that a new con
     note: INSTALL_MAC,
     settings: false,
     recheck: null,
+    download: "Download Chrome",
   });
+  // Windows has Edge: no Download Chrome
   expect(words(missing, { platform: "windows" })).toMatchObject({
     reason: "Install Chrome or Edge",
     note: INSTALL_WINDOWS,
+    download: null,
   });
   // Linux is for development only: Chrome, as on a Mac
   expect(words(missing, { platform: "linux" })).toMatchObject({
     reason: "Install Chrome",
     note: INSTALL_MAC,
+    download: "Download Chrome",
   });
   // a policy read has nothing to say to it
   expect(words(missing, { policy: { state: "clear" } }).reason).toBe("Install Chrome");
@@ -399,9 +407,12 @@ test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand n
   expect(toolsLabel("hi", "windows", [{ tool: "browser", state: "browser_not_installed" }])).toBe(
     "ब्राउज़र: बंद, Chrome या Edge इंस्टॉल करें।",
   );
-  expect(toolRow("hi", { tool: "browser", state: "browser_not_installed" }, ROOM).note).toBe(
-    "Google Chrome इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
-  );
+  expect(toolRow("hi", { tool: "browser", state: "browser_not_installed" }, ROOM)).toMatchObject({
+    note:
+      "Clauseo को इस कंप्यूटर पर Google Chrome, Microsoft Edge, Brave या Chromium नहीं मिला। " +
+      "इनमें से कोई एक इंस्टॉल करें, फिर एक नई बातचीत शुरू करें।",
+    download: "Chrome डाउनलोड करें",
+  });
   // provisional Hindi, until the app thread writes it
   expect(toolsLabel("hi", "mac", [{ tool: "browser", state: "browser_blocked_by_policy" }])).toBe(
     "ब्राउज़र: बंद, ब्राउज़र की एक नीति ने रोका है।",

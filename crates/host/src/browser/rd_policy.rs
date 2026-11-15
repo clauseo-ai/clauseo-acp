@@ -1,9 +1,9 @@
-//! Whether the firm's own browser policy lets Clauseo's browser start: Chrome's, Edge's and
-//! Chromium's `RemoteDebuggingAllowed`, read by `clauseo_settings::chromium_policy`. Every
-//! browser Clauseo drives needs remote debugging, and Chrome for Testing and
-//! chrome-headless-shell do not read the firm's policy themselves, so the launch prep asks
-//! [`RdPolicy::check`] before it picks any browser (`launch_checks/browser.rs`), at every
-//! launch: nothing is kept between launches.
+//! Whether the firm's own browser policy lets Clauseo's browser start: Chrome's, Edge's,
+//! Chromium's and (on macOS) Brave's `RemoteDebuggingAllowed`, read by
+//! `clauseo_settings::chromium_policy`. Every browser Clauseo drives needs remote debugging, and
+//! Chrome for Testing and chrome-headless-shell do not read the firm's policy themselves, so the
+//! launch prep asks [`RdPolicy::check`] before it picks any browser (`launch_checks/browser.rs`),
+//! at every launch: nothing is kept between launches.
 //!
 //! A false anywhere starts none (`BrowserBlockedByPolicy`). Otherwise a place that could not be
 //! read starts none either (`BrowserPolicyUnreadable`): nothing is known there, and the lawyer is
@@ -283,7 +283,7 @@ fn rule_among(
                 match browser {
                     Browser::Edge => edge_off = true,
                     Browser::Chrome => chrome_off = true,
-                    Browser::Chromium => {}
+                    Browser::Chromium | Browser::Brave => {}
                 }
             }
             Some(blocked) => {

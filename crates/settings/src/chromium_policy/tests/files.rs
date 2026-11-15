@@ -23,7 +23,7 @@ pub(super) fn plist(value: Option<plist::Value>) -> Vec<u8> {
     bytes
 }
 
-const MAC_FILES: [(&str, Browser, Scope); 6] = [
+const MAC_FILES: [(&str, Browser, Scope); 8] = [
     (
         "/Library/Managed Preferences/com.google.Chrome.plist",
         Browser::Chrome,
@@ -40,6 +40,11 @@ const MAC_FILES: [(&str, Browser, Scope); 6] = [
         Scope::Machine,
     ),
     (
+        "/Library/Managed Preferences/com.brave.Browser.plist",
+        Browser::Brave,
+        Scope::Machine,
+    ),
+    (
         "/Library/Managed Preferences/lawyer/com.google.Chrome.plist",
         Browser::Chrome,
         Scope::User,
@@ -52,6 +57,11 @@ const MAC_FILES: [(&str, Browser, Scope); 6] = [
     (
         "/Library/Managed Preferences/lawyer/org.chromium.Chromium.plist",
         Browser::Chromium,
+        Scope::User,
+    ),
+    (
+        "/Library/Managed Preferences/lawyer/com.brave.Browser.plist",
+        Browser::Brave,
         Scope::User,
     ),
 ];
@@ -73,7 +83,7 @@ fn each_managed_preferences_file_says_nothing_false_true_bad_or_unreadable() {
         for (bytes, expected) in &cases {
             let tree = FakeTree::default().with(path, bytes.as_deref().map_err(|kind| *kind));
             let read = read_managed_prefs(&tree, Ok(Some("lawyer".to_owned())));
-            assert_eq!(read.found.len(), 6);
+            assert_eq!(read.found.len(), 8);
             assert_eq!(kind(&at(&read, browser, scope)), *expected, "{path}");
             assert!(others_absent(&read, browser, scope), "{path}");
             let off = (*expected == Kind::Disallowed).then_some(place(browser, scope));
@@ -96,7 +106,12 @@ fn without_a_login_user_the_users_files_are_read_errors() {
             read.turned_off_by(),
             Some(place(Browser::Edge, Scope::Machine))
         );
-        for browser in [Browser::Chrome, Browser::Edge, Browser::Chromium] {
+        for browser in [
+            Browser::Chrome,
+            Browser::Edge,
+            Browser::Chromium,
+            Browser::Brave,
+        ] {
             assert_eq!(
                 kind(&at(&read, browser, Scope::User)),
                 Kind::Unreadable,

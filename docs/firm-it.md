@@ -884,9 +884,11 @@ pull request that makes Clauseo act on it. Same formats as above ([decision
 ### Browser automation and RemoteDebuggingAllowed
 
 Clauseo's browser is agent-browser, a command the agents run, which drives the computer's installed
-Google Chrome (on Windows, Microsoft Edge when no Chrome is installed) through Chrome's remote
-debugging, in a fresh profile for each session. With neither installed, the agents get no browser
-and the app tells the lawyer what to install; a browser installed later reaches the agents in the
+Google Chrome through Chrome's remote debugging, in a fresh profile for each session. When no Chrome
+is installed it takes another Chromium browser: on a Mac, Microsoft Edge, Brave, then Chromium (in
+`/Applications`, then `~/Applications`; not Arc, which agent-browser can't drive); on Windows,
+Microsoft Edge. With none installed, the agents get no browser and the app tells the lawyer what to
+install, with a button to Chrome's download page; a browser installed later reaches the agents in the
 next new conversation, with no need to reopen Clauseo. For launch, which conversations have it
 depends on the agent: on a Mac, Codex conversations have the browser and Claude conversations don't
 (they read web pages with Claude's web fetch tool). On Windows, Clauseo doesn't run a browser at
@@ -895,8 +897,8 @@ update. The browser doesn't go through Clauseo's egress proxy, so `network.allow
 unsafe-site list don't apply to it; Chrome or Edge uses its own network settings.
 
 Chrome's, Edge's and Chromium's `RemoteDebuggingAllowed` policy turns remote debugging off.
-Clauseo checks your Chrome, Edge and Chromium policy itself, before it starts any browser,
-whichever browser it would pick.
+Clauseo checks your Chrome, Edge and Chromium policy itself (and Brave's, on a Mac), before it
+starts any browser, whichever browser it would pick.
 
 The agent can't click or type past a certificate warning in Clauseo's browser: Clauseo's own
 profile for it turns the warning's "Proceed" off. A managed `SSLErrorOverrideAllowed` (set to
@@ -906,15 +908,16 @@ allow) or `SSLErrorOverrideAllowedForOrigins` policy outranks that profile setti
 `/etc/opt/chrome/policies/managed` on Linux.
 
 **What Clauseo reads.** The value `RemoteDebuggingAllowed`, for both the computer and the user,
-in Chrome's, Edge's and Chromium's policy locations. It takes the same values Chrome does:
+in Chrome's, Edge's and Chromium's policy locations, and on a Mac Brave's. It takes the same values
+Chrome does:
 
 - **Windows:** `SOFTWARE\Policies\Google\Chrome`, `SOFTWARE\Policies\Microsoft\Edge` and
   `SOFTWARE\Policies\Chromium`, each under both `HKLM` and `HKCU`. A `REG_DWORD` of 0 is false
   and any other number true; a `REG_SZ` holding a whole number counts the same way, so `"0"`
   (spaces around it allowed) is false too.
 - **macOS:** the managed preferences files `/Library/Managed Preferences/com.google.Chrome.plist`,
-  `com.microsoft.Edge.plist` and `org.chromium.Chromium.plist`, plus the same files under
-  `/Library/Managed Preferences/<user>/` for the signed-in user. The value is a boolean, or the
+  `com.microsoft.Edge.plist`, `org.chromium.Chromium.plist` and `com.brave.Browser.plist`, plus the
+  same files under `/Library/Managed Preferences/<user>/` for the signed-in user. The value is a boolean, or the
   integer 0 (false) or 1 (true).
 - **Linux:** every `*.json` file in `/etc/opt/chrome/policies/managed/`,
   `/etc/opt/edge/policies/managed/` and `/etc/chromium/policies/managed/`; other files are
@@ -923,7 +926,7 @@ in Chrome's, Edge's and Chromium's policy locations. It takes the same values Ch
   file past either limit counts as one it can't read (below). Clauseo skips `recommended/`,
   because Chrome doesn't take this policy as a recommendation either.
 
-**What Clauseo doesn't read.** Brave's policy, and Chrome or Edge policy pushed from the cloud
+**What Clauseo doesn't read.** Brave's policy on Windows and Linux, and Chrome or Edge policy pushed from the cloud
 (Chrome Browser Cloud Management, Edge management service) that is not written to the registry,
 a managed preferences file or a policy folder. To have Clauseo honour such a policy, deploy
 `RemoteDebuggingAllowed` through one of the places above too.

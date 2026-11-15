@@ -153,7 +153,15 @@ export const UET: Entry[] = [
   // no browser on the computer: what to install, by the OS, then in full under it
   entry("UET-20", lineWords("Install Chrome"), NONE),
   entry("UET-48", lineWords("Install Chrome or Edge"), NONE, WINDOWS),
-  entry("UET-49", popWords("Install Google Chrome, then start a new conversation."), NONE),
+  entry(
+    "UET-49",
+    popWords(
+      "Clauseo didn't find Google Chrome, Microsoft Edge, Brave or Chromium on this computer. Install one, then start a new conversation.",
+    ),
+    NONE,
+  ),
+  // and on a Mac, the button to Chrome's download page
+  entry("UC-540", popWords("Download Chrome"), NONE),
   entry(
     "UET-50",
     popWords("Install Google Chrome or Microsoft Edge, then start a new conversation."),

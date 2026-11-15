@@ -35,6 +35,9 @@ fn touch(dir: &Path, relative: &str) -> PathBuf {
 }
 
 const MAC_CHROME: &str = "Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const MAC_EDGE: &str = "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
+const MAC_BRAVE: &str = "Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
+const MAC_CHROMIUM: &str = "Applications/Chromium.app/Contents/MacOS/Chromium";
 const WIN_CHROME: &str = "Google/Chrome/Application/chrome.exe";
 const WIN_EDGE: &str = "Microsoft/Edge/Application/msedge.exe";
 const CFT_MAC_ARM: &str =
@@ -162,10 +165,66 @@ fn windows_installed_is_empty_off_windows() {
 }
 
 #[test]
-fn edge_is_never_looked_for_on_mac() {
+fn windows_edge_is_never_looked_for_on_mac() {
     let dir = TempDir::new("chrome-mac-no-edge");
     touch(&dir.path().join("pf86"), WIN_EDGE);
     assert_eq!(find_with(&roots(dir.path(), Platform::MacX64), true), None);
+}
+
+/// On a Mac with no Chrome: Edge, Brave, then Chromium, each in `/Applications` before
+/// `~/Applications`; a missing one is skipped, and Chrome anywhere still wins.
+#[test]
+fn mac_other_chromium_browsers_come_after_chrome_in_order() {
+    let dir = TempDir::new("chrome-mac-others");
+    let (root, home) = (dir.path().join("root"), dir.path().join("home"));
+    let mac = || roots(dir.path(), Platform::MacArm64);
+    let chromium = touch(&home, MAC_CHROMIUM);
+    assert_eq!(find(&mac()), Some(chromium));
+    // No Edge: Brave in `~/Applications` comes before Chromium.
+    let home_brave = touch(&home, MAC_BRAVE);
+    assert_eq!(find(&mac()), Some(home_brave));
+    let brave = touch(&root, MAC_BRAVE);
+    assert_eq!(find(&mac()), Some(brave), "/Applications first");
+    let edge = touch(&home, MAC_EDGE);
+    assert_eq!(find(&mac()), Some(edge));
+    // Windows' Edge switch does not touch the Mac's list.
+    assert!(find_with(&mac(), false).is_some());
+    let chrome = touch(&home, MAC_CHROME);
+    assert_eq!(find(&mac()), Some(chrome));
+    // Each browser's places, in order.
+    let order: Vec<PathBuf> = [MAC_EDGE, MAC_BRAVE, MAC_CHROMIUM]
+        .into_iter()
+        .flat_map(|app| [root.join(app), home.join(app)])
+        .collect();
+    assert_eq!(mac().others(), order);
+    assert_eq!(roots(dir.path(), Platform::MacX64).others(), order);
+}
+
+/// Clauseo's own Chrome for Testing is Chrome, so it comes before the Mac's other browsers.
+#[test]
+fn mac_chrome_for_testing_beats_the_other_browsers() {
+    let dir = TempDir::new("chrome-mac-others-cft");
+    touch(&dir.path().join("root"), MAC_EDGE);
+    let cft = touch(
+        dir.path(),
+        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
+    );
+    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(cft));
+}
+
+/// The Mac's list is the Mac's: Windows and Linux never look there, and Arc is not on it.
+#[test]
+fn mac_others_are_looked_for_on_mac_alone_and_arc_never() {
+    let dir = TempDir::new("chrome-mac-others-only");
+    touch(
+        &dir.path().join("root"),
+        "Applications/Arc.app/Contents/MacOS/Arc",
+    );
+    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), None);
+    touch(&dir.path().join("root"), MAC_BRAVE);
+    for platform in [Platform::WindowsX64, Platform::Linux, Platform::Other] {
+        assert_eq!(find(&roots(dir.path(), platform)), None, "{platform:?}");
+    }
 }
 
 #[test]

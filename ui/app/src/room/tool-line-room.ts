@@ -10,11 +10,13 @@ import { ToolLine } from "./tool-line.tsx";
 import { knownTools, sameTools, toolsLabel, type KnownTool } from "./tools.ts";
 
 /** What the room gives the tool line: the plan's name, as the status line names it ("Claude"), Settings where the
- * host has the window, and the app's re-read of the firm's browser policy. */
+ * host has the window, the app's re-read of the firm's browser policy, and the open of Chrome's download page in the
+ * default browser (null with no transport). */
 export type ToolLineRoom = {
   plan: string;
   openSettings: (() => void) | undefined;
   policy: BrowserPolicyStore | null;
+  openChromeDownload: (() => void) | null;
 };
 
 let last: readonly KnownTool[] = [];
