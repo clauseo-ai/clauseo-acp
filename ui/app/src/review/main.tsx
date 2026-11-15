@@ -1,6 +1,8 @@
 // The dev-only copy review: review.html loads it, `pnpm build:review` builds it into dist-review/, and the app's
 // build never does. Without a query it is the list of strings; with ?cell=<id>&lang=hi&theme=night it is one
 // registered state in one language and light, for the list's frames: display.ts sets one display per document.
+// first: the live cells served over plain http need crypto.randomUUID before any module uses it
+import "./secure-context.ts";
 import "./review.css";
 import { startDisplay, whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
