@@ -4,17 +4,22 @@
 //! folder's handle, never by the folder's path:
 //! 1. the staging file is opened, refusing a link ([`Folder::copy_in`]);
 //! 2. a hidden temporary file `.clauseo-dl-<random>` is made new in the folder (Unix
-//!    `O_CREAT|O_EXCL|O_NOFOLLOW`, Windows `FILE_CREATE` relative to the folder's handle);
+//!    `O_CREAT|O_EXCL|O_NOFOLLOW`, Windows `FILE_CREATE` relative to the folder's handle, with
+//!    `FILE_ATTRIBUTE_HIDDEN`, cleared just before step 5);
 //! 3. the caller's [`Mark`] marks it, before a byte of the download is in it, so no reader ever
 //!    sees the content without its mark; a mark that fails or does not read back ends the copy
 //!    ([`CopyFailed::Mark`]) and the temporary file goes;
 //! 4. the content is copied and flushed to the disk (`fsync`, `FlushFileBuffers`);
 //! 5. [`Incoming::publish`] gives it its name without replacing anything (`AlreadyExists`
-//!    otherwise, and the caller tries the next name);
+//!    otherwise, and the caller tries the next name). On Unix the rename goes by name in a
+//!    folder the agent can write, so the file then at the new name is checked to be the one
+//!    this process made and holds open (same device and inode, not followed if a link); one the
+//!    agent swapped in fails the copy, and nothing says it was saved;
 //! 6. [`Incoming::remove_source`] deletes the staging file (on Windows through the handle opened
 //!    in step 1, so a file held by another process fails step 1, not this one).
 //!
-//! Dropped before it is published, the temporary file is deleted.
+//! Dropped before it is published, the temporary file is deleted. One a crash left is removed
+//! when the next mover starts ([`remove_leftovers`]).
 
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
@@ -44,6 +49,10 @@ const TEMPORARY_TRIES: usize = 8;
 
 /// The start of every temporary name.
 const TEMPORARY_PREFIX: &str = ".clauseo-dl-";
+
+/// Why a published copy is refused on Unix.
+#[cfg(unix)]
+const SWAPPED: &str = "the file at the new name is not the copy the guard made: it was swapped";
 
 /// A download copied into a folder under a hidden temporary name, waiting for its own.
 pub(crate) struct Incoming<'a> {
@@ -96,6 +105,31 @@ pub(super) fn copy_in<'a>(
     Ok(incoming)
 }
 
+/// Whether `name` is one [`make_temporary`] gives: the prefix, then exactly 16 lowercase hex
+/// digits.
+pub(super) fn is_temporary(name: &OsStr) -> bool {
+    name.to_str()
+        .and_then(|name| name.strip_prefix(TEMPORARY_PREFIX))
+        .is_some_and(|random| {
+            random.len() == 16
+                && random
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+}
+
+/// [`Folder::remove_copy_leftovers`]: every plain file in `folder` named as a temporary file
+/// ([`is_temporary`]) is removed through the folder's handle ([`Folder::remove_plain`]: a
+/// link or a folder of that name stays). How many went.
+pub(super) fn remove_leftovers(folder: &Folder) -> usize {
+    folder
+        .names()
+        .into_iter()
+        .filter(|name| is_temporary(name))
+        .filter(|name| folder.remove_plain(name).is_ok())
+        .count()
+}
+
 /// A new temporary file in `folder`: `.clauseo-dl-<16 hex digits>`, random (std's
 /// `RandomState`, seeded by the OS), made with no-replace, no-follow semantics.
 fn make_temporary(folder: &Folder) -> io::Result<(OsString, File)> {
@@ -105,7 +139,7 @@ fn make_temporary(folder: &Folder) -> io::Result<(OsString, File)> {
             .build_hasher()
             .finish();
         let name = OsString::from(format!("{TEMPORARY_PREFIX}{random:016x}"));
-        match folder.create_new(&name) {
+        match folder.create_hidden(&name) {
             Ok(file) => return Ok((name, file)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => last = error,
             Err(error) => return Err(error),
@@ -122,14 +156,27 @@ impl Incoming<'_> {
         #[cfg(unix)]
         let published = match super::unix::rename_new_in(&self.folder.dir, &self.temporary, name) {
             Err(error) if error.kind() == io::ErrorKind::Unsupported => self.copy_as(name),
-            done => done,
+            Ok(()) => self.check_published(name, &self.file),
+            Err(error) => Err(error),
         };
         #[cfg(windows)]
-        let published = super::windows::rename_into(&self.file, &self.folder.dir, name);
+        let published = super::windows::unhide(&self.file)
+            .and_then(|()| super::windows::rename_into(&self.file, &self.folder.dir, name));
         if published.is_ok() {
             self.published = true;
         }
         published
+    }
+
+    /// `Ok` when the file at `name` (not followed) is `made`, the file this process made and
+    /// holds open: else the agent swapped its own in, by name, before the rename.
+    #[cfg(unix)]
+    fn check_published(&self, name: &OsStr, made: &File) -> io::Result<()> {
+        if super::unix::is_same_file_in(&self.folder.dir, name, made)? {
+            Ok(())
+        } else {
+            Err(io::Error::other(SWAPPED))
+        }
     }
 
     /// The copy made again under `name`: new (`O_EXCL|O_NOFOLLOW`), marked, then filled from
@@ -148,7 +195,7 @@ impl Incoming<'_> {
             return filled;
         }
         drop(super::unix::remove_in(dir, &self.temporary));
-        Ok(())
+        self.check_published(name, &copy)
     }
 
     /// Deletes the staging file the copy was made from.

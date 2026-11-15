@@ -61,12 +61,73 @@ pub(super) fn create_new_in(dir: &OwnedFd, name: &OsStr) -> io::Result<std::fs::
 }
 
 /// Whether a failed hard link means this file system has none (FAT and exFAT: `EPERM`; others
-/// `EOPNOTSUPP` or `ENOSYS`; `EMLINK` for a file at its link limit): the move then copies.
+/// `ENOTSUP`, `EOPNOTSUPP` or `ENOSYS`; `EMLINK` for a file at its link limit): the move then
+/// copies.
 pub(super) fn no_hard_links(error: &io::Error) -> bool {
-    matches!(
-        error.raw_os_error().map(Errno::from_raw),
-        Some(Errno::EPERM | Errno::EOPNOTSUPP | Errno::ENOSYS | Errno::EMLINK)
-    )
+    not_supported(error)
+        || matches!(
+            error.raw_os_error().map(Errno::from_raw),
+            Some(Errno::EPERM | Errno::ENOSYS | Errno::EMLINK)
+        )
+}
+
+/// Whether `error` is `ENOTSUP` or `EOPNOTSUPP`: one number on Linux (95), two on macOS
+/// (45 and 102), where exFAT, FAT and SMB answer `ENOTSUP`.
+pub(crate) fn not_supported(error: &io::Error) -> bool {
+    error
+        .raw_os_error()
+        .is_some_and(|code| code == nix::libc::ENOTSUP || code == nix::libc::EOPNOTSUPP)
+}
+
+/// Whether the file `name` in the folder `dir` holds, not followed if it is a link, is the open
+/// `file` (same device and inode): a published copy that is still the one this process made.
+pub(super) fn is_same_file_in(
+    dir: &OwnedFd,
+    name: &OsStr,
+    file: &std::fs::File,
+) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let found = fstatat(dir, name, AtFlags::AT_SYMLINK_NOFOLLOW).map_err(io::Error::from)?;
+    let held = file.metadata()?;
+    // `st_dev` is a `u64` on Linux and an `i32` on macOS: compared as `i128`, losslessly.
+    Ok(i128::from(found.st_dev) == i128::from(held.dev())
+        && i128::from(found.st_ino) == i128::from(held.ino()))
+}
+
+/// Removes `name` from the folder `dir` holds when it is a plain file (`fstatat` with
+/// `AT_SYMLINK_NOFOLLOW`), through the handle: a link is never followed (one swapped in after
+/// the look is itself unlinked, never its target), a folder never removed.
+pub(super) fn remove_plain_in(dir: &OwnedFd, name: &OsStr) -> io::Result<()> {
+    let found = fstatat(dir, name, AtFlags::AT_SYMLINK_NOFOLLOW).map_err(io::Error::from)?;
+    if nix::sys::stat::SFlag::from_bits_truncate(found.st_mode) & nix::sys::stat::SFlag::S_IFMT
+        != nix::sys::stat::SFlag::S_IFREG
+    {
+        return Err(io::Error::other("not a plain file"));
+    }
+    remove_in(dir, name)
+}
+
+/// The names in the folder `dir` holds, read through a second handle opened relative to it
+/// (`openat(dir, ".")`, then `fdopendir`), never its path. Empty when the listing cannot open.
+pub(super) fn names_in(dir: &OwnedFd) -> Vec<std::ffi::OsString> {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(again) = openat(
+        dir,
+        ".",
+        OFlag::O_DIRECTORY | OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    ) else {
+        return Vec::new();
+    };
+    let Ok(mut listing) = Dir::from_fd(again) else {
+        return Vec::new();
+    };
+    listing
+        .iter()
+        .flatten()
+        .map(|entry| OsStr::from_bytes(entry.file_name().to_bytes()).to_owned())
+        .filter(|name| name != "." && name != "..")
+        .collect()
 }
 
 /// Opens the file `from` to copy it: `O_NOFOLLOW` (a link fails), `O_NONBLOCK` (a FIFO does not
@@ -121,8 +182,8 @@ pub(super) fn rename_new_in(dir: &OwnedFd, from: &OsStr, to: &OsStr) -> io::Resu
 fn rename_unsupported(error: &io::Error) -> bool {
     matches!(
         error.raw_os_error().map(Errno::from_raw),
-        Some(Errno::EINVAL | Errno::EOPNOTSUPP | Errno::ENOSYS)
-    )
+        Some(Errno::EINVAL | Errno::ENOSYS)
+    ) || not_supported(error)
 }
 
 #[cfg(all(target_os = "linux", target_env = "gnu"))]

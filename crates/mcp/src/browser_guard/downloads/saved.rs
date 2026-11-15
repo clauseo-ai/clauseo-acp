@@ -10,14 +10,24 @@
 //! answers that call itself ([`open_reply`]): it waits up to [`OPEN_WAIT`] for the mover, then
 //! says the file was saved, or that the download is still in progress, as a success. With no
 //! download in sight by then, agent-browser's error goes on as it was.
+//!
+//! Notes still untold when the guard exits ([`Saved::drain`]), and those of the reaper's last
+//! sweep after a guard was killed, are queued in the guard's `--cwd` ([`queue`]: one file
+//! `.clauseo-untold-<16 hex digits>` each, a JSON list of notes, written under a temporary
+//! name and renamed), and the next guard under that `--cwd` (an MCP reconnect, or the session
+//! resumed) tells them with its next tool result ([`Saved::queued_in`]), so the host still sees
+//! a file delivered to the fallback folder and shows the lawyer where it is.
 
-use std::path::Path;
+use std::ffi::{OsStr, OsString};
+use std::hash::{BuildHasher, Hasher};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::Value;
 
 use crate::browser_guard::pause;
+use crate::write;
 
 /// How long an `open` that ended in `net::ERR_ABORTED` waits for its download to be delivered.
 pub(crate) const OPEN_WAIT: Duration = Duration::from_secs(5);
@@ -34,9 +44,33 @@ pub(crate) const IN_PROGRESS: &str = "The page is a file, and the browser is sti
 #[derive(Default)]
 pub(crate) struct Saved {
     untold: Mutex<Vec<String>>,
+    /// The guard's `--cwd`, where notes an earlier guard or reaper queued wait ([`queue`]);
+    /// read before each telling. None in the tests that do not queue.
+    queue: Option<PathBuf>,
 }
 
 impl Saved {
+    /// A record that also tells the notes queued in `cwd` ([`queue`]).
+    pub(crate) fn queued_in(cwd: PathBuf) -> Saved {
+        Saved {
+            untold: Mutex::default(),
+            queue: Some(cwd),
+        }
+    }
+
+    /// The notes queued in [`Saved::queue`], each file's taken once, added to the untold ones.
+    fn pull(&self, untold: &mut Vec<String>) {
+        if let Some(cwd) = &self.queue {
+            untold.extend(take_queued(cwd));
+        }
+    }
+
+    /// The notes untold so far, without the queued ones: the guard's own, to [`queue`] at its
+    /// exit.
+    pub(crate) fn drain(&self) -> Vec<String> {
+        std::mem::take(&mut *lock(&self.untold))
+    }
+
     /// One more file delivered, under `name`, in the downloads folder.
     pub(crate) fn record(&self, name: &str) {
         lock(&self.untold).push(note(name));
@@ -55,7 +89,9 @@ impl Saved {
 
     /// The notes untold so far, which are told now.
     pub(crate) fn take(&self) -> Vec<String> {
-        std::mem::take(&mut *lock(&self.untold))
+        let mut untold = lock(&self.untold);
+        self.pull(&mut untold);
+        std::mem::take(&mut *untold)
     }
 
     /// `line`, a reply to a tool call, with one text block per untold note appended to its
@@ -64,6 +100,7 @@ impl Saved {
     /// `content` that is no list: the notes wait for the next result.
     pub(crate) fn note_into(&self, line: &[u8]) -> Option<Vec<u8>> {
         let mut untold = lock(&self.untold);
+        self.pull(&mut untold);
         if untold.is_empty() {
             return None;
         }
@@ -81,6 +118,94 @@ impl Saved {
         untold.clear();
         Some(bytes)
     }
+}
+
+/// The start of a queued notes file's name; then 16 lowercase hex digits.
+const QUEUE_PREFIX: &str = ".clauseo-untold-";
+/// The end of the name a queued notes file is written under before its rename.
+const QUEUE_WRITING: &str = ".new";
+/// How many names a queue file tries when each is taken.
+const QUEUE_TRIES: usize = 8;
+
+/// Queues `notes` in `cwd` for the next guard there to tell (above): written to
+/// `.clauseo-untold-<random>.new`, made new through the folder's handle, then renamed without
+/// replacing to `.clauseo-untold-<random>`, so a reader never sees half a file. Noted on stderr
+/// when that fails: the notes are then lost.
+pub(crate) fn queue(cwd: &Path, notes: &[String]) {
+    if notes.is_empty() {
+        return;
+    }
+    if let Err(error) = try_queue(cwd, notes) {
+        crate::browser_guard::note(&format!(
+            "{} note(s) to the agent could not be queued for the next guard: {error}",
+            notes.len()
+        ));
+    }
+}
+
+fn try_queue(cwd: &Path, notes: &[String]) -> std::io::Result<()> {
+    let bytes = serde_json::to_vec(notes).map_err(std::io::Error::other)?;
+    let folder = write::Folder::open(cwd)?;
+    let mut last = std::io::Error::from(std::io::ErrorKind::AlreadyExists);
+    for _ in 0..QUEUE_TRIES {
+        let random = std::collections::hash_map::RandomState::new()
+            .build_hasher()
+            .finish();
+        let name = OsString::from(format!("{QUEUE_PREFIX}{random:016x}"));
+        let mut writing = name.clone();
+        writing.push(QUEUE_WRITING);
+        let mut file = match folder.create_new(&writing) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                last = error;
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        let renamed = std::io::Write::write_all(&mut file, &bytes)
+            .and_then(|()| file.sync_all())
+            .and_then(|()| folder.rename_new(&file, &writing, &name));
+        if renamed.is_err() {
+            drop(folder.remove_plain(&writing));
+        }
+        return renamed;
+    }
+    Err(last)
+}
+
+/// The notes queued in `cwd`: each `.clauseo-untold-<16 hex digits>` file there is read
+/// (refusing a link), removed through the folder's handle, and only then its notes taken, so
+/// two guards never tell one twice. A file that does not read as a list of notes is removed.
+fn take_queued(cwd: &Path) -> Vec<String> {
+    let Ok(folder) = write::Folder::open(cwd) else {
+        return Vec::new();
+    };
+    let mut notes = Vec::new();
+    for name in folder.names().into_iter().filter(|name| is_queued(name)) {
+        let read = write::read_no_follow(&cwd.join(&name));
+        if folder.remove_plain(&name).is_err() {
+            continue;
+        }
+        if let Some(queued) = read
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok())
+        {
+            notes.extend(queued);
+        }
+    }
+    notes
+}
+
+/// Whether `name` is a queued notes file's: [`QUEUE_PREFIX`] and 16 lowercase hex digits.
+fn is_queued(name: &OsStr) -> bool {
+    name.to_str()
+        .and_then(|name| name.strip_prefix(QUEUE_PREFIX))
+        .is_some_and(|random| {
+            random.len() == 16
+                && random
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
 }
 
 /// The note for a file delivered as `name`.

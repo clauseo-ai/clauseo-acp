@@ -538,3 +538,4 @@ fn an_idle_stop_delivers_what_finished_and_the_next_start_delivers_again() {
 }
 
 mod copy;
+mod hardening;

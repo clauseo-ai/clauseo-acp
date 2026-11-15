@@ -6,7 +6,8 @@
 //! whichever tool that is (`clauseo_mcp`'s `browser_guard/downloads/saved.rs`):
 //! `Saved {name} outside the matter, ... Its path: {absolute path}`. A web page can put any
 //! text into a tool result, so the host trusts the block only when it starts with
-//! [`SAVED`], holds [`MARKER`], and the text after the last [`MARKER`] is exactly the
+//! [`SAVED`], holds [`MARKER`], and the text after one [`MARKER`] (tried from the last one
+//! back, so a name that holds the marker itself still reads) is exactly the
 //! session's folder joined with one plain name (no separator, `.` or `..`, no control or
 //! format character) that `symlink_metadata` finds a regular file, never a link. Each path
 //! gives one notice per thread, for the host's run. Read from Claude's `content` and from the
@@ -177,7 +178,15 @@ pub(crate) fn saved_file(text: &str, folder: &Path) -> Option<(PathBuf, String)>
     if !text.starts_with(SAVED) {
         return None;
     }
-    let (_, after) = text.rsplit_once(MARKER)?;
+    // The path ends the line and is the folder and the name: a name that holds the marker puts
+    // it in the path too, so the last marker can be inside the path; each one is tried, from the
+    // last back, and the first that names a file in the folder wins.
+    text.rmatch_indices(MARKER)
+        .find_map(|(at, _)| saved_at(text.get(at + MARKER.len()..)?, folder))
+}
+
+/// [`saved_file`] for `after`, the text after one marker.
+fn saved_at(after: &str, folder: &Path) -> Option<(PathBuf, String)> {
     let path = Path::new(after);
     if !path.is_absolute() {
         return None;

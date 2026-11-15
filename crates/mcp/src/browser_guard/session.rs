@@ -228,6 +228,7 @@ pub(crate) struct Shared {
 
 impl Shared {
     pub(crate) fn new(launcher: Launcher) -> Shared {
+        let saved = Arc::new(Saved::queued_in(launcher.cwd.clone()));
         Shared {
             launcher,
             state: Mutex::new(State {
@@ -246,7 +247,7 @@ impl Shared {
             closing: AtomicBool::new(false),
             oneshot: Mutex::new(None),
             held: Arc::default(),
-            saved: Arc::default(),
+            saved,
         }
     }
 }

@@ -62,6 +62,31 @@ pub(crate) fn mark_copy(source: &std::fs::File, copy: &std::fs::File) -> io::Res
     os::mark_copy(source, copy)
 }
 
+/// Whether `error`, from [`mark_copy`], says the drive cannot keep the mark at all, so the file
+/// goes to the fallback folder: a mark that did not read back (no OS error), or the OS's
+/// "not supported" or "not permitted" for the attribute or stream (Unix `ENOTSUP`,
+/// `EOPNOTSUPP`, `EPERM`, `ENOSYS`; Windows `ERROR_INVALID_FUNCTION`, `ERROR_NOT_SUPPORTED`,
+/// `ERROR_INVALID_PARAMETER`, `ERROR_INVALID_NAME`: FAT and exFAT refuse a stream's name).
+/// Any other error (a sharing violation or a denial while a scanner holds the new file,
+/// `EBUSY`, `EINTR`, a full disk) is not the drive's: the copy is tried again.
+pub(crate) fn cannot_keep(error: &io::Error) -> bool {
+    let Some(code) = error.raw_os_error() else {
+        return true;
+    };
+    #[cfg(unix)]
+    {
+        use nix::libc;
+        [libc::ENOTSUP, libc::EOPNOTSUPP, libc::EPERM, libc::ENOSYS].contains(&code)
+    }
+    #[cfg(windows)]
+    {
+        /// `ERROR_INVALID_FUNCTION`, `ERROR_NOT_SUPPORTED`, `ERROR_INVALID_PARAMETER` and
+        /// `ERROR_INVALID_NAME`.
+        const CANNOT: [i32; 4] = [1, 50, 87, 123];
+        CANNOT.contains(&code)
+    }
+}
+
 /// Whether the staging folder's drive keeps a mark: writes [`PROBE`], marks it, reads the mark
 /// back and removes it. Always `Ok` on Linux.
 pub(crate) fn probe(staging: &Path) -> io::Result<()> {
