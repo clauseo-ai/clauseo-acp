@@ -2,10 +2,11 @@
 //! `open_external` opens an https, http or mailto link in the default browser or mail app, a
 //! plain web link at once and a mailto or misleading one after a native confirm naming where it
 //! goes (`ask.rs`); `open_file` opens a document of a matter with its
-//! default app; `reveal` shows a matter's folder, the app data folder, or a file the browser saved in
-//! Clauseo's own downloads folder for a matter, in Finder or File Explorer. The webview names a file by the `FileRefId` the host issued and a folder by its
-//! matter, never by a path. The host, the confirm and the OS sit behind traits, so tests run
-//! without a window and never open anything.
+//! default app; `reveal` shows a matter's folder, the app data folder, or a file the browser
+//! saved in Clauseo's own downloads folder for a matter, in Finder or File Explorer. The webview
+//! names a file by the `FileRefId` the host issued, a folder by its matter, and a saved download
+//! by its matter and file name, never by a path. The host, the confirm and the OS sit behind
+//! traits, so tests run without a window and never open anything.
 
 mod ask;
 mod bounded;
