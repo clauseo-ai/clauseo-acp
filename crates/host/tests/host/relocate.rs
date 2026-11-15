@@ -192,17 +192,17 @@ fn locate_refusals_leave_the_matter_unchanged() {
         (
             "another matter's folder",
             other_folder,
-            ErrorCode::MatterFolderRefused,
+            ErrorCode::MatterFolderIsMatter,
         ),
         (
             "a folder holding another matter's",
             dir.work_path("outer"),
-            ErrorCode::MatterFolderRefused,
+            ErrorCode::MatterFolderHoldsMatter,
         ),
         (
             "inside another matter's folder",
             inside,
-            ErrorCode::MatterFolderRefused,
+            ErrorCode::MatterFolderInsideMatter,
         ),
         (
             "the matters root",

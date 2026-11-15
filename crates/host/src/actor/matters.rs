@@ -135,22 +135,21 @@ pub(super) fn live_worker(actor: &Actor, matter: MatterId) -> Result<bool, Error
     }
 }
 
-/// What a folder for `matter` is checked against: the folders import refuses, every other
-/// registered matter's folder (forgotten ones too: their folders bring them back), and the
-/// folders other commands are making matters of.
+/// What a folder for `matter` is checked against by a locate or a relink: the folders import
+/// refuses, and the other claimed folders (`claimed_folders`) without their commands, so a
+/// folder being made refuses too.
 pub(super) fn registry(actor: &Actor, matter: MatterId) -> Registry {
-    let rows = actor
-        .matters
-        .values()
-        .chain(actor.forgotten.values())
-        .map(|entry| (entry.row.id, PathBuf::from(&entry.row.folder_path)));
-    let claimed = actor.claims.values().cloned();
+    let others = claimed_folders(actor)
+        .into_iter()
+        .filter(|claimed| claimed.matter != matter)
+        .map(|claimed| Claimed {
+            command: None,
+            ..claimed
+        })
+        .collect();
     Registry {
         refused: refused_folders(actor),
-        others: rows
-            .chain(claimed)
-            .filter(|(id, _)| *id != matter)
-            .collect(),
+        others,
     }
 }
 
