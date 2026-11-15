@@ -151,6 +151,47 @@ fn a_file_open_in_word_is_refused_and_nothing_is_written() {
     assert_no_temp_files(&fx.folder);
 }
 
+/// A hold at the write (an antivirus scanning the file, on Windows) already released when the
+/// replace checks again, the file as walked, is no change: the write goes through.
+#[test]
+fn a_hold_released_by_the_check_again_is_written() {
+    let (fx, mut matter, expected, new) = replacing("replace-hold-released", b"old");
+    let file = path("Lease.docx");
+    clauseo_matters::test_support::hold_at_replace_write(fx.file("Lease.docx"), None);
+    let replaced = matter
+        .replace_file(&request(&file, &expected, &new))
+        .unwrap();
+    assert_eq!(replaced.before, cid(1));
+    assert_eq!(
+        created(replaced.checkpoint.unwrap(), 3),
+        [modified("Lease.docx", b"old", b"new")]
+    );
+    assert_eq!(fx.read("Lease.docx"), b"new");
+    assert_no_temp_files(&fx.folder);
+}
+
+/// Another program that changed the file while it held it is a change: refused as stale, and
+/// its bytes stay.
+#[test]
+fn a_change_made_during_a_hold_is_refused_and_kept() {
+    let (fx, mut matter, expected, new) = replacing("replace-hold-changed", b"old");
+    let file = path("Lease.docx");
+    clauseo_matters::test_support::hold_at_replace_write(
+        fx.file("Lease.docx"),
+        Some(b"changed by another program".to_vec()),
+    );
+    let error = matter
+        .replace_file(&request(&file, &expected, &new))
+        .unwrap_err();
+    assert!(
+        matches!(&error, Error::ChangedSince { path } if *path == file),
+        "{error}"
+    );
+    assert_eq!(error.code(), ErrorCode::WordRevisionsStale);
+    assert_eq!(fx.read("Lease.docx"), b"changed by another program");
+    assert_no_temp_files(&fx.folder);
+}
+
 #[test]
 fn ids_on_the_timeline_or_equal_are_refused() {
     let (_fx, mut matter, expected, new) = replacing("replace-ids", b"old");

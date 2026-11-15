@@ -90,3 +90,46 @@ pub(crate) fn after_replace_write(path: &std::path::Path) -> Result<(), crate::E
         std::io::Error::from_raw_os_error(32),
     ))
 }
+
+/// The holds [`hold_at_replace_write`] armed: the file's absolute path, and the bytes written
+/// to it while held, if any.
+type Hold = (std::path::PathBuf, Option<Vec<u8>>);
+
+/// The holds [`hold_at_replace_write`] armed.
+static HOLD_AT_WRITE: std::sync::Mutex<Vec<Hold>> = std::sync::Mutex::new(Vec::new());
+
+/// From now on, for the whole process, the next write of `Matter::replace_file` to the file
+/// `path` (absolute) fails before it renames, as if a program held the file (an antivirus
+/// scan, on Windows) and let go before the replace checks again. With `changed`, those bytes
+/// are written to the file first: another program's real change while it held the file. Once
+/// per call. Process-wide, as the host replaces on a matter thread; it suits nextest's one
+/// process per test.
+pub fn hold_at_replace_write(path: impl Into<std::path::PathBuf>, changed: Option<Vec<u8>>) {
+    let mut armed = HOLD_AT_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    armed.push((path.into(), changed));
+}
+
+/// Before a replace's write to `path`: whether a hold was armed for it (and disarms it), after
+/// writing its bytes, if any. A failed write is the test's to see.
+pub(crate) fn held_at_replace_write(path: &std::path::Path) -> bool {
+    let mut armed = HOLD_AT_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(at) = armed.iter().position(|(one, _)| one == path) else {
+        return false;
+    };
+    let (_, changed) = armed.remove(at);
+    drop(armed);
+    if let Some(bytes) = changed {
+        use std::io::Write as _;
+        let written = crate::write::remove_file(path)
+            .and_then(|()| crate::write::create_new(path))
+            .and_then(|mut file| file.write_all(&bytes));
+        if let Err(err) = written {
+            tracing::warn!(error = %err, "a test's change of a held file was not written");
+        }
+    }
+    true
+}
