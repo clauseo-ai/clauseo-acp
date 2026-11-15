@@ -6,7 +6,9 @@
 // - its auto mode safety check blocked it: "… denied by the Claude Code auto mode classifier. Reason: [<rule>] …",
 //   the rule's name in square brackets (or "Permission for this action has been denied. Reason: [<rule>]");
 // - that check gave no verdict ("… was not reviewed: …", "… auto mode cannot determine the safety of …");
-// - one of Clauseo's own deny rules matched: "Permission to read <path> has been denied." (use, edit, write).
+// - one of Clauseo's own deny rules matched: "Permission to read <path> has been denied." (use, edit, write), or,
+//   for a folder's deny, "File is in a directory that is denied by your permission settings." (and "File is covered
+//   by a Read deny rule in your permission settings and cannot be edited." / "… written.").
 // Pure, and only the words change: what Claude itself receives is untouched, and the raw text stays in the call.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { refusal, type RefusalKey } from "@clauseo/components/lib/words-refusals.ts";
@@ -41,8 +43,11 @@ const SAFETY_CHECK = "denied by a built-in Claude Code safety check";
  * phrases only, so a task whose output says "classifier" is never taken for one. */
 const NO_VERDICT =
   /auto mode (?:classifier|cannot determine|could not evaluate)|auto mode's (?:safety classifier|review)|not a judgment that the (?:action|call) is unsafe/i;
-/** Claude Code's own deny rule ("Permission to read …/agents/… has been denied."). */
-const RULE = /^Permission to (?:use|read|edit|write)\b[\s\S]* has been denied\b/;
+/** Claude Code's own deny rule ("Permission to read …/agents/… has been denied."), or a folder's ("File is in a
+ * directory that is denied by your permission settings."): the second only at the start, so a task's output that
+ * quotes it is never taken for one. */
+const RULE =
+  /^Permission to (?:use|read|edit|write)\b[\s\S]* has been denied\b|^File is (?:in a directory that is denied by|covered by a Read deny rule in) your permission settings\b/;
 
 /** A rule name's words, in order: the first match names what it looked like. Claude Code ships no list of its
  * rules' names (the model names one per block), so these read its words; the binary's own examples and the ones
