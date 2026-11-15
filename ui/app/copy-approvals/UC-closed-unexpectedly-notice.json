@@ -1,0 +1,145 @@
+{
+  "UC-326": {
+    "en": "Last session",
+    "hi": "पिछला सत्र",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: Card label for assistive technology"
+  },
+  "UC-327": {
+    "en": "Clauseo closed unexpectedly.",
+    "hi": "Clauseo अचानक बंद हो गया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: Title"
+  },
+  "UC-328": {
+    "en": "Your conversations are kept.",
+    "hi": "आपकी बातचीत सुरक्षित है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: First line, always"
+  },
+  "UC-329": {
+    "en": "{action} in {matter} may not have finished.",
+    "hi": "{matter} में {action} शायद पूरा नहीं हुआ।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: One per unfinished action in a named matter; {action} is UC-331..335, UC-365 or UC-366"
+  },
+  "UC-330": {
+    "en": "{action} may not have finished.",
+    "hi": "{action} शायद पूरा नहीं हुआ।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: One per unfinished action in the Scratch matter (not named)"
+  },
+  "UC-331": {
+    "en": "Undo of 1 file",
+    "hi": "1 फ़ाइल का अनडू",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+  },
+  "UC-332": {
+    "en": "Undo of {count} files",
+    "hi": "{count} फ़ाइलों का अनडू",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+  },
+  "UC-333": {
+    "en": "Restore of 1 file",
+    "hi": "1 फ़ाइल की बहाली",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+  },
+  "UC-334": {
+    "en": "Restore of {count} files",
+    "hi": "{count} फ़ाइलों की बहाली",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+  },
+  "UC-335": {
+    "en": "A restore",
+    "hi": "एक बहाली",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: {action}: a whole-matter restore, count unknown"
+  },
+  "UC-365": {
+    "en": "Accepting tracked changes",
+    "hi": "ट्रैक किए गए बदलाव स्वीकार करना",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+  },
+  "UC-366": {
+    "en": "Rejecting tracked changes",
+    "hi": "ट्रैक किए गए बदलाव अस्वीकार करना",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+  },
+  "UC-367": {
+    "en": "Versions has the earlier copies.",
+    "hi": "पिछली प्रतियाँ Versions में हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "crashnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
+    "note": "Room notice after Clauseo closed unexpectedly: Last line, when any action is named"
+  }
+}

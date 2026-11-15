@@ -136,6 +136,8 @@ export class TauriTransport
   readonly protectionWire = false;
   /** R23: the desktop carries the updater (store/update.ts): `get_update`, `update_changed` and its commands. */
   readonly updateWire = true;
+  /** The desktop answers `last_exit` (room/crash-notice.tsx). */
+  readonly lastExitWire = true;
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
   readonly #warn: (message: string) => void;
