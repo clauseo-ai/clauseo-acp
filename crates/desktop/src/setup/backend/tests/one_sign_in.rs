@@ -158,6 +158,39 @@ fn a_press_for_an_installed_agent_waits_for_the_other_sign_in() {
     }
 }
 
+/// The lawyer's `CancelSignIn` for the going sign-in frees the queue: once S18 ends that job
+/// (`Failed { code: Cancelled }`), the kept press of the other agent starts, with no new
+/// command.
+#[test]
+fn cancelling_the_going_sign_in_starts_the_kept_one() {
+    let rig = rig(true);
+    press(&rig, "start_sign_in", &claude());
+    press(&rig, "start_sign_in", &codex());
+    assert_eq!(
+        pending(&rig, &codex()),
+        Some(Press::SignIn(Method::Browser))
+    );
+    press(&rig, "cancel_sign_in", &claude());
+    assert_eq!(asked(&rig, "cancel_sign_in", &claude()), 1);
+    assert_eq!(
+        asked(&rig, "sign_in", &codex()),
+        0,
+        "not before S18 ends it"
+    );
+    let cancelled = SigninState::Failed {
+        code: SigninCode::Cancelled,
+        at: UNIX_EPOCH,
+    };
+    sign_in_ends(&rig, &claude(), Some(cancelled));
+    assert_eq!(
+        asked(&rig, "sign_in", &codex()),
+        1,
+        "started with no new command: {:?}",
+        rig.calls()
+    );
+    assert_eq!(pending(&rig, &codex()), None);
+}
+
 /// The other agent's install `Ready` and `Paused` leave the kept press alone, and its sign-in's
 /// end runs it rather than dropping it.
 #[test]

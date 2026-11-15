@@ -129,6 +129,9 @@ impl SetupAgents for FakeAgents {
     fn retry(&self, agent: &AgentId, _use_system_proxy: bool) {
         self.call("retry", agent);
     }
+    fn cancel_install(&self, agent: &AgentId) {
+        self.call("cancel_install", agent);
+    }
     fn state(&self, agent: &AgentId) -> Option<InstallState> {
         let set = lock(&self.states).get(agent).cloned();
         Some(set.unwrap_or_else(|| InstallState::Ready {

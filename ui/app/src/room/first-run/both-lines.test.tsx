@@ -70,12 +70,16 @@ test("pressing ChatGPT while Claude downloads sends ChatGPT's sign-in, no instal
   ]);
 });
 
-test("the other plan's Cancel cancels its sign-in alone; its download line stays", async () => {
+test("the other plan's Cancel stops its download and sign-in alone; Claude's line stays", async () => {
   const t = await mountFirstRun({ first: DOWNLOADS });
   await press(also()?.querySelector("button") ?? null);
-  expect(setups(t)).toEqual([{ cancel_sign_in: { agent: CODEX } }]);
-  await play(t, signIn(CODEX, { signed_out: {} }));
-  expect(lines()).toHaveLength(2);
+  expect(setups(t)).toEqual([{ cancel_agent_install: { agent: CODEX } }]);
+  await play(
+    t,
+    install(CODEX, { missing: { download_bytes: 139_000_000 } }),
+    signIn(CODEX, { signed_out: {} }),
+  );
+  expect(lines()).toHaveLength(1);
   expect(lines()[0]?.textContent).toContain("Getting Claude ready… 13 MB of 165 MB");
 });
 

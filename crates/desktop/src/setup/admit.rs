@@ -33,6 +33,7 @@ const fn windows(action: SetupAction) -> Windows {
     match action {
         SetupAction::InstallAgent
         | SetupAction::RetryAgentInstall
+        | SetupAction::CancelAgentInstall
         | SetupAction::StartSignIn
         | SetupAction::CancelSignIn
         | SetupAction::PasteSignInCode

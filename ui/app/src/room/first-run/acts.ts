@@ -19,6 +19,7 @@ export const IDS = {
     state: "signin-state",
     setUp: "signin-set-up",
     cancel: "signin-cancel",
+    cancelAhead: "signin-cancel-ahead",
     paste: "signin-paste",
     code: "signin-code",
     deviceCode: "signin-device-code",

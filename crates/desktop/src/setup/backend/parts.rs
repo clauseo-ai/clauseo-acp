@@ -29,12 +29,13 @@ pub(super) fn retry(
 
 /// Before an install, a retry or a sign-in: waits for the first network route to reach
 /// `Agents` (`network/follow.rs`), so the first try goes through the resolved proxy and
-/// never direct first.
+/// never direct first. A cancel waits too, so it never overtakes the install it cancels.
 pub(super) async fn network_first(backend: &AgentsBackend, command: &SetupCommand) {
     let reaches = matches!(
         command,
         SetupCommand::InstallAgent { .. }
             | SetupCommand::RetryAgentInstall { .. }
+            | SetupCommand::CancelAgentInstall { .. }
             | SetupCommand::StartSignIn { .. }
             | SetupCommand::UseDeviceCode { .. }
             | SetupCommand::UseDifferentAccount { .. }

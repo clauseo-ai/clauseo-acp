@@ -12,7 +12,8 @@
 //! never pile up its copies of the tarballs; except a try whose set-up is kept from one that
 //! failed only its rename, which renames it alone (`kept`). Every way to `Ready` then removes
 //! the install's downloads and its npm cache ([`files::clean_up`]); a failed try keeps both.
-//! - A pause ends the job quietly where it is: `pause` has already sent `Paused`.
+//! - A pause ends the job quietly where it is: `pause` has already sent `Paused`. So does a
+//!   cancel, which has sent `Missing`; its clean-up job removes the files (`worker/cancel.rs`).
 //!
 //! Two agents install at once (decision 0033, "Two installs at once"), so a job holds the lock
 //! files in `agents/` ([`Locks`], `write::AgentsLock`) for what it shares: `.lock` shared for
@@ -36,7 +37,7 @@ mod ready;
 pub(crate) mod restart;
 mod try_error;
 
-pub(crate) use files::{empty_npm_cache, remove_legacy_shared, written};
+pub(crate) use files::{agent_downloads, empty_npm_cache, remove_legacy_shared, written};
 #[cfg(test)]
 pub(crate) use kept::MARKER;
 pub(crate) use kept::marked_for;

@@ -55,7 +55,7 @@ import { copyText, IDS, installActs, NAME, PLANS, planOf } from "./acts.ts";
 import { FirstScreen } from "./first-screen.tsx";
 import { repairOf, stepWords, type StepParts } from "./step-parts.ts";
 import { gateView, installView, queuedView, refusalView } from "./views.ts";
-import { footActs, stillNote, welcomeFoot } from "./welcome-foot.tsx";
+import { footActs, welcomeFoot } from "./welcome-foot.tsx";
 
 // UD2: the expired sign-in card rides here, with the setup store and the gate; the thread's chunk places it
 provideExpiredCard((props) => <ExpiredCard {...props} />);
@@ -86,8 +86,13 @@ function actsFor(
         return;
       }
       case "cancel":
-        // the plan waiting its turn stops waiting (nothing sent), or cancel_sign_in goes; its download carries on
+        // not installed yet: its download stops with the waiting sign-in; else the plan waiting its turn stops waiting
+        // (nothing sent), or cancel_sign_in goes
         store.cancelSignIn(agent);
+        return;
+      case "cancel-ahead":
+        // the other plan's sign-in ahead of this one ends, and this one's goes by itself after
+        store.cancelAhead(agent);
         return;
       case "paste":
         store.set({ pasting: true });
@@ -250,14 +255,11 @@ function holdOf(
     installActs(store, agent, state.copied),
     IDS.install,
   );
-  // its sign-in cancelled while it downloads: the note under its line, as the first screen's row has it
-  const note = stillNote(lang, NAME[plan], setup);
-  const own = line?.kind === "wait" && note !== null ? { ...line, note } : line;
   // the other plan's line while it downloads or its sign-in waits, compact under this plan's: choosing a plan never
   // hides the other's download, and each line keeps its own progress and Cancel
   const other = otherLine(store, state, otherPlan(agent), lang, room.online);
-  const working = own ?? other;
-  const also = own === null ? null : other;
+  const working = line ?? other;
+  const also = line === null ? null : other;
   // a plan waiting for the other's download or sign-in to end says the queued sign-in's words, with its Cancel
   const view = viewFor(state, room, clock);
   const signedIn = setup?.signIn;

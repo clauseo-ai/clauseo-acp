@@ -48,8 +48,10 @@ export type GateView =
   | { kind: "checking" }
   /** `after`: the plan installed, its browser opening once the other plan's sign-in, named here, ends (one sign-in at
    * a time). `offline`: the install waits (agent.install_offline); `online` with it, the window says it is online, so
-   * the browser opens once setting up can continue, not on reconnecting. */
-  | { kind: "queued"; offline: boolean; online?: boolean; after?: string }
+   * the browser opens once setting up can continue, not on reconnecting. `ahead`: that sign-in's own Cancel isn't on
+   * screen (a code or a switch of accounts, which the first run's lines don't show), so "Cancel {after}'s sign-in"
+   * offers to end it here. */
+  | { kind: "queued"; offline: boolean; online?: boolean; after?: string; ahead?: boolean }
   | { kind: "waiting"; nudge: boolean; pasting: boolean }
   | { kind: "device"; code: string; until: string }
   | { kind: "login-found"; email?: string | undefined }
@@ -67,6 +69,8 @@ export type GateAct =
   /** A plan's own "Sign in with {name}", where both are offered: this gate's plan or the other. */
   | { act: "sign-in-to"; plan: Plan }
   | { act: "cancel" }
+  /** "Cancel {name}'s sign-in" on a queued view with `ahead`: the other plan's sign-in, ahead of this one. */
+  | { act: "cancel-ahead" }
   | { act: "paste" }
   | { act: "code"; code: string }
   | { act: "device" }
@@ -83,6 +87,8 @@ export type GateTestIds = {
   root?: string;
   state?: string;
   cancel?: string;
+  /** The queued view's "Cancel {name}'s sign-in". */
+  cancelAhead?: string;
   paste?: string;
   code?: string;
   deviceCode?: string;
@@ -276,20 +282,32 @@ export function Gate({
       break;
     case "queued":
       body = (
-        <Act act={cancel}>
-          <Say>
-            {view.offline
-              ? view.online === true
-                ? w("Your browser opens when setting up can continue.")
-                : w("Your browser opens when you reconnect.")
-              : view.after !== undefined
-                ? w("Your browser opens for {name} after {other}'s sign-in.", {
-                    name,
-                    other: view.after,
-                  })
-                : w("Your browser opens when {name} is ready.", { name })}
-          </Say>
-        </Act>
+        <>
+          <Act act={cancel}>
+            <Say>
+              {view.offline
+                ? view.online === true
+                  ? w("Your browser opens when setting up can continue.")
+                  : w("Your browser opens when you reconnect.")
+                : view.after !== undefined
+                  ? w("Your browser opens for {name} after {other}'s sign-in.", {
+                      name,
+                      other: view.after,
+                    })
+                  : w("Your browser opens when {name} is ready.", { name })}
+            </Say>
+          </Act>
+          {/* the sign-in ahead, perhaps left open in the browser, ended from here: this one's goes after */}
+          {view.after !== undefined && view.ahead === true && (
+            <Ways>
+              {way(
+                w("Cancel {name}'s sign-in", { name: view.after }),
+                { act: "cancel-ahead" },
+                testIds.cancelAhead,
+              )}
+            </Ways>
+          )}
+        </>
       );
       break;
     case "waiting":

@@ -132,8 +132,9 @@ test("plan-early, plan-queued: Sign in works before the install is ready, and th
   expect(text()).not.toMatch(/Sign in at|\d:\d\d/);
   await play(t, install(CLAUDE, OFFLINE));
   expect(text()).toContain("Your browser opens when you reconnect.");
+  // not installed yet: Cancel stops the download with the sign-in
   await press(byId("signin-cancel"));
-  expect(setups(t).at(-1)).toEqual({ cancel_sign_in: { agent: CLAUDE } });
+  expect(setups(t).at(-1)).toEqual({ cancel_agent_install: { agent: CLAUDE } });
 });
 
 test("plan-queued, install waiting: offline the browser opens on reconnecting; online, when setting up can continue", async () => {

@@ -3,9 +3,11 @@
 //!
 //! The registry speaks just enough HTTP/1.1 for ureq: `GET`, `Range: bytes=N-`,
 //! `Content-Length`, `Content-Range` and `Connection: close`, one thread per connection. Nothing
-//! here sleeps: a stalled response waits on a condvar for [`TestRegistry::release`].
+//! here sleeps: a stalled response waits on a condvar for [`TestRegistry::release`], and a
+//! trickled one times its bytes with the same condvar's timed wait.
 
 mod pack;
+mod stalls;
 mod tls;
 mod trace;
 
@@ -17,6 +19,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
 pub use pack::{npm_tarball, runtime_tar_gz, sha512_integrity};
+pub use stalls::TRICKLE;
+use stalls::{stall, trickle};
 pub use trace::{instant, millis_since, trace};
 
 use crate::TestResolver;
@@ -37,6 +41,10 @@ pub enum Behaviour {
     /// Headers and the first half of the body, then a wait for [`TestRegistry::release`]
     /// before the rest.
     Stall,
+    /// Headers and the first half of the body (counted as a stall, for
+    /// [`TestRegistry::wait_for_stalls`]), then the rest one byte per [`TRICKLE`]: a download
+    /// that keeps going slowly, so a client stops it between chunks.
+    Trickle,
     /// The bytes with no `Content-Length`: the body ends when the connection closes.
     NoLength,
 }
@@ -398,20 +406,12 @@ fn respond(stream: &mut impl Write, shared: &Shared, request: &Request) -> io::R
             stream.write_all(rest)?;
             stream.flush()
         }
-    }
-}
-
-/// Counts a stall, then waits for the next release (or the registry's drop).
-fn stall(shared: &Shared) {
-    let mut state = shared.lock();
-    let seen = state.releases;
-    state.stalled += 1;
-    shared.changed.notify_all();
-    while state.releases == seen {
-        state = shared
-            .changed
-            .wait(state)
-            .unwrap_or_else(PoisonError::into_inner);
+        Behaviour::Trickle => {
+            let (first, rest) = body.split_at(body.len() / 2);
+            write_response(stream, status, kind, &range, first, body.len())?;
+            stream.flush()?;
+            trickle(shared, stream, rest)
+        }
     }
 }
 

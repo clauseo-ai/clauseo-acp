@@ -5,9 +5,10 @@
 // way and offers its Cancel, never a second Sign in; the states only a matter's gate walks (a device code, switching
 // accounts) leave the foot as it was; a login found says the gate's line with its Use it. A plan whose sign-in waits (the setup store's `queued`, behind
 // the other plan's sign-in, or desktop's, behind its own download) keeps its download's line with a Cancel that stops
-// the wait and leaves the download going, and once it is here says when its browser opens. The composer shows the
-// other plan's line the same way. A plan the firm's policy locks shows no control. Settings' Plans has its own Sign
-// in again.
+// the download and the wait (the plan reads not installed after), and once it is here says when its browser opens,
+// with "Cancel {name}'s sign-in" for the other plan's sign-in ahead of it only while that one shows no line of its own
+// (a code, a switch of accounts). The composer shows the other plan's line the same way. A plan the firm's policy locks
+// shows no control. Settings' Plans has its own Sign in again.
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import {
   checkingLine,
@@ -34,37 +35,35 @@ import {
 import { installActs, planOf } from "./acts.ts";
 import { gateView, installView, queuedView } from "./views.ts";
 
-/** The line's presses: the install's, the room gate's Sign in, and its Cancel. */
+/** The line's presses: the install's, the room gate's Sign in, a found login's Use it, its Cancel, and the other
+ * plan's sign-in's Cancel. */
 export type FootActs = InstallActs & {
   signIn: () => void;
   useFound: () => void;
   cancel: () => void;
+  cancelAhead: () => void;
 };
 
-/** A plan's line's presses: its install's, its "Sign in with {name}" (through the store's queue), and Cancel, which
- * stops a wait for the other plan's sign-in, or cancels the sign-in under way or queued behind its download (the
- * download carries on). */
+/** A plan's line's presses: its install's, its "Sign in with {name}" (through the store's queue), Cancel, which stops
+ * its download with its waiting sign-in while it isn't installed yet, and once installed stops a wait for the other
+ * plan's sign-in or cancels its own sign-in; and "Cancel {name}'s sign-in", which cancels the other plan's sign-in
+ * ahead of it. */
 export const footActs = (store: SetupStore, agent: AgentId, state: SetupState): FootActs => ({
   ...installActs(store, agent, state.copied),
   signIn: () => store.signInTo(agent),
   // a found login's Use it, as the room gate's: use_found_login
   useFound: () => store.command({ use_found_login: { agent } }),
   cancel: () => store.cancelSignIn(agent),
+  cancelAhead: () => store.cancelAhead(agent),
 });
 
-/** The note under a plan's download line once its waiting sign-in was cancelled and the download carries on (the store's
- * `stillDownloading`); null otherwise. */
-export const stillNote = (
-  lang: Lang,
-  name: string,
-  setup: AgentSetup | undefined,
-): string | null =>
-  setup?.stillDownloading === true
-    ? fl(lang, "Sign-in cancelled. {name} is still downloading; sign in when it's ready.", { name })
-    : null;
-
 /** The test ids of the signed-out line. */
-const IDS = { line: "signin-foot", signIn: "signin-foot-sign-in", cancel: "signin-foot-cancel" };
+const IDS = {
+  line: "signin-foot",
+  signIn: "signin-foot-sign-in",
+  cancel: "signin-foot-cancel",
+  cancelAhead: "signin-foot-cancel-ahead",
+};
 
 /** Whether the plan is on this computer: installed here, or by the firm. */
 const installed = (setup: AgentSetup | undefined): boolean => {
@@ -116,8 +115,8 @@ export function browserNote(
     : null;
 }
 
-/** The install's line with a quiet Cancel after its own controls: the waiting sign-in's, which leaves the download
- * going. */
+/** The install's line with a quiet Cancel after its own controls: the waiting sign-in's, which stops the download
+ * too. */
 function withCancel(line: WorkingState, lang: Lang, cancel: () => void): WorkingState {
   if (line.kind !== "wait") return line;
   return {
@@ -154,44 +153,41 @@ export function welcomeFoot(
   const waits = signInWaits(state, agent) && !locked;
   const view0 = installView(setup, online);
   const install = installLine(lang, view0, name, { ...acts, named: true }, ids);
-  // a waiting sign-in over its download: the download's own line and progress, and the wait's Cancel beside them
+  // a waiting sign-in over its download: the download's own line and progress, and the Cancel that stops both
   if (waits && install !== null && view0?.kind !== "missing")
     return named(withCancel(install, lang, acts.cancel), lang, name, null);
   if (!waits && (install !== null || !installed(setup) || locked)) {
-    const row = named(
+    return named(
       install,
       lang,
       name,
       view0?.kind === "missing" && view0.reinstall !== true ? view0.mb : null,
     );
-    // its sign-in cancelled while it downloads: the download's line, no Cancel, and the note saying it carries on
-    const note = stillNote(lang, name, setup);
-    return note === null || row?.kind !== "wait" ? row : { ...row, note };
   }
   // no clock time is said by the states shown here; a waiting sign-in says when its browser opens
   const view = waits
     ? queuedView(setup, state, agent, online)
     : gateView(setup, state, () => "", agent, online);
   if (view === null) return null;
-  const line = (
-    words: string,
-    kind: string,
-    button: { words: string; press: () => void; testId: string; quiet?: boolean },
-  ): WorkingState => ({
+  type Press = { words: string; press: () => void; testId: string; quiet?: boolean };
+  const line = (words: string, kind: string, ...buttons: Press[]): WorkingState => ({
     kind: "wait",
     words,
     pill: null,
     actions: (
       <span className="fl-install" data-testid={IDS.line} data-state={kind}>
-        <Button
-          kind={button.quiet === true ? "quiet" : "tone"}
-          size="small"
-          className="working-act"
-          onClick={button.press}
-          data-testid={button.testId}
-        >
-          {button.words}
-        </Button>
+        {buttons.map((button) => (
+          <Button
+            key={button.testId}
+            kind={button.quiet === true ? "quiet" : "tone"}
+            size="small"
+            className="working-act"
+            onClick={button.press}
+            data-testid={button.testId}
+          >
+            {button.words}
+          </Button>
+        ))}
       </span>
     ),
   });
@@ -233,7 +229,19 @@ export function welcomeFoot(
         null,
         "done",
       );
-    case "queued":
+    case "queued": {
+      // the other plan's sign-in ahead, with no line of its own here (a code, a switch): its Cancel, before this one's
+      const ahead =
+        view.after === undefined || view.ahead !== true
+          ? []
+          : [
+              {
+                words: fl(lang, "Cancel {name}'s sign-in", { name: view.after }),
+                press: acts.cancelAhead,
+                testId: IDS.cancelAhead,
+                quiet: true,
+              },
+            ];
       return line(
         view.offline
           ? view.online === true
@@ -246,8 +254,10 @@ export function welcomeFoot(
               })
             : fl(lang, "Your browser opens when {name} is ready.", { name }),
         view.kind,
+        ...ahead,
         cancel,
       );
+    }
     case "waiting":
       return view.pasting
         ? null

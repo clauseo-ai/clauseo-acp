@@ -149,13 +149,17 @@ test("Cancel on one plan's row leaves the other's download and sign-in going", a
     install(CODEX, { downloading: { received: 90_000_000, total: 139_000_000 } }),
   );
   await press(row(CODEX)?.querySelector("button") ?? null);
-  expect(setups(t).at(-1)).toEqual({ cancel_sign_in: { agent: CODEX } });
+  expect(setups(t).at(-1)).toEqual({ cancel_agent_install: { agent: CODEX } });
   expect(setups(t).filter((c) => Object.values(c)[0]?.agent === CLAUDE)).toEqual([
     { start_sign_in: { agent: CLAUDE } },
   ]);
-  // desktop drops ChatGPT's sign-in and keeps its download; Claude's row is as it was
-  await play(t, signIn(CODEX, { signed_out: {} }));
-  expect(row(CODEX)?.textContent).toContain("Getting ChatGPT ready… 90 MB of 139 MB");
+  // desktop stops ChatGPT's download and drops its sign-in; Claude's row is as it was
+  await play(
+    t,
+    install(CODEX, { missing: { download_bytes: 139_000_000 } }),
+    signIn(CODEX, { signed_out: {} }),
+  );
+  expect(row(CODEX)?.textContent).toContain("needs a download of about 140 MB");
   expect(row(CLAUDE)?.textContent).toContain("Getting Claude ready… 13 MB of 165 MB");
   expect(row(CLAUDE)?.querySelector("button")?.textContent).toBe("Cancel");
 });
@@ -175,7 +179,10 @@ test("ChatGPT ready while Claude's sign-in is under way: its row says its browse
   expect(row(CODEX)?.textContent).toContain(
     "Your browser opens for ChatGPT after Claude's sign-in.",
   );
-  expect(row(CODEX)?.querySelector("button")?.textContent).toBe("Cancel");
+  // Claude's own row has its Cancel: no second one for it here
+  expect([...(row(CODEX)?.querySelectorAll("button") ?? [])].map((x) => x.textContent)).toEqual([
+    "Cancel",
+  ]);
   await play(t, signIn(CLAUDE, SIGNED_IN), signIn(CODEX, { waiting: { since: AT, nudge: false } }));
   expect(row(CODEX)?.textContent).toContain("ChatGPT · Finish signing in with your browser.");
   // only the two presses' sign-ins went: desktop held ChatGPT's, one sign-in at a time
@@ -234,7 +241,7 @@ test("a cancelled sign-in's row has no icon: no tick, since it isn't ready, and 
   expect(row(CLAUDE)?.querySelector(".working-lead")?.getAttribute("data-lead")).toBe("none");
 });
 
-test("the waiting plan's Cancel stops its wait: nothing is sent for it, its download goes on, and its Sign in is back once it is here", async () => {
+test("the waiting plan's Cancel while it downloads: its wait ends and its download stops (cancel_agent_install); on missing its row offers its Sign in again", async () => {
   const t = await mountFirstRun({ matters: [], first: FRESH });
   await press("Sign in with Claude");
   await play(t, install(CLAUDE, READY), signIn(CLAUDE, { waiting: { since: AT, nudge: false } }));
@@ -242,12 +249,17 @@ test("the waiting plan's Cancel stops its wait: nothing is sent for it, its down
   await play(t, install(CODEX, { downloading: { received: 40_000_000, total: 139_000_000 } }));
   await press(row(CODEX)?.querySelector("button") ?? null);
   expect(storeOf(t).state().queued).toBeNull();
-  expect(row(CODEX)?.textContent).toContain("Getting ChatGPT ready… 40 MB of 139 MB");
-  await play(t, install(CODEX, READY), signIn(CLAUDE, SIGNED_IN));
+  await play(
+    t,
+    install(CODEX, { missing: { download_bytes: 139_000_000 } }),
+    signIn(CLAUDE, SIGNED_IN),
+  );
+  expect(row(CODEX)?.textContent).toContain("needs a download of about 140 MB");
   expect(row(CODEX)?.querySelector("button")?.textContent).toBe("Sign in with ChatGPT");
   expect(setups(t)).toEqual([
     { start_sign_in: { agent: CLAUDE } },
     { install_agent: { agent: CODEX } },
+    { cancel_agent_install: { agent: CODEX } },
   ]);
 });
 

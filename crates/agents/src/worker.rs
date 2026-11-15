@@ -10,6 +10,10 @@
 //! (`install.rs`), and the free space is counted for both (`worker/space.rs`). Every event
 //! a job sends goes through [`Shared::emit_job`], under the same lock `pause` takes, and is
 //! dropped once the job is paused or superseded: a paused job never speaks after its `Paused`.
+//! A cancel ([`Agents::cancel_install`]) stops the job as quietly as a newer one would, says
+//! `Missing` itself, and puts a clean-up job in the agent's slot (`worker/cancel.rs`): it takes
+//! the turn lock like any job, removes the agent's partial files, and a newer install of that
+//! agent supersedes it.
 //!
 //! Sign-in jobs (`signin`) run beside the installs, one per agent, on the model in
 //! [`crate::signin::job`]: the calls reserve the agent's job slot, the worker starts the job.
@@ -37,6 +41,7 @@ use crate::config::{AgentsConfig, Network};
 use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
 use crate::state::{AgentsEvent, InstallState, Installed, PythonState};
 
+mod cancel;
 mod first;
 mod python_log;
 mod shared;
@@ -69,6 +74,7 @@ enum Command {
     Install(AgentId),
     Pause(AgentId),
     Retry(AgentId, bool),
+    CancelInstall(AgentId),
     /// Replace the proxies and CA files the next jobs take.
     SetNetwork(Box<Network>),
     /// Start a reserved sign-in, sign-out or status job.
@@ -111,6 +117,8 @@ struct Inner {
     /// time installs it, and another reaching its agent's `Ready` meanwhile ends there.
     python_job: Option<u64>,
     next_job: u64,
+    /// Each agent's last `Missing` size, for the `Missing` a cancel goes back to.
+    missing_bytes: BTreeMap<AgentId, u64>,
     /// Each agent's tries in its last install job that ended, the last one included.
     tries: BTreeMap<AgentId, u32>,
     /// Set by `shutdown` or the drop: no job starts after it.
@@ -156,6 +164,9 @@ struct Slot {
     /// What its try's disk check counted on, once passed: other tries' checks count what of
     /// it is not written yet.
     reserve: space::Reserve,
+    /// A cancel's clean-up (`worker/cancel.rs`), not an install: it reserves no space, is no
+    /// install running for `install` or `retry`, and stops with no event.
+    cleanup: bool,
 }
 
 /// One job's identity and pause signal.
@@ -235,6 +246,17 @@ impl Agents {
     /// Pauses `agent`'s install if it is running: `Paused`, its partial files kept.
     pub fn pause(&self, agent: &AgentId) {
         self.send(Command::Pause(agent.clone()));
+    }
+
+    /// Cancels `agent`'s install while it downloads, installs, waits, is paused or failed: its
+    /// job stops with no `Paused`, the state is `Missing` at once, and a clean-up job removes
+    /// the agent's own partial files (its downloads, its npm cache, and every entry of its
+    /// `install/` but a ready folder) once the stopped job's thread has ended, under the
+    /// agent's `.lock-<id>`. Node's and Python's archives are shared and stay. Nothing happens
+    /// to an unknown, `Managed`, `Ready` or `Missing` agent. A later `install` supersedes the
+    /// clean-up.
+    pub fn cancel_install(&self, agent: &AgentId) {
+        self.send(Command::CancelInstall(agent.clone()));
     }
 
     /// Starts a `Failed`, `Waiting` or `Paused` install again with a fresh count of tries, or,

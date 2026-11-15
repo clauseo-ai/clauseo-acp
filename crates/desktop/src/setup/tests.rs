@@ -42,6 +42,7 @@ fn command(action: SetupAction) -> SetupCommand {
     let (name, fields) = match action {
         SetupAction::InstallAgent => ("install_agent", agent),
         SetupAction::RetryAgentInstall => ("retry_agent_install", agent),
+        SetupAction::CancelAgentInstall => ("cancel_agent_install", agent),
         SetupAction::StartSignIn => ("start_sign_in", agent),
         SetupAction::CancelSignIn => ("cancel_sign_in", agent),
         SetupAction::PasteSignInCode => ("paste_sign_in_code", with(json!({ "code": SECRET }))),
@@ -66,6 +67,7 @@ fn mains(first_key: bool) -> Vec<SetupAction> {
     let mut list = vec![
         SetupAction::InstallAgent,
         SetupAction::RetryAgentInstall,
+        SetupAction::CancelAgentInstall,
         SetupAction::StartSignIn,
         SetupAction::CancelSignIn,
         SetupAction::PasteSignInCode,

@@ -1,6 +1,7 @@
 //! Quitting during `npm ci` (#386): `npm ci` is replaced by a fake npm, the real Node running a
 //! script that starts a child Node, writes both pids and sleeps. `shutdown` kills both within
-//! its wait, a short wait returns in time while a job is stuck, and a drop kills both too. Also
+//! its wait, a short wait returns in time while a job is stuck, and a drop kills both too; so
+//! does a cancel, whose clean-up then removes the temp tree. Also
 //! `install_tries` after a plain install.
 #![expect(
     clippy::disallowed_methods,
@@ -213,6 +214,58 @@ fn dropping_agents_kills_a_sleeping_npm_and_its_child() {
     let ended = all_end(running);
     let alive = still_running(running);
     assert!(ended, "still running after the drop: {alive:?}");
+}
+
+/// A cancel while npm runs kills npm's tree, says `Missing`, and its clean-up removes the
+/// temp tree npm was setting up and the agent's npm cache.
+#[test]
+fn a_cancel_during_npm_kills_it_and_removes_its_temp_tree() {
+    let fx = Fixture::new("quit-cancel-npm");
+    let (agents, events, pids, _gate) = start(&fx);
+    let running = install_until_npm(&agents, &events, &pids);
+    agents.cancel_install(&agent_a());
+    let seen = events.until(&agent_a(), |s| matches!(s, InstallState::Missing { .. }));
+    assert!(!states_of(&seen, &agent_a()).contains(&InstallState::Paused));
+    let gone = all_end(running);
+    let alive = still_running(running);
+    assert!(gone, "still running after the cancel: {alive:?}");
+    let root = fx.install_root(&agent_a());
+    let cache = fx
+        .data
+        .path()
+        .join("agents")
+        .join("npm-cache")
+        .join("agent-a");
+    let start = Instant::now();
+    while !temp_trees(&root).is_empty() || cache.exists() {
+        assert!(
+            start.elapsed() < DEADLINE,
+            "left: {:?}, cache {}",
+            temp_trees(&root),
+            cache.exists()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(matches!(
+        agents.state(&agent_a()),
+        Some(InstallState::Missing { .. })
+    ));
+    assert!(agents.shutdown(WAIT));
+}
+
+/// The `.tmp-*` entries of `root`.
+fn temp_trees(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with(".tmp-"))
+        })
+        .collect()
 }
 
 #[test]

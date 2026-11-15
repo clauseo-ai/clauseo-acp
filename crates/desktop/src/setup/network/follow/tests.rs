@@ -56,6 +56,7 @@ struct Networks(Mutex<Vec<clauseo_agents::Network>>);
 impl SetupAgents for Networks {
     fn install(&self, _agent: &AgentId) {}
     fn retry(&self, _agent: &AgentId, _use_system_proxy: bool) {}
+    fn cancel_install(&self, _agent: &AgentId) {}
     fn state(&self, _agent: &AgentId) -> Option<clauseo_agents::InstallState> {
         None
     }

@@ -11,6 +11,7 @@
 //! - `install` plays `Downloading` (0, then half), `Installing`, then `Ready { version: e2e }`,
 //!   each held [`HOLD`], with no network; an install already playing is joined, and one of a
 //!   ready agent says `Ready` again, as S18's does. `retry` does nothing (it never fails).
+//!   `cancel_install` while it plays says `Missing` again and the rest of the play is dropped.
 //! - `installed` says nothing for it, so no `agents.<id>` entry is written at `Ready`: the
 //!   spec's settings keep theirs (`fake_agent`, or none).
 //! - Pair it with `E2E_FAKE_SIGNIN` ([`scripted`] wraps that over this), so the sign-in pending at
@@ -114,12 +115,20 @@ fn wrap_with(
 struct Shared {
     events: mpsc::UnboundedSender<AgentsEvent>,
     states: Mutex<BTreeMap<AgentId, InstallState>>,
+    /// Each agent's play count: a play says nothing once a cancel has moved it on. Taken only
+    /// with `states` held.
+    runs: Mutex<BTreeMap<AgentId, u64>>,
 }
 
 impl Shared {
     /// Says `state` for `agent`, under the lock, so states go out in the order they are said.
     fn say(&self, agent: &AgentId, state: InstallState) {
         self.say_in(&mut lock(&self.states), agent, state);
+    }
+
+    /// `agent`'s play count; call with `states` held.
+    fn run(&self, agent: &AgentId) -> u64 {
+        lock(&self.runs).get(agent).copied().unwrap_or_default()
     }
 
     /// [`Shared::say`] with the lock held.
@@ -138,8 +147,8 @@ impl Shared {
     }
 }
 
-/// The steps after the first `Downloading`, each after `hold`.
-async fn play(shared: &Shared, agent: &AgentId, hold: Duration) {
+/// The steps after the first `Downloading` of play `run`, each after `hold`, until a cancel.
+async fn play(shared: &Shared, agent: &AgentId, run: u64, hold: Duration) {
     let steps = [
         InstallState::Downloading {
             received: DOWNLOAD_BYTES / 2,
@@ -152,7 +161,11 @@ async fn play(shared: &Shared, agent: &AgentId, hold: Duration) {
     ];
     for state in steps {
         async_io::Timer::after(hold).await;
-        shared.say(agent, state);
+        let mut states = lock(&shared.states);
+        if shared.run(agent) != run {
+            return;
+        }
+        shared.say_in(&mut states, agent, state);
     }
 }
 
@@ -177,6 +190,7 @@ impl FakeInstall {
         let shared = Arc::new(Shared {
             events,
             states: Mutex::new(BTreeMap::new()),
+            runs: Mutex::new(BTreeMap::new()),
         });
         for agent in agents {
             let missing = InstallState::Missing {
@@ -203,7 +217,7 @@ impl FakeInstall {
     /// one step under the lock, so two presses start one install), the rest on a thread of its
     /// own. A ready agent says `Ready` again; one playing is joined.
     fn start(&self, agent: &AgentId) {
-        {
+        let run = {
             let mut states = lock(&self.shared.states);
             match states.get(agent) {
                 Some(InstallState::Missing { .. }) => {}
@@ -219,20 +233,36 @@ impl FakeInstall {
                 total: DOWNLOAD_BYTES,
             };
             self.shared.say_in(&mut states, agent, downloading);
-        }
+            self.shared.run(agent)
+        };
         let shared = Arc::clone(&self.shared);
         let who = agent.clone();
         let hold = self.hold;
         let spawned = std::thread::Builder::new()
             .name("clauseo-e2e-install".to_owned())
-            .spawn(move || futures::executor::block_on(play(&shared, &who, hold)));
+            .spawn(move || futures::executor::block_on(play(&shared, &who, run, hold)));
         if let Err(err) = spawned {
             tracing::warn!(%err, "e2e: the scripted install did not start");
-            let missing = InstallState::Missing {
-                download_bytes: DOWNLOAD_BYTES,
-            };
-            self.shared.say(agent, missing);
+            let _cancelled = self.cancel(agent);
         }
+    }
+
+    /// Stops `agent`'s play, when one goes: `Missing` again, the play's next steps dropped.
+    /// Whether one went.
+    fn cancel(&self, agent: &AgentId) -> bool {
+        let mut states = lock(&self.shared.states);
+        if !matches!(
+            states.get(agent),
+            Some(InstallState::Downloading { .. } | InstallState::Installing)
+        ) {
+            return false;
+        }
+        *lock(&self.shared.runs).entry(agent.clone()).or_default() += 1;
+        let missing = InstallState::Missing {
+            download_bytes: DOWNLOAD_BYTES,
+        };
+        self.shared.say_in(&mut states, agent, missing);
+        true
     }
 }
 
@@ -241,6 +271,13 @@ impl SetupAgents for FakeInstall {
         match self.scripted(agent) {
             None => self.real.install(agent),
             Some(_) => self.start(agent),
+        }
+    }
+    fn cancel_install(&self, agent: &AgentId) {
+        if self.scripted(agent).is_none() {
+            self.real.cancel_install(agent);
+        } else {
+            let _went = self.cancel(agent);
         }
     }
     fn retry(&self, agent: &AgentId, use_system_proxy: bool) {

@@ -1,5 +1,5 @@
 //! The worker thread: each snapshot agent's first state at start, then the handle's commands in
-//! order (installs, pauses, retries, and the sign-in jobs `signin::start_job` starts).
+//! order (installs, pauses, retries, cancels, and the sign-in jobs `signin::start_job` starts).
 
 use std::collections::BTreeMap;
 use std::sync::mpsc;
@@ -9,7 +9,7 @@ use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::AgentId;
 
 use super::python_log::LIFECYCLE;
-use super::{Command, Inner, Shared, Ticket, first, signin};
+use super::{Command, Inner, Shared, Ticket, cancel, first, signin};
 use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
 use crate::install::{self, Job};
@@ -44,6 +44,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Command::Install(agent) => self.install(&agent),
                 Command::Pause(agent) => self.pause(&agent),
                 Command::Retry(agent, use_system_proxy) => self.retry(&agent, use_system_proxy),
+                Command::CancelInstall(agent) => self.cancel_install(&agent),
                 Command::SetNetwork(network) => self.set_network(*network),
                 Command::Signin(start) => signin::start_job(&self, *start),
             }
@@ -65,7 +66,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 // failed one waits for a retry; a running one fetches Python as its own second
                 // step, or is fetching it); otherwise `Ready` again.
                 let missing = matches!(inner.python, PythonState::Missing { .. });
-                if !inner.jobs.is_empty() || !missing {
+                if inner.installing().next().is_some() || !missing {
                     let installed = inner.installed.get(agent).cloned();
                     Inner::set(&mut inner, &self.shared.events, agent, ready, installed);
                     return;
@@ -114,7 +115,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         let (python, idle) = {
             let inner = self.shared.lock();
             let missing = matches!(inner.python, PythonState::Missing { .. });
-            (missing, inner.jobs.is_empty())
+            (missing, inner.installing().next().is_none())
         };
         let archive = self.config.snapshot.python_archive(self.config.platform);
         if !python || !idle || install::restart::blocked(&data_dir, archive).is_some() {
@@ -129,6 +130,17 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             tracing::info!(target: LIFECYCLE, %agent, "python runtime: resumed at start");
             self.start_job(&agent);
         }
+    }
+
+    /// `Agents::cancel_install`: see `worker/cancel.rs`.
+    fn cancel_install(&mut self, agent: &AgentId) {
+        if self.config.snapshot.agent(agent).is_none() || self.config.managed.contains(agent) {
+            return;
+        }
+        // The lawyer's cancel, as a pause: the next start doesn't resume it.
+        install::restart::clear_wanted(&self.config.data_dir, agent);
+        let turn = Arc::clone(self.turns.entry(agent.clone()).or_default());
+        cancel::cancel(&self.config, &self.shared, agent, turn);
     }
 
     fn set_network(&mut self, network: Network) {
@@ -157,7 +169,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Some(InstallState::Ready { .. }) => {
                     let wanted = python_wanted(&inner.python)
                         || matches!(inner.python, PythonState::Waiting { .. });
-                    let installing = inner.jobs.keys().any(|running| {
+                    let installing = inner.installing().any(|running| {
                         !matches!(inner.states.get(running), Some(InstallState::Ready { .. }))
                     });
                     let restart = wanted && !installing;
@@ -198,7 +210,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 agent: agent.clone(),
                 cancel: Arc::new(Cancel::new()),
             };
-            inner.add_job(ticket.clone());
+            inner.add_job(ticket.clone(), false);
             ticket
         };
         let turn = Arc::clone(self.turns.entry(agent.clone()).or_default());

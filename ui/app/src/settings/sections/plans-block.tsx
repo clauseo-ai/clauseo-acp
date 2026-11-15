@@ -194,8 +194,13 @@ export function PlanBlock({
         command({ start_sign_in: a.console === true ? { agent, console: true } : { agent } });
         return;
       case "cancel":
+        // not installed yet (its download paused with the sign-in queued): the download stops too, and the card reads
+        // not added; else cancel_sign_in
         setPasting(false);
-        command({ cancel_sign_in: { agent } });
+        store.cancelSignIn(agent);
+        return;
+      case "cancel-ahead":
+        // never offered here: the plan ahead's block shows its own Cancel
         return;
       case "paste":
         setPasting(true);
@@ -430,13 +435,15 @@ export function PlanBlock({
       case "gate": {
         const zone = localZone();
         // a clock time only, so the host's time stands for its own day
-        const view = gateView(
+        // the plan ahead's block above or below shows its own sign-in and Cancel: no second Cancel for it here
+        const seen = gateView(
           setup,
           { ...store.state(), keyOpen: false, pasting },
           (at) => clockOf(at, at, zone, lang).time,
-          undefined,
+          agent,
           online,
         );
+        const view = seen?.kind === "queued" ? { ...seen, ahead: false } : seen;
         // a sign-in that stopped in a way the card says: the card, with no key link (the key stands under it)
         if (view !== null && view.kind === "failed" && isStopped(view.code)) {
           body = (
