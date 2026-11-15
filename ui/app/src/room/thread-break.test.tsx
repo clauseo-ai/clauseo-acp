@@ -116,6 +116,8 @@ test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.start
     "matter.folder_backslash",
     "agent.folder_inaccessible",
     "agent.unreachable",
+    "agent.answer_failed",
+    "agent.mode_missing",
   ])
     expect(stoppedLine("en", brk(code), 0, { onRestart: () => {}, refused: null })).toBeNull();
   // and before H10 only agent.exited takes the line
@@ -161,6 +163,26 @@ test("the stopped question comes back only before H10, only for the codes asking
   expect(refillOf(brk("matter.folder_backslash"), true, null)).toBeNull();
   expect(refillOf(brk("agent.folder_inaccessible"), true, null)).toBeNull();
   expect(refillOf(brk("agent.unreachable"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.answer_failed"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.mode_missing"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.start_offline"), true, null)).toEqual({ key: "step:x", text: "Q" });
+});
+
+test("agent.answer_failed: an error answer to the question is never called unreadable; no Restart, Try again", () => {
+  const b = brk("agent.answer_failed");
+  expect(RESTARTS.has("agent.answer_failed")).toBe(false);
+  expect(takesMark(b.step)).toBe(false);
+  expect(stoppedLine("en", b, 0, { onRestart: () => {}, refused: null })).toBeNull();
+  expect(errorWords("en", "agent.answer_failed")).toBe("Claude stopped with an error. Try again.");
+  expect(errorWords("en", "agent.answer_failed", { kind: "codex", name: "codex-acp" })).toBe(
+    "ChatGPT stopped with an error. Try again.",
+  );
+  expect(errorWords("en", "agent.mode_missing")).toBe(
+    errorWords("en", "agent.unsupported_version"),
+  );
+  expect(errorWords("en", "agent.start_offline")).toBe(
+    "You're offline, so Claude didn't start. Try again when you're back online. Your question is kept.",
+  );
 });
 
 test("agent.service_error (#1030): no Restart, no time mark, no working line, with H10 or without", () => {

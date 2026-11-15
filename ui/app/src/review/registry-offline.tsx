@@ -22,6 +22,7 @@ export const ownEntry = (code: ErrorCode, key: ErrorKey): key is (typeof MARK_KE
   code === "agent.unreachable" ||
   code === "matter.folder_backslash" ||
   code === "agent.folder_inaccessible" ||
+  code === "agent.answer_failed" ||
   (MARK_KEYS as readonly string[]).includes(key);
 
 /** agent.offline is never a send's refusal: the stop line under the answer so far, with Try again. */
@@ -127,6 +128,12 @@ const folderStop = (code: ErrorCode, key: Parameters<typeof errorWords>[0]): Ent
   {
     id: `U3-err-${code}`,
     words: errorWords(key),
+/** agent.answer_failed is never a send's refusal either: Claude's stop line under the answer so far, with Try again
+ * and never Restart. ChatGPT's, an agent's by its name and the nameless line are U6F-28 to U6F-30. */
+const ANSWER_FAILED: Entry[] = [
+  {
+    id: "U3-err-agent.answer_failed",
+    words: errorWords("Claude stopped with an error. Try again."),
     screen: "room/thread",
     render: () => (
       <RoomOver
@@ -139,6 +146,9 @@ const folderStop = (code: ErrorCode, key: Parameters<typeof errorWords>[0]): Ent
             // matter.folder_backslash's line as on the Mac, for the matter folder's own name
             platform: "mac",
             matterFolder: "Documents/Acme\\ Traders",
+              agentText(6, 1, "Clause nine requires **notice in writing**, served at"),
+              step(9, { stop: "failed", failure: "agent.answer_failed" }),
+            ],
           })
         }
       />
@@ -165,3 +175,15 @@ const OWN: Partial<Record<ErrorCode, Entry[]>> = {
 /** The entries in place of a refusal for a code `ownEntry` names: agent.offline's, agent.service_error's, agent.quiet's,
  * agent.unreachable's and the two folder codes' own, in their code's place. */
 export const ownEntries = (code: ErrorCode): Entry[] => OWN[code] ?? [];
+/** The entries in place of a refusal for a code `ownEntry` names: agent.offline's, agent.service_error's and
+ * agent.quiet's own, in their code's place. */
+export const ownEntries = (code: ErrorCode): Entry[] =>
+  code === "agent.offline"
+    ? OFFLINE
+    : code === "agent.service_error"
+      ? SERVICE
+      : code === "agent.quiet"
+        ? QUIET
+        : code === "agent.answer_failed"
+          ? ANSWER_FAILED
+          : [];

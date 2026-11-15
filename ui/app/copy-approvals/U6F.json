@@ -467,5 +467,38 @@
     "at": "2026-11-15",
     "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
     "note": "agent.start_offline: the start request failed on its connection and the host's probe did not get through; a send's refusal, the question kept"
+  },
+  "U6F-28": {
+    "en": "ChatGPT stopped with an error. Try again.",
+    "hi": "ChatGPT एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.answer_failed: an error the agent answered the question with (was \"sent something Clauseo can't read\"); Try again under the answer, never Restart"
+  },
+  "U6F-29": {
+    "en": "{name} stopped with an error. Try again.",
+    "hi": "{name} एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.answer_failed for an agent of no kind by its name"
+  },
+  "U6F-30": {
+    "en": "The AI stopped with an error. Try again.",
+    "hi": "AI एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.answer_failed with no name at all"
   }
 }

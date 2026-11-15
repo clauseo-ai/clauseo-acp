@@ -1097,5 +1097,27 @@
     "at": "2026-11-15",
     "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
     "note": "agent.start_offline: the start request failed on its connection and the host's probe did not get through"
+  },
+  "U3-err-agent.answer_failed": {
+    "en": "Claude stopped with an error. Try again.",
+    "hi": "Claude एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.answer_failed: an error the agent answered the question with (was \"Claude sent something Clauseo can't read.\"); Try again under the answer, never Restart"
+  },
+  "U3-err-agent.mode_missing": {
+    "en": "This version of Claude Code doesn't work with Clauseo.",
+    "hi": "Claude Code का यह संस्करण Clauseo के साथ काम नहीं करता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "startmsg helper (provisional; before-launch item 3: start failures say what to do)",
+    "note": "agent.mode_missing: the session offered no mode Clauseo runs it in (was \"Claude sent something Clauseo can't read.\"); the same words as U3-err-agent.unsupported_version, approved there"
   }
 }
