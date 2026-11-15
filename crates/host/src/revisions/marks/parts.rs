@@ -7,6 +7,12 @@
 //! The relationship parts are matched as bytes, never parsed as XML, like the rest of the scan:
 //! each `<Relationship` element's `Type`, `Target` and `TargetMode` attributes are read, with the
 //! XML entities in a value decoded, and a target is resolved against its source part's folder.
+//! The read is one pass: after each element it goes on from the element's end, so a hostile part
+//! with `<Relationship` repeated inside one long value costs its length, not its length squared.
+//!
+//! A target may name any part inside the zip, `/[Content_Types].xml` or a relationships part
+//! among them: the scan then reads that part as XML too, within the same caps. It never leaves
+//! the zip, so such a target costs a read and nothing more.
 
 /// Where the main document is when the package names none.
 const MAIN_FALLBACK: &str = "word/document.xml";
@@ -101,59 +107,73 @@ fn resolve(folder: &str, target: &str) -> Option<String> {
 /// `Target` is left out.
 pub(super) fn relationships(xml: &[u8]) -> impl Iterator<Item = Relationship> + '_ {
     const OPEN: &[u8] = b"<Relationship";
-    memchr::memmem::find_iter(xml, OPEN).filter_map(|at| {
-        let rest = xml.get(at + OPEN.len()..)?;
-        // `<Relationships`, the root, is another element
-        if !rest.first().is_some_and(u8::is_ascii_whitespace) {
-            return None;
-        }
-        let end = memchr::memchr(b'>', rest)?;
-        let mut kind = None;
-        let mut target = None;
-        let mut external = false;
-        for (name, value) in attributes(rest.get(..end)?) {
-            match name {
-                b"Type" => kind = Some(text(value)),
-                b"Target" => target = Some(text(value)),
-                b"TargetMode" => external = value.eq_ignore_ascii_case(b"External"),
-                _ => {}
+    let finder = memchr::memmem::Finder::new(OPEN);
+    let mut rest = xml;
+    std::iter::from_fn(move || {
+        loop {
+            let at = finder.find(rest)?;
+            let after = rest.get(at + OPEN.len()..)?;
+            // the element ends at its first `>` (`/>` included); the next search starts there, so
+            // no byte is searched twice
+            let end = memchr::memchr(b'>', after);
+            rest = end.and_then(|end| after.get(end + 1..)).unwrap_or_default();
+            // `<Relationships`, the root, is another element
+            if !after.first().is_some_and(u8::is_ascii_whitespace) {
+                continue;
+            }
+            if let Some(rel) = relationship(after.get(..end?)?) {
+                return Some(rel);
             }
         }
-        Some(Relationship {
-            kind: kind?,
-            target: target?,
-            external,
-        })
     })
 }
 
-/// The `name="value"` (or `name='value'`) pairs of an element's tag after its name, until one
-/// does not read.
-fn attributes(mut tag: &[u8]) -> Vec<(&[u8], &[u8])> {
-    let mut pairs = Vec::new();
-    loop {
-        let Some(eq) = memchr::memchr(b'=', tag) else {
-            return pairs;
-        };
-        let name = tag.get(..eq).unwrap_or_default().trim_ascii();
-        let value = tag.get(eq + 1..).unwrap_or_default().trim_ascii_start();
-        let Some((&quote, value)) = value.split_first() else {
-            return pairs;
-        };
-        if quote != b'"' && quote != b'\'' {
-            return pairs;
+/// The relationship whose tag after `<Relationship` is `tag`; `None` without a `Type` or a
+/// `Target`. Only those two values are decoded; every other attribute is passed over.
+fn relationship(tag: &[u8]) -> Option<Relationship> {
+    let mut kind = None;
+    let mut target = None;
+    let mut external = false;
+    for (name, value) in attributes(tag) {
+        match name {
+            b"Type" => kind = Some(text(value)),
+            b"Target" => target = Some(text(value)),
+            b"TargetMode" => external = value.eq_ignore_ascii_case(b"External"),
+            _ => {}
         }
-        let Some(close) = memchr::memchr(quote, value) else {
-            return pairs;
-        };
-        pairs.push((name, value.get(..close).unwrap_or_default()));
-        tag = value.get(close + 1..).unwrap_or_default();
     }
+    Some(Relationship {
+        kind: kind?,
+        target: target?,
+        external,
+    })
 }
 
-/// An attribute's value as text, its five predefined XML entities decoded.
+/// The `name="value"` (or `name='value'`) pairs of an element's tag after its name, in one pass,
+/// until one does not read. Also the root element's `xmlns` declarations, for the marks scan.
+pub(super) fn attributes(mut tag: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])> {
+    std::iter::from_fn(move || {
+        let eq = memchr::memchr(b'=', tag)?;
+        let name = tag.get(..eq)?.trim_ascii();
+        let value = tag.get(eq + 1..)?.trim_ascii_start();
+        let (&quote, value) = value.split_first()?;
+        if quote != b'"' && quote != b'\'' {
+            return None;
+        }
+        let close = memchr::memchr(quote, value)?;
+        tag = value.get(close + 1..)?;
+        Some((name, value.get(..close)?))
+    })
+}
+
+/// An attribute's value as text, its five predefined XML entities decoded (one copy when it has
+/// none).
 fn text(value: &[u8]) -> String {
-    String::from_utf8_lossy(value)
+    let value = String::from_utf8_lossy(value);
+    if !value.contains('&') {
+        return value.into_owned();
+    }
+    value
         .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
@@ -163,7 +183,10 @@ fn text(value: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::{Relationship, main_part, relationships, rels_of, resolve, story_parts};
+    use crate::clock::{Clock as _, SystemClock};
 
     const DOC_RELS: &str = concat!(
         r#"<?xml version="1.0"?><Relationships xmlns="http://x/rel">"#,
@@ -229,5 +252,29 @@ mod tests {
         assert_eq!(resolve("word/", "../../x.xml"), None);
         assert_eq!(resolve("word/", "a/"), None);
         assert_eq!(resolve("", "/"), None);
+    }
+
+    /// `<Relationship ` repeated inside one value, `size` bytes of it: each one is the start of
+    /// another element to a scan that reads ahead from every match.
+    fn hostile(size: usize) -> String {
+        let inside = "<Relationship ".repeat(size / "<Relationship ".len());
+        format!(
+            r#"<Relationships><Relationship Id="{inside}" Type="t/header" Target="h.xml"/></Relationships>"#
+        )
+    }
+
+    /// The shape that took 15 s at 256 KiB and over two minutes at 1 MiB reads in one pass: well
+    /// under a second, even in a debug build.
+    #[test]
+    fn a_relationships_part_with_elements_hidden_in_a_value_reads_in_one_pass() {
+        for size in [256 * 1024, 1024 * 1024] {
+            let xml = hostile(size);
+            let start = SystemClock.now().mono;
+            let found: Vec<Relationship> = relationships(xml.as_bytes()).collect();
+            let took = SystemClock.now().mono.saturating_sub(start);
+            assert_eq!(found.len(), 1, "{size}");
+            assert_eq!(found[0].target, "h.xml");
+            assert!(took < Duration::from_secs(1), "{size} bytes took {took:?}");
+        }
     }
 }
