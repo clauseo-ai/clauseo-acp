@@ -158,6 +158,7 @@ fn meta(forced_ask: bool) -> Value {
             notes: "C:/data/agent-state/m/notes",
             connectors: "",
             browser: "",
+            other_matters: "",
         },
         seed_sites: crate::browser::seed_sites::SEED_SITES,
         forced_ask,

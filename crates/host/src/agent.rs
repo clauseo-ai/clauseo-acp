@@ -39,6 +39,7 @@ pub(crate) mod mcp_trust;
 pub(crate) mod one_shell;
 pub(crate) mod plan_note;
 pub(crate) mod shell_path;
+pub(crate) mod short_forms;
 mod spec;
 pub(crate) mod temp;
 pub(crate) mod title;

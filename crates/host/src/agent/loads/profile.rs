@@ -43,7 +43,7 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use clauseo_profile::placeholders::{
-    self, BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+    self, BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, OTHER_MATTERS, WORK_FOLDER,
 };
 use clauseo_protocol::{
     AgentKind, ClauseoTool, ErrorCode, ToolAvailability, ToolState, ToolsUnavailableReason,
@@ -127,6 +127,11 @@ pub(crate) struct Folders<'a> {
     /// `agent-browser` rules in a session with the shell tool, else the sentence that says it
     /// has no browser, which [`Folders::of`] starts with.
     pub(crate) browser: &'a str,
+    /// `{other_matters}`: the other matters' rule, the fenced one
+    /// (`clauseo_profile::instructions::OTHER_MATTERS`), which [`Folders::of`] starts with, or,
+    /// for Codex on Windows, the closed matters named
+    /// (`clauseo_profile::instructions::other_matters_closed`).
+    pub(crate) other_matters: &'a str,
 }
 
 impl<'a> Folders<'a> {
@@ -148,12 +153,21 @@ impl<'a> Folders<'a> {
             browser: clauseo_profile::instructions::browser_part(
                 clauseo_profile::instructions::BrowserPart::Off,
             ),
+            other_matters: clauseo_profile::instructions::OTHER_MATTERS.trim(),
         })
     }
 
     /// The same folders, with `{browser}` filled by `browser`.
     pub(crate) fn with_browser(self, browser: &'a str) -> Self {
         Self { browser, ..self }
+    }
+
+    /// The same folders, with `{other_matters}` filled by `rule`.
+    pub(crate) fn with_other_matters(self, rule: &'a str) -> Self {
+        Self {
+            other_matters: rule,
+            ..self
+        }
     }
 
     /// The same folders, with `{connectors}` filled by `connectors`.
@@ -531,9 +545,9 @@ pub(crate) fn fill_meta(meta: &mut Map<String, Value>, folders: Folders<'_>) -> 
     Ok(())
 }
 
-/// The instructions with `{work_folder}`, `{matter_notes}`, `{connectors}` and `{browser}`
-/// filled, in one pass. An unfillable token is a host bug: `agent.launch_failed`, naming it in
-/// the log.
+/// The instructions with `{work_folder}`, `{matter_notes}`, `{connectors}`, `{browser}` and
+/// `{other_matters}` filled, in one pass. An unfillable token is a host bug:
+/// `agent.launch_failed`, naming it in the log.
 pub(crate) fn fill_instructions(text: &str, folders: Folders<'_>) -> Result<String, Error> {
     placeholders::fill(
         text,
@@ -543,6 +557,7 @@ pub(crate) fn fill_instructions(text: &str, folders: Folders<'_>) -> Result<Stri
             (MATTER_NOTES, folders.notes),
             (CONNECTORS, folders.connectors),
             (BROWSER, folders.browser),
+            (OTHER_MATTERS, folders.other_matters),
         ],
     )
     .map_err(|unfilled| {
