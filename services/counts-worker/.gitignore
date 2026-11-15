@@ -3,3 +3,4 @@ build/
 node_modules/
 .wrangler/
 wrangler.deploy.toml
+.tools/
