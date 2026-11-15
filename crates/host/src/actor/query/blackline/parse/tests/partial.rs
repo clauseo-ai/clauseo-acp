@@ -417,3 +417,40 @@ fn an_unreadable_summary_may_differ() {
     });
     assert_eq!(read_view(&view).unwrap().blackline.notices, [MayDiffer]);
 }
+
+/// A deleted row holding an inserted cell is gone in the newer version: its paragraphs are
+/// removed. A deleted cell in an inserted row likewise.
+#[test]
+fn a_deletion_around_an_insertion_wins() {
+    let changes = |text: &str| -> Vec<_> {
+        read_text(text)
+            .paragraphs
+            .iter()
+            .map(|p| p.change)
+            .collect()
+    };
+    let deleted_row =
+        "t1 {table cols=1}\nr1 {row deleted #1 C}\np1 {cell inserted #2 C} x\n{/table}";
+    assert_eq!(changes(deleted_row), [Removed]);
+    let inserted_row =
+        "t1 {table cols=1}\nr1 {row inserted #1 C}\np1 {cell deleted #2 C} x\n{/table}";
+    assert_eq!(changes(inserted_row), [Removed]);
+    let nested = concat!(
+        "t1 {table cols=1}\nr1 {row deleted #1 C}\np1 a\n",
+        "t2 {+} {table cols=1}\nr2 {row inserted #2 C}\np2 b\n{/table}\n{/table}"
+    );
+    assert_eq!(changes(nested), [Removed, Removed]);
+}
+
+/// A section's tracked change, a mark or a format change (page size, margins), shows in no
+/// paragraph: it says the blackline may differ. A plain section end says nothing.
+#[test]
+fn a_tracked_section_change_may_differ() {
+    let unknown = |line: &str| read_text(&format!("p1 a\n{line}\np2 b")).seen.unknown;
+    assert!(unknown("{section 1 ends: next-page rev section #4 C}"));
+    assert!(unknown(
+        "{section 1 ends: next-page mark inserted #3 C peer -}"
+    ));
+    assert!(!unknown("{section 1 ends: next-page}"));
+    assert!(!unknown("{section 2 ends: continuous title-page}"));
+}

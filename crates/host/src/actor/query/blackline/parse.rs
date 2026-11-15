@@ -348,9 +348,13 @@ pub(crate) fn read_text(text: &str) -> Text {
         }
         if line.starts_with('{') {
             // A line of the view's own this reader does not know (a newer stetdoc's), and a
-            // section's tracked change (`{section 1 ends: next-page mark …}`), which no paragraph
-            // shows, are noted.
-            let section_mark = line.starts_with("{section ") && line.contains(" mark ");
+            // section's tracked change, which no paragraph shows, are noted: its mark
+            // (`{section 1 ends: next-page mark inserted #3 C peer -}`) or a format change such as
+            // its page size or margins (`{section 1 ends: next-page rev section #4 C}`).
+            let section_mark = line.starts_with("{section ")
+                && line
+                    .split([' ', '}'])
+                    .any(|word| word == "mark" || word == "rev");
             if section_mark || !STRUCTURE.iter().any(|known| line.starts_with(known)) {
                 read.seen.unknown = true;
             }
@@ -443,15 +447,18 @@ fn enter_cell(levels: &mut [Level], content: &str, seen: &mut Seen) {
     seen.unknown |= tags.unknown;
 }
 
-/// The change a paragraph takes from the rows and cells it stands in: the innermost table's
-/// cell's or row's, then the next table out's, and so on; `None` when none is marked.
+/// The change a paragraph takes from the rows and cells it stands in: deleted when any of them
+/// is deleted (its content is gone in the newer version, whatever was inserted inside it), else
+/// inserted when any is inserted; `None` when none is marked.
 fn whole(levels: &[Level]) -> Mark {
-    levels
-        .iter()
-        .rev()
-        .flat_map(|level| [level.cell, level.row])
-        .find(|mark| *mark != Mark::None)
-        .unwrap_or(Mark::None)
+    let marks = || levels.iter().flat_map(|level| [level.cell, level.row]);
+    if marks().any(|mark| mark == Mark::Deleted) {
+        Mark::Deleted
+    } else if marks().any(|mark| mark == Mark::Inserted) {
+        Mark::Inserted
+    } else {
+        Mark::None
+    }
 }
 
 /// The view's lines, each with the number of its first physical line (from 1): a line that ends
