@@ -30,6 +30,7 @@ const HOSTILE: &[(&str, &str)] = &[
     ("AGENT_BROWSER_PROXY_BYPASS", "*"),
     ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "1"),
     ("AGENT_BROWSER_SCREENSHOT_DIR", "/elsewhere"),
+    ("AGENT_BROWSER_STREAM_DISABLED", "0"),
     ("AI_GATEWAY_API_KEY", "secret-for-the-test"),
     ("CI", "1"),
     ("XDG_RUNTIME_DIR", "/run/user/1000"),
@@ -51,6 +52,7 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     map.insert("AGENT_BROWSER_STREAM_DISABLED".to_owned(), "1".to_owned());
     let fixed = [
         ("AGENT_BROWSER_PROXY_BYPASS", "<-loopback>"),
+        ("AGENT_BROWSER_STREAM_DISABLED", "1"),
         ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "600000"),
         ("AGENT_BROWSER_MAX_OUTPUT", "25000"),
         ("AGENT_BROWSER_DEFAULT_TIMEOUT", "30000"),

@@ -1890,6 +1890,21 @@ stays without a browser until a later change.
   asks before running commands and has no browser in this conversation." The launch prep still
   claims the browser's ports and socket folder for such a session (the sandbox is decided after
   it); they go unused and are released at its end.
+- **The stream server** (security review of PR-1). agent-browser's stream server is an
+  unauthenticated loopback listener whose `/api/command` drives the browser and can relaunch
+  Chrome with any arguments or executable, past the guard's `weakening` check. agent-browser
+  0.41.1 has no switch for it: it always starts one (`native/daemon.rs:110-131`; port 0 or no
+  port only picks a random one). The guard now sets `AGENT_BROWSER_STREAM_DISABLED=1` on every
+  OS, as W1 does on Windows (decision record 0060), which W2's patched agent-browser honours; the
+  host claims no stream port there either (0060).
+  **Remaining exposure until the patched Mac sidecar ships:** on macOS (and Linux) an unpatched
+  agent-browser's stream server still starts on a port the OS picks, which the guard does not
+  read (0060), as does Chrome's debugging port. Claude's sandboxed shell reaches either only if Claude Code's
+  proxy lets a loopback spelling through: `deniedDomains` matches names, not addresses, so
+  `localhost.`, `localtest.me`, `2130706433` or `[::ffff:127.0.0.1]` in a CONNECT are untested
+  (stage C's live check, `scratch-e/loopback-bypass-check.sh`). Codex's Seatbelt refuses
+  loopback outright. If that check fails, the fix is W1's pipe-plus-relay design on macOS too
+  (no debugging TCP port on any system at launch).
 - **Instructions.** Claude's part is `browser-claude-mcp.txt`: Codex's rules without "your shell
   has no internet… never with curl", false for Claude. Both parts now say where a saved file
   lands: in downloads/ in the matter, by clicking its link (Codex) or clicking or opening it (Claude). The dormant shell part
