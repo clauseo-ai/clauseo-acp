@@ -381,3 +381,43 @@ fn a_source_reads_at_most_its_cap_and_counts_the_rest() {
     assert_eq!(found.len(), MAX_ENTRIES_PER_SOURCE);
     assert_eq!(left_out, 7);
 }
+
+/// Every source together reads at most `MAX_ENTRIES_TOTAL` servers, in reading order; the rest
+/// are counted with the per-source cap's.
+#[test]
+fn all_sources_read_at_most_the_total_cap_and_count_the_rest() {
+    let servers = |prefix: &str, count: usize| {
+        let list: Vec<String> = (0..count)
+            .map(|n| format!(r#""{prefix}{n:04}": {{"command": "/bin/x"}}"#))
+            .collect();
+        format!("{{{}}}", list.join(","))
+    };
+    // 500 user-wide, 500 in one project and 10 in another: 1,010 read, 10 past the total.
+    let claude = format!(
+        r#"{{"mcpServers": {}, "projects": {{"/Users/ana/A": {{"mcpServers": {}}},
+            "/Users/ana/B": {{"mcpServers": {}}}}}}}"#,
+        servers("u", MAX_ENTRIES_PER_SOURCE),
+        servers("a", MAX_ENTRIES_PER_SOURCE),
+        servers("b", 10),
+    );
+    let fs = FakeFs::default()
+        // unix-paths-ok: a fake Mac file system's key, never the real one
+        .file("/Users/ana/.claude.json", &claude)
+        .program("/bin/x");
+    let env_vars = |_: &str| None;
+    let env = Env {
+        os: Os::Mac,
+        // unix-paths-ok: the fake Mac home, read only through the fake file system
+        home: Path::new("/Users/ana"),
+        vars: &env_vars,
+        fs: &fs,
+    };
+    let (found, left_out) = find_candidates_counted(&env, &[]);
+    assert_eq!(MAX_ENTRIES_TOTAL, 2 * MAX_ENTRIES_PER_SOURCE);
+    assert_eq!(found.len(), MAX_ENTRIES_TOTAL);
+    assert_eq!(left_out, 10);
+    assert!(
+        found.iter().all(|c| !c.name.starts_with('b')),
+        "read past the cap"
+    );
+}
