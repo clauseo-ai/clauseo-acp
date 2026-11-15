@@ -126,7 +126,7 @@ test("the line's name and tooltip: one sentence per tool, web search first, its 
     "Browser: off, couldn't check browser settings.",
   );
   expect(label(null, "browser_blocked_edge")).toBe("Browser: off, blocked by a browser policy.");
-  expect(label(null, "browser_per_user_chrome_only")).toBe("Browser: off, can't use this Chrome.");
+  expect(label(null, "browser_per_user_chrome_only")).toBe("Browser: off, can't use your Chrome.");
 });
 
 test("sameTools reads two lists the same only when every tool and state match", () => {
@@ -172,7 +172,7 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
     browser_policy_unreadable: "Couldn't check browser settings",
     browser_blocked_edge: "Blocked by a browser policy",
     browser_blocked_chrome: "Blocked by a browser policy",
-    browser_per_user_chrome_only: "Can't use this Chrome",
+    browser_per_user_chrome_only: "Can't use your Chrome",
   };
   const notes: Record<string, string> = {
     browser_not_installed: INSTALL_MAC,
@@ -286,13 +286,13 @@ test("on Windows a per-user Chrome alone says why Clauseo can't use it, not to i
   const perUser: KnownTool = { tool: "browser", state: "browser_per_user_chrome_only" };
   expect(words(perUser, { platform: "windows" })).toMatchObject({
     glyph: "off",
-    reason: "Can't use this Chrome",
+    reason: "Can't use your Chrome",
     note: PER_USER,
     settings: false,
     recheck: null,
   });
   const hi = toolRow("hi", perUser, { ...ROOM, platform: "windows" });
-  expect(hi.reason).toBe("यह Chrome इस्तेमाल नहीं हो सकता");
+  expect(hi.reason).toBe("आपका Chrome इस्तेमाल नहीं हो सकता");
   expect(hi.note).toBe(
     "Clauseo सिर्फ़ आपके लिए इंस्टॉल की गई Google Chrome की कॉपी का उपयोग नहीं कर सकता। " +
       "Microsoft Edge इंस्टॉल करें, या अपनी फ़र्म की IT टीम से इस कंप्यूटर पर सभी के लिए Google Chrome इंस्टॉल करने को कहें। " +

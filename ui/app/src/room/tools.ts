@@ -101,7 +101,7 @@ const REASON: Record<
   browser_blocked_edge: "Blocked by a browser policy",
   browser_blocked_chrome: "Blocked by a browser policy",
   browser_policy_unreadable: "Couldn't check browser settings",
-  browser_per_user_chrome_only: "Can't use this Chrome",
+  browser_per_user_chrome_only: "Can't use your Chrome",
 };
 
 /** Why a tool is off, in a few words; null while it's on. With no browser on the computer, the lawyer's step: what to
