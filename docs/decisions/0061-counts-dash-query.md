@@ -25,10 +25,15 @@ Access's JWT again in the Worker, and guards queries with `sqlparser`.
   id, and nothing prints an id, AUD, team, client id or email. Without `ACCESS_TEAM`, or on a
   `401`/`403` from the API (the token lacks the Access scopes), it skips with one line and
   deploys anyway. It uses the API's per-application policies and deletes any other policy on
-  its two applications at every deploy (review of #1092), so a policy added by hand does not
-  last; deleting rather than refusing keeps the deploy self-healing. A reusable policy is shared
-  with other applications, so it is not deleted from here: the deploy fails and says so. This replaces S23's
-  `wrangler.toml` vars: `check-deploy.mjs` keeps refusing any var there.
+  its two applications at every deploy (review of #1092), a second of its own name included, so
+  each application ends with exactly one policy and a policy added by hand does not last;
+  deleting rather than refusing keeps the deploy self-healing. A reusable policy is shared with
+  other applications, so it is not deleted from here: the deploy fails and says so. Every read
+  comes before any change, and its shape is checked (lists, policies with string `id`, `name`,
+  `decision` and boolean `reusable`, `app.policies` a list of those); any other shape skips
+  Access as a `401` does, so the routes stay `404`. `scripts/check-access.mjs` checks the
+  set-up live, printing only yes/no lines, before the deploy that turns Access on. This
+  replaces S23's `wrangler.toml` vars: `check-deploy.mjs` keeps refusing any var there.
 - **The JWT check** (`src/access.rs`). RS256 only: `none`, `HS*` and every other `alg` are
   refused before anything else. Then `exp` (and `nbf`, with 60 s of skew), `iss` =
   `https://<team>.cloudflareaccess.com`, `aud` containing the route's own AUD, the caller (review
@@ -57,9 +62,12 @@ Access's JWT again in the Worker, and guards queries with `sqlparser`.
   A CTE may not take a base table's name, or a `sqlite_`, `_cf_` or `d1_` one. No CTE may be
   recursive (review of #1092): `WITH RECURSIVE` is refused, and so is a CTE that names itself
   or a later CTE, which SQLite runs as recursive without the keyword; an unbounded one kept D1
-  running and blocked the counts writes. A query has at most 8 `FROM`/`JOIN` items over the
-  whole statement (views, CTE references and parenthesised subqueries each count one), so
-  a join cannot multiply rows past what D1 does in its time. `FROM` takes tables,
+  running and blocked the counts writes. A query weighs at most 4 tables over the whole statement
+  (round 2 of the review): a view counts one, a CTE reference counts every table its CTE reads,
+  recursively, so `WITH a AS (… v_daily x, v_daily y), b AS (… a p, a q), c AS (… b r, b s)`
+  weighs 8 at `FROM c`, and a subquery in `FROM` counts what it reads, at least one. This is a
+  coarse limit, not a cost bound: the 10 s race answers `504` but does not cancel the query in
+  D1, so D1's own per-query time limit is the real bound. `FROM` takes tables,
   subqueries and joins, never a table-valued function. Functions: `count`, `sum`, `total`,
   `avg`, `min`, `max`, `group_concat`, `date`, `strftime`, `coalesce`, `round`,
   `json_extract`. The Worker runs `SELECT * FROM (<query>) LIMIT 1000`, written from the parsed

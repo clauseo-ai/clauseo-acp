@@ -11,9 +11,12 @@
 //   /v1/query takes only a token with that common_name. While that token does not exist the
 //   application has no policy of ours, so it lets no one in, and the Worker answers 404.
 //
-// Any other policy on the two applications, one added by hand included, is deleted, so each
-// application's policy set is exactly the one made here, at every deploy. A reusable policy
-// (shared between applications) is not deleted from here: the step fails and names the
+// Any other policy on the two applications, one added by hand or a second of our name included,
+// is deleted, so each application ends every deploy with exactly one policy, ours (or none).
+// Every read comes first, and its shape is checked before anything changes: a list where one is
+// read, policies with string `id`, `name` and `decision` and a boolean `reusable`, and
+// `app.policies` a list of the same. Any other shape skips Access like a 401 or 403. A reusable
+// policy (shared between applications) is not deleted from here: the step fails and names the
 // application, to be fixed by hand. The Worker's own check of the caller holds either way.
 //
 // Run logs on this public repo are public: nothing here prints an id, an AUD, the team or an
@@ -39,6 +42,31 @@ export const APPS = [
 
 /** The API answered 401 or 403: the token has no Access scopes yet. */
 export class AccessUnavailable extends Error {}
+
+/** The API answered in a shape this step does not read; the message names what, never an id. */
+export class AccessShape extends Error {}
+
+/** `value` if it is a list, else AccessShape naming `what`. */
+function expectList(value, what) {
+  if (!Array.isArray(value)) throw new AccessShape(what);
+  return value;
+}
+
+/**
+ * `value` if it is a list of policies with the fields this step reads (`id` and `name` strings,
+ * `reusable` a boolean, `decision` a string), else AccessShape naming `what`.
+ */
+export function expectPolicies(value, what) {
+  const ok = (p) =>
+    p !== null &&
+    typeof p === "object" &&
+    typeof p.id === "string" &&
+    typeof p.name === "string" &&
+    typeof p.reusable === "boolean" &&
+    typeof p.decision === "string";
+  if (!Array.isArray(value) || !value.every(ok)) throw new AccessShape(what);
+  return value;
+}
 
 /**
  * A caller of Cloudflare's API with `token`: `(method, path, body?) => { status, json }`.
@@ -117,13 +145,38 @@ export async function setUpAccess(api, env) {
   const vars = { ACCESS_TEAM: team };
   try {
     const base = `/accounts/${await accountId(api, env)}/access`;
-    const apps = (await call(api, "GET", `${base}/apps?per_page=1000`)) ?? [];
-    const tokens = (await call(api, "GET", `${base}/service_tokens?per_page=1000`)) ?? [];
-    const token = tokens.find((t) => t.name === SERVICE_TOKEN);
+    // First every read and its shape check, so nothing changes unless all of it is as expected.
+    const apps = expectList(await call(api, "GET", `${base}/apps?per_page=1000`), "application list");
+    const tokens = expectList(await call(api, "GET", `${base}/service_tokens?per_page=1000`), "service token list");
+    const token = tokens.find((t) => t?.name === SERVICE_TOKEN);
+    if (token !== undefined && (typeof token.id !== "string" || typeof token.client_id !== "string")) {
+      throw new AccessShape("service token");
+    }
+    const plans = [];
     for (const wanted of APPS) {
-      const found = apps.filter((app) => app.name === wanted.name);
+      const found = apps.filter((app) => app?.name === wanted.name);
       if (found.length > 1) throw new Refused(`more than one Access application is named ${wanted.name}`);
-      let app = found[0];
+      const app = found[0];
+      let policies = [];
+      if (app !== undefined) {
+        if (typeof app.id !== "string") throw new AccessShape("application");
+        if (app.domain !== wanted.domain) {
+          throw new Refused(`the Access application ${wanted.name} is not on ${wanted.domain}; fix it by hand`);
+        }
+        if (typeof app.aud !== "string" || app.aud === "") throw new Refused(`${wanted.name} has no AUD tag`);
+        // The application's own list, and the ones the application names (reusable ones too).
+        const attached = expectPolicies(app.policies, "application's policy list");
+        policies = expectPolicies(await call(api, "GET", `${base}/apps/${app.id}/policies`), "policy list");
+        const shared = [...policies, ...attached].some(
+          (p) => p.reusable || !policies.some((own) => own.id === p.id),
+        );
+        if (shared) throw new Refused(`${wanted.name} has a reusable Access policy attached; remove it by hand`);
+      }
+      plans.push({ wanted, app, policies });
+    }
+    // Then the changes: each application ends with exactly one policy, ours, or none.
+    for (const { wanted, app: found, policies } of plans) {
+      let app = found;
       if (app === undefined) {
         app = await call(api, "POST", `${base}/apps`, {
           name: wanted.name,
@@ -132,32 +185,24 @@ export async function setUpAccess(api, env) {
           session_duration: "24h",
           app_launcher_visible: false,
         });
+        if (typeof app?.id !== "string" || typeof app.aud !== "string" || app.aud === "") {
+          throw new AccessShape("created application");
+        }
         lines.push(`Access: created ${wanted.name}`);
       }
-      if (app.domain !== wanted.domain) {
-        throw new Refused(`the Access application ${wanted.name} is not on ${wanted.domain}; fix it by hand`);
-      }
-      if (typeof app.aud !== "string" || app.aud === "") throw new Refused(`${wanted.name} has no AUD tag`);
-      const policies = (await call(api, "GET", `${base}/apps/${app.id}/policies`)) ?? [];
       const policy = wantedPolicy(wanted, env, token);
+      // The first policy of our name is kept; any other, a second of the same name included, goes.
+      const kept = policy === undefined ? undefined : policies.find((p) => p.name === policy.name);
       if (policy === undefined) {
         lines.push(`Access: ${wanted.name} has no policy of ours yet, so it lets no one in`);
-      } else {
-        const existing = policies.find((p) => p.name === policy.name);
-        if (existing === undefined) {
-          await call(api, "POST", `${base}/apps/${app.id}/policies`, { ...policy, precedence: 1 });
-          lines.push(`Access: ${wanted.name}'s policy created`);
-        } else if (existing.decision !== policy.decision || !sameRules(existing.include, policy.include)) {
-          await call(api, "PUT", `${base}/apps/${app.id}/policies/${existing.id}`, { ...policy, precedence: existing.precedence ?? 1 });
-          lines.push(`Access: ${wanted.name}'s policy updated`);
-        }
+      } else if (kept === undefined) {
+        await call(api, "POST", `${base}/apps/${app.id}/policies`, { ...policy, precedence: 1 });
+        lines.push(`Access: ${wanted.name}'s policy created`);
+      } else if (kept.decision !== policy.decision || !sameRules(kept.include, policy.include)) {
+        await call(api, "PUT", `${base}/apps/${app.id}/policies/${kept.id}`, { ...policy, precedence: kept.precedence ?? 1 });
+        lines.push(`Access: ${wanted.name}'s policy updated`);
       }
-      // The application's own policies, and any the application lists (reusable ones too).
-      const listed = [...policies, ...(Array.isArray(app.policies) ? app.policies : [])];
-      const others = [...new Map(listed.filter((p) => p.name !== policy?.name).map((p) => [p.id, p])).values()];
-      if (others.some((p) => p.reusable === true || !policies.some((own) => own.id === p.id))) {
-        throw new Refused(`${wanted.name} has a reusable Access policy attached; remove it by hand`);
-      }
+      const others = policies.filter((p) => p.id !== kept?.id);
       for (const other of others) await call(api, "DELETE", `${base}/apps/${app.id}/policies/${other.id}`);
       if (others.length > 0) lines.push(`Access: ${wanted.name}: ${others.length} other policy(ies) deleted`);
       vars[wanted.variable] = app.aud;
@@ -165,6 +210,12 @@ export async function setUpAccess(api, env) {
       if (who !== undefined) vars[wanted.callerVariable] = who;
     }
   } catch (error) {
+    if (error instanceof AccessShape) {
+      return {
+        vars: null,
+        lines: [`Access: skipped, the API's ${error.message} is not in the shape this step reads; /dash and /v1/query stay 404`],
+      };
+    }
     if (!(error instanceof AccessUnavailable)) throw error;
     return {
       vars: null,

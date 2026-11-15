@@ -134,18 +134,19 @@ test("a query over the views returns its rows as JSON", async () => {
   assert.equal((await capped.json()).length, 1000, "1,600 rows capped at 1,000");
 });
 
-test("a recursive query, or one over eight tables, is refused before it reaches D1", async () => {
+test("a recursive query, or one weighing over four tables, is refused before it reaches D1", async () => {
   for (const sql of [
     "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n) SELECT count(*) FROM n",
     "WITH n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n) SELECT count(*) FROM n",
-    `SELECT count(*) FROM ${Array.from({ length: 9 }, (_, i) => `v_daily t${i}`).join(", ")}`,
+    `SELECT count(*) FROM ${Array.from({ length: 5 }, (_, i) => `v_daily t${i}`).join(", ")}`,
+    "WITH a AS (SELECT * FROM v_daily x, v_daily y), b AS (SELECT * FROM a p, a q) SELECT count(*) FROM b, v_daily",
   ]) {
     const response = await query(sql);
     assert.equal(response.status, 400, sql);
     assert.equal(await response.text(), "", sql);
   }
-  const eight = await query(`SELECT count(*) AS n FROM ${Array.from({ length: 8 }, (_, i) => `v_daily t${i}`).join(", ")}`);
-  assert.equal(eight.status, 200, "eight tables pass");
+  const four = await query(`SELECT count(*) AS n FROM ${Array.from({ length: 4 }, (_, i) => `v_daily t${i}`).join(", ")}`);
+  assert.equal(four.status, 200, "four tables pass");
 });
 
 test("the query route refuses writes, base tables, bad bodies and bad tokens", async () => {

@@ -35,7 +35,7 @@ function fakeApi(state, { deny } = {}) {
     if (method === "GET" && path.startsWith(`${base}/apps?`)) return ok(state.apps);
     if (method === "GET" && path.startsWith(`${base}/service_tokens?`)) return ok(state.tokens);
     if (method === "POST" && path === `${base}/apps`) {
-      const app = { id: `app-${next++}`, aud: body.name.endsWith("dash") ? AUD_DASH : AUD_QUERY, ...body };
+      const app = { id: `app-${next++}`, aud: body.name.endsWith("dash") ? AUD_DASH : AUD_QUERY, policies: [], ...body };
       state.apps.push(app);
       return ok(app);
     }
@@ -45,7 +45,7 @@ function fakeApi(state, { deny } = {}) {
       state.policies[appId] ??= [];
       if (method === "GET") return ok(state.policies[appId]);
       if (method === "POST") {
-        const policy = { id: `pol-${next++}`, ...body };
+        const policy = { id: `pol-${next++}`, reusable: false, ...body };
         state.policies[appId].push(policy);
         return ok(policy);
       }
@@ -55,7 +55,7 @@ function fakeApi(state, { deny } = {}) {
       }
       if (method === "PUT") {
         const list = state.policies[appId];
-        list[list.findIndex((p) => p.id === policyId)] = { id: policyId, ...body };
+        list[list.findIndex((p) => p.id === policyId)] = { id: policyId, reusable: false, ...body };
         return ok(body);
       }
     }
@@ -147,9 +147,9 @@ test("any other policy on the two applications is deleted; a reusable one fails 
   await setUpAccess(fakeApi(state).api, env({ CLOUDFLARE_ACCOUNT_ID: ACCOUNT }));
   const [dash, query] = state.apps;
   // Added by hand: an Allow for everyone on the dashboard, and a second token on the query.
-  state.policies[dash.id].push({ id: "pol-90", name: "everyone", decision: "allow", include: [{ everyone: {} }] });
-  state.policies[query.id].push({ id: "pol-91", name: "x", decision: "non_identity", include: [{ any_valid_service_token: {} }] });
-  state.policies[query.id].push({ id: "pol-92", name: "y", decision: "bypass", include: [{ everyone: {} }] });
+  state.policies[dash.id].push({ id: "pol-90", name: "everyone", decision: "allow", reusable: false, include: [{ everyone: {} }] });
+  state.policies[query.id].push({ id: "pol-91", name: "x", decision: "non_identity", reusable: false, include: [{ any_valid_service_token: {} }] });
+  state.policies[query.id].push({ id: "pol-92", name: "y", decision: "bypass", reusable: false, include: [{ everyone: {} }] });
   const healed = fakeApi(state);
   const result = await setUpAccess(healed.api, env({ CLOUDFLARE_ACCOUNT_ID: ACCOUNT }));
   assert.deepEqual(
@@ -163,7 +163,7 @@ test("any other policy on the two applications is deleted; a reusable one fails 
   // Without the service token, the query application ends with no policy at all.
   const bare = { apps: [], policies: {}, tokens: [] };
   await setUpAccess(fakeApi(bare).api, env());
-  bare.policies[bare.apps[1].id].push({ id: "pol-93", name: "everyone", decision: "allow", include: [{ everyone: {} }] });
+  (bare.policies[bare.apps[1].id] ??= []).push({ id: "pol-93", name: "everyone", decision: "allow", reusable: false, include: [{ everyone: {} }] });
   await setUpAccess(fakeApi(bare).api, env());
   assert.deepEqual(bare.policies[bare.apps[1].id], []);
   // A reusable policy, shared with other applications, is not deleted from here.
@@ -182,6 +182,59 @@ test("any other policy on the two applications is deleted; a reusable one fails 
       return error instanceof Refused && /clauseo-counts-dash has a reusable Access policy/.test(error.message);
     });
     assert.ok(!refused.calls.some((call) => call.startsWith("DELETE")), "nothing deleted");
+  }
+});
+
+test("two policies of our name and a stranger: the deploy leaves exactly one", async () => {
+  const state = { apps: [], policies: {}, tokens: [AGENT] };
+  await setUpAccess(fakeApi(state).api, env({ CLOUDFLARE_ACCOUNT_ID: ACCOUNT }));
+  for (const app of state.apps) {
+    const [ours] = state.policies[app.id];
+    // A copy of ours by name, opening it to everyone, and a stranger.
+    state.policies[app.id].push({ ...ours, id: `pol-8${app.id.slice(-1)}`, decision: "allow", include: [{ everyone: {} }] });
+    state.policies[app.id].push({ id: `pol-7${app.id.slice(-1)}`, name: "stranger", decision: "allow", reusable: false, include: [{ everyone: {} }] });
+  }
+  const again = fakeApi(state);
+  await setUpAccess(again.api, env({ CLOUDFLARE_ACCOUNT_ID: ACCOUNT }));
+  assert.equal(again.calls.filter((call) => call.startsWith("DELETE")).length, 4);
+  const [dash, query] = state.apps.map((app) => state.policies[app.id]);
+  assert.deepEqual(dash.map((p) => [p.name, p.decision, p.include]), [["clauseo-counts-dash owner", "allow", [{ email: { email: EMAIL } }]]]);
+  assert.deepEqual(query.map((p) => [p.name, p.decision, p.include]), [
+    ["clauseo-counts-query agent", "non_identity", [{ service_token: { token_id: TOKEN_ID } }]],
+  ]);
+  // The copy came first: it is the one kept, and put right.
+  const flipped = { apps: [], policies: {}, tokens: [AGENT] };
+  await setUpAccess(fakeApi(flipped).api, env());
+  const dashId = flipped.apps[0].id;
+  const [mine] = flipped.policies[dashId];
+  flipped.policies[dashId].unshift({ ...mine, id: "pol-60", include: [{ everyone: {} }] });
+  const put = fakeApi(flipped);
+  await setUpAccess(put.api, env());
+  assert.deepEqual(flipped.policies[dashId].map((p) => [p.id, p.include]), [["pol-60", [{ email: { email: EMAIL } }]]]);
+});
+
+test("an API answer in another shape skips Access before anything changes", async () => {
+  const cases = {
+    "a policy without reusable": (state) => delete state.policies[state.apps[0].id][0].reusable,
+    "reusable as a string": (state) => (state.policies[state.apps[1].id][0].reusable = "false"),
+    "a policy without an id": (state) => delete state.policies[state.apps[0].id][0].id,
+    "app.policies missing": (state) => delete state.apps[1].policies,
+    "app.policies not a list": (state) => (state.apps[0].policies = { id: "pol-1" }),
+    "app.policies holding a string": (state) => (state.apps[0].policies = ["pol-1"]),
+    "a token without client_id": (state) => delete state.tokens[0].client_id,
+    "the apps not a list": (state) => (state.apps = { result: [] }),
+  };
+  for (const [name, edit] of Object.entries(cases)) {
+    const state = { apps: [], policies: {}, tokens: [{ ...AGENT }] };
+    await setUpAccess(fakeApi(state).api, env({ ACCESS_DASH_EMAIL: "old@example.org" }));
+    edit(state);
+    const shaped = fakeApi(state);
+    const result = await setUpAccess(shaped.api, env());
+    assert.equal(result.vars, null, name);
+    assert.equal(result.lines.length, 1, name);
+    assert.match(result.lines[0], /^Access: skipped, the API's .* is not in the shape this step reads; \/dash and \/v1\/query stay 404$/, name);
+    assertNothingSecret(printed(result));
+    assert.deepEqual(shaped.calls.filter((call) => !call.startsWith("GET")), [], `${name}: nothing changed`);
   }
 });
 
