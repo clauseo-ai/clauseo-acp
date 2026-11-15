@@ -44,6 +44,28 @@ pub(crate) fn no_file_ids(file_id_error: Option<i32>, fs_name: Option<&str>, rem
         })
 }
 
+/// Whether the path `text` names a server, so an object there never counts as having no file
+/// IDs: any `\\` or `//` form (`\\server\share`, `\\?\UNC\…`, `\\localhost\c$\…`) but a
+/// local drive's verbatim form, `\\?\X:\…` or `\\.\X:\…`, which `dunce::canonicalize` keeps
+/// for a path of 260 characters or more. The drive is read as [`super::resolve::drive_form`]
+/// reads it; a verbatim `X:` followed by anything but `\` stays a server's, as
+/// [`super::is_network_path`] has it.
+#[cfg(any(windows, test))]
+pub(crate) fn unc_text(text: &str) -> bool {
+    let text = text.replace('/', "\\");
+    if !text.starts_with(r"\\") {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    let verbatim = lower.starts_with(r"\\?\") || lower.starts_with(r"\\.\");
+    let network = lower.starts_with(r"\\?\unc\") || lower.starts_with(r"\\.\unc\");
+    let after_drive = text.get(6..).unwrap_or_default();
+    let drive = text.get(5..6) == Some(":")
+        && (after_drive.is_empty() || after_drive.starts_with('\\'))
+        && super::resolve::drive_form(&text).is_some();
+    !(verbatim && !network && drive)
+}
+
 /// The marker inside the error [`file_id_failure`] gives for an object with no file ID.
 #[cfg(any(windows, test))]
 #[derive(Debug)]
@@ -100,6 +122,57 @@ mod tests {
             assert!(!no_file_ids(Some(code), Some("exFAT"), false), "{code}");
         }
         assert!(!no_file_ids(None, Some("exFAT"), false));
+    }
+
+    /// A local exFAT path of `len` characters or more under `prefix`.
+    fn long(prefix: &str, len: usize) -> String {
+        let mut text = format!(r"{prefix}Matters\");
+        while text.len() < len {
+            text.push_str(r"A long folder name\");
+        }
+        text.push_str("brief.docx");
+        text
+    }
+
+    #[test]
+    fn a_long_local_path_in_its_verbatim_form_is_not_a_server() {
+        let short = r"E:\Matters\brief.docx";
+        let long_path = long(r"\\?\E:\", 300);
+        assert!(long_path.len() >= 260);
+        for local in [
+            short.to_owned(),
+            long_path,
+            long(r"\\?\e:\", 260),
+            long("//?/E:/", 300),
+            long(r"\\.\E:\", 300),
+            long(r"E:\", 300),
+            r"\\?\E:\".to_owned(),
+            r"\\?\E:".to_owned(),
+        ] {
+            assert!(!unc_text(&local), "{local}");
+            assert!(
+                no_file_ids(Some(87), Some("exFAT"), unc_text(&local)),
+                "{local}"
+            );
+        }
+        for server in [
+            long(r"\\?\UNC\server\share\", 300),
+            long(r"\\?\unc\localhost\e$\", 300),
+            long(r"\\.\UNC\server\share\", 300),
+            long(r"\\server\share\", 300),
+            long(r"\\localhost\e$\", 300),
+            long("//server/share/", 300),
+            long(r"\\?\E:x\", 300),
+            long(r"\\?\GLOBALROOT\Device\Mup\", 300),
+            long(r"\\?\Volume{0}\", 300),
+            r"\\?\".to_owned(),
+        ] {
+            assert!(unc_text(&server), "{server}");
+            assert!(
+                !no_file_ids(Some(87), Some("exFAT"), unc_text(&server)),
+                "{server}"
+            );
+        }
     }
 
     #[test]
