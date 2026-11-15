@@ -10,14 +10,17 @@ use clauseo_reducer::{REDUCER_SCHEMA_VERSION, Snapshot, StreamState, wakes_threa
 use crate::fixtures::{Log, matter_id, start_turn, thread_created};
 use crate::helpers::fold;
 
+#[cfg(test)]
 fn allowed(matter: MatterId) -> DomainEvent {
     MatterReadAllowed { matter }.into()
 }
 
+#[cfg(test)]
 fn withdrawn(matter: MatterId) -> DomainEvent {
     MatterReadWithdrawn { matter }.into()
 }
 
+#[cfg(test)]
 fn header(state: &StreamState) -> &HeaderEntry {
     state.as_thread().unwrap().header().unwrap()
 }
@@ -27,7 +30,10 @@ fn allowed_matters_are_kept_in_order_once_and_withdrawn_alone() {
     let (b, c) = (matter_id(21).unwrap(), matter_id(22).unwrap());
     let mut log = Log::thread(31).unwrap();
     log.push(thread_created().unwrap()).unwrap();
-    assert!(header(&fold(log.events())).read_matters.is_empty());
+    assert_eq!(
+        header(&fold(log.events())).read_matters,
+        Vec::<MatterId>::new()
+    );
     log.push(allowed(b)).unwrap();
     log.push(allowed(c)).unwrap();
     log.push(allowed(b)).unwrap();

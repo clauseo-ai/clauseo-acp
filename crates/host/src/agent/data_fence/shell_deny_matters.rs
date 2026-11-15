@@ -7,13 +7,15 @@
 //!
 //! Each fence path is written each way a command may write it ([`forms`]: `\`, `/`, `\\`, Git
 //! Bash's `/c/…` and under the variables of `forms::VARS`), followed by anything: one rule per
-//! form and shell. Where the session's own matter folder or `<data>` starts with the path's
-//! text and goes on past it inside a name (a matter `Smith` beside the session's `Smith 2`),
-//! the rules end at a name boundary instead ([`named`]): the path followed by a separator, one
-//! of [`AFTER`](super::AFTER), or the end. Otherwise a name that merely starts with the path's
-//! (another folder `Smith Jones`) is denied too: the accepted cost of a short list. The rest
-//! of the residual is the data folder's (`super`'s module doc): a path built at run time, a `cd`
-//! first, other letter cases in Bash, a short name, a script that opens the file.
+//! form and shell. Where the session's own matter folder or `<data>` starts with the path's text
+//! and goes on past it inside a name (a matter `Smith` beside the session's `Smith 2`), the rules
+//! end at a name boundary instead ([`bounded`]): the path followed by a separator, one of
+//! [`AFTER`](super::AFTER) but the character the own place goes on with, or the end (so beside the
+//! session's `Smith 2`, `…\Smith "x"` or `…\Smith -Recurse` unquoted is not denied: the
+//! accepted cost of never denying the session's own matter). Otherwise a name that merely starts
+//! with the path's (another folder `Smith Jones`) is denied too: the accepted cost of a short list.
+//! The rest of the residual is the data folder's (`super`'s module doc): a path built at run time,
+//! a `cd` first, other letter cases in Bash, a short name, a script that opens the file.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -21,7 +23,7 @@ use std::path::Path;
 
 use clauseo_protocol::MatterId;
 
-use super::{Piece, forms, join, named, render, text};
+use super::{AFTER, JUNCTIONS, Piece, forms, join, render, text};
 use crate::agent::data_fence::LaunchDeny;
 
 /// The rules for each other matter of `deny.matters` that has a fence path, in its order, with
@@ -45,18 +47,19 @@ pub(crate) fn windows_matter_shell_rules(
             let Some(back) = back_form(path) else {
                 continue;
             };
-            let bounded = kept.iter().any(|place| {
-                place
-                    .strip_prefix(&back)
-                    .is_some_and(|rest| !rest.is_empty() && !rest.starts_with('\\'))
-            });
+            // What a kept place goes on with right after the path's text inside a name.
+            let goes_on: Vec<char> = kept
+                .iter()
+                .filter_map(|place| place.strip_prefix(&back)?.chars().next())
+                .filter(|c| *c != '\\')
+                .collect();
             let one = LaunchDeny {
                 spellings: vec![path.clone()],
                 ..LaunchDeny::default()
             };
             for form in forms(&one, var, variables) {
                 let (mut contents, mut ends) = (Vec::new(), Vec::new());
-                named(&text(&form.lead), bounded, &mut contents, &mut ends);
+                bounded(&text(&form.lead), &goes_on, &mut contents, &mut ends);
                 tagged.extend(
                     contents
                         .into_iter()
@@ -70,6 +73,32 @@ pub(crate) fn windows_matter_shell_rules(
         }
     }
     out
+}
+
+/// The rules for a fence path (`path`): followed by anything when no kept place goes on past
+/// it inside a name (`goes_on` empty); else at a name boundary only (a separator, one of
+/// [`AFTER`], the end), leaving out each character a kept place goes on with (`Smith 2` beside
+/// a fenced `Smith`: a space), so the session's own matter is never denied.
+fn bounded(
+    path: &[Piece],
+    goes_on: &[char],
+    contents: &mut Vec<Vec<Piece>>,
+    ends: &mut Vec<Vec<Piece>>,
+) {
+    if goes_on.is_empty() {
+        contents.push(join(&[path, &[Piece::Any]]));
+        return;
+    }
+    let after = JUNCTIONS.into_iter().chain(AFTER).filter(|after| {
+        !after
+            .chars()
+            .next()
+            .is_some_and(|c| goes_on.contains(&c.to_ascii_lowercase()))
+    });
+    for after in after {
+        contents.push(join(&[path, &text(after), &[Piece::Any]]));
+    }
+    ends.push(path.to_vec());
 }
 
 /// `tagged` as rules, each once per shell; PowerShell's compared in any case, as it matches them.

@@ -86,6 +86,7 @@ pub(crate) struct MatterFence {
 
 impl MatterFence {
     /// No other matter (a unit test's keys).
+    #[cfg(test)]
     pub(crate) const NONE: Self = Self {
         others: Vec::new(),
         key: FenceKey {
@@ -200,7 +201,11 @@ pub(crate) fn key(path: &Path) -> Vec<OsString> {
             Component::Normal(name) if FOLD_CASE => {
                 OsString::from(fold_name(&name.to_string_lossy()))
             }
-            other => other.as_os_str().to_owned(),
+            other @ (Component::Normal(_)
+            | Component::Prefix(_)
+            | Component::RootDir
+            | Component::CurDir
+            | Component::ParentDir) => other.as_os_str().to_owned(),
         })
         .collect()
 }

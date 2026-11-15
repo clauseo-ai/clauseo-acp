@@ -51,11 +51,11 @@ pub(super) const OTHER_MATTER_TEXT: &str =
 pub(super) const NOTICE_TEXT: &str =
     "Clauseo stopped a step: the AI tried to reach outside this matter.";
 
-/// Rejects a request that touches Clauseo's data folder, or another matter when `matter` names
-/// it, unasked: the agent's count for its `agent ended` line goes up and no path is logged. The first refusal of the turn also logs
-/// the notice and, after the answer and in the same task (so the agent reads it after the
-/// refusal), sends the note ([`tell_once`]). An agent that cancels its turn on it (Codex) ends
-/// the turn `OutsideMatter`, not the lawyer's `Cancelled`.
+/// Rejects a request that touches Clauseo's data folder, or another matter when `matter` names it,
+/// unasked: the agent's count for its `agent ended` line goes up and no path is logged. The first
+/// refusal of the turn also logs the notice and, after the answer and in the same task (so the
+/// agent reads it after the refusal), sends the note ([`tell_once`]). An agent that cancels its
+/// turn on it (Codex) ends the turn `OutsideMatter`, not the lawyer's `Cancelled`.
 pub(super) fn refuse_data_folder(
     actor: &mut Actor,
     thread: ThreadId,
