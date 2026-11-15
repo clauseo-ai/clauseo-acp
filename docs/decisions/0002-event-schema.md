@@ -96,6 +96,8 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `thread_archived` | nothing (`{}`) | host | yes | T |
 | `thread_snoozed` | until? (cleared when absent), by (`SnoozeBy`: lawyer, or expired when the host wakes it at its time) (0045) | host | yes | T |
 | `thread_done` | done, by (`DoneBy`: lawyer or morning_sweep) (0045) | host | yes | T |
+| `matter_read_allowed` | matter (another matter whose files the lawyer let this thread's agent read, read-only, from its next launch; kept in the header's `read_matters`) | host | yes | T |
+| `matter_read_withdrawn` | matter (that read lifted again) | host | yes | T |
 | `agent_session_attached` | session, agent_version?, capabilities | acp | yes | T |
 | `agent_named` | agent_name (the agent's own display name, `initialize`'s title, cleaned) | host, from acp | yes | T |
 | `agent_session_detached` | reason (`DetachReason`) | acp, host | yes | T |
@@ -121,7 +123,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `config_options_replaced` | options | acp | yes | T |
 | `commands_available` | commands | acp | yes | T |
 | `usage_updated` | context_used?, context_size?, cost? | acp | yes | T |
-| `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `auto_mode_unavailable`, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`), `outside_matter_blocked`, `shell_network_blocked`, `shell_network_blocked_no_web_search`; host notices only; `text` is the fallback) | acp, host | yes | T |
+| `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `auto_mode_unavailable`, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`), `outside_matter_blocked`, `shell_network_blocked`, `shell_network_blocked_no_web_search`, `other_matter_refused` with matter and name, `matters_unfenced` with matters (at most five) and more; host notices only; `text` is the fallback) | acp, host | yes | T |
 | `compaction_changed` | status, summary? | acp | yes | T |
 | `files_changed` | turn, files, skipped | matters, through the host | yes | T |
 | `turn_failed` | turn, code, detail? (never shown) | host, acp | yes | T |

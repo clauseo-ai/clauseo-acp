@@ -242,6 +242,22 @@ pub enum HostCommand {
         /// Today's local midnight.
         day_start: Timestamp,
     },
+    /// Let a thread's agent read another matter's files, read-only: logs `matter_read_allowed`
+    /// (unless already allowed) and answers `Done`; the agent has it from its next launch. The
+    /// host refuses the thread's own matter (`command.invalid`) or one it does not know.
+    AllowMatterRead {
+        /// The thread.
+        thread: ThreadId,
+        /// The other matter.
+        matter: MatterId,
+    },
+    /// Withdraw that: logs `matter_read_withdrawn` (when allowed) and answers `Done`.
+    WithdrawMatterRead {
+        /// The thread.
+        thread: ThreadId,
+        /// The other matter.
+        matter: MatterId,
+    },
     /// Start a thread in a matter with an agent.
     CreateThread {
         /// The matter.

@@ -53,6 +53,7 @@ pub fn header_entry() -> HeaderEntry {
         tools: vec![],
         snoozed_until: None,
         done: false,
+        read_matters: Vec::new(),
         mode_id: Some(short("plan")),
         config_options: vec![],
         commands: vec![],

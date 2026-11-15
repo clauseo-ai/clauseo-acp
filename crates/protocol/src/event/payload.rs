@@ -15,8 +15,9 @@ pub use matter::{
 };
 pub use thread::{
     AgentNamed, AgentSessionAttached, AgentSessionDetached, CommandsAvailable, CompactionChanged,
-    ConfigOptionsReplaced, ModeChanged, Notice, PlanReplaced, ThreadArchived, ThreadCreated,
-    ThreadDone, ThreadRenamed, ThreadSnoozed, UsageUpdated,
+    ConfigOptionsReplaced, MatterReadAllowed, MatterReadWithdrawn, ModeChanged, Notice,
+    PlanReplaced, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed,
+    UsageUpdated,
 };
 pub use tool::{
     ElicitationExpired, ElicitationRequested, ElicitationResolved, PageVisited, PermissionExpired,

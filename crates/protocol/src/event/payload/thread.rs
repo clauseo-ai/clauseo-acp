@@ -66,6 +66,26 @@ pub struct ThreadDone {
     pub by: DoneBy,
 }
 
+/// The lawyer let this conversation read another matter's files, read-only: the host lifts
+/// that matter's read fence for the conversation's agent from its next launch. The reducer keeps
+/// it in [`HeaderEntry::read_matters`](crate::HeaderEntry).
+/// JSON: `{"matter_read_allowed": {"matter": "..."}}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct MatterReadAllowed {
+    /// The other matter.
+    pub matter: MatterId,
+}
+
+/// The lawyer withdrew [`MatterReadAllowed`] for `matter`: its fence is back from the agent's
+/// next launch. JSON: `{"matter_read_withdrawn": {"matter": "..."}}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct MatterReadWithdrawn {
+    /// The other matter.
+    pub matter: MatterId,
+}
+
 /// An agent session started or was loaded for the thread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::open_enum::{open_data_enum, open_unit_enum};
-use crate::{CompactString, Count, Finite, MatterPath, PackId};
+use crate::{CompactString, Count, Finite, MatterId, MatterPath, PackId};
 
 /// The agent's stable ACP v1 capabilities, plus Clauseo's steering capability.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -321,6 +321,24 @@ open_data_enum! {
         /// As `shell_network_blocked`, in a session without web search (the firm or the lawyer
         /// turned it off), so the words offer no web search instead. Once a turn.
         ShellNetworkBlockedNoWebSearch = "shell_network_blocked_no_web_search",
+        /// Clauseo kept the agent out of another matter's files: a refused permission request,
+        /// or a tool call that failed as refused on a path in that matter (the innermost, when
+        /// matters nest). The app offers to let this conversation read that matter's files.
+        /// Once a turn for each matter.
+        OtherMatterRefused = "other_matter_refused" {
+            /// The other matter.
+            matter: MatterId,
+            /// Its name when the host gave the notice (display only; it may have changed).
+            name: String,
+        },
+        /// Too many matters to fence off from the agent's commands (Claude on Windows, whose
+        /// settings file has a size limit): its commands may still reach these matters' files.
+        MattersUnfenced = "matters_unfenced" {
+            /// The first of them, at most five.
+            matters: Vec<MatterId>,
+            /// How many more beyond `matters`.
+            more: u32,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -339,6 +357,16 @@ open_data_enum! {
             reason: PackSkipReason::Changed,
         },
         NoticeKind::AutoModeUnavailable,
+        NoticeKind::OtherMatterRefused {
+            matter: MatterId::new(uuid::Uuid::from_u128((0x0190_0000_0000 << 80) | (0x7 << 76) | (0b10 << 62) | 7))
+                .unwrap(),
+            name: "Smith".to_owned(),
+        },
+        NoticeKind::MattersUnfenced {
+            matters: vec![MatterId::new(uuid::Uuid::from_u128((0x0190_0000_0000 << 80) | (0x7 << 76) | (0b10 << 62) | 8))
+                .unwrap()],
+            more: 3,
+        },
     ];
 }
 

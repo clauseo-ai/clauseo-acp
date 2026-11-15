@@ -79,6 +79,10 @@ pub struct HeaderEntry {
     /// waking event (the same ones as for `snoozed_until`). Missing reads as `false`.
     #[serde(default)]
     pub done: bool,
+    /// The other matters whose files the lawyer let this thread read (read-only), oldest first,
+    /// from `MatterReadAllowed` not withdrawn since. Missing reads as empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub read_matters: Vec<MatterId>,
     /// The agent's current mode, if it reported one.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<String>))]

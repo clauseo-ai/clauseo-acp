@@ -228,6 +228,8 @@ mod domain_event {
         ThreadArchived => thread_archived: event("thread_archived");
         ThreadSnoozed => thread_snoozed: event("thread_snoozed");
         ThreadDone => thread_done: event("thread_done");
+        MatterReadAllowed => matter_read_allowed: event("matter_read_allowed");
+        MatterReadWithdrawn => matter_read_withdrawn: event("matter_read_withdrawn");
         AgentSessionAttached => agent_session_attached: event("agent_session_attached");
         AgentNamed => agent_named: event("agent_named");
         AgentSessionDetached => agent_session_detached: event("agent_session_detached");

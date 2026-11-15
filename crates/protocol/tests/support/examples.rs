@@ -13,14 +13,14 @@ use clauseo_protocol::{
     CheckpointKind, CheckpointRecorded, CompactionChanged, CompactionStatus, ContentAppended,
     ContentBlock, ContentId, Cost, Delivery, DetachReason, DomainEvent, DoneBy, ErrorCode,
     FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated, MatterKind,
-    MatterRelocated, Notice, NoticeLevel, OutsideEdits, PageVia, PageVisited, PromptCapabilities,
-    QueuedPromptEdited, RawFrom, RenameSource, RestoreScope, SessionCapabilities, SkippedFile,
-    SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved, SteeringCapability, StepUndone,
-    StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadDone,
-    ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
-    ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued,
-    TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage, VersionRestored,
-    WebResult, WebSearchRecorded,
+    MatterReadAllowed, MatterReadWithdrawn, MatterRelocated, Notice, NoticeLevel, OutsideEdits,
+    PageVia, PageVisited, PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource,
+    RestoreScope, SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy, SteerOutcome,
+    SteerResolved, SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob,
+    ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, Timestamp,
+    ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind,
+    ToolLocation, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage,
+    UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
@@ -275,6 +275,14 @@ fn thread_events() -> Vec<DomainEvent> {
         ThreadDone {
             done: true,
             by: DoneBy::MorningSweep,
+        }
+        .into(),
+        MatterReadAllowed {
+            matter: matter_id(3),
+        }
+        .into(),
+        MatterReadWithdrawn {
+            matter: matter_id(3),
         }
         .into(),
         AgentSessionAttached {

@@ -4,7 +4,7 @@
 //! clears both. The rule reads no clock: a snooze's time passing is the host's `ThreadSnoozed`
 //! with `by: expired`, which clears the snooze as any `until: None` does.
 
-use clauseo_protocol::{DomainEvent, ThreadDone, ThreadSnoozed, ViewEntry};
+use clauseo_protocol::{DomainEvent, MatterId, ThreadDone, ThreadSnoozed, ViewEntry};
 
 use super::{set, update_header};
 use crate::Applied;
@@ -15,6 +15,27 @@ use crate::state::ThreadState;
 pub(super) fn snoozed(state: &mut ThreadState, event: &ThreadSnoozed, out: &mut Applied) {
     update_header(state, "thread_snoozed", out, |h| {
         set(&mut h.snoozed_until, event.until)
+    });
+}
+
+/// `MatterReadAllowed`: `matter` joins the header's `read_matters` once, at the end. Not part
+/// of triage, but a header mark of the lawyer's like the two above.
+pub(super) fn read_allowed(state: &mut ThreadState, matter: MatterId, out: &mut Applied) {
+    update_header(state, "matter_read_allowed", out, |h| {
+        let fresh = !h.read_matters.contains(&matter);
+        if fresh {
+            h.read_matters.push(matter);
+        }
+        fresh
+    });
+}
+
+/// `MatterReadWithdrawn`: `matter` leaves the header's `read_matters`.
+pub(super) fn read_withdrawn(state: &mut ThreadState, matter: MatterId, out: &mut Applied) {
+    update_header(state, "matter_read_withdrawn", out, |h| {
+        let before = h.read_matters.len();
+        h.read_matters.retain(|known| *known != matter);
+        h.read_matters.len() != before
     });
 }
 

@@ -36,6 +36,14 @@ golden! { HostCommand::name_of {
     SweepDone => sweep_done: HostCommand::SweepDone {
         day_start: Timestamp::new(1_759_968_000_000).unwrap(),
     };
+    AllowMatterRead => allow_matter_read: HostCommand::AllowMatterRead {
+        thread: thread_id(2),
+        matter: matter_id(3),
+    };
+    WithdrawMatterRead => withdraw_matter_read: HostCommand::WithdrawMatterRead {
+        thread: thread_id(2),
+        matter: matter_id(3),
+    };
     CreateThread => create_thread: HostCommand::CreateThread {
         matter: matter_id(1),
         agent: agent("claude-acp"),
