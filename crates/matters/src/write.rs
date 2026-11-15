@@ -378,7 +378,8 @@ impl Staged {
         };
         #[cfg(not(any(windows, test)))]
         let renamed = {
-            let _ = replace;
+            // Only Windows keeps metadata at the rename; elsewhere [`stage`] copied it.
+            let _ = (replace, self.keep);
             plain_rename(&temp, &self.target)
         };
         match renamed {
