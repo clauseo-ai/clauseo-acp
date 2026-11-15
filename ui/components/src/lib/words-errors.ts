@@ -117,6 +117,7 @@ export type ErrorCode =
   | "mcp.save_declined"
   | "agent.service_error"
   | "agent.quiet"
+  | "agent.unreachable"
   | "mcp.import_too_large"
   | "matter.folder_backslash"
   | "agent.folder_inaccessible"
@@ -346,6 +347,9 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // ended the turn (D-050's backstop): Try again under the answer so far, never Restart. English approved (orchestrator,
   // 2026-11-13); the Hindi is provisional
   "agent.quiet": "Claude stopped answering. Try again.",
+  // the agent couldn't get through to its service while the computer seemed online (offline truth): Try again under
+  // the answer, never Restart; provisional
+  "agent.unreachable": "Clauseo couldn't reach Claude. Try again.",
   // an import whose servers are too long to show whole in one confirm: nothing was added
   "mcp.import_too_large":
     "There are too many tools to import at once, so nothing was imported. Add them one at a time.",
@@ -438,6 +442,13 @@ const PLANNED: Partial<
       "{name} couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
     nameless:
       "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+  },
+  // the agent couldn't get through to its service while the computer seemed online (offline truth; see ERROR_WORDS):
+  // Try again, never Restart; provisional
+  "agent.unreachable": {
+    chatgpt: "Clauseo couldn't reach ChatGPT. Try again.",
+    named: "Clauseo couldn't reach {name}. Try again.",
+    nameless: "Clauseo couldn't reach the AI. Try again.",
   },
 };
 

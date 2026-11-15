@@ -330,6 +330,24 @@ test.each([
   },
 );
 
+// offline truth: the agent couldn't get through to its service while the computer seemed online. The same line as
+// agent.quiet: Try again under the answer, never Restart (even with H10 faked), no time mark
+test("a Codex turn failed with agent.unreachable: ChatGPT's line and Try again, no Restart, no time mark", async () => {
+  const agent = "codex-acp";
+  h = await asked({ threads: [{ ...summary(), agent }], next: H10 }, agent);
+  h.deliver(failed("agent.unreachable", NOW, agent));
+  await h.settle();
+  const row = h.one("turn-stopped");
+  expect(row?.dataset["failure"]).toBe("agent.unreachable");
+  expect(row?.textContent).toBe("Clauseo couldn't reach ChatGPT. Try again.");
+  expect(h.one("answer-try-again")).not.toBeNull();
+  expect(h.one("restart")).toBeNull();
+  expect(h.one("agent-stopped")).toBeNull();
+  expect(h.one("stopped-here")).toBeNull();
+  expect(field().value).toBe("");
+  expect(h.host.textContent).toContain("Clause nine requires notice");
+});
+
 test("with H10 faked: no Restart for a code a restart can't mend, and a refused Restart says its code", async () => {
   h = await asked({ next: H10 });
   h.deliver(failed("agent.protocol_error"));
@@ -454,6 +472,7 @@ test.each([
     "agent.folder_inaccessible",
     "ChatGPT couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
   ],
+  ["agent.unreachable", "Clauseo couldn't reach ChatGPT. Try again."],
 ] as const)("a Codex thread's %s names ChatGPT on the step's row", async (code, said) => {
   const agent = "codex-acp";
   // on the Mac, where matter.folder_backslash's line says Finder

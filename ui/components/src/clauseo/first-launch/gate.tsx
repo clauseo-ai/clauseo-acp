@@ -47,8 +47,9 @@ export type GateView =
   | { kind: "set-up"; expired: boolean; instead: boolean; keyed?: boolean; busy?: boolean }
   | { kind: "checking" }
   /** `after`: the plan installed, its browser opening once the other plan's sign-in, named here, ends (one sign-in at
-   * a time). */
-  | { kind: "queued"; offline: boolean; after?: string }
+   * a time). `offline`: the install waits (agent.install_offline); `online` with it, the window says it is online, so
+   * the browser opens once setting up can continue, not on reconnecting. */
+  | { kind: "queued"; offline: boolean; online?: boolean; after?: string }
   | { kind: "waiting"; nudge: boolean; pasting: boolean }
   | { kind: "device"; code: string; until: string }
   | { kind: "login-found"; email?: string | undefined }
@@ -278,7 +279,9 @@ export function Gate({
         <Act act={cancel}>
           <Say>
             {view.offline
-              ? w("Your browser opens when you reconnect.")
+              ? view.online === true
+                ? w("Your browser opens when setting up can continue.")
+                : w("Your browser opens when you reconnect.")
               : view.after !== undefined
                 ? w("Your browser opens for {name} after {other}'s sign-in.", {
                     name,

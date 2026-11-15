@@ -100,6 +100,21 @@ host added later reached the page without anyone deciding it should.
   from the watch's start; after that the probe decides. The window's word alone never makes a
   failed prompt read as offline. So a page that lies can stop only a turn whose agent is
   already silent and whose service the host cannot reach either.
+- **The truth of an offline end (2026-11-15, offline truth):** "You're offline"
+  (`agent.offline`) only while the window says offline when the turn ends **and** the host's
+  probe misses (a launch with nothing to probe counts as a miss then). Any other connection
+  failure (a watch whose probe missed while the window says online, a failed prompt naming a
+  connection failure, Codex giving up on its connection) ends `agent.unreachable` ("Clauseo
+  couldn't reach Claude. Try again."): the service, a proxy, a firewall or TLS inspection in
+  front of it, or a LAN with no internet; one message, its detail carrying the probe's fixed
+  fields (`class`, `via`, `status`) for firm IT. A request that timed out (Claude's "Request
+  timed out.") while the probe reached the service is a slow service: `agent.quiet`. A failed
+  prompt reads the turn's last probe when it is under 30 s old, else its end waits for one fresh
+  probe, at most 8 s (`offline/hold.rs`); one that does not answer by then is a miss. No second,
+  independent probe target: it would send a lawyer's machine's traffic to a third party, and a
+  firm that blocks that target would read as offline, the very lie this removes. The agent's
+  install says "You're offline" only while the window says offline too, else "Setting up can't
+  reach the download right now. It tries again by itself."
 - **The same probe guards an agent's own note** (Codex's "Falling back from WebSockets to HTTPS
   transport", Claude's connection line): after it, 30 s of silence ends the turn only when the
   probe fails, since Codex then retries over HTTPS, which a blip or a proxy that blocks only
@@ -113,7 +128,8 @@ host added later reached the page without anyone deciding it should.
   and the wait runs from the first note: later retries only replace it, so retries less than
   30 s apart never put the probe off. The notice is the note and never reaches the transcript,
   in a turn or outside one (idle, or replayed by `session/load`); answer text outside a turn is
-  never touched. A prompt that ends on a failure Codex gave up on ends `agent.offline` when a
+  never touched. A prompt that ends on a failure Codex gave up on ends with the offline truth's
+  code (`agent.offline` or `agent.unreachable`, below) when a
   note armed the watch or its title names a connection failure, unless its title says a server
   answered or the host's last probe got through (an outage of the service, not of the
   computer); else it fails `agent.protocol_error`, as the same failure over JSON-RPC does, so a
@@ -178,7 +194,8 @@ host added later reached the page without anyone deciding it should.
     whether or not its service is known; an ask's end restarts it, so the lawyer's time never
     counts. An agent of no known kind gets no quiet arm. 30 s with no output, no open tool call
     and no ask arms a quiet watch and probes at once; a probe that gets through waits again, and two
-    misses in a row end the turn `agent.offline`. An agent's note turns the watch into a note's,
+    misses in a row end the turn (`agent.offline` only while the window says offline, else
+    `agent.unreachable`). An agent's note turns the watch into a note's,
     which ends at its next miss; the window's `offline` makes it the window's, and `online`
     leaves it. This is what covers Claude, whose retries reach the client as nothing at all.
   - **The backstop:** 5 minutes with no output, no open tool call and no ask end the turn

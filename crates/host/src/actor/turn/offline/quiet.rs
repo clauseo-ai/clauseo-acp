@@ -191,7 +191,7 @@ fn backstop(actor: &mut Actor, thread: ThreadId, quiet: Duration, limit: Duratio
         return;
     };
     let minutes = limit.as_secs() / 60;
-    let last = current.offline.as_ref().and_then(|watch| watch.class);
+    let last = current.offline.as_ref().and_then(super::Watch::class);
     let reached = current.offline.as_ref().is_some_and(|watch| watch.reached);
     tracing::warn!(
         target: LIFECYCLE,

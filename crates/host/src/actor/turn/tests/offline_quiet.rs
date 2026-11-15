@@ -234,7 +234,7 @@ fn a_silent_claude_turn_ends_offline_after_two_missed_probes() {
     let log = rig.log(thread);
     assert_eq!(
         ended(&log, turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
     rig.finish();
@@ -412,7 +412,7 @@ fn a_codex_note_after_a_missed_quiet_probe_ends_at_the_next_miss() {
     let log = rig.log(thread);
     assert_eq!(
         ended(&log, turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
     rig.finish();
@@ -446,7 +446,7 @@ fn codex_502_fallback_and_retries_end_offline() {
     let log = rig.log(thread);
     assert_eq!(
         ended(&log, turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
     let shown = format!(
@@ -502,7 +502,7 @@ fn the_window_coming_online_keeps_a_quiet_watch() {
     finish_turn(&mut rig, thread);
     assert_eq!(
         ended(&rig.log(thread), turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable))
     );
     rig.finish();
 }

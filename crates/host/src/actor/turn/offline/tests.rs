@@ -1,7 +1,9 @@
 //! The offline classifier on real texts: the systems' own error words on macOS, Linux and
 //! Windows, as Codex and Claude Code pass them on, and the server errors that are never offline.
 
-use super::classify::{Note, is_offline, says_connection, says_server, transport_note};
+use super::classify::{
+    Note, is_offline, says_connection, says_server, says_timeout, transport_note,
+};
 
 /// Connection-class failures, by system: each is offline.
 const OFFLINE: [&str; 27] = [
@@ -79,6 +81,26 @@ fn connection_failures_on_every_system_are_offline() {
 fn server_errors_are_never_offline() {
     for text in NOT_OFFLINE {
         assert!(!is_offline(text), "offline: {text}");
+    }
+}
+
+/// A request that timed out is a slow service's (the probe decides); a connection that timed
+/// out, or never got made, is not. Both still name a connection failure, so a note arms.
+#[test]
+fn only_a_request_that_timed_out_says_timeout() {
+    for text in [
+        "API Error: Request timed out.",
+        "Internal error: API Error: Request timed out. Check your internet connection and proxy \
+         settings",
+    ] {
+        assert!(says_timeout(text) && says_connection(text), "{text}");
+    }
+    for text in [
+        "tcp connect error: Connection timed out (os error 110)",
+        "connect ETIMEDOUT 160.79.104.10:443",
+        "API Error: Unable to connect to API (ECONNREFUSED)",
+    ] {
+        assert!(!says_timeout(text), "{text}");
     }
 }
 

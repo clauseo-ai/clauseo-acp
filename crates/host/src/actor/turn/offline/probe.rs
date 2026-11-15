@@ -31,7 +31,7 @@ mod tests;
 
 /// The most the whole try may take: the name's lookup, the TCP connection, the `CONNECT` head
 /// and the first TLS record (each service of a login of unknown kind at once, side by side).
-pub(super) const PROBE_CAP: Duration = Duration::from_secs(8);
+pub(in crate::actor::turn) const PROBE_CAP: Duration = Duration::from_secs(8);
 
 /// The thread's name.
 const THREAD_NAME: &str = "clauseo-offline-probe";
@@ -189,6 +189,20 @@ impl ReachProbe {
             };
             answer(next.unwrap_or(false))
         }))
+    }
+
+    /// A probe that answers `reached` only once the gate it hands back is sent to or dropped.
+    pub(crate) fn gated(reached: bool) -> (Self, std::sync::mpsc::Sender<()>) {
+        let (open, gate) = std::sync::mpsc::channel::<()>();
+        let gate = std::sync::Mutex::new(gate);
+        let probe = Self(Arc::new(move |_| {
+            let gate = gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let _opened = gate.recv();
+            answer(reached)
+        }));
+        (probe, open)
     }
 
     /// This probe, counting its calls in the counter it hands back.

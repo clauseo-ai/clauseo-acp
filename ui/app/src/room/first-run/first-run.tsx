@@ -10,6 +10,7 @@ import { installLine } from "@clauseo/components/clauseo/first-launch/install.ts
 import { DocumentsLine } from "@clauseo/components/clauseo/first-launch/parts.tsx";
 import { useDisplay, type Lang, type ReleaseMode } from "@clauseo/components/lib/display.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
+import { useOnline } from "../../transport/online.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import {
   CLAUDE,
@@ -151,6 +152,8 @@ type RoomSide = {
   lang: Lang;
   platform: string;
   releaseMode: ReleaseMode;
+  /** What the window says of the network (online.ts): a waiting install's words follow it. */
+  online: boolean;
 };
 
 /** UC: the Safe workspace step's acts over the window's protection store. */
@@ -184,8 +187,9 @@ function viewFor(state: SetupState, room: RoomSide, clock: (at: number) => strin
       (typeof install === "object" && "missing" in install && install.missing !== undefined);
     return { kind: "set-up", expired: false, instead: drafting, keyed: true, busy: !idle } as const;
   }
-  if (state.queued === agent && !isSignedIn(setup?.signIn)) return queuedView(setup, state, agent);
-  const view = gateView(setup, state, clock, agent);
+  if (state.queued === agent && !isSignedIn(setup?.signIn))
+    return queuedView(setup, state, agent, room.online);
+  const view = gateView(setup, state, clock, agent, room.online);
   if (view?.kind !== "signed-out" || view.found !== undefined) return view;
   const other = isSignedIn(state.agents[agent === CODEX ? CLAUDE : CODEX]?.signIn);
   if (drafting && !other) return view;
@@ -197,9 +201,15 @@ function viewFor(state: SetupState, room: RoomSide, clock: (at: number) => strin
 /** The other plan's line in the composer, as the first screen says it (its name in front, its own Cancel), while its
  * install is under way, failed or offline, or its sign-in waits or is open in the browser; null otherwise (only
  * offered, ready or signed in). */
-function otherLine(store: SetupStore, state: SetupState, other: AgentId, lang: Lang) {
+function otherLine(
+  store: SetupStore,
+  state: SetupState,
+  other: AgentId,
+  lang: Lang,
+  online: boolean,
+) {
   const setup = state.agents[other];
-  const view = installView(setup);
+  const view = installView(setup, online);
   const signIn = setup?.signIn;
   const moving =
     installGoing(setup) ||
@@ -213,6 +223,7 @@ function otherLine(store: SetupStore, state: SetupState, other: AgentId, lang: L
     NAME[planOf(other)],
     setup,
     state,
+    online,
     footActs(store, other, state),
     IDS.install,
   );
@@ -234,7 +245,7 @@ function holdOf(
   const clock = (at: number) => clockOf(at, Date.now(), room.zone, lang).time;
   const line = installLine(
     lang,
-    installView(setup),
+    installView(setup, room.online),
     NAME[plan],
     installActs(store, agent, state.copied),
     IDS.install,
@@ -244,7 +255,7 @@ function holdOf(
   const own = line?.kind === "wait" && note !== null ? { ...line, note } : line;
   // the other plan's line while it downloads or its sign-in waits, compact under this plan's: choosing a plan never
   // hides the other's download, and each line keeps its own progress and Cancel
-  const other = otherLine(store, state, otherPlan(agent), lang);
+  const other = otherLine(store, state, otherPlan(agent), lang, room.online);
   const working = own ?? other;
   const also = own === null ? null : other;
   // a plan waiting for the other's download or sign-in to end says the queued sign-in's words, with its Cancel
@@ -395,6 +406,7 @@ export function FirstRun({
   );
   const display = useDisplay();
   const { lang, platform, releaseMode } = display;
+  const online = useOnline();
   // the plan the send uses: the open conversation's thread's, or the one a draft would run (room.tsx's openAgent)
   const openAgent = talks.rows.find((r) => r.key === talks.open)?.agent ?? null;
   const agent = openAgent ?? talks.agent;
@@ -432,7 +444,7 @@ export function FirstRun({
   // and again when the room's side changes
   useEffect(() => {
     const holder = holderOf(transport);
-    const room: RoomSide = { agent, fixed, drafting, zone, lang, platform, releaseMode };
+    const room: RoomSide = { agent, fixed, drafting, zone, lang, platform, releaseMode, online };
     let cache: [SetupState, ProtectionState | null, Hold | null] | null = null;
     const withParts = (shield: ProtectionState | null) =>
       shields === null || shield === null || parts === null
@@ -457,7 +469,20 @@ export function FirstRun({
       holder.read = () => null;
       notify();
     };
-  }, [transport, store, shields, parts, agent, fixed, drafting, zone, lang, platform, releaseMode]);
+  }, [
+    transport,
+    store,
+    shields,
+    parts,
+    agent,
+    fixed,
+    drafting,
+    zone,
+    lang,
+    platform,
+    releaseMode,
+    online,
+  ]);
   // UC: the Safe workspace step is entered once, after the first sign-in here; where the set-up
   // asks no administrator it is sent at once, with no confirm, and the step is its wait; where the
   // repair is the installer, nothing is sent

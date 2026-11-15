@@ -16,6 +16,7 @@ import {
   mountFirstRun,
   play,
   press,
+  setOnline,
   setups,
   signIn,
   text,
@@ -120,6 +121,24 @@ test("waiting offline: the plans' own offline words, with nothing to press", asy
   expect(line()?.dataset["state"]).toBe("waiting");
   expect(line()?.textContent).toBe("You're offline. Setting up waits for the connection.");
   expect(line()?.querySelector("button")).toBeNull();
+});
+
+test("waiting with the window online: the line says the download can't be reached, not offline; offline again, the offline words", async () => {
+  await mountFirstRun({
+    matters: [],
+    first: [
+      ...CLAUDE_READY,
+      tools({ waiting: { code: "agent.install_offline", hosts: [], log: [] } }),
+    ],
+    online: true,
+  });
+  expect(line()?.dataset["state"]).toBe("waiting");
+  expect(line()?.textContent).toBe(
+    "Setting up can't reach the download right now. It tries again by itself.",
+  );
+  expect(line()?.querySelector("button")).toBeNull();
+  await setOnline(false);
+  expect(line()?.textContent).toBe("You're offline. Setting up waits for the connection.");
 });
 
 test("failed: the line and Try again, which sends RetryAgentInstall with the ready plan's id; Claude's row is unchanged", async () => {

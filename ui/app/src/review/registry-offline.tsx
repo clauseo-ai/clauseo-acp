@@ -1,6 +1,7 @@
 // U3's entries for a turn's failure that is never a send's refusal: going offline mid-answer (D-050), the agent's
 // service giving up on its side (agent.service_error, #1030), and the agent going quiet for 5 minutes (agent.quiet,
-// D-050's backstop), and a folder Claude can't start in (matter.folder_backslash, agent.folder_inaccessible); and which
+// D-050's backstop), the agent unable to reach its service while the computer seemed online (agent.unreachable,
+// offline truth), and a folder Claude can't start in (matter.folder_backslash, agent.folder_inaccessible); and which
 // error codes need no send-refusal entry, split from registry.tsx for its length.
 import { MARK_KEYS, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
 import { agentText, step, userMessage } from "../testing/stream-script.ts";
@@ -12,12 +13,13 @@ import { errorWords } from "./words.ts";
 
 /** Whether an error code's sentence needs no "U3-err-<code>" refusal on a send: Versions' own (the Word blackline's,
  * words-errors.ts's MARK_KEYS, UC-114 and UC-115), and agent.offline, agent.service_error, agent.quiet,
- * matter.folder_backslash and agent.folder_inaccessible, a turn's failures with their own entries below. Only the false
- * answer narrows: a key it refuses is never one of MARK_KEYS. */
+ * agent.unreachable, matter.folder_backslash and agent.folder_inaccessible, a turn's failures with their own entries
+ * below. Only the false answer narrows: a key it refuses is never one of MARK_KEYS. */
 export const ownEntry = (code: ErrorCode, key: ErrorKey): key is (typeof MARK_KEYS)[number] =>
   code === "agent.offline" ||
   code === "agent.service_error" ||
   code === "agent.quiet" ||
+  code === "agent.unreachable" ||
   code === "matter.folder_backslash" ||
   code === "agent.folder_inaccessible" ||
   (MARK_KEYS as readonly string[]).includes(key);
@@ -92,6 +94,30 @@ const QUIET: Entry[] = [
   },
 ];
 
+/** agent.unreachable is never a send's refusal either: Claude's stop line under the answer so far, with Try again and
+ * never Restart (UC-530, offline truth). ChatGPT's, an agent's by its name and the nameless line are UC-531 to
+ * UC-533. */
+const UNREACHABLE: Entry[] = [
+  {
+    id: "UC-530",
+    words: errorWords("Clauseo couldn't reach Claude. Try again."),
+    screen: "room/thread",
+    render: () => (
+      <RoomOver
+        host={() =>
+          threadHost({
+            entries: [
+              userMessage(5, 1, "What does clause nine of the lease say about notice?"),
+              agentText(6, 1, "Clause nine requires **notice in writing**, served at"),
+              step(9, { stop: "failed", failure: "agent.unreachable" }),
+            ],
+          })
+        }
+      />
+    ),
+  },
+];
+
 /** A turn Claude couldn't start in the matter's folder, never a send's refusal: the question and the stop line under it,
  * with Try again and never Restart. Draft English (Rohan to approve). ChatGPT's, an agent's by its name and the
  * nameless line are U6F-25 to U6F-30. */
@@ -123,6 +149,7 @@ const OWN: Partial<Record<ErrorCode, Entry[]>> = {
   "agent.offline": OFFLINE,
   "agent.service_error": SERVICE,
   "agent.quiet": QUIET,
+  "agent.unreachable": UNREACHABLE,
   "matter.folder_backslash": folderStop(
     "matter.folder_backslash",
     "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
@@ -133,6 +160,6 @@ const OWN: Partial<Record<ErrorCode, Entry[]>> = {
   ),
 };
 
-/** The entries in place of a refusal for a code `ownEntry` names: agent.offline's, agent.service_error's, agent.quiet's
- * and the two folder codes' own, in their code's place. */
+/** The entries in place of a refusal for a code `ownEntry` names: agent.offline's, agent.service_error's, agent.quiet's,
+ * agent.unreachable's and the two folder codes' own, in their code's place. */
 export const ownEntries = (code: ErrorCode): Entry[] => OWN[code] ?? [];

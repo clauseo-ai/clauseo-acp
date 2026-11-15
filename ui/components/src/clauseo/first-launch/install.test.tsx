@@ -57,6 +57,19 @@ test("install lines: installing is the set-up, with no bytes, in English and Hin
   expect(linesOf("hi", { kind: "installing" }).words).toBe("Claude सेट अप हो रहा है…");
 });
 
+test("install lines: waiting says you're offline; with the window online, that the download can't be reached", async () => {
+  await loadHindi();
+  expect(linesOf("en", { kind: "offline" }).words).toBe(
+    "You're offline. Setting up waits for the connection.",
+  );
+  expect(linesOf("en", { kind: "offline", online: true }).words).toBe(
+    "Setting up can't reach the download right now. It tries again by itself.",
+  );
+  expect(linesOf("hi", { kind: "offline", online: true }).words).toBe(
+    "सेटअप अभी डाउनलोड तक नहीं पहुँच पा रहा। यह अपने-आप फिर से कोशिश करेगा।",
+  );
+});
+
 test("install lines: missing with no size says nothing, so no line stands", async () => {
   await loadHindi();
   expect(installLine("en", { kind: "missing", mb: 0 }, "Claude", ACTS)).toBeNull();

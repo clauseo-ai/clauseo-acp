@@ -139,12 +139,13 @@ export function welcomeFoot(
   name: string,
   setup: AgentSetup | undefined,
   state: SetupState,
+  online: boolean,
   acts: FootActs,
   ids: InstallTestIds,
 ): WorkingState | null {
   const locked = planLocked(state.locked, agent);
   const waits = signInWaits(state, agent) && !locked;
-  const view0 = installView(setup);
+  const view0 = installView(setup, online);
   const install = installLine(lang, view0, name, { ...acts, named: true }, ids);
   // a waiting sign-in over its download: the download's own line and progress, and the wait's Cancel beside them
   if (waits && install !== null && view0?.kind !== "missing")
@@ -161,7 +162,9 @@ export function welcomeFoot(
     return note === null || row?.kind !== "wait" ? row : { ...row, note };
   }
   // no clock time is said by the states shown here; a waiting sign-in says when its browser opens
-  const view = waits ? queuedView(setup, state, agent) : gateView(setup, state, () => "", agent);
+  const view = waits
+    ? queuedView(setup, state, agent, online)
+    : gateView(setup, state, () => "", agent, online);
   if (view === null) return null;
   const line = (
     words: string,
@@ -226,7 +229,9 @@ export function welcomeFoot(
     case "queued":
       return line(
         view.offline
-          ? fl(lang, "Your browser opens when you reconnect.")
+          ? view.online === true
+            ? fl(lang, "Your browser opens when setting up can continue.")
+            : fl(lang, "Your browser opens when you reconnect.")
           : view.after !== undefined
             ? fl(lang, "Your browser opens for {name} after {other}'s sign-in.", {
                 name,

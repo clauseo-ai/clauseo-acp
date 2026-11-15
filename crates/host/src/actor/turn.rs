@@ -28,7 +28,7 @@ mod launch_checks;
 mod logout;
 mod note;
 mod offline;
-pub(crate) use offline::probe::settings::claude_shell_carries;
+pub(crate) use offline::{probe::settings::claude_shell_carries, set_network};
 mod out;
 mod outside;
 mod own_turn;
@@ -80,7 +80,6 @@ pub(crate) use idle::{on_due as idle_due, relay_call as idle_relay_call, tick as
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub(crate) use launch_checks::HeldRuns;
 pub use launch_checks::PackRequest;
-pub(crate) use offline::set_network;
 pub(crate) use out::flush_text;
 pub(crate) use queue::{any_active, any_running, cancel_all, queue_hold, release, sync_all_held};
 pub(crate) use restore::{
@@ -225,8 +224,9 @@ struct Current {
     /// The turn failed on the host's side; it ends `Failed` with this `TurnFailed`.
     failure: Option<(ErrorCode, Option<String>)>,
     /// The agent said its connection failed, or the window said offline, and the agent has sent
-    /// nothing since (`offline.rs`).
+    /// nothing since (`offline.rs`). A prompt's end held for the probe is `probe_hold`.
     offline: Option<offline::Watch>,
+    probe_hold: Option<offline::Hold>,
     /// The quiet arm's clock of the turn (`offline/quiet.rs`).
     quiet: offline::quiet::QuietClock,
     /// The failure asks to stop the prompt once the commit being built is sent.

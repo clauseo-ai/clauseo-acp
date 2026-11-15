@@ -23,6 +23,7 @@ import {
   mountFirstRun,
   play,
   press,
+  setOnline,
   setups,
   signIn,
   stubClipboard,
@@ -133,6 +134,16 @@ test("plan-early, plan-queued: Sign in works before the install is ready, and th
   expect(text()).toContain("Your browser opens when you reconnect.");
   await press(byId("signin-cancel"));
   expect(setups(t).at(-1)).toEqual({ cancel_sign_in: { agent: CLAUDE } });
+});
+
+test("plan-queued, install waiting: offline the browser opens on reconnecting; online, when setting up can continue", async () => {
+  await mountFirstRun({ first: [install(CLAUDE, OFFLINE), signIn(CLAUDE, "queued")] });
+  expect(gateState()).toBe("queued");
+  expect(text()).toContain("Your browser opens when you reconnect.");
+  await setOnline(true);
+  expect(gateState()).toBe("queued");
+  expect(text()).toContain("Your browser opens when setting up can continue.");
+  expect(text()).not.toContain("when you reconnect");
 });
 
 test("plan-chatgpt: Sign in with ChatGPT with neither plan busy sends StartSignIn for codex-acp, and the gate moves to ChatGPT", async () => {

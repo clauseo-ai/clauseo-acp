@@ -15,6 +15,7 @@ import {
   press,
   setups,
   signIn,
+  setOnline,
   stubClipboard,
   text,
 } from "./rig.tsx";
@@ -147,6 +148,35 @@ test("install: dl-offline waits for the connection and resumes by itself", async
   await play(t, install(CLAUDE, { downloading: { received: 1, total: 200_000_000 } }));
   expect(foot()?.dataset["state"]).toBe("downloading");
   expect(setups(t)).toEqual([]);
+});
+
+const UNREACHABLE = "Setting up can't reach the download right now. It tries again by itself.";
+const OFFLINE_WORDS = "You're offline. Setting up waits for the connection.";
+
+test("install: waiting with the window offline says you're offline; online, that the download can't be reached", async () => {
+  await mountFirstRun({ matters: [], first: [OFFLINE], online: false });
+  expect(foot()?.dataset["state"]).toBe("offline");
+  expect(text()).toContain(OFFLINE_WORDS);
+  expect(text()).not.toContain(UNREACHABLE);
+  // the window's online event: the same wait, now in the words that don't say offline
+  await setOnline(true);
+  expect(foot()?.dataset["state"]).toBe("offline");
+  expect(text()).toContain(UNREACHABLE);
+  expect(text()).not.toContain(OFFLINE_WORDS);
+  expect(byId("install-retry")?.textContent).toBe("Try again");
+  await setOnline(false);
+  expect(text()).toContain(OFFLINE_WORDS);
+});
+
+test("install: waiting in a matter's composer with the window online says the download can't be reached", async () => {
+  await mountFirstRun({
+    matters: [A],
+    first: [OFFLINE, signIn(CLAUDE, { signed_out: {} })],
+    online: true,
+  });
+  expect(foot()?.dataset["state"]).toBe("offline");
+  expect(text()).toContain(UNREACHABLE);
+  expect(text()).not.toContain(OFFLINE_WORDS);
 });
 
 test("install: dl-offline offers Try again and Use the system proxy, Try again first", async () => {

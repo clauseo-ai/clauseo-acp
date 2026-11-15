@@ -199,6 +199,12 @@ export const HI = {
   "ChatGPT stopped answering. Try again.": "ChatGPT ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
   "{name} stopped answering. Try again.": "{name} ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
   "The AI stopped answering. Try again.": "AI ने उत्तर देना बंद कर दिया। फिर से प्रयास करें।",
+  // agent.unreachable: the agent couldn't get through to its service while the computer seemed online (offline
+  // truth). The English and this Hindi are provisional
+  "Clauseo couldn't reach Claude. Try again.": "Clauseo, Claude तक नहीं पहुँच सका। फिर से प्रयास करें।",
+  "Clauseo couldn't reach ChatGPT. Try again.": "Clauseo, ChatGPT तक नहीं पहुँच सका। फिर से प्रयास करें।",
+  "Clauseo couldn't reach {name}. Try again.": "Clauseo, {name} तक नहीं पहुँच सका। फिर से प्रयास करें।",
+  "Clauseo couldn't reach the AI. Try again.": "Clauseo, AI तक नहीं पहुँच सका। फिर से प्रयास करें।",
   // an MCP import too long to show whole in one native confirm (provisional Hindi)
   "There are too many tools to import at once, so nothing was imported. Add them one at a time.":
     "एक साथ आयात करने के लिए टूल बहुत अधिक हैं, इसलिए कुछ भी आयात नहीं हुआ। इन्हें एक-एक करके जोड़ें।",

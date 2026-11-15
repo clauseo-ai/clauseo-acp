@@ -6,8 +6,9 @@
 // thread's line for a turn Clauseo stopped on the agent's request for files outside the matter, name the agent the same
 // way: Codex's turn as ChatGPT, and the AI alone. So do U3-54 and U3-55, the line for a turn the model refused as too
 // long to read (StopReason too_long). U6F-19 to U6F-21 are agent.service_error's, and U6F-22 to U6F-24 agent.quiet's,
-// never a send's refusal: the stop line under the answer so far, with Try again. U6F-25 to U6F-27 are
-// matter.folder_backslash's and U6F-28 to U6F-30 agent.folder_inaccessible's (drafts), the same way.
+// UC-531 to UC-533 agent.unreachable's (offline truth), never a send's refusal: the stop line under the answer so far,
+// with Try again. U6F-25 to U6F-27 are matter.folder_backslash's and U6F-28 to U6F-30 agent.folder_inaccessible's
+// (drafts), the same way.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { type AgentName, errorWords as sentence } from "@clauseo/components/lib/words-errors.ts";
@@ -49,6 +50,19 @@ const quietStopped = (agent: AgentId) => () => (
     host={() =>
       threadHost({
         entries: [QUESTION, ANSWER, step(7, { stop: "failed", failure: "agent.quiet" })],
+        agent,
+      })
+    }
+  />
+);
+
+/** A turn `agent` failed with agent.unreachable (it couldn't get through to its service while the computer seemed
+ * online): the stop line, with Try again. */
+const unreachableFailed = (agent: AgentId) => () => (
+  <RoomOver
+    host={() =>
+      threadHost({
+        entries: [QUESTION, ANSWER, step(7, { stop: "failed", failure: "agent.unreachable" })],
         agent,
       })
     }
@@ -297,6 +311,24 @@ export const U6F: Entry[] = [
     ),
     screen: "room/thread",
     render: nameless("agent.folder_inaccessible"),
+  },
+  {
+    id: "UC-531",
+    words: errorWords("Clauseo couldn't reach ChatGPT. Try again."),
+    screen: "room/thread",
+    render: unreachableFailed("codex-acp"),
+  },
+  {
+    id: "UC-532",
+    words: errorWords("Clauseo couldn't reach {name}. Try again."),
+    screen: "room/thread",
+    render: unreachableFailed("gemini"),
+  },
+  {
+    id: "UC-533",
+    words: errorWords("Clauseo couldn't reach the AI. Try again."),
+    screen: "room/thread",
+    render: nameless("agent.unreachable"),
   },
   {
     id: "U3-52",

@@ -91,6 +91,7 @@ impl Current {
             end: None,
             failure: None,
             offline: None,
+            probe_hold: None,
             quiet: super::offline::quiet::QuietClock::started(started),
             abort: false,
             store_failed: None,

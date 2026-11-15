@@ -1,6 +1,7 @@
 //! Going offline mid-answer (D-050): the agent's own notes about its connection never reach the
-//! transcript, and a turn whose agent lost its connection ends `Failed { agent.offline }`, whose
-//! words say so and offer Try again.
+//! transcript, and a turn whose agent lost its connection ends `Failed`: `agent.offline` only
+//! while the window says the computer is offline, else `agent.unreachable` (or `agent.quiet`
+//! for a slow service), as `hold.rs` decides; each code's words say so and offer Try again.
 //!
 //! How it arrives:
 //! - Codex (codex-acp 2.2.2, to a client like Clauseo that advertises notices and the AIR
@@ -27,20 +28,22 @@
 //! ([`classify::transport_note`]), or for every running turn while the window says offline.
 //! Codex's note is surely its own and is dropped; Claude's line is only suspected (a model could
 //! write the same words), so it is held in the watch and put back in order if the agent goes on
-//! or the turn ends any other way, and dropped only when the turn ends offline. Any agent event
-//! of the turn but usage, commands, config options, mode and title clears the watch: the agent
-//! got through. Unless it is cleared within [`OFFLINE_WAIT`], the turn is cancelled through the
-//! Cancel path with `agent.offline` as its failure, so the answer so far is kept. A turn waiting
+//! or the turn ends any other way, and dropped only when the turn ends offline or unreachable.
+//! Any agent event of the turn but usage, commands, config options, mode and title clears the
+//! watch: the agent got through. Unless it is cleared within [`OFFLINE_WAIT`], the turn is
+//! cancelled through the Cancel path with the verdict's code as its failure, so the answer so far
+//! is kept. A turn waiting
 //! on the lawyer (a permission, an elicitation) waits again instead; so does one running a tool
 //! call under a watch only the window armed, for up to [`WORKING_LIMIT`] (after an agent's note
 //! an open tool call is stale). Either watch ends only once the host's own probe (`probe.rs`)
 //! cannot reach the agent's service either: Codex's fallback note means it retries over HTTPS,
 //! which a blip or a proxy that blocks only WebSocket connections lets through, and a reasoning
 //! model may stay silent past the wait. A probe that gets through makes it wait again. A prompt
-//! that fails with a connection-class error, or while an agent's note armed the watch, ends
-//! `agent.offline` too, unless its error says a server answered or asks for a sign-in; so does
-//! one that ends on a `connection` failure the agent gave up on, unless the host's last probe
-//! got through (then it fails `agent.protocol_error`). The log gets fixed fields only, never
+//! that fails with a connection-class error, or while an agent's note armed the watch, ends with
+//! the verdict's code too (its end waits for a fresh probe when the last is over 30 s old),
+//! unless its error says a server answered or asks for a sign-in; so does one that ends on a
+//! `connection` failure the agent gave up on, unless the host's last probe got through (then it
+//! fails `agent.protocol_error`). The log gets fixed fields only, never
 //! the agent's text (decision 0047).
 
 use std::time::Duration;
@@ -56,10 +59,12 @@ use super::{TimerKind, TurnPhase, TurnTimer, cancel, current, updates};
 
 pub(super) mod classify;
 mod ended;
+mod hold;
 pub(crate) mod probe;
 pub(super) mod quiet;
 
 pub(super) use ended::prompt_ended;
+pub(super) use hold::{Hold, hold_for_probe};
 pub(super) use quiet::ask_ended;
 
 use probe::{Reach, ReachClass};
@@ -112,8 +117,8 @@ pub(super) struct Watch {
     by: Arm,
     /// The host's probes for it in a row that did not get through.
     misses: u8,
-    /// The class of the host's last probe for it, once one answered.
-    class: Option<ReachClass>,
+    /// The host's last probe for it, once one answered, and when.
+    probed: Option<(Duration, Reach)>,
     /// When it was armed, or armed again, on the host's monotonic clock.
     since: Duration,
     /// When it was first armed; arming it again leaves this.
@@ -137,7 +142,7 @@ impl Watch {
         Self {
             by,
             misses: 0,
-            class: None,
+            probed: None,
             since: now,
             first: now,
             note: None,
@@ -145,6 +150,11 @@ impl Watch {
             probing: false,
             reached: false,
         }
+    }
+
+    /// The class of the host's last probe for it.
+    pub(super) fn class(&self) -> Option<ReachClass> {
+        self.probed.map(|(_, reach)| reach.class)
     }
 }
 
@@ -173,11 +183,6 @@ impl Watch {
     /// Whether the host's last probe for it got through.
     pub(super) const fn reached(&self) -> bool {
         self.reached
-    }
-
-    /// The class of the host's last probe for it.
-    pub(super) const fn class(&self) -> Option<ReachClass> {
-        self.class
     }
 }
 
@@ -330,7 +335,10 @@ pub(super) fn turn_ending(actor: &mut Actor, thread: ThreadId, failure: Option<E
         return;
     }
     let failure = failure.or_else(|| current.failure.as_ref().map(|(code, _)| *code));
-    if failure == Some(ErrorCode::AgentOffline) {
+    if matches!(
+        failure,
+        Some(ErrorCode::AgentOffline | ErrorCode::AgentUnreachable)
+    ) {
         current.offline = None;
         return;
     }
@@ -352,11 +360,16 @@ fn put_back(
 }
 
 fn arm_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    arm_timer_for(actor, thread, turn, OFFLINE_WAIT);
+}
+
+/// Arms `thread`'s offline timer for `turn` to fire `after`.
+fn arm_timer_for(actor: &mut Actor, thread: ThreadId, turn: TurnId, after: Duration) {
     let timer = TurnTimer {
         thread,
         kind: TimerKind::Offline(turn),
     };
-    let _handle = actor.arm_timer(OFFLINE_WAIT, timer);
+    let _handle = actor.arm_timer(after, timer);
 }
 
 /// `SetNetwork`: the window says whether the computer is online. Offline arms the watch on
@@ -423,6 +436,9 @@ fn network_watch(actor: &mut Actor, thread: ThreadId) {
 /// off: it waits again. Else the host's probe decides ([`on_probed`]): the turn is cancelled
 /// through the Cancel path and ends `Failed { agent.offline }` only if it cannot get through.
 pub(super) fn on_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    if hold::on_timer(actor, thread, turn) {
+        return;
+    }
     let now = actor.now().mono;
     let (asking, working) = at_work(actor, thread, turn);
     let Some(watch) = live_watch(actor, thread, turn)
@@ -474,6 +490,9 @@ pub(super) fn at_work(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> (boo
 /// note's watch, but as a miss for the window's: the OS says offline and nothing says otherwise.
 /// A watch that went ignores it. The line goes to host.log (the lifecycle target).
 pub(super) fn on_probed(actor: &mut Actor, thread: ThreadId, turn: TurnId, reach: Reach) {
+    if hold::on_probed(actor, thread, turn, reach) {
+        return;
+    }
     let now = actor.now().mono;
     let Some(watch) = live_watch(actor, thread, turn).filter(|watch| watch.probing) else {
         return;
@@ -481,7 +500,7 @@ pub(super) fn on_probed(actor: &mut Actor, thread: ThreadId, turn: TurnId, reach
     let reached = reach.reached() && !(watch.by == Arm::Window && reach.class.unknown());
     watch.probing = false;
     watch.reached = reached;
-    watch.class = Some(reach.class);
+    watch.probed = Some((now, reach));
     watch.misses = if reached {
         0
     } else {
@@ -512,19 +531,31 @@ fn live_watch(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> Option<&mut 
 
 /// Cancels `thread`'s live turn with `agent.offline` as its failure; its watch goes.
 fn end_offline(actor: &mut Actor, thread: ThreadId) {
-    let Some(current) = current(actor, thread) else {
+    let Some(watch) = current(actor, thread).and_then(|current| current.offline.take()) else {
         return;
     };
-    let Some(watch) = current.offline.take() else {
-        return;
-    };
+    let probed = watch.probed.map(|(_, reach)| reach);
     let (by, detail) = match (watch.by, watch.note) {
         (Arm::Note, Some(note)) => ("agent_note", note),
         (Arm::Quiet, _) => ("quiet", QUIET_DETAIL.to_owned()),
         (Arm::Window | Arm::Note, _) => ("window", NETWORK_DETAIL.to_owned()),
     };
-    tracing::warn!(%thread, by, "the agent went quiet while offline; ending the turn");
-    current.failure = Some((ErrorCode::AgentOffline, Some(detail)));
+    // Offline only while the window says so: else the service (or what stands in front of
+    // it) is what could not be reached, the probe's fixed fields saying how.
+    let offline = actor.turn_path.offline;
+    let (code, detail) = if offline {
+        (ErrorCode::AgentOffline, detail)
+    } else {
+        (
+            ErrorCode::AgentUnreachable,
+            hold::with_probe(&detail, probed),
+        )
+    };
+    tracing::warn!(%thread, by, offline, "the agent went quiet and the probe missed; ending the turn");
+    let Some(current) = current(actor, thread) else {
+        return;
+    };
+    current.failure = Some((code, Some(detail)));
     cancel::cancel_running(actor, thread, None, cancel::why::FAILURE);
 }
 
