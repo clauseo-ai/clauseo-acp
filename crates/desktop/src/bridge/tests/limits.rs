@@ -27,8 +27,9 @@ use crate::bridge::throttle::REFRESH_GAP;
 use crate::host_start::{HostCell, stop};
 use crate::test_support::{Messages, Running, STEP_WAIT, collector};
 
-/// The wait a `Shown` refresh has the host keep since the last read.
-const SHOWN_AFTER: Duration = Duration::from_mins(5);
+/// The wait a `Shown` refresh has the host keep since the last Claude read (`limits`'
+/// `kind_rules`: 2 minutes for Claude, 1 for Codex).
+const SHOWN_AFTER: Duration = Duration::from_mins(2);
 
 /// A scripted Claude reader: each read is recorded and waits until [`Reads::answer`].
 struct Reads {
@@ -192,9 +193,9 @@ fn a_watchdog_fire_renews_the_limits_with_the_current_view() {
 }
 
 /// A window's focus refresh is `RefreshLimits { agent: None, why: Shown }`: the host reads
-/// again only once the last read is 5 minutes old, so a focus just after one reads nothing.
+/// again only once the last read is [`SHOWN_AFTER`] old, so a focus just after one reads nothing.
 #[test]
-fn a_focus_refresh_reads_limits_older_than_five_minutes() {
+fn a_focus_refresh_reads_limits_older_than_the_shown_age() {
     let scratch = Scratch::with_limits("limits-focus");
     let (host, reads, clock) = start(&scratch);
     let bridge = host.bridge();
@@ -205,13 +206,13 @@ fn a_focus_refresh_reads_limits_older_than_five_minutes() {
 
     // The host starts a read as it takes the command, so the count is final once it answers.
     assert_eq!(block_on(bridge.shown()).unwrap(), CommandOutcome::Done);
-    assert_eq!(reads.count(), 1, "the last read is under 5 minutes old");
+    assert_eq!(reads.count(), 1, "the last read is under the shown age");
     clock.advance(SHOWN_AFTER);
     assert_eq!(block_on(bridge.shown()).unwrap(), CommandOutcome::Done);
     assert_eq!(
         reads.count(),
         2,
-        "a focus 5 minutes after the last read reads"
+        "a focus the shown age after the last read reads"
     );
 }
 
@@ -260,7 +261,8 @@ fn main_and_settings_focus_dispatch_a_shown_refresh_and_no_other_window_s() {
     block_on(task).unwrap();
     // The host starts the read as it takes the command, so the count is final once it answers.
     assert_eq!(reads.count(), 2, "one read for one focus");
-    // That read ends (its view, read later, shows it did) and is 5 minutes old by the next focus.
+    // That read ends (its view, read later, shows it did) and is [`SHOWN_AFTER`] old by the
+    // next focus.
     reads.answer(ReadOutcome::SignedOut);
     let _changed = next_view(&messages);
     clock.advance(SHOWN_AFTER);
@@ -271,7 +273,7 @@ fn main_and_settings_focus_dispatch_a_shown_refresh_and_no_other_window_s() {
 
 /// A focus before the host has started: the handler returns at once with a task that waits on
 /// the host's cell, and once the host is in it, that task dispatches its one refresh, which
-/// reads (the start-up read is answered and 5 minutes old by then).
+/// reads (the start-up read is answered and [`SHOWN_AFTER`] old by then).
 #[test]
 fn a_focus_before_the_host_starts_refreshes_once_it_has() {
     let scratch = Scratch::with_limits("limits-focus-before-start");
@@ -301,7 +303,7 @@ fn a_focus_before_the_host_starts_refreshes_once_it_has() {
     let mut views = block_on(host.subscribe_limits(PRINCIPAL)).unwrap();
     let _first = block_on(views.next()).unwrap();
     reads.until_count(1);
-    // The start-up read ends (its view change shows it did), then 5 minutes pass.
+    // The start-up read ends (its view change shows it did), then [`SHOWN_AFTER`] passes.
     reads.answer(ReadOutcome::SignedOut);
     let _changed = block_on(views.next()).unwrap();
     clock.advance(SHOWN_AFTER);

@@ -21,7 +21,8 @@ pub(crate) fn follows_limits(label: &str) -> bool {
 
 /// A window event: the focus of a window following the limits (`follows_limits`: `main`, and
 /// the `settings` window, whose Plan and usage shows them), asks the host to read the limits
-/// older than 5 minutes (`Bridge::shown`), in a task, so the event loop never waits on the host:
+/// older than the agent kind's shown age (2 minutes for Claude, 1 for Codex; `Bridge::shown`),
+/// in a task, so the event loop never waits on the host:
 /// a focus before the host has started waits in its task for the start, then dispatches once.
 /// Focus lost, or any other window's focus, does nothing. Returns the task, for tests. A failed
 /// dispatch (a failed start) is dropped: the desktop has no log yet.
