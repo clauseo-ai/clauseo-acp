@@ -89,21 +89,41 @@ function words(command: string): string[] {
 }
 
 /** A command line's parts, chained with `&&`, `||`, `;` or `|` as sh and PowerShell chain them: split outside
- * quotes, never at `2>&1`'s lone `&`. A backslash is a path's in PowerShell and cmd (`cd C:\matter\; ls` is two
- * parts), so it escapes nothing, but for `\;` as a word of its own, find's (`find … -exec rm {} \;` is one part). A
- * sh line with an escaped quote may count one part too many; never one too few. */
+ * quotes, never at `2>&1`'s lone `&`. Outside quotes a backslash escapes only a quote or a backslash, as in sh's
+ * `'it'\''s'`; anywhere else it is a Windows path's (`cd C:\matter\; ls` is two parts), but for find's `\;` after an
+ * `-exec` (`find … -exec rm {} \;` is one part). A quote that never closes is read as a plain character, so no
+ * quote can hide a part: the count is never lower than the same line read without that quote. */
 function partsOf(command: string): string[] {
   const parts: string[] = [];
+  /** The quotes that never closed, read as plain characters. */
+  const plain = new Set<number>();
   let quote: string | null = null;
+  /** Where the open quote stands, and where the part it is in starts and how many parts came before it. */
+  let opened = { at: -1, from: 0, parts: 0 };
   let from = 0;
-  for (let i = 0; i < command.length; i++) {
+  for (let i = 0; i <= command.length; i++) {
+    if (i === command.length) {
+      if (quote === null) break;
+      // the quote never closed: from it again, as a plain character
+      plain.add(opened.at);
+      quote = null;
+      from = opened.from;
+      parts.length = opened.parts;
+      i = opened.at - 1;
+      continue;
+    }
     const c = command[i]!;
     if (quote !== null) {
       if (c === quote) quote = null;
-    } else if (c === '"' || c === "'") quote = c;
-    else if (c === "\\" && command[i + 1] === ";" && (i === 0 || /\s/.test(command[i - 1]!)))
-      i += 1;
-    else if (c === ";" || c === "|" || (c === "&" && command[i + 1] === "&")) {
+    } else if (c === "\\") {
+      const next = command[i + 1];
+      if (next === "'" || next === '"' || next === "\\") i += 1;
+      else if (next === ";" && /\s-(?:exec|execdir|ok|okdir)\s/.test(command.slice(from, i)))
+        i += 1;
+    } else if ((c === '"' || c === "'") && !plain.has(i)) {
+      quote = c;
+      opened = { at: i, from, parts: parts.length };
+    } else if (c === ";" || c === "|" || (c === "&" && command[i + 1] === "&")) {
       parts.push(command.slice(from, i));
       if (c !== ";" && command[i + 1] === c) i += 1;
       from = i + 1;
@@ -115,7 +135,7 @@ function partsOf(command: string): string[] {
 
 /** The programs a command runs, one per part: each part's first word that isn't a variable set or a prefix, a part
  * that only moves to a folder or sets a variable (PLACE) left out. */
-function programsOf(command: string): string[] {
+export function programsOf(command: string): string[] {
   const out: string[] = [];
   for (const part of partsOf(command)) {
     const ws = words(part.trim()).filter((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));

@@ -22,7 +22,7 @@ const placed = new WeakMap<
 const listening = new WeakSet<HTMLTextAreaElement>();
 
 /** Cmd/Ctrl+Z on a field whose last replaceAll set a long text in place, and that still holds it: the words before
- * back; Cmd/Ctrl+Shift+Z after it: the text again. Told to the field as the engine's undo and redo tell it (an input
+ * back; Cmd/Ctrl+Shift+Z after it, or Ctrl+Y on Windows (the page's data-platform, display.ts), the text again. Told to the field as the engine's undo and redo tell it (an input
  * event of historyUndo or historyRedo). Once the field holds anything else, the step is forgotten. */
 function placedUndo(e: KeyboardEvent) {
   const a = e.currentTarget;
@@ -30,8 +30,16 @@ function placedUndo(e: KeyboardEvent) {
   const step = placed.get(a);
   if (step === undefined || e.isComposing || e.altKey) return;
   // either modifier, never both: on a Mac Ctrl+Z does nothing of its own in a field
-  if (e.metaKey === e.ctrlKey || e.key.toLowerCase() !== "z") return;
-  const redo = e.shiftKey;
+  if (e.metaKey === e.ctrlKey) return;
+  const key = e.key.toLowerCase();
+  // Windows's own redo; on a Mac Cmd+Y is no redo
+  const ctrlY =
+    key === "y" &&
+    e.ctrlKey &&
+    !e.shiftKey &&
+    a.ownerDocument.documentElement.dataset["platform"] === "windows";
+  if (key !== "z" && !ctrlY) return;
+  const redo = e.shiftKey || ctrlY;
   if (a.value !== (step.undone ? step.before : step.text)) {
     placed.delete(a);
     return;
