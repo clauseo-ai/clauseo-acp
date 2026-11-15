@@ -264,3 +264,59 @@ test("a skill pack notice with no pack gives null, so the row shows its text", (
     noticeLine({ skill_pack_not_loaded: { reason: "changed" } } as unknown as NoticeKind, en),
   ).toBeNull();
 });
+
+const SHARMA = "0190a000-0000-7000-8000-000000000007";
+const JOSHI = "0190a000-0000-7000-8000-000000000008";
+const KAPOOR = "0190a000-0000-7000-8000-000000000009";
+const names = (id: string) => ({ [SHARMA]: "Sharma v. State", [JOSHI]: "Joshi v. Joshi" })[id];
+const claude = { kind: "claude", name: "claude-acp" } as const;
+
+test("another matter's files refused: the line names the agent and the matter as the app's list names it now", () => {
+  const kind: NoticeKind = { other_matter_refused: { matter: SHARMA, name: "Sharma (old name)" } };
+  expect(noticeLine(kind, en, claude, names)).toBe(
+    `Clauseo stopped a step: Claude tried to open ${iso("Sharma v. State")}'s files. That's another matter.`,
+  );
+  expect(noticeLine(kind, words("hi"), claude, names)).toBe(
+    `Clauseo ने एक काम रोक दिया: Claude ने ${iso("Sharma v. State")} की फ़ाइलें खोलने की कोशिश की। वह दूसरा मामला है।`,
+  );
+});
+
+test("with no agent name known, the refusal names the AI; a matter the list doesn't hold keeps the host's name", () => {
+  const kind: NoticeKind = { other_matter_refused: { matter: KAPOOR, name: "Kapoor" } };
+  expect(noticeLine(kind, en, undefined, names)).toBe(
+    `Clauseo stopped a step: the AI tried to open ${iso("Kapoor")}'s files. That's another matter.`,
+  );
+  expect(noticeLine(kind, en)).toBe(
+    `Clauseo stopped a step: the AI tried to open ${iso("Kapoor")}'s files. That's another matter.`,
+  );
+});
+
+test("a refusal with no name anywhere gives null, so the row shows its text", () => {
+  const kind = { other_matter_refused: { matter: KAPOOR } } as unknown as NoticeKind;
+  expect(noticeLine(kind, en, claude, names)).toBeNull();
+});
+
+test("matters Claude's commands may reach: each named, then how many more", () => {
+  const kind: NoticeKind = { matters_unfenced: { matters: [SHARMA, JOSHI], more: 3 } };
+  expect(noticeLine(kind, en, claude, names)).toBe(
+    `Clauseo couldn't keep Claude's commands out of these matters: ${iso("Sharma v. State")}, ${iso("Joshi v. Joshi")} and 3 more.`,
+  );
+  expect(noticeLine(kind, words("hi"), claude, names)).toBe(
+    `Clauseo Claude की कमांड को इन मामलों से बाहर नहीं रख सका: ${iso("Sharma v. State")}, ${iso("Joshi v. Joshi")} और 3 और।`,
+  );
+});
+
+test("the unfenced line with no more, with no agent name, and with a matter the list doesn't hold", () => {
+  const two: NoticeKind = { matters_unfenced: { matters: [SHARMA, JOSHI], more: 0 } };
+  expect(noticeLine(two, en, undefined, names)).toBe(
+    `Clauseo couldn't keep the AI's commands out of these matters: ${iso("Sharma v. State")} and ${iso("Joshi v. Joshi")}.`,
+  );
+  // Kapoor isn't in the list: counted with the more
+  const unknown: NoticeKind = { matters_unfenced: { matters: [SHARMA, KAPOOR], more: 0 } };
+  expect(noticeLine(unknown, en, claude, names)).toBe(
+    `Clauseo couldn't keep Claude's commands out of these matters: ${iso("Sharma v. State")} and 1 more.`,
+  );
+  // none named: the host's text shows
+  const none: NoticeKind = { matters_unfenced: { matters: [KAPOOR], more: 2 } };
+  expect(noticeLine(none, en, claude, names)).toBeNull();
+});
