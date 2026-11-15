@@ -212,6 +212,34 @@ export const HI = {
     "{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
   "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.":
     "AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  // matter.folder_backslash on Linux, whose file manager has no one name. Draft English (Rohan to approve); this Hindi
+  // is provisional
+  "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.":
+    "Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.":
+    "ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "{name} can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.":
+    "{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.":
+    "AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  // matter.folder_backslash when the backslash is in a folder above the matter's, named by {folder}: Finder on the
+  // Mac, your file manager on Linux. Draft English (Rohan to approve); this Hindi is provisional
+  "Claude can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.":
+    'Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "ChatGPT can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.":
+    'ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "{name} can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.":
+    '{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "The AI can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in Finder, then Try again.":
+    'AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "Claude can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.":
+    'Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "ChatGPT can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.":
+    'ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "{name} can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.":
+    '{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
+  "The AI can't work in this matter's folder because the folder \"{folder}\" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.":
+    'AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "{folder}" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।',
   // agent.folder_inaccessible: the agent couldn't open the matter folder as it started. Draft English (Rohan to
   // approve); this Hindi is provisional
   "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":

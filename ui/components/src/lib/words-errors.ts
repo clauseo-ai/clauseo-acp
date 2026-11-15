@@ -5,6 +5,7 @@
 // आप, the danda, Western digits, English names in Latin script. Nothing here says मैं, पेंसिल, स्याही, चरण or कदम.
 import type { Lang } from "./display.ts";
 import { wordsOf } from "./words-core.ts";
+import { BACKSLASH, backslashKey, byAgent, type BackslashPlace } from "./words-errors-backslash.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
 import type { VersionKey } from "./words-versions.ts";
@@ -329,8 +330,7 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
     "There are too many tools to import at once, so nothing was imported. Add them one at a time.",
   // the host didn't start Claude: the matter folder's path has a backslash, on macOS or Linux, where Claude Code can't
   // start. Try again under the turn once the folder is renamed. Draft English (Rohan to approve); Hindi provisional
-  "matter.folder_backslash":
-    "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+  "matter.folder_backslash": BACKSLASH.finder.own.claude,
   // Claude couldn't open the matter folder as it started ("Can't access working directory"): Try again, never
   // Restart. Draft English (Rohan to approve); Hindi provisional
   "agent.folder_inaccessible":
@@ -407,14 +407,7 @@ const PLANNED: Partial<
   },
   // a folder whose path has a backslash, where the agent can't start (see ERROR_WORDS). Draft English (Rohan to
   // approve); the Hindi is provisional
-  "matter.folder_backslash": {
-    chatgpt:
-      "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
-    named:
-      "{name} can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
-    nameless:
-      "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
-  },
+  "matter.folder_backslash": BACKSLASH.finder.own,
   // the agent couldn't open the matter folder as it started (see ERROR_WORDS). Draft English (Rohan to approve); the
   // Hindi is provisional
   "agent.folder_inaccessible": {
@@ -461,19 +454,28 @@ export function plannedKey(code: WordedCode, agent?: AgentName): { key: ErrorKey
     if (name !== null) return { key: KEY_REFUSED, name };
   }
   const planned = PLANNED[code];
-  if (planned === undefined || agent === undefined || agent.kind === "claude")
-    return { key: ERROR_WORDS[code] };
-  if (agent.kind === "codex") return { key: planned.chatgpt };
-  const name = agent.name?.trim() ?? "";
-  return name === "" ? { key: planned.nameless } : { key: planned.named, name };
+  if (planned === undefined) return { key: ERROR_WORDS[code] };
+  return byAgent({ claude: ERROR_WORDS[code], ...planned }, agent);
 }
+
+export type { BackslashPlace };
 
 /** A code's sentence in the language; a code this version doesn't know reads as "unknown", which reads as "internal".
  * `agent` is the thread's agent (AgentName), for the codes whose sentence names it (plannedKey); a caller that
- * doesn't know the thread leaves it out. */
-export function errorWords(lang: Lang, code: string, agent?: AgentName): string {
+ * doesn't know the thread leaves it out. `place` is where matter.folder_backslash's backslash is (BackslashPlace), for
+ * a caller that knows the matter; left out, its line names the folder's own name and Finder. */
+export function errorWords(
+  lang: Lang,
+  code: string,
+  agent?: AgentName,
+  place?: BackslashPlace,
+): string {
   if (Object.hasOwn(APP_ERROR_WORDS, code))
     return own(lang, APP_ERROR_WORDS[code as keyof typeof APP_ERROR_WORDS]);
+  if (code === "matter.folder_backslash" && place !== undefined) {
+    const { key, slots } = backslashKey(agent, place);
+    return own(lang, key as keyof typeof HI, slots);
+  }
   const known = Object.hasOwn(ERROR_WORDS, code) ? (code as WordedCode) : "unknown";
   const { key, name } = plannedKey(known, agent);
   return name === undefined || key === STOPPED || isMark(key)

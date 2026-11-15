@@ -108,6 +108,9 @@ const folderStop = (code: ErrorCode, key: Parameters<typeof errorWords>[0]): Ent
               userMessage(5, 1, "What does clause nine of the lease say about notice?"),
               step(9, { stop: "failed", failure: code }),
             ],
+            // matter.folder_backslash's line as on the Mac, for the matter folder's own name
+            platform: "mac",
+            matterFolder: "Documents/Acme\\ Traders",
           })
         }
       />

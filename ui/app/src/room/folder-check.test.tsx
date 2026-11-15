@@ -282,12 +282,11 @@ test("Create waits at most 5 s for a check that doesn't answer, then makes the m
 // plain path
 const SLASHED = (folder: string) =>
   folder === "ref-a" ? "Documents/Clauseo\\ Test\\ Matter" : `Documents/${folder}`;
-const BACKSLASH_SAYS =
-  fr("en", "This folder's name has a backslash (\\).") +
-  fr(
-    "en",
-    "Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.",
-  );
+/** The file manager the warning names: Finder on the Mac, "your file manager" on Linux. */
+const FILES = { mac: "Finder", linux: "your file manager" } as const;
+const BACKSLASH_SAYS = (platform: "mac" | "linux") =>
+  "This folder's name has a backslash (\\)." +
+  `Claude can't work in a folder like this; ChatGPT can. Rename it in ${FILES[platform]} first, or choose another folder.`;
 
 test.each(["mac", "linux"] as const)(
   "on %s, a folder whose name has a backslash: its warning, then Choose another folder picks again",
@@ -299,7 +298,7 @@ test.each(["mac", "linux"] as const)(
     expect(warning()?.getAttribute("aria-label")).toBe(
       fr("en", "This folder's name has a backslash"),
     );
-    expect(warning()?.textContent).toBe(BACKSLASH_SAYS);
+    expect(warning()?.textContent).toBe(BACKSLASH_SAYS(platform));
     expect(fr("en", "This folder's name has a backslash (\\).")).toBe(
       "This folder's name has a backslash (" + String.fromCharCode(92) + ").",
     );
@@ -321,6 +320,27 @@ test.each(["mac", "linux"] as const)(
     const transport = await mount(checking([{}], ["ref-a"], platform, SLASHED));
     await openForm();
     await press("matter-existing");
+    await press("folder-anyway");
+    expect(created(transport)).toEqual([existing("ref-a")]);
+  },
+);
+
+// a folder above the one picked has the backslash: the warning names the nearest such folder
+test.each(["mac", "linux"] as const)(
+  "on %s, a folder above the one picked has a backslash: the warning names it",
+  async (platform) => {
+    const above = () => "Documents/x\\y/Old\\Work/Acme Traders";
+    const transport = await mount(checking([{}], ["ref-a"], platform, above));
+    await openForm();
+    await press("matter-existing");
+    expect(warning()?.dataset["kind"]).toBe("backslash");
+    expect(warning()?.getAttribute("aria-label")).toBe(
+      "A folder in this folder's path has a backslash",
+    );
+    expect(warning()?.textContent).toBe(
+      'The folder "\u2068Old\\Work\u2069" in this folder\'s path has a backslash (\\).' +
+        `Claude can't work in a folder like this; ChatGPT can. Rename that folder in ${FILES[platform]} first, or choose another folder.`,
+    );
     await press("folder-anyway");
     expect(created(transport)).toEqual([existing("ref-a")]);
   },

@@ -299,3 +299,60 @@ test.each([["./words-errors.hi.ts"], ["./words-limits.hi.ts"], ["./words-thread.
     }
   },
 );
+
+// matter.folder_backslash by where the backslash is and the computer: the matter folder's own name, or the nearest folder
+// above it by name (isolated), and Finder on the Mac, "your file manager" on Linux; each agent's line, in both languages
+const FOLDER = "\u2068Old\\Work\u2069";
+test.each([
+  [
+    "mac",
+    null,
+    "can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    "इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  ],
+  [
+    "linux",
+    null,
+    "can't work in this matter's folder because its name has a backslash (\\). Rename the folder in your file manager, then Try again.",
+    "इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  ],
+  [
+    "mac",
+    "Old\\Work",
+    `can't work in this matter's folder because the folder "${FOLDER}" in its path has a backslash (\\). Rename that folder in Finder, then Try again.`,
+    `इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "${FOLDER}" के नाम में बैकस्लैश (\\) है। Finder में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।`,
+  ],
+  [
+    "linux",
+    "Old\\Work",
+    `can't work in this matter's folder because the folder "${FOLDER}" in its path has a backslash (\\). Rename that folder in your file manager, then Try again.`,
+    `इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके पाथ में मौजूद फ़ोल्डर "${FOLDER}" के नाम में बैकस्लैश (\\) है। अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।`,
+  ],
+] as const)(
+  "matter.folder_backslash on %s, the folder above with it %j: each agent's line",
+  (platform, parent, en, hi) => {
+    const place = { platform, parent };
+    const code = "matter.folder_backslash";
+    for (const [agent, enName, hiName] of [
+      [CLAUDE, "Claude", "Claude"],
+      [undefined, "Claude", "Claude"],
+      [CODEX, "ChatGPT", "ChatGPT"],
+      [named("gemini"), "gemini", "gemini"],
+      [named(null), "The AI", "AI"],
+    ] as const) {
+      expect(errorWords("en", code, agent, place)).toBe(`${enName} ${en}`);
+      expect(errorWords("hi", code, agent, place)).toBe(`${hiName} ${hi}`);
+      sound(errorWords("en", code, agent, place), errorWords("hi", code, agent, place));
+    }
+    // the place reaches no other code's line
+    expect(errorWords("en", "agent.folder_inaccessible", CLAUDE, place)).toBe(
+      ERROR_WORDS["agent.folder_inaccessible"],
+    );
+  },
+);
+
+test("matter.folder_backslash with no place known: the Mac's line for the folder's own name, as before", () => {
+  expect(errorWords("en", "matter.folder_backslash")).toBe(
+    errorWords("en", "matter.folder_backslash", undefined, { platform: "mac", parent: null }),
+  );
+});

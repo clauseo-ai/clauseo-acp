@@ -37,6 +37,8 @@ const MOVED = detailed(
   { folder_state: "missing", folder_display: "Documents/Khan" },
 );
 const SLASHED = "Documents/Clauseo\\ Test\\ Khan";
+/** The file manager the step names: Finder on the Mac, "your file manager" on Linux. */
+const FILES = { mac: "Finder", linux: "your file manager" } as const;
 
 const byId = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
 
@@ -98,12 +100,9 @@ test.each(["mac", "linux"] as const)(
     await locate();
     const step = byId("locate-warning");
     expect(step).not.toBeNull();
-    expect(step?.textContent).toContain(fr("en", "This folder's name has a backslash (\\)."));
+    expect(step?.textContent).toContain("This folder's name has a backslash (\\).");
     expect(step?.textContent).toContain(
-      fr(
-        "en",
-        "Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.",
-      ),
+      `Claude can't work in a folder like this; ChatGPT can. Rename it in ${FILES[platform]} first, or choose another folder.`,
     );
     expect(byId("locate-choose")?.textContent).toBe(fr("en", "Choose another folder"));
     expect(byId("locate-anyway")?.textContent).toBe(fr("en", "Locate anyway"));
@@ -124,6 +123,23 @@ test.each(["mac", "linux"] as const)(
     expect(transport.only("pick_folder")).toHaveLength(1);
     expect(relocated()).toEqual(["ref-0"]);
     expect(byId("locate-warning")).toBeNull();
+  },
+);
+
+test.each(["mac", "linux"] as const)(
+  "on %s, a folder above the one picked has a backslash: the step names it",
+  async (platform) => {
+    const { locate, relocated } = await mount(platform, ["Documents/Old\\Work/Khan"]);
+    await locate();
+    const step = byId("locate-warning");
+    expect(step?.textContent).toContain(
+      'The folder "\u2068Old\\Work\u2069" in this folder\'s path has a backslash (\\).',
+    );
+    expect(step?.textContent).toContain(
+      `Claude can't work in a folder like this; ChatGPT can. Rename that folder in ${FILES[platform]} first, or choose another folder.`,
+    );
+    await press("locate-anyway");
+    expect(relocated()).toEqual(["ref-0"]);
   },
 );
 
