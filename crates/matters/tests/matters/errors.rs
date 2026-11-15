@@ -27,6 +27,7 @@ fn variant(err: &Error) -> &'static str {
         Error::UnknownFile { .. } => "UnknownFile",
         Error::DuplicateFile { .. } => "DuplicateFile",
         Error::NoFilesChosen => "NoFilesChosen",
+        Error::FileFolderClash { .. } => "FileFolderClash",
         Error::FolderExists { .. } => "FolderExists",
         Error::HistoryExists { .. } => "HistoryExists",
         Error::MarkerNotBuilt => "MarkerNotBuilt",
@@ -41,7 +42,7 @@ fn assert_code(err: &Error, code: ErrorCode, name: &str) {
 }
 
 /// One of each variant, with the code it maps to.
-fn hand_built() -> [(Error, ErrorCode); 17] {
+fn hand_built() -> [(Error, ErrorCode); 18] {
     let folder = PathBuf::from("/m");
     [
         (
@@ -101,6 +102,10 @@ fn hand_built() -> [(Error, ErrorCode); 17] {
             ErrorCode::CommandInvalid,
         ),
         (Error::NoFilesChosen, ErrorCode::CommandInvalid),
+        (
+            Error::FileFolderClash { path: path("a") },
+            ErrorCode::MatterFileFolderClash,
+        ),
         (
             Error::FolderExists {
                 folder: folder.clone(),
