@@ -130,9 +130,7 @@ pub(super) fn browser_run_dir(data: &Path) -> PathBuf {
 
 /// `<data>/agent-state/<matter>/notes`.
 pub(super) fn notes_dir(data: &Path, matter: MatterId) -> PathBuf {
-    data.join("agent-state")
-        .join(matter.to_string())
-        .join("notes")
+    crate::agent::matter_state_dir(data, matter).join("notes")
 }
 
 /// Removes `folder` and all it holds, through no link; a failure is a warning.

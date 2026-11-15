@@ -14,6 +14,7 @@ use crate::test_support::Scratch;
 
 mod ask;
 mod bounded;
+mod download;
 mod links;
 mod privacy;
 mod word;
@@ -565,7 +566,13 @@ fn the_marker_check_refuses_a_reveal_and_an_open() {
         ErrorCode::MatterFolderMissing,
     ] {
         host.refusing(Some(refused_with));
-        let refused = block_on(reveal(&host, &opener, scratch.path(), FOLDER_WAIT, matter));
+        let refused = block_on(reveal(
+            &host,
+            &opener,
+            scratch.path(),
+            FOLDER_WAIT,
+            matter.clone(),
+        ));
         assert_eq!(code(refused), refused_with);
         assert_eq!(code(file(&host, &opener, host.file)), refused_with);
     }

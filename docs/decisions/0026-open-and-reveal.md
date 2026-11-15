@@ -102,6 +102,15 @@ added: the dialog and opener plugins are called from Rust, as before.
   folder that is a bundle. A matter's folder that is not there is `matter.folder_missing`; one
   that is there without the matter's `.clauseo/matter.json` is `matter.folder_not_a_matter`
   (added 2026-11-07).
+- **`reveal { target: { "download": { matter, name } } }`** (added 2026-11-15). A file the
+  browser guard saved in Clauseo's own downloads folder for the matter, because the matter's
+  drive cannot keep the "downloaded from the internet" mark (`NoticeKind::DownloadOutsideMatter`).
+  Still no path from the page: the desktop recomputes `<app data>/agent-state/<matter>/downloads/
+  <name>` (`clauseo_host::matter_fallback_downloads`), asks the host that the matter is known
+  (`command.unknown_matter`), and requires `name` to be one plain component (no `/` or `\`, not
+  `.` or `..`, no `:` on Windows), the folder a real folder and the file a regular file, neither
+  a link (`symlink_metadata`), else `command.invalid`; past the wait, `internal`. The file is
+  shown selected in that folder, never opened. No new command or permission.
 - **No call waits on a folder that does not answer** (added 2026-11-07, `open/bounded.rs`).
   `open_file`'s checks (the marker check, `canonicalize`, `metadata`, the short-name lookup) and
   its open, and `reveal`'s checks (the marker check, `is_dir`) and its reveal, run on a thread of
@@ -126,8 +135,8 @@ added: the dialog and opener plugins are called from Rust, as before.
 ## Consequences
 
 - The page reaches thirteen typed commands. A script in the page can now ask the lawyer to open a
-  link (they see where it goes and must accept), and show a matter's folder or the app data
-  folder. It can also open any listed document of any matter in its app without a click, since
+  link (they see where it goes and must accept), and show a matter's folder, the app data
+  folder, or a file in Clauseo's own downloads folder for a matter. It can also open any listed document of any matter in its app without a click, since
   Rust cannot tell a click from a script; the gate holds that to one a second. It cannot open a
   path it names, or any link without the confirm.
 - A document's own app still runs what its own policy allows (an old `.doc` or `.xls` with
@@ -147,7 +156,8 @@ added: the dialog and opener plugins are called from Rust, as before.
   ("Cancel"); in Hindi Escape may do nothing (the dialog stays, nothing opens), since rfd cannot
   give the button its key.
 - A new type in `DOCUMENT_TYPES`, a new scheme, a confirm skipped beyond the plain web links
-  above, or a new reveal target needs a new record.
+  above, or a new reveal target needs a new record (the `download` target was added here by
+  amendment, as it shows only Clauseo's own folder for a matter).
 
 ## Status
 

@@ -4,12 +4,12 @@
 
 use clauseo_protocol::{
     CompactionStatus, ConfigCategory, ContentBlock, Delivery, DomainEvent, ElicitationOutcome,
-    Envelope, LimitStopReason, MatterKind, PermissionChoice, PlanPriority, PlanStatus, Principal,
-    RawFrom, RawPayload, RestoreScope, TextKind, TextOrBlob, ToolKind,
+    Envelope, LimitStopReason, MatterKind, NoticeKind, PermissionChoice, PlanPriority, PlanStatus,
+    Principal, RawFrom, RawPayload, RestoreScope, TextKind, TextOrBlob, ToolKind,
 };
 
 use crate::examples::every_event;
-use crate::fixtures::{decode_both, decodes_in_both, entry, envelope, packed_raw};
+use crate::fixtures::{decode_both, decodes_in_both, entry, envelope, packed_raw, round_trips};
 use crate::json_copies::ID_KEY;
 use crate::unknown_variants::unit_enum;
 
@@ -66,6 +66,17 @@ fn an_unknown_kind_takes_null_as_its_payload() {
 fn a_plain_string_naming_a_struct_kind_says_so() {
     let says = "`files` has fields, so it is a one-key map, not a plain string";
     refused_saying::<RestoreScope>(r#""files""#, says);
+}
+
+/// `NoticeKind::DownloadOutsideMatter` keeps its wire form. Here, not in
+/// `unknown_variants::notice_kind` with the other kinds, as that file is at its size limit.
+#[test]
+fn notice_kind_download_outside_matter() {
+    let download = NoticeKind::DownloadOutsideMatter {
+        name: "a.pdf".to_owned(),
+    };
+    decodes_in_both(r#"{"download_outside_matter":{"name":"a.pdf"}}"#, &download);
+    round_trips(&download);
 }
 
 #[test]

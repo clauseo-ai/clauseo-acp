@@ -297,6 +297,8 @@ fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
         "{browser_dir}",
         "--downloads",
         "{matter_downloads}",
+        "--fallback-downloads",
+        "{matter_fallback_downloads}",
         "--cdp-port",
         "{cdp_port}",
     ];

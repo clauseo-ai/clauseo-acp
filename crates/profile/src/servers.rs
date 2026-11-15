@@ -9,8 +9,9 @@ use clauseo_protocol::AgentKind;
 
 use crate::paths::ProfilePaths;
 use crate::placeholders::{
-    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, MATTER_DOWNLOADS, PROXY_PORT,
-    PROXY_SECRET_FILE, RELAY_PORT, RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR,
+    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, MATTER_DOWNLOADS,
+    MATTER_FALLBACK_DOWNLOADS, PROXY_PORT, PROXY_SECRET_FILE, RELAY_PORT, RELAY_TOKEN_FILE,
+    SESSION_ID, SOCKET_DIR,
 };
 
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
@@ -108,7 +109,10 @@ pub struct ProfileServer {
 /// The `browser` entry. The command is `clauseo-mcp`; its `browser-guard` runs agent-browser's
 /// `mcp --tools core` with `--cwd` the session's browser state folder (`{browser_dir}`, one
 /// token the host fills with a native path), `--downloads` the matter's downloads folder
-/// (`{matter_downloads}`, where the files the browser saves are delivered) and
+/// (`{matter_downloads}`, where the files the browser saves are delivered),
+/// `--fallback-downloads` Clauseo's own downloads folder for the matter
+/// (`{matter_fallback_downloads}`, where a file goes when the matter's drive cannot keep the
+/// "downloaded from the internet" mark) and
 /// `--cdp-port {cdp_port}`, plus `--daemon-port {daemon_port}` on Windows. It derives from
 /// `--cwd` every other folder agent-browser needs (screenshots, its run profile, Chrome's
 /// download staging, `HOME`, `TMPDIR` or `TEMP`, and the Windows socket folder), and fixes the
@@ -137,6 +141,8 @@ fn browser_for(paths: &ProfilePaths, windows: bool) -> ProfileServer {
         BROWSER_DIR.to_owned(),
         "--downloads".to_owned(),
         MATTER_DOWNLOADS.to_owned(),
+        "--fallback-downloads".to_owned(),
+        MATTER_FALLBACK_DOWNLOADS.to_owned(),
         "--cdp-port".to_owned(),
         CDP_PORT.to_owned(),
     ];

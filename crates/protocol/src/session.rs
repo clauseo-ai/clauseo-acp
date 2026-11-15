@@ -340,6 +340,14 @@ open_data_enum! {
             /// How many.
             more: u32,
         },
+        /// The browser saved a file outside the matter folder, in Clauseo's own folder for this
+        /// matter (`<data>/agent-state/<matter id>/downloads`): the matter's drive cannot keep
+        /// the "downloaded from the internet" mark. The app shows the file in Finder or File
+        /// Explorer by the thread's matter and `name`, never by a path.
+        DownloadOutsideMatter = "download_outside_matter" {
+            /// The file's name in that folder: one component, no separator.
+            name: String,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -364,6 +372,9 @@ open_data_enum! {
             reason: PackSkipReason::Changed,
         },
         NoticeKind::AutoModeUnavailable,
+        NoticeKind::DownloadOutsideMatter {
+            name: "judgment.pdf".to_owned(),
+        },
     ];
 }
 

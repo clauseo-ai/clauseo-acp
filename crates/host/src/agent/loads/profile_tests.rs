@@ -107,6 +107,7 @@ pub(super) fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> Bro
         executable: chrome,
         browser_dir,
         matter_downloads: Path::new("/matters/smith/downloads"),
+        fallback_downloads: Path::new("/data/agent-state/m1/downloads"),
         claims: Some(claims()),
     }
 }
