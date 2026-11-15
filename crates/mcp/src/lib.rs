@@ -1,6 +1,6 @@
-//! `clauseo-mcp`: the sidecar binary the agents start as an MCP server. Two modes:
-//! `browser-guard` and `connector`; on Unix a third, `browser-reaper`, which only the guard
-//! starts (`browser_guard/reaper.rs`).
+//! `clauseo-mcp`: the sidecar binary the agents start as an MCP server. Three modes:
+//! `browser-guard`, `connector` and `launch`; on Unix a fourth, `browser-reaper`, which only
+//! the guard starts (`browser_guard/reaper.rs`).
 //!
 //! # Owns
 //!
@@ -15,10 +15,15 @@
 //!   host's per-launch relay, and answers "not reachable" itself when there is no relay. It reads
 //!   the relay address from `CLAUSEO_RELAY` and the token from the file `CLAUSEO_RELAY_TOKEN_FILE`
 //!   names; it never puts the token on stdout, stderr or argv.
+//! - The launcher of the lawyer's local MCP servers ([`launch`]): `clauseo-mcp launch <file>`
+//!   reads the server's program, arguments and variables from the host's private file and runs
+//!   it (`exec` on Unix; in a Job Object of its own on Windows), so none of them is in the
+//!   agent's session request or on its command line.
 //! - The one place the crate creates folders (`write.rs`; the Unix socket folder under `/tmp`
-//!   is made with mode 0700 and checked in `browser_guard/socket.rs`), and the three places it
+//!   is made with mode 0700 and checked in `browser_guard/socket.rs`), and the four places it
 //!   starts a process (`browser_guard/relay/pumps.rs` `spawn_child`, `chrome.rs` `spawn`, both
-//!   through `job/spawn.rs` on Windows, and on Unix `reaper.rs` `Reaper::start`).
+//!   through `job/spawn.rs` on Windows, and on Unix `reaper.rs` `Reaper::start`), and the
+//!   `launch` mode's server (`launch/unix.rs`, `launch/windows.rs`).
 //!
 //! # Interface
 //!
@@ -54,6 +59,7 @@
 
 pub mod browser_guard;
 pub mod connector;
+pub mod launch;
 mod write;
 
 /// A mode's failure: the exit code and the message `main` prints on stderr.

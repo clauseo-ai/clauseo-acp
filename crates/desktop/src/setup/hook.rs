@@ -322,6 +322,10 @@ impl ProfileHook for SetupHook {
     fn browser_tool(&self) -> Option<PathBuf> {
         self.profile.browser_tool()
     }
+
+    fn mcp_launcher(&self) -> Option<PathBuf> {
+        self.profile.mcp_launcher()
+    }
 }
 
 #[cfg(test)]

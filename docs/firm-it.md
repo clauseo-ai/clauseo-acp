@@ -867,6 +867,14 @@ New-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Clauseo\Clauseo' -Name 'ui.theme
 In Intune, set the same value with a custom OMA-URI or a remediation script; ADMX templates come
 later.
 
+**MCP servers start from a file.** Clauseo starts each local server in `mcp.servers` (the
+firm's or the lawyer's) as `clauseo-mcp launch <file>`. The file holds the server's program,
+`args` and `env`, one file per server, in the conversation's run folder:
+`<data>/run/<session>/mcp/<n>-<name>.json` (mode 0600 on macOS and Linux). `clauseo-mcp`
+reads it and starts the server with that program, those arguments and that environment. The
+file is removed with the run folder. Remote servers (`url`, `headers`) go to the agent as
+before.
+
 ### Coming
 
 Keys Clauseo already reads and locks, with the safe value an unreadable source locks each at,

@@ -32,11 +32,12 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::JobObjects::{
-    CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicAccountingInformation,
-    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
-    TerminateJobObject,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
+    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
+use windows::Win32::System::Threading::GetCurrentProcess;
 use windows::core::PCWSTR;
 
 pub(crate) use child::{Child, ChildStderr, ChildStdin};
@@ -141,6 +142,18 @@ fn make_job() -> io::Result<OwnedHandle> {
     }
     .map_err(|error| io::Error::other(format!("could not set the job's limit: {error}")))?;
     Ok(owned)
+}
+
+/// A new job like the guard's ([`make_job`]) with this process in it (`launch` mode,
+/// `launch/windows.rs`): what the process starts afterwards is in the job from its creation.
+/// Jobs nest, so the agent's job keeps it too. Closing the handle ends the process with the job.
+pub(crate) fn join_new() -> io::Result<OwnedHandle> {
+    let job = make_job()?;
+    // SAFETY: the handle is the open one `job` owns; `GetCurrentProcess` is a pseudo-handle
+    // that needs no closing.
+    unsafe { AssignProcessToJobObject(HANDLE(job.as_raw_handle()), GetCurrentProcess()) }
+        .map_err(|error| io::Error::other(format!("could not join a job: {error}")))?;
+    Ok(job)
 }
 
 /// Waits until no process is left in `job` (child jobs counted), at most [`END_WAIT`]; whether
