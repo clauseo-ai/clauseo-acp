@@ -47,6 +47,12 @@ impl Saved {
         lock(&self.untold).push(why);
     }
 
+    /// One more file delivered outside the matter, as `name` at `path` in the fallback folder
+    /// (`deliver.rs`): told with [`fallback_note`], which the host reads.
+    pub(crate) fn record_fallback(&self, name: &str, path: &Path) {
+        lock(&self.untold).push(fallback_note(name, path));
+    }
+
     /// The notes untold so far, which are told now.
     pub(crate) fn take(&self) -> Vec<String> {
         std::mem::take(&mut *lock(&self.untold))
@@ -80,6 +86,22 @@ impl Saved {
 /// The note for a file delivered as `name`.
 pub(crate) fn note(name: &str) -> String {
     format!("Saved {name} to downloads/ in the matter.")
+}
+
+/// What comes right before the path in [`fallback_note`]; the host takes the text after the
+/// last one as the path (`crates/host`, the browser's tool results), and trusts it only inside
+/// the matter's own fallback folder.
+pub(crate) const FALLBACK_MARKER: &str = " Its path: ";
+
+/// The note for a file delivered outside the matter, as `name` at `path`: one line, the path
+/// last, after [`FALLBACK_MARKER`].
+pub(crate) fn fallback_note(name: &str, path: &Path) -> String {
+    format!(
+        "Saved {name} outside the matter, in Clauseo's own folder for this matter: the matter's \
+         drive cannot keep the \"downloaded from the internet\" mark, so the file is not in \
+         downloads/. Your user sees where it is in the thread.{FALLBACK_MARKER}{}",
+        path.display()
+    )
 }
 
 /// For `line`, agent-browser's reply to an `agent_browser_open` call: when it failed with

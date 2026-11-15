@@ -121,6 +121,8 @@ pub(crate) struct Launcher {
     pub(crate) cwd: PathBuf,
     /// The downloads folder (the guard's `--downloads`), which the mover delivers to.
     pub(crate) downloads: PathBuf,
+    /// The guard's `--fallback-downloads`, if given (`downloads/deliver.rs`).
+    pub(crate) fallback: Option<PathBuf>,
     /// The run's id and profile (`runs.rs`), kept from one start to the next.
     pub(crate) run: String,
     pub(crate) profile: PathBuf,
@@ -186,6 +188,7 @@ impl Launcher {
             executable: dir.join("chrome"),
             cwd: dir.to_owned(),
             downloads: dir.join("downloads"),
+            fallback: None,
             run: "1-0000abcd".to_owned(),
             profile: dir.join("chrome-profile-1-0000abcd"),
             started_with: Mutex::new(None),

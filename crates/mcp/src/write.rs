@@ -114,35 +114,27 @@ pub(crate) fn remove_dir(path: &Path) -> io::Result<()> {
 
 /// A folder opened once, for the download mover (`browser_guard/downloads.rs`): every look and
 /// change below names a file relative to it, never by the folder's path again, so a link swapped
-/// in for the folder after [`Folder::open`] is never followed. On Unix it is a handle
-/// (`write/unix.rs`: `open(O_DIRECTORY|O_NOFOLLOW)`, then `fstatat`, `linkat`, `openat`).
-/// On Windows it is still the path, checked for a link or reparse point at the open and again
-/// right before each change, which leaves a window between the check and the change: no agent
-/// has a browser on Windows, so the guard does not run there. It needs the handle form (a folder
-/// handle opened with `FILE_FLAG_OPEN_REPARSE_POINT`, then `NtCreateFile` or
-/// `SetFileInformationByHandle` relative to it) before Windows gets a browser.
+/// in for the folder after [`Folder::open`] is never followed. On Unix a descriptor
+/// (`write/unix.rs`: `open(O_DIRECTORY|O_NOFOLLOW)`, then `fstatat`, `linkat`, `openat`,
+/// `renameat2`); on Windows a handle (`write/windows.rs`: opened with
+/// `FILE_FLAG_OPEN_REPARSE_POINT`, then `NtCreateFile` and `SetFileInformationByHandle`
+/// relative to it). A copy into it: `write/copy.rs`.
 pub(crate) struct Folder {
     #[cfg(unix)]
     dir: std::os::fd::OwnedFd,
     #[cfg(windows)]
-    path: std::path::PathBuf,
+    dir: std::os::windows::io::OwnedHandle,
 }
 
 impl Folder {
-    /// Opens `folder`, refusing a link (on Windows a reparse point, junctions included) or
-    /// anything but a folder at its name.
+    /// Opens `folder`, refusing a link (on Windows a symlink or junction) or anything but a
+    /// folder at its name.
     pub(crate) fn open(folder: &Path) -> io::Result<Folder> {
         #[cfg(unix)]
-        {
-            unix::open_folder(folder).map(|dir| Folder { dir })
-        }
+        let dir = unix::open_folder(folder)?;
         #[cfg(windows)]
-        {
-            refuse_a_link(folder)?;
-            Ok(Folder {
-                path: folder.to_owned(),
-            })
-        }
+        let dir = windows::open_folder(folder)?;
+        Ok(Folder { dir })
     }
 
     /// Whether `name` exists in the folder, as anything, a link included.
@@ -153,7 +145,7 @@ impl Folder {
         }
         #[cfg(windows)]
         {
-            std::fs::symlink_metadata(self.path.join(name)).is_ok()
+            windows::exists_in(&self.dir, name)
         }
     }
 
@@ -161,10 +153,11 @@ impl Folder {
     /// `AlreadyExists` rather than replacing anything there (`fs::rename` replaces a file on
     /// every OS). On Unix a hard link made through the handle (`linkat`), then `fs::remove_file`
     /// of `from` (or, if that fails, `unlinkat` of the new link, so the file keeps one name and
-    /// the move can be tried again); on Windows `MoveFileExW` without
-    /// `MOVEFILE_REPLACE_EXISTING` (`write/windows.rs`). A file system without hard links
-    /// refuses the Unix move every time; the file then stays where it is. Another drive fails
-    /// with `CrossesDevices`.
+    /// the move can be tried again); on Windows a rename of `from`'s own handle relative to the
+    /// folder's (`SetFileInformationByHandle(FileRenameInfo)`, `ReplaceIfExists` false). Another
+    /// drive fails with `CrossesDevices`, and on Unix a file system without hard links with
+    /// `EPERM` or `EOPNOTSUPP`: [`needs_copy`] tells both, and the caller copies
+    /// ([`Folder::copy_in`]).
     pub(crate) fn move_new(&self, from: &Path, name: &OsStr) -> io::Result<()> {
         #[cfg(unix)]
         {
@@ -172,12 +165,12 @@ impl Folder {
         }
         #[cfg(windows)]
         {
-            refuse_a_link(&self.path)?;
-            windows::move_new(from, &self.path.join(name))
+            windows::move_new_into(from, &self.dir, name)
         }
     }
 
-    /// Makes the file `name` in the folder, new: the note of held-back downloads.
+    /// Makes the file `name` in the folder, new: the note of held-back downloads, and a copy's
+    /// temporary file.
     pub(crate) fn create_new(&self, name: &OsStr) -> io::Result<std::fs::File> {
         #[cfg(unix)]
         {
@@ -185,22 +178,36 @@ impl Folder {
         }
         #[cfg(windows)]
         {
-            refuse_a_link(&self.path)?;
-            std::fs::File::create_new(self.path.join(name))
+            windows::create_new_in(&self.dir, name)
         }
+    }
+
+    /// Copies the file `from` into the folder under a new hidden temporary name, marked by
+    /// `mark` before any content, and flushed to the disk (`write/copy.rs`).
+    pub(crate) fn copy_in(&self, from: &Path, mark: Mark) -> Result<Incoming<'_>, CopyFailed> {
+        copy::copy_in(self, from, mark)
     }
 }
 
-/// `Err` unless `folder` is a real folder, read without following a link (`symlink_metadata`,
-/// whose `is_symlink` covers junctions).
-#[cfg(windows)]
-fn refuse_a_link(folder: &Path) -> io::Result<()> {
-    let kind = std::fs::symlink_metadata(folder)?.file_type();
-    if kind.is_symlink() || !kind.is_dir() {
-        return Err(io::Error::other("the folder is no longer a real folder"));
+/// Whether [`Folder::move_new`] failed because the move cannot be made here at all, and a copy
+/// can: another drive (`CrossesDevices`), or on Unix a file system without hard links.
+pub(crate) fn needs_copy(error: &io::Error) -> bool {
+    if error.kind() == io::ErrorKind::CrossesDevices {
+        return true;
     }
-    Ok(())
+    #[cfg(unix)]
+    {
+        unix::no_hard_links(error)
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
+
+mod copy;
+
+pub(crate) use copy::{CopyFailed, Incoming, Mark};
 
 /// Makes the folder `path` if it is missing, then insists it is a real folder, not a link or a
 /// file: the guard's folders, the downloads folder among them (`browser_guard.rs`). On Unix the
@@ -233,6 +240,11 @@ pub(crate) fn make_folder(path: &Path) -> io::Result<()> {
 
 #[cfg(windows)]
 mod windows;
+
+/// A file's `:Zone.Identifier` stream, opened relative to the file's handle: a copied
+/// download's mark (`browser_guard/downloads/marks.rs`).
+#[cfg(windows)]
+pub(crate) use windows::open_stream;
 
 /// Writes `contents` to `file` through a new temporary file beside it, renamed over `file`,
 /// never writing through a link at `file`'s name: the kept Chrome profile's `Default/Preferences`
@@ -311,6 +323,10 @@ pub(crate) use mac::has_xattr;
 
 #[cfg(all(target_os = "macos", test))]
 pub(crate) use mac::read_xattr;
+
+/// `fgetxattr` and `fsetxattr`: a copied download's quarantine mark, on the open copy.
+#[cfg(target_os = "macos")]
+pub(crate) use mac::{fget_xattr, fset_xattr};
 
 #[cfg(target_os = "macos")]
 mod mac;

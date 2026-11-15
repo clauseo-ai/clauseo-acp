@@ -77,6 +77,7 @@ fn an_aborted_open_waits_for_the_mover_and_says_the_file_was_saved() {
     let mover = Mover::start(
         staging.clone(),
         downloads.clone(),
+        None,
         Arc::new(Held::default()),
         Arc::clone(&saved),
     );
