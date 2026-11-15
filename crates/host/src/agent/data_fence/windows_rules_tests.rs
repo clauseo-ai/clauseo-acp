@@ -36,8 +36,8 @@ fn env(name: &str) -> Option<OsString> {
 
 /// The launch: this matter `Acme\Deal`, other matters `Smith` (sibling), `Acme` (parent, fenced
 /// by `Acme\Old` and `Acme\notes.txt`), `Zed` (invited), `Acme\Deal\Child` (inside this one).
-/// The profile folder has an 8.3 short name (`CLAUSE~1`), so `Smith` and the data folder also
-/// go by their full short forms, as the launch adds them (`agent::short_forms`).
+/// The profile folder has an 8.3 short name (`CLAUSE~1`), so `Smith`, this matter and the data
+/// folder also go by their full short forms, as the launch adds them (`agent::short_forms`).
 fn launch() -> LaunchDeny {
     let at = |name: &str| PathBuf::from(format!(r"{MATTERS}\{name}"));
     let others: [(&str, &[&str], bool); 4] = [
@@ -62,7 +62,10 @@ fn launch() -> LaunchDeny {
         })
         .collect();
     let mut fence = MatterFence::asked(others);
-    fence.own = vec![at(r"Acme\Deal")];
+    fence.own = vec![
+        at(r"Acme\Deal"),
+        PathBuf::from(format!(r"{SHORT_MATTERS}\Acme\Deal")),
+    ];
     let mut deny = LaunchDeny::fixed(vec![
         PathBuf::from(r"C:\Users\clauseo-lawyer\AppData\Local\ai.clauseo.desktop"),
         PathBuf::from(r"C:\Users\CLAUSE~1\AppData\Local\AICLAU~1.DES"),
