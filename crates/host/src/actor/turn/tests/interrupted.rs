@@ -1,6 +1,7 @@
 //! The file actions a run leaves unfinished (`last_exit.rs`): an undo's record is durable before
-//! R8 touches a file, a crash keeps it and the next start names it in `LastExit` (and clears
-//! it), a finished undo leaves none, and an unclean exit with nothing recorded says only that.
+//! R8 touches a file, a crash keeps it and the next start names it in `LastExit`, keeping the row
+//! until its own clean stop (so a second crash names it again), a finished undo leaves none, and
+//! an unclean exit with nothing recorded says only that.
 
 use clauseo_protocol::{
     CommandEnvelope, ExpiryReason, FileChoice, FileDecision, HostCommand, InterruptedAction,
@@ -106,9 +107,11 @@ fn an_undo_is_recorded_before_r8_runs_and_named_after_a_crash() {
             files: Some(clauseo_protocol::Count::new(1).unwrap()),
         }]
     );
-    assert_eq!(pending(&mut rig), Vec::new(), "start-up cleared the record");
-    // The start after names nothing.
+    // Still in the store: a second crash now leaves it for the start after to name.
+    assert_eq!(pending(&mut rig).len(), 1, "start-up keeps the record");
+    // This run stops cleanly, which deletes it: the start after names nothing.
     let mut rig = rig.restart(2);
+    assert_eq!(pending(&mut rig), Vec::new(), "the clean stop deleted it");
     let view = last_exit(&mut rig);
     assert!(!view.unclean);
     assert_eq!(view.interrupted, Vec::new());
@@ -159,5 +162,46 @@ fn an_unclean_exit_with_nothing_recorded_says_only_that() {
     let view = last_exit(&mut rig);
     assert!(view.unclean);
     assert_eq!(view.interrupted, Vec::new());
+    rig.finish();
+}
+
+#[test]
+fn a_record_right_after_a_finish_waits_for_the_delete() {
+    use crate::actor::{Actor, last_exit};
+    use crate::error::Error;
+    let mut rig = Rig::start("interrupted-delete-then-put", "");
+    let matter: MatterId = rig.matter();
+    let at = rig.actor.now().wall;
+    let first = last_exit::action(matter, InterruptedKind::Undo, Some(1), None, at);
+    last_exit::record(
+        &mut rig.actor,
+        first,
+        Box::new(|_: &mut Actor, _: Result<(), Error>| {}),
+    );
+    rig.run_until("the first put", |actor| actor.work.matter_jobs == 0);
+    // The writer passes on and the next action is recorded before the delete has come back:
+    // the put is held, so the delete cannot land after it and lose the new row.
+    last_exit::finished(&mut rig.actor, matter);
+    let second = last_exit::action(matter, InterruptedKind::Restore, None, None, at);
+    let ran = std::rc::Rc::new(std::cell::Cell::new(false));
+    let seen = std::rc::Rc::clone(&ran);
+    last_exit::record(
+        &mut rig.actor,
+        second,
+        Box::new(move |_: &mut Actor, _: Result<(), Error>| seen.set(true)),
+    );
+    assert_eq!(
+        rig.actor.work.matter_jobs, 1,
+        "only the delete is on its way"
+    );
+    rig.run_until("the delete, then the put", |actor| {
+        actor.work.matter_jobs == 0
+    });
+    assert!(ran.get(), "the second action went ahead");
+    let rows = pending(&mut rig);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].kind, InterruptedKind::Restore);
+    last_exit::finished(&mut rig.actor, matter);
+    rig.run_until("the last delete", |actor| actor.work.matter_jobs == 0);
     rig.finish();
 }
