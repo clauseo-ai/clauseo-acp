@@ -1,8 +1,10 @@
 //! The quiet backstop (`offline/quiet.rs`, D-050): a live turn whose agent sends no model output
 //! for 5 minutes, with no tool call open and no ask, ends `Failed { agent.quiet }` whatever the
 //! host's probes said, the answer so far kept and the queue held; output (a thought too) moves
-//! it, an open tool call or an ask keeps it off, and an ask's end restarts the clock, so the
-//! lawyer's time never counts. The probe is a fixed answer: no test here touches the network.
+//! it, an open tool call or a compaction in progress (each up to 11 silent minutes) or an ask
+//! keeps it off,
+//! and an ask's end restarts the clock, so the lawyer's time never counts. The probe is a fixed
+//! answer: no test here touches the network.
 
 use std::time::Duration;
 
@@ -12,12 +14,12 @@ use serde_json::json;
 use super::agents::send_prompt;
 use super::offline::{answer, ended};
 use super::offline_quiet::{
-    CANCELLED, END_TURN, PERMISSION, PROMPT, allow, cancel, chunk, finish_turn, going, hold,
-    probes, prompting_held, release_one, start, thought, tool, update, wait, wait_steps,
+    CANCELLED, END_TURN, PERMISSION, PROMPT, allow, cancel, chunk, finish_turn, from_agent, going,
+    hold, probes, prompting_held, release_one, start, thought, tool, update, wait, wait_steps,
 };
 use crate::actor::turn::offline::probe::ReachProbe;
 use crate::actor::turn::offline::quiet::QUIET_WAIT;
-use crate::actor::turn::queue;
+use crate::actor::turn::{TurnPhase, queue};
 
 const SECOND: Duration = Duration::from_secs(1);
 
@@ -135,16 +137,11 @@ fn a_tool_call_open_with_no_word_for_eleven_minutes_ends_the_turn_quiet() {
 }
 
 /// Stage D's L2: claude-agent-acp 0.89.1 sends a compaction's start at once and streams its
-/// summary (`compaction_update`, `compaction_summary_chunk`), and each counts as output: a
+/// summary (`compaction_update`, `compaction_summary_chunk`), and each counts as output (the
+/// start and each chunk also keep the compaction's hold on): a
 /// compaction whose summary comes in over 6 minutes is never probed and never trips the backstop.
 #[test]
 fn a_compaction_streaming_its_summary_never_trips_the_limit() {
-    let compaction = |status: &str| {
-        update(
-            &json!({"sessionUpdate": "compaction_update", "compactionId": "c-1",
-            "status": status}),
-        )
-    };
     let summary = |n: usize| {
         update(
             &json!({"sessionUpdate": "compaction_summary_chunk", "compactionId": "c-1",
@@ -175,6 +172,126 @@ fn a_compaction_streaming_its_summary_never_trips_the_limit() {
     assert_eq!(
         ended(&rig.log(thread), turn),
         (Some(StopReason::EndTurn), None)
+    );
+    rig.finish();
+}
+
+/// A `compaction_update` of compaction `c-1` with `status`.
+fn compaction(status: &str) -> String {
+    update(&json!({"sessionUpdate": "compaction_update", "compactionId": "c-1", "status": status}))
+}
+
+/// A compaction in progress holds the backstop off: 7 silent minutes after its start (probed,
+/// every probe through) the turn goes on; its end restarts the clock, so the backstop comes 5
+/// minutes after it, at 12:00, not at the open compaction's cap (11:00).
+#[test]
+fn a_compaction_in_progress_holds_the_backstop_off_until_it_ends() {
+    let lines = [
+        PROMPT.to_owned(),
+        compaction("in_progress"),
+        compaction("completed"),
+        CANCELLED.to_owned(),
+    ];
+    let probe = ReachProbe::fixed(true);
+    let (mut rig, thread, count) = start(
+        "backstop-compacting",
+        Some(AgentKind::Claude),
+        &lines,
+        probe,
+    );
+    let turn = prompting_held(&mut rig, thread);
+    hold(&mut rig, 2);
+    release_one(&mut rig);
+    wait_steps(&mut rig, thread, 14, QUIET_WAIT);
+    assert!(going(&rig, thread), "still going at 7:00");
+    assert_eq!(probes(&count), 14, "the quiet arm still probes");
+    release_one(&mut rig);
+    wait_steps(&mut rig, thread, 9, QUIET_WAIT);
+    wait(&mut rig, thread, ALMOST);
+    assert!(going(&rig, thread), "still going at 11:59");
+    wait(&mut rig, thread, SECOND);
+    finish_turn(&mut rig, thread);
+    assert_eq!(
+        ended(&rig.log(thread), turn),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentQuiet))
+    );
+    rig.finish();
+}
+
+/// The hold has an open tool call's cap: a compaction that sends nothing after its start ends
+/// the turn `agent.quiet` `TOOL_LIMIT` (11 min) after it, going at 10:59.
+#[test]
+fn a_compaction_silent_for_eleven_minutes_ends_the_turn_quiet() {
+    let lines = [
+        PROMPT.to_owned(),
+        compaction("in_progress"),
+        CANCELLED.to_owned(),
+    ];
+    let probe = ReachProbe::fixed(true);
+    let (mut rig, thread, _) = start(
+        "backstop-compacting-cap",
+        Some(AgentKind::Claude),
+        &lines,
+        probe,
+    );
+    let turn = prompting_held(&mut rig, thread);
+    hold(&mut rig, 1);
+    release_one(&mut rig);
+    wait_steps(&mut rig, thread, 21, QUIET_WAIT);
+    wait(&mut rig, thread, ALMOST);
+    assert!(going(&rig, thread), "still going at 10:59");
+    wait(&mut rig, thread, SECOND);
+    finish_turn(&mut rig, thread);
+    assert_eq!(
+        ended(&rig.log(thread), turn),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentQuiet))
+    );
+    rig.finish();
+}
+
+/// A compaction that starts and never ends before its turn does leaves no hold: the next
+/// turn, silent, meets the backstop at 5:00.
+#[test]
+fn a_compaction_left_open_at_the_turns_end_holds_nothing_after() {
+    let p2_cancelled = r#"{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"p2","result":{"stopReason":"cancelled"}}}"#;
+    let lines = [
+        PROMPT.to_owned(),
+        compaction("in_progress"),
+        END_TURN.to_owned(),
+        p2_cancelled.to_owned(),
+    ];
+    let probe = ReachProbe::fixed(true);
+    let (mut rig, thread, _) = start(
+        "backstop-compacting-next",
+        Some(AgentKind::Claude),
+        &lines,
+        probe,
+    );
+    let first = prompting_held(&mut rig, thread);
+    hold(&mut rig, 2);
+    finish_turn(&mut rig, thread);
+    assert_eq!(
+        ended(&rig.log(thread), first),
+        (Some(StopReason::EndTurn), None)
+    );
+    let second = send_prompt(&mut rig, 11, thread);
+    rig.run_holding("the second prompt", from_agent, |actor| {
+        actor.threads[&thread]
+            .turn
+            .current
+            .as_ref()
+            .is_some_and(|current| current.phase == TurnPhase::Prompting)
+    });
+    wait_steps(&mut rig, thread, 9, QUIET_WAIT);
+    wait(&mut rig, thread, ALMOST);
+    assert!(going(&rig, thread), "still going at 4:59");
+    wait(&mut rig, thread, SECOND);
+    finish_turn(&mut rig, thread);
+    assert_eq!(
+        ended(&rig.log(thread), second),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentQuiet))
     );
     rig.finish();
 }

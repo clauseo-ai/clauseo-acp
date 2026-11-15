@@ -92,6 +92,7 @@ impl Current {
             failure: None,
             offline: None,
             last_output: started,
+            compacting: false,
             abort: false,
             store_failed: None,
             detach: None,

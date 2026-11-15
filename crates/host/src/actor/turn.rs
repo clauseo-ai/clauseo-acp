@@ -233,6 +233,9 @@ struct Current {
     /// When the agent last sent model output, or an ask of it ended, on the host's monotonic
     /// clock: the quiet arm runs from here (`offline/quiet.rs`).
     last_output: std::time::Duration,
+    /// A compaction of the turn started and has not ended: it holds the backstop off, up to
+    /// `TOOL_LIMIT` from `last_output` (`offline/quiet.rs`).
+    compacting: bool,
     /// The failure asks to stop the prompt once the commit being built is sent.
     abort: bool,
     /// An agent-driven commit of the turn failed with this code.
