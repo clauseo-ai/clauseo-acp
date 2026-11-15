@@ -117,6 +117,7 @@ impl HostConfig {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
                 #[cfg(feature = "test-support")]
                 fail_close: false,
+                last_run_unclean: false,
             },
             idle: IdleStop::default(),
             sandbox: None,
@@ -492,8 +493,7 @@ impl HostConfig {
 
     /// The sign-in hook (decision record 0048, ruling 2): asked off the actor at every Codex
     /// launch, with a bounded wait, whether Clauseo's Codex home shares the lawyer's login file
-    /// (`agent/login_link.rs`). Unset (the default), nothing is checked: no split check and no
-    /// guard.
+    /// (`agent/login_link.rs`). Unset (the default), nothing is checked: no split check, no guard.
     pub fn with_login_check(mut self, check: Arc<dyn LoginCheck + Send + Sync>) -> Self {
         self.wiring.sign_in.check = Some(check);
         self

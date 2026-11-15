@@ -12,13 +12,13 @@ use clauseo_counts::schema::Feature;
 use clauseo_matters::{CheckpointOutcome, Restored};
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, ErrorCode,
-    HostCommand, MatterId, RestoreRequest, StreamId, ThreadId, VersionRestored,
+    HostCommand, InterruptedKind, MatterId, RestoreRequest, StreamId, ThreadId, VersionRestored,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::MatterTag;
 use super::super::query::own_versions;
-use super::super::{Actor, Tag, counting};
+use super::super::{Actor, Tag, counting, last_exit};
 use super::{Holder, end, known, lost, undo};
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -75,13 +75,32 @@ pub(crate) fn restore_version(actor: &mut Actor, ctx: CommandCtx, command: HostC
     actor.with_loaded(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
-            let sent = loaded
-                .and_then(|()| own_versions(actor, matter, &[from, undoes.unwrap_or(from)]))
-                .and_then(|()| send_restore(actor, ask));
-            if let Err(error) = sent {
+            let checked =
+                loaded.and_then(|()| own_versions(actor, matter, &[from, undoes.unwrap_or(from)]));
+            if let Err(error) = checked {
                 give_up(actor, matter, ctx, error);
+                actor.release(stream);
+                return;
             }
-            actor.release(stream);
+            // Recorded first (`last_exit.rs`): sent once the record is durable.
+            let files = match &ask.scope {
+                RestoreRequest::Matter => None,
+                RestoreRequest::Files { paths } => u64::try_from(paths.len()).ok(),
+            };
+            let action = last_exit::action(
+                matter,
+                InterruptedKind::Restore,
+                files,
+                thread,
+                actor.now().wall,
+            );
+            let then = move |actor: &mut Actor, _recorded: Result<(), Error>| {
+                if let Err(error) = send_restore(actor, ask) {
+                    give_up(actor, matter, ctx, error);
+                }
+                actor.release(stream);
+            };
+            last_exit::record(actor, action, Box::new(then));
         }),
     );
 }

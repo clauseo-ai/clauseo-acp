@@ -157,6 +157,7 @@ pub(super) fn query(
             let _gone = reply.send(Ok(QueryResult::Settings(view)));
         }
         HostQuery::GetUpdate => super::update::answer(actor, reply),
+        HostQuery::LastExit => super::last_exit::answer(actor, reply),
         HostQuery::ListSkillPacks => skill_packs::list(actor, reply),
         // From the cache (decision record 0051): never detected here.
         HostQuery::Protection => {

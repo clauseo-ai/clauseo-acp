@@ -274,6 +274,8 @@ pub(crate) enum Input {
     BrowserPolicy(super::browser_policy::PolicyInput),
     /// A `SetSkillPack`'s read of its pack, from its thread (`settings/packs.rs`).
     SkillPack(Box<super::settings::packs::PackRead>),
+    /// A file action's record was put or cleared (`last_exit.rs`).
+    Recorded(Box<super::last_exit::Recorded>),
     /// The updater's check, download, progress, timer or file thread (`update.rs`).
     Update(super::update::UpdateInput),
     /// A connector command's work, or a relay's event (`connectors.rs`).
@@ -345,6 +347,7 @@ impl std::fmt::Debug for Input {
             #[cfg(feature = "test-support")]
             Self::StateForTest(_) => "StateForTest",
             Self::Allowed(_) => "Allowed",
+            Self::Recorded(_) => "Recorded",
             #[cfg(not(windows))]
             Self::PapersChanged(_) => "PapersChanged",
             #[cfg(not(windows))]

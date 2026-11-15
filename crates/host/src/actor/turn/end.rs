@@ -543,8 +543,9 @@ pub(super) fn release_writer(actor: &mut Actor, matter: MatterId, thread: Thread
 }
 
 /// The holder of `matter`'s writer has let go: the next queued turn takes it, or nothing
-/// does during shutdown.
+/// does during shutdown. A file action it held is over (`last_exit.rs`).
 pub(super) fn pass_writer(actor: &mut Actor, matter: MatterId) {
+    super::super::last_exit::finished(actor, matter);
     let shutting = host_stopping(actor);
     let Some(entry) = actor.matters.get_mut(&matter) else {
         return;
