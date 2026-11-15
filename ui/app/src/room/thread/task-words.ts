@@ -88,17 +88,53 @@ function words(command: string): string[] {
   return out;
 }
 
-/** A command line's parts, chained with `&&`, `||`, `;` or `|` as sh and PowerShell chain them: split outside
- * quotes, never at `2>&1`'s lone `&`. Outside quotes a backslash escapes only a quote or a backslash, as in sh's
- * `'it'\''s'`; anywhere else it is a Windows path's (`cd C:\matter\; ls` is two parts), but for find's `\;` after an
- * `-exec` (`find … -exec rm {} \;` is one part). A quote that never closes is read as a plain character, so no
- * quote can hide a part: the count is never lower than the same line read without that quote. */
-function partsOf(command: string): string[] {
+/** A command line's parts, chained with `&&`, `||`, `;` or `|`: the line read three ways, as the
+ * reading that finds the most tasks has it. One reading is main's (mainPartsOf), so a count is never lower than it
+ * was; the others are sh's (shellPartsOf) and PowerShell's. Each is one pass over the line, plus one re-read from
+ * each quote that never closes. */
+function readingsOf(command: string): string[][] {
+  return [mainPartsOf(command), shellPartsOf(command, "sh"), shellPartsOf(command, "pwsh")];
+}
+
+/** Main's reading, as it was before the sh and PowerShell readings: split outside quotes, never at `2>&1`'s lone
+ * `&`; a backslash escapes nothing but find's `\;` as a word of its own. Kept as it is, so no line counts
+ * fewer tasks than it did. */
+function mainPartsOf(command: string): string[] {
+  const parts: string[] = [];
+  let quote: string | null = null;
+  let from = 0;
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]!;
+    if (quote !== null) {
+      if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === "\\" && command[i + 1] === ";" && (i === 0 || /\s/.test(command[i - 1]!)))
+      i += 1;
+    else if (c === ";" || c === "|" || (c === "&" && command[i + 1] === "&")) {
+      parts.push(command.slice(from, i));
+      if (c !== ";" && command[i + 1] === c) i += 1;
+      from = i + 1;
+    }
+  }
+  parts.push(command.slice(from));
+  return parts;
+}
+
+/** A line's parts as sh or PowerShell splits it, outside quotes and never at `2>&1`'s lone `&`.
+ * - sh: outside quotes a backslash escapes the next character; inside double quotes it escapes `"`, `\`, `$` and a
+ *   backtick; inside single quotes nothing escapes.
+ * - PowerShell: a backslash is a path's (`cd C:\matter\; ls` is two parts); a backtick escapes the next character
+ *   outside quotes and inside double quotes; inside single quotes `''` is a quote.
+ * In both, find's `\;` is no split when the backslash follows a space and an `-exec`, `-execdir`, `-ok` or `-okdir`
+ * came earlier in the part. A quote that never closes is read again from where it stands as a plain character, once
+ * per such quote, so no unclosed quote hides a part. */
+function shellPartsOf(command: string, shell: "sh" | "pwsh"): string[] {
+  const escape = shell === "sh" ? "\\" : "`";
   const parts: string[] = [];
   /** The quotes that never closed, read as plain characters. */
   const plain = new Set<number>();
   let quote: string | null = null;
-  /** Where the open quote stands, and where the part it is in starts and how many parts came before it. */
+  /** Where the open quote stands, where its part starts and how many parts came before it. */
   let opened = { at: -1, from: 0, parts: 0 };
   let from = 0;
   for (let i = 0; i <= command.length; i++) {
@@ -113,19 +149,24 @@ function partsOf(command: string): string[] {
       continue;
     }
     const c = command[i]!;
-    if (quote !== null) {
-      if (c === quote) quote = null;
-    } else if (c === "\\") {
-      const next = command[i + 1];
-      if (next === "'" || next === '"' || next === "\\") i += 1;
-      else if (next === ";" && /\s-(?:exec|execdir|ok|okdir)\s/.test(command.slice(from, i)))
+    const next = command[i + 1];
+    if (quote === "'") {
+      if (c === "'") {
+        if (shell === "pwsh" && next === "'") i += 1;
+        else quote = null;
+      }
+    } else if (quote === '"') {
+      if (c === escape && (shell === "pwsh" || (next !== undefined && '"\\$`'.includes(next))))
         i += 1;
-    } else if ((c === '"' || c === "'") && !plain.has(i)) {
+      else if (c === '"') quote = null;
+    } else if (c === "\\" && next === ";" && findsEnd(command, from, i)) i += 1;
+    else if (c === escape) i += 1;
+    else if ((c === '"' || c === "'") && !plain.has(i)) {
       quote = c;
       opened = { at: i, from, parts: parts.length };
-    } else if (c === ";" || c === "|" || (c === "&" && command[i + 1] === "&")) {
+    } else if (c === ";" || c === "|" || (c === "&" && next === "&")) {
       parts.push(command.slice(from, i));
-      if (c !== ";" && command[i + 1] === c) i += 1;
+      if (c !== ";" && next === c) i += 1;
       from = i + 1;
     }
   }
@@ -133,11 +174,21 @@ function partsOf(command: string): string[] {
   return parts;
 }
 
-/** The programs a command runs, one per part: each part's first word that isn't a variable set or a prefix, a part
- * that only moves to a folder or sets a variable (PLACE) left out. */
-export function programsOf(command: string): string[] {
+/** Whether the backslash at `at` ends a find's `-exec` (`find … -exec rm {} \;`): it follows a space, and an
+ * `-exec`, `-execdir`, `-ok` or `-okdir` came earlier in the part that starts at `from`. */
+function findsEnd(command: string, from: number, at: number): boolean {
+  return (
+    at > 0 &&
+    /\s/.test(command[at - 1]!) &&
+    /(?:^|\s)-(?:exec|execdir|ok|okdir)\s/.test(command.slice(from, at))
+  );
+}
+
+/** The programs in a line's parts, one per part: each part's first word that isn't a variable set or a prefix, a
+ * part that only moves to a folder or sets a variable (PLACE) left out. */
+export function programsIn(parts: string[]): string[] {
   const out: string[] = [];
-  for (const part of partsOf(command)) {
+  for (const part of parts) {
     const ws = words(part.trim()).filter((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
     while (ws.length > 0 && PREFIX.has(ws[0]!)) ws.shift();
     const first = ws[0];
@@ -146,6 +197,22 @@ export function programsOf(command: string): string[] {
     if (name !== "") out.push(name);
   }
   return out;
+}
+
+/** The programs a command runs, as the reading that finds the most of them has it (readingsOf); between readings that
+ * find as many, the one with the most parts, then the first. */
+export function programsOf(command: string): string[] {
+  let best: { programs: string[]; parts: number } | null = null;
+  for (const parts of readingsOf(command)) {
+    const programs = programsIn(parts);
+    if (
+      best === null ||
+      programs.length > best.programs.length ||
+      (programs.length === best.programs.length && parts.length > best.parts)
+    )
+      best = { programs, parts: parts.length };
+  }
+  return best!.programs;
 }
 
 /** The first paper a command names, by its file name: a quoted or bare word ending in a paper's extension,

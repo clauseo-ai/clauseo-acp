@@ -5,7 +5,8 @@ import { toolCall } from "../../testing/stream-script.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { doneOf, timeOf } from "./steps.ts";
 import { doingOf, plainOf, siteQuery, thoughtText, titleOf } from "./step-names.ts";
-import { inMatter, programsOf, taskOf, whyOf } from "./task-words.ts";
+import { mainPartsOf } from "../../testing/main-parts.ts";
+import { inMatter, programsIn, programsOf, taskOf, whyOf } from "./task-words.ts";
 
 const FOLDER = "Documents/Clauseo/Sharma";
 const ROOT = `/Users/lawyer/${FOLDER}`;
@@ -110,10 +111,77 @@ test.each([
   ["Write-Output \\; Remove-Item papers", ["Write-Output", "Remove-Item"]],
   ['echo "abc ; rm -rf papers', ["echo", "rm"]],
   ["echo 'abc ; rm -rf papers", ["echo", "rm"]],
+  // a path's backslash before a quote or a semicolon, in PowerShell
+  ['echo C:\\m\\"x" ; Remove-Item papers ; echo "y"', ["echo", "Remove-Item", "echo"]],
+  ["Write-Output -ok C:\\m\\; Remove-Item papers", ["Write-Output", "Remove-Item"]],
+  ["find . -exec x {}\\; Remove-Item papers", ["find", "Remove-Item"]],
+  // sh's escaped quote inside double quotes, and PowerShell's backtick
+  ['echo "x\\"" ; rm -rf papers ; echo "y"', ["echo", "rm", "echo"]],
+  ['echo `" ; rm x ; echo "y"', ["echo", "rm", "echo"]],
 ])("no quote or backslash hides a chained task: %s", (line, programs) => {
   expect(programsOf(line)).toEqual(programs);
-  expect(taskOf(task({ command: line }))).toMatchObject({ program: programs[0], count: 2 });
-  expect(doneOf("en", task({ command: line }))).toBe("Ran 2 tasks.");
+  const n = String(programs.length);
+  expect(taskOf(task({ command: line }))).toMatchObject({
+    program: programs[0],
+    count: programs.length,
+  });
+  expect(doneOf("en", task({ command: line }))).toBe(`Ran ${n} tasks.`);
+});
+
+test("find's \\; after an -exec is one task, in every reading", () => {
+  expect(programsOf("find . -exec rm {} \\;")).toEqual(["find"]);
+  expect(programsOf("find . -name x -exec rm {} \\;")).toEqual(["find"]);
+  expect(programsOf("find . -name x -execdir rm {} \\; && ls")).toEqual(["find", "ls"]);
+});
+
+/** A seeded PRNG (mulberry32), so a failing line comes back on every run. */
+function prng(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const PIECES = [
+  "echo",
+  "rm",
+  "Remove-Item",
+  "ls",
+  "find",
+  "x",
+  "papers",
+  "'",
+  '"',
+  "`",
+  "\\",
+  ";",
+  "|",
+  "&&",
+  " ",
+  " ",
+  "C:\\m\\",
+  "C:\\matter\\x.txt",
+  "-exec rm {} \\;",
+  "-ok",
+  "{}\\;",
+  "''",
+  "2>&1",
+  "\\;",
+];
+
+test("no line counts fewer tasks than main's reading did (2000 seeded lines)", () => {
+  const next = prng(1110);
+  let failing: string | null = null;
+  for (let n = 0; n < 2000 && failing === null; n++) {
+    const length = 1 + Math.floor(next() * 14);
+    let line = "";
+    for (let k = 0; k < length; k++) line += PIECES[Math.floor(next() * PIECES.length)]!;
+    if (programsOf(line).length < programsIn(mainPartsOf(line)).length) failing = line;
+  }
+  expect(failing, `first line counted below main: ${failing}`).toBeNull();
 });
 
 test("paths inside the matter read from the matter, through the home folder or a whole path", () => {
