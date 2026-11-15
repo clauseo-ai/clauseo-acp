@@ -94,8 +94,14 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
     target.focus();
   });
 
+  // the lawyer changed the list: the last import's lines (and its failure) no longer describe it
+  const listChanged = () => {
+    setImportedLines(null);
+    setImportFailed(null);
+  };
   const answered = async (answer: Promise<ToolsAnswer>) => {
     const refusal = await answer.catch(() => "mcp.secret_store_failed" as const);
+    if (refusal === null) listChanged();
     setFailed(
       refusal === null || refusal === "mcp.save_declined" ? null : refusalOf(lang, refusal).words,
     );
@@ -144,6 +150,7 @@ function Tools({ commands, safe }: { commands: ToolsCommands; safe: boolean }) {
               save={(previousName, draft) => commands.save(previousName, draft)}
               onDone={(name) => {
                 setFailed(null);
+                listChanged();
                 close(name);
               }}
               onCancel={() => close(open.editing?.name ?? null)}

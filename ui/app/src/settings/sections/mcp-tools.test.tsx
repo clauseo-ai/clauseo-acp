@@ -392,6 +392,75 @@ test("an import: one command, then one line, the left-out names without reasons;
   expect(rig.q('[data-testid="tools-imports"]')).toBeNull();
 });
 
+// the import's line, and what the lawyer's own changes do to it
+const importedLine = () => rig!.q('[data-testid="tools-imported-head"]')?.textContent ?? null;
+
+test("the import's line stays while nothing changes: a view the host sends alone doesn't clear it", async () => {
+  const fake = new FakeTools(THREE, { imports: IMPORTS });
+  rig = await mount(fake);
+  await rig.click(rig.q('[data-testid="tools-import-claude_desktop"]'));
+  expect(importedLine()).toBe("Imported 2 tools. 1 couldn't be imported.");
+  await act(async () => fake.sendView());
+  expect(importedLine()).toBe("Imported 2 tools. 1 couldn't be imported.");
+  expect(rig.rows()).toContain("legal-citationslegal-citations-mcp");
+});
+
+test("Remove clears the import's line", async () => {
+  const fake = new FakeTools(THREE, { imports: IMPORTS });
+  rig = await mount(fake);
+  await rig.click(rig.q('[data-testid="tools-import-codex"]'));
+  expect(importedLine()).toBe("Imported 1 tool.");
+  await rig.click(rig.q('button[aria-label="Remove filings"]'));
+  await rig.click(document.querySelector('[data-testid="tools-remove-ok"]'));
+  expect(fake.removed).toEqual(["filings"]);
+  expect(importedLine()).toBeNull();
+});
+
+test("the switch clears the import's line", async () => {
+  const fake = new FakeTools(THREE, { imports: IMPORTS });
+  rig = await mount(fake);
+  await rig.click(rig.q('[data-testid="tools-import-codex"]'));
+  expect(importedLine()).toBe("Imported 1 tool.");
+  await rig.click(rig.pane().querySelectorAll<HTMLElement>('[role="switch"]')[0]!);
+  expect(fake.toggled).toEqual([{ name: "court-diary", enabled: false }]);
+  expect(importedLine()).toBeNull();
+});
+
+test("Save of a new tool clears the import's line", async () => {
+  const fake = new FakeTools(THREE, { imports: IMPORTS });
+  rig = await mount(fake);
+  await rig.click(rig.q('[data-testid="tools-import-codex"]'));
+  expect(importedLine()).toBe("Imported 1 tool.");
+  await rig.press("Add a tool");
+  await rig.type(rig.field("tools-name"), "court-notes");
+  await rig.type(rig.field("tools-command"), "/opt/homebrew/bin/npx");
+  await rig.save();
+  expect(fake.saves.at(-1)?.previousName).toBeNull();
+  expect(rig.rows().some((r) => r.startsWith("court-notes"))).toBe(true);
+  expect(importedLine()).toBeNull();
+});
+
+test("Save of an edited tool clears the import's line", async () => {
+  const fake = new FakeTools(THREE, { imports: IMPORTS });
+  rig = await mount(fake);
+  await rig.click(rig.q('[data-testid="tools-import-codex"]'));
+  expect(importedLine()).toBe("Imported 1 tool.");
+  await rig.click(rig.q('[data-tool-edit="filings"]'));
+  await rig.save();
+  expect(fake.saves.at(-1)?.previousName).toBe("filings");
+  expect(importedLine()).toBeNull();
+});
+
+test("Cancel in the form keeps the import's line", async () => {
+  const fake = new FakeTools(THREE, { imports: IMPORTS });
+  rig = await mount(fake);
+  await rig.click(rig.q('[data-testid="tools-import-codex"]'));
+  await rig.press("Add a tool");
+  await rig.click(rig.q('[data-testid="tools-cancel"]'));
+  expect(fake.saves).toEqual([]);
+  expect(importedLine()).toBe("Imported 1 tool.");
+});
+
 test("a declined confirm (mcp.save_declined): the form stays as it was, no error, the hint as before, no ring; focus back on Save; the list unchanged", async () => {
   const fake = new FakeTools(THREE);
   rig = await mount(fake);

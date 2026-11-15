@@ -99,6 +99,11 @@ export class FakeTools implements ToolsCommands {
     for (const listener of this.listeners) listener(this.current());
   }
 
+  /** Sends the view again with nothing changed, as the host does when it sends a view on its own. */
+  sendView(): void {
+    this.changed();
+  }
+
   subscribe(listener: (view: ToolsView) => void): () => void {
     this.listeners.add(listener);
     listener(this.current());
