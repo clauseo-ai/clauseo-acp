@@ -8,8 +8,9 @@ use zeroize::Zeroize as _;
 use super::{SecretStore, check_size};
 use crate::error::StoreError;
 
-/// A [`SecretStore`] in memory, for tests. Knobs: fail the next N writes, count reads, writes and
-/// deletes, read an item back. `Debug` names the accounts and never prints an item.
+/// A [`SecretStore`] in memory, for tests. Knobs: fail the next N writes, or one write after N
+/// that land, count reads, writes and deletes, read an item back. `Debug` names the accounts and
+/// never prints an item.
 #[derive(Default)]
 pub struct MemoryStore {
     inner: Mutex<Inner>,
@@ -31,6 +32,8 @@ impl std::fmt::Debug for MemoryStore {
 struct Inner {
     items: BTreeMap<String, Vec<u8>>,
     fail_writes: usize,
+    /// How many more writes land before the one that fails ([`MemoryStore::fail_write_after`]).
+    fail_after: Option<usize>,
     reads: usize,
     writes: usize,
     deletes: usize,
@@ -49,6 +52,12 @@ impl MemoryStore {
     /// The next `n` calls to `set` fail with `StoreError::Platform` and change nothing.
     pub fn fail_next_writes(&self, n: usize) {
         self.lock().fail_writes = n;
+    }
+
+    /// The next `landing` calls to `set` land; the one after fails with `StoreError::Platform`
+    /// and changes nothing (a failure partway through a batch of writes).
+    pub fn fail_write_after(&self, landing: usize) {
+        self.lock().fail_after = Some(landing);
     }
 
     /// How many times `get` was called.
@@ -89,6 +98,22 @@ impl SecretStore for MemoryStore {
     fn set(&self, account: &str, secret: &[u8]) -> Result<(), StoreError> {
         let mut inner = self.lock();
         inner.writes = inner.writes.saturating_add(1);
+        let fails_now = match inner.fail_after {
+            Some(0) => {
+                inner.fail_after = None;
+                true
+            }
+            Some(left) => {
+                inner.fail_after = Some(left - 1);
+                false
+            }
+            None => false,
+        };
+        if fails_now {
+            return Err(StoreError::Platform(
+                "a write failure (MemoryStore)".to_owned(),
+            ));
+        }
         if inner.fail_writes > 0 {
             inner.fail_writes -= 1;
             return Err(StoreError::Platform(

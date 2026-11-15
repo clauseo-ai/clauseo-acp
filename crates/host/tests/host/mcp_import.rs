@@ -438,6 +438,32 @@ fn mcp_import_keychain_failure_imports_nothing() {
     host.shutdown();
 }
 
+/// The second server's keychain write fails: the first server's value, written already, is put
+/// back (the item it replaced restored), and no settings are written.
+#[test]
+fn mcp_import_second_keychain_write_failing_puts_back_the_first() {
+    let dir = Dir::new("mcp_import_keychain_second", &[]);
+    let store = Arc::new(MemoryStore::new());
+    // An earlier install's item under the first server's account: restored, never lost.
+    store.put("github/env/GITHUB_TOKEN", b"earlier");
+    let host = dir.start_with(0, |config| wired(config, &store, apps()));
+    let before = dir.settings_json();
+    // `github`'s one value lands; `notes`'s, the second write, fails.
+    store.fail_write_after(1);
+    host.refused(
+        import(McpImportSource::ClaudeDesktop),
+        ErrorCode::McpSecretStoreFailed,
+    );
+    assert_eq!(store.writes(), 3, "the write, the failed one, the put-back");
+    assert_eq!(
+        store.peek("github/env/GITHUB_TOKEN").as_deref(),
+        Some(&b"earlier"[..])
+    );
+    assert_eq!(store.peek("notes/header/Authorization"), None);
+    assert_eq!(dir.settings_json(), before);
+    host.shutdown();
+}
+
 /// The firm's list (policy) and its `managed-mcp.json` refuse an import with `settings.locked`,
 /// and the view offers nothing to import.
 #[test]
