@@ -128,7 +128,7 @@ fn stetdoc_refusals_have_codes_of_their_own() {
 
 /// Two files that differ, blacklined with no change shown and nothing said (a link's address
 /// changed, which stetdoc does not mark), say the blackline may differ; the same files, or a
-/// change or notice already shown, add nothing.
+/// change shown, or a notice that already says part may be missing, add nothing.
 #[test]
 fn a_difference_the_blackline_does_not_show_may_differ() {
     let blackline = |change| WordBlackline {
@@ -150,7 +150,21 @@ fn a_difference_the_blackline_does_not_show_may_differ() {
     );
     assert_eq!(noted(blackline(ParagraphChange::Same), false), []);
     assert_eq!(noted(blackline(ParagraphChange::Changed), true), []);
+    // A notice about something else (the same hidden word in both) does not say they differ.
     let mut hidden = blackline(ParagraphChange::Same);
     hidden.notices.push(BlacklineNotice::HiddenText);
-    assert_eq!(noted(hidden, true), [BlacklineNotice::HiddenText]);
+    assert_eq!(
+        noted(hidden.clone(), true),
+        [BlacklineNotice::HiddenText, BlacklineNotice::MayDiffer]
+    );
+    assert_eq!(noted(hidden, false), [BlacklineNotice::HiddenText]);
+    // One that already says part may be missing does.
+    for said in [
+        BlacklineNotice::PartNotShown,
+        BlacklineNotice::ChangesOutsideText,
+    ] {
+        let mut blackline = blackline(ParagraphChange::Same);
+        blackline.notices.push(said);
+        assert_eq!(noted(blackline, true), [said]);
+    }
 }
