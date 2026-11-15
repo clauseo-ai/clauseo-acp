@@ -1,4 +1,5 @@
-//! The words of the Mac's menu bar (`menu.rs`), in English and Hindi by the app's language
+//! The words of the Mac's menu bar (`menu.rs`), and of Quit Clauseo in Windows' system menu
+//! (MN-07, `window_frame/quit_item.rs`), in English and Hindi by the app's language
 //! (`ui.language`), as the native dialogs' (`dialogs/words.rs`). Their review home is
 //! `ui/app/src/review/registry-mn.tsx` (MN-01 to MN-25), where the Hindi is provisional; a test
 //! fails when the two disagree. The items macOS adds itself (autofill, Start Dictation, Emoji &
@@ -8,6 +9,7 @@
 use clauseo_protocol::Language;
 
 /// One word of the menu bar.
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Key {
     /// MN-01: the app menu's About.
@@ -62,6 +64,7 @@ pub(crate) enum Key {
     Help,
 }
 
+#[cfg(any(test, target_os = "macos"))]
 impl Key {
     /// Every key, in review order (MN-01 first).
     #[cfg(test)]
@@ -95,6 +98,7 @@ impl Key {
 }
 
 /// `key`'s words in `language`.
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) fn text(language: Language, key: Key) -> &'static str {
     match language {
         Language::En => en(key),
@@ -102,6 +106,16 @@ pub(crate) fn text(language: Language, key: Key) -> &'static str {
     }
 }
 
+/// MN-07, Quit Clauseo, in `language`: the Mac bar's Quit and Windows' system-menu item
+/// (`window_frame/quit_item.rs`), the only word Windows takes from here.
+pub(crate) fn quit(language: Language) -> &'static str {
+    match language {
+        Language::En => "Quit Clauseo",
+        Language::Hi => "Clauseo बंद करें",
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
 fn en(key: Key) -> &'static str {
     match key {
         Key::About => "About Clauseo",
@@ -110,7 +124,7 @@ fn en(key: Key) -> &'static str {
         Key::Hide => "Hide Clauseo",
         Key::HideOthers => "Hide Others",
         Key::ShowAll => "Show All",
-        Key::Quit => "Quit Clauseo",
+        Key::Quit => quit(Language::En),
         Key::File => "File",
         Key::NewConversation => "New conversation",
         Key::NewMatter => "New matter",
@@ -134,6 +148,7 @@ fn en(key: Key) -> &'static str {
 
 /// Provisional Hindi, for the copy review (module docs). The room's own words where it has
 /// them: नई बातचीत, नया मामला, खोजें, सेटिंग्स, पूर्ववत करें.
+#[cfg(any(test, target_os = "macos"))]
 fn hi(key: Key) -> &'static str {
     match key {
         Key::About => "Clauseo के बारे में",
@@ -142,7 +157,7 @@ fn hi(key: Key) -> &'static str {
         Key::Hide => "Clauseo छिपाएँ",
         Key::HideOthers => "बाकी छिपाएँ",
         Key::ShowAll => "सब दिखाएँ",
-        Key::Quit => "Clauseo बंद करें",
+        Key::Quit => quit(Language::Hi),
         Key::File => "फ़ाइल",
         Key::NewConversation => "नई बातचीत",
         Key::NewMatter => "नया मामला",

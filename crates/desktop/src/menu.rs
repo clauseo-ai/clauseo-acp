@@ -4,7 +4,9 @@
 //! Contract:
 //! - macOS only. Windows and Linux get none: a menu would be a bar on the undecorated window;
 //!   there the page's own keys do the same (`ui/app/src/room/room-commands.ts`, `find-key.ts`,
-//!   `settings-key.ts`).
+//!   `settings-key.ts`, and on Windows `quit-key.ts`). Windows' system menu gets Quit Clauseo
+//!   (`window_frame/quit_item.rs`), whose words [`follow_language`] keeps in the app's language;
+//!   the page commands below are the Mac's alone.
 //! - The app menu: About, Settings… on Cmd+, (the settings window, `settings_window.rs`),
 //!   Services, Hide, Hide Others, Show All, Quit. File: New conversation on Cmd+N, New matter on
 //!   Shift+Cmd+N, Close Window. Edit: Undo, Redo, Cut, Copy, Paste, Select All (the system's
@@ -26,6 +28,7 @@ pub(crate) mod words;
 mod tests;
 
 /// A command the menu sends the main window's page (`MenuCommand` in `room-commands.ts`).
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PageCommand {
     /// New conversation in the open matter.
@@ -36,6 +39,7 @@ pub(crate) enum PageCommand {
     Find,
 }
 
+#[cfg(any(test, target_os = "macos"))]
 impl PageCommand {
     /// Every command.
     #[cfg(test)]
@@ -59,9 +63,11 @@ impl PageCommand {
 }
 
 /// The page's event, `MENU_EVENT` in `room-commands.ts`.
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) const EVENT: &str = "clauseo-menu";
 
 /// The script that sends `command` to the page.
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) fn script(command: PageCommand) -> String {
     format!(
         "window.dispatchEvent(new CustomEvent({EVENT:?}, {{ detail: {:?} }}));",
@@ -200,6 +206,7 @@ pub(crate) fn on_menu_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, id: &s
 }
 
 /// Raises the main window and sends its page `command` ([`script`]); nothing without one.
+#[cfg(any(test, target_os = "macos"))]
 pub(crate) fn send<R: tauri::Runtime, M: tauri::Manager<R>>(
     manager: &M,
     command: PageCommand,
@@ -213,10 +220,10 @@ pub(crate) fn send<R: tauri::Runtime, M: tauri::Manager<R>>(
     main.eval(script(command))
 }
 
-/// Builds the bar again in the settings' language once the host has started, and on each
-/// `SettingsChanged` that changes it, until the host stops. A bar that fails to build keeps the
-/// one shown, and the next change tries again.
-#[cfg(target_os = "macos")]
+/// Builds the bar again (on Windows, renames the system menu's Quit) in the settings' language
+/// once the host has started, and on each `SettingsChanged` that changes it, until the host
+/// stops. A bar that fails to build keeps the one shown, and the next change tries again.
+#[cfg(any(target_os = "macos", windows))]
 pub(crate) fn follow_language<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     use futures::StreamExt as _;
     use tauri::Manager as _;
@@ -230,22 +237,45 @@ pub(crate) fn follow_language<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
         let Ok(mut changes) = CellHost::new(cell).settings_changes().await else {
             return;
         };
-        let mut shown = clauseo_protocol::Language::En;
+        // The Mac's bar starts in English; Windows' Quit in the installer's language, unknown
+        // here, so the first read renames it.
+        let mut shown = cfg!(target_os = "macos").then_some(clauseo_protocol::Language::En);
         loop {
             let Some(bridge) = app.try_state::<Bridge>() else {
                 return;
             };
             let language = bridge.language().await;
-            if language != shown
-                && bar(&app, language)
-                    .and_then(|bar| app.set_menu(bar))
-                    .is_ok()
-            {
-                shown = language;
+            if shown != Some(language) && show(&app, language) {
+                shown = Some(language);
             }
             if changes.next().await.is_none() {
                 return;
             }
         }
     }));
+}
+
+/// Shows the bar in `language`; false when it did not build or show.
+#[cfg(target_os = "macos")]
+fn show<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    language: clauseo_protocol::Language,
+) -> bool {
+    bar(app, language).and_then(|bar| app.set_menu(bar)).is_ok()
+}
+
+/// Renames the main window's system-menu Quit in `language`, on the main thread (the window's);
+/// false when there is no main window or the rename could not be queued.
+#[cfg(windows)]
+fn show<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    language: clauseo_protocol::Language,
+) -> bool {
+    use tauri::Manager as _;
+    let Some(main) = app.get_webview_window(crate::MAIN_WINDOW) else {
+        return false;
+    };
+    let window = main.clone();
+    main.run_on_main_thread(move || crate::window_frame::quit_item::relabel(&window, language))
+        .is_ok()
 }

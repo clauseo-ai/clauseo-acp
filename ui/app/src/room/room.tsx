@@ -80,6 +80,7 @@ import { RoomRail } from "./rail.tsx";
 import { useSettingsKey } from "./settings-key.ts";
 import { focusFind, useFindKey } from "./find-key.ts";
 import { useRoomCommands } from "./room-commands.ts";
+import { useQuitKey } from "./quit-key.ts";
 import { ScratchLine } from "./scratch-line.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
@@ -346,6 +347,7 @@ function RoomFrame({
       : () => void quietly("open_settings", open.call(transport));
   });
   useSettingsKey(openSettings, mac);
+  useQuitKey(transport, platform);
   // the connectors' store listens from the room's start (U15): a case-law hint is in no catch-up, so one sent while no
   // conversation's composer or thread is up must still be heard
   useState(() => connectorsStoreOf(transport));
