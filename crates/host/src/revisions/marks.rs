@@ -6,8 +6,8 @@
 //! text inserted, deleted or moved, and formatting, section, table, row, cell and numbering
 //! changes), or a comment (`<w:comment `). It is looked for in every part stetdoc reads them
 //! from: the main document and the headers, footers, footnotes, endnotes and comments its
-//! relationships name ([`parts`]), or by Word's usual part names when those relationships are
-//! too large or not UTF-8. Each part is read as XML, as it streams (quick-xml's `NsReader`): a
+//! relationships name ([`parts`]), or every XML part under `word/` when those relationships
+//! are too large or not UTF-8. Each part is read as XML, as it streams (quick-xml's `NsReader`): a
 //! mark is an element in Word's main namespace, whatever prefix the part binds to it, with one
 //! of the marks' names, so comments, CDATA, processing instructions and nested declarations are
 //! read as XML reads them. The scan never answers "no changes" for a part it does not model: a
@@ -44,7 +44,7 @@ pub(crate) const MAX_XML_BYTES: u64 = 16 * 1024 * 1024;
 pub(crate) const MAX_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The most bytes of a relationships part: about 300 bytes a relationship, so a brief with
-/// thousands of links and images fits. Over it, Word's usual part names are scanned instead.
+/// thousands of links and images fits. Over it, every XML part under `word/` is scanned instead.
 const MAX_RELS_BYTES: u64 = 1024 * 1024;
 
 /// Word's main XML namespace: a mark is an element in it.
@@ -193,7 +193,7 @@ fn zip_marks(file: impl Read + Seek, part_cap: u64, total_cap: u64) -> Option<bo
                 .filter_map(Result::ok)
                 .map(std::borrow::Cow::into_owned)
                 .collect();
-            parts::usual_story_parts(names.iter().map(String::as_str))
+            parts::word_parts(&main, names.iter().map(String::as_str))
         }
     };
     // more story parts than the scan reads: it cannot answer that they hold none

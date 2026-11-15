@@ -492,7 +492,7 @@ fn hostile_rels(size: usize, target: &str) -> String {
 }
 
 /// Relationships parts shaped to make a scan read ahead from every match cost one pass; over the
-/// cap, the main document is still read, and so are the parts Word's usual names name.
+/// cap, the main document is still read, and so is every XML part under `word/`.
 #[test]
 fn a_hostile_or_oversized_relationships_part_is_read_fast_and_capped() {
     let change = format!("<w:hdr><w:p><w:ins w:id=\"1\" {AUTHOR}/></w:p></w:hdr>");
@@ -522,8 +522,8 @@ fn a_hostile_or_oversized_relationships_part_is_read_fast_and_capped() {
 }
 
 /// A brief with 500 cited links has a relationships part past 64 KiB: its header is still
-/// read. Past the cap, or when not UTF-8, the part's usual names are read instead, and a part with
-/// no usual name is missed.
+/// read. Past the cap, or when not UTF-8, every XML part under `word/` is read instead, whatever
+/// its name.
 #[test]
 fn a_large_or_utf_16_relationships_part_still_finds_the_headers() {
     let change = format!("<w:hdr><w:p><w:ins w:id=\"1\" {AUTHOR}/></w:p></w:hdr>");
@@ -548,8 +548,8 @@ fn a_large_or_utf_16_relationships_part_still_finds_the_headers() {
         (500, "header3.xml", true),
         (500, "letterhead.xml", true),
         (cap / 100, "header3.xml", true),
-        // past the cap, a header Word would not name so is not read
-        (cap / 100, "letterhead.xml", false),
+        // past the cap, a header with a name Word would not give it is read all the same
+        (cap / 100, "letterhead.xml", true),
     ] {
         let document_rels = with(links, header);
         assert!(document_rels.len() > 64 * 1024, "{links}");
@@ -562,7 +562,7 @@ fn a_large_or_utf_16_relationships_part_still_finds_the_headers() {
         ];
         assert_eq!(zip_has_marks(docx(&parts)), Some(found), "{links} {header}");
     }
-    // relationships saved as UTF-16: the usual names
+    // relationships saved as UTF-16: every XML part under `word/`
     let utf16: Vec<u8> = [0xFF, 0xFE]
         .into_iter()
         .chain(
