@@ -354,7 +354,7 @@ pub(super) fn on_after_turn(
     close.failure = end.failure;
     close.limit = limit;
     close.detach = end.detach;
-    close.complete_tools = close.failure.is_none() && super::close::completes_tools(stop);
+    close.complete_tools = super::skipped::to_complete(actor, thread, &close);
     if !fallback {
         // The fallback asked for its read before this commit, and asks nothing after it.
         tell_limits(actor, thread, &mut close);

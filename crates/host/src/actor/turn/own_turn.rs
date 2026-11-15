@@ -341,7 +341,8 @@ pub(super) fn flush(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             | AcpEvent::Limit { .. }
             | AcpEvent::TooLong { .. }
             | AcpEvent::ConnectionLost { .. }
-            | AcpEvent::Warning { .. }) => updates::handle(actor, thread, event),
+            | AcpEvent::Warning { .. }
+            | AcpEvent::UpdateSkipped { .. }) => updates::handle(actor, thread, event),
         }
     }
 }

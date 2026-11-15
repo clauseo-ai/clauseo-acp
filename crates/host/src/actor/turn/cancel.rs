@@ -7,8 +7,8 @@
 use clauseo_process::Cutoff;
 use clauseo_protocol::{
     CommandOutcome, ElicitationOutcome, ElicitationResolved, ElicitationResponse, PermissionChoice,
-    PermissionResolved, Principal, StopReason, StreamId, ThreadId, ToolCallPatch, ToolCallStatus,
-    ToolCallUpdated, TurnId,
+    PermissionResolved, Principal, StopReason, StreamId, ThreadId, ToolCallId, ToolCallPatch,
+    ToolCallStatus, ToolCallUpdated, TurnId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -295,6 +295,16 @@ pub(super) fn push_tool_settles(
         .loaded(StreamId::Thread(thread))
         .map(|loaded| loaded.sent.unfinished_tools(turn).collect())
         .unwrap_or_default();
+    push_statuses(actor, tools, status, out)
+}
+
+/// `status` for each of `tools`, status only.
+pub(super) fn push_statuses(
+    actor: &mut Actor,
+    tools: Vec<ToolCallId>,
+    status: ToolCallStatus,
+    out: &mut Out,
+) -> Result<(), Error> {
     for tool_call in tools {
         let patch = ToolCallPatch {
             status: Some(status),

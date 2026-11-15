@@ -41,6 +41,7 @@ mod route;
 mod session;
 mod shell_network;
 pub(super) mod sign_in;
+mod skipped;
 mod state;
 mod steps;
 mod text;
@@ -206,6 +207,8 @@ struct Current {
     too_long: Option<clauseo_acp::TooLong>,
     /// The places the turn's tool calls named, for the after-turn checkpoint.
     tool_paths: crate::sent::TurnPaths,
+    /// Tool calls whose update the ACP reader dropped with no status read (`skipped.rs`).
+    skipped: skipped::Skipped,
     /// A web search of the turn looked like case law (`connectors/hint.rs`): its end asks
     /// whether to offer the connector.
     case_law_hint: crate::connectors::hint::TurnLooks,

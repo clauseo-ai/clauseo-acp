@@ -176,7 +176,8 @@ fn update_warnings_name_their_session_and_set_mode_round_trips() {
             | AcpEvent::Limit { .. }
             | AcpEvent::TooLong { .. }
             | AcpEvent::ConnectionLost { .. }
-            | AcpEvent::Warning { .. }) => panic!("expected a warning, got {other:?}"),
+            | AcpEvent::Warning { .. }
+            | AcpEvent::UpdateSkipped { .. }) => panic!("expected a warning, got {other:?}"),
         })
         .collect();
     let named = |name: &str| Some(name.to_owned());

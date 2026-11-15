@@ -18,6 +18,7 @@ use clauseo_protocol::{
 
 use super::super::Actor;
 use super::out::Out;
+use super::skipped::{self, Skipped};
 use super::{LimitMark, cancel};
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
@@ -95,10 +96,11 @@ pub(super) struct TurnClose {
     pub(super) expiries: Expiries,
     /// `Cancelled` for each tool call of the turn not finished, as sent.
     pub(super) cancel_tools: bool,
-    /// When not cancelling: `Completed` for each tool call of the turn not finished, as sent.
-    /// Set on a turn the agent ended well, so a tool call whose last update never came (a
-    /// `session/update` over the ACP line cap, which the reader drops) does not stay running.
-    pub(super) complete_tools: bool,
+    /// When not cancelling: `Completed` for each of these tool calls not finished, as sent.
+    /// Set on a turn the agent ended well to the calls whose update the ACP reader dropped over
+    /// its line cap with no status read (`skipped.rs`), so a call whose last update never came
+    /// does not stay running.
+    pub(super) complete_tools: Skipped,
     /// Events of the matter's stream: checkpoint records (with their rows) and outside edits.
     pub(super) matter: Option<(MatterId, Vec<MatterEvent>)>,
     pub(super) files: Option<FilesChanged>,
@@ -119,7 +121,7 @@ impl TurnClose {
             failure: None,
             expiries: Expiries::None,
             cancel_tools: false,
-            complete_tools: false,
+            complete_tools: Skipped::None,
             matter: None,
             files: None,
             checkpoint_after: None,
@@ -142,8 +144,9 @@ impl TurnClose {
         self.expiries.push_into(actor, out)?;
         if self.cancel_tools {
             cancel::push_tool_settles(actor, out.thread(), turn, ToolCallStatus::Cancelled, out)?;
-        } else if self.complete_tools {
-            cancel::push_tool_settles(actor, out.thread(), turn, ToolCallStatus::Completed, out)?;
+        } else {
+            let tools = skipped::unfinished(actor, out.thread(), turn, &self.complete_tools);
+            cancel::push_statuses(actor, tools, ToolCallStatus::Completed, out)?;
         }
         if let Some((matter, events)) = &self.matter {
             for event in events {
@@ -238,9 +241,10 @@ impl TurnClose {
 }
 
 /// Whether a turn that stops with `stop`, and no failure, completes the tool calls it leaves
-/// unfinished ([`TurnClose::complete_tools`]): the stops where the agent answered the prompt. A
-/// cancel closes them `Cancelled` itself, and a failure leaves them as they are. An agent that
-/// ends its turn has run its tool calls, so one still open lost its last update.
+/// unfinished whose update the reader dropped ([`TurnClose::complete_tools`]): the stops where
+/// the agent answered the prompt. A cancel closes every unfinished one `Cancelled` itself, and a
+/// failure leaves them as they are. An agent that ends its turn has run its tool calls, so one
+/// still open after a dropped update lost its last one.
 pub(super) fn completes_tools(stop: StopReason) -> bool {
     matches!(
         stop,
