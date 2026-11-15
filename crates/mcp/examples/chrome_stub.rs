@@ -8,13 +8,20 @@
 //! touches fds 3 and 4 and runs until it is killed. A file `chrome-mode` beside it changes that:
 //! `silent` reads but never answers, `exit` exits 3 at once, `answer-exit` answers the first
 //! command and exits 3, `sandbox-exit:<line>` prints `<line>` (one of Chrome's sandbox failures)
-//! and exits 1 before it answers, `sandbox-stay:<line>` prints it and waits, never answering.
+//! and exits 1 before it answers, `sandbox-stay:<line>` prints it and waits, never answering,
+//! `sandbox-late:<line>` answers as usual and prints it [`LATE`] after its first answer.
 //! Each start also adds a line to `chrome-launches` beside it. Tests copy it into their own
 //! folder, so each has its own mode and pid file. Cargo builds it for the tests; it is never
 //! shipped.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::time::Duration;
+
+/// How long after its first answer `sandbox-late` prints its line: past the guard's start, once
+/// agent-browser has answered the test's first call.
+const LATE: Duration = Duration::from_secs(1);
 
 fn main() -> std::io::Result<()> {
     let exe = std::env::current_exe()?;
@@ -46,6 +53,9 @@ fn main() -> std::io::Result<()> {
     let Some(Ok((read, mut write))) = piped.then(pipe::open) else {
         wait_forever();
     };
+    let mut late = mode
+        .strip_prefix("sandbox-late:")
+        .map(|line| line.trim_end().to_owned());
     let mut read = BufReader::new(read);
     loop {
         let mut message = Vec::new();
@@ -69,10 +79,29 @@ fn main() -> std::io::Result<()> {
         bytes.push(0);
         write.write_all(&bytes)?;
         write.flush()?;
+        if let Some(line) = late.take() {
+            print_later(line);
+        }
         if mode == "answer-exit" {
             std::process::exit(3);
         }
     }
+}
+
+/// Prints `line` on stderr [`LATE`] from now, on a thread of its own, so the answers go on.
+fn print_later(line: String) {
+    let (keep, wait) = mpsc::channel::<()>();
+    drop(std::thread::spawn(move || {
+        // Nothing is ever sent: the wait just takes `LATE`.
+        match wait.recv_timeout(LATE) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        }
+        drop(keep);
+        let mut err = std::io::stderr().lock();
+        drop(writeln!(err, "{line}"));
+        drop(err.flush());
+    }));
 }
 
 /// Writes `chrome.pid`, a line more in `chrome-launches` and, on Unix,

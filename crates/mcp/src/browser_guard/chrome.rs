@@ -106,6 +106,9 @@ pub(crate) struct Chrome {
     mover: Option<Mover>,
     /// Dropped to stop the exit watcher.
     stop_watch: Option<mpsc::Sender<()>>,
+    /// Where the stderr reader tells a sandbox failure after the start
+    /// ([`Chrome::on_sandbox_failure`]).
+    later: Arc<Later>,
     /// The relay holding the guard's ends of the browser's `DevTools` pipe. Dropped after the
     /// browser is killed.
     devtools: super::devtools::Devtools,
@@ -185,8 +188,11 @@ fn launch_on(
     )
     .map_err(|error| format!("cannot start {}: {error}", spec.executable.display()))?;
     let (seen, inbox) = mpsc::channel();
+    let later = Arc::new(Later::default());
     if let Some(stderr) = child.stderr.take() {
-        drop(thread::spawn(move || read_stderr(stderr, &seen)));
+        let later = Arc::clone(&later);
+        // Never joined: it ends at the end of Chrome's stderr, once Chrome's group is gone.
+        drop(thread::spawn(move || read_stderr(stderr, &seen, &later)));
     }
     Ok(Chrome {
         #[cfg(unix)]
@@ -200,6 +206,7 @@ fn launch_on(
         starting: Some(inbox),
         mover: None,
         stop_watch: None,
+        later,
         devtools,
     })
 }
@@ -309,6 +316,12 @@ impl Chrome {
         }));
     }
 
+    /// Calls `tell` once if Chrome says its sandbox cannot start after its start was accepted
+    /// (or said so just before, too late for the start's check), before this value drops.
+    pub(crate) fn on_sandbox_failure(&self, tell: impl FnOnce(&'static str) + Send + 'static) {
+        self.later.set(Box::new(tell));
+    }
+
     /// Kills Chrome's tree, if Chrome still runs, and reaps Chrome. The process group is
     /// signalled only while its leader is unreaped (under the lock the watcher also takes), so
     /// its id cannot have been reused. The reap hook runs after the kill, before the reap.
@@ -354,6 +367,7 @@ impl Chrome {
 impl Drop for Chrome {
     fn drop(&mut self) {
         drop(self.stop_watch.take());
+        self.later.clear();
         self.kill_tree();
         if let Some(mover) = self.mover.take() {
             mover.finish();
@@ -439,7 +453,7 @@ pub(crate) mod sandbox;
 mod stderr;
 
 pub(super) use profile::ready_profile;
-use stderr::{Seen, quote, read_stderr};
+use stderr::{Later, Seen, quote, read_stderr};
 
 #[cfg(test)]
 mod tests;

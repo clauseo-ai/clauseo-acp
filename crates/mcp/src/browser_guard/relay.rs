@@ -58,6 +58,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
+use super::chrome::sandbox::REFUSAL;
 use super::parent::Parent;
 use super::session::{self, Shared, StartError, Stopped};
 use super::{Child, note};
@@ -135,6 +136,8 @@ pub(crate) enum Event {
     PortRefused(u64, String),
     /// The guard's Chrome exited.
     ChromeExited(u64),
+    /// The guard's running Chrome said its sandbox cannot start; the fixed part of what it said.
+    SandboxFailed(u64, &'static str),
     /// agent-browser's reply to an `agent_browser_close` call went to the agent; with
     /// `State::sent_count` as the reply was taken.
     Closed(u64, u64),
@@ -299,13 +302,15 @@ fn wait_for_end(shared: &Shared, inbox: &mpsc::Receiver<Event>) -> End {
                     return End::ChromeExited;
                 }
             }
+            Event::SandboxFailed(of, said) if current(of) => refuse_after_start(shared, said),
             Event::Closed(of, sent) if current(of) => stop_after_close(shared, sent),
             // From a start the guard has stopped already.
             Event::Closed(..)
             | Event::ChildEnded(_)
             | Event::ChildOversize(_)
             | Event::PortRefused(..)
-            | Event::ChromeExited(_) => {}
+            | Event::ChromeExited(_)
+            | Event::SandboxFailed(..) => {}
             Event::ParentGone => return End::ParentGone,
             Event::StartFailed(reason) => return End::StartFailed(reason),
             Event::AgentFailed(error) => return End::AgentFailed(error),
@@ -371,6 +376,24 @@ fn stop_after_close(shared: &Shared, sent: u64) {
              session ends",
         );
     }
+}
+
+/// The running Chrome said its sandbox cannot start (after its start was accepted, or just before,
+/// too late for the start's check; `chrome/stderr.rs`): stops Chrome and agent-browser, answers
+/// what is in flight with the sandbox's refusal, and refuses every later call the same way
+/// (`session::start`, which then ends the guard as a refused start does). No browser starts again.
+fn refuse_after_start(shared: &Shared, said: &'static str) {
+    let in_flight = {
+        let mut state = lock(&shared.state);
+        state.sandbox_refused = Some(said);
+        drop(session::stop(&shared.launcher, &mut state));
+        state.take_in_flight()
+    };
+    note(&format!(
+        "{}; stopped Chrome and agent-browser",
+        StartError::Sandbox(Some(said))
+    ));
+    answer_all(&shared.out, &in_flight, REFUSAL);
 }
 
 /// Chrome died while relaying. The first time: stops agent-browser, answers what is in flight
