@@ -17,7 +17,11 @@
 //! - A prompt does not wait for the grace: a prompted turn (typed, or taken from the queue) for a
 //!   marked agent with nothing else open restarts it at step 4 (`agents::restart_if_marked`),
 //!   so the prompt goes with the new servers. A removed server or a changed key thus stays only
-//!   for the turn running at the edit and any agent-started turn after it.
+//!   for the turn running at the edit and any agent-started turn after it. What the relaunch can
+//!   cut: a command Claude put in the background (a steer during a Bash call ends the turn with
+//!   the command still running) that has not reported yet. The host sees such a command only
+//!   when it reports, as an agent-started turn, so it cannot know one is running; a prompt in
+//!   that window relaunches the agent, the command ends with it, and its result never comes.
 
 use clauseo_protocol::ThreadId;
 

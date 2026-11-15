@@ -273,6 +273,7 @@ pub(super) fn send(actor: &mut Actor, thread: ThreadId, mut ask: Ask) {
     let message = ask.message;
     let content = ask.content.clone();
     tracing::info!(target: LIFECYCLE, %thread, turn = %ask.turn, "a steer was sent");
+    note_in_tool(actor, thread, ask.turn);
     ask.places = confirm::mark(actor, thread);
     let timer = Some(arm(actor, thread, message));
     if let Some(queue) = queue(actor, thread) {
@@ -289,6 +290,20 @@ pub(super) fn send(actor: &mut Actor, thread: ThreadId, mut ask: Ask) {
         };
         let _gone = post.try_send(Input::Turn(input));
     });
+}
+
+/// A steer into `turn` went out while a tool call of it was open: Claude may put the command in
+/// the background and end the turn (`own_turn.rs`). Noted on the agent for the relaunch's log.
+fn note_in_tool(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    let open = actor
+        .loaded(StreamId::Thread(thread))
+        .is_some_and(|loaded| loaded.sent.unfinished_tools(turn).next().is_some());
+    if let (true, Some(agent)) = (
+        open,
+        state(actor, thread).and_then(|state| state.agent.as_deref_mut()),
+    ) {
+        agent.idle.steered_in_tool = Some(turn);
+    }
 }
 
 /// The answer's kind, as the lifecycle log names it.
@@ -355,6 +370,13 @@ fn arm(actor: &mut Actor, thread: ThreadId, message: MessageId) -> futures::futu
 /// end (`confirm.rs`). After `EndTurn` the unanswered ones keep waiting for their answer; after
 /// any other stop they are not sent, and a later answer is ignored.
 pub(super) fn turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, stop: StopReason) {
+    let now = actor.now().mono;
+    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && agent.idle.steered_in_tool == Some(turn)
+    {
+        agent.idle.steered_in_tool = None;
+        agent.idle.steered_end = Some(now);
+    }
     confirm::turn_ended(actor, thread, turn, stop);
     if stop == StopReason::EndTurn {
         return;

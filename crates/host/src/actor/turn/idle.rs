@@ -31,7 +31,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use clauseo_protocol::ThreadId;
+use clauseo_protocol::{ThreadId, TurnId};
 use futures::future::AbortHandle;
 
 use super::super::Actor;
@@ -77,6 +77,12 @@ pub(super) struct Mark {
     pub(super) tools_seen: u64,
     /// Why it is to be stopped once nothing is pending, and relaunched by its next prompt.
     pub(super) relaunch: Option<Relaunch>,
+    /// Its turn that got a steer while a tool call of it was open (`queue/steer.rs`), until
+    /// that turn closes.
+    pub(super) steered_in_tool: Option<TurnId>,
+    /// When that turn closed (monotonic): Claude may have put the command in the background,
+    /// which a relaunch soon after would end (`agents::restart_if_marked` logs it).
+    pub(super) steered_end: Option<Duration>,
 }
 
 /// Why an agent is to be stopped once idle and relaunched by its next prompt: what it was
@@ -153,6 +159,12 @@ impl IdleClock {
             config,
             ..Self::default()
         }
+    }
+
+    /// How soon after a turn's end a relaunch is logged as one that may cut a background
+    /// command: the grace, `cap_min_idle`.
+    pub(super) fn window(&self) -> Duration {
+        self.config.cap_min_idle
     }
 
     /// When the deadline armed falls, for tests.
