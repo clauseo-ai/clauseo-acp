@@ -62,6 +62,12 @@ pub(in crate::actor::turn) fn stop_stale_at_turn_end(actor: &mut Actor, thread: 
     }
 }
 
+/// Whether `thread`'s live launch took another fence key than a launch would take now, for a
+/// prompt about to reach it (`agents::ensure`).
+pub(in crate::actor::turn) fn fence_stale(actor: &Actor, thread: ThreadId) -> bool {
+    stale(actor, thread, matters_hash(actor))
+}
+
 /// Whether `thread`'s live launch took another fence key than a launch would take now.
 fn stale(actor: &Actor, thread: ThreadId, matters: u64) -> bool {
     let launched = actor

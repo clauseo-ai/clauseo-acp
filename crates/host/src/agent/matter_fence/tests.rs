@@ -233,3 +233,32 @@ fn codex_keeps_an_invited_matter_inside_the_own_one_denied() {
     denied.sort();
     assert_eq!(denied, [root.join("fenced"), root.join("own/Inner")]);
 }
+
+/// The budget goes to the matters with the fewest paths first: one old parent with thousands
+/// of entries can't push a newer plain sibling out; the parent is the one left unfenced.
+#[test]
+fn the_budget_fences_the_smallest_matters_first() {
+    let (_dir, root) = tree("mfence-budget-order", &["big/own", "small", "data"]);
+    for n in 0..super::MAX_PATHS {
+        write::write_file(&root.join(format!("big/f{n}")), b"").unwrap();
+    }
+    let fence = fence(&root, "big/own", &[("big", false), ("small", false)]);
+    assert_eq!(fence.unfenced, [fence.others[0].id]);
+    assert_eq!(fence.others[1].paths, [root.join("small")]);
+}
+
+/// A link among the own matter's entries is never re-opened for the sandbox: it could lead into
+/// another matter.
+#[cfg(unix)]
+#[test]
+fn a_link_in_the_own_matter_is_not_re_opened() {
+    let (_dir, root) = tree(
+        "mfence-own-link",
+        &["own/Sub", "own/Drafts", "other", "data"],
+    );
+    write::symlink(&root.join("other"), &root.join("own/x")).unwrap();
+    let fence = fence(&root, "own", &[("own/Sub", false), ("other", false)]);
+    let open = fence.own_open.clone().expect("split");
+    assert_eq!(open, [root.join("own/Drafts")]);
+    assert!(!fence.own_unlisted);
+}
