@@ -111,9 +111,11 @@ impl Access {
 
     /// The result in the restricted probe's `output`, if it printed one.
     pub(super) fn parse(output: &str) -> Option<Access> {
+        // Anywhere in a line: libtest prints the test's name on the line the probe's output
+        // continues.
         let line = output
             .lines()
-            .find(|line| line.trim_start().starts_with(RESULT))?;
+            .find_map(|line| line.find(RESULT).and_then(|at| line.get(at..)))?;
         let mut granted = [false; 4];
         for ((name, _), slot) in RIGHTS.iter().zip(&mut granted) {
             let value = line
@@ -152,26 +154,31 @@ fn raw(handle: &OwnedHandle) -> HANDLE {
     HANDLE(handle.as_raw_handle())
 }
 
-/// `class` of `token`, in a buffer aligned for any of the TOKEN_* structs.
+/// `class` of `token` (a class of variable size: `TokenUser`, `TokenOwner`, `TokenGroups`,
+/// `TokenPrivileges`, `TokenIntegrityLevel`), in a buffer aligned for any of the TOKEN_*
+/// structs: the size asked first with no buffer, then exactly that many bytes read.
 fn info(token: HANDLE, class: TOKEN_INFORMATION_CLASS) -> io::Result<Vec<u64>> {
+    let failed = |error: windows::core::Error| io::Error::other(format!("{class:?}: {error}"));
     let mut size = 0_u32;
     // SAFETY: with no buffer the call only writes the size it needs into `size`; its
     // ERROR_INSUFFICIENT_BUFFER is expected.
     drop(unsafe { GetTokenInformation(token, class, None, 0, &raw mut size) });
+    if size == 0 {
+        return Err(io::Error::other(format!("{class:?}: no size reported")));
+    }
     let words = usize::try_from(size).map_err(io::Error::other)?.div_ceil(8);
-    let mut buffer = vec![0_u64; words.max(1)];
-    let length = u32::try_from(buffer.len() * 8).map_err(io::Error::other)?;
-    // SAFETY: `buffer` is `length` writable bytes, 8-aligned, live for the call.
+    let mut buffer = vec![0_u64; words];
+    // SAFETY: `buffer` is at least `size` writable bytes, 8-aligned, live for the call.
     unsafe {
         GetTokenInformation(
             token,
             class,
             Some(buffer.as_mut_ptr().cast()),
-            length,
+            size,
             &raw mut size,
         )
     }
-    .map_err(io::Error::from)?;
+    .map_err(failed)?;
     Ok(buffer)
 }
 
@@ -207,11 +214,24 @@ fn administrators() -> io::Result<Box<[u64; 9]>> {
     Ok(buffer)
 }
 
-/// Whether `token` is elevated (`TokenElevation`).
+/// Whether `token` is elevated (`TokenElevation`, a class of fixed size, read into its struct
+/// with exactly its size: Windows answers any other length with `ERROR_BAD_LENGTH`).
 fn is_elevated(token: HANDLE) -> io::Result<bool> {
-    let buffer = info(token, TokenElevation)?;
-    // SAFETY: the call filled `buffer` with a TOKEN_ELEVATION.
-    Ok(unsafe { (*buffer.as_ptr().cast::<TOKEN_ELEVATION>()).TokenIsElevated } != 0)
+    let mut elevation = TOKEN_ELEVATION::default();
+    let length = u32::try_from(size_of::<TOKEN_ELEVATION>()).map_err(io::Error::other)?;
+    let mut size = 0_u32;
+    // SAFETY: `elevation` is a live TOKEN_ELEVATION of `length` bytes the call writes.
+    unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            Some((&raw mut elevation).cast()),
+            length,
+            &raw mut size,
+        )
+    }
+    .map_err(|error| io::Error::other(format!("TokenElevation: {error}")))?;
+    Ok(elevation.TokenIsElevated != 0)
 }
 
 /// Whether this process's token is elevated; no on any error.
@@ -460,7 +480,7 @@ pub(super) fn restricted(entry: &str, pid: u32) -> io::Result<String> {
     let output = inheritable(HANDLE(writer.as_raw_handle()))?;
     drop(writer);
     let program: Vec<u16> = std::env::current_exe()?.as_os_str().encode_wide().collect();
-    let args: Vec<Vec<u16>> = [entry, "--exact", "--nocapture", "--test-threads=1"]
+    let args: Vec<Vec<u16>> = [entry, "--exact", "--nocapture", "--test-threads=1", "-q"]
         .iter()
         .map(|arg| arg.encode_utf16().collect())
         .collect();
