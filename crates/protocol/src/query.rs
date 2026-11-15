@@ -9,8 +9,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, AgentPrefs, AllowedSite, BlobHash, CheckpointId, ClientName, CompactString,
-    ConfigOption, Count, Date, Error, FileChange, FileRefId, FolderPlace, LastStop, MatterId,
-    MatterKind, MatterPath, MatterSource, MatterStatus, PackList, PackStatus, Protection,
+    ConfigOption, Count, Date, Error, FileChange, FileRefId, FolderPlace, LastExit, LastStop,
+    MatterId, MatterKind, MatterPath, MatterSource, MatterStatus, PackList, PackStatus, Protection,
     ProtectionView, QueueHoldReason, RestoreRequest, RevisionList, SearchAnswer, SearchRequest,
     Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId,
     UpdateView, ViewEntry, WordBlackline,
@@ -187,6 +187,10 @@ pub enum HostQuery {
     /// Where the updater stands (decision record 0037), read after subscribing to the app
     /// stream as `GetSettings` is. Answered `QueryResult::Update`. JSON: `"get_update"`.
     GetUpdate,
+    /// How the run before this one ended, and the file actions it left unfinished, for the
+    /// notice after Clauseo closed unexpectedly. Answered `QueryResult::LastExit`, the same all
+    /// through a run. JSON: `"last_exit"`.
+    LastExit,
     /// Every skill pack folder in `<data>/skill-packs/`, and every pack `skills.enabled`
     /// names, each with its state (decision record 0040), sorted by id; read off the host
     /// thread. Answered `QueryResult::SkillPacks`. JSON: `"list_skill_packs"`.
@@ -253,6 +257,8 @@ pub enum QueryResult {
     Settings(SettingsView),
     /// For `GetUpdate`.
     Update(UpdateView),
+    /// For `LastExit`.
+    LastExit(LastExit),
     /// For `ListPapers`: the matter's folder as it is now, by the rules a checkpoint versions
     /// it by (the same excluded names, size cap and cloud-only files).
     Papers {

@@ -3,7 +3,8 @@
 //! name rules in `commands/names.rs`, file lists in `commands/files.rs`, the display settings'
 //! wire form in `commands/settings.rs`, `list_agents` in `commands/agents.rs`, `refresh_limits` in
 //! `commands/limits.rs`, `preview_undo` in `commands/undo_preview.rs`, folder support in
-//! `commands/folder_support.rs`, the updater's in `commands/update.rs`.
+//! `commands/folder_support.rs`, the updater's in `commands/update.rs`, `last_exit` in
+//! `commands/last_exit.rs`.
 
 #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -54,6 +55,10 @@ mod folder_support;
 #[cfg(test)]
 #[path = "commands/update.rs"]
 mod update;
+
+#[cfg(test)]
+#[path = "commands/last_exit.rs"]
+mod last_exit;
 
 #[cfg(test)]
 #[path = "commands/protection.rs"]
