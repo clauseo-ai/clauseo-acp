@@ -284,6 +284,9 @@ def main():
     if len(sys.argv) != 6:
         raise SystemExit("usage: smoke.py <runtime dir> <fixtures dir> <work dir> <pandoc version> "
                          "<tesseract version>")
+    # Windows' console code page cannot print the Hindi word; -I ignores PYTHONIOENCODING.
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
     root, fixtures, work, version, tesseract_version = sys.argv[1:6]
     interpreter(root)
     imports(root)
