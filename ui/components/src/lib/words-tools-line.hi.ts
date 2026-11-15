@@ -27,7 +27,7 @@ export const HI = {
   "Couldn't check browser settings": "ब्राउज़र सेटिंग्स की जाँच नहीं हो सकी",
   // Windows: the only Chrome is a copy installed for this user alone, which Clauseo's browser can't start
   // (UC-554; provisional Hindi, app track final)
-  "Can't use this Chrome": "यह Chrome इस्तेमाल नहीं हो सकता",
+  "Can't use your Chrome": "आपका Chrome इस्तेमाल नहीं हो सकता",
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

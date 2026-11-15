@@ -204,7 +204,7 @@ export const UET: Entry[] = [
   ),
   entry(
     "UC-554",
-    lineWords("Can't use this Chrome"),
+    lineWords("Can't use your Chrome"),
     [browser("browser_per_user_chrome_only")],
     WINDOWS,
   ),

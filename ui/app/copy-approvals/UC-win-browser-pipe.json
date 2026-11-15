@@ -19,7 +19,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
-    "note": "Under Can't use this Chrome (UC-554) on Windows (browser_per_user_chrome_only): no Edge and no Program Files Chrome, only %LOCALAPPDATA%\\Google\\Chrome, which can't start under Clauseo's browser guard; replaces UET-50, which told the lawyer to install what they have"
+    "note": "Under Can't use your Chrome (UC-554) on Windows (browser_per_user_chrome_only): no Edge and no Program Files Chrome, only %LOCALAPPDATA%\\Google\\Chrome, which can't start under Clauseo's browser guard; replaces UET-50, which told the lawyer to install what they have"
   },
   "UC-552": {
     "en": "Your firm's settings don't let apps control Microsoft Edge. Ask your firm's IT to allow this for Clauseo, then start a new conversation.",
@@ -44,14 +44,14 @@
     "note": "UC-550 when a Program Files Chrome is the one browser installed (browser_blocked_chrome), so only Chrome is named"
   },
   "UC-554": {
-    "en": "Can't use this Chrome",
-    "hi": "यह Chrome इस्तेमाल नहीं हो सकता",
+    "en": "Can't use your Chrome",
+    "hi": "आपका Chrome इस्तेमाल नहीं हो सकता",
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-15",
     "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
-    "note": "The browser's reason on Windows when the only Chrome is a per-user copy (browser_per_user_chrome_only); UC-551 says it in full under it; in the tool line's tooltip as 'Browser: off, can't use this Chrome.'"
+    "note": "The browser's reason on Windows when the only Chrome is a per-user copy (browser_per_user_chrome_only); UC-551 says it in full under it; in the tool line's tooltip as 'Browser: off, can't use your Chrome.'"
   }
 }
