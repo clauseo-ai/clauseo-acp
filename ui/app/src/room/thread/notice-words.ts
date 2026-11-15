@@ -92,6 +92,13 @@ export function noticeLine(
           { name },
         );
   }
+  // the same, in a session without web search: no web search is offered
+  if (kind === "shell_network_blocked_no_web_search") {
+    const name = agentNameOf(agent);
+    return name === null
+      ? w.th("Clauseo stopped a step: the AI tried to go online by running a command.")
+      : w.th("Clauseo stopped a step: {name} tried to go online by running a command.", { name });
+  }
   if (typeof kind === "string") {
     if (kind === "context_not_restored")
       return w.th(

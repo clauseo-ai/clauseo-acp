@@ -4197,6 +4197,11 @@ export type NoticeKind =
  *  the internet (curl, wget, a network approval, extra network permissions). Once a turn.
  */
 "shell_network_blocked" | 
+/**
+ *  As `shell_network_blocked`, in a session without web search (the firm or the lawyer
+ *  turned it off), so the words offer no web search instead. Once a turn.
+ */
+"shell_network_blocked_no_web_search" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

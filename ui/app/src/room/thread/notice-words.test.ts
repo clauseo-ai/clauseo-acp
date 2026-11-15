@@ -73,6 +73,25 @@ test("a declined shell download's line names the agent, in English and Hindi", (
   );
 });
 
+test("without web search, the declined download's line offers none, in English and Hindi", () => {
+  const codex = { kind: "codex", name: "codex-acp" } as const;
+  const kind = "shell_network_blocked_no_web_search";
+  expect(noticeLine(kind, en, codex)).toBe(
+    "Clauseo stopped a step: ChatGPT tried to go online by running a command.",
+  );
+  expect(noticeLine(kind, words("hi"), codex)).toBe(
+    "Clauseo ने एक काम रोक दिया: ChatGPT ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
+  );
+  expect(noticeLine(kind, en)).toBe(
+    "Clauseo stopped a step: the AI tried to go online by running a command.",
+  );
+  expect(noticeLine(kind, words("hi"), { kind: undefined, name: " " })).toBe(
+    "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
+  );
+  // with web search, the line still offers it
+  expect(noticeLine("shell_network_blocked", en, codex)).toMatch(/can use web search instead\.$/);
+});
+
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
   expect(noticeLine(undefined, en)).toBeNull();
 });

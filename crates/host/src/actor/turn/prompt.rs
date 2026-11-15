@@ -140,12 +140,14 @@ fn note_text(actor: &mut Actor, thread: ThreadId) -> Option<String> {
     ensure_note(actor, thread);
     let state = state(actor, thread)?;
     let undo = undo_note::note_text(state.note.as_deref().unwrap_or_default());
-    let owed = state
-        .offline_owed
-        .then_some(super::shell_network::OWED_NOTE);
+    let owed = state.offline_owed;
+    let owed = owed.then(|| {
+        let web_search = crate::actor::header_tools::web_search_on(actor, thread);
+        super::shell_network::owed_note(web_search)
+    });
     match (owed, undo) {
         (Some(owed), Some(undo)) => Some(format!("{owed}\n{undo}")),
-        (owed, undo) => owed.map(str::to_owned).or(undo),
+        (owed, undo) => owed.or(undo),
     }
 }
 

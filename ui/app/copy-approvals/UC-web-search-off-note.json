@@ -1,0 +1,24 @@
+{
+  "UC-570": {
+    "en": "Clauseo stopped a step: {name} tried to go online by running a command.",
+    "hi": "Clauseo ने एक काम रोक दिया: {name} ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "stage E netnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "stage E netnote (provisional; Rohan batch review)",
+    "note": "Host notice NoticeKind::ShellNetworkBlockedNoWebSearch: TN-13 in a session without web search (the firm or the lawyer turned it off), so no web search is offered (actor/turn/shell_network.rs). {name} as TN-13 (ChatGPT for Codex)"
+  },
+  "UC-571": {
+    "en": "Clauseo stopped a step: the AI tried to go online by running a command.",
+    "hi": "Clauseo ने एक काम रोक दिया: AI ने कमांड चलाकर इंटरनेट से जुड़ने की कोशिश की।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "stage E netnote (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "stage E netnote (provisional; Rohan batch review)",
+    "note": "UC-570 where the room knows no agent name (notice-words.ts), as TN-14; rendered alone"
+  }
+}

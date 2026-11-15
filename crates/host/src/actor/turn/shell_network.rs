@@ -28,7 +28,9 @@
 //! The answer cannot carry the note: codex-acp keeps only the chosen option's id
 //! (`selectedDecision`, `dist/index.js:32443-32447`). So when the steer cannot go (no native
 //! steering, an agent not attached) or does not land (`PromptRequired`, `Failed`, an error),
-//! the note is owed: [`OWED_NOTE`] goes first in the thread's next prompt (`prompt.rs`).
+//! the note is owed: [`owed_note`] goes first in the thread's next prompt (`prompt.rs`).
+//! In a session without web search (`header_tools::web_search_on`), the notice
+//! (`ShellNetworkBlockedNoWebSearch`) and the notes offer no web search instead.
 
 use clauseo_acp::SteerResult;
 use clauseo_protocol::{
@@ -45,21 +47,64 @@ use super::updates::{agent, commit};
 use super::{TurnInput, current, spawn, state};
 use crate::log_file::Cause;
 
-/// What the agent is told after the first refusal of the turn.
-pub(super) const AGENT_NOTE: &str = "Clauseo declined that command: your shell has no internet. \
-    Use your web search or web fetch tool instead, or, if you have the browser, save a file by \
-    clicking its link there.";
+/// What the agent is told after the first refusal of the turn, without its way out.
+const AGENT_NOTE: &str = "Clauseo declined that command: your shell has no internet.";
 
-/// The note owed when the steer did not land, first in the thread's next prompt.
-pub(super) const OWED_NOTE: &str = "Note from Clauseo: in your last turn, Clauseo declined a \
-    command of yours that needed the internet, because your shell has no internet. Use your web \
-    search or web fetch tool instead, or, if you have the browser, save a file by clicking its \
-    link there.";
+/// The note owed when the steer did not land, first in a later prompt (a queued prompt may
+/// start first, so it says "earlier"), without its way out.
+const OWED_NOTE: &str = "Note from Clauseo: earlier, Clauseo declined a command of yours that \
+    needed the internet, because your shell has no internet.";
+
+/// The notes' way out with web search.
+const WITH_SEARCH: &str = "Use your web search or web fetch tool instead, or, if you have the \
+    browser, save a file by clicking its link there.";
+
+/// The notes' way out without web search.
+const WITHOUT_SEARCH: &str = "If you have the browser, save a file by clicking its link there.";
 
 /// The notice's fallback words, for a view that does not know its kind (TN-13's English with
 /// `ChatGPT`, the name the app gives Codex; the app words the kind itself).
-pub(super) const NOTICE_TEXT: &str = "Clauseo stopped a step: ChatGPT tried to go online by \
-    running a command. ChatGPT can use web search instead.";
+const NOTICE_TEXT: &str = "Clauseo stopped a step: ChatGPT tried to go online by running a \
+    command. ChatGPT can use web search instead.";
+
+/// [`NOTICE_TEXT`] without web search (UC-570's English with `ChatGPT`).
+const NOTICE_TEXT_NO_SEARCH: &str =
+    "Clauseo stopped a step: ChatGPT tried to go online by running a command.";
+
+/// The steered note, its way out as `web_search` allows.
+pub(super) fn agent_note(web_search: bool) -> String {
+    format!("{AGENT_NOTE} {}", way_out(web_search))
+}
+
+/// The owed note, its way out as `web_search` allows.
+pub(super) fn owed_note(web_search: bool) -> String {
+    format!("{OWED_NOTE} {}", way_out(web_search))
+}
+
+fn way_out(web_search: bool) -> &'static str {
+    if web_search {
+        WITH_SEARCH
+    } else {
+        WITHOUT_SEARCH
+    }
+}
+
+/// The notice for a session with web search or without.
+pub(super) fn notice(web_search: bool) -> Notice {
+    let (text, kind) = if web_search {
+        (NOTICE_TEXT, NoticeKind::ShellNetworkBlocked)
+    } else {
+        (
+            NOTICE_TEXT_NO_SEARCH,
+            NoticeKind::ShellNetworkBlockedNoWebSearch,
+        )
+    };
+    Notice {
+        level: NoticeLevel::Warning,
+        text: text.to_owned(),
+        kind: Some(kind),
+    }
+}
 
 /// codex-acp's option that declines a command and lets the turn go on (`dist/index.js:32026`).
 const DECLINE: &str = "decline";
@@ -133,6 +178,7 @@ fn refuse(actor: &mut Actor, thread: ThreadId, ask: &PermissionAsk) {
         None => None,
     };
     let post = actor.post.clone();
+    let text = agent_note(crate::actor::header_tools::web_search_on(actor, thread));
     let Some(agent) = agent(actor, thread) else {
         return;
     };
@@ -144,7 +190,6 @@ fn refuse(actor: &mut Actor, thread: ThreadId, ask: &PermissionAsk) {
         // that turn; the answer follows on the same connection without waiting for it.
         let steer = async {
             let session = note?;
-            let text = AGENT_NOTE.to_owned();
             let content = vec![ContentBlock::Text { text }];
             Some(client.steer_held(&session, content).await)
         };
@@ -209,11 +254,7 @@ fn tell_once(actor: &mut Actor, thread: ThreadId) -> Option<Route> {
     if std::mem::replace(&mut current.told.offline, true) {
         return None;
     }
-    let notice = Notice {
-        level: NoticeLevel::Warning,
-        text: NOTICE_TEXT.to_owned(),
-        kind: Some(NoticeKind::ShellNetworkBlocked),
-    };
+    let notice = notice(crate::actor::header_tools::web_search_on(actor, thread));
     if let Err(error) = commit(actor, thread, [notice.into()], Vec::new()) {
         tracing::warn!(%thread, error = %Cause(&error), "a shell-network notice was not logged");
     }
@@ -225,7 +266,7 @@ fn tell_once(actor: &mut Actor, thread: ThreadId) -> Option<Route> {
     Some(if native { Route::Steer } else { Route::Owe })
 }
 
-/// The note did not reach the agent: [`OWED_NOTE`] goes first in the thread's next prompt.
+/// The note did not reach the agent: [`owed_note`] goes first in the thread's next prompt.
 pub(super) fn owe_note(actor: &mut Actor, thread: ThreadId) {
     if let Some(state) = state(actor, thread) {
         state.offline_owed = true;
