@@ -345,7 +345,10 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
 /// (`idle::Relaunch`, a Tools change): with nothing else on that agent (no question or call
 /// open, no output held for a turn of its own) it stops and a new one starts for the turn, as
 /// [`restart_if_moved`] does, so the prompt goes with the new inputs. An agent-started turn
-/// (a background command's result) is never cut: it is the current turn then, not this one.
+/// that has opened is never cut: it is the current turn then, not this one. A command Claude put
+/// in the background (a steer during a Bash call) that has not reported yet is cut: the host
+/// sees it only when it reports, so the relaunch ends it and its result never comes. A relaunch
+/// within `cap_min_idle` of a turn that closed after a steer during a tool call is logged.
 /// `false` when nothing was restarted.
 pub(super) fn restart_if_marked(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
     let Some(state) = state(actor, thread) else {
@@ -369,7 +372,21 @@ pub(super) fn restart_if_marked(actor: &mut Actor, thread: ThreadId, turn: TurnI
     if !prompted || held || open || !up || super::idle::calls(agent) > 0 {
         return false;
     }
+    let steered_end = agent.idle.steered_end;
     tracing::info!(target: LIFECYCLE, %thread, why = why.as_str(), "agent relaunched for a prompt");
+    let now = actor.now().mono;
+    let window = actor.turn_path.idle.window();
+    if let Some(at) = steered_end
+        && now.saturating_sub(at) <= window
+    {
+        let since_ms = u64::try_from(now.saturating_sub(at).as_millis()).unwrap_or(u64::MAX);
+        tracing::info!(
+            target: LIFECYCLE,
+            %thread,
+            since_ms,
+            "agent relaunched soon after a steer during a tool call; a background command may end"
+        );
+    }
     restart_for(actor, thread, turn);
     true
 }
