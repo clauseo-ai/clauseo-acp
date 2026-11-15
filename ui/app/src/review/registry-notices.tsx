@@ -1,4 +1,4 @@
-// Host notices' copy review entries (TN-01 on; TN-13 to TN-17 the read invite's: another matter's files refused, with
+// Host notices' copy review entries (TN-01 on; UC-346 to UC-350 the read invite's: another matter's files refused, with
 // the offer, and matters Claude's commands may reach), apart from registry.tsx to keep that file under the size limit: a
 // notice the host sends with its kind, in the room's thread, shown in the app's words (notice-words.ts). Each over the
 // thread the notice is in, as the host sends it.
@@ -210,33 +210,33 @@ export const TN: Entry[] = [
     render: alone((lang) => th(lang, BLOCKED_ALONE)),
   },
   {
-    id: "TN-13",
+    id: "UC-346",
     words: threadWords(OTHER),
     screen: "room/thread",
     render: thread(OTHER_NOTICE),
   },
   {
     // Where the room knows no agent name: rendered alone, as TN-12.
-    id: "TN-14",
+    id: "UC-347",
     words: threadWords(OTHER_ALONE),
     screen: "room/thread",
     render: alone((lang) => th(lang, OTHER_ALONE, { matter: iso(JOSHI.name) })),
   },
   {
-    // The offer under TN-13's line, while the matter is in the list and not yet allowed.
-    id: "TN-15",
+    // The offer under UC-346's line, while the matter is in the list and not yet allowed.
+    id: "UC-348",
     words: threadWords(OFFER),
     screen: "room/thread",
     render: thread(OTHER_NOTICE),
   },
   {
-    id: "TN-16",
+    id: "UC-349",
     words: threadWords(UNFENCED),
     screen: "room/thread",
     render: thread(UNFENCED_NOTICE),
   },
   {
-    id: "TN-17",
+    id: "UC-350",
     words: threadWords(UNFENCED_ALONE),
     screen: "room/thread",
     render: alone((lang) =>
