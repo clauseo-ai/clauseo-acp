@@ -1,0 +1,46 @@
+{
+  "UC-388": {
+    "en": "The web address behind '{text}' changed.",
+    "hi": "'{text}' के पीछे का वेब पता बदल गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-links-tags (en provisional, for the orchestrator)",
+    "note": "over the blackline sheet, one line per link whose web address changed while its text stayed ({text} is the link's text); stetdoc 0.9.3's compare marks no change for it (WordBlackline changed_links)"
+  },
+  "UC-389": {
+    "en": "A comment's text changed. Open both versions in Word to see it.",
+    "hi": "एक टिप्पणी का पाठ बदल गया है। इसे देखने के लिए दोनों संस्करण Word में खोलें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-links-tags (en provisional, for the orchestrator)",
+    "note": "over the blackline sheet when a comment's text differs between the versions; the sheet doesn't show comments (BlacklineNotice comment_changed)"
+  },
+  "UC-390": {
+    "en": "Text in a text box changed. Open both versions in Word to see it.",
+    "hi": "एक टेक्स्ट बॉक्स का पाठ बदल गया है। इसे देखने के लिए दोनों संस्करण Word में खोलें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-links-tags (en provisional, for the orchestrator)",
+    "note": "over the blackline sheet when a text box's text differs between the versions; the sheet shows the new box text but not the old (BlacklineNotice text_box_changed)"
+  },
+  "UC-391": {
+    "en": "The formatting of some table cells changed.",
+    "hi": "तालिका के कुछ सेल की फ़ॉर्मैटिंग बदल गई है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-links-tags (en provisional, for the orchestrator)",
+    "note": "over the blackline sheet when stetdoc lists a tracked cell format change the sheet has no mark for (BlacklineNotice cell_format_changed)"
+  }
+}
