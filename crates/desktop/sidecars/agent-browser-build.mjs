@@ -23,6 +23,9 @@
 // pin's two lines for that triple. .github/workflows/agent-browser-build.yml runs it on a runner
 // per triple (native, except x64 macOS, cross-compiled on an ARM64 Mac).
 //
+// `build` refuses to run when `git status` shows uncommitted changes in the patches folder, and
+// when the toolchain's `rustc -vV` commit-hash is not the pin's `rustc_commit`.
+//
 // The build aims to be reproducible: the toolchain is rust-toolchain.toml's channel
 // (RUSTUP_TOOLCHAIN, as the source folder is outside this repository), the target dir sits outside
 // the source tree, and the rustflags are --remap-path-prefix for the source, cargo's home and the
@@ -346,12 +349,36 @@ function linkerVersions(env) {
 }
 
 /** `build`: see the header. Returns the record it wrote. */
+/** Throws unless `status`, `git status --porcelain` for the patches folder, is empty. */
+export function checkCommitted(status, dir) {
+  if (status.trim() !== '') {
+    throw new Error(`agent-browser: ${dir} has uncommitted changes; build only from committed patches:\n${status.trim()}`);
+  }
+}
+
+/** The 40-hex commit-hash in `rustc -vV`'s output, or null. */
+export function rustcCommit(verbose) {
+  return /^commit-hash: ([0-9a-f]{40})\s*$/m.exec(verbose)?.[1] ?? null;
+}
+
 async function build({ target, out }, { pin, patchDir, log, fetch }) {
   const channel = toolchainChannel(await readFile(TOOLCHAIN, 'utf8'));
+  // Only committed patches: a build from a working tree with edits there is refused.
+  const status = spawnSync('git', ['status', '--porcelain', '--', patchDir], { cwd: REPO, encoding: 'utf8' });
+  if (status.error || status.status !== 0) {
+    throw new Error(`agent-browser: git status failed for ${patchDir}; build only from a git checkout`);
+  }
+  checkCommitted(status.stdout, patchDir);
   const { work, src, epoch, patches } = await prepare({ pin, patchDir, log, fetch });
   try {
     const targetDir = join(work, 'target');
     const env = buildEnv({ triple: target, src, targetDir, epoch, channel });
+    // The toolchain rustup gives for the channel must be the pinned one (rustc_commit).
+    const verbose = spawnSync('rustc', ['-vV'], { encoding: 'utf8', env });
+    const found = verbose.status === 0 ? rustcCommit(verbose.stdout) : null;
+    if (found !== pin.rustcCommit) {
+      throw new Error(`agent-browser: rustc's commit-hash is ${found}, the pin's rustc_commit is ${pin.rustcCommit}`);
+    }
     // The tests first: a failing one stops the build, so nothing untested is published.
     run('cargo', ['test', '--locked', '--target', target], { cwd: join(src, 'cli'), env });
     run('cargo', ['build', '--release', '--locked', '--target', target], { cwd: join(src, 'cli'), env });
@@ -363,7 +390,6 @@ async function build({ target, out }, { pin, patchDir, log, fetch }) {
     await copyFile(join(targetDir, target, 'release', `agent-browser${exe(target)}`), binary);
     const bytes = await readFile(binary);
     const digest = sha256(bytes);
-    const rustc = spawnSync('rustc', ['-vV'], { encoding: 'utf8', env });
     const record = {
       triple: target,
       sha256: digest,
@@ -375,7 +401,7 @@ async function build({ target, out }, { pin, patchDir, log, fetch }) {
       patches,
       source_date_epoch: epoch,
       rustflags: env.CARGO_ENCODED_RUSTFLAGS.split('\x1f'),
-      rustc: rustc.status === 0 ? rustc.stdout.trim() : null,
+      rustc: verbose.stdout.trim(),
       ...linkerVersions(process.env),
       runner_image: process.env.ImageOS ? `${process.env.ImageOS} ${process.env.ImageVersion}` : null,
     };

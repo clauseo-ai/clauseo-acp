@@ -19,11 +19,12 @@ mod tests {
     const OURS: &str = "https://github.com/clauseo-ai/clauseo-acp/releases/download/";
 
     /// The keys before the first table.
-    const TOP_KEYS: [&str; 4] = [
+    const TOP_KEYS: [&str; 5] = [
         "version",
         "patched_tag",
         "upstream_commit",
         "upstream_tarball_sha256",
+        "rustc_commit",
     ];
 
     /// Each Rust target triple the pin names, and upstream's release asset it must download, or
@@ -92,6 +93,9 @@ mod tests {
         }
         if !is_hex(top("upstream_tarball_sha256").unwrap_or_default(), 64) {
             out.push("upstream_tarball_sha256 is not 64 lowercase hex characters".to_owned());
+        }
+        if !is_hex(top("rustc_commit").unwrap_or_default(), 40) {
+            out.push("rustc_commit is not 40 lowercase hex characters".to_owned());
         }
 
         let triples: BTreeSet<&str> = table
@@ -261,6 +265,7 @@ mod tests {
                 "upstream_tarball_sha256 = \"c",
                 "upstream_tarball_sha256 = \"C",
             ),
+            ("rustc_commit = \"b", "rustc_commit = \"B"),
         ];
         for (from, to) in cases {
             assert!(PIN.contains(from), "the pin holds {from}");
