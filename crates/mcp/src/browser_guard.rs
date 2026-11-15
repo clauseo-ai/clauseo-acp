@@ -19,8 +19,8 @@
 //! job holds it, before the guard waits for it) with its download mover (`downloads.rs`), then
 //! agent-browser connected to it; on Windows, after each child line, the guard checks that the
 //! stream server is off and the daemon is on its claimed port (`port_file.rs`). Ten minutes
-//! without a tool call stop Chrome, agent-browser and its daemon, keeping the profile; Chrome's first
-//! unexpected exit stops them too, and its second ends the guard. The guard ends when the
+//! without a tool call stop Chrome, agent-browser and its daemon, keeping the profile; Chrome's
+//! first unexpected exit stops them too, and its second ends the guard. The guard ends when the
 //! agent's stdin ends, agent-browser exits, a start fails or the guard's parent goes
 //! (`parent.rs`). On the way out, whatever the reason, it ends agent-browser's daemon and Chrome
 //! and deletes the run's profile, its Chrome record and its lock file. [`runs_settled`] and
