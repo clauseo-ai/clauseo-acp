@@ -119,14 +119,25 @@ pub(crate) async fn blackline<T: Timer>(
 }
 
 /// Adds [`BlacklineNotice::MayDiffer`] when the two files differ (`differ`) but the blackline
-/// shows no change and says nothing: stetdoc marks no change for some differences (a link's
-/// address with the same text), and "no changes" must never stand for two different files.
+/// shows no change and no notice says part of it may be missing: stetdoc marks no change for
+/// some differences (a link's address with the same text), and "no changes" must never stand
+/// for two different files.
 pub(crate) fn note_a_silent_difference(blackline: &mut WordBlackline, differ: bool) {
     let shown = blackline
         .paragraphs
         .iter()
         .any(|paragraph| paragraph.change != ParagraphChange::Same);
-    if differ && !shown && blackline.notices.is_empty() {
+    // Only a notice that already says something may be missing makes it needless; one about
+    // something else (hidden text, numbers) does not say the versions differ.
+    let said = blackline.notices.iter().any(|notice| {
+        matches!(
+            notice,
+            BlacklineNotice::MayDiffer
+                | BlacklineNotice::PartNotShown
+                | BlacklineNotice::ChangesOutsideText
+        )
+    });
+    if differ && !shown && !said {
         blackline.notices.push(BlacklineNotice::MayDiffer);
     }
 }
