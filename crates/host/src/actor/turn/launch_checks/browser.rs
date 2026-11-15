@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use super::super::super::Actor;
 use crate::browser::chrome::ChromeRoots;
+use crate::browser::install::prune::InUse;
 use crate::browser::rd_policy::RdPolicy;
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
@@ -28,6 +29,16 @@ enum ChromeSearch {
 }
 
 impl ChromeSearch {
+    /// The folder of downloaded copies the search looks in: the roots' app data's, or the data
+    /// folder's.
+    fn browsers(&self, data: &Path) -> PathBuf {
+        let app_data = match self {
+            Self::Roots(Some(roots)) => roots.app_data.as_path(),
+            Self::Skip | Self::Forced(_) | Self::Picked(_) | Self::Roots(None) => data,
+        };
+        app_data.join(crate::browser::chrome::BROWSERS_DIR)
+    }
+
     /// The Chrome found. File system calls: off the actor.
     fn find(self, data: &Path) -> Option<PathBuf> {
         match self {
@@ -91,6 +102,9 @@ pub(super) struct BrowserPrep {
     /// parked Safe workspace's. The plain client's Codex entry does not, so its session opens no
     /// proxy and waits for no block list (`egress::egress_prep`).
     proxy: bool,
+    /// The sessions running a downloaded copy (the actor's): the search notes this one in it,
+    /// under its lock, so the prune never removes a copy a session just picked.
+    in_use: InUse,
 }
 
 impl BrowserPrep {
@@ -148,11 +162,16 @@ impl BrowserPrep {
         }
         // The shell tool's config is the session's own (`launch_checks::shell_folders`); the
         // app-wide one under `<data>/browser` is the parked MCP entry's.
-        let found = if self.shell {
-            chrome.find(data)
-        } else {
-            chrome.find_with_config(data)
-        };
+        let browsers = chrome.browsers(data);
+        let run_root = super::run_dir(data).join(session_id);
+        let shell = self.shell;
+        let found = self.in_use.search(&browsers, &run_root, || {
+            if shell {
+                chrome.find(data)
+            } else {
+                chrome.find_with_config(data)
+            }
+        });
         let Some(chrome) = found else {
             return read;
         };
@@ -337,6 +356,7 @@ pub(super) fn browser_prep(
         socket_root: None,
         shell: false,
         proxy: false,
+        in_use: actor.browser_install.in_use.clone(),
     };
     // Codex on Windows, and Claude on every OS, have no browser at all
     // (`agent::loads::browser::no_browser`).

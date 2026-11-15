@@ -101,6 +101,8 @@
       <string>none</string>
       <key>browser.allow_when_remote_debugging_disabled</key>
       <false/>
+      <key>browser.allow_download</key>
+      <true/>
     </dict>
   </array>
   <key>PayloadType</key>

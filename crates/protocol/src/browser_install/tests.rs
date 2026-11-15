@@ -37,6 +37,7 @@ fn the_failure_codes_are_these_strings() {
             r#""unpack""#,
             r#""unsupported""#,
             r#""cancelled""#,
+            r#""firm_forbids""#,
             r#""unknown""#,
         ]
     );
@@ -50,9 +51,17 @@ fn the_states_are_written_as_the_app_reads_them() {
         json(BrowserInstallState::Downloading {
             bytes: Count::from(5u32),
             total: Count::from(9u32),
+            behind: true,
         }),
-        r#"{"downloading":{"bytes":5,"total":9}}"#
+        r#"{"downloading":{"bytes":5,"total":9,"behind":true}}"#
     );
+    let old: BrowserInstallState =
+        serde_json::from_str(r#"{"downloading":{"bytes":5,"total":9}}"#).unwrap();
+    assert!(matches!(
+        old,
+        BrowserInstallState::Downloading { behind: false, .. }
+    ));
+    assert_eq!(json(BrowserInstallState::Offline), r#""offline""#);
     assert_eq!(json(BrowserInstallState::Unpacking), r#""unpacking""#);
     assert_eq!(json(BrowserInstallState::Done), r#""done""#);
 }

@@ -30,7 +30,7 @@ import { U6F } from "./registry-u6f.tsx";
 import { ME } from "./registry-me.tsx";
 import { UTC } from "./registry-utc.tsx";
 import { WEB_SOURCES } from "./registry-web-sources.tsx";
-import { UET } from "./registry-uet.tsx";
+import { UC_OWN_BROWSER, UET } from "./registry-uet.tsx";
 import { UD1 } from "./registry-ud1.tsx";
 import { UD1_CRASH } from "./registry-ud1-crash.tsx";
 import { UD2 } from "./registry-ud2.tsx";
@@ -411,6 +411,7 @@ export const REGISTRY: readonly Entry[] = [
   ...U6F,
   ...WEB_SOURCES,
   ...UET,
+  ...UC_OWN_BROWSER,
   ...ME,
   ...UD1,
   ...UD1_CRASH,

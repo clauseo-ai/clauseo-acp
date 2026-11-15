@@ -23,5 +23,6 @@ expression: SECURITY_KEYS
   "network.allowed_domains",
   "network.allow_unsafe_site_override",
   "network.unsafe_site_list_updates",
-  "browser.allow_when_remote_debugging_disabled"
+  "browser.allow_when_remote_debugging_disabled",
+  "browser.allow_download"
 ]

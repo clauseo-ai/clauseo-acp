@@ -20,8 +20,20 @@ export const HI = {
   // a policy read found nothing blocking: the browser row's reason, and its tooltip on when the browser comes
   "Ready for new conversations": "नई बातचीत के लिए तैयार",
   "The browser comes with your next conversation.": "ब्राउज़र आपकी अगली बातचीत के साथ आएगा।",
-  // under the Mac's no-browser line: opens Chrome's download page in the default browser (provisional Hindi)
-  "Download Chrome": "Chrome डाउनलोड करें",
+  // with no Chromium browser on a Mac: the offer of Clauseo's own browser, how far its download has got, the wait
+  // for the network, its update when the copy on the computer is behind, the firm's policy forbidding it, and done
+  // (provisional Hindi, stage E)
+  "Get a browser for Clauseo": "Clauseo के लिए ब्राउज़र डाउनलोड करें",
+  "Getting Clauseo's browser: {done}\u00a0MB of {total}\u00a0MB ({percent}%)":
+    "Clauseo का ब्राउज़र डाउनलोड हो रहा है: {total}\u00a0MB में से {done}\u00a0MB ({percent}%)",
+  "Waiting for an internet connection to get the browser.":
+    "ब्राउज़र डाउनलोड करने के लिए इंटरनेट कनेक्शन की प्रतीक्षा की जा रही है।",
+  "Clauseo's browser is behind on security updates. Updating it now.":
+    "Clauseo का ब्राउज़र सुरक्षा अपडेट में पीछे है। इसे अभी अपडेट किया जा रहा है।",
+  "Your firm doesn't allow Clauseo to download a browser.":
+    "आपकी फ़र्म Clauseo को ब्राउज़र डाउनलोड करने की अनुमति नहीं देती।",
+  "Clauseo's browser is ready. Start a new conversation to use it.":
+    "Clauseo का ब्राउज़र तैयार है। इसका उपयोग करने के लिए एक नई बातचीत शुरू करें।",
   // under the browser whose policy Clauseo couldn't check: read it again now
   "Try again": "फिर से प्रयास करें",
   // under the browser's reason when the firm's policy blocks it, in full: installing a browser doesn't help

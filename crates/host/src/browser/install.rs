@@ -2,24 +2,35 @@
 //! (`HostCommand::InstallBrowser`), the host downloads Chrome for Testing once into
 //! `<app data>/browsers/chrome-<version>/`, where [`super::chrome`] finds it at the next session.
 //!
+//! There is no Clauseo manifest: the host reads Google's own list and takes Stable from it. The
+//! same run serves the lawyer's download and the daily check while the app runs, which
+//! downloads only when Stable is newer than the copy installed.
+//!
 //! It runs on a thread of its own (`actor/browser_install.rs`), one at a time, and reports each
 //! [`BrowserInstallState`] as it goes. In order:
 //! 1. The machine: macOS (arm64, x64) only; elsewhere `unsupported`. Never on Windows, where the
 //!    guard's piped browser cannot start from the per-user folder it would sit in
 //!    (`super::chrome`), whatever the app asks.
-//! 2. The disk: about 1 GB free in `<app data>/browsers` ([`MIN_FREE_BYTES`]), else `disk_space`.
-//! 3. The version list ([`VERSIONS_URL`]), and from it Stable's `chrome` zip for this platform
-//!    ([`manifest`]): a version of dotted digits and the one URL Google's layout gives it, else
+//! 2. The version list ([`VERSIONS_URL`]), and from it Stable's `chrome` zip for this platform
+//!    ([`versions`]): a version of dotted digits and the one URL Google's layout gives it, else
 //!    `host_refused`, all before any download.
-//! 4. The zip, into `browsers/.partial-<version>-<random>/chrome.zip`, with progress; its size
-//!    must equal the response's `Content-Length`, else `size_mismatch`.
-//! 5. Unpacking: every entry name in the zip's directory is checked first ([`archive`]), then the
+//! 3. The guardrails ([`fresh`]): the record of Stables seen is updated; a Stable below this
+//!    release's floor or below the copy installed is `host_refused` (never downgraded); a
+//!    Stable equal to the copy installed ends the run as [`Outcome::Current`].
+//! 4. The disk: about 1 GB free in `<app data>/browsers` ([`MIN_FREE_BYTES`]), else `disk_space`.
+//! 5. The zip, into `browsers/.partial-<version>-<random>/chrome.zip`, with progress; its size
+//!    must equal the response's `Content-Length` and be at most [`MAX_ZIP_BYTES`], else
+//!    `size_mismatch`.
+//! 6. Unpacking: every entry name in the zip's directory is checked first ([`archive`]), then the
 //!    system tool unpacks into `.partial-…/chrome/`, then the result is walked: every entry must
 //!    sit inside, and no link may lead out. Else `unpack`.
-//! 6. The code signature, checked and logged; it fails the download only while
-//!    [`signature_required`] says so.
-//! 7. `chrome/` is renamed to `browsers/chrome-<version>/`, walked again there, and the rest of
-//!    `.partial-…` removed.
+//! 7. Windows only: the Authenticode check, logged; it fails the download only while
+//!    [`SIGNATURE_REQUIRED_WINDOWS`] says so. None on macOS: Chrome for Testing there is ad hoc
+//!    signed, with no team id, so no signature check could ever be required of it (record 0029).
+//!    HTTPS to Google's two pinned hosts, no redirect, the size checks and the zip checks are
+//!    the integrity checks, and the browsers folder sits outside what any agent can write.
+//! 8. `chrome/` is renamed to `browsers/chrome-<version>/`, walked again there, and the rest of
+//!    `.partial-…` removed. Older copies go once no session runs them ([`prune`]).
 //!
 //! Every way out but the last removes `.partial-…`, and a cancel (the lawyer's, or the host
 //! stopping) ends the running tool at once. The tools themselves sit behind [`InstallTools`]:
@@ -35,8 +46,10 @@ use super::chrome::{BROWSERS_DIR, CFT_PREFIX, Platform};
 use crate::write;
 
 pub mod archive;
-pub mod manifest;
+pub mod fresh;
+pub mod prune;
 pub mod system;
+pub mod versions;
 #[cfg(windows)]
 mod windows;
 
@@ -53,27 +66,33 @@ pub const MIN_FREE_BYTES: u64 = 1_000_000_000;
 /// removes every leftover one at start ([`archive::sweep_partials`]).
 pub const PARTIAL_PREFIX: &str = ".partial-";
 
+/// The largest zip the host takes, the same cap curl's `--max-filesize` sets
+/// (`system::CURL_FLAGS`): Chrome for Testing's Mac zips are about 200 MB.
+pub const MAX_ZIP_BYTES: u64 = 419_430_400;
+
+/// How long the lawyer's download waits, while offline, before it tries the network again.
+pub const OFFLINE_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// The zip's name inside the working folder.
 const ZIP_NAME: &str = "chrome.zip";
 
 /// The folder inside the working folder that the zip unpacks into, renamed at the end.
 const UNPACKED_NAME: &str = "chrome";
 
-/// Whether a macOS download whose `codesign` check fails is refused. False until the by-hand
-/// check in record 0029 shows Chrome for Testing is signed by Google (`EQHXZ8M8AV`).
-pub const SIGNATURE_REQUIRED_MAC: bool = false;
-
 /// Whether a Windows download whose Authenticode check of `chrome.exe` fails is refused. False
-/// until the by-hand check in record 0029 shows Chrome for Testing is signed.
+/// until the by-hand check in record 0029 shows Chrome for Testing is signed there.
+///
+/// There is no macOS counterpart, and there must never be one: Chrome for Testing on a Mac is
+/// ad hoc signed, with no team id, so `codesign` can never tie it to Google and no signature
+/// can be required of it. The integrity of a Mac download rests on HTTPS to Google's pinned
+/// hosts with no redirect, the size checks, the zip checks, and the browsers folder sitting
+/// outside what any agent can write (anything running as the lawyer could patch an ad hoc
+/// signed app).
 pub const SIGNATURE_REQUIRED_WINDOWS: bool = false;
 
-/// Whether `platform`'s download is refused when its signature check fails.
-pub fn signature_required(platform: Platform) -> bool {
-    match platform {
-        Platform::MacArm64 | Platform::MacX64 => SIGNATURE_REQUIRED_MAC,
-        Platform::WindowsX64 => SIGNATURE_REQUIRED_WINDOWS,
-        Platform::WindowsArm64 | Platform::Linux | Platform::Other => false,
-    }
+/// Whether `platform`'s download gets a signature check at all: Windows x64 only.
+pub fn signature_checked(platform: Platform) -> bool {
+    matches!(platform, Platform::WindowsX64)
 }
 
 /// Why a download failed: the code the app shows copy for, and an English message for the log.
@@ -163,8 +182,8 @@ pub trait InstallTools: Send + Sync {
     /// Unpacks `zip` into the empty folder `into`.
     fn unpack(&self, zip: &Path, into: &Path, cancel: &Cancel) -> Result<(), Failure>;
 
-    /// Checks the code signature of the unpacked browser under `folder` (the macOS app bundle,
-    /// or `chrome.exe` on Windows): `Err` with what the check said when it does not pass.
+    /// Checks the code signature of the unpacked browser under `folder` (`chrome.exe`, Windows
+    /// only): `Err` with what the check said when it does not pass.
     fn verify_signature(
         &self,
         platform: Platform,
@@ -182,16 +201,65 @@ pub struct Job {
     pub app_data: PathBuf,
     /// The working folder's random part, `.partial-<version>-<random>`.
     pub random: String,
+    /// Now, in seconds since the Unix epoch, for the record of Stables seen.
+    pub now: i64,
 }
 
-/// Runs the download, reporting `Downloading` and `Unpacking` to `report`, and returns the folder
-/// it made, `browsers/chrome-<version>/`. On every failure the working folder is gone.
+/// How a run that did not fail ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    /// A new copy is in place, in this folder.
+    Installed(PathBuf),
+    /// The copy installed is Stable already: nothing was downloaded.
+    Current,
+}
+
+/// [`run`] again after each `network` failure, reporting `Offline` and waiting `retry` first,
+/// until it gets through or `cancel` is set: the lawyer's download, which waits out a dropped
+/// connection rather than failing.
+pub fn run_until_online(
+    job: &Job,
+    tools: &dyn InstallTools,
+    cancel: &Cancel,
+    report: &mut dyn FnMut(BrowserInstallState),
+    retry: std::time::Duration,
+) -> Result<Outcome, Failure> {
+    loop {
+        match run(job, tools, cancel, report) {
+            Err(failure) if failure.code == BrowserInstallFailure::Network => {
+                tracing::info!(message = %failure.message, "offline; the download tries again");
+                report(BrowserInstallState::Offline);
+                wait(retry, cancel)?;
+            }
+            done => return done,
+        }
+    }
+}
+
+/// Waits `retry`, looking at `cancel` every 250 ms: `Err(cancelled)` once it is set.
+fn wait(retry: std::time::Duration, cancel: &Cancel) -> Result<(), Failure> {
+    let step = std::time::Duration::from_millis(250);
+    let start = std::time::Instant::now();
+    loop {
+        cancel.check()?;
+        let left = retry.saturating_sub(start.elapsed());
+        if left.is_zero() {
+            return Ok(());
+        }
+        std::thread::sleep(left.min(step));
+    }
+}
+
+/// Runs the check and, when Stable is newer than the copy installed, the download, reporting
+/// `Downloading` and `Unpacking` to `report`; returns the folder it made,
+/// `browsers/chrome-<version>/`, or [`Outcome::Current`]. On every failure the working folder
+/// is gone.
 pub fn run(
     job: &Job,
     tools: &dyn InstallTools,
     cancel: &Cancel,
     report: &mut dyn FnMut(BrowserInstallState),
-) -> Result<PathBuf, Failure> {
+) -> Result<Outcome, Failure> {
     let platform = job
         .platform
         .cft_name()
@@ -201,6 +269,30 @@ pub fn run(
         .map_err(|error| Failure::io("making the app data folder", &error))?;
     write::create_private_dirs_under(&job.app_data, &browsers)
         .map_err(|error| Failure::io("making the browsers folder", &error))?;
+    cancel.check()?;
+    versions::check_versions_url(VERSIONS_URL)?;
+    let body = tools.fetch_versions(VERSIONS_URL, &browsers, cancel)?;
+    let download = versions::stable_download(&body, platform)?;
+    let record = fresh::observe(
+        fresh::read_record(&browsers).as_ref(),
+        &download.version,
+        job.now,
+    );
+    if let Err(error) = fresh::write_record(&browsers, &record) {
+        tracing::warn!(error = %crate::log_file::Cause(&error), "the Stable record was not written");
+    }
+    let binary = job.platform.cft_binary().unwrap_or_default();
+    let installed: Vec<String> = fresh::working(&browsers, &binary)
+        .into_iter()
+        .map(|(version, _)| version)
+        .collect();
+    if !fresh::check_install(&download.version, &installed)? {
+        tracing::info!(version = %download.version, "Chrome for Testing is Stable already");
+        return Ok(Outcome::Current);
+    }
+    let behind = installed
+        .last()
+        .is_some_and(|version| fresh::too_far_behind(version, Some(&record)));
     match tools.free_bytes(&browsers) {
         Ok(free) if free < MIN_FREE_BYTES => {
             return Err(Failure::new(
@@ -218,22 +310,18 @@ pub fn run(
         }
     }
     cancel.check()?;
-    manifest::check_versions_url(VERSIONS_URL)?;
-    let body = tools.fetch_versions(VERSIONS_URL, &browsers, cancel)?;
-    let download = manifest::stable_download(&body, platform)?;
-    cancel.check()?;
     let partial = browsers.join(format!(
         "{PARTIAL_PREFIX}{}-{}",
         download.version, job.random
     ));
     write::create_private_dir(&partial)
         .map_err(|error| Failure::io("making the working folder", &error))?;
-    let done = in_partial(job, tools, cancel, report, &download, &partial);
+    let done = in_partial(job, tools, cancel, report, (&download, behind), &partial);
     // Whatever is left of the working folder goes, after success too (the zip).
     if let Err(error) = write::remove_tree(&partial) {
         tracing::warn!(error = %crate::log_file::Cause(&error), "a working folder was not removed");
     }
-    done
+    done.map(Outcome::Installed)
 }
 
 /// The steps inside the working folder `partial`: download, check, unpack, walk, sign, rename.
@@ -242,7 +330,7 @@ fn in_partial(
     tools: &dyn InstallTools,
     cancel: &Cancel,
     report: &mut dyn FnMut(BrowserInstallState),
-    download: &manifest::Download,
+    (download, behind): (&versions::Download, bool),
     partial: &Path,
 ) -> Result<PathBuf, Failure> {
     let zip = partial.join(ZIP_NAME);
@@ -250,6 +338,7 @@ fn in_partial(
         report(BrowserInstallState::Downloading {
             bytes: Count::clamped(bytes),
             total: Count::clamped(total),
+            behind,
         });
     };
     let length = tools.download(&download.url, &zip, cancel, &mut progress)?;
@@ -270,9 +359,11 @@ fn in_partial(
             format!("the zip holds no {}", binary.display()),
         ));
     }
-    let signed = tools.verify_signature(job.platform, &unpacked, cancel);
-    cancel.check()?;
-    check_signature(signature_required(job.platform), signed)?;
+    if signature_checked(job.platform) {
+        let signed = tools.verify_signature(job.platform, &unpacked, cancel);
+        cancel.check()?;
+        check_signature(SIGNATURE_REQUIRED_WINDOWS, signed)?;
+    }
     let browsers = partial.parent().unwrap_or(partial);
     let target = browsers.join(format!("{CFT_PREFIX}{}", download.version));
     // A folder of the same version that `chrome::find` passed over (its binary gone), or
@@ -304,6 +395,10 @@ fn check_size(zip: &Path, length: Option<u64>) -> Result<(), Failure> {
         .map_err(|error| Failure::io("reading the zip's size", &error))?
         .len();
     match length {
+        Some(length) if length > MAX_ZIP_BYTES => Err(Failure::new(
+            BrowserInstallFailure::SizeMismatch,
+            format!("the zip's Content-Length {length} is over the {MAX_ZIP_BYTES} byte cap"),
+        )),
         Some(length) if length == size => Ok(()),
         Some(length) => Err(Failure::new(
             BrowserInstallFailure::SizeMismatch,
@@ -320,12 +415,12 @@ fn check_size(zip: &Path, length: Option<u64>) -> Result<(), Failure> {
 pub fn check_signature(required: bool, signed: Result<(), String>) -> Result<(), Failure> {
     match signed {
         Ok(()) => {
-            tracing::info!("the Chrome for Testing signature check passed");
+            tracing::info!("the Chrome for Testing Authenticode check passed");
             Ok(())
         }
         Err(said) if required => Err(Failure::new(BrowserInstallFailure::Signature, said)),
         Err(_) => {
-            tracing::warn!("the Chrome for Testing signature check failed; not required");
+            tracing::warn!("the Chrome for Testing Authenticode check failed; not required");
             Ok(())
         }
     }

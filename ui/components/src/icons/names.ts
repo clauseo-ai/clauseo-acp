@@ -255,7 +255,7 @@ export const ICON_NAMES = [
     source: "appWindow",
     meaning: "Browser: Clauseo's own browser, on this computer",
   },
-  { component: "IconDownload", source: "download", meaning: "Download Chrome" },
+  { component: "IconDownload", source: "download", meaning: "Get a browser for Clauseo" },
   {
     component: "IconCopy",
     source: "copy",

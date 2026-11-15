@@ -683,6 +683,11 @@ export type BrowserInstallFailure =
 "unsupported" | 
 /**  The lawyer cancelled, or the app quit, during the download. */
 "cancelled" | 
+/**
+ *  The firm's policy forbids the download, or its browser policy turns Clauseo's browser
+ *  off. The app offers no download then.
+ */
+"firm_forbids" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
@@ -702,11 +707,21 @@ export type BrowserInstallState =
 	bytes: Count,
 	/**  The whole zip's size, from `Content-Length`. */
 	total: Count,
+	/**
+	 *  The browser already downloaded is more than one Chrome security release behind: no
+	 *  session starts it until this update is in.
+	 */
+	behind: boolean,
 } }) & { failed?: never } | 
 /**  The zip is downloaded; it is being unpacked and checked. */
 "unpacking" | 
 /**  Chrome for Testing is in place; the next session uses it. */
 "done" | 
+/**
+ *  No network: the download waits, and the host tries again about every minute until it is
+ *  online or the lawyer cancels.
+ */
+"offline" | 
 /**  The download ended without a browser and left no folder behind. */
 ({ failed: {
 	/**  Why, for the app's copy: the app picks what it shows by `code` alone. */

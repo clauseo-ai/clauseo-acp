@@ -85,7 +85,7 @@ fn installed_chrome_wins_on_mac_over_home_and_chrome_for_testing() {
     touch(&dir.path().join("home"), MAC_CHROME);
     touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_MAC_ARM}"),
     );
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(system));
 }
@@ -96,7 +96,7 @@ fn mac_home_applications_comes_second() {
     let home = touch(&dir.path().join("home"), MAC_CHROME);
     touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_MAC_ARM}"),
     );
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(home));
 }
@@ -239,7 +239,7 @@ fn mac_chrome_for_testing_beats_the_other_browsers() {
     touch(&dir.path().join("root"), MAC_EDGE);
     let cft = touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
+        &format!("app/browsers/chrome-158.0.6778.85/{CFT_MAC_ARM}"),
     );
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(cft));
 }
@@ -306,11 +306,11 @@ fn chrome_for_testing_highest_version_wins() {
     );
     let newest = touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.6778.85/{CFT_WIN}"),
+        &format!("app/browsers/chrome-158.0.6778.85/{CFT_WIN}"),
     );
     touch(
         dir.path(),
-        &format!("app/browsers/chrome-130.9.1/{CFT_WIN}"),
+        &format!("app/browsers/chrome-157.9.1/{CFT_WIN}"),
     );
     // A higher version without its binary, and folders that are no version, are passed over.
     write::create_dir_all(&dir.path().join("app/browsers/chrome-200.0.0.0")).unwrap();
@@ -324,14 +324,14 @@ fn chrome_for_testing_layout_per_platform() {
     let dir = TempDir::new("chrome-cft-layout");
     let arm = touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_MAC_ARM}"),
     );
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(arm));
     // The arm64 zip's layout is not the x64 one.
     assert_eq!(find(&roots(dir.path(), Platform::MacX64)), None);
     let x64 = touch(
         dir.path(),
-        "app/browsers/chrome-131.0.1/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        "app/browsers/chrome-158.0.1/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
     );
     assert_eq!(find(&roots(dir.path(), Platform::MacX64)), Some(x64));
 }
@@ -343,7 +343,7 @@ fn windows_ignores_chrome_for_testing() {
     let dir = TempDir::new("chrome-win-cft");
     touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_WIN}"),
     );
     for platform in [Platform::WindowsX64, Platform::WindowsArm64] {
         assert_eq!(find(&roots(dir.path(), platform)), None, "{platform:?}");
@@ -407,7 +407,7 @@ fn windows_edge_beats_program_files_chrome_and_ignores_the_rest() {
     let dir = TempDir::new("chrome-win-edge-first");
     touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_WIN}"),
     );
     touch(&dir.path().join(LOCAL), WIN_CHROME);
     let chrome = touch(&dir.path().join("pf86"), WIN_CHROME);
@@ -429,7 +429,7 @@ fn a_link_in_the_browsers_folder_is_passed_over() {
     let dir = TempDir::new("chrome-cft-links");
     let real = touch(
         dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
+        &format!("app/browsers/chrome-158.0.1/{CFT_WIN}"),
     );
     let elsewhere = touch(dir.path(), &format!("outside/chrome-999.0/{CFT_WIN}"));
     write::symlink(
@@ -443,4 +443,46 @@ fn a_link_in_the_browsers_folder_is_passed_over() {
     write::create_dir_all(linked.parent().unwrap()).unwrap();
     write::symlink(&elsewhere, &linked).unwrap();
     assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(real));
+}
+
+/// The highest copy below this release's floor is never run, nor is an older one in its place.
+#[test]
+fn chrome_for_testing_below_the_floor_is_not_run() {
+    let dir = TempDir::new("chrome-cft-floor");
+    touch(
+        dir.path(),
+        &format!("app/browsers/chrome-131.0.6778.85/{CFT_MAC_ARM}"),
+    );
+    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), None);
+}
+
+/// A copy more than one Stable release behind the daily check's record is not run (it waits
+/// for its update); Stable, or the one release behind, is. Never an older copy in its place.
+#[test]
+fn chrome_for_testing_more_than_one_release_behind_is_not_run() {
+    use crate::browser::install::fresh::{StableRecord, write_record};
+    let dir = TempDir::new("chrome-cft-behind");
+    touch(
+        dir.path(),
+        &format!("app/browsers/chrome-158.0.0.1/{CFT_MAC_ARM}"),
+    );
+    let copy = touch(
+        dir.path(),
+        &format!("app/browsers/chrome-158.0.0.2/{CFT_MAC_ARM}"),
+    );
+    let browsers = dir.path().join("app/browsers");
+    let roots = roots(dir.path(), Platform::MacArm64);
+    let record = |stable: &str, previous: Option<&str>| StableRecord {
+        stable: stable.to_owned(),
+        previous: previous.map(str::to_owned),
+        checked_at: 0,
+    };
+    write_record(&browsers, &record("158.0.0.3", Some("158.0.0.2"))).unwrap();
+    assert_eq!(find(&roots), Some(copy.clone()), "one release behind runs");
+    write_record(&browsers, &record("158.0.0.4", Some("158.0.0.3"))).unwrap();
+    assert_eq!(find(&roots), None, "two behind: neither copy runs");
+    write_record(&browsers, &record("158.0.0.3", None)).unwrap();
+    assert_eq!(find(&roots), None, "behind, the release before unknown");
+    write_record(&browsers, &record("158.0.0.2", None)).unwrap();
+    assert_eq!(find(&roots), Some(copy));
 }

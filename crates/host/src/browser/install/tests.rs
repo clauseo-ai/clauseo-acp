@@ -1,5 +1,6 @@
 //! The download engine with fake tools, and its checks one by one.
 
+mod guard;
 mod review;
 mod support;
 
@@ -8,7 +9,7 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::{BrowserInstallFailure, BrowserInstallState, Count};
 
 use super::system::{content_length, curl_exit};
-use super::{Cancel, Failure, Job, archive, check_signature, manifest, run};
+use super::{Cancel, Failure, Job, Outcome, archive, check_signature, run, versions};
 use crate::browser::chrome::{self, ChromeRoots, Platform};
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
@@ -20,6 +21,7 @@ fn job(dir: &Path, platform: Platform) -> Job {
         platform,
         app_data: dir.join("app"),
         random: "r".to_owned(),
+        now: 1_700_000_000,
     }
 }
 
@@ -31,15 +33,20 @@ fn run_with(
 ) -> (Result<PathBuf, Failure>, Vec<BrowserInstallState>) {
     let mut states = Vec::new();
     let result = run(job, tools, cancel, &mut |state| states.push(state));
+    let result = result.map(|outcome| match outcome {
+        Outcome::Installed(folder) => folder,
+        Outcome::Current => panic!("nothing was installed"),
+    });
     (result, states)
 }
 
-/// What `browsers/` holds, by name, sorted.
+/// What `browsers/` holds, by name, sorted, but the record of Stables seen.
 fn browsers(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir.join("app").join("browsers"))
         .map(|entries| {
             entries
                 .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .filter(|name| name != super::fresh::RECORD_FILE)
                 .collect()
         })
         .unwrap_or_default();
@@ -72,18 +79,17 @@ fn a_download_reports_progress_then_unpacking_and_find_finds_it() {
             BrowserInstallState::Downloading {
                 bytes: Count::clamped(total / 2),
                 total: Count::clamped(total),
+                behind: false,
             },
             BrowserInstallState::Downloading {
                 bytes: Count::clamped(total),
                 total: Count::clamped(total),
+                behind: false,
             },
             BrowserInstallState::Unpacking,
         ]
     );
-    assert_eq!(
-        tools.calls(),
-        ["fetch_versions", "download", "unpack", "verify_signature"]
-    );
+    assert_eq!(tools.calls(), ["fetch_versions", "download", "unpack"]);
     let browsers_dir = dir.path().join("app").join("browsers");
     assert_eq!(folder, browsers_dir.join(format!("chrome-{VERSION}")));
     assert_eq!(browsers(dir.path()), [format!("chrome-{VERSION}")]);
@@ -190,12 +196,12 @@ fn a_refused_url_or_version_downloads_nothing() {
 #[test]
 fn zip_urls_must_be_exactly_googles() {
     let refused = |url: &str| {
-        let failure = manifest::check_zip_url(url, VERSION, "mac-arm64").unwrap_err();
+        let failure = versions::check_zip_url(url, VERSION, "mac-arm64").unwrap_err();
         assert_eq!(failure.code, BrowserInstallFailure::HostRefused);
         failure.message
     };
     let good = google_url(VERSION);
-    manifest::check_zip_url(&good, VERSION, "mac-arm64").unwrap();
+    versions::check_zip_url(&good, VERSION, "mac-arm64").unwrap();
     assert!(refused(&good.replace("https://", "http://")).contains("not https"));
     assert!(refused(&good.replace("storage.googleapis.com", "evil.example")).contains("host"));
     assert!(refused(&good.replace(".com/", ".com:8443/")).contains("host"));
@@ -210,14 +216,14 @@ fn zip_urls_must_be_exactly_googles() {
 #[test]
 fn versions_and_the_list_url_are_checked() {
     for version in ["131.0.6778.85", "1"] {
-        manifest::check_version(version).unwrap();
+        versions::check_version(version).unwrap();
     }
     for version in ["", "131.0.x", "../1", "1/2", "131.0 .1", &"1.".repeat(40)] {
-        assert!(manifest::check_version(version).is_err(), "{version:?}");
+        assert!(versions::check_version(version).is_err(), "{version:?}");
     }
-    manifest::check_versions_url(super::VERSIONS_URL).unwrap();
-    assert!(manifest::check_versions_url("http://googlechromelabs.github.io/x.json").is_err());
-    assert!(manifest::check_versions_url("https://googlechromelabs.github.io.evil/x").is_err());
+    versions::check_versions_url(super::VERSIONS_URL).unwrap();
+    assert!(versions::check_versions_url("http://googlechromelabs.github.io/x.json").is_err());
+    assert!(versions::check_versions_url("https://googlechromelabs.github.io.evil/x").is_err());
 }
 
 /// A zip entry that climbs out with `..` is refused before the unpack tool runs, and nothing
@@ -324,7 +330,7 @@ fn low_disk_and_unsupported_machines_download_nothing() {
         ..Fake::working()
     };
     fails_with("cft-disk", &low, BrowserInstallFailure::DiskSpace);
-    assert_eq!(low.calls(), Vec::<&str>::new());
+    assert_eq!(low.calls(), ["fetch_versions"]);
     // Windows x64 too: Chrome for Testing would sit in a per-user folder, which Chrome's sandbox
     // cannot start a piped browser from, so the host refuses it there (`chrome.rs`).
     for platform in [
@@ -341,15 +347,18 @@ fn low_disk_and_unsupported_machines_download_nothing() {
     }
 }
 
-/// A failed signature check fails the download only when required; today it is logged.
+/// A failed Authenticode check fails a Windows download only when required; today it is logged.
+/// A Mac download gets no signature check at all: Chrome for Testing there is ad hoc signed.
 #[test]
 fn a_failed_signature_fails_only_when_required() {
     let failure = check_signature(true, Err("not signed".to_owned())).unwrap_err();
     assert_eq!(failure.code, BrowserInstallFailure::Signature);
     check_signature(false, Err("not signed".to_owned())).unwrap();
     check_signature(true, Ok(())).unwrap();
-    assert!(!super::signature_required(Platform::MacArm64));
-    assert!(!super::signature_required(Platform::WindowsX64));
+    assert!(!super::signature_checked(Platform::MacArm64));
+    assert!(!super::signature_checked(Platform::MacX64));
+    assert!(super::signature_checked(Platform::WindowsX64));
+    assert!(!super::SIGNATURE_REQUIRED_WINDOWS);
     let unsigned = Fake {
         signed: Err("not signed".to_owned()),
         ..Fake::working()
@@ -447,6 +456,7 @@ fn real_download() {
         platform: Platform::current(),
         app_data: dir.path().to_owned(),
         random: "real".to_owned(),
+        now: 1_700_000_000,
     };
     let mut states = Vec::new();
     let result = run(&job, &super::SystemTools, &Cancel::new(), &mut |state| {
@@ -454,6 +464,6 @@ fn real_download() {
         states.push(state);
     });
     let folder = result.unwrap();
-    println!("installed in {}", folder.display());
+    println!("installed: {folder:?}");
     assert!(states.contains(&BrowserInstallState::Unpacking));
 }

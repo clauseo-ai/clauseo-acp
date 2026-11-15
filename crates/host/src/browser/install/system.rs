@@ -1,8 +1,9 @@
 //! The production tools ([`SystemTools`]): curl for the version list and the zip, ditto (macOS)
-//! or tar (Windows) to unpack, the OS's signature check, and the free space on the disk.
+//! or tar (Windows) to unpack, Windows' Authenticode check, and the free space on the disk. No
+//! signature check on macOS: Chrome for Testing there is ad hoc signed, with no team id.
 //!
-//! Each tool is an absolute path, never a `PATH` lookup: `/usr/bin/curl`, `/usr/bin/ditto` and
-//! `/usr/bin/codesign` on macOS; `curl.exe` and `tar.exe` from `GetSystemDirectoryW()` (System32)
+//! Each tool is an absolute path, never a `PATH` lookup: `/usr/bin/curl` and `/usr/bin/ditto`
+//! on macOS; `curl.exe` and `tar.exe` from `GetSystemDirectoryW()` (System32)
 //! on Windows. A tool that is not there is `unsupported`. Each runs through
 //! `clauseo_process::spawn_in_tree`, in a process tree of its own, and is watched every 250 ms:
 //! a cancel ends its tree and waits for it to exit before the working folder is removed.
@@ -65,11 +66,8 @@ const TICK: Duration = Duration::from_millis(250);
 /// The most the version list may be.
 const MAX_VERSIONS_BYTES: usize = 1024 * 1024;
 
-/// The most of a tool's stderr kept, for the log and for `codesign -dv`.
+/// The most of a tool's stderr kept, for the log.
 const MAX_STDERR_BYTES: usize = 64 * 1024;
-
-/// The `TeamIdentifier` Google signs its macOS apps with.
-pub const GOOGLE_TEAM_ID: &str = "EQHXZ8M8AV";
 
 /// The production tools.
 #[derive(Debug, Clone, Copy, Default)]
@@ -160,51 +158,25 @@ impl InstallTools for SystemTools {
         &self,
         platform: Platform,
         folder: &Path,
-        cancel: &Cancel,
+        _cancel: &Cancel,
     ) -> Result<(), String> {
-        let binary = folder.join(platform.cft_binary().unwrap_or_default());
         match platform {
             Platform::MacArm64 | Platform::MacX64 => {
-                let app = binary
-                    .ancestors()
-                    .find(|path| path.extension().is_some_and(|ext| ext == "app"))
-                    .ok_or("no app bundle")?;
-                codesign(app, cancel)
+                Err("no signature check on macOS: Chrome for Testing is ad hoc signed".to_owned())
             }
             #[cfg(windows)]
-            Platform::WindowsX64 => super::windows::verify_authenticode(&binary),
+            Platform::WindowsX64 => super::windows::verify_authenticode(
+                &folder.join(platform.cft_binary().unwrap_or_default()),
+            ),
             #[cfg(not(windows))]
-            Platform::WindowsX64 => Err("no Authenticode check off Windows".to_owned()),
+            Platform::WindowsX64 => {
+                let _ = folder;
+                Err("no Authenticode check off Windows".to_owned())
+            }
             Platform::WindowsArm64 | Platform::Linux | Platform::Other => {
                 Err(format!("no signature check for {platform:?}"))
             }
         }
-    }
-}
-
-/// `codesign --verify --deep --strict`, then `codesign -dv` must show Google's `TeamIdentifier`.
-fn codesign(app: &Path, cancel: &Cancel) -> Result<(), String> {
-    let codesign = tool("codesign").map_err(|failure| failure.message)?;
-    let run = |args: &[&str]| {
-        let mut args: Vec<OsString> = args.iter().map(OsString::from).collect();
-        args.push(app.into());
-        let cwd = app.parent().unwrap_or(app);
-        run_tool(&codesign, args, cwd, cancel, 0, &mut || {})
-            .map_err(|stop| stop.failure(BrowserInstallFailure::Signature).message)
-    };
-    let verified = run(&["--verify", "--deep", "--strict"])?;
-    if verified.code != Some(0) {
-        return Err(format!("codesign --verify: {}", verified.stderr.trim()));
-    }
-    let shown = run(&["-dv"])?;
-    let team = format!("TeamIdentifier={GOOGLE_TEAM_ID}");
-    if shown.code == Some(0) && shown.stderr.lines().any(|line| line.trim() == team) {
-        Ok(())
-    } else {
-        Err(format!(
-            "codesign -dv shows no {team}: {}",
-            shown.stderr.trim()
-        ))
     }
 }
 

@@ -33,8 +33,13 @@ source: crates/settings/src/schema/tests.rs
       "type": "object"
     },
     "BrowserSettings": {
-      "description": "The `browser` section. Its key is a security key, set by policy only: a policy source that\ncannot be read locks it `false`, its default, and a `settings.json` value is ignored with a\nwarning.",
+      "description": "The `browser` section. Both keys are security keys, set by policy only, and a\n`settings.json` value for either is ignored with a warning. A policy source that cannot be\nread locks `allow_when_remote_debugging_disabled` `false`, its default, and `allow_download`\n`false`, not its default (on).",
       "properties": {
+        "allow_download": {
+          "default": true,
+          "description": "Whether Clauseo may download its own browser (Chrome for Testing from Google) on a Mac\nwhere no Chrome, Edge, Brave or Chromium is installed. On by default; a firm's policy\ncan turn it off.",
+          "type": "boolean"
+        },
         "allow_when_remote_debugging_disabled": {
           "default": false,
           "description": "Whether Clauseo's browser may start when the firm turned off Chrome's or Edge's remote\ndebugging (their `RemoteDebuggingAllowed` policy false), which every browser Clauseo\ndrives needs. Off by default: such a policy then turns Clauseo's browser off too.",
@@ -558,6 +563,7 @@ source: crates/settings/src/schema/tests.rs
     "browser": {
       "$ref": "#/$defs/BrowserSettings",
       "default": {
+        "allow_download": true,
         "allow_when_remote_debugging_disabled": false
       },
       "description": "What the firm allows Clauseo's browser beyond its browser policy."

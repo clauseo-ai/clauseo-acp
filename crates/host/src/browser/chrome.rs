@@ -11,7 +11,10 @@
 //!    `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, then the same under
 //!    `~/Applications`.
 //! 2. Chrome for Testing that Clauseo downloaded into `<app data>/browsers/chrome-<version>/`,
-//!    the highest version first, with the binary where the Chrome for Testing zip puts it.
+//!    the highest version only, with the binary where the Chrome for Testing zip puts it. It is
+//!    passed over when it is below this release's floor or more than one Stable security
+//!    release behind (`install::fresh`): an older copy never runs, and a stale one waits for
+//!    the update.
 //! 3. The other Chromium browsers a lawyer may have, last ([`ChromeRoots::others`]): Microsoft
 //!    Edge, Brave, then Chromium, each under `/Applications` then `~/Applications` as
 //!    `<App>.app/Contents/MacOS/<binary>` ([`MAC_OTHERS`]). Arc is not looked for: it is no
@@ -406,7 +409,9 @@ fn windows_installed_with(roots: &ChromeRoots, edge_allowed: bool) -> WindowsBro
     }
 }
 
-/// The highest-versioned Chrome for Testing under `<app data>/browsers/` whose binary is there.
+/// The highest-versioned Chrome for Testing under `<app data>/browsers/` whose binary is there,
+/// when it is at or above the floor and not more than one Stable release behind the record of
+/// the daily checks (`install::fresh`); never an older copy in its place.
 /// A version folder must be a real folder (a link is passed over, by `file_type`, which does not
 /// follow it), and the binary, links resolved, must still sit under the browsers folder, so a
 /// link planted in the folder cannot pick another program. The folder must be outside what an
@@ -431,7 +436,28 @@ fn chrome_for_testing(roots: &ChromeRoots) -> Option<PathBuf> {
         })
         .collect();
     found.sort();
-    found.pop().map(|(_, path)| path)
+    let (_, path) = found.pop()?;
+    let version = path
+        .strip_prefix(&browsers)
+        .ok()?
+        .components()
+        .next()?
+        .as_os_str()
+        .to_str()?
+        .strip_prefix(CFT_PREFIX)?;
+    if !super::install::fresh::at_or_above_floor(version) {
+        tracing::warn!(%version, "a Chrome for Testing below this release's floor is not run");
+        return None;
+    }
+    let record = super::install::fresh::read_record(&browsers);
+    if super::install::fresh::too_far_behind(version, record.as_ref()) {
+        tracing::warn!(
+            %version,
+            "a Chrome for Testing more than one Stable release behind is not run until it updates"
+        );
+        return None;
+    }
+    Some(path)
 }
 
 /// A dotted version, such as `131.0.6778.85`, as numbers to compare; `None` when it is not one.

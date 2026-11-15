@@ -59,6 +59,7 @@
     "mode": "none"
   },
   "browser": {
-    "allow_when_remote_debugging_disabled": false
+    "allow_when_remote_debugging_disabled": false,
+    "allow_download": true
   }
 }

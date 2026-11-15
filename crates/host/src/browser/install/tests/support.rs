@@ -8,7 +8,7 @@ use crate::browser::chrome::Platform;
 use crate::write;
 
 /// The version every test downloads.
-pub(super) const VERSION: &str = "131.0.6778.85";
+pub(super) const VERSION: &str = "158.0.7000.1";
 
 /// The browser's path inside the unpacked folder on Apple silicon.
 pub(super) const MAC_BINARY: &str =
@@ -153,6 +153,8 @@ pub(super) struct Fake {
     pub(super) signed: Result<(), String>,
     /// The download sets the cancel halfway, as the lawyer's click would, and the tool ends.
     pub(super) cancel_in_download: bool,
+    /// How many version-list fetches fail as `network` first (offline), each counting down.
+    pub(super) offline: std::sync::atomic::AtomicU32,
     /// Each tool called, in order.
     pub(super) calls: Mutex<Vec<&'static str>>,
 }
@@ -168,6 +170,7 @@ impl Fake {
             made: vec![Made::File(MAC_BINARY), Made::File(MAC_INFO)],
             signed: Ok(()),
             cancel_in_download: false,
+            offline: std::sync::atomic::AtomicU32::new(0),
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -194,6 +197,17 @@ impl InstallTools for Fake {
     ) -> Result<Vec<u8>, Failure> {
         self.call("fetch_versions");
         cancel.check()?;
+        let offline = self.offline.try_update(
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+            |left| left.checked_sub(1),
+        );
+        if offline.is_ok() {
+            return Err(Failure::new(
+                clauseo_protocol::BrowserInstallFailure::Network,
+                "offline",
+            ));
+        }
         Ok(self.versions.clone())
     }
 

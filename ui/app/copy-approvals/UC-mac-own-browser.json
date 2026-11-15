@@ -1,0 +1,62 @@
+{
+  "UC-580": {
+    "en": "Get a browser for Clauseo",
+    "hi": "Clauseo के लिए ब्राउज़र डाउनलोड करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-581": {
+    "en": "Getting Clauseo's browser: {done} MB of {total} MB ({percent}%)",
+    "hi": "Clauseo का ब्राउज़र डाउनलोड हो रहा है: {total} MB में से {done} MB ({percent}%)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-582": {
+    "en": "Waiting for an internet connection to get the browser.",
+    "hi": "ब्राउज़र डाउनलोड करने के लिए इंटरनेट कनेक्शन की प्रतीक्षा की जा रही है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-583": {
+    "en": "Clauseo's browser is behind on security updates. Updating it now.",
+    "hi": "Clauseo का ब्राउज़र सुरक्षा अपडेट में पीछे है। इसे अभी अपडेट किया जा रहा है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-584": {
+    "en": "Your firm doesn't allow Clauseo to download a browser.",
+    "hi": "आपकी फ़र्म Clauseo को ब्राउज़र डाउनलोड करने की अनुमति नहीं देती।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-585": {
+    "en": "Clauseo's browser is ready. Start a new conversation to use it.",
+    "hi": "Clauseo का ब्राउज़र तैयार है। इसका उपयोग करने के लिए एक नई बातचीत शुरू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; Rohan batch review)"
+  }
+}

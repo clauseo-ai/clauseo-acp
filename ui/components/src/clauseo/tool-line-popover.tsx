@@ -113,7 +113,7 @@ export function DownloadBar({
   max: number;
   /** How far: "64 of 200 MB". */
   text: string;
-  /** The bar's name: "Download Chrome". */
+  /** The bar's name: the download's words. */
   name: string;
   className?: string;
 }) {

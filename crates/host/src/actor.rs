@@ -524,7 +524,7 @@ impl Actor {
             Input::Documents(input) => documents::on_input(self, input),
             Input::NewFolder(probed) => matters::probe::on_probed(self, *probed),
             Input::Located(located) => locate::on_located(self, *located),
-            Input::BrowserInstall(state) => browser_install::on_state(self, state),
+            Input::BrowserInstall(step) => browser_install::on_input(self, step),
             Input::BrowserPolicy(input) => browser_policy::on_input(self, input),
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::Update(input) => update::on_input(self, input),

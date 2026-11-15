@@ -269,8 +269,8 @@ pub(crate) enum Input {
     NewFolder(Box<super::matters::probe::Probed>),
     /// A `LocateFile`'s folder probe answered (`locate.rs`).
     Located(Box<super::locate::Located>),
-    /// Where the Chrome for Testing download stands, from its thread.
-    BrowserInstall(clauseo_protocol::BrowserInstallState),
+    /// Where the Chrome for Testing download stands, from its thread, or the daily check's tick.
+    BrowserInstall(super::browser_install::Step),
     /// What the lawyer's re-read of the firm's browser policy found, from its thread, or its
     /// deadline (`browser_policy.rs`).
     BrowserPolicy(super::browser_policy::PolicyInput),

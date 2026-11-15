@@ -6,7 +6,9 @@ import { settled } from "@clauseo/components/lib/late.ts";
 import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
-import { UET } from "./registry-uet.tsx";
+import { UC_OWN_BROWSER, UET } from "./registry-uet.tsx";
+
+const ENTRIES = [...UET, ...UC_OWN_BROWSER];
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -18,10 +20,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-test.each(UET.map((e) => e.id))(
+test.each(ENTRIES.map((e) => e.id))(
   "%s draws its tool line with nothing on the console",
   async (id) => {
-    const entry = UET.find((e) => e.id === id)!;
+    const entry = ENTRIES.find((e) => e.id === id)!;
     const errors = vi.spyOn(console, "error");
     const host = document.createElement("div");
     document.body.append(host);

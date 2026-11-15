@@ -233,12 +233,13 @@ test.each(ROWS)(
         tool.availability !== "available" && reason === "In Settings",
       );
     // nothing else in words: the name, the chip and the reason; with no Chrome, what to install in full; blocked by
-    // the firm's policy, or a policy Clauseo couldn't check, the reason in full (that one, Try again)
+    // the firm's policy, or a policy Clauseo couldn't check, the reason in full (that one, Try again); with no
+    // browser, what to install and, on the fake host's Linux, the offer of Clauseo's own browser
     const offer =
       reason === "Install Chrome"
         ? "Clauseo didn't find Google Chrome, Microsoft Edge, Brave or Chromium on this computer. " +
           "Install one, then start a new conversation." +
-          "Download Chrome"
+          "Get a browser for Clauseo"
         : reason === "Blocked by a browser policy"
           ? "A Chrome or Edge policy on this computer doesn't let apps control the browser, so Clauseo " +
             "can't use one for you."
@@ -324,18 +325,16 @@ test.each([
     "install Chrome or Edge",
   ],
 ] as const)(
-  "no browser on the computer (%s): what to install, in a few words and in full; Download Chrome but on Windows",
+  "no browser on the computer (%s): what to install, in a few words and in full, and only on a Mac (or Linux) Clauseo's own browser to press",
   async (platform, reason, full, inLine) => {
     h = await open([browser(off("browser_not_installed"))], true, platform);
     await openPopover();
     expect(said("browser", "tool-row-reason")).toBe(reason);
     expect(said("browser", "tool-row-full")).toBe(full);
-    const download = inRow("browser", "tool-download-chrome");
-    if (platform === "windows") expect(row("browser")?.querySelector("button")).toBeNull();
-    else {
-      expect(row("browser")?.querySelectorAll("button")).toHaveLength(1);
-      expect(download?.textContent).toBe("Download Chrome");
-    }
+    // the offer of Clauseo's own browser (browser-install.test.tsx), never on Windows
+    expect(
+      [...(row("browser")?.querySelectorAll("button") ?? [])].map((b) => b.dataset["testid"]),
+    ).toEqual(platform === "windows" ? [] : ["tool-install"]);
     expect(row("browser")?.querySelector('[role="progressbar"]')).toBeNull();
     expect(line()?.getAttribute("aria-label")).toBe(`Browser: off, ${inLine}.`);
   },
@@ -397,18 +396,6 @@ test.each([
     expect(settingsButtons()).toEqual([]);
   },
 );
-
-test("Download Chrome opens Chrome's download page in the default browser, once a press, and the row stays", async () => {
-  h = await open([browser(off("browser_not_installed"))], true, "mac");
-  await openPopover();
-  expect(h.transport.only("open_external")).toEqual([]);
-  await h.click(inRow("browser", "tool-download-chrome"));
-  expect(h.transport.only("open_external")).toEqual([
-    { call: "open_external", url: "https://www.google.com/chrome/" },
-  ]);
-  // the browser comes with the next new conversation, as the row says: nothing here changes
-  expect(said("browser", "tool-row-reason")).toBe("Install Chrome");
-});
 
 test("Try again asks for the policy once and waits; a read that finds it clear says Ready for new conversations", async () => {
   h = await open([browser(off("browser_policy_unreadable"))]);
