@@ -36,11 +36,10 @@ const JOB: Job = Job {
 };
 
 /// The lawyer's adds and removals of kept rules this run, numbered in the order the actor saw
-/// them, and the rules removed since, by matter.
+/// them (`always::next_seq`, process-wide, as the file side's record is), and the rules removed
+/// since, by matter.
 #[derive(Debug, Default)]
 pub(crate) struct Ledger {
-    /// The last number given.
-    seq: u64,
     /// Each matter's rules the lawyer removed and did not keep again since.
     removed: BTreeMap<MatterId, BTreeSet<String>>,
 }
@@ -51,7 +50,7 @@ impl Ledger {
         if let Some(removed) = self.removed.get_mut(&matter) {
             removed.remove(rule);
         }
-        self.next()
+        always::next_seq()
     }
 
     /// The lawyer removed `rule` from `matter`: its removal's number.
@@ -60,7 +59,7 @@ impl Ledger {
             .entry(matter)
             .or_default()
             .insert(rule.to_owned());
-        self.next()
+        always::next_seq()
     }
 
     /// `rules`, read for a launch of `matter`, without those the lawyer removed since.
@@ -68,11 +67,6 @@ impl Ledger {
         if let Some(removed) = self.removed.get(&matter) {
             rules.retain(|rule| !removed.contains(rule));
         }
-    }
-
-    fn next(&mut self) -> u64 {
-        self.seq += 1;
-        self.seq
     }
 }
 

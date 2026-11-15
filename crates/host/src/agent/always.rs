@@ -37,7 +37,9 @@ use serde_json::Value;
 
 mod store;
 
-pub(crate) use store::{list, read_beside, remove_now, store};
+pub(crate) use store::{list, next_seq, read_beside, remove_now, store};
+#[cfg(test)]
+pub(crate) use store::{read, store_now};
 
 /// The file's name, in `<data>/agent-state/<matter>`.
 pub(crate) const FILE: &str = "claude-allow.json";
