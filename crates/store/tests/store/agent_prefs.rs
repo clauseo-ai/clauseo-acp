@@ -144,7 +144,7 @@ fn schema_5_database_migrates_and_reads_agent_prefs_as_null() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
     assert_eq!(version, i64::from(SCHEMA));
-    assert_eq!(SCHEMA, 6);
+    assert_eq!(SCHEMA, 7);
     drop(conn);
     let store = dir.open();
     assert_eq!(block_on(store.matters()).unwrap(), [picked]);
