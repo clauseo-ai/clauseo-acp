@@ -184,6 +184,7 @@ pub use receipt::{install_folder, install_root, script_path};
 #[cfg(feature = "test-support")]
 pub use sac::SacForTests;
 pub use sac::SacState;
+pub use signin::keychain_lock::login_keychain_locked;
 pub use signin::reuse::{CodexLink, codex_link_holds, codex_login_shared, unlink_reused_login};
 pub use signin::{
     Found, LoginFrom, Method, PasteCode, SigninCode, SigninError, SigninNote, SigninState, Source,

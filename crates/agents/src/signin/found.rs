@@ -6,8 +6,9 @@
 //! - a recorded `reused` (for Codex also "a missing file with a home `auth.json`") is checked
 //!   first: "At a later start, a recorded `reused` whose login still holds is `Reused` with no
 //!   question." Claude holds when detection still finds a login (a stat, and on macOS the
-//!   Keychain query; else `ReusedSignedOut`) and the status
-//!   under the session's environment is signed in (else the run-time fallback). Codex holds while
+//!   Keychain query; else `ReusedSignedOut`, but a query that could not tell leaves the state)
+//!   and the status under the session's environment is signed in (else the run-time fallback).
+//!   Codex holds while
 //!   the two names are one file (`reuse::codex_link_holds`; else `CodexLinkSplit`, or
 //!   `ReusedSignedOut` when the lawyer's file is gone) and Codex's own status, through its CLI,
 //!   confirms the account (`codex::confirm`; signed out is `ReusedSignedOut` too).
@@ -39,11 +40,11 @@ use futures::future::{Either, select};
 use crate::signin::codex::Confirmation;
 use crate::signin::detect::{self, Detected};
 use crate::signin::env::{RunKind, Vendor};
-use crate::signin::job::SigninJob;
+use crate::signin::job::{SigninJob, Task};
 use crate::signin::marker::{self, LoginSource};
 use crate::signin::{
     Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, Unconfirmed, claude,
-    codex, reuse,
+    codex, keychain_lock, reuse,
 };
 use crate::status::Identity;
 
@@ -116,6 +117,11 @@ pub(crate) async fn stop<T: Timer + Send + Sync>(
 /// tell).
 pub(crate) async fn check<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
     match job.vendor {
+        // A background check runs no Claude while the keychain is locked (`keychain_lock`).
+        Vendor::Claude if job.task == Task::Status && keychain_lock::locked(&job.config) => {
+            tracing::warn!(agent = %job.ticket.agent, "claude status: keychain locked; not run");
+            None
+        }
         Vendor::Claude => check_claude(job).await,
         Vendor::Codex => check_codex(job).await,
     }
@@ -128,7 +134,12 @@ async fn check_claude<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Sign
     {
         let found = detect::claude(job, cancel).await?;
         // A login still found holds, whatever account it is now: the agent runs as the
-        // lawyer, and switching accounts is their own doing.
+        // lawyer, and switching accounts is their own doing. A Keychain query that could not
+        // tell (a timeout, another exit, no start) keeps the reuse: the state stays as it is.
+        if found.could_not_tell {
+            tracing::warn!(agent = %job.ticket.agent, "reused claude login: could not tell; kept");
+            return None;
+        }
         return match &found.state {
             SigninState::LoginFound { .. } => claude_session(job, email, found, false).await,
             _ => Some(stop(job, Some(Found::ReusedSignedOut)).await),

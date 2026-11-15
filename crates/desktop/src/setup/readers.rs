@@ -23,6 +23,12 @@
 //!   gateway's, to the vendor's own host while its launches are refused. The blocked agents
 //!   come from the settings read at start, then from each `SettingsChanged`
 //!   ([`LeaveReaders::set_blocked`]).
+//! - No Claude read goes out while the macOS login keychain is locked
+//!   (`clauseo_agents::login_keychain_locked`, `SecKeychainGetStatus`, which never prompts): the
+//!   read runs Claude Code, whose own `security -w` of its item would show "security wants to use
+//!   the 'login' keychain" with the lawyer doing nothing (VM, 2026-11-15). The read fails at once,
+//!   so the last numbers stay as stale (`limits`' failed-read rule), and the next scheduled read
+//!   asks again. Codex keeps its login in a file and is not held.
 
 use std::any::Any;
 use std::collections::BTreeSet;
@@ -77,6 +83,9 @@ pub(crate) struct SwappableReaders {
     readers: Arc<ProcessReaders<AsyncIoTimer>>,
     keys: KeySlot,
     blocked: Arc<RwLock<BTreeSet<AgentId>>>,
+    /// Whether the login keychain is locked now: `clauseo_agents::login_keychain_locked`, or a
+    /// test's answer.
+    keychain_locked: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
 impl SwappableReaders {
@@ -104,7 +113,24 @@ impl SwappableReaders {
             readers: Arc::new(readers),
             keys,
             blocked: Arc::default(),
+            // Tests never read the machine's keychain (a CI Mac's may be locked or missing).
+            keychain_locked: if cfg!(test) {
+                Arc::new(|| false)
+            } else {
+                Arc::new(clauseo_agents::login_keychain_locked)
+            },
         }
+    }
+
+    /// Tests only: these readers with `locked` standing in for the keychain's lock state.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_keychain_locked(
+        mut self,
+        locked: impl Fn() -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.keychain_locked = Arc::new(locked);
+        self
     }
 
     /// These readers with `blocked` the agents an unreadable policy blocks, as read at start.
@@ -158,11 +184,18 @@ impl ReadLimits for SwappableReaders {
         let readers = Arc::clone(&self.readers);
         let keys = Arc::clone(&self.keys);
         let blocked = Arc::clone(&self.blocked);
+        let keychain_locked = Arc::clone(&self.keychain_locked);
         Box::pin(async move {
             let ready = keys_ready(&keys, agent).await;
             // After the wait, so a block that came meanwhile holds.
             if let Err(failure) = ready.and_then(|()| refuse_blocked(&blocked, agent)) {
                 return ReadOutcome::Failed(failure);
+            }
+            // Asked at the read, so a keychain unlocked since the last tick is read now.
+            if agent == AgentKind::Claude && keychain_locked() {
+                return ReadOutcome::Failed(ReadFailure::LaunchFailed(
+                    "the login keychain is locked".to_owned(),
+                ));
             }
             readers.read(agent).await
         })

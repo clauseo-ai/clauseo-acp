@@ -439,9 +439,12 @@ find-generic-password` query for Claude's default Keychain item: never `-w`/`-g`
 only (2026-11-15). `signin/reuse.rs` is the one file that names the login files and the item.
 - Claude: `~/.claude/.credentials.json` (`%USERPROFILE%\.claude\.credentials.json` on Windows)
   a regular file is `LoginFound { from: ClaudeCode, email: None }`; anything else (missing, a
-  symbolic link or other reparse point, a folder) is `SignedOut { found: NoLogin }`. With
-  `CLAUDE_CONFIG_DIR` set in the lawyer's environment nothing is found and nothing is queried:
-  their Claude Code keeps its login under that folder, and "Use it" reads the default store only.
+  symbolic link or other reparse point, a folder) is `SignedOut { found: NoLogin }`. When the
+  lawyer's environment moves Claude's store, nothing is found and nothing is queried: their
+  Claude Code keeps its login elsewhere, and "Use it" reads the default store only. By Claude
+  Code 0.3.293's rule (`claude_store_moved`): with `CLAUDE_SECURESTORAGE_CONFIG_DIR` set, a
+  folder moves the store and `""` is the default store (`~/.claude`, the unsuffixed item)
+  whatever `CLAUDE_CONFIG_DIR` says; unset, a non-empty `CLAUDE_CONFIG_DIR` moves it.
   `ClaudeSettings` is no longer reported.
 - **macOS** (`config.platform`, decided at run time). Claude Code keeps its login in the
   Keychain: a generic password, service `Claude Code-credentials`, account `$USER` (else the OS
@@ -452,15 +455,48 @@ only (2026-11-15). `signin/reuse.rs` is the one file that names the login files 
   Code-credentials"`, plus `-a <USER>` when the lawyer's `USER` fits that account rule (else the
   service alone), by absolute path, with `HOME` the only variable, stdin closed and stdout and
   stderr thrown away unread (they name the account), killed past 3 s. Exit 0 is
-  `LoginFound { from: ClaudeCode, email: None }`; 44 ("could not be found") and any other end
-  (another code, a timeout, a failed start) are `SignedOut { found: NoLogin }`, the others logged
-  with the code or a fixed word only. `-w`, `-g` and `-d` are never passed, so the secret is
+  `LoginFound { from: ClaudeCode, email: None }`; 44 ("could not be found") is a definite no;
+  any other end (another code, a timeout, a failed start) could not tell, logged with the code or
+  a fixed word only. At first detection both are `SignedOut { found: NoLogin }`. A recorded
+  `reused` re-checked at a status check stops (`ReusedSignedOut`) on 44 only; could not tell
+  keeps the record and leaves the state as it is, and the next check asks again (2026-11-15
+  review).
+  - **Locked keychain.** `security find-generic-password` searches the file-based login
+    keychain with `SecKeychainSearchCopyNext`, and Apple documents that functions needing an
+    unlocked keychain show the Unlock Keychain dialog unless `SecKeychainSetUserInteractionAllowed`
+    is false (process-wide, deprecated); over SSH the same search fails "User interaction is not
+    allowed". So a locked keychain may show the dialog even for this attributes-only query
+    (unverified on a Mac; checklist rows). An in-process `SecItemCopyMatching` with
+    `kSecUseAuthenticationUI` skip or fail would not help: Apple's Security source
+    (`OSX/libsecurity_keychain/lib/SecItem.cpp`) sends a legacy-keychain query to
+    `SecItemCopyMatching_osx`, which never reads that key. The guard: detection keeps the
+    Keychain's answer for 10 minutes (`KeychainMemo`, one per `Agents`, on the config clock's
+    monotonic reading), whatever it was, so status checks, their retries and Sign in presses ask
+    at most once per 10 minutes and a dialog cannot repeat sooner. Only the lawyer's own "Look
+    for my Claude Code login" asks afresh. `-w`, `-g` and `-d` are never passed, so the secret is
   never read or printed; on a Mac (stage C, 2026-11-15) the query exits 0 with attributes only
   and no Keychain dialog, and 44 for a missing service. `tests/credential_names.rs` keeps the
   service name in `reuse.rs` and fails any file that runs the query and holds one of those flags.
-  Linux and Windows keep the stat alone. Everything after detection is as elsewhere: "Use it"
+  Linux and Windows keep the stat alone. Tests pin the fixture to Linux on a Mac
+  (`testing::signin_test_platform`), and a test that reaches the query with no fake `security`
+  panics unless it opts in (`SigninConfig::allow_real_security`, the one real-macOS test).
+  Everything after detection is as elsewhere: "Use it"
   confirms through `auth status` under `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`, which addresses the
   unsuffixed item, and each status check detects again.
+- **Locked keychain, background runs (2026-11-15, VM).** In a macOS 27.2 VM with the login
+  keychain locked, detection's attributes-only query found the item with no prompt, but Claude
+  Code's own `security find-generic-password -w` of Clauseo's suffixed item, run by the status
+  check, showed "security wants to use the 'login' keychain" at times the lawyer did nothing (on
+  main before this change too). So the status check the app starts by itself (`Task::Status`:
+  at start, a window's Plans, its background re-checks) runs no Claude, own or reused, while the
+  default keychain is locked (`signin/keychain_lock.rs`, `SecKeychainGetStatus` on the default
+  keychain, which reads the state and never prompts; a failed call counts as locked;
+  `security show-keychain-info` exits 0 locked or unlocked in the GUI session). It could not tell: the state stays (a blank
+  card shows Sign in), a recorded reuse is kept, and the background re-checks (30 s, 60 s, then
+  every 120 s) ask again. Turns, sign-ins, "Use it" and "Look for my login" are the lawyer's own
+  acts and are not guarded. Desktop's limits readers (`setup/readers.rs`) hold Claude's
+  scheduled read the same way through `clauseo_agents::login_keychain_locked`: it fails at once,
+  the last numbers stay as stale, and the next read asks again.
 - **Guard: Keychain shims and jails are for `own` only.** Reuse on macOS works only because a
   reused Claude reaches the lawyer's real item through Apple's `/usr/bin/security` and
   SecurityServer. Any Keychain shim, jail or `keychain(false)` sandbox profile for Claude (draft

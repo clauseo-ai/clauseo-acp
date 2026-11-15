@@ -6,8 +6,8 @@ use std::ffi::{OsStr, OsString};
 use std::time::Duration;
 
 use super::{
-    CLAUDE_KEYCHAIN_SERVICE, KEYCHAIN_LIMIT, KeychainProbe, claude_account, keychain_args,
-    keychain_found,
+    CLAUDE_KEYCHAIN_SERVICE, KEYCHAIN_LIMIT, KeychainProbe, KeychainSeen, claude_account,
+    keychain_args, keychain_seen,
 };
 
 fn env(pairs: &[(&str, &str)]) -> BTreeMap<OsString, OsString> {
@@ -63,20 +63,26 @@ fn the_account_is_user_only_when_claude_would_take_it() {
     assert_eq!(claude_account(&env(&[("HOME", "/x")])), None);
 }
 
-/// Exit 0 is found; 44 ("could not be found"), any other code, a signal, a timeout and a failed
-/// start are not.
+/// Exit 0 is found and 44 ("could not be found") absent; any other code, a signal, a timeout
+/// and a failed start could not tell.
 #[test]
-fn only_exit_0_is_found() {
-    assert!(keychain_found(KeychainProbe::Exited(Some(0))));
+fn exit_0_is_found_44_absent_and_anything_else_unknown() {
+    assert_eq!(
+        keychain_seen(KeychainProbe::Exited(Some(0))),
+        KeychainSeen::Found
+    );
+    assert_eq!(
+        keychain_seen(KeychainProbe::Exited(Some(44))),
+        KeychainSeen::Absent
+    );
     for probe in [
-        KeychainProbe::Exited(Some(44)),
         KeychainProbe::Exited(Some(1)),
         KeychainProbe::Exited(Some(36)),
         KeychainProbe::Exited(None),
         KeychainProbe::TimedOut,
         KeychainProbe::NotStarted,
     ] {
-        assert!(!keychain_found(probe), "{probe:?}");
+        assert_eq!(keychain_seen(probe), KeychainSeen::Unknown, "{probe:?}");
     }
 }
 
@@ -89,7 +95,8 @@ mod run {
     use futures::executor::block_on;
 
     use super::super::{
-        CLAUDE_KEYCHAIN_SERVICE, KEYCHAIN_LIMIT, KeychainProbe, claude_keychain_present, query,
+        CLAUDE_KEYCHAIN_SERVICE, KEYCHAIN_LIMIT, KeychainProbe, KeychainSeen, claude_keychain,
+        query,
     };
     use super::env;
     use crate::write::{TestDir, set_mode};
@@ -111,25 +118,20 @@ mod run {
         path
     }
 
-    fn present(program: &Path) -> bool {
+    fn seen(program: &Path) -> KeychainSeen {
         let base = env(&[
             ("HOME", "/home/lawyer"),
             ("USER", "lawyer"),
             ("SECRET_TOKEN", "not-for-security"),
         ]);
-        block_on(claude_keychain_present(
-            &launcher(),
-            &AsyncIoTimer,
-            program,
-            &base,
-        ))
+        block_on(claude_keychain(&launcher(), &AsyncIoTimer, program, &base))
     }
 
     #[test]
     fn exit_0_is_found_with_the_exact_arguments_and_only_home() {
         let dir = TestDir::new("keychain-found");
         let program = fake(&dir, "echo 'acct=lawyer'; echo 'attrs' >&2; exit 0");
-        assert!(present(&program));
+        assert_eq!(seen(&program), KeychainSeen::Found);
         let args = std::fs::read_to_string(dir.0.join("called")).unwrap();
         let want = format!("find-generic-password\n-s\n{CLAUDE_KEYCHAIN_SERVICE}\n-a\nlawyer\n");
         assert_eq!(args, want);
@@ -140,11 +142,11 @@ mod run {
     }
 
     #[test]
-    fn exit_44_and_exit_1_are_not_found() {
-        for code in [44, 1] {
+    fn exit_44_is_absent_and_exit_1_unknown() {
+        for (code, want) in [(44, KeychainSeen::Absent), (1, KeychainSeen::Unknown)] {
             let dir = TestDir::new("keychain-absent");
             let program = fake(&dir, &format!("exit {code}"));
-            assert!(!present(&program), "exit {code}");
+            assert_eq!(seen(&program), want, "exit {code}");
             assert!(dir.0.join("called").exists(), "exit {code}");
         }
     }
@@ -164,7 +166,7 @@ mod run {
             )),
             KeychainProbe::NotStarted
         );
-        assert!(!present(&missing));
+        assert_eq!(seen(&missing), KeychainSeen::Unknown);
     }
 
     /// Past its limit the query is not found and its process is killed.
@@ -211,23 +213,36 @@ mod run {
     }
 }
 
-/// Apple's own `security`, on the Mac: a service that cannot exist exits 44, not found.
+/// Apple's own `security`, on the Mac: a service that cannot exist exits 44, absent. The one
+/// test that asks the machine's Keychain, so it opts in (`allow_real_security`).
 #[cfg(target_os = "macos")]
 #[test]
 fn apple_s_security_says_44_for_a_missing_item() {
     use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
 
+    let mut signin = crate::config::SigninConfig::from_env();
+    signin.allow_real_security = true;
+    let program = signin.security_program();
+    assert_eq!(program, std::path::Path::new(super::SECURITY));
     let service = format!("{CLAUDE_KEYCHAIN_SERVICE}-clauseo-test-absent");
     let home = std::env::var_os("HOME").unwrap();
     let base = BTreeMap::from([(OsString::from("HOME"), home)]);
     let probe = futures::executor::block_on(super::query::run(
         &PassthroughLauncher::new(SpawnOptions::new().clear_env()),
         &AsyncIoTimer,
-        std::path::Path::new(super::SECURITY),
+        &program,
         keychain_args(&service, None),
         &base,
         KEYCHAIN_LIMIT,
     ));
     assert_eq!(probe, KeychainProbe::Exited(Some(44)));
-    assert!(!keychain_found(probe));
+    assert_eq!(keychain_seen(probe), KeychainSeen::Absent);
+}
+
+/// With no fake and no opt-in, a test that reaches the query panics instead of asking the
+/// machine's Keychain.
+#[test]
+#[should_panic(expected = "a test reached the real Keychain query")]
+fn a_test_without_a_fake_never_reaches_the_real_security() {
+    drop(crate::config::SigninConfig::from_env().security_program());
 }

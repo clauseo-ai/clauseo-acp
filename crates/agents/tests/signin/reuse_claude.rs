@@ -78,10 +78,15 @@ fn reuse(agents: &clauseo_agents::Agents, events: &Events) {
 #[test]
 fn claude_detection_starts_no_run() {
     let mut fx = Fixture::new("reuse-claude-env", "ok-after:0");
+    // The lawyer's store variable is `""` (Claude Code's default store, so the login is still
+    // found; a folder there would move it, `detect_keychain.rs`); Codex's is a stray folder.
+    // Neither reaches the run.
     let stray = fx.data.path().join("stray").into_os_string();
-    for name in ["CLAUDE_SECURESTORAGE_CONFIG_DIR", "CODEX_HOME"] {
-        fx.config.signin.base_env.insert(name.into(), stray.clone());
-    }
+    fx.config
+        .signin
+        .base_env
+        .insert("CLAUDE_SECURESTORAGE_CONFIG_DIR".into(), "".into());
+    fx.config.signin.base_env.insert("CODEX_HOME".into(), stray);
     plant_lawyer(&fx, "claude.ai", EMAIL);
     let (agents, events) = fx.start();
     agents.check_status(&claude()).unwrap();

@@ -17,10 +17,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
-use clauseo_agents::testing::{TempDir, installed, write_file};
+use clauseo_agents::testing::{TempDir, installed, signin_test_platform, write_file};
 use clauseo_agents::{
-    Agents, AgentsConfig, AgentsEvent, Clock, InstallState, Installed, NodeSearch, Platform,
-    TestResolver,
+    Agents, AgentsConfig, AgentsEvent, Clock, InstallState, Installed, NodeSearch, TestResolver,
 };
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions, Timer};
 use clauseo_protocol::AgentId;
@@ -297,7 +296,7 @@ impl Fixture {
         let adapter = under(&codex_folder, CODEX_ADAPTER);
         write_file(&adapter, b"").unwrap();
         write_file(&under(&codex_folder, CODEX_CLI), b"").unwrap();
-        let mut config = AgentsConfig::new(root.to_path_buf(), Platform::current().unwrap());
+        let mut config = AgentsConfig::new(root.to_path_buf(), signin_test_platform());
         config.node_search = NodeSearch::none();
         config.clock = Arc::new(FixedClock);
         config.ready_for_tests.insert(

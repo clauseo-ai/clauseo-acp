@@ -250,6 +250,15 @@ pub struct SigninConfig {
     /// field does not exist, so the query always runs Apple's `security` by absolute path.
     #[cfg(feature = "test-support")]
     pub security_program: Option<PathBuf>,
+    /// Tests only: lets a test with no [`SigninConfig::security_program`] run Apple's own
+    /// `security` (the one real-macOS test). Unset, such a test panics at the query instead of
+    /// asking the machine's Keychain.
+    #[cfg(feature = "test-support")]
+    pub allow_real_security: bool,
+    /// Tests only: the macOS login keychain's lock state the background status check sees
+    /// (`signin/keychain_lock.rs`); `None` reads the machine's, on macOS only.
+    #[cfg(feature = "test-support")]
+    pub keychain_locked: Option<bool>,
 }
 
 /// The port Codex's browser sign-in listens on for its callback: `http://127.0.0.1:1455`.
@@ -265,6 +274,10 @@ impl SigninConfig {
             callback_port: None,
             #[cfg(feature = "test-support")]
             security_program: None,
+            #[cfg(feature = "test-support")]
+            allow_real_security: false,
+            #[cfg(feature = "test-support")]
+            keychain_locked: None,
         }
     }
 
@@ -292,12 +305,19 @@ impl SigninConfig {
         CODEX_CALLBACK_PORT
     }
 
-    /// The program the macOS Keychain query runs: a test's fake, or `/usr/bin/security`.
+    /// The program the macOS Keychain query runs: a test's fake, or `/usr/bin/security` for a
+    /// test that allowed it. Any other test panics here rather than ask the machine's Keychain.
     #[cfg(feature = "test-support")]
     pub(crate) fn security_program(&self) -> PathBuf {
-        self.security_program
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(crate::signin::reuse::SECURITY))
+        if let Some(fake) = &self.security_program {
+            return fake.clone();
+        }
+        assert!(
+            self.allow_real_security,
+            "a test reached the real Keychain query: set SigninConfig::security_program to a \
+             fake, or allow_real_security"
+        );
+        PathBuf::from(crate::signin::reuse::SECURITY)
     }
 
     /// The program the macOS Keychain query runs: always `/usr/bin/security` outside tests.

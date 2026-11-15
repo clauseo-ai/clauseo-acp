@@ -1,4 +1,4 @@
-//! The Keychain query's run (`super::claude_keychain_present`): any program and arguments, with
+//! The Keychain query's run (`super::claude_keychain`): any program and arguments, with
 //! their output thrown away and only the exit status kept. It names no credential; the
 //! arguments, attributes only, are `super::keychain_args`.
 

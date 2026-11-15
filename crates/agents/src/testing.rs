@@ -552,6 +552,19 @@ pub fn python_failed(
     })
 }
 
+/// The platform a sign-in test's config says: this machine's, with Linux in place of macOS, so
+/// detection never runs the real Keychain query unless a test makes the config macOS itself
+/// (with a fake `security`). Windows stays Windows: its runs differ (`USERPROFILE`, no shim).
+pub fn signin_test_platform() -> crate::Platform {
+    match crate::Platform::current() {
+        Some(platform) if platform.os == crate::Os::Darwin => {
+            crate::Platform::new(crate::Os::Linux, platform.arch)
+        }
+        Some(platform) => platform,
+        None => crate::Platform::new(crate::Os::Linux, crate::Arch::X64),
+    }
+}
+
 /// Writes `bytes` to `path`, making its folder, replacing any file there.
 pub fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
