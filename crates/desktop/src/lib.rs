@@ -33,8 +33,7 @@
 //!   returns at once (a Windows logoff reaches it through tao's `WM_ENDSESSION`), and a second
 //!   start during a quit raises nothing (`quit::on_second_start`).
 //! - On Windows, `run` first checks the `WebView2` runtime; when it is missing or older than
-//!   `minimumWebview2Version`, a task dialog says so and `run` returns without building the app
-//!   (`webview2.rs`).
+//!   `minimumWebview2Version`, a task dialog says so and `run` returns without building the app.
 //! - The host's pre-write guard hook runs this executable with `--pre-write-guard`, which `main`
 //!   answers before anything starts ([`guard_requested`], `pre_write_guard.rs`).
 //! - Every other start first asks whether it runs inside the agent sandbox ([`launch`],
@@ -84,8 +83,7 @@
 //!   included: Tauri sends the header with `.html` only (`csp.rs`).
 //! - No command takes a path but `chooser_list`'s typed one (`chooser.rs`, checked there; the
 //!   chooser admits only through a native confirm): folders come from a dialog drawn in Rust,
-//!   files are named by the refs the host issued, and `reveal` names a matter or the app data
-//!   folder (`open.rs`, 0026).
+//!   files are named by the refs the host issued; `reveal` names a matter or the data folder.
 //! - Plugins are called from Rust only. Each is registered with `plugin_rust_only`, which drops the
 //!   script a plugin would inject into the page (`rust_only.rs`). clippy's `disallowed-methods`
 //!   (`clippy.toml`) forbids the other public ways we know of to register a plugin, grant a
