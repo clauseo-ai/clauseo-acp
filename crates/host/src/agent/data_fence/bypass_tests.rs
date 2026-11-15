@@ -218,3 +218,25 @@ fn a_long_verbatim_path_keys_as_its_plain_form() {
         super::key(std::path::Path::new(&plain), true)
     );
 }
+
+/// The bug's own shape on Windows: a deep path the walk gives verbatim keys under the shorter,
+/// plain data folder's key, so the fence's text compare finds it.
+#[cfg(windows)]
+#[test]
+fn a_deep_verbatim_path_keys_under_the_shorter_plain_data_folder() {
+    let folder = r"C:\Users\a\AppData\Roaming\Clauseo";
+    let mut file = format!(r"\\?\{folder}\agents\");
+    while file.len() < 300 {
+        file.push_str(r"A long folder name\");
+    }
+    file.push_str("state.json");
+    for insensitive in [false, true] {
+        let data = super::key(std::path::Path::new(folder), insensitive);
+        assert!(super::key(std::path::Path::new(&file), insensitive).starts_with(&data));
+        let other = super::key(
+            std::path::Path::new(r"C:\Users\a\AppData\Roaming\Other"),
+            insensitive,
+        );
+        assert!(!super::key(std::path::Path::new(&file), insensitive).starts_with(&other));
+    }
+}

@@ -51,9 +51,84 @@ fn backslashed(path: &Path) -> Cow<'_, Path> {
     }
 }
 
+/// `path` with this machine's own admin share in its drive form: `\\?\UNC\localhost\c$\x` (or
+/// `127.0.0.1`, `.`, any case) is `\\?\C:\x`, as `dunce::canonicalize` names a link or a `gitdir:`
+/// line written through the loopback share. Only a one-letter `X$` share on those three
+/// servers; any other path, another server's included, comes back as it is. Pure text.
+pub(crate) fn local_share_as_drive(path: PathBuf) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path;
+    };
+    let Some(rest) = text
+        .get(..8)
+        .filter(|head| head.eq_ignore_ascii_case(r"\\?\UNC\"))
+        .and_then(|_| text.get(8..))
+    else {
+        return path;
+    };
+    let (server, rest) = rest.split_once('\\').unwrap_or((rest, ""));
+    let local = ["localhost", "127.0.0.1", "."];
+    if !local.iter().any(|name| server.eq_ignore_ascii_case(name)) {
+        return path;
+    }
+    let (share, rest) = rest.split_once('\\').unwrap_or((rest, ""));
+    let mut chars = share.chars();
+    match (chars.next(), chars.next(), chars.next()) {
+        (Some(drive), Some('$'), None) if drive.is_ascii_alphabetic() => {
+            PathBuf::from(format!(r"\\?\{}:\{rest}", drive.to_ascii_uppercase()))
+        }
+        _ => path,
+    }
+}
+
+/// `path` in the one form [`crate::policy::under`] compares when either side is verbatim:
+/// [`verbatim`], this machine's admin share read as its drive ([`local_share_as_drive`]).
+pub(crate) fn compared(path: &Path) -> PathBuf {
+    local_share_as_drive(verbatim(path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// This machine's admin share reads as its drive; another server's, another share, or a
+    /// share that is not one letter and `$` stays as it is.
+    #[test]
+    fn the_local_admin_share_is_read_as_its_drive() {
+        for (local, drive) in [
+            (r"\\?\UNC\localhost\c$\m\realgit", r"\\?\C:\m\realgit"),
+            (r"\\?\unc\LOCALHOST\C$\m", r"\\?\C:\m"),
+            (r"\\?\UNC\127.0.0.1\d$\x", r"\\?\D:\x"),
+            (r"\\?\UNC\.\c$\m", r"\\?\C:\m"),
+            (r"\\?\UNC\localhost\c$", r"\\?\C:\"),
+        ] {
+            assert_eq!(
+                local_share_as_drive(local.into()),
+                PathBuf::from(drive),
+                "{local}"
+            );
+        }
+        for other in [
+            r"\\?\UNC\server\c$\m",
+            r"\\?\UNC\localhost.evil\c$\m",
+            r"\\?\UNC\localhost\share\m",
+            r"\\?\UNC\localhost\cd$\m",
+            r"\\?\UNC\localhost\1$\m",
+            r"\\?\UNC\[::1]\c$\m",
+            r"\\server\c$\m",
+            r"\\?\C:\m",
+        ] {
+            assert_eq!(
+                local_share_as_drive(other.into()),
+                PathBuf::from(other),
+                "{other}"
+            );
+        }
+        assert_eq!(
+            compared(Path::new(r"\\localhost\c$\m")),
+            PathBuf::from(r"\\?\C:\m")
+        );
+    }
 
     /// Round 7 (VM run 3): `/` separators become `\` when the prefix is added, so std parses
     /// the parts rather than reading one verbatim name.

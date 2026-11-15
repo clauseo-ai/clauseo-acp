@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::policy::{opens_as, same, under};
+use crate::windows::acl_plan::local_share_as_drive;
 use crate::{Error, PROTECTED_AT_ANY_DEPTH};
 
 /// A `.git` file larger than this is not read for its `gitdir:` line; git writes one line.
@@ -245,7 +246,7 @@ impl Walk {
                 // A `.git` link to a folder in the matter: that folder is the repository.
                 None if is_git => {
                     if let Ok(dir) = dunce::canonicalize(&path) {
-                        self.scan.git_dirs.push(dir);
+                        self.scan.git_dirs.push(local_share_as_drive(dir));
                     }
                     self.scan.git.push(path);
                 }
@@ -383,7 +384,8 @@ fn dir_named(matter: &Path, base: &Path, line: &str) -> Option<PathBuf> {
     } else {
         base.join(named)
     };
-    let dir = dunce::canonicalize(joined).ok()?;
+    // Through this machine's admin share it is named by its drive, as the rules expect.
+    let dir = local_share_as_drive(dunce::canonicalize(joined).ok()?);
     // The matter itself is left out: naming it would make the whole matter read-only.
     (under(&dir, matter) && !same(&dir, matter)).then_some(dir)
 }

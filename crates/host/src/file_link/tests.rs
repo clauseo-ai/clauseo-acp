@@ -72,3 +72,26 @@ fn a_long_verbatim_path_is_inside_its_plain_folder() {
     let share = format!(r"\\?\UNC\server\c$\{}", folder.get(3..).unwrap_or_default());
     assert!(!within(Path::new(&share), Path::new(&folder)));
 }
+
+/// The bug's own shape on Windows, where `\\?\C:\` is parsed: a deep file `dunce` leaves
+/// verbatim is inside its shorter, plain matter folder, though `Path::starts_with` says not.
+#[cfg(windows)]
+#[test]
+fn a_deep_verbatim_file_is_inside_its_shorter_plain_folder() {
+    let folder = r"C:\Users\a\Documents\Matters\Smith v Jones";
+    let mut file = format!(r"\\?\{folder}\");
+    while file.len() < 300 {
+        file.push_str(r"A long folder name\");
+    }
+    file.push_str("brief.docx");
+    assert!(!Path::new(&file).starts_with(folder));
+    assert!(within(Path::new(&file), Path::new(folder)));
+    assert!(!within(
+        Path::new(&file),
+        Path::new(r"C:\Users\a\Documents\Other")
+    ));
+    assert!(!within(
+        Path::new(&file),
+        Path::new(r"D:\Users\a\Documents\Matters")
+    ));
+}
