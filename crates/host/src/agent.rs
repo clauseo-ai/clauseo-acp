@@ -20,6 +20,7 @@
 pub(crate) mod claude_tmp;
 pub(crate) mod codex;
 pub(crate) mod codex_fence;
+pub(crate) mod codex_memories;
 pub(crate) mod data_fence;
 pub(crate) mod data_folder;
 pub(crate) mod folder_access;
