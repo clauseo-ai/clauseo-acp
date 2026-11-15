@@ -11,10 +11,12 @@
 //! written, on Unix its pid told to the reaper before the wait, and then given the start wait to
 //! answer `Browser.getVersion` on the pipe.
 
+#[cfg(any(windows, test))]
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 use super::super::browsers;
 use super::super::chrome::{self, Chrome, Spec};
 use super::super::parent::Parent;
@@ -29,23 +31,37 @@ pub(super) fn start_browser(
 ) -> Result<(Chrome, String), StartFailure> {
     let launcher = &shared.launcher;
     let candidates = candidates(shared)?;
-    let mut failures = Vec::new();
-    for (tried, executable) in candidates.iter().enumerate() {
+    let (started, executable) = first_to_start(&candidates, |tried, executable| {
         if tried > 0 {
             chrome::remove_profile(&launcher.profile);
         }
+        start_one(shared, executable, parent)
+    })?;
+    *lock(&launcher.started_with) = Some(executable);
+    Ok(started)
+}
+
+/// The fallback loop over `candidates`, in order: `start` is given each one's place in the
+/// list (a place past 0 starts on a fresh profile) and its path. The first that starts wins;
+/// the parent's going, or Chrome's sandbox that cannot start, ends the loop at once; when each one
+/// fails, the failure is the only reason, or every reason joined.
+fn first_to_start<T>(
+    candidates: &[PathBuf],
+    mut start: impl FnMut(usize, &PathBuf) -> Result<T, StartError>,
+) -> Result<(T, PathBuf), StartFailure> {
+    let mut failures = Vec::new();
+    for (tried, executable) in candidates.iter().enumerate() {
         note(&format!(
             "starting {} over a DevTools pipe",
             executable.display()
         ));
-        match start_one(shared, executable, parent) {
+        match start(tried, executable) {
             Ok(started) => {
                 note(&format!(
                     "{} answers on its DevTools pipe; the relay listens on 127.0.0.1",
                     executable.display()
                 ));
-                *lock(&launcher.started_with) = Some(executable.clone());
-                return Ok(started);
+                return Ok((started, executable.clone()));
             }
             // Chrome's sandbox could not start: refused, and no other browser is tried
             // (`chrome/sandbox.rs`); nor any once the guard's parent has gone.
@@ -74,20 +90,41 @@ fn candidates(shared: &Shared) -> Result<Vec<PathBuf>, StartFailure> {
 #[cfg(windows)]
 fn candidates(shared: &Shared) -> Result<Vec<PathBuf>, StartFailure> {
     let launcher = &shared.launcher;
-    let mut choice = browsers::system(&launcher.executable);
-    if let Some(last) = lock(&launcher.started_with).as_deref() {
+    let last = lock(&launcher.started_with).clone();
+    plan(browsers::system(&launcher.executable), last.as_deref())
+}
+
+/// Windows' list from `choice`, with `last` (the browser that started last) first, each one
+/// set aside noted; or, when none is left, the failure with the agent's words.
+#[cfg(any(windows, test))]
+fn plan(mut choice: browsers::Choice, last: Option<&Path>) -> Result<Vec<PathBuf>, StartFailure> {
+    if let Some(last) = last {
         choice.prefer(last);
+    }
+    if let Some(refused) = &choice.refused {
+        note(&format!(
+            "{} is not under Program Files; not tried",
+            refused.display()
+        ));
     }
     for blocked in &choice.blocked {
         note(&format!(
-            "{} is blocked by the firm's policy {}=0; not tried",
+            "{} is blocked by the firm's policy ({}=0 or {}={}); not tried",
             blocked.display(),
-            browsers::POLICY_VALUE
+            browsers::POLICY_VALUE,
+            browsers::DEVTOOLS_VALUE,
+            browsers::DEVTOOLS_DISALLOWED
+        ));
+    }
+    if let Some(per_user) = &choice.per_user {
+        note(&format!(
+            "{} is a per-user install; not tried",
+            per_user.display()
         ));
     }
     match choice.unavailable() {
         Some(none) => Err(StartFailure {
-            reason: none.reason().to_owned(),
+            reason: StartError::Other(none.reason().to_owned()),
             agent_note: Some(none.agent_note()),
         }),
         None => Ok(choice.try_in_order),
@@ -149,3 +186,6 @@ fn start_one(
 fn lock(mutex: &Mutex<Option<PathBuf>>) -> MutexGuard<'_, Option<PathBuf>> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
+
+#[cfg(test)]
+mod tests;

@@ -187,12 +187,18 @@ on stderr and starts no browser (fail closed).
 
 ### Which browser
 
-- **Windows** (`browsers.rs`, host `browser/chrome.rs`): the host's choice comes first, then
-  Microsoft Edge under Program Files, then Google Chrome under Program Files. Chrome for Testing
-  is never used on Windows, and neither is a per-user Chrome: row b-CfT shows a per-user folder's
-  ACL stops Chrome's sandbox. A browser whose firm policy sets `RemoteDebuggingAllowed` to 0 is set
-  aside up front (the machine's value wins over the user's). One that exits, or doesn't answer in
-  time, is killed, and the next one starts on a fresh profile.
+- **Windows** (`browsers.rs`, host `browser/chrome.rs`): the host's choice comes first, but only
+  when it lies under `%ProgramFiles%` or `%ProgramFiles(x86)%`; then Microsoft Edge under
+  Program Files, then Google Chrome under Program Files. Chrome for Testing is never used on
+  Windows, and neither is a per-user Chrome: row b-CfT shows a per-user folder's ACL stops Chrome
+  for Testing's sandbox, and a per-user Chrome install sits under the same folder rules (inferred,
+  not tried). A browser whose firm policy sets `RemoteDebuggingAllowed` to 0 or
+  `DeveloperToolsAvailability` to 2 is set aside up front (for each value the machine's wins over
+  the user's), and Clauseo's own opt-in (`browser.allow_when_remote_debugging_disabled`) does not
+  bring it back, on the guard or in the host's panel. One that exits, or doesn't answer in time,
+  is killed, and the next one starts on a fresh profile. A policy set through MDM or cloud
+  management rather than the registry is not seen up front: it costs that browser's 15 s start
+  wait, then the next is tried.
 - **macOS and Linux:** the host's choice, as today, only over the pipe. On macOS that means
   installed Chrome, else Chrome for Testing.
 
@@ -201,8 +207,13 @@ on stderr and starts no browser (fail closed).
 - **Neither installed:** the host shows its existing Windows words (UET-48 and UET-50). If the
   guard finds none, it tells the agent to say that installing Microsoft Edge or Google Chrome and
   starting a new conversation would give it a browser.
-- **Every installed browser blocked by policy:** the host shows the new Windows line UC-550
-  (provisional). The guard tells the agent to have the lawyer ask the firm's IT to allow it.
+- **Only a per-user Chrome:** the host shows UC-554 and UC-551 (provisional): Clauseo can't use
+  a Chrome installed just for the lawyer; install Microsoft Edge, or have the firm's IT install
+  Chrome for everyone. The guard tells the agent the same.
+- **Every installed browser blocked by policy:** the host shows UC-550 (both), UC-552 (Edge) or
+  UC-553 (Chrome), naming only the blocked browsers installed (provisional): the firm's settings
+  don't let apps control them, so ask the firm's IT to allow this for Clauseo. The guard tells the
+  agent the same.
 - **Tried and failed:** the plain "the browser could not start".
 
 ### The stream server

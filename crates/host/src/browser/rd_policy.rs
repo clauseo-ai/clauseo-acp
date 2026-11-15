@@ -15,12 +15,20 @@
 //! That is the rule on macOS and Linux, and for a forced browser. On Windows Clauseo starts only
 //! Edge or a Program Files Chrome (`super::chrome`), each of which reads its own policy, so the
 //! rule goes per browser ([`RdPolicy::pick`]): a browser is passed over when its own place, the
-//! computer's or the user's, says false or could not be read, and the first installed browser
-//! left is taken. Every installed one false is `BrowserBlockedByPolicy`; none false but none
-//! readable is `BrowserPolicyUnreadable`; none installed is no policy block (the launch prep
-//! says `BrowserNotInstalled`). Chromium's place counts for neither there: no browser Clauseo
-//! starts on Windows reads it. The firm's Clauseo opt-in takes the first installed browser only
-//! when the rule leaves none.
+//! computer's or the user's, says false (`RemoteDebuggingAllowed` 0, or there
+//! `DeveloperToolsAvailability` 2, `clauseo_settings::chromium_policy::read_registry`) or could
+//! not be read, and the first installed browser left is taken. When none is left, a false names
+//! the browsers it blocks: Edge alone `BrowserBlockedEdge`, Chrome alone `BrowserBlockedChrome`,
+//! both `BrowserBlockedByPolicy`; none false but none readable is `BrowserPolicyUnreadable`;
+//! none installed is no policy block (the launch prep says `BrowserNotInstalled`, or
+//! `BrowserPerUserChromeOnly`). Chromium's place counts for neither there: no browser Clauseo
+//! starts on Windows reads it.
+//!
+//! On Windows the firm's Clauseo opt-in lifts only a place that could not be read: it takes the
+//! first installed browser whose own policy does not say false. A browser whose policy says false
+//! refuses the guard's pipe whatever Clauseo allows, and the guard sets it aside
+//! (`crates/mcp/src/browser_guard/browsers.rs`), so the panel says it is blocked rather than
+//! offer a browser that then cannot start.
 
 #[cfg(test)]
 mod tests;
@@ -98,7 +106,8 @@ impl RdPolicy {
     }
 
     /// [`Self::recheck`] with Windows' rule over `installed`: why no browser would start, or
-    /// `None` when one would or none is installed.
+    /// `None` when one would or none is installed. The opt-in lifts only what [`Self::pick`]'s
+    /// does.
     pub(crate) fn recheck_among(
         &self,
         allowed_anyway: bool,
@@ -108,7 +117,7 @@ impl RdPolicy {
         self.log_once(&read);
         rule_among(&read, installed)
             .err()
-            .filter(|_| !allowed_anyway)
+            .filter(|_| lifted_among(&read, installed, allowed_anyway).is_none())
             .map(|(_, reason)| reason)
     }
 
@@ -152,7 +161,7 @@ fn decide_blocked(
     reason: ToolsUnavailableReason,
     allowed_anyway: bool,
 ) -> Option<ToolsUnavailableReason> {
-    let off = reason == ToolsUnavailableReason::BrowserBlockedByPolicy;
+    let off = is_blocked(reason);
     if allowed_anyway {
         tracing::info!(
             %place,
@@ -188,8 +197,19 @@ fn rule(read: &RemoteDebugging) -> Option<(Place, ToolsUnavailableReason)> {
     }
 }
 
+/// Whether `reason` is a false of the firm's browser policy (not a read error).
+fn is_blocked(reason: ToolsUnavailableReason) -> bool {
+    matches!(
+        reason,
+        ToolsUnavailableReason::BrowserBlockedByPolicy
+            | ToolsUnavailableReason::BrowserBlockedEdge
+            | ToolsUnavailableReason::BrowserBlockedChrome
+    )
+}
+
 /// [`RdPolicy::pick`]'s rule over what was read, with its log lines: the first installed browser
-/// the rule leaves on; when it leaves none, the firm's Clauseo opt-in takes the first installed.
+/// the rule leaves on; when it leaves none, the firm's Clauseo opt-in takes the first installed
+/// browser whose own policy says no false ([`lifted_among`]).
 fn decide_among(
     read: &RemoteDebugging,
     installed: &[(Browser, PathBuf)],
@@ -200,7 +220,7 @@ fn decide_among(
             if let Some((place, reason)) = installed.first().and_then(|(b, _)| verdict(read, *b)) {
                 tracing::info!(
                     %place,
-                    turned_off = reason == ToolsUnavailableReason::BrowserBlockedByPolicy,
+                    turned_off = is_blocked(reason),
                     "the firm's browser policy turns this browser's remote debugging off or was \
                      not read; the session takes the next browser installed"
                 );
@@ -209,31 +229,76 @@ fn decide_among(
         }
         Err(blocked) => blocked,
     };
-    decide_blocked(place, reason, allowed_anyway)
-        .map_or_else(|| Ok(installed.first().map(|(_, path)| path.clone())), Err)
+    if let Some(path) = lifted_among(read, installed, allowed_anyway) {
+        tracing::info!(
+            %place,
+            "the firm's browser policy was not read; its Clauseo policy allows Clauseo's browser \
+             anyway"
+        );
+        return Ok(Some(path));
+    }
+    if allowed_anyway {
+        tracing::info!(
+            %place,
+            "the firm's Clauseo policy allows Clauseo's browser anyway, but on Windows a browser \
+             its own policy turns off refuses Clauseo's pipe"
+        );
+    }
+    decide_blocked(place, reason, false).map_or(Ok(None), Err)
+}
+
+/// Windows' opt-in (`allowed_anyway`): the first installed browser whose own policy says no
+/// false, only a place that could not be read; `None` without the opt-in, or when every one
+/// says false.
+fn lifted_among(
+    read: &RemoteDebugging,
+    installed: &[(Browser, PathBuf)],
+    allowed_anyway: bool,
+) -> Option<PathBuf> {
+    if !allowed_anyway {
+        return None;
+    }
+    installed
+        .iter()
+        .find(|(browser, _)| !verdict(read, *browser).is_some_and(|(_, why)| is_blocked(why)))
+        .map(|(_, path)| path.clone())
 }
 
 /// Windows' rule alone, before the firm's Clauseo opt-in: the first browser in `installed` its
 /// own policy leaves on, `Ok(None)` when none is installed; else the place that blocks and why,
-/// any browser's false before a read error.
+/// any browser's false before a read error. A false names the browsers it turns off
+/// (`BrowserBlockedEdge`, `BrowserBlockedChrome`, or `BrowserBlockedByPolicy` for both).
 fn rule_among(
     read: &RemoteDebugging,
     installed: &[(Browser, PathBuf)],
 ) -> Result<Option<PathBuf>, (Place, ToolsUnavailableReason)> {
-    let mut off = None;
+    let mut off: Option<Place> = None;
+    let (mut edge_off, mut chrome_off) = (false, false);
     let mut unread = None;
     for (browser, path) in installed {
         match verdict(read, *browser) {
             None => return Ok(Some(path.clone())),
             Some((place, ToolsUnavailableReason::BrowserBlockedByPolicy)) => {
-                off.get_or_insert((place, ToolsUnavailableReason::BrowserBlockedByPolicy));
+                off.get_or_insert(place);
+                match browser {
+                    Browser::Edge => edge_off = true,
+                    Browser::Chrome => chrome_off = true,
+                    Browser::Chromium => {}
+                }
             }
             Some(blocked) => {
                 unread.get_or_insert(blocked);
             }
         }
     }
-    off.or(unread).map_or(Ok(None), Err)
+    let named = match (edge_off, chrome_off) {
+        (true, false) => ToolsUnavailableReason::BrowserBlockedEdge,
+        (false, true) => ToolsUnavailableReason::BrowserBlockedChrome,
+        _ => ToolsUnavailableReason::BrowserBlockedByPolicy,
+    };
+    off.map(|place| (place, named))
+        .or(unread)
+        .map_or(Ok(None), Err)
 }
 
 /// What `browser`'s own places say: the first false, else the first read error, else `None`.

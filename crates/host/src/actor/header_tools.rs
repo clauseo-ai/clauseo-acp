@@ -65,8 +65,9 @@ pub(crate) fn forget(actor: &mut Actor, thread: ThreadId) {
 /// A read of the firm's browser policy found it turns the browser off
 /// (`actor/browser_policy.rs`): every header, shown or held, whose browser was left out because
 /// that policy could not be read (`BrowserPolicyUnreadable`) now says why it truly is
-/// (`BrowserBlockedByPolicy`). Those sessions have no browser either way.
-pub(crate) fn policy_blocked(actor: &mut Actor) {
+/// (`reason`: `BrowserBlockedByPolicy`, or on Windows `BrowserBlockedEdge` or
+/// `BrowserBlockedChrome`). Those sessions have no browser either way.
+pub(crate) fn policy_blocked(actor: &mut Actor, reason: ToolsUnavailableReason) {
     let unreadable = ToolAvailability::Unavailable {
         reason: ToolsUnavailableReason::BrowserPolicyUnreadable,
     };
@@ -74,9 +75,7 @@ pub(crate) fn policy_blocked(actor: &mut Actor) {
         let mut changed = false;
         for state in tools.iter_mut() {
             if state.tool == ClauseoTool::Browser && state.availability == unreadable {
-                state.availability = ToolAvailability::Unavailable {
-                    reason: ToolsUnavailableReason::BrowserBlockedByPolicy,
-                };
+                state.availability = ToolAvailability::Unavailable { reason };
                 changed = true;
             }
         }

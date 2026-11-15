@@ -19,7 +19,11 @@ export type BrowserState =
   | "locked_off"
   | "browser_not_installed"
   | "browser_blocked_by_policy"
-  | "browser_policy_unreadable";
+  | "browser_policy_unreadable"
+  // Windows only: the one browser installed is blocked by its own policy, or the only Chrome is a per-user copy
+  | "browser_blocked_edge"
+  | "browser_blocked_chrome"
+  | "browser_per_user_chrome_only";
 
 /** One tool the line can speak for. */
 export type KnownTool =
@@ -37,6 +41,9 @@ const BROWSER: ReadonlySet<string> = new Set<BrowserState>([
   "browser_not_installed",
   "browser_blocked_by_policy",
   "browser_policy_unreadable",
+  "browser_blocked_edge",
+  "browser_blocked_chrome",
+  "browser_per_user_chrome_only",
 ]);
 
 /** The state of a tool, or null where it says nothing: an availability string it doesn't know, a reason it doesn't
@@ -67,12 +74,20 @@ export function knownTools(tools: readonly ToolState[] | undefined): KnownTool[]
   return [web, browser].filter((t): t is KnownTool => t !== null);
 }
 
+const LOCKED: ReadonlySet<string> = new Set<WebState | BrowserState>([
+  "locked_off",
+  "browser_blocked_by_policy",
+  "browser_blocked_edge",
+  "browser_blocked_chrome",
+]);
+
 /** The state a tool's glyph shows: on as drawn, the firm's lock for a tool the firm holds off
- * (its browser policy too), every other off slashed (a login with no search shows web search off:
- * it can't search here; a browser policy Clauseo couldn't read is no firm's lock). */
+ * (its browser policy too, for one browser or both), every other off slashed (a login with no search shows web
+ * search off: it can't search here; a browser policy Clauseo couldn't read is no firm's lock, nor a per-user
+ * Chrome). */
 export function glyphState(t: KnownTool): ToolGlyphState {
   if (t.state === "available") return "on";
-  return t.state === "locked_off" || t.state === "browser_blocked_by_policy" ? "locked" : "off";
+  return LOCKED.has(t.state) ? "locked" : "off";
 }
 
 const REASON: Record<
@@ -83,7 +98,10 @@ const REASON: Record<
   locked_off: "Managed by firm",
   no_search_on_this_login: "Can't search on this login",
   browser_blocked_by_policy: "Blocked by a browser policy",
+  browser_blocked_edge: "Blocked by a browser policy",
+  browser_blocked_chrome: "Blocked by a browser policy",
   browser_policy_unreadable: "Couldn't check browser settings",
+  browser_per_user_chrome_only: "Can't use this Chrome",
 };
 
 /** Why a tool is off, in a few words; null while it's on. With no browser on the computer, the lawyer's step: what to

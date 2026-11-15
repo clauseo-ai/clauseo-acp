@@ -364,6 +364,9 @@ fn tool_states_round_trip_in_a_header_with_every_reason() {
             "no_relay",
             "browser_blocked_by_policy",
             "browser_policy_unreadable",
+            "browser_blocked_edge",
+            "browser_blocked_chrome",
+            "browser_per_user_chrome_only",
         ]
     );
 }

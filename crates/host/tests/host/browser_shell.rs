@@ -76,6 +76,7 @@ fn launch(
         home: None,
         program_files: None,
         program_files_x86: None,
+        local_app_data: None,
         app_data: dir.data().join("no-app"),
     };
     let stetdoc = dir.data().join("stetdoc");

@@ -122,8 +122,8 @@ impl BrowserPrep {
 
     /// The Chrome found and the session's claims. The firm's browser policy comes first,
     /// before any Chrome is picked, forced or found (`browser::rd_policy`), read again at each
-    /// launch: when it blocks, both are left out and the entry drops with
-    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`. On Windows it is asked per
+    /// launch: when it blocks, both are left out and the entry drops with a `BrowserBlocked*`
+    /// reason or `BrowserPolicyUnreadable`. On Windows it is asked per
     /// browser over those installed ([`policy`]), so the search comes with it. A missing sidecar
     /// leaves both out, with a warning (a development build has no agent-browser); a failed
     /// claim leaves the claims out. Either way the entry drops with `BrowserNotInstalled`.
@@ -196,7 +196,8 @@ impl BrowserPrep {
 }
 
 /// The firm's browser policy for `search`, read now: why it leaves the session without a
-/// browser, if it does, and the search to make. On Windows (`ChromeSearch::windows_roots`) the
+/// browser, if it does (on Windows also `BrowserPerUserChromeOnly`, when the only Chrome is one
+/// the guard cannot start), and the search to make. On Windows (`ChromeSearch::windows_roots`) the
 /// policy is asked per browser over what is installed, so the search is already made
 /// (`ChromeSearch::Picked`); elsewhere, and for a forced Chrome, one false or unread place
 /// blocks every browser and the search comes after. Registry and file system calls: off the
@@ -211,7 +212,19 @@ fn policy(
         return (rd_policy.check(allowed_anyway), search);
     };
     let installed = crate::browser::chrome::windows_installed(&roots);
-    match rd_policy.pick(allowed_anyway, &installed) {
+    match rd_policy.pick(allowed_anyway, &installed.usable) {
+        // Nothing usable, but a per-user Chrome: the lawyer is told why it is not used rather
+        // than to install a Chrome they already have.
+        Ok(None) if installed.per_user_chrome.is_some() => {
+            tracing::info!(
+                "the only Chrome is installed for this user alone, which Clauseo's browser cannot \
+                 start; the session has no browser"
+            );
+            (
+                Some(ToolsUnavailableReason::BrowserPerUserChromeOnly),
+                ChromeSearch::Picked(None),
+            )
+        }
         Ok(picked) => (None, ChromeSearch::Picked(picked)),
         Err(reason) => (Some(reason), ChromeSearch::Picked(None)),
     }
@@ -224,7 +237,9 @@ pub(super) struct Prepared {
     pub(super) chrome: Option<PathBuf>,
     /// The session's claims, if made.
     pub(super) session: Option<Arc<BrowserSession>>,
-    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
+    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`); on
+    /// Windows also `BrowserPerUserChromeOnly`, which is no policy block
+    /// (`actor/browser_policy.rs` reads it as clear).
     pub(super) policy_block: Option<ToolsUnavailableReason>,
     /// Whether the firm's browser policy was read for this launch (`actor/browser_policy.rs`).
     pub(super) policy_read: bool,

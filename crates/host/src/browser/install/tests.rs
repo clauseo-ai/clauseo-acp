@@ -93,6 +93,7 @@ fn a_download_reports_progress_then_unpacking_and_find_finds_it() {
         home: None,
         program_files: None,
         program_files_x86: None,
+        local_app_data: None,
         app_data: dir.path().join("app"),
     };
     let binary = MAC_BINARY

@@ -16,7 +16,9 @@
 //! 5. The firm's Chrome or Edge policy turns remote debugging off and its Clauseo policy does
 //!    not allow Clauseo's browser anyway (`browser::rd_policy`): `BrowserBlockedByPolicy`; or,
 //!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`. On
-//!    Windows each installed browser's own policy counts, so only every one off blocks.
+//!    Windows each installed browser's own policy counts, so only every one off blocks, named
+//!    `BrowserBlockedEdge`, `BrowserBlockedChrome` or (both) `BrowserBlockedByPolicy`; and the
+//!    only Chrome a per-user one the guard cannot start: `BrowserPerUserChromeOnly`.
 //! 6. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
 //! 7. For an entry that asks for it, the session's proxy did not open, so it has no port:
