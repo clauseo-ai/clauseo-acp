@@ -139,9 +139,9 @@ export const UC_WORD: Entry[] = [
   panel("UC-122", readerWords("Formatting changed"), wordHost(LIST)),
   panel("UC-123", readerWords("Moved"), wordHost(LIST)),
   // where a change outside the main text is, beside its kind's label
-  panel("UC-261", readerWords("In a header or footer"), wordHost(OUTSIDE)),
-  panel("UC-262", readerWords("In a footnote or endnote"), wordHost(OUTSIDE)),
-  panel("UC-263", readerWords("In a comment"), wordHost(OUTSIDE)),
+  panel("UC-304", readerWords("In a header or footer"), wordHost(OUTSIDE)),
+  panel("UC-305", readerWords("In a footnote or endnote"), wordHost(OUTSIDE)),
+  panel("UC-306", readerWords("In a comment"), wordHost(OUTSIDE)),
   panel(
     "UC-124",
     errorWords(
