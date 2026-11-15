@@ -8,8 +8,9 @@ use std::path::{Path, PathBuf};
 use super::launch::claude_project_key;
 use super::tests::layout;
 use super::{
-    LaunchDeny, claude_deny_rules, claude_projects, launch_deny, other_matters, rule_path,
+    LaunchDeny, claude_allow_rules, claude_deny_rules, claude_projects, launch_deny, rule_path,
 };
+use crate::agent::matter_fence::{MatterFence, Other};
 use crate::write;
 
 /// Whether one of `rules` denies `tool` on the absolute `path`. A `Tool(//p/**)` rule covers
@@ -59,9 +60,26 @@ fn spellings(path: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// A matter id from `n`.
+fn id(n: u128) -> clauseo_protocol::MatterId {
+    let bits = (0x0190_0000_0000_u128 << 80) | (0x7 << 76) | (0b10 << 62) | n;
+    clauseo_protocol::MatterId::new(uuid::Uuid::from_u128(bits)).unwrap()
+}
+
+/// The fence of `others` (folder, invited) for a session whose matter folder is spelled `own`
+/// and `<data>` `data`.
+fn matters(others: &[(PathBuf, bool)], own: &[&Path], data: &[&Path]) -> MatterFence {
+    let asked = others
+        .iter()
+        .zip(1..)
+        .map(|((folder, invited), n)| Other::new(id(n), format!("M{n}"), folder.clone(), *invited))
+        .collect();
+    MatterFence::asked(asked).resolve(own, data)
+}
+
 /// The rules of a Claude launch of session `s1` for matter `m1` at `root/matter`, with two
 /// other matters at `root/other-a` and `root/other-b`, and `root` itself registered as a
-/// matter too (it holds this one's folder and `<data>`, so it must be left out).
+/// matter too (it holds this one's folder and `<data>`, so its other entries are denied).
 fn whole_launch(root: &Path) -> Vec<String> {
     let data = root.join("data");
     let matter = root.join("matter");
@@ -75,12 +93,13 @@ fn whole_launch(root: &Path) -> Vec<String> {
     ];
     let projects = claude_projects(&home, &[&real_matter, &matter]);
     let data_spellings = spellings(&data);
-    let keep: Vec<&Path> = [real_matter.as_path(), matter.as_path()]
-        .into_iter()
-        .chain(data_spellings.iter().map(PathBuf::as_path))
-        .collect();
-    let others = [root.join("other-a"), root.join("other-b"), root.to_owned()];
-    let matters = other_matters(&others, &keep);
+    let data_places: Vec<&Path> = data_spellings.iter().map(PathBuf::as_path).collect();
+    let others = [root.join("other-a"), root.join("other-b"), root.to_owned()].map(|f| (f, false));
+    let matters = matters(
+        &others,
+        &[real_matter.as_path(), matter.as_path()],
+        &data_places,
+    );
     let mut deny = launch_deny(data_spellings, &data, &own, &projects);
     deny.matters = matters;
     claude_deny_rules(&deny)
@@ -111,6 +130,8 @@ fn a_launch_denies_other_matters_and_data_and_leaves_the_sessions_own() {
         project(&format!("{own_key}/s-1.jsonl")),
         project(&format!("{own_key}/s-1/subagents/agent-a.jsonl")),
         project(&format!("{own_key}/memory/MEMORY.md")),
+        // Beside the session's matter inside `root`, a registered matter: fenced.
+        "outside/x.txt".to_owned(),
     ];
     let open = [
         "data/run/s1/work/draft.docx".to_owned(),
@@ -121,7 +142,6 @@ fn a_launch_denies_other_matters_and_data_and_leaves_the_sessions_own() {
         project(&format!("{own_key}/s-1/tool-results/webfetch-1.pdf")),
         project(&format!("{own_key}/s-1/tool-results/toolu_1.txt")),
         "matter/sub/a.txt".to_owned(),
-        "outside/x.txt".to_owned(),
     ];
     for file in deny.iter().chain(&open) {
         let file = root.join(file);
@@ -152,9 +172,8 @@ fn a_launch_denies_other_matters_and_data_and_leaves_the_sessions_own() {
     }
 }
 
-/// An other matter's folder is named by its canonical path and as stored, a link's both ways;
-/// one that holds the session's matter folder or `<data>`, is it, or is not absolute is left
-/// out whole.
+/// An other matter's folder is named by its canonical path and as stored; one that is the
+/// session's matter folder or `<data>`, or is not absolute, is in no rule.
 #[test]
 fn other_matters_are_spelled_both_ways_and_never_cover_the_sessions_own() {
     let dir = layout("matters-spelled");
@@ -163,21 +182,19 @@ fn other_matters_are_spelled_both_ways_and_never_cover_the_sessions_own() {
     let data = root.join("data");
     let keep = [matter.as_path(), data.as_path()];
     let other = root.join("outside");
-    let found = other_matters(std::slice::from_ref(&other), &keep);
-    assert_eq!(found, spellings(&other));
+    let found = matters(&[(other.clone(), false)], &keep, &[]);
+    assert_eq!(found.others[0].paths, spellings(&other));
     for left_out in [
-        root.to_owned(),
         matter.clone(),
         root.join("data"),
         PathBuf::from("relative/matter"),
     ] {
-        let found = other_matters(std::slice::from_ref(&left_out), &keep);
-        assert!(found.is_empty(), "{left_out:?}: {found:?}");
+        let found = matters(&[(left_out.clone(), false)], &keep, &[]);
+        assert!(
+            found.denied_edits().next().is_none(),
+            "{left_out:?}: {found:?}"
+        );
     }
-    // A folder canonicalised to a holder of `<data>` is left out by that spelling too.
-    let canonical_keep = spellings(&data);
-    let keep: Vec<&Path> = canonical_keep.iter().map(PathBuf::as_path).collect();
-    assert!(other_matters(&[root.to_owned()], &keep).is_empty());
 }
 
 /// A link registered as a matter's folder is denied as itself and where it leads.
@@ -189,12 +206,13 @@ fn a_linked_matter_folder_is_denied_at_both_places() {
     let real = root.join("outside");
     let link = root.join("linked-matter");
     write::symlink(&real, &link).unwrap();
-    let found = other_matters(
-        std::slice::from_ref(&link),
+    let found = matters(
+        &[(link.clone(), false)],
         &[root.join("matter").as_path()],
+        &[],
     );
     assert_eq!(
-        found,
+        found.others[0].paths,
         vec![dunce::canonicalize(&real).unwrap(), link.clone()]
     );
     let deny = LaunchDeny {
@@ -211,8 +229,16 @@ fn a_linked_matter_folder_is_denied_at_both_places() {
 /// in Claude Code's `//` form, glob characters escaped.
 #[test]
 fn an_other_matters_rules_name_the_folder_and_all_under_it() {
-    let deny = LaunchDeny {
-        matters: vec![PathBuf::from("/m/Smith [2024]")],
+    let mut other = Other::new(
+        id(1),
+        "Smith".into(),
+        PathBuf::from("/m/Smith [2024]"),
+        false,
+    );
+    other.spellings = vec![other.folder.clone()];
+    other.paths = vec![other.folder.clone()];
+    let mut deny = LaunchDeny {
+        matters: MatterFence::asked(vec![other]),
         ..LaunchDeny::default()
     };
     let rules = claude_deny_rules(&deny);
@@ -224,5 +250,20 @@ fn an_other_matters_rules_name_the_folder_and_all_under_it() {
             r"Edit(//m/Smith \[2024\])",
             r"Edit(//m/Smith \[2024\]/**)",
         ]
+    );
+    // Invited: its Read deny goes, a Read allow comes, its Edit deny stays.
+    deny.matters.others[0].invited = true;
+    assert_eq!(
+        claude_deny_rules(&deny),
+        [r"Edit(//m/Smith \[2024\])", r"Edit(//m/Smith \[2024\]/**)"]
+    );
+    let allow = claude_allow_rules(&deny);
+    assert!(
+        allow.contains(&r"Read(//m/Smith \[2024\])".to_owned()),
+        "{allow:?}"
+    );
+    assert!(
+        allow.contains(&r"Read(//m/Smith \[2024\]/**)".to_owned()),
+        "{allow:?}"
     );
 }

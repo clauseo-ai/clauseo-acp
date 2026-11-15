@@ -453,13 +453,13 @@ fn the_shell_browser_env_is_reachable_under_its_own_codex_fence_only() {
         write::create_dir_all(&folders.downloads).unwrap();
     }
     let listed = list(&data, &run.root, &run.notes);
-    let codex_home = locations.agent_home("codex-acp");
     let session = Session {
         run_root: &run.root,
         notes: &run.notes,
-        codex_home: &codex_home,
+        codex_home: &locations.agent_home("codex-acp"),
         listed: &listed,
         socket_dir: None,
+        other_matters: &[],
     };
     let fence = keys(&locations, session, false);
     let own = [run.root.clone(), run.notes.clone()];

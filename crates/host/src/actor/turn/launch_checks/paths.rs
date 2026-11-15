@@ -27,9 +27,6 @@ pub(super) struct LaunchPaths {
     pub(super) stored: PathBuf,
     /// The data folder.
     pub(super) data: PathBuf,
-    /// Every other registered matter's folder as stored, forgotten ones too: Claude's deny
-    /// rules name each (`data_fence::other_matters`).
-    pub(super) others: Vec<PathBuf>,
     /// The agent's home, `Locations::agent_home` of its id, for an agent with a kind.
     pub(super) home: Option<PathBuf>,
     /// Whether the agent is Claude.
@@ -132,19 +129,12 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
             kind,
         },
     };
-    let others = actor
-        .matters
-        .values()
-        .chain(actor.forgotten.values())
-        .filter(|entry| entry.row.id != row.matter)
-        .map(|entry| PathBuf::from(&entry.row.folder_path))
-        .collect();
+    run.data_deny.matters = super::super::fence::matter_fence(actor, thread, row.matter);
     let matter = actor.check_matter(row.matter)?.row.skill_packs.as_ref();
     let packs = pack_prep(actor, &row.agent, matter);
     Ok(LaunchPaths {
         stored,
         data: locations.data_dir().to_owned(),
-        others,
         home,
         claude: kind == Some(AgentKind::Claude),
         run,
