@@ -10,7 +10,8 @@ libFuzzer needs. Run cargo from this folder so rustup picks that toolchain.
 ## Targets
 
 Each target's `//!` header gives its input format, the crate items it drives and the invariants
-it asserts. All of them go through public APIs only.
+it asserts. All of them go through public APIs only, but `zip_marks`: `build.rs` compiles the
+host's private `revisions/marks.rs` into it (its header says why and what that needs).
 
 | target | what it feeds |
 |---|---|
@@ -21,6 +22,7 @@ it asserts. All of them go through public APIs only.
 | `store_read` | stored rows, overwritten in the SQLite file, read back through `Store` |
 | `settings_parse` | settings.json, policy.json and a UI patch, through `Effective` |
 | `reducer_snapshot` | raw snapshot bytes into `Snapshot::from_bytes`, then a fold |
+| `zip_marks` | a generated or raw `.docx` into the tracked-changes scan, against a roxmltree oracle |
 
 `fuzz_targets/scratch.rs` is a module the three disk-backed targets share, not a target.
 
