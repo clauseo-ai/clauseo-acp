@@ -156,12 +156,12 @@ const named = (name: string | null) => ({ kind: undefined, name });
 const PLANNED_LINES = [
   [
     "agent.launch_failed",
-    "ChatGPT didn't start. Your question is kept.",
-    "ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
-    "gemini didn't start. Your question is kept.",
-    "gemini शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
-    "The AI didn't start. Your question is kept.",
-    "AI शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+    "ChatGPT didn't start. Try again. Your question is kept.",
+    "ChatGPT शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "gemini didn't start. Try again. Your question is kept.",
+    "gemini शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "The AI didn't start. Try again. Your question is kept.",
+    "AI शुरू नहीं हुआ। फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
   ],
   [
     "agent.protocol_error",
@@ -171,6 +171,15 @@ const PLANNED_LINES = [
     "gemini ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
     "The AI sent something Clauseo can't read.",
     "AI ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
+  ],
+  [
+    "agent.start_offline",
+    "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.",
+    "आप ऑफ़लाइन हैं, इसलिए ChatGPT शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "You're offline, so gemini didn't start. Try again when you're back online. Your question is kept.",
+    "आप ऑफ़लाइन हैं, इसलिए gemini शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+    "You're offline, so the AI didn't start. Try again when you're back online. Your question is kept.",
+    "आप ऑफ़लाइन हैं, इसलिए AI शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
   ],
   [
     "agent.auth_required",
@@ -278,7 +287,7 @@ test("an agent's name fills no other code", () => {
   );
   // a settings id is shown as the lawyer wrote it, even one the words' own rules would ban
   expect(errorWords("en", "agent.launch_failed", named("my-agent"))).toBe(
-    "my-agent didn't start. Your question is kept.",
+    "my-agent didn't start. Try again. Your question is kept.",
   );
 });
 
