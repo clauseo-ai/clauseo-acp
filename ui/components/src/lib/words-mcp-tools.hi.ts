@@ -61,4 +61,7 @@ export const HI = {
   "{name}: Clauseo couldn't read its settings.": "{name}: Clauseo इसकी सेटिंग नहीं पढ़ सका।",
   "{name}: it comes from a project you haven't approved in Claude Code.":
     "{name}: यह ऐसे प्रोजेक्ट से है जिसे आपने Claude Code में मंज़ूरी नहीं दी है।",
+  // UC-256: a tool left out because one import's approval box could hold only so many
+  "{name}: there were too many tools to import at once. Import again to add it.":
+    "{name}: एक बार में बहुत सारे टूल थे। इसे जोड़ने के लिए फिर से इम्पोर्ट करें।",
 } as const;

@@ -8,5 +8,6 @@ expression: "McpSkipReason::ALL"
   "unsupported_transport",
   "command_not_found",
   "unresolved_variable",
-  "unreadable"
+  "unreadable",
+  "too_many"
 ]

@@ -3,17 +3,20 @@
 //! the set of variable or header names), or a new value for a variable that changes how a
 //! program loads ([`loader_var`]). The ask names the program and its arguments, or the URL, and
 //! every variable or header that is new or whose loader value changed, all verbatim; an ask too
-//! long to show whole is refused before any prompt, so nothing is ever cut from view.
+//! long to show whole is refused before any prompt, so nothing is ever cut from view. Its length
+//! is counted on the text the confirm shows, quoted and escaped (`config::mcp::shown`), so an
+//! argument that grows when shown can't slip past the cap.
 
 use clauseo_protocol::{McpSecretValue, McpServerEdit};
 use clauseo_settings::{McpRefusal, McpServerLaunch, McpTransport};
 
 use crate::config::mcp::McpLaunchAsk;
+use crate::config::mcp::shown::{self, MAX_ASK_CHARS};
 use crate::error::Error;
 
-/// The most characters an ask may hold (its program and arguments, or its URL, and its names),
-/// so the confirm shows all of it.
-pub(crate) const MAX_ASK_CHARS: usize = 2000;
+#[cfg(test)]
+#[path = "ask_tests.rs"]
+mod tests;
 
 /// The variables whose value changes how a program loads, matched exactly, in any case on
 /// Windows. `DYLD_*` is matched by prefix, and `NPM_CONFIG_REGISTRY` in any case everywhere
@@ -99,14 +102,14 @@ pub(crate) fn ask(
         ),
         McpTransport::Remote { url, .. } => (Vec::new(), Some(url.clone())),
     };
-    let shown: usize = program
-        .iter()
-        .chain(url.iter())
-        .chain(names.iter())
-        .map(|part| part.chars().count() + 2)
-        .sum();
-    if shown > MAX_ASK_CHARS {
-        let refusal = if url.is_some() {
+    let ask = McpLaunchAsk {
+        server: edit.name.clone(),
+        program,
+        url,
+        names,
+    };
+    if shown::ask_chars(&ask) > MAX_ASK_CHARS {
+        let refusal = if ask.url.is_some() {
             McpRefusal::UrlInvalid
         } else {
             McpRefusal::CommandInvalid
@@ -116,10 +119,5 @@ pub(crate) fn ask(
             refusal,
         }));
     }
-    Ok(Some(McpLaunchAsk {
-        server: edit.name.clone(),
-        program,
-        url,
-        names,
-    }))
+    Ok(Some(ask))
 }

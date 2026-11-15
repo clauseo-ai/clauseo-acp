@@ -36,15 +36,19 @@ pub trait McpLaunchConfirm: Send + Sync {
     fn confirm(&self, ask: &McpLaunchAsk) -> bool;
 
     /// Asks once about an import (Settings › Tools' `Import`) of `asks`, one per server in name
-    /// order: `true` imports them turned on; `false` imports nothing (`mcp.save_declined`). By
-    /// default it declines, so no program is imported unseen.
-    fn confirm_import(&self, _asks: &[McpLaunchAsk]) -> bool {
+    /// order: `true` imports them turned on; `false` imports nothing (`mcp.save_declined`).
+    /// `left_out` names, in order, the servers that would import but did not fit in this one
+    /// confirm ([`shown::MAX_ASK_CHARS`]): the confirm says how many, and names them when they
+    /// fit ([`shown::left_out`]), so the lawyer can import them in another go. By default it
+    /// declines, so no program is imported unseen.
+    fn confirm_import(&self, _asks: &[McpLaunchAsk], _left_out: &[String]) -> bool {
         false
     }
 }
 
 mod bare;
 mod found;
+pub mod shown;
 pub use found::{McpFileStamp, McpFound, McpHereFinder, McpImportFinder, find_mcp_imports_in};
 
 /// Finds a lawyer's MCP server's program: the command as typed (a bare name or an absolute path)

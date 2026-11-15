@@ -1,11 +1,12 @@
 //! The one native confirm before an import (A1's `McpLaunchConfirm`): Allow imports every
 //! listed server turned on; Cancel imports nothing and answers `mcp.save_declined`; an import
-//! with nothing to import never asks; one too long to show whole in one confirm is refused before
-//! it. Split from `mcp_import.rs` for its length.
+//! with nothing to import never asks; one too long to show whole in one confirm keeps the servers
+//! that fit, whole and in order, and names the rest, which the next import adds. Split from
+//! `mcp_import.rs` for its length.
 
 use std::sync::Mutex;
 
-use clauseo_host::{McpLaunchAsk, McpLaunchConfirm};
+use clauseo_host::{McpLaunchAsk, McpLaunchConfirm, mcp_shown};
 
 use super::*;
 
@@ -13,6 +14,7 @@ use super::*;
 pub(super) struct Answers {
     allow: bool,
     imports: Mutex<Vec<Vec<McpLaunchAsk>>>,
+    left_out: Mutex<Vec<Vec<String>>>,
 }
 
 impl Answers {
@@ -20,7 +22,16 @@ impl Answers {
         Self {
             allow,
             imports: Mutex::new(Vec::new()),
+            left_out: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The servers each import's confirm said were left out, in order.
+    fn left_out(&self) -> Vec<Vec<String>> {
+        self.left_out
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// The lists each import showed, in order.
@@ -37,11 +48,15 @@ impl McpLaunchConfirm for Answers {
         panic!("an import asked the save's confirm");
     }
 
-    fn confirm_import(&self, asks: &[McpLaunchAsk]) -> bool {
+    fn confirm_import(&self, asks: &[McpLaunchAsk], left_out: &[String]) -> bool {
         self.imports
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(asks.to_vec());
+        self.left_out
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(left_out.to_vec());
         self.allow
     }
 }
@@ -125,13 +140,15 @@ fn mcp_import_with_nothing_to_import_never_asks() {
     host.shutdown();
 }
 
-/// An import whose servers and programs would pass A1's 2,000 characters in one confirm is
-/// refused before any dialog (`mcp.import_too_large`), with nothing written: nothing is cut.
+/// An import whose list would pass A1's 2,000 characters, as shown, keeps whole servers in name
+/// order while they fit and leaves out the rest whole: the confirm and the result name them
+/// (`too_many`), and the next import adds the next ones. A server too long to show even alone is
+/// skipped as `unreadable`, and never blocks the others.
 #[test]
-fn mcp_import_too_long_for_one_confirm_is_refused_unasked() {
+fn mcp_import_too_long_for_one_confirm_keeps_a_whole_prefix_and_names_the_rest() {
     let dir = Dir::new("mcp_import_too_large", &[]);
     let long = "x".repeat(150);
-    let servers: serde_json::Map<String, Value> = (0..20)
+    let mut servers: serde_json::Map<String, Value> = (0..20)
         .map(|n| {
             (
                 format!("tool{n:02}"),
@@ -139,6 +156,10 @@ fn mcp_import_too_long_for_one_confirm_is_refused_unasked() {
             )
         })
         .collect();
+    servers.insert(
+        "huge".to_owned(),
+        json!({"command": program(), "args": ["y".repeat(2_100)]}),
+    );
     let fs = FakeFs::default().file(&program(), "").file(
         &desktop_config(),
         &json!({ "mcpServers": servers }).to_string(),
@@ -151,14 +172,44 @@ fn mcp_import_too_long_for_one_confirm_is_refused_unasked() {
     let host = dir.start_with(0, |config| {
         wired(config, &store, fs).with_mcp_confirm(answered)
     });
-    let before = dir.settings_json();
-    host.refused(import(ClaudeDesktop), ErrorCode::McpImportTooLarge);
-    assert_eq!(
-        answers.imports(),
-        Vec::<Vec<McpLaunchAsk>>::new(),
-        "no dialog"
-    );
-    assert_eq!(store.writes(), 0);
-    assert_eq!(dir.settings_json(), before);
+    let mut sub = subscribe(&host);
+    let all: Vec<String> = (0..20).map(|n| format!("tool{n:02}")).collect();
+    let (_, first) = imported(&host, &mut sub, ClaudeDesktop);
+    let shown = &answers.imports()[0];
+    let kept = shown.len();
+    assert!(kept > 0 && kept < 20, "{kept} kept");
+    // Whole servers, in order, each with every argument.
+    let names: Vec<&str> = shown.iter().map(|ask| ask.server.as_str()).collect();
+    assert_eq!(names, all[..kept]);
+    assert!(shown.iter().all(|ask| ask.program[1] == long));
+    // Within the cap as shown; one more server would pass it.
+    assert!(mcp_shown::import_chars(shown) <= mcp_shown::MAX_ASK_CHARS);
+    let mut one_more = shown.clone();
+    one_more.push(McpLaunchAsk {
+        server: all[kept].clone(),
+        ..shown[0].clone()
+    });
+    assert!(mcp_shown::import_chars(&one_more) > mcp_shown::MAX_ASK_CHARS);
+    // The confirm named the rest, and the result names them and the one too long alone.
+    assert_eq!(answers.left_out()[0], all[kept..]);
+    assert_eq!(first.imported, all[..kept]);
+    let mut skipped: Vec<McpSkipped> = all[kept..]
+        .iter()
+        .map(|name| skip(name, McpSkipReason::TooMany, None))
+        .collect();
+    skipped.insert(0, skip("huge", McpSkipReason::Unreadable, None));
+    assert_eq!(first.skipped, skipped);
+    assert_eq!(first.others, 0);
+    // The next import takes the next whole servers.
+    host.ok(import(ClaudeDesktop));
+    let view = view_until(&mut sub, |view| {
+        view.last_import
+            .as_ref()
+            .is_some_and(|last| last.imported != first.imported)
+    });
+    let second = view.last_import.unwrap();
+    let next = answers.imports()[1].len();
+    assert!(next > 0);
+    assert_eq!(second.imported, all[kept..kept + next]);
     host.shutdown();
 }

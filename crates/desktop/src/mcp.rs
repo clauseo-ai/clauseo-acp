@@ -136,10 +136,12 @@ impl<D: LaunchDrawer> McpLaunchConfirm for LaunchConfirm<D> {
         })
     }
 
-    /// One confirm for the whole import, listing each server ([`import_words`]), behind the
-    /// same flood control.
-    fn confirm_import(&self, asks: &[McpLaunchAsk]) -> bool {
-        self.gated(asks, |language| import_words::import_words(asks, language))
+    /// One confirm for the whole import, listing each server ([`import_words`]) and saying which
+    /// did not fit, behind the same flood control.
+    fn confirm_import(&self, asks: &[McpLaunchAsk], left_out: &[String]) -> bool {
+        self.gated(asks, |language| {
+            import_words::import_words(asks, left_out, language)
+        })
     }
 }
 

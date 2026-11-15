@@ -6,7 +6,10 @@ use std::path::PathBuf;
 use clauseo_protocol::{McpImportSource, McpSkipReason};
 use clauseo_settings::mcp_import::{CandidateKind, ImportCandidate, Problem, Source};
 
+use super::fit::{fits_alone, fitting};
 use super::{pick, program_name, skip_of, source_of};
+use crate::config::mcp::McpLaunchAsk;
+use crate::config::mcp::shown::MAX_ASK_CHARS;
 use crate::testing::abs;
 
 fn candidate(name: &str, source: Source, problems: Vec<Problem>) -> ImportCandidate {
@@ -153,4 +156,43 @@ fn a_missing_program_is_named_by_its_file_name_only() {
     assert_eq!(program_name("/Users/ana/tools/uvx"), "uvx");
     assert_eq!(program_name("C:\\Users\\ana\\uvx.cmd"), "uvx.cmd");
     assert_eq!(program_name("uvx"), "uvx");
+}
+
+fn ask(server: &str, args: &[String]) -> McpLaunchAsk {
+    McpLaunchAsk {
+        server: server.to_owned(),
+        program: std::iter::once("npx".to_owned())
+            .chain(args.iter().cloned())
+            .collect(),
+        url: None,
+        names: Vec::new(),
+    }
+}
+
+/// The import's cap counts the list as shown: `a (npx ` and `)` are 8 characters, and each
+/// newline shows as `\n`, so 996 newlines show as exactly 2,000 characters.
+#[test]
+fn an_imports_cap_counts_escapes_as_shown_at_the_boundary() {
+    let at_cap = "\n".repeat((MAX_ASK_CHARS - 8) / 2);
+    assert!(fits_alone(&ask("a", std::slice::from_ref(&at_cap))));
+    let over = format!("{at_cap}\n");
+    assert!(!fits_alone(&ask("a", &[over])));
+    // Quotes and backslashes: `it's` puts it in double quotes (2 more), each `\` shows as two.
+    let quoted = format!("it's{}", "\\".repeat((MAX_ASK_CHARS - 8 - 6) / 2));
+    assert!(fits_alone(&ask("a", std::slice::from_ref(&quoted))));
+    assert!(!fits_alone(&ask("a", &[format!("{quoted}\\")])));
+}
+
+/// Whole servers, from the first, while the list as shown fits; a second server that would pass
+/// the cap by one character is left out whole, and so is every one after it, even a short one.
+#[test]
+fn an_import_keeps_a_whole_prefix_that_fits() {
+    // `a (npx …)`, `, ` and `b (npx)`: 8 + n + 2 + 7 characters.
+    let first = "𝔄".repeat(MAX_ASK_CHARS - 17);
+    let asks = [ask("a", std::slice::from_ref(&first)), ask("b", &[])];
+    assert_eq!(fitting(&asks), 2);
+    let longer = format!("{first}𝔄");
+    let asks = [ask("a", &[longer]), ask("b", &[]), ask("c", &[])];
+    assert_eq!(fitting(&asks), 1);
+    assert_eq!(fitting(&[]), 0);
 }

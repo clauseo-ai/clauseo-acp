@@ -8,9 +8,10 @@ use clauseo_host::{McpLaunchAsk, McpLaunchConfirm as _};
 use clauseo_protocol::Language;
 use futures::channel::oneshot;
 
-use super::words::{EN, HI, shown_address, shown_program, table};
+use super::words::{EN, HI, table};
 use super::{BoxFuture, LaunchConfirm, LaunchDrawer, LaunchWords};
 use crate::dialogs::words::OFF_VOICE;
+use clauseo_host::mcp_shown::{address as shown_address, program as shown_program};
 
 fn local(program: &[&str]) -> McpLaunchAsk {
     McpLaunchAsk {
@@ -296,9 +297,9 @@ fn mcp_import_confirm_only_allow_allows() {
         (Answer::Never, false),
     ] {
         let confirm = LaunchConfirm::new(FakeDrawer::new(Language::En, answer));
-        assert_eq!(confirm.confirm_import(&asks), allowed);
+        assert_eq!(confirm.confirm_import(&asks, &[]), allowed);
         let drawn = confirm.drawer().drawn.lock().unwrap();
-        let words = super::import_words::import_words(&asks, Language::En);
+        let words = super::import_words::import_words(&asks, &[], Language::En);
         assert_eq!(drawn.as_slice(), [words]);
     }
 }

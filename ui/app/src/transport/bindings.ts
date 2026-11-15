@@ -3862,8 +3862,8 @@ export type McpImportResult = {
 	 */
 	skipped: McpSkipped[],
 	/**
-	 *  The servers left out past [`MCP_SKIPPED_MAX`], and those the app's config held past
-	 *  the per-source read cap (counted, never read); 0 when `skipped` names them all.
+	 *  The servers left out past [`MCP_SKIPPED_MAX`], and those the apps' config held past
+	 *  the per-source or total read cap (counted, never read); 0 when `skipped` names them all.
 	 */
 	others?: number,
 };
@@ -3999,8 +3999,16 @@ export type McpSkipReason =
 "command_not_found" | 
 /**  Its config names a variable that is not set. */
 "unresolved_variable" | 
-/**  Part of its entry could not be read, or Clauseo's rules refuse it. */
-"unreadable";
+/**
+ *  Part of its entry could not be read, or Clauseo's rules refuse it (such as one too long
+ *  to show whole in the import's confirm).
+ */
+"unreadable" | 
+/**
+ *  It would import, but did not fit in this import's one confirm after the servers before
+ *  it; the next import of the same app adds it.
+ */
+"too_many";
 
 /**  A server an import left out. */
 export type McpSkipped = {
