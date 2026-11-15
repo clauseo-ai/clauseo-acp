@@ -10,12 +10,14 @@ libFuzzer needs. Run cargo from this folder so rustup picks that toolchain.
 ## Targets
 
 Each target's `//!` header gives its input format, the crate items it drives and the invariants
-it asserts. All of them go through public APIs only, but `zip_marks`: it compiles the host's
-private `revisions/marks.rs` as a module of its own (its header says why and what that needs).
+it asserts. All of them go through public APIs only, but two: `zip_marks` compiles the host's
+private `revisions/marks.rs` as a module of its own (its header says why and what that needs), and
+`acp_skipped_update` goes through `clauseo_acp::fuzzing`, a `#[doc(hidden)]` module that only the fuzz crate uses.
 
 | target | what it feeds |
 |---|---|
 | `acp_stdout` | agent stdout bytes into `clauseo_acp::connect`, through a handshake and a turn |
+| `acp_skipped_update` | the start of an oversize line into the line reader's scanner |
 | `protocol_decode` | the wire types from JSON and MessagePack, and the id parsers |
 | `matters_objects` | a matter's loose objects, replaced on disk, then checkpoint and undo |
 | `matters_read` | `.clauseo/matter.json` and the stat cache, read by `Matter::open` |

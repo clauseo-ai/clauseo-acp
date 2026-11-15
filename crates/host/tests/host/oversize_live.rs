@@ -269,3 +269,30 @@ fn a_tool_left_open_with_no_dropped_line_ends_with_its_later_status() {
     assert_eq!(calls[0].content.len(), 1, "{:?}", calls[0].content);
     host.shutdown();
 }
+
+#[test]
+fn a_call_from_an_earlier_turn_whose_dropped_update_names_it_ends_completed() {
+    let huge = tool_status_line("failed", false, &"A".repeat(MAX_LINE_BYTES + 1));
+    let mut steps = scenario(vec![after_read()], answer_and_end(), false);
+    steps.extend([
+        json!({"expect": {"method": "session/prompt", "as": "p2",
+            "params": {"sessionId": "sess-1"}}}),
+        json!({"send_line": huge}),
+        json!({"respond": {"to": "p2", "result": {"stopReason": "end_turn"}}}),
+    ]);
+    let (_dir, host, thread, mut events, (stop, _)) = first_turn("skipped_later_turn", steps);
+    assert_eq!(stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(
+        tool_calls(&host, thread)[0].status,
+        ToolCallStatus::InProgress
+    );
+    // The second turn's dropped line names the first turn's call: its end completes it.
+    let (second, _) = host.prompt(thread, "And then?");
+    let ended = events.until_turn_ended(second);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    host.settle();
+    let calls = tool_calls(&host, thread);
+    assert_eq!(calls.len(), 1, "{calls:#?}");
+    assert_eq!(calls[0].status, ToolCallStatus::Completed);
+    host.shutdown();
+}

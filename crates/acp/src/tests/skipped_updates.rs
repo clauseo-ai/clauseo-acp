@@ -8,7 +8,7 @@ use futures::executor::LocalPool;
 use futures::task::LocalSpawnExt;
 
 use super::*;
-use crate::line::MAX_LINE_BYTES;
+use crate::line::{MAX_LINE_BYTES, MAX_LINES_IN_FLIGHT};
 
 /// A line that opens with `start`, pads a string with `A` to just over the cap, and closes
 /// with `end`.
@@ -123,4 +123,71 @@ fn another_kind_gives_nothing() {
         r#""}}}}"#,
     );
     assert_eq!(send_after_start(line), []);
+}
+
+/// More skipped lines in a row than the gate lets wait: each marker is counted on and off the
+/// gate, so the reader never stalls, the update after them arrives, and the gate is back at
+/// zero (`ReadProgress::drained_since`).
+#[test]
+fn more_skipped_lines_in_a_row_than_the_gate_holds_leave_it_balanced() {
+    let (client, events, driver, mut agent) = pipes();
+    let progress = client.read_progress();
+    let mut pool = LocalPool::new();
+    pool.spawner()
+        .spawn_local(async move { drop(driver.await) })
+        .unwrap();
+    pool.run_until(async {
+        futures::join!(handshake(&client), agent.start());
+    });
+    let count = MAX_LINES_IN_FLIGHT + 6;
+    let mut received = Vec::new();
+    for n in 0..count {
+        let start = format!(
+            r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"s-1","update":{{"sessionUpdate":"tool_call_update","toolCallId":"t-{n}","content":[{{"type":"content","content":{{"type":"text","text":""#
+        );
+        let line = oversize(&start, r#""}}],"status":"failed"}}}"#);
+        agent.stdout.unbounded_send(Ok(line)).unwrap();
+        // One line in memory at a time; the events are left in the channel until the end.
+        pool.run_until_stalled();
+        if n % 16 == 15 {
+            received.extend(drain(&events));
+        }
+    }
+    agent.update(&json!({"sessionId": "s-1", "update": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {"type": "text", "text": "after"},
+    }}));
+    pool.run_until_stalled();
+    received.extend(drain(&events));
+    let mark = progress.mark();
+    pool.run_until_stalled();
+    assert!(progress.drained_since(mark), "the gate holds a count");
+    let skipped: Vec<_> = received
+        .iter()
+        .filter_map(|event| {
+            if let AcpEvent::UpdateSkipped {
+                acp_tool_call_id: Some(id),
+                ..
+            } = event
+            {
+                Some(id.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    let expected: Vec<_> = (0..count).map(|n| format!("t-{n}")).collect();
+    assert_eq!(skipped, expected);
+    assert!(
+        matches!(
+            received.last(),
+            Some(AcpEvent::Update {
+                update: AgentUpdate::MessageChunk { .. },
+                ..
+            })
+        ),
+        "the update after the skipped lines: {:?}",
+        received.last()
+    );
+    drop(client);
 }
