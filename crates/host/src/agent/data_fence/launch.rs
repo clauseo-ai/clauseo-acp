@@ -106,8 +106,8 @@ impl LaunchDeny {
     /// reading: a spelling of `<data>` (and so every target under it), the folder (each
     /// spelling) of any other matter this conversation is not invited into
     /// (`MatterFence::fenced_folders`, so one the fence dropped, past its path budget or under a
-    /// folder it could not list, counts too), or a matter inside it the launch could not list
-    /// down to (`MatterFence::own_unlisted`). A place equal to the matter counts. Names compare
+    /// folder it could not list, counts too), or any fenced matter inside it at all
+    /// (`MatterFence::own_shut`). A place equal to the matter counts. Names compare
     /// as the matter fence compares them (`matter_fence::key`: folded where the file system
     /// folds, the drive too, `\\?\` forms as plain ones). Paths only, after the launch prep
     /// resolved the fence. An empty `matter` answers false: the caller passes the matter
@@ -121,7 +121,10 @@ impl LaunchDeny {
         expect(dead_code, reason = "stage D's matter allow rules (#1065) call it")
     )]
     pub(crate) fn denies_inside(&self, matter: &[&Path]) -> bool {
-        if self.matters.own_unlisted {
+        if matter.is_empty() {
+            return false;
+        }
+        if self.matters.own_shut {
             return true;
         }
         let matter: Vec<_> = matter.iter().map(|place| key(place)).collect();

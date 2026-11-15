@@ -17,11 +17,13 @@
 //! Claude Code reads): a deny of the whole folder would cover the session's own, so the lawyer
 //! is told instead ([`MatterFence::unfenced`], `NoticeKind::MattersUnfenced`).
 //!
-//! A matter inside the session's own matter needs one more thing on macOS and Linux: Claude's
-//! sandbox re-opens the own matter for reading, and its `allowRead` beats its `denyRead`, so it
-//! re-opens the own matter's entries one by one down to that matter instead
-//! ([`MatterFence::own_open`]). Windows has no OS fence: there a command in the own matter that
-//! never names the nested one (`rg x .`) reads it.
+//! A matter inside the session's own matter that it is not invited into needs one more thing on
+//! macOS and Linux: Claude's sandbox re-opens the own matter for reading, and its `allowRead`
+//! beats its `denyRead`, so it re-opens none of the own matter then ([`MatterFence::own_shut`]):
+//! Claude's commands can't open the matter, its file tools still can, and the lawyer is told.
+//! A matter only gets inside another by folders moved outside Clauseo (or an older registry):
+//! every way through Clauseo refuses it. Windows has no OS fence: there a command in the own
+//! matter that never names the nested one (`rg x .`) reads it.
 //!
 //! Who uses which: Claude's `Read` deny rules and Codex's profile name the fence paths of the
 //! matters not invited, Claude's `Edit` deny rules and its Windows shell rules those of every
@@ -90,23 +92,12 @@ pub(crate) struct MatterFence {
     pub(crate) key: FenceKey,
     /// The session's own matter folder, each spelling ([`Self::resolve`]).
     pub(crate) own: Vec<PathBuf>,
-    /// When another matter the session is not invited into lies inside its own matter: what
-    /// of the own matter Claude's sandbox re-opens for reading instead of the whole folder, its
-    /// entries down to each such matter ([`down_to`]), so the fence holds for a command that
-    /// never names the path (`rg x .`). Left out, as the agent controls them: links (re-opened,
-    /// a link would re-open where it leads), and names that hold `*` or `?` or no letter or
-    /// digit (the sandbox writes each entry as a pattern, [`reopen_safe`]). `None` when no such
-    /// matter lies inside it; empty when the list could not be made safely
-    /// ([`Self::own_unlisted`]).
-    pub(crate) own_open: Option<Vec<PathBuf>>,
-    /// Whether [`Self::own_open`] was needed but could not be made safely: a folder on the way
-    /// could not be listed, is a link or on a network share, or the entries pass
-    /// [`MAX_PATHS`]. Then the sandbox stays on and re-opens none of the own matter's entries
-    /// (less access, never none of the sandbox: nothing in the matter may turn it off), and the
-    /// lawyer is told (`NoticeKind::ShellLimited`).
-    pub(crate) own_unlisted: bool,
+    /// Whether another matter the session is not invited into lies inside its own matter: then
+    /// Claude's sandbox stays on and re-opens none of the own matter (its `allowRead` would beat
+    /// the nested matter's `denyRead`), and the lawyer is told (`NoticeKind::ShellLimited`).
+    pub(crate) own_shut: bool,
     /// Every other matter's folder (each spelling, invited or not) inside the own matter:
-    /// Claude's sandbox denies writes there, Codex's profile gives an invited one `read`.
+    /// Claude's sandbox denies writes there; Codex's profile keeps an invited one denied.
     pub(crate) inside_own: Vec<(PathBuf, bool)>,
     /// The other matters left unfenced ([`Self::resolve`]): one inside a folder that could not
     /// be listed or on a network share, or past the launch's [`MAX_PATHS`]. The lawyer is told
@@ -114,9 +105,9 @@ pub(crate) struct MatterFence {
     pub(crate) unfenced: Vec<MatterId>,
 }
 
-/// The most fence paths a launch names, all matters together, and the most entries of the own
-/// matter Claude's sandbox re-opens: past them, Claude's settings would near the 2 MiB file
-/// Claude Code reads (`agent::launch_settings`), and the launch would fail.
+/// The most fence paths a launch names, all matters together: past them, Claude's settings
+/// would near the 2 MiB file Claude Code reads (`agent::launch_settings`), and the launch
+/// would fail.
 pub(crate) const MAX_PATHS: usize = 2000;
 
 impl MatterFence {
@@ -129,8 +120,7 @@ impl MatterFence {
             invited: 0,
         },
         own: Vec::new(),
-        own_open: None,
-        own_unlisted: false,
+        own_shut: false,
         inside_own: Vec::new(),
         unfenced: Vec::new(),
     };
@@ -189,7 +179,7 @@ impl MatterFence {
                 "other matters could not be fenced; the lawyer is told"
             );
         }
-        self.split_own(&net);
+        self.split_own();
         self
     }
 
@@ -220,8 +210,8 @@ impl MatterFence {
         self.unfenced.sort();
     }
 
-    /// Fills [`Self::inside_own`], [`Self::own_open`] and [`Self::own_unlisted`].
-    fn split_own(&mut self, net: &NetEnv) {
+    /// Fills [`Self::inside_own`] and [`Self::own_shut`].
+    fn split_own(&mut self) {
         let inside = |path: &Path, own: &Path| {
             let (path, own) = (key(path), key(own));
             path.len() > own.len() && path.starts_with(&own)
@@ -233,36 +223,9 @@ impl MatterFence {
                 }
             }
         }
-        let fenced: Vec<&Path> = self
-            .inside_own
-            .iter()
-            .filter(|(_, invited)| !invited)
-            .map(|(path, _)| path.as_path())
-            .collect();
-        if fenced.is_empty() {
-            return;
-        }
-        let mut open = Vec::new();
-        let mut listed = true;
-        for own in &self.own {
-            let ways: Vec<Vec<OsString>> = fenced
-                .iter()
-                .filter(|path| inside(path, own))
-                .map(|path| below(path, key(own).len()))
-                .collect();
-            if ways.is_empty() {
-                continue;
-            }
-            // Links are left out: a link re-opened would re-open where it leads.
-            listed &= !net.is_network(own) && down_to(own, &ways, true, &mut open).is_some();
-        }
-        open.retain(|entry| reopen_safe(entry));
-        if listed && open.len() <= MAX_PATHS {
-            self.own_open = Some(open);
-        } else {
+        self.own_shut = self.inside_own.iter().any(|(_, invited)| !invited);
+        if self.own_shut {
             tracing::warn!("a matter inside this one: the sandbox re-opens none of this matter");
-            self.own_open = Some(Vec::new());
-            self.own_unlisted = true;
         }
     }
 
@@ -385,23 +348,8 @@ fn fence_paths(spelling: &Path, keep: &[&Path], net: &NetEnv) -> Result<Vec<Path
         return Err(());
     }
     let mut out = Vec::new();
-    down_to(spelling, &inside, false, &mut out).ok_or(())?;
+    down_to(spelling, &inside, &mut out).ok_or(())?;
     Ok(out)
-}
-
-/// Whether an own matter's entry may be re-opened for Claude's sandbox: UTF-8, its name with no
-/// `*` or `?` (Claude Code reads them as a pattern with no escape, `agent::loads::sandbox`) and
-/// with a letter or digit, which the sandbox writes as a one-letter class so the entry is a
-/// pattern the runtime never resolves through a link swapped in later
-/// (`agent::loads::sandbox::reopen_pattern`).
-pub(crate) fn reopen_safe(entry: &Path) -> bool {
-    let Some(name) = entry.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    entry
-        .to_str()
-        .is_some_and(|text| !text.contains(['*', '?']))
-        && name.chars().any(|c| c.is_ascii_alphanumeric())
 }
 
 /// `place`'s names after its first `depth`, as it spells them.
@@ -415,19 +363,7 @@ fn below(place: &Path, depth: usize) -> Vec<OsString> {
 
 /// Every entry of `parent`, and of each folder on the way to each of `ways` (names below
 /// `parent`), that is not on a way, into `out`; `None` when a folder on the way can't be listed.
-/// With `no_links` (what Claude's sandbox re-opens, [`MatterFence::own_open`]) a link is never
-/// put in `out`, and a link on the way is `None`: re-opening a link would re-open where it
-/// leads, another matter perhaps. A deny takes links as they are.
-fn down_to(
-    parent: &Path,
-    ways: &[Vec<OsString>],
-    no_links: bool,
-    out: &mut Vec<PathBuf>,
-) -> Option<()> {
-    let link = |path: &Path| {
-        // One that can't be read counts as a link: it is never re-opened.
-        !std::fs::symlink_metadata(path).is_ok_and(|meta| !meta.file_type().is_symlink())
-    };
+fn down_to(parent: &Path, ways: &[Vec<OsString>], out: &mut Vec<PathBuf>) -> Option<()> {
     let fold = |name: &OsString| key(Path::new(name));
     let mut names: Vec<OsString> = std::fs::read_dir(parent)
         .ok()?
@@ -441,10 +377,7 @@ fn down_to(
             .filter(|way| way.first().is_some_and(|first| fold(first) == fold(&name)))
             .collect();
         if on_way.is_empty() {
-            let entry = parent.join(&name);
-            if !(no_links && link(&entry)) {
-                out.push(entry);
-            }
+            out.push(parent.join(&name));
             continue;
         }
         // A kept place itself is left whole; a folder on the way is walked into.
@@ -455,11 +388,7 @@ fn down_to(
             .iter()
             .map(|way| way.iter().skip(1).cloned().collect())
             .collect();
-        let next = parent.join(&name);
-        if no_links && link(&next) {
-            return None;
-        }
-        down_to(&next, &tails, no_links, out)?;
+        down_to(&parent.join(&name), &tails, out)?;
     }
     Some(())
 }

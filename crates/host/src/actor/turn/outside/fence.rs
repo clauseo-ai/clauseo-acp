@@ -113,12 +113,15 @@ pub(crate) fn append_part(text: &mut Value, part: &str) {
 
 /// What a Claude session's `meta` gets from the fence after its instructions are filled: the
 /// invited matters' part appended to them, and the lawyer told of the matters the launch could
-/// not fence and those its Windows shell rules left out ([`tell_unfenced`]).
+/// not fence and those its Windows shell rules left out ([`tell_unfenced`]), and that Claude's
+/// sandboxed commands can't open the matter when a fenced matter lies inside it or `limited`
+/// (a deny widened to a folder above, `agent::loads::sandbox::deny_form`).
 pub(crate) fn after_meta(
     actor: &mut Actor,
     thread: ThreadId,
     run: &RunFolders,
     meta: &mut serde_json::Map<String, Value>,
+    limited: bool,
 ) {
     let reads = reads_part(run, true);
     let prompt = meta.get_mut("systemPrompt");
@@ -135,11 +138,8 @@ pub(crate) fn after_meta(
     tell_unfenced(actor, thread, unfenced);
     // Claude on macOS and Linux alone has the sandbox (its short temp folder was made).
     let sandboxed = run.claude_tmp.is_some();
-    tell_limited(
-        actor,
-        thread,
-        run.data_deny.matters.own_unlisted && sandboxed,
-    );
+    let shut = run.data_deny.matters.own_shut || limited;
+    tell_limited(actor, thread, shut && sandboxed);
 }
 
 /// The words the limited notice falls back to, for a view that does not know its kind.
@@ -147,7 +147,8 @@ const LIMITED_TEXT: &str =
     "Claude's commands can't open this matter's files right now; it can still read and edit them.";
 
 /// Tells the lawyer, once while it lasts, that Claude's sandboxed commands can't open the
-/// matter (`MatterFence::own_unlisted`: the sandbox re-opens none of it).
+/// matter (`MatterFence::own_shut`: the sandbox re-opens none of it), or that a deny was
+/// widened to a folder above the matter (`agent::loads::sandbox::deny_form`).
 fn tell_limited(actor: &mut Actor, thread: ThreadId, limited: bool) {
     let Some(state) = actor.threads.get_mut(&thread).map(|entry| &mut entry.turn) else {
         return;

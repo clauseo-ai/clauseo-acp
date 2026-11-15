@@ -1,45 +1,34 @@
-//! A matter inside this one in Claude's sandbox: its entries re-opened one by one as patterns,
-//! a name the agent made never turning the sandbox off, and no sandbox never the fallback.
+//! A matter inside this one in Claude's sandbox: a fenced one shuts the matter to sandboxed
+//! commands, an invited one leaves it open but denied writes, and a deny is never dropped.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use super::super::sandbox::{nameable, reopen_pattern};
+use super::super::sandbox::deny_form;
 use super::{Session, mac};
 
-/// A matter inside this one (`Sub`, then deeper down): the matter is not re-opened whole for
-/// reading, since Claude Code's `allowRead` beats `denyRead`; its entries down to the other
-/// matter are, each as a pattern the runtime never resolves through a link
-/// (`reopen_pattern`), and the other matter is denied writes.
+/// A fenced matter inside this one (`Sub`, then deeper down): the matter is not re-opened for
+/// reading at all, since Claude Code's `allowRead` beats `denyRead`; the other matter is
+/// denied reads and writes, and writes into the rest of the matter still go.
 #[test]
-fn a_matter_inside_this_one_stays_shut_to_sandboxed_commands() {
-    for (inner, open) in [
-        ("Sub", vec!["Drafts", "lease.pdf"]),
-        ("p/q/Sub", vec!["Drafts", "p/other", "p/q/x.docx"]),
-    ] {
+fn a_fenced_matter_inside_this_one_shuts_it_to_sandboxed_commands() {
+    for inner in ["Sub", "p/q/Sub"] {
         let mut session = Session::new("s-1");
         let sub = session.matter.join(inner);
         session.other_matters.push(sub.clone());
         session.matter_inside = vec![sub.clone()];
-        session.matter_open = Some(open.iter().map(|name| session.matter.join(name)).collect());
-        let sandbox = mac(&session.paths()).unwrap();
+        session.matter_shut = true;
+        let sandbox = mac(&session.paths()).expect("the sandbox stays on");
         let matter = session.matter.to_str().unwrap();
         let sub = sub.to_str().unwrap();
         assert!(
-            !sandbox.allow_read.iter().any(|path| path == matter),
+            !sandbox
+                .allow_read
+                .iter()
+                .any(|path| path.starts_with(matter)),
             "{inner}"
         );
-        assert!(
-            !sandbox.allow_read.iter().any(|path| path.starts_with(sub)),
-            "{inner}"
-        );
-        for name in &open {
-            let [itself, below] = reopen_pattern(&session.matter.join(name)).unwrap();
-            assert!(sandbox.allow_read.contains(&itself), "{inner}: {itself}");
-            assert!(sandbox.allow_read.contains(&below), "{inner}: {below}");
-        }
         assert!(sandbox.deny_read.iter().any(|path| path == sub), "{inner}");
         assert!(sandbox.deny_write.iter().any(|path| path == sub), "{inner}");
-        // Writes into the rest of the matter still go.
         assert!(
             sandbox.allow_write.iter().any(|path| path == matter),
             "{inner}"
@@ -47,59 +36,70 @@ fn a_matter_inside_this_one_stays_shut_to_sandboxed_commands() {
     }
 }
 
-/// An entry is written as a one-letter class, `[` escaped, itself and all under it; a name the
-/// agent made with `*` or `?`, or with no letter or digit, is never re-opened.
+/// An invited matter inside this one: the matter is re-opened whole, the invited one in it
+/// readable, and still denied writes.
 #[test]
-fn a_re_opened_entry_is_a_pattern_and_a_wildcard_name_is_left_out() {
-    let matter = Session::new("s-1").matter;
-    let [itself, below] = reopen_pattern(&matter.join("docs")).unwrap();
-    assert!(itself.ends_with("/[d]ocs"), "{itself}");
-    assert_eq!(below, format!("{itself}/**"));
-    let [bracket, _] = reopen_pattern(&matter.join("_x[1]")).unwrap();
-    assert!(bracket.ends_with("/_[x][[]1]"), "{bracket}");
-    for name in ["what?.txt", "a*b", "---"] {
-        assert_eq!(reopen_pattern(&matter.join(name)), None, "{name}");
-    }
-    // Such names never turn the sandbox off.
+fn an_invited_matter_inside_this_one_is_read_whole_and_denied_writes() {
     let mut session = Session::new("s-1");
-    let sub = session.matter.join("Sub");
-    session.other_matters.push(sub.clone());
-    session.matter_inside = vec![sub];
-    session.matter_open = Some(vec![
-        session.matter.join("what?.txt"),
-        session.matter.join("a"),
-    ]);
-    let sandbox = mac(&session.paths()).expect("the sandbox stays on");
-    assert!(!sandbox.allow_read.iter().any(|path| path.contains("what")));
-}
-
-/// Where the own matter's entries could not be listed safely, the sandbox stays on and
-/// re-opens none of them: never the matter whole, never no sandbox.
-#[test]
-fn an_unlisted_matter_inside_this_one_keeps_the_sandbox_and_opens_none() {
-    let mut session = Session::new("s-1");
-    let sub = session.matter.join("Sub");
-    session.other_matters.push(sub.clone());
-    session.matter_inside = vec![sub];
-    session.matter_open = Some(Vec::new());
+    let shared = session.matter.join("Shared");
+    session.matter_inside = vec![shared.clone()];
     let sandbox = mac(&session.paths()).expect("the sandbox stays on");
     let matter = session.matter.to_str().unwrap();
-    assert!(
-        !sandbox
-            .allow_read
-            .iter()
-            .any(|path| path.starts_with(matter))
-    );
+    let shared = shared.to_str().unwrap();
+    assert!(sandbox.allow_read.iter().any(|path| path == matter));
+    assert!(!sandbox.deny_read.iter().any(|path| path == shared));
+    assert!(sandbox.deny_write.iter().any(|path| path == shared));
 }
 
-/// Another matter's folder as registered always goes in the lists; where it only leads (a link
-/// the agent made) only when the sandbox can name it, so a link to `*` turns nothing off.
+/// A folder as registered is denied as itself; where it only leads, as itself when the sandbox
+/// can write it, else as the longest folder above it that it can (limited), never dropped.
 #[test]
-fn a_folder_the_agent_can_name_through_a_link_never_turns_the_sandbox_off() {
-    let stored = Session::new("s-1").matter.join("Sub");
-    let stored = [stored.as_path()];
-    assert!(nameable(stored[0], &stored));
-    let wild = PathBuf::from("/tmp/a*b");
-    assert!(!nameable(&wild, &stored));
-    assert!(nameable(Path::new("/tmp/plain"), &stored));
+fn a_deny_the_sandbox_cannot_write_is_widened_never_dropped() {
+    let abs = |path: &str| PathBuf::from(crate::testing::abs(path));
+    let stored = abs("/Users/l/Clients/A/W*/Sub");
+    let as_stored = [stored.as_path()];
+    assert_eq!(deny_form(&stored, &as_stored), (stored.clone(), false));
+    let plain = abs("/tmp/plain/Sub");
+    assert_eq!(deny_form(&plain, &as_stored), (plain.clone(), false));
+    let wild = abs("/Users/l/Clients/A/W?/x*/Sub");
+    assert_eq!(deny_form(&wild, &[]), (abs("/Users/l/Clients/A"), true));
+}
+
+/// The agent renames a folder above another matter to a wildcard name and links the old name
+/// to it (`mv Acme/W "Acme/W*" && ln -s "W*" Acme/W`): the matter's walked spelling
+/// (`Acme/W*/Sub`) is denied as `Acme`, the session limited, and the stored one kept.
+#[cfg(unix)]
+#[test]
+fn a_wildcard_rename_behind_a_link_widens_the_deny() {
+    use std::path::Path;
+
+    use crate::agent::matter_fence::{MatterFence, Other};
+    use crate::pipeline::tests::support::TempDir;
+    use crate::write;
+
+    let dir = TempDir::new("sandbox-wild-rename");
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    for name in ["own", "data", "Acme/W/Sub"] {
+        write::create_dir_all(&root.join(name)).unwrap();
+    }
+    let acme = root.join("Acme");
+    write::rename(&acme.join("W"), &acme.join("W*")).unwrap();
+    write::symlink(Path::new("W*"), &acme.join("W")).unwrap();
+    let stored = acme.join("W/Sub");
+    let id = clauseo_protocol::MatterId::new(uuid::Uuid::from_u128(
+        (0x0190_0000_0000_u128 << 80) | (0x7 << 76) | (0b10 << 62) | 1,
+    ))
+    .unwrap();
+    let (own, data) = (root.join("own"), root.join("data"));
+    let fence = MatterFence::asked(vec![Other::new(id, "M1".into(), stored.clone(), false)])
+        .resolve(&[own.as_path()], &[data.as_path()]);
+    let walked = acme.join("W*/Sub");
+    assert!(fence.others[0].spellings.contains(&walked));
+    let as_stored = [stored.as_path()];
+    let denied: Vec<(PathBuf, bool)> = fence
+        .fenced_folders()
+        .map(|path| deny_form(path, &as_stored))
+        .collect();
+    assert!(denied.contains(&(stored.clone(), false)), "{denied:?}");
+    assert!(denied.contains(&(acme, true)), "{denied:?}");
 }

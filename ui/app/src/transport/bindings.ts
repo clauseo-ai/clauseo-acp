@@ -4374,9 +4374,9 @@ export type NoticeKind =
 } }) & { files_came_back?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Claude's sandboxed commands can't open this matter's files this session: another
- *  matter lies inside it, and the matter's entries could not be re-opened one by one
- *  safely (too many, a folder that can't be listed, a link on the way). Claude's file
- *  tools still read and edit them. Once a launch.
+ *  matter this conversation is not invited into lies inside it, or another matter's
+ *  folder could only be denied through a folder above it. Claude's file tools still
+ *  read and edit them. Once a launch.
  */
 "shell_limited" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
