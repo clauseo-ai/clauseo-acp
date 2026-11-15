@@ -561,7 +561,7 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
         .window_classname(MAIN_WINDOW_CLASS)
         .use_https_scheme(true);
     let builder = window_size::with_size(builder, (width, height)).center();
-    // The ground from the first frame on Windows, before WebView2 starts (window_size.rs).
+    // The first frame's ground: on Windows before WebView2, elsewhere shown after (window_size.rs).
     let builder = window_size::with_ground(window_frame::with_frame(builder));
     // Tauri sends the CSP with the page only; the scripts, the colouring worker's among them,
     // get the same policy here (csp.rs). It goes nowhere but the app's pages (navigation.rs).
@@ -591,6 +591,7 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     startup::mark("main window built");
     window_size::paint_first_frame(&window);
     window_frame::after_build(&window);
+    window_size::show_first_frame(&window);
     #[cfg(windows)]
     window_frame::quit_item::add(&window);
     // Destroyed: the bridge drops main's stream, and the settings window goes too.

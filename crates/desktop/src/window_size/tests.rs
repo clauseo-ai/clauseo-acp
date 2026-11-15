@@ -1,6 +1,7 @@
 use super::{
-    DAY_GROUND, MIN_WINDOW_SIZE, NIGHT_GROUND, SETTINGS_SIZE, WEBVIEW2_BACKGROUND_ENV, WINDOW_SIZE,
-    fit, fitted, ground, state_denylist, state_flags, webview2_background,
+    BUILT_VISIBLE, DAY_GROUND, MIN_WINDOW_SIZE, NIGHT_GROUND, SETTINGS_SIZE,
+    WEBVIEW2_BACKGROUND_ENV, WINDOW_SIZE, fit, fitted, ground, state_denylist, state_flags,
+    webview2_background,
 };
 use std::path::Path;
 use tauri_plugin_window_state::StateFlags;
@@ -144,4 +145,12 @@ fn webview2_s_first_background_is_the_ground_of_the_theme() {
             format!("FF{r:02X}{g:02X}{b:02X}")
         );
     }
+}
+
+/// Off Windows the window is built hidden and shown once it has the ground, so the Mac's first
+/// frame is never `NSWindow`'s grey or `WKWebView`'s white; Windows is built visible, for the
+/// native mark through `WebView2`'s start.
+#[test]
+fn only_windows_builds_the_window_visible_before_its_ground() {
+    assert_eq!(BUILT_VISIBLE, cfg!(windows));
 }
