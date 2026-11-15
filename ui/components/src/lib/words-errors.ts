@@ -128,6 +128,8 @@ export type ErrorCode =
   | "blackline.format_unknown"
   | "word.too_large"
   | "agent.start_offline"
+  | "agent.answer_failed"
+  | "agent.mode_missing"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -370,6 +372,12 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // (before-launch item 3); Try again once online, the question back in the field. Provisional
   "agent.start_offline":
     "You're offline, so Claude didn't start. Try again when you're back online. Your question is kept.",
+  // the agent answered the question with an error no other code reads (before-launch item 3): Try again under the
+  // answer so far, never Restart, as agent.service_error. Provisional
+  "agent.answer_failed": "Claude stopped with an error. Try again.",
+  // the agent's session offered no mode Clauseo runs it in: as agent.unsupported_version says it, a version Clauseo
+  // doesn't support (before-launch item 3)
+  "agent.mode_missing": "This version of Claude Code doesn't work with Clauseo.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -405,6 +413,18 @@ const PLANNED: Partial<
     chatgpt: "ChatGPT sent something Clauseo can't read.",
     named: "{name} sent something Clauseo can't read.",
     nameless: "The AI sent something Clauseo can't read.",
+  },
+  // provisional (before-launch item 3), as ERROR_WORDS' sentence
+  "agent.answer_failed": {
+    chatgpt: "ChatGPT stopped with an error. Try again.",
+    named: "{name} stopped with an error. Try again.",
+    nameless: "The AI stopped with an error. Try again.",
+  },
+  // agent.unsupported_version's sentences, the same words (before-launch item 3)
+  "agent.mode_missing": {
+    chatgpt: "This version of Codex doesn't work with Clauseo.",
+    named: "This version of {name} doesn't work with Clauseo.",
+    nameless: "This version of the AI doesn't work with Clauseo.",
   },
   // provisional (before-launch item 3), as ERROR_WORDS' sentence
   "agent.start_offline": {

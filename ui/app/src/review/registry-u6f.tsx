@@ -10,6 +10,8 @@
 // with Try again. U6F-25 to U6F-27 are matter.folder_backslash's and U6F-28 to U6F-30 agent.folder_inaccessible's
 // (drafts), the same way.
 // agent.start_offline's, a start that failed on its connection with the host's probe agreeing.
+// agent.start_offline's, a start that failed on its connection with the host's probe agreeing, and U6F-28 to
+// U6F-30 agent.answer_failed's, an error the agent answered the question with: the stop line, with Try again.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { type AgentName, errorWords as sentence } from "@clauseo/components/lib/words-errors.ts";
@@ -80,6 +82,13 @@ const folderStopped = (code: ErrorCode, agent: AgentId) => () => (
         // matter.folder_backslash's line as on the Mac, for the matter folder's own name
         platform: "mac",
         matterFolder: "Documents/Acme\\ Traders",
+/** A turn `agent` ended with agent.answer_failed (an error answer to the question): the stop line, with Try again. */
+const answerFailed = (agent: AgentId) => () => (
+  <RoomOver
+    host={() =>
+      threadHost({
+        entries: [QUESTION, ANSWER, step(7, { stop: "failed", failure: "agent.answer_failed" })],
+        agent,
       })
     }
   />
@@ -348,6 +357,24 @@ export const U6F: Entry[] = [
     ),
     screen: "room/thread",
     render: nameless("agent.unreachable"),
+  },
+  {
+    id: "U6F-28",
+    words: errorWords("ChatGPT stopped with an error. Try again."),
+    screen: "room/thread",
+    render: answerFailed("codex-acp"),
+  },
+  {
+    id: "U6F-29",
+    words: errorWords("{name} stopped with an error. Try again."),
+    screen: "room/thread",
+    render: answerFailed("gemini"),
+  },
+  {
+    id: "U6F-30",
+    words: errorWords("The AI stopped with an error. Try again."),
+    screen: "room/thread",
+    render: nameless("agent.answer_failed"),
   },
   {
     id: "U3-52",

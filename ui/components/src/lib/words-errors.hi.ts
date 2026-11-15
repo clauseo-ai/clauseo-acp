@@ -191,6 +191,11 @@ export const HI = {
     "यह प्रश्न भेजने के लिए बहुत लंबा है। पाठ को मामले के फ़ोल्डर में एक फ़ाइल के रूप में सहेजें, फिर उसके बारे में पूछें। आपके शब्द रखे गए हैं।",
   // Cancel in the native confirm before an MCP server is saved (provisional Hindi)
   "You chose Cancel, so nothing was saved.": "आपने रद्द करें चुना, इसलिए कुछ भी सहेजा नहीं गया।",
+  // agent.answer_failed: the agent answered the question with an error no other code reads (provisional Hindi)
+  "Claude stopped with an error. Try again.": "Claude एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+  "ChatGPT stopped with an error. Try again.": "ChatGPT एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+  "{name} stopped with an error. Try again.": "{name} एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+  "The AI stopped with an error. Try again.": "AI एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
   // agent.start_offline: the start failed on its connection, confirmed by the host's probe (provisional Hindi)
   "You're offline, so Claude didn't start. Try again when you're back online. Your question is kept.":
     "आप ऑफ़लाइन हैं, इसलिए Claude शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
