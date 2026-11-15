@@ -89,6 +89,9 @@ pub(crate) struct Spec<'a> {
     pub(crate) cwd: &'a Path,
     /// The downloads folder the mover delivers to: `<matter>/downloads` in a Codex session.
     pub(crate) downloads: &'a Path,
+    /// Where a download goes when the downloads folder's drive cannot keep the mark (the guard's
+    /// `--fallback-downloads`); none: it stays in staging.
+    pub(crate) fallback: Option<&'a Path>,
     /// The run's profile (`runs.rs`), which [`launch`] makes.
     pub(crate) profile: &'a Path,
     /// `AGENT_BROWSER_PROXY`, checked by `env.rs`; none when the host gave none.
@@ -107,6 +110,7 @@ pub(crate) struct Chrome {
     /// Where Chrome downloads to, and where the mover puts each file.
     staging: PathBuf,
     downloads: PathBuf,
+    fallback: Option<PathBuf>,
     /// What Chrome's stderr reader saw first, until [`Chrome::endpoint`] reads it.
     starting: Option<mpsc::Receiver<Seen>>,
     mover: Option<Mover>,
@@ -209,6 +213,7 @@ fn launch_on(
         })),
         staging,
         downloads,
+        fallback: spec.fallback.map(Path::to_owned),
         starting: Some(inbox),
         mover: None,
         stop_watch: None,
@@ -260,6 +265,7 @@ impl Chrome {
         self.mover = Some(Mover::start(
             self.staging.clone(),
             self.downloads.clone(),
+            self.fallback.clone(),
             held,
             saved,
         ));

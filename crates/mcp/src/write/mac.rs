@@ -1,13 +1,16 @@
 //! macOS: extended attributes, for a download's `com.apple.quarantine` mark
-//! (`browser_guard/downloads/marks.rs`); std has no call for them. The reads sit here too, so
+//! (`browser_guard/downloads/marks.rs`), and `renameatx_np`, the copied download's rename that
+//! never replaces a file (`write/unix.rs`); std has no call for them. The reads sit here too, so
 //! one file holds the guard's attribute calls.
 #![expect(
     unsafe_code,
-    reason = "getxattr and setxattr, for a download's quarantine mark; libc binds them, std does not"
+    reason = "xattr calls and renameatx_np, for a download's quarantine mark and its no-replace \
+              rename; libc binds them, std does not"
 )]
 
 use std::ffi::{CStr, CString};
 use std::io;
+use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
@@ -82,6 +85,69 @@ pub(crate) fn set_xattr(file: &Path, name: &CStr, value: &[u8]) -> io::Result<()
             libc::XATTR_NOFOLLOW,
         )
     };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+/// `fgetxattr` of attribute `name` of the open `file`: its value, `None` when it has none or the
+/// value changed size between the two reads.
+pub(crate) fn fget_xattr(file: &std::fs::File, name: &CStr) -> Option<Vec<u8>> {
+    let fd = file.as_raw_fd();
+    // SAFETY: `fd` is open for the call (`file` is borrowed); `name` is a NUL-terminated C string;
+    // a null buffer with size 0 asks only for the value's size.
+    let size = unsafe { libc::fgetxattr(fd, name.as_ptr(), std::ptr::null_mut(), 0, 0, 0) };
+    let size = usize::try_from(size).ok()?;
+    let mut buffer = vec![0_u8; size];
+    // SAFETY: as above, with `buffer` writable for `size` bytes.
+    let read =
+        unsafe { libc::fgetxattr(fd, name.as_ptr(), buffer.as_mut_ptr().cast(), size, 0, 0) };
+    let read = usize::try_from(read).ok()?;
+    buffer.truncate(read);
+    Some(buffer)
+}
+
+/// `fsetxattr`: sets attribute `name` of the open `file` to `value`; the copy's mark is set on
+/// the file this process made and holds open, so no path is resolved again.
+pub(crate) fn fset_xattr(file: &std::fs::File, name: &CStr, value: &[u8]) -> io::Result<()> {
+    // SAFETY: the fd is open for the call; `name` is NUL-terminated and `value` readable for the
+    // length passed; the call keeps none of them.
+    let status = unsafe {
+        libc::fsetxattr(
+            file.as_raw_fd(),
+            name.as_ptr(),
+            value.as_ptr().cast(),
+            value.len(),
+            0,
+            0,
+        )
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+/// `renameatx_np(dir, from, dir, to, RENAME_EXCL)`: a rename within the folder `dir` holds that
+/// fails with `EEXIST` rather than replace `to`.
+pub(crate) fn rename_excl(
+    dir: &std::os::fd::OwnedFd,
+    from: &std::ffi::OsStr,
+    to: &std::ffi::OsStr,
+) -> io::Result<()> {
+    let c_name = |name: &std::ffi::OsStr| {
+        CString::new(name.as_bytes())
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))
+    };
+    let (from, to) = (c_name(from)?, c_name(to)?);
+    let fd = dir.as_raw_fd();
+    // SAFETY: `fd` is open for the call (`dir` is borrowed); both names are NUL-terminated C
+    // strings that outlive it.
+    let status =
+        unsafe { libc::renameatx_np(fd, from.as_ptr(), fd, to.as_ptr(), libc::RENAME_EXCL) };
     if status == 0 {
         Ok(())
     } else {

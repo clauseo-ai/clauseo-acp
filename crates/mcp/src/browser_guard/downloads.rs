@@ -19,12 +19,18 @@
 //! the guard runs outside the sandbox: the agent could swap the folder for a link to anywhere
 //! (`~/Library/LaunchAgents`) while a page serves a file. Each move therefore opens the folder
 //! once, refusing a link at its name, and finds the name and moves the file relative to that
-//! handle, never through the folder's path again (`write::Folder`; on Windows, where the guard
-//! does not run yet, still by path).
+//! handle, never through the folder's path again (`write::Folder`, a descriptor on Unix and a
+//! handle on Windows).
+//!
+//! A downloads folder on another drive than staging (USB, exFAT, a share), or on a file system
+//! without hard links, gets a copy instead of a move, marked before any content and given its
+//! name without replacing anything; where that drive cannot keep the mark, the file goes to the
+//! fallback folder on the data drive and the agent is told where (`deliver.rs`).
 //!
 //! Each moved file has its OS download mark, so the OS checks it when the lawyer opens it
 //! (`marks.rs`): the mover waits for Chrome's mark, makes sure of it in staging, and only then
-//! moves the file. Where the drive cannot hold a mark, downloads are held back ([`Sweeper`]).
+//! moves the file. Where staging's drive cannot hold a mark, downloads are held back
+//! ([`Sweeper`]).
 //!
 //! A download Chrome holds for a confirmation (an executable, `held.rs`) is never delivered: the
 //! agent is told in its next tool result, and the file is deleted from staging when Chrome stops.
@@ -46,9 +52,13 @@ use std::time::Duration;
 
 use crate::write;
 
+mod deliver;
 mod held;
 mod marks;
 mod saved;
+
+#[cfg(test)]
+pub(crate) use deliver::{How, deliver};
 
 pub(crate) use held::Held;
 pub(crate) use saved::{OPEN_WAIT, Saved, open_reply};
@@ -97,19 +107,22 @@ pub(crate) struct Mover {
     thread: Option<JoinHandle<Sweeper>>,
     staging: PathBuf,
     downloads: PathBuf,
+    fallback: Option<PathBuf>,
 }
 
 impl Mover {
-    /// Starts moving from `staging` to `downloads` every [`POLL`], recording each held download
-    /// in `held` and each delivered file in `saved`.
+    /// Starts moving from `staging` to `downloads` (or `fallback`, [`Sweeper::fallback`]) every
+    /// [`POLL`], recording each held download in `held` and each delivered file in `saved`.
     pub(crate) fn start(
         staging: PathBuf,
         downloads: PathBuf,
+        fallback: Option<PathBuf>,
         held: Arc<Held>,
         saved: Arc<Saved>,
     ) -> Mover {
         let (stop, stopped) = mpsc::channel::<()>();
         let mut sweeper = Sweeper::new(staging.clone(), downloads.clone(), MARK_WAIT);
+        sweeper.fallback.clone_from(&fallback);
         sweeper.held = Some(held);
         sweeper.saved = Some(saved);
         let thread = thread::spawn(move || {
@@ -123,6 +136,7 @@ impl Mover {
             thread: Some(thread),
             staging,
             downloads,
+            fallback,
         }
     }
 
@@ -135,21 +149,30 @@ impl Mover {
             Some(Ok(sweeper)) => sweeper,
             Some(Err(_)) => {
                 super::note("the download mover panicked");
-                Sweeper::new(self.staging.clone(), self.downloads.clone(), 0)
+                self.fresh()
             }
-            None => Sweeper::new(self.staging.clone(), self.downloads.clone(), 0),
+            None => self.fresh(),
         };
         sweeper.wait = 0;
         sweeper.sweep();
         held::clear(&self.staging);
+    }
+
+    /// A sweeper with no state, for [`Mover::finish`] when the thread's is lost.
+    fn fresh(&self) -> Sweeper {
+        let mut sweeper = Sweeper::new(self.staging.clone(), self.downloads.clone(), 0);
+        sweeper.fallback.clone_from(&self.fallback);
+        sweeper
     }
 }
 
 /// One sweep after Chrome has stopped (the reaper's, on Unix): [`Sweeper::sweep`] with no wait,
 /// then the held downloads deleted.
 #[cfg(any(unix, test))]
-pub(crate) fn sweep(staging: &Path, downloads: &Path) {
-    Sweeper::new(staging.to_owned(), downloads.to_owned(), 0).sweep();
+pub(crate) fn sweep(staging: &Path, downloads: &Path, fallback: Option<&Path>) {
+    let mut sweeper = Sweeper::new(staging.to_owned(), downloads.to_owned(), 0);
+    sweeper.fallback = fallback.map(Path::to_owned);
+    sweeper.sweep();
     held::clear(staging);
 }
 
@@ -161,9 +184,20 @@ pub(crate) struct Sweeper {
     wait: u32,
     /// Finished files seen without Chrome's mark, with how many sweeps each has waited.
     waited: HashMap<PathBuf, u32>,
-    /// Files whose mark could not be written, or that cannot move to another drive, each noted
-    /// once.
+    /// Where a download goes when the downloads folder's drive cannot keep the mark: the guard's
+    /// `--fallback-downloads`. None: such a download stays in staging (`deliver.rs`).
+    pub(crate) fallback: Option<PathBuf>,
+    /// How a delivery moves and marks (the tests inject a move across devices, or a mark that
+    /// fails).
+    pub(crate) how: deliver::How,
+    /// Files whose mark could not be written in staging, each noted once.
     unmarkable: HashSet<PathBuf>,
+    /// Files held in staging for good, never tried again: their agent was told (`deliver.rs`).
+    given_up: HashSet<PathBuf>,
+    /// Copies that failed, with how many sweeps in a row each did.
+    copy_failures: HashMap<PathBuf, u32>,
+    /// Files whose delivery failed and waits for a later sweep, each noted once.
+    retry_noted: HashSet<PathBuf>,
     /// Whether a mark can be written in the staging folder: probed at the first finished file.
     marks_work: Option<bool>,
     /// The probe ([`marks::probe`]; the tests inject a failure).
@@ -192,7 +226,12 @@ impl Sweeper {
             downloads,
             wait,
             waited: HashMap::new(),
+            fallback: None,
+            how: deliver::How::default(),
             unmarkable: HashSet::new(),
+            given_up: HashSet::new(),
+            copy_failures: HashMap::new(),
+            retry_noted: HashSet::new(),
             marks_work: None,
             probe,
             held: None,
@@ -203,7 +242,8 @@ impl Sweeper {
 
     /// Moves every finished regular file in the staging folder into the downloads folder under
     /// [`safe_name`] (made unique), each with its OS mark, written in staging, out of the agent's
-    /// reach, before the move, which keeps it. A file without Chrome's mark first waits
+    /// reach, before the move, which keeps it; or copies it, or delivers it to the fallback
+    /// folder (`deliver.rs`). A file without Chrome's mark first waits
     /// [`Sweeper::wait`] sweeps. Where no mark can be written (Windows and macOS), nothing is
     /// moved: the files stay in staging, deleted with the profile, and the downloads folder
     /// gets [`BLOCKED_NOTE`]. A file that cannot be moved now is left for the next sweep. A file
@@ -229,6 +269,9 @@ impl Sweeper {
                 continue;
             }
             let path = entry.path();
+            if self.given_up.contains(&path) {
+                continue;
+            }
             if !std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file())
                 || !self.marks_work()
             {
@@ -252,40 +295,14 @@ impl Sweeper {
             }
             // A refusal (Windows: a sharing violation while Chrome, or a scanner, still holds the
             // file without delete sharing) is retried on the next sweep: the file stays in staging.
-            match place(&path, &self.downloads, &safe_name(&name), |_| {}) {
-                Ok(placed) => {
-                    self.waited.remove(&path);
-                    self.unmarkable.remove(&path);
-                    if let (Some(saved), Some(given)) = (&self.saved, placed.file_name()) {
-                        saved.record(&given.to_string_lossy());
-                    }
-                }
-                // A matter on another drive than the data folder: the move, which keeps the
-                // mark, cannot happen, ever. Told once; the file goes with the profile.
-                Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
-                    if self.unmarkable.insert(path.clone()) {
-                        super::note(
-                            "a download stays in staging: the downloads folder is on another drive",
-                        );
-                        if let Some(saved) = &self.saved {
-                            saved.record_unsaved(format!(
-                                "The browser downloaded {}, but it is not in the matter: the \
-                                 matter is on a different drive from Clauseo's data folder, so \
-                                 the file stayed in Clauseo's browser folder, which is cleared \
-                                 when the browser closes. Tell your user it was not saved to the \
-                                 matter, and that they can download it from the page in their \
-                                 own browser.",
-                                safe_name(&name)
-                            ));
-                        }
-                    }
-                }
-                Err(_) => {}
-            }
+            deliver::deliver_one(self, &path, &name);
         }
         let exists = |path: &PathBuf| std::fs::symlink_metadata(path).is_ok();
         self.waited.retain(|path, _| exists(path));
         self.unmarkable.retain(exists);
+        self.given_up.retain(exists);
+        self.copy_failures.retain(|path, _| exists(path));
+        self.retry_noted.retain(exists);
         self.held_seen.retain(|path, _| exists(path));
     }
 
@@ -315,38 +332,25 @@ impl Sweeper {
     }
 }
 
-/// Moves the file `from` into `downloads` as `name`, or the first free `<stem> (<n>)<ext>`,
-/// never replacing a file: when a name is taken by the time of the move, the next free one is
-/// tried, [`MOVE_TRIES`] names at most. The folder is opened once, first ([`write::Folder`]):
-/// a link at its name (or, on Windows, a reparse point) is refused there, and every look for a
-/// free name and every move goes through that handle, so a link swapped in for `downloads`
-/// afterwards is never followed: the move goes into the folder that was opened, or fails if it
-/// is gone. `before_move` runs between the look and each move (the tests put a file there, or
-/// swap the folder). Returns where the file went, by the path it had when opened.
+/// Delivers the file `from` into `downloads` as `name`, or the first free `<stem> (<n>)<ext>`,
+/// never replacing a file, by a move or a copy ([`deliver::deliver`]); `before_move` runs
+/// between each look and its move (the tests put a file there, or swap the folder). Returns where
+/// the file went, by the path it had when opened.
+#[cfg(test)]
 pub(crate) fn place(
     from: &Path,
     downloads: &Path,
     name: &str,
-    mut before_move: impl FnMut(&Path),
+    before_move: impl FnMut(&Path),
 ) -> io::Result<PathBuf> {
-    let folder = write::Folder::open(downloads)?;
-    let mut first = 1;
-    for _ in 0..MOVE_TRIES {
-        let Some((n, given)) = free_name(&folder, name, first) else {
-            break;
-        };
-        let target = downloads.join(&given);
-        before_move(&target);
-        match folder.move_new(from, OsStr::new(&given)) {
-            Ok(()) => return Ok(target),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => first = n + 1,
-            Err(error) => return Err(error),
-        }
+    match deliver::deliver(from, downloads, name, deliver::How::default(), before_move) {
+        Ok(delivered) => Ok(delivered.path),
+        Err(
+            deliver::Failed::Unmarkable(error)
+            | deliver::Failed::Copy(error)
+            | deliver::Failed::Retry(error),
+        ) => Err(error),
     }
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        "no free name in the downloads folder",
-    ))
 }
 
 /// Chrome's names for a download still being written, on every OS: `*.crdownload` once Chrome

@@ -1,39 +1,162 @@
-//! Windows: the download move that never replaces a file, `MoveFileExW` without
-//! `MOVEFILE_REPLACE_EXISTING` (std has none: `fs::rename` replaces, and `fs::hard_link` plus
-//! `fs::remove_file` would leave two names while Chrome or a scanner holds the file open).
+//! Windows: the download mover's folder, opened once as a handle, and every change in it made
+//! relative to that handle (`write::Folder`, `write/copy.rs`), so a junction or symlink swapped
+//! in for the folder after it was opened is never followed:
+//! - the folder: `CreateFileW` with `FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT`,
+//!   then a link at its name is refused (std's `File::metadata` of the handle);
+//! - a name in it: `NtCreateFile` with `RootDirectory` the folder's handle, `FILE_CREATE` (never
+//!   replaces) and `FILE_OPEN_REPARSE_POINT` (never follows);
+//! - a move or rename into it: `SetFileInformationByHandle(FileRenameInfo)` on the file's own
+//!   handle with `RootDirectory` the folder's handle and `ReplaceIfExists` false (std has no
+//!   rename that never replaces);
+//! - the copy's mark: its `:Zone.Identifier` stream opened with `RootDirectory` the copy's own
+//!   handle;
+//! - a delete: `FileDispositionInfo` on the file's own handle.
+//!
 //! And the proxy's secret file, checked and deleted through the one handle it was opened with
-//! (`write/secret.rs`): `GetFileInformationByHandle` and `SetFileInformationByHandle`.
+//! (`write/secret.rs`): `GetFileInformationByHandle` and `delete_by_handle`.
 #![expect(
     unsafe_code,
-    reason = "MoveFileExW, for a download move that never replaces a file; the secret file's \
-              GetFileInformationByHandle and SetFileInformationByHandle"
+    reason = "NtCreateFile and SetFileInformationByHandle, relative to handles; std has neither; \
+              the secret file's GetFileInformationByHandle"
 )]
 
 use std::ffi::OsStr;
+use std::fs::File;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::fs::OpenOptionsExt;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::path::Path;
 
-use std::os::windows::io::AsRawHandle;
-
-use windows::Win32::Foundation::{HANDLE, WIN32_ERROR};
-use windows::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, FILE_DISPOSITION_INFO, FileDispositionInfo,
-    GetFileInformationByHandle, MOVE_FILE_FLAGS, MoveFileExW, SetFileInformationByHandle,
+use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
+use windows::Wdk::Storage::FileSystem::{
+    FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT,
+    FILE_SYNCHRONOUS_IO_NONALERT, NTCREATEFILE_CREATE_DISPOSITION, NtCreateFile,
 };
-use windows::core::PCWSTR;
+use windows::Win32::Foundation::{
+    HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, STATUS_OBJECT_NAME_NOT_FOUND,
+    STATUS_OBJECT_PATH_NOT_FOUND, UNICODE_STRING, WIN32_ERROR,
+};
+use windows::Win32::Storage::FileSystem::{
+    BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_NORMAL, FILE_DISPOSITION_INFO,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
+    FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO,
+    FILE_SHARE_DELETE, FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
+    FileDispositionInfo, FileRenameInfo, GetFileInformationByHandle, SYNCHRONIZE,
+    SetFileInformationByHandle,
+};
+use windows::Win32::System::IO::IO_STATUS_BLOCK;
+use windows::core::PWSTR;
 
-/// Moves `from` to `to`; `AlreadyExists` if `to` exists, a sharing violation while the file
-/// is open without delete sharing.
-pub(crate) fn move_new(from: &Path, to: &Path) -> io::Result<()> {
-    let (from, to) = (wide(from)?, wide(to)?);
-    // SAFETY: both pointers are to NUL-terminated UTF-16 strings that live until the call
-    // returns; no flag is set, so the call fails rather than replace `to`.
+/// A struct's size as the `u32` Win32 takes (every one here is a few bytes).
+fn size_u32(size: usize) -> u32 {
+    u32::try_from(size).unwrap_or(u32::MAX)
+}
+
+/// Every sharing mode: the guard's handles never stop Chrome, a scanner or the lawyer.
+const SHARE_ALL: FILE_SHARE_MODE =
+    FILE_SHARE_MODE(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0);
+
+/// Opens `folder` itself (`FILE_FLAG_OPEN_REPARSE_POINT`: a junction or symlink at its name is
+/// opened, not followed), sharing everything, then refuses it unless it is a real folder. Only
+/// the last part of the path is held to that, as on Unix.
+pub(super) fn open_folder(folder: &Path) -> io::Result<OwnedHandle> {
+    let opened = std::fs::OpenOptions::new()
+        .access_mode((FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE).0)
+        .share_mode(SHARE_ALL.0)
+        .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
+        .open(folder)?;
+    let kind = opened.metadata()?.file_type();
+    if kind.is_symlink() || !kind.is_dir() {
+        return Err(io::Error::other("the folder is no longer a real folder"));
+    }
+    Ok(OwnedHandle::from(opened))
+}
+
+/// Whether `name` exists in the folder `dir` holds, as anything, a link included: an open of
+/// its attributes relative to the handle. Only "not found" reads as absent; any other failure
+/// (a sharing violation, a denial) reads as present, so the mover takes another name.
+pub(super) fn exists_in(dir: &OwnedHandle, name: &OsStr) -> bool {
+    match nt_open(
+        dir,
+        name,
+        FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+        FILE_OPEN_REPARSE_POINT.0,
+    ) {
+        Ok(_found) => true,
+        Err(status) => {
+            status != STATUS_OBJECT_NAME_NOT_FOUND && status != STATUS_OBJECT_PATH_NOT_FOUND
+        }
+    }
+}
+
+/// Makes the file `name` in the folder `dir` holds, new (`FILE_CREATE`), open to read, write
+/// and delete (the copy deletes its temporary file through this handle).
+pub(super) fn create_new_in(dir: &OwnedHandle, name: &OsStr) -> io::Result<File> {
+    nt_open(
+        dir,
+        name,
+        FILE_GENERIC_READ | FILE_GENERIC_WRITE | DELETE,
+        FILE_CREATE,
+        FILE_NON_DIRECTORY_FILE.0 | FILE_OPEN_REPARSE_POINT.0,
+    )
+    .map(File::from)
+    .map_err(nt_error)
+}
+
+/// Opens the file `from` (in staging, the guard's own folder) to copy it or move it: read,
+/// delete and its attributes, sharing everything, a reparse point at its name opened itself;
+/// anything but a plain file is refused. A file another process holds without delete sharing
+/// fails the open with a sharing violation, retried on the next sweep.
+pub(super) fn open_source(from: &Path) -> io::Result<File> {
+    let opened = std::fs::OpenOptions::new()
+        .access_mode((FILE_GENERIC_READ | DELETE).0)
+        .share_mode(SHARE_ALL.0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(from)?;
+    let kind = opened.metadata()?.file_type();
+    if kind.is_symlink() || !kind.is_file() {
+        return Err(io::Error::other("not a plain file"));
+    }
+    Ok(opened)
+}
+
+/// Moves the file `from` into the folder `dir` holds as `name`, within one volume, never
+/// replacing a file: the file opened by its path in staging ([`open_source`]), then renamed
+/// through its handle relative to the folder's ([`rename_into`]). Another volume fails with
+/// `CrossesDevices` (`ERROR_NOT_SAME_DEVICE`).
+pub(super) fn move_new_into(from: &Path, dir: &OwnedHandle, name: &OsStr) -> io::Result<()> {
+    rename_into(&open_source(from)?, dir, name)
+}
+
+/// Renames the open `file` to `name` in the folder `dir` holds:
+/// `SetFileInformationByHandle(FileRenameInfo)` with `ReplaceIfExists` false and
+/// `RootDirectory` the folder's handle. `AlreadyExists` for a taken name.
+pub(super) fn rename_into(file: &File, dir: &OwnedHandle, name: &OsStr) -> io::Result<()> {
+    let wide: Vec<u16> = name.encode_wide().collect();
+    let name_bytes = wide.len() * size_of::<u16>();
+    let offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let size = (offset + name_bytes + size_of::<u16>()).max(size_of::<FILE_RENAME_INFO>());
+    // `u64`s, so the buffer is aligned for `FILE_RENAME_INFO` (8 bytes at most).
+    let mut buffer = vec![0_u64; size.div_ceil(size_of::<u64>())];
+    let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    let length = u32::try_from(name_bytes).map_err(io::Error::other)?;
+    let size = u32::try_from(size).map_err(io::Error::other)?;
+    // SAFETY: `buffer` is zeroed, aligned and at least `size` bytes, which holds the header and
+    // the name with its NUL after `FileName`'s offset; the writes stay inside it. The call reads
+    // `size` bytes and both handles are open for its length (`file` and `dir` are borrowed).
     unsafe {
-        MoveFileExW(
-            PCWSTR(from.as_ptr()),
-            PCWSTR(to.as_ptr()),
-            MOVE_FILE_FLAGS(0),
+        (*info).Anonymous.ReplaceIfExists = false;
+        (*info).RootDirectory = handle(dir.as_raw_handle());
+        (*info).FileNameLength = length;
+        let name_at = info.cast::<u8>().add(offset);
+        std::ptr::copy_nonoverlapping(wide.as_ptr().cast::<u8>(), name_at, name_bytes);
+        SetFileInformationByHandle(
+            handle(file.as_raw_handle()),
+            FileRenameInfo,
+            info.cast(),
+            size,
         )
     }
     .map_err(|error| io_error(&error))
@@ -41,37 +164,130 @@ pub(crate) fn move_new(from: &Path, to: &Path) -> io::Result<()> {
 
 /// `GetFileInformationByHandle` of `file`: its attributes (`dwFileAttributes`) and how many
 /// names it has (`nNumberOfLinks`).
-pub(super) fn attributes_and_links(file: &std::fs::File) -> io::Result<(u32, u32)> {
+pub(super) fn attributes_and_links(file: &File) -> io::Result<(u32, u32)> {
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: the handle is `file`'s own, open for the whole call; `info` is a live, writable
     // BY_HANDLE_FILE_INFORMATION that the call fills and nothing else borrows.
-    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &raw mut info) }
+    unsafe { GetFileInformationByHandle(handle(file.as_raw_handle()), &raw mut info) }
         .map_err(|error| io_error(&error))?;
     Ok((info.dwFileAttributes, info.nNumberOfLinks))
 }
 
-/// Marks `file` for deletion through its own handle (`SetFileInformationByHandle` with
-/// `FileDispositionInfo`), which needs `DELETE` access on it: the name goes when the last
-/// handle closes, and the path is never opened again.
-pub(super) fn delete_by_handle(file: &std::fs::File) -> io::Result<()> {
-    let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
-    let size = u32::try_from(size_of::<FILE_DISPOSITION_INFO>()).unwrap_or(u32::MAX);
-    // SAFETY: the handle is `file`'s own, open for the whole call; the pointer is to a live
-    // FILE_DISPOSITION_INFO of exactly `size` bytes, which the call only reads.
+/// Deletes the open `file` through its handle (`FileDispositionInfo`), once every handle to it
+/// is closed; the handle must have been opened with `DELETE`.
+pub(super) fn delete_by_handle(file: &File) -> io::Result<()> {
+    let info = FILE_DISPOSITION_INFO { DeleteFile: true };
+    // SAFETY: `info` is a valid `FILE_DISPOSITION_INFO` that outlives the call, and its size is
+    // the one passed; `file`'s handle is open for the call.
     unsafe {
         SetFileInformationByHandle(
-            HANDLE(file.as_raw_handle()),
+            handle(file.as_raw_handle()),
             FileDispositionInfo,
-            (&raw const disposition).cast(),
-            size,
+            std::ptr::from_ref(&info).cast(),
+            size_u32(size_of::<FILE_DISPOSITION_INFO>()),
         )
     }
     .map_err(|error| io_error(&error))
 }
 
+/// The stream `stream` (`:Zone.Identifier`) of the open `file`, opened relative to the file's
+/// own handle: made new for writing when `create`, else opened to read. A volume without
+/// alternate data streams (FAT, exFAT, some shares) fails.
+pub(crate) fn open_stream(file: &File, stream: &str, create: bool) -> io::Result<File> {
+    let (access, disposition) = if create {
+        (FILE_GENERIC_WRITE, FILE_CREATE)
+    } else {
+        (FILE_GENERIC_READ, FILE_OPEN)
+    };
+    let root = file.as_raw_handle();
+    // SAFETY: `root` is `file`'s handle, open for the call; it is borrowed, not owned, so the
+    // `ManuallyDrop` keeps it from being closed here.
+    let root = std::mem::ManuallyDrop::new(unsafe { OwnedHandle::from_raw_handle(root) });
+    nt_open(
+        &root,
+        OsStr::new(stream),
+        access,
+        disposition,
+        FILE_NON_DIRECTORY_FILE.0,
+    )
+    .map(File::from)
+    .map_err(nt_error)
+}
+
+/// `NtCreateFile` of `name` relative to `root`, case-insensitive as Win32 names are, for
+/// synchronous I/O (std's `File` needs it), sharing everything; the status on failure.
+fn nt_open(
+    root: &OwnedHandle,
+    name: &OsStr,
+    access: FILE_ACCESS_RIGHTS,
+    disposition: NTCREATEFILE_CREATE_DISPOSITION,
+    options: u32,
+) -> Result<OwnedHandle, NTSTATUS> {
+    let mut wide: Vec<u16> = name.encode_wide().collect();
+    let bytes = u16::try_from(wide.len() * size_of::<u16>())
+        .map_err(|_too_long| STATUS_OBJECT_NAME_NOT_FOUND)?;
+    let unicode = UNICODE_STRING {
+        Length: bytes,
+        MaximumLength: bytes,
+        Buffer: PWSTR(wide.as_mut_ptr()),
+    };
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: size_u32(size_of::<OBJECT_ATTRIBUTES>()),
+        RootDirectory: handle(root.as_raw_handle()),
+        ObjectName: &raw const unicode,
+        Attributes: OBJ_CASE_INSENSITIVE,
+        ..OBJECT_ATTRIBUTES::default()
+    };
+    let mut opened = HANDLE::default();
+    let mut status_block = IO_STATUS_BLOCK::default();
+    // SAFETY: every pointer is to a live local that outlives the call (`unicode` points into
+    // `wide`); `root` is open for the call. On success the call gives `opened`, a handle this
+    // function then owns.
+    let status = unsafe {
+        NtCreateFile(
+            &raw mut opened,
+            access | SYNCHRONIZE,
+            &raw const attributes,
+            &raw mut status_block,
+            None,
+            FILE_ATTRIBUTE_NORMAL,
+            SHARE_ALL,
+            disposition,
+            windows::Wdk::Storage::FileSystem::NTCREATEFILE_CREATE_OPTIONS(
+                options | FILE_SYNCHRONOUS_IO_NONALERT.0,
+            ),
+            None,
+            0,
+        )
+    };
+    if status.is_ok() {
+        // SAFETY: the call succeeded, so `opened` is a new handle nothing else owns.
+        Ok(unsafe { OwnedHandle::from_raw_handle(opened.0) })
+    } else {
+        Err(status)
+    }
+}
+
+/// A raw handle as the `windows` crate's `HANDLE`.
+fn handle(raw: RawHandle) -> HANDLE {
+    HANDLE(raw)
+}
+
+/// `status` as std's own OS error, through its Win32 code, so `kind()` is right
+/// (`STATUS_OBJECT_NAME_COLLISION` reads as `AlreadyExists`).
+fn nt_error(status: NTSTATUS) -> io::Error {
+    // SAFETY: a pure lookup of a status code.
+    let code = unsafe { RtlNtStatusToDosError(status) };
+    match i32::try_from(code) {
+        Ok(code) => io::Error::from_raw_os_error(code),
+        Err(_) => io::Error::other(format!("NTSTATUS {:#x}", status.0)),
+    }
+}
+
 /// The Win32 error inside `error` as std's own OS error, so `kind()` is right:
-/// `ERROR_ALREADY_EXISTS` (183) and `ERROR_FILE_EXISTS` (80) read as `AlreadyExists`.
-/// `io::Error::from` would keep the HRESULT (`0x800700B7`), whose kind std does not know.
+/// `ERROR_ALREADY_EXISTS` (183) and `ERROR_FILE_EXISTS` (80) read as `AlreadyExists`,
+/// `ERROR_NOT_SAME_DEVICE` (17) as `CrossesDevices`. `io::Error::from` would keep the HRESULT
+/// (`0x800700B7`), whose kind std does not know.
 fn io_error(error: &windows::core::Error) -> io::Error {
     match WIN32_ERROR::from_error(error).and_then(|code| i32::try_from(code.0).ok()) {
         Some(code) => io::Error::from_raw_os_error(code),
@@ -79,80 +295,5 @@ fn io_error(error: &windows::core::Error) -> io::Error {
     }
 }
 
-/// `path` made absolute and normalised (`std::path::absolute`: `.`, `..` and `/` resolved, as
-/// Windows itself would), as a NUL-terminated wide string with the `\\?\` prefix (`\\?\UNC\`
-/// for a share), so a long path still works. A path that has the prefix already is kept.
-fn wide(path: &Path) -> io::Result<Vec<u16>> {
-    let full = std::path::absolute(path)?;
-    let text = full.as_os_str();
-    let (prefix, rest): (&str, &OsStr) = match full.to_str() {
-        Some(s) if s.starts_with(r"\\?\") || s.starts_with(r"\\.\") => ("", text),
-        Some(s) if let Some(share) = s.strip_prefix(r"\\") => (r"\\?\UNC\", OsStr::new(share)),
-        Some(s) if s.as_bytes().get(1) == Some(&b':') => (r"\\?\", text),
-        _ => ("", text),
-    };
-    Ok(OsStr::new(prefix)
-        .encode_wide()
-        .chain(rest.encode_wide())
-        .chain(Some(0))
-        .collect())
-}
-
 #[cfg(test)]
-mod tests {
-    use std::io;
-    use std::path::Path;
-
-    use windows::Win32::Foundation::{
-        ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS,
-    };
-
-    use super::{io_error, move_new, wide};
-
-    /// The review's M2: both "exists" errors read as `AlreadyExists`, which the download mover
-    /// retries under the next name; another error keeps its own kind.
-    #[test]
-    fn an_existing_name_reads_as_already_exists() {
-        for code in [ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS] {
-            let error = windows::core::Error::from(code.to_hresult());
-            assert_eq!(
-                io_error(&error).kind(),
-                io::ErrorKind::AlreadyExists,
-                "{code:?}"
-            );
-        }
-        let denied = windows::core::Error::from(ERROR_ACCESS_DENIED.to_hresult());
-        assert_eq!(io_error(&denied).kind(), io::ErrorKind::PermissionDenied);
-    }
-
-    /// A real move onto a file that exists fails with `AlreadyExists` and changes neither file.
-    #[test]
-    fn a_move_onto_a_file_fails_with_already_exists() {
-        let dir = std::env::temp_dir().join(format!("clauseo-mcp-move-{}", std::process::id()));
-        if dir.exists() {
-            crate::write::remove_dir_all(&dir).unwrap();
-        }
-        crate::write::create_dir_all(&dir).unwrap();
-        let (from, to) = (dir.join("from.txt"), dir.join("to.txt"));
-        crate::write::write(&from, "download").unwrap();
-        crate::write::write(&to, "kept").unwrap();
-        let error = move_new(&from, &to).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists, "{error}");
-        assert_eq!(std::fs::read_to_string(&to).unwrap(), "kept");
-        assert_eq!(std::fs::read_to_string(&from).unwrap(), "download");
-        crate::write::remove_dir_all(&dir).unwrap();
-    }
-
-    /// `.` and `..` are resolved before the prefix, which turns both off in Windows' own parse.
-    #[test]
-    fn a_path_is_normalised_before_its_prefix() {
-        let text = |path: &str| String::from_utf16(&wide(Path::new(path)).unwrap()).unwrap();
-        assert_eq!(text(r"C:\a\.\b\..\c.txt"), "\\\\?\\C:\\a\\c.txt\0");
-        assert_eq!(text("C:/a/b.txt"), "\\\\?\\C:\\a\\b.txt\0");
-        assert_eq!(
-            text(r"\\host\share\a.txt"),
-            "\\\\?\\UNC\\host\\share\\a.txt\0"
-        );
-        assert_eq!(text(r"\\?\C:\a.txt"), "\\\\?\\C:\\a.txt\0");
-    }
-}
+mod tests;

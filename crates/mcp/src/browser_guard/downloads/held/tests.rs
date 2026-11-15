@@ -158,6 +158,7 @@ fn a_stop_clears_held_downloads_and_keeps_the_rest() {
     let mover = Mover::start(
         staging.clone(),
         downloads.clone(),
+        None,
         Arc::default(),
         Arc::default(),
     );
@@ -166,7 +167,7 @@ fn a_stop_clears_held_downloads_and_keeps_the_rest() {
     mover.finish();
     assert_eq!(names(&staging), ["big.zip.crdownload"]);
     write::write(&staging.join("Unconfirmed 2.crdownload"), "MZ").unwrap();
-    sweep(&staging, &downloads);
+    sweep(&staging, &downloads, None);
     assert_eq!(names(&staging), ["big.zip.crdownload"]);
     write::write(&staging.join("Unconfirmed 3.crdownload"), "MZ").unwrap();
     clear(&staging);

@@ -37,6 +37,7 @@ fn the_cdp_port_is_required_and_parsed() {
             agent_browser: program.clone().into(),
             cwd: cwd.clone().into(),
             downloads: std::path::Path::new(&cwd).join("downloads"),
+            fallback: None,
             cdp_port: 61_101,
             daemon_port: None,
             child_args: args(&["mcp"]),
@@ -80,6 +81,54 @@ fn downloads_names_the_matters_folder_after_cwd() {
             "--downloads must be an absolute path in an existing folder"
         );
     }
+}
+
+/// `--fallback-downloads` right after `--downloads` names the fallback folder, which need not
+/// exist yet; its parent must. Without `--downloads` before it, it is no flag of the guard's.
+#[test]
+fn fallback_downloads_follows_downloads() {
+    let (program, cwd) = program_and_cwd();
+    let downloads = std::path::Path::new(&cwd).join("matter-downloads");
+    let fallback = std::path::Path::new(&cwd).join("held-downloads");
+    let (downloads_arg, fallback_arg) = (downloads.to_str().unwrap(), fallback.to_str().unwrap());
+    let with = |fallback: &str| {
+        args(&[
+            "--agent-browser",
+            &program,
+            "--cwd",
+            &cwd,
+            "--downloads",
+            downloads_arg,
+            "--fallback-downloads",
+            fallback,
+            "--cdp-port",
+            "61101",
+            "--",
+            "mcp",
+        ])
+    };
+    let parsed = parse(&with(fallback_arg), Os::Unix).unwrap();
+    assert_eq!(parsed.downloads, downloads);
+    assert_eq!(parsed.fallback, Some(fallback.clone()));
+    assert_eq!(parsed.child_args, args(&["mcp"]));
+    for bad in ["relative/held", "/no/such/parent/held"] {
+        assert_eq!(
+            parse(&with(bad), Os::Unix).unwrap_err(),
+            "--fallback-downloads must be an absolute path in an existing folder"
+        );
+    }
+    let alone = args(&[
+        "--agent-browser",
+        &program,
+        "--cwd",
+        &cwd,
+        "--fallback-downloads",
+        fallback_arg,
+        "--cdp-port",
+        "61101",
+        "--",
+    ]);
+    assert!(parse(&alone, Os::Unix).is_err());
 }
 
 #[test]

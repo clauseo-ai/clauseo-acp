@@ -57,8 +57,11 @@ libc = { workspace = true }
 # (`CreateProcessW` with a job list), so a refused port, and the guard's own exit, end Chrome and
 # agent-browser's detached daemon (src/browser_guard/job.rs, job/spawn.rs); a Toolhelp snapshot
 # and a process handle wait for the guard's parent (src/browser_guard/parent/windows.rs). The
-# workspace line's features, plus `Win32_Storage_FileSystem` for `MoveFileExW`, the download
-# move that never replaces a file (src/write/windows.rs), and `CreateFileW`, a child's `NUL`.
+# workspace line's features, plus `Win32_Storage_FileSystem` for `SetFileInformationByHandle`, the
+# download move and rename that never replace a file, and `CreateFileW`, a child's `NUL`;
+# `Wdk_Foundation`, `Wdk_Storage_FileSystem` and `Win32_System_IO` for `NtCreateFile`, which makes a
+# file relative to the downloads folder's handle and opens a copy's `Zone.Identifier` relative to
+# the copy's handle (src/write/windows.rs).
 # `Win32_System_SystemInformation` is for `GetWindowsDirectoryW` and `GetSystemDirectoryW`, the
 # folders a child's `SystemRoot`, `windir` and `ComSpec` default to
 # (src/browser_guard/job/spawn.rs).
@@ -73,10 +76,13 @@ libc = { workspace = true }
 # All in the `windows` crate already here.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
+  "Wdk_Foundation",
+  "Wdk_Storage_FileSystem",
   "Win32_NetworkManagement_IpHelper",
   "Win32_Networking_WinSock",
   "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
+  "Win32_System_IO",
   "Win32_System_Pipes",
   "Win32_System_Registry",
   "Win32_System_SystemInformation",

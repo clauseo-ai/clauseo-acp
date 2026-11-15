@@ -6,7 +6,8 @@
 //! ([`kill_daemon`], then dropping `Chrome`). A guard that is killed (SIGKILL, or a signal it
 //! does not handle) or crashes (`panic = "abort"`) cannot, so the guard starts this reaper
 //! first: `clauseo-mcp browser-reaper --socket-dir <folder> --session <name> --cwd <folder>
-//! --run <id> [--downloads <folder>]` (the guard's downloads folder, else `<cwd>/downloads`),
+//! --run <id> [--downloads <folder> [--fallback-downloads <folder>]]` (the guard's downloads
+//! folder, else `<cwd>/downloads`, and its fallback folder, `downloads/deliver.rs`),
 //! in a process group of its own, with a pipe from the guard on its stdin. Every name
 //! it acts on is its own run's (`runs.rs`): the daemon's socket `<socket dir>/run-<id>.sock`
 //! (`--session`) and the profile `<cwd>/chrome-profile-<id>`, so a reaper never touches the
@@ -47,7 +48,8 @@ use crate::Failure;
 
 /// The mode's command line.
 pub const USAGE: &str = "usage: clauseo-mcp browser-reaper --socket-dir <folder> --session <name> \
-                         --cwd <folder> --run <id> [--downloads <folder>]";
+                         --cwd <folder> --run <id> [--downloads <folder> \
+                         [--fallback-downloads <folder>]]";
 /// How long the reaper waits for Chrome's group to be gone before it deletes the profile anyway.
 const GONE_WAIT: Duration = Duration::from_secs(5);
 /// How long after the guard's `done` or its death the reaper ends the run's daemon once more.
@@ -115,7 +117,7 @@ impl Reaper {
     pub(crate) fn start(
         socket_dir: &Path,
         session: &str,
-        (cwd, downloads): (&Path, &Path),
+        (cwd, downloads, fallback): (&Path, &Path, Option<&Path>),
         run: &str,
     ) -> io::Result<Reaper> {
         use std::os::unix::process::CommandExt;
@@ -129,7 +131,11 @@ impl Reaper {
             .arg(cwd)
             .args(["--run", run])
             .arg("--downloads")
-            .arg(downloads)
+            .arg(downloads);
+        if let Some(fallback) = fallback {
+            command.arg("--fallback-downloads").arg(fallback);
+        }
+        command
             .env_clear()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -191,9 +197,14 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
     else {
         return Err(usage());
     };
-    let downloads = match downloads {
-        [] => None,
-        [flag, folder] if flag == "--downloads" => Some(PathBuf::from(folder)),
+    let (downloads, fallback) = match downloads {
+        [] => (None, None),
+        [flag, folder] if flag == "--downloads" => (Some(PathBuf::from(folder)), None),
+        [flag, folder, flag_fallback, fallback]
+            if flag == "--downloads" && flag_fallback == "--fallback-downloads" =>
+        {
+            (Some(PathBuf::from(folder)), Some(PathBuf::from(fallback)))
+        }
         _ => return Err(usage()),
     };
     if flag_dir != "--socket-dir"
@@ -228,7 +239,7 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
     clean_up(
         dir,
         session,
-        (cwd, &downloads),
+        (cwd, &downloads, fallback.as_deref()),
         run,
         pids.chrome,
         pids.agent,
@@ -271,7 +282,7 @@ impl Pids {
 fn clean_up(
     socket_dir: &Path,
     session: &str,
-    (cwd, downloads): (&Path, &Path),
+    (cwd, downloads, fallback): (&Path, &Path, Option<&Path>),
     run: &str,
     chrome_pid: Option<u32>,
     agent_pid: Option<u32>,
@@ -303,7 +314,7 @@ fn clean_up(
     // goes only if it names no Chrome that may live (`record.rs`).
     record::forget(cwd, run);
     let profile = runs::profile_of(cwd, run);
-    downloads::sweep(&profile.join(STAGING), downloads);
+    downloads::sweep(&profile.join(STAGING), downloads, fallback);
     chrome::remove_profile(&profile);
     runs::forget(cwd, run);
 }

@@ -13,10 +13,13 @@
 //! waits for the mark ([`super::MARK_WAIT`]) before it moves a file.
 //!
 //! [`ensure`] then makes sure of the mark in the staging folder, out of the agent's reach, and
-//! the move keeps it: `MoveFileExW` within one volume renames the file with its streams, and the
-//! Unix hard link is the same inode with its attributes. The staging folder and the downloads
-//! folder are both in the guard's `--cwd`; a move across volumes fails and is retried
-//! (`write::Folder::move_new` has no copy fallback), so no move drops a mark.
+//! the move keeps it: a rename within one volume keeps the file's streams on Windows, and the
+//! Unix hard link is the same inode with its attributes. A download that must be copied instead
+//! (the downloads folder on another drive, or a file system without hard links:
+//! `write/copy.rs`) gets its mark from [`mark_copy`] on the new, still empty copy, which is
+//! checked by reading it back: so the mark is tested on each destination's own drive, file by
+//! file, and a drive that cannot keep it (FAT, exFAT, a share without streams or attributes) gets
+//! no copy at all.
 
 use std::io;
 use std::path::Path;
@@ -44,6 +47,19 @@ pub(crate) fn ensure(file: &Path) -> io::Result<()> {
         return Ok(());
     }
     os::ensure(file)
+}
+
+/// Marks `copy`, a new empty file another drive holds, as `source` (the staging file, marked
+/// by [`ensure`]) is marked, then reads the mark back: on Windows the source's
+/// `Zone.Identifier` text when its zone is kept (with Chrome's `HostUrl`), else `ZoneId=3`;
+/// on macOS the source's `com.apple.quarantine` value, else a new one. Both are written through
+/// the copy's open handle, never its path. `Err` when the drive does not keep it. Nothing on
+/// Linux.
+pub(crate) fn mark_copy(source: &std::fs::File, copy: &std::fs::File) -> io::Result<()> {
+    if !HAS_MARKS {
+        return Ok(());
+    }
+    os::mark_copy(source, copy)
 }
 
 /// Whether the staging folder's drive keeps a mark: writes [`PROBE`], marks it, reads the mark
@@ -134,6 +150,29 @@ mod os {
         write::write(&stream(file), ZONE_MARK)
     }
 
+    /// The stream's name, relative to a file's handle.
+    const STREAM: &str = ":Zone.Identifier";
+
+    pub(super) fn mark_copy(source: &std::fs::File, copy: &std::fs::File) -> io::Result<()> {
+        let read = |file: &std::fs::File| -> io::Result<String> {
+            let mut text = String::new();
+            io::Read::read_to_string(&mut write::open_stream(file, STREAM, false)?, &mut text)?;
+            Ok(text)
+        };
+        let text = read(source)
+            .ok()
+            .filter(|text| super::zone_kept(super::zone_of(text)))
+            .unwrap_or_else(|| ZONE_MARK.to_owned());
+        let mut stream = write::open_stream(copy, STREAM, true)?;
+        io::Write::write_all(&mut stream, text.as_bytes())?;
+        drop(stream);
+        if super::zone_of(&read(copy)?) == super::zone_of(&text) {
+            Ok(())
+        } else {
+            Err(io::Error::other("the mark did not read back"))
+        }
+    }
+
     pub(super) fn probe(staging: &Path) -> io::Result<()> {
         super::probe_with(staging, |file| {
             std::fs::read_to_string(stream(file)).is_ok_and(|text| super::zone_of(&text) == Some(3))
@@ -180,6 +219,26 @@ mod os {
         write::set_xattr(file, NAME, super::quarantine_value(seconds).as_bytes())
     }
 
+    pub(super) fn mark_copy(source: &std::fs::File, copy: &std::fs::File) -> io::Result<()> {
+        let found = write::fget_xattr(source, NAME).filter(|value| !value.is_empty());
+        let value = if let Some(value) = found {
+            value
+        } else {
+            let seconds = source
+                .metadata()?
+                .modified()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs());
+            super::quarantine_value(seconds).into_bytes()
+        };
+        write::fset_xattr(copy, NAME, &value)?;
+        if write::fget_xattr(copy, NAME).as_deref() == Some(value.as_slice()) {
+            Ok(())
+        } else {
+            Err(io::Error::other("the mark did not read back"))
+        }
+    }
+
     pub(super) fn probe(staging: &Path) -> io::Result<()> {
         super::probe_with(staging, marked)
     }
@@ -201,6 +260,11 @@ mod os {
 
     /// Never called: `HAS_MARKS` is false here.
     pub(super) fn ensure(_file: &Path) -> io::Result<()> {
+        Err(io::ErrorKind::Unsupported.into())
+    }
+
+    /// Never called: `HAS_MARKS` is false here.
+    pub(super) fn mark_copy(_source: &std::fs::File, _copy: &std::fs::File) -> io::Result<()> {
         Err(io::ErrorKind::Unsupported.into())
     }
 

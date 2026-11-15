@@ -144,6 +144,7 @@ fn start_one(
         executable,
         cwd: &launcher.cwd,
         downloads: &launcher.downloads,
+        fallback: launcher.fallback.as_deref(),
         profile: &launcher.profile,
         proxy: launcher.proxy.as_deref(),
         env: &launcher.chrome_env,

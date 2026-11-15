@@ -148,7 +148,7 @@ fn a_downloads_folder_that_is_a_link_moves_nothing() {
         |_: &Path| {},
     );
     assert!(placed.is_err(), "{placed:?}");
-    sweep(&staging, &downloads);
+    sweep(&staging, &downloads, None);
     assert_eq!(names(&staging), ["x.plist"]);
     assert_eq!(names(&outside), NONE);
     write::remove_file(&downloads).unwrap();
@@ -163,7 +163,7 @@ fn a_sweep_lands_protected_and_taken_names_with_their_marks() {
     write::write(&downloads.join("report.pdf"), "the agent's own").unwrap();
     write::write(&staging.join("report.pdf"), "download").unwrap();
     write::write(&staging.join("CLAUDE.md"), "instructions").unwrap();
-    sweep(&staging, &downloads);
+    sweep(&staging, &downloads, None);
     assert_eq!(names(&staging), NONE);
     assert_eq!(
         names(&downloads),
@@ -286,7 +286,7 @@ fn a_half_written_guid_tmp_stays_until_chrome_renames_it() {
     let partial = staging.join("9bfaa860-c93d-4921-a7ba-75f845a80d7f.tmp");
     write::write(&partial, "half of it").unwrap();
     for _ in 0..3 {
-        sweep(&staging, &downloads);
+        sweep(&staging, &downloads, None);
     }
     assert_eq!(
         names(&staging),
@@ -294,7 +294,7 @@ fn a_half_written_guid_tmp_stays_until_chrome_renames_it() {
     );
     assert_eq!(names(&downloads), NONE);
     write::replace(&partial, &staging.join("report.pdf")).unwrap();
-    sweep(&staging, &downloads);
+    sweep(&staging, &downloads, None);
     assert_eq!(names(&staging), NONE);
     assert_eq!(names(&downloads), ["report.pdf"]);
     write::remove_dir_all(&dir).unwrap();
@@ -305,7 +305,7 @@ fn a_half_written_guid_tmp_stays_until_chrome_renames_it() {
 fn a_tmp_that_is_no_guid_moves() {
     let (dir, staging, downloads) = scratch("plain-tmp");
     write::write(&staging.join("notes.tmp"), "the user's").unwrap();
-    sweep(&staging, &downloads);
+    sweep(&staging, &downloads, None);
     assert_eq!(names(&staging), NONE);
     assert_eq!(names(&downloads), ["notes.tmp"]);
     write::remove_dir_all(&dir).unwrap();
@@ -446,7 +446,7 @@ fn a_moved_file_has_its_zone_with_or_without_a_mark_before() {
             write::write(&marks::stream_of(&staging.join(name)), stream).unwrap();
         }
     }
-    sweep(&staging, &downloads);
+    sweep(&staging, &downloads, None);
     let read = |name: &str| marks::read(&downloads.join(name));
     assert_eq!(read("marked.pdf").as_deref(), Some(chromes));
     assert_eq!(read("trusted.pdf").as_deref(), Some(trusted));
@@ -466,11 +466,11 @@ fn a_file_held_open_is_moved_by_a_later_sweep() {
     let file = staging.join("report.pdf");
     write::write(&file, "download").unwrap();
     let held = write::open_unshared(&file).unwrap();
-    sweep(&staging, &downloads);
+    sweep(&staging, &downloads, None);
     assert_eq!(names(&staging), ["report.pdf"]);
     assert_eq!(names(&downloads), NONE);
     drop(held);
-    sweep(&staging, &downloads);
+    sweep(&staging, &downloads, None);
     assert_eq!(names(&staging), NONE);
     assert_eq!(names(&downloads), ["report.pdf"]);
     write::remove_dir_all(&dir).unwrap();
@@ -491,7 +491,7 @@ fn a_moved_file_is_quarantined_with_or_without_a_mark_before() {
     )
     .unwrap();
     write::write(&staging.join("bare.pdf"), "b").unwrap();
-    sweep(&staging, &downloads);
+    sweep(&staging, &downloads, None);
     assert_eq!(names(&downloads), ["bare.pdf", "marked.pdf"]);
     assert_eq!(
         marks::read(&downloads.join("marked.pdf")).as_deref(),
@@ -514,6 +514,7 @@ fn an_idle_stop_delivers_what_finished_and_the_next_start_delivers_again() {
     let mover = Mover::start(
         staging.clone(),
         downloads.clone(),
+        None,
         Arc::default(),
         Arc::default(),
     );
@@ -526,6 +527,7 @@ fn an_idle_stop_delivers_what_finished_and_the_next_start_delivers_again() {
     let mover = Mover::start(
         staging.clone(),
         downloads.clone(),
+        None,
         Arc::default(),
         Arc::default(),
     );
@@ -534,3 +536,5 @@ fn an_idle_stop_delivers_what_finished_and_the_next_start_delivers_again() {
     assert_eq!(names(&downloads), ["report.pdf", "second.pdf"]);
     write::remove_dir_all(&dir).unwrap();
 }
+
+mod copy;

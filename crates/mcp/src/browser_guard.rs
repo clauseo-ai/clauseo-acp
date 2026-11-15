@@ -1,8 +1,10 @@
 //! The `browser-guard` mode: `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder>
-//! [--downloads <folder>] --cdp-port <port> -- <agent-browser args...>`, with
-//! `--daemon-port <port>` after `--cdp-port` on Windows. `--downloads` is where Chrome's
-//! downloads are delivered (`downloads.rs`): `<matter>/downloads` in a Codex session, made
-//! here if missing; without it, `<cwd>/downloads`.
+//! [--downloads <folder> [--fallback-downloads <folder>]] --cdp-port <port> -- <agent-browser
+//! args...>`, with `--daemon-port <port>` after `--cdp-port` on Windows. `--downloads` is where
+//! Chrome's downloads are delivered (`downloads.rs`): `<matter>/downloads` in a Codex session,
+//! made here if missing; without it, `<cwd>/downloads`. `--fallback-downloads` is where a
+//! download goes when that folder's drive cannot keep the "from the internet" mark
+//! (`<data>/agent-state/<matter>/downloads`, made when first needed: `downloads/deliver.rs`).
 //!
 //! In order: note the guard's parent (`parent.rs`; exit 1 if it is gone already), read the command
 //! line (exit 2 on anything else), build the child's environment from the host's variables and read
@@ -113,6 +115,9 @@ struct Command {
     cwd: PathBuf,
     /// `--downloads`, or `<cwd>/downloads`.
     downloads: PathBuf,
+    /// `--fallback-downloads`: where a download goes when the downloads folder's drive cannot
+    /// keep the "from the internet" mark (`downloads/deliver.rs`); none: it stays in staging.
+    fallback: Option<PathBuf>,
     /// The port the host claimed for Chrome's debugging port. Unused since route 2: the browser
     /// has no debugging port (decision record 0060); the host still claims and passes it.
     cdp_port: u16,
@@ -314,7 +319,11 @@ fn serve(
     let reaper = reaper::Reaper::start(
         &socket_dir,
         session,
-        (&command.cwd, &command.downloads),
+        (
+            &command.cwd,
+            &command.downloads,
+            command.fallback.as_deref(),
+        ),
         run.id(),
     )
     .map_err(|error| failed(&format!("cannot start the reaper: {error}")))?;
@@ -324,6 +333,7 @@ fn serve(
             .map_or_else(PathBuf::new, PathBuf::from),
         cwd: command.cwd.clone(),
         downloads: command.downloads.clone(),
+        fallback: command.fallback.clone(),
         run: run.id().to_owned(),
         profile: run.profile().to_owned(),
         proxy: env.get(env::PROXY).cloned(),
@@ -468,18 +478,30 @@ const EXPECTED_UNIX: &str =
 const EXPECTED_WINDOWS: &str = "expected --agent-browser <file> --cwd <folder> --cdp-port <port> --daemon-port <port> -- <args...>";
 
 /// Exactly `--agent-browser <file> --cwd <folder> --cdp-port <port> -- <args...>`, in that
-/// order, with `--downloads <folder>` after `--cwd` or not, and `--daemon-port <port>` after
+/// order, with `--downloads <folder>` after `--cwd` or not (and right after it
+/// `--fallback-downloads <folder>` or not), and `--daemon-port <port>` after
 /// `--cdp-port` on Windows and never on Unix; each path absolute and existing (for
-/// `--downloads`, its parent: the guard makes the folder), each port from 1024 to 65535 in plain
-/// decimal. The child's arguments are kept as given.
+/// `--downloads` and `--fallback-downloads`, its parent: the guard makes the folder), each port
+/// from 1024 to 65535 in plain decimal. The child's arguments are kept as given.
 fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
-    let (args, downloads) = match args.get(4..6) {
-        Some([flag, folder]) if flag == "--downloads" => {
+    let (args, downloads, fallback) = match (args.get(4..6), args.get(6..8)) {
+        (Some([flag, folder]), Some([flag_fallback, fallback]))
+            if flag == "--downloads" && flag_fallback == "--fallback-downloads" =>
+        {
+            let mut rest = args.get(..4).unwrap_or_default().to_vec();
+            rest.extend_from_slice(args.get(8..).unwrap_or_default());
+            (
+                rest,
+                Some(PathBuf::from(folder)),
+                Some(PathBuf::from(fallback)),
+            )
+        }
+        (Some([flag, folder]), _) if flag == "--downloads" => {
             let mut rest = args.get(..4).unwrap_or_default().to_vec();
             rest.extend_from_slice(args.get(6..).unwrap_or_default());
-            (rest, Some(PathBuf::from(folder)))
+            (rest, Some(PathBuf::from(folder)), None)
         }
-        _ => (args.to_vec(), None),
+        _ => (args.to_vec(), None, None),
     };
     let expected = match os {
         env::Os::Unix => EXPECTED_UNIX,
@@ -527,6 +549,12 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
     if !downloads.is_absolute() || !downloads.parent().is_some_and(Path::is_dir) {
         return Err("--downloads must be an absolute path in an existing folder");
     }
+    if fallback
+        .as_deref()
+        .is_some_and(|folder| !folder.is_absolute() || !folder.parent().is_some_and(Path::is_dir))
+    {
+        return Err("--fallback-downloads must be an absolute path in an existing folder");
+    }
     let cdp_port = env::port_of(cdp)
         .ok_or("--cdp-port must be a port from 1024 to 65535 with no leading zero")?;
     let daemon_port = match daemon {
@@ -540,6 +568,7 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
         agent_browser: program.to_owned(),
         cwd: cwd.to_owned(),
         downloads,
+        fallback,
         cdp_port,
         daemon_port,
         child_args: child_args.to_vec(),

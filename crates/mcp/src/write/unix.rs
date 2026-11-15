@@ -1,7 +1,7 @@
 //! Unix: files made inside a folder opened once, so a link swapped in for the folder after it
 //! was checked is never written through: a file replaced (`browser_guard/chrome/profile.rs`),
-//! a download moved in and a note made (`browser_guard/downloads.rs`), a folder made
-//! (`browser_guard.rs`).
+//! a download moved or copied in and a note made (`browser_guard/downloads.rs`,
+//! `write/copy.rs`), a folder made (`browser_guard.rs`).
 
 use std::ffi::{CString, OsStr};
 use std::io::{self, Write};
@@ -48,16 +48,103 @@ pub(super) fn move_new_into(from: &Path, dir: &OwnedFd, name: &OsStr) -> io::Res
 }
 
 /// Makes the file `name` in the folder `dir` holds, new (`O_CREAT|O_EXCL|O_NOFOLLOW`), mode
-/// 0666 less the umask, as `File::create_new` would.
+/// 0666 less the umask, as `File::create_new` would; open for reading too (`O_RDWR`).
 pub(super) fn create_new_in(dir: &OwnedFd, name: &OsStr) -> io::Result<std::fs::File> {
     let file: OwnedFd = openat(
         dir,
         name,
-        OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_WRONLY | OFlag::O_CLOEXEC,
+        OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_RDWR | OFlag::O_CLOEXEC,
         Mode::from_bits_truncate(0o666),
     )
     .map_err(io::Error::from)?;
     Ok(std::fs::File::from(file))
+}
+
+/// Whether a failed hard link means this file system has none (FAT and exFAT: `EPERM`; others
+/// `EOPNOTSUPP` or `ENOSYS`; `EMLINK` for a file at its link limit): the move then copies.
+pub(super) fn no_hard_links(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error().map(Errno::from_raw),
+        Some(Errno::EPERM | Errno::EOPNOTSUPP | Errno::ENOSYS | Errno::EMLINK)
+    )
+}
+
+/// Opens the file `from` to copy it: `O_NOFOLLOW` (a link fails), `O_NONBLOCK` (a FIFO does not
+/// block the open), then anything but a plain file is refused.
+pub(super) fn open_source(from: &Path) -> io::Result<std::fs::File> {
+    let file: OwnedFd = open(
+        from,
+        OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(io::Error::from)?;
+    let file = std::fs::File::from(file);
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("not a plain file"));
+    }
+    Ok(file)
+}
+
+/// `unlinkat(dir, name)`: a name this process made in the folder, never a folder.
+pub(super) fn remove_in(dir: &OwnedFd, name: &OsStr) -> io::Result<()> {
+    unlinkat(dir, name, UnlinkatFlags::NoRemoveDir).map_err(io::Error::from)
+}
+
+/// Renames `from` to `to`, both in the folder `dir` holds, failing with `EEXIST` rather than
+/// replacing anything at `to`: `renameat2(RENAME_NOREPLACE)` on Linux, `renameatx_np(RENAME_EXCL)`
+/// on macOS. Where the call or the file system has no such rename (`EINVAL`, `ENOTSUP`,
+/// `ENOSYS`; and on every other Unix), a hard link (`linkat`, which never replaces) then the
+/// unlink of `from`. `Unsupported` when the file system has neither.
+pub(super) fn rename_new_in(dir: &OwnedFd, from: &OsStr, to: &OsStr) -> io::Result<()> {
+    match rename_exclusive(dir, from, to) {
+        Err(error) if rename_unsupported(&error) => {}
+        done => return done,
+    }
+    match linkat(dir, from, dir, to, AtFlags::empty()) {
+        Ok(()) => {
+            // `to` holds the file now; a `from` that stays is a hidden leftover.
+            drop(remove_in(dir, from));
+            Ok(())
+        }
+        Err(error) => {
+            let error = io::Error::from(error);
+            if no_hard_links(&error) {
+                Err(io::Error::new(io::ErrorKind::Unsupported, error))
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+/// Whether a no-replace rename failed only because it is not available here.
+fn rename_unsupported(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error().map(Errno::from_raw),
+        Some(Errno::EINVAL | Errno::EOPNOTSUPP | Errno::ENOSYS)
+    )
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn rename_exclusive(dir: &OwnedFd, from: &OsStr, to: &OsStr) -> io::Result<()> {
+    nix::fcntl::renameat2(
+        dir,
+        from,
+        dir,
+        to,
+        nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+    )
+    .map_err(io::Error::from)
+}
+
+#[cfg(target_os = "macos")]
+fn rename_exclusive(dir: &OwnedFd, from: &OsStr, to: &OsStr) -> io::Result<()> {
+    super::mac::rename_excl(dir, from, to)
+}
+
+#[cfg(not(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos")))]
+fn rename_exclusive(_dir: &OwnedFd, _from: &OsStr, _to: &OsStr) -> io::Result<()> {
+    Err(Errno::ENOSYS.into())
 }
 
 /// Makes the folder `name` in `parent` if it is missing, then insists it is a real folder: the
