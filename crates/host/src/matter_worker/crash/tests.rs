@@ -15,7 +15,7 @@ use clauseo_protocol::{
 };
 use uuid::Uuid;
 
-use super::{Crashes, LIMIT, REST, WINDOW, failed_in_history, hook};
+use super::{Crashes, LIMIT, REST, WINDOW, failed_in_history, hook, is_under};
 use crate::agent::data_fence::PathsChecked;
 use crate::agent::folder_support::CheckSource;
 use crate::clock::{Clock, ManualClock, SystemClock};
@@ -450,4 +450,36 @@ fn only_a_writing_jobs_history_failure_opens_the_matter_again() {
     assert!(!failed(MatterReply::Restored(Err(io(paper)))));
     let locked = Error::Matters(clauseo_matters::Error::FileLocked { paths: Vec::new() });
     assert!(!failed(MatterReply::BeforeTurn(Err(locked))));
+}
+
+/// On Windows R8's history paths come back verbatim (`\\?\C:\…`, `\\?\UNC\…`) while the matters
+/// root is plain: they still count as under it. Text only, so checked on every OS.
+#[test]
+fn a_verbatim_history_path_is_under_the_plain_matters_root() {
+    let under = |root: &str, path: &str| is_under(Path::new(root), Path::new(path));
+    let root = r"C:\Users\Lawyer\AppData\Clauseo\matters";
+    assert!(under(
+        root,
+        r"\\?\C:\Users\Lawyer\AppData\Clauseo\matters\m1\index"
+    ));
+    assert!(under(
+        root,
+        r"C:\Users\Lawyer\AppData\Clauseo\matters\m1\refs"
+    ));
+    assert!(under(
+        &format!(r"{root}\"),
+        r"\\?\C:\Users\Lawyer\AppData\Clauseo\matters\m1"
+    ));
+    let share = r"\\srv\home\Clauseo\matters";
+    assert!(under(share, r"\\?\UNC\srv\home\Clauseo\matters\m1\index"));
+    // A sibling whose name starts with the root's, and a paper, are not under it.
+    assert!(!under(
+        root,
+        r"\\?\C:\Users\Lawyer\AppData\Clauseo\matters-old\m1"
+    ));
+    assert!(!under(
+        root,
+        r"\\?\C:\Users\Lawyer\Matters\Lease\brief.docx"
+    ));
+    assert!(!under(share, r"\\?\C:\srv\home\Clauseo\matters\m1"));
 }
