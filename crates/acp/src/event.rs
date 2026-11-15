@@ -111,6 +111,18 @@ pub enum AcpEvent {
         /// What it was.
         warning: ProtocolWarning,
     },
+    /// A `session/update` over the line cap that the reader dropped, which was or may have been
+    /// a `tool_call_update` and whose start showed no status the driver could pass on in its
+    /// place. The host completes that tool call, if still unfinished, when the turn ends well;
+    /// with no `acp_tool_call_id`, every unfinished tool call of the turn.
+    UpdateSkipped {
+        /// The agent's session, when the start showed it.
+        session: Option<AgentSessionId>,
+        /// When it came: `Idle` when the start showed no session.
+        origin: Origin,
+        /// The agent's `toolCallId`, when the start showed it and its session.
+        acp_tool_call_id: Option<CompactString>,
+    },
 }
 
 /// When an update came, relative to the session's turns.

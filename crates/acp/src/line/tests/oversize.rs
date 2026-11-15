@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 use futures::{FutureExt, StreamExt};
 
 use super::{MAX_LINE_BYTES, SplitError, Trickle, lines};
-use crate::line::oversize::is_update_notification;
+use crate::line::oversize::skipped_update;
 use crate::line::{LineSplitter, incoming};
 use crate::state::Shared;
 
@@ -50,7 +50,7 @@ fn read_all(bytes: Vec<u8>, step: usize) -> (Vec<Result<Vec<u8>, usize>>, Option
             match splitter.next_line().await {
                 Ok(Some(line)) => out.push(Ok(line)),
                 Ok(None) => return (out, None),
-                Err(SplitError::Skipped { bytes }) => out.push(Err(bytes)),
+                Err(SplitError::Skipped { bytes, .. }) => out.push(Err(bytes)),
                 Err(fatal) => return (out, Some(fatal)),
             }
         }
@@ -175,7 +175,11 @@ fn only_a_start_showing_an_update_notification_is_skippable() {
         (r#"[{"method":"session/update","params":{"#, false),
         ("", false),
     ] {
-        assert_eq!(is_update_notification(head.as_bytes()), skippable, "{head}");
+        assert_eq!(
+            skipped_update(head.as_bytes()).is_some(),
+            skippable,
+            "{head}"
+        );
     }
     // Both adapters' recorded replays.
     for fixture in [
@@ -183,7 +187,7 @@ fn only_a_start_showing_an_update_notification_is_skippable() {
         include_str!("fixtures/replay-codex-acp.jsonl"),
     ] {
         let line = fixture.lines().nth(1).unwrap();
-        assert!(is_update_notification(line.as_bytes()));
+        assert!(skipped_update(line.as_bytes()).is_some());
     }
 }
 
@@ -217,7 +221,7 @@ fn dropping_an_oversize_update_holds_no_memory() {
         let next = splitter.next_line().await;
         (skipped, next)
     });
-    assert!(matches!(rest.0, Err(SplitError::Skipped { bytes }) if bytes == total));
+    assert!(matches!(rest.0, Err(SplitError::Skipped { bytes, .. }) if bytes == total));
     assert_eq!(rest.1.unwrap(), Some(NEXT.to_vec()));
     assert_eq!(splitter.held(), 0);
 }
@@ -264,12 +268,20 @@ fn through_incoming(bytes: Vec<u8>) -> (Vec<String>, bool, Option<crate::Error>)
     (passed, failed, shared.fatal())
 }
 
-/// The connection's view: an oversize update is dropped with no fatal error and the line after
-/// it passed on; an oversize response ends the stream with `Error::Protocol`.
+/// The connection's view: an oversize update is dropped with no fatal error, the marker of what
+/// its start said takes its place, and the line after it is passed on; an oversize response
+/// ends the stream with `Error::Protocol`.
 #[test]
 fn incoming_keeps_the_connection_past_an_oversize_update_only() {
     let (passed, failed, fatal) = through_incoming(then_next(update(MAX_LINE_BYTES + 1)));
-    assert_eq!(passed, [String::from_utf8(NEXT.to_vec()).unwrap()]);
+    assert_eq!(passed.len(), 2, "{passed:?}");
+    let marker: serde_json::Value = serde_json::from_str(&passed[0]).unwrap();
+    let params = serde_json::json!({"bytes": MAX_LINE_BYTES + 1, "sessionId": "s",
+        "kind": "tool_call_update", "toolCallId": null, "status": null});
+    let expected = serde_json::json!({"jsonrpc": "2.0", "method": "_clauseo/skipped_update",
+        "params": params});
+    assert_eq!(marker, expected);
+    assert_eq!(passed[1], String::from_utf8(NEXT.to_vec()).unwrap());
     assert!(!failed && fatal.is_none(), "{fatal:?}");
 
     let response = padded(

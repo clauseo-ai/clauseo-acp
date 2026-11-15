@@ -7,7 +7,7 @@ use std::fmt;
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 
-use super::MALFORMED_LINE_METHOD;
+use super::{MALFORMED_LINE_METHOD, SKIPPED_UPDATE_METHOD};
 
 /// What the filter reads of a line, with no `Value` (escaped strings go through `serde_json`'s
 /// scratch buffer): which JSON-RPC keys it has, and the shapes of their values. Only a JSON
@@ -36,8 +36,9 @@ impl Envelope {
     ///   `error` (an object whose `code` is an `i32` and whose `message` is a string): a response.
     ///
     /// Anything else the SDK answers with an error, and a log line an adapter wrote to stdout is
-    /// not one. Nor is a line naming [`MALFORMED_LINE_METHOD`]: only the filter's own marker may
-    /// (the inbound handler counts it off the gate and turns it into a warning).
+    /// not one. Nor is a line naming [`MALFORMED_LINE_METHOD`] or [`SKIPPED_UPDATE_METHOD`]: only
+    /// the filter's own markers may (the inbound handler counts them off the gate and acts on
+    /// them).
     pub(super) fn is_message(&self) -> bool {
         if self.jsonrpc != Some(Shape::Text(Word::Version)) {
             return false;
@@ -273,7 +274,7 @@ enum Word {
     Version,
     /// `"session/update"`.
     Update,
-    /// [`MALFORMED_LINE_METHOD`].
+    /// [`MALFORMED_LINE_METHOD`] or [`SKIPPED_UPDATE_METHOD`].
     Marker,
     /// Any other string.
     Other,
@@ -311,7 +312,7 @@ impl<'de> Visitor<'de> for ShapeOf {
         Ok(Shape::Text(match v {
             "2.0" => Word::Version,
             "session/update" => Word::Update,
-            MALFORMED_LINE_METHOD => Word::Marker,
+            MALFORMED_LINE_METHOD | SKIPPED_UPDATE_METHOD => Word::Marker,
             _ => Word::Other,
         }))
     }

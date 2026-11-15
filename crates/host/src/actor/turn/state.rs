@@ -82,6 +82,7 @@ impl Current {
             limit: None,
             too_long: None,
             tool_paths: crate::sent::TurnPaths::default(),
+            skipped: super::skipped::Skipped::None,
             checkpoint_before: None,
             prompt_call: None,
             case_law_hint: crate::connectors::hint::TurnLooks::Nothing,

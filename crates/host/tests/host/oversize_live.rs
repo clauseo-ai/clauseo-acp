@@ -5,6 +5,11 @@
 //! unfinished when the agent ends it well (`actor/turn/close.rs`, `complete_tools`): the room
 //! shows the tool done with no output, never running. A normal stop and a failed turn are as
 //! they were: the first gains no tool update, the second leaves its tool calls as they stood.
+//!
+//! The reader reads the dropped line's start (`line/oversize.rs`): a status written before the
+//! content passes on alone, so a tool that failed shows Failed, not Completed. Only a tool call
+//! whose dropped line showed no status is completed at the turn's end; one with no dropped line
+//! stays open, and an update in a later turn gives its real status.
 
 use clauseo_protocol::{
     DomainEvent, ErrorCode, StopReason, StreamId, ThreadId, ToolCallEntry, ToolCallStatus,
@@ -53,6 +58,22 @@ fn scenario(middle: Vec<Value>, end: Value, second: bool) -> Vec<Value> {
         steps.extend(answered("p2", "Second answer."));
     }
     steps
+}
+
+/// A `tool_call_update` for [`TOOL`] whose content is `text`, with `status` written before
+/// the content (`before`) or after it, as one line in that key order.
+fn tool_status_line(status: &str, before: bool, text: &str) -> String {
+    let content =
+        format!(r#""content":[{{"type":"content","content":{{"type":"text","text":"{text}"}}}}]"#);
+    let status = format!(r#""status":"{status}""#);
+    let (first, second) = if before {
+        (status, content)
+    } else {
+        (content, status)
+    };
+    format!(
+        r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"sess-1","update":{{"sessionUpdate":"tool_call_update","toolCallId":"{TOOL}",{first},{second}}}}}}}"#
+    )
 }
 
 /// The answer after the tool call, then `end_turn`.
@@ -182,5 +203,69 @@ fn a_failed_turn_leaves_its_tool_calls_as_they_stood() {
     let calls = tool_calls(&host, thread);
     assert_eq!(calls.len(), 1, "{calls:#?}");
     assert_eq!(calls[0].status, ToolCallStatus::InProgress);
+    host.shutdown();
+}
+
+#[test]
+fn an_oversize_failed_tool_update_leaves_the_tool_failed() {
+    let huge = tool_status_line("failed", true, &"A".repeat(MAX_LINE_BYTES + 1));
+    let steps = scenario(
+        vec![json!({"send_line": huge}), after_read()],
+        answer_and_end(),
+        false,
+    );
+    let (_dir, host, thread, events, (stop, _)) = first_turn("oversize_failed_tool", steps);
+    assert_eq!(stop, StopReason::EndTurn, "{}", events.dump());
+    // The status the dropped line gave, and nothing from the end.
+    assert_eq!(tool_updates(&events), 1, "{}", events.dump());
+    let calls = tool_calls(&host, thread);
+    assert_eq!(calls.len(), 1, "{calls:#?}");
+    assert_eq!(calls[0].status, ToolCallStatus::Failed);
+    assert!(calls[0].content.is_empty(), "{:?}", calls[0].content);
+    host.shutdown();
+}
+
+#[test]
+fn an_oversize_update_with_its_status_after_the_content_ends_completed() {
+    let huge = tool_status_line("failed", false, &"A".repeat(MAX_LINE_BYTES + 1));
+    let steps = scenario(
+        vec![json!({"send_line": huge}), after_read()],
+        answer_and_end(),
+        false,
+    );
+    let (_dir, host, thread, events, (stop, _)) = first_turn("oversize_status_after", steps);
+    assert_eq!(stop, StopReason::EndTurn, "{}", events.dump());
+    // The status was not read: the end completes the tool, never leaves it running.
+    assert_eq!(tool_updates(&events), 1, "{}", events.dump());
+    let calls = tool_calls(&host, thread);
+    assert_eq!(calls.len(), 1, "{calls:#?}");
+    assert_eq!(calls[0].status, ToolCallStatus::Completed);
+    host.shutdown();
+}
+
+#[test]
+fn a_tool_left_open_with_no_dropped_line_ends_with_its_later_status() {
+    let mut steps = scenario(vec![after_read()], answer_and_end(), false);
+    steps.extend([
+        json!({"expect": {"method": "session/prompt", "as": "p2",
+            "params": {"sessionId": "sess-1"}}}),
+        json!({"send_line": tool_status_line("failed", true, "page text")}),
+        json!({"respond": {"to": "p2", "result": {"stopReason": "end_turn"}}}),
+    ]);
+    let (_dir, host, thread, mut events, (stop, _)) = first_turn("open_across_turns", steps);
+    assert_eq!(stop, StopReason::EndTurn, "{}", events.dump());
+    // The first turn's end leaves the tool open.
+    assert_eq!(tool_updates(&events), 0, "{}", events.dump());
+    let calls = tool_calls(&host, thread);
+    assert_eq!(calls[0].status, ToolCallStatus::InProgress, "{calls:#?}");
+    // The next turn's update gives the tool its real status.
+    let (second, _) = host.prompt(thread, "And then?");
+    let ended = events.until_turn_ended(second);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    host.settle();
+    let calls = tool_calls(&host, thread);
+    assert_eq!(calls.len(), 1, "{calls:#?}");
+    assert_eq!(calls[0].status, ToolCallStatus::Failed);
+    assert_eq!(calls[0].content.len(), 1, "{:?}", calls[0].content);
     host.shutdown();
 }

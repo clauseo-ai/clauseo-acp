@@ -38,6 +38,8 @@ mod oversize;
 mod tests;
 
 use envelope::Envelope;
+use oversize::SkippedUpdate;
+pub(crate) use oversize::{SKIPPED_UPDATE_METHOD, TOOL_CALL_UPDATE};
 
 /// The longest JSON-RPC line the agent may send: 8 MiB, newline excluded.
 pub(crate) const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
@@ -238,9 +240,9 @@ pub(crate) enum SplitError {
     /// notification: the stream cannot go on.
     TooLong,
     /// A `session/update` notification of `bytes` bytes, newline excluded, grew past
-    /// [`MAX_LINE_BYTES`] and was dropped up to its newline (or the end of the stream). Not
-    /// fatal: the next call reads the line after it.
-    Skipped { bytes: usize },
+    /// [`MAX_LINE_BYTES`] and was dropped up to its newline (or the end of the stream), its
+    /// start saying `update`. Not fatal: the next call reads the line after it.
+    Skipped { bytes: usize, update: SkippedUpdate },
     /// Reading the pipe failed.
     Io(io::Error),
 }
@@ -250,13 +252,16 @@ pub(crate) enum SplitError {
 /// It holds at most [`MAX_LINE_BYTES`] plus one read buffer of a line. A line over the cap is
 /// fatal ([`SplitError::TooLong`]) unless what it holds shows a `session/update` notification
 /// (`oversize.rs`); then that start is let go and the rest of the line is read and dropped up
-/// to its newline, buffer by buffer, keeping only a count ([`SplitError::Skipped`]).
+/// to its newline, buffer by buffer, keeping only a count and what the start said
+/// ([`SplitError::Skipped`]).
 pub(crate) struct LineSplitter<R> {
     reader: BufReader<R>,
     /// The start of a line that did not end in the bytes read so far.
     partial: Vec<u8>,
     /// The bytes of the oversize `session/update` being dropped, so far.
     dropping: Option<usize>,
+    /// What the start of that update said.
+    skipped: SkippedUpdate,
 }
 
 impl<R: AsyncRead + Unpin> LineSplitter<R> {
@@ -265,6 +270,7 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
             reader: BufReader::with_capacity(READ_BUFFER_BYTES, reader),
             partial: Vec::new(),
             dropping: None,
+            skipped: SkippedUpdate::default(),
         }
     }
 
@@ -289,7 +295,8 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
                 match done {
                     Some(bytes) => {
                         self.dropping = None;
-                        return Err(SplitError::Skipped { bytes });
+                        let update = std::mem::take(&mut self.skipped);
+                        return Err(SplitError::Skipped { bytes, update });
                     }
                     None => self.dropping = Some(dropped + read),
                 }
@@ -325,10 +332,11 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
             self.partial.extend_from_slice(buffer);
             self.reader.consume_unpin(read);
             if self.partial.len() > MAX_LINE_BYTES {
-                if !oversize::is_update_notification(&self.partial) {
+                let Some(update) = oversize::skipped_update(&self.partial) else {
                     return Err(SplitError::TooLong);
-                }
-                // Let the start go and drop the rest up to the newline.
+                };
+                // Keep what the start said, let it go and drop the rest up to the newline.
+                self.skipped = update;
                 self.dropping = Some(self.partial.len());
                 self.partial = Vec::new();
             }
@@ -339,10 +347,9 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
     /// [`SplitError::Skipped`] when `head` shows a `session/update` notification, else
     /// [`SplitError::TooLong`].
     fn skippable(head: &[u8], bytes: usize) -> SplitError {
-        if oversize::is_update_notification(head) {
-            SplitError::Skipped { bytes }
-        } else {
-            SplitError::TooLong
+        match oversize::skipped_update(head) {
+            Some(update) => SplitError::Skipped { bytes, update },
+            None => SplitError::TooLong,
         }
     }
 
@@ -359,7 +366,8 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
 /// included, becomes a [`MALFORMED_LINE_METHOD`] notification, which the inbound handler turns
 /// into a [`ProtocolWarning::MalformedLine`](crate::ProtocolWarning::MalformedLine). A
 /// `session/update` notification over 8 MiB is dropped with one WARN line (its size and method,
-/// never its content) and the stream goes on: the update is lost, the connection is not. Any
+/// never its content) and the stream goes on: the update is lost, the connection is not, and a
+/// [`SKIPPED_UPDATE_METHOD`] notification with what its start said takes its place. Any
 /// other line over 8 MiB ends the stream with an error, which closes the connection (the driver
 /// reports `Error::Protocol`): a response or a request dropped would leave its other side
 /// waiting forever. Before each line it waits for the [`Gate`].
@@ -382,14 +390,15 @@ where
             let bytes = match splitter.next_line().await {
                 Ok(Some(bytes)) => bytes,
                 Ok(None) => return None,
-                Err(SplitError::Skipped { bytes }) => {
+                Err(SplitError::Skipped { bytes, update }) => {
                     tracing::warn!(
                         method = oversize::UPDATE_METHOD,
                         bytes,
                         max = MAX_LINE_BYTES,
                         "skipped a message from the agent over the line cap"
                     );
-                    continue;
+                    shared.gate.line_read();
+                    return Some((Ok(update.marker(bytes)), Some((splitter, shared))));
                 }
                 Err(SplitError::TooLong) => {
                     shared.set_fatal(crate::Error::Protocol(format!(
@@ -443,11 +452,14 @@ pub(crate) const MALFORMED_LINE_METHOD: &str = "_clauseo/malformed_line";
 
 /// Whether the inbound handler counts this notification off the [`Gate`]: the same lines
 /// [`incoming`] counted, a `session/update` whose `params` is an object ([`Envelope::is_update`])
-/// or a malformed-line marker, which only [`incoming`] writes (it turns an agent's line naming
-/// that method into a marker of its own). The SDK hands each of these to the handler exactly
-/// once (see [`Gate`] for when that holds).
+/// or a malformed-line or skipped-update marker, which only [`incoming`] writes (it turns an
+/// agent's line naming either method into a malformed-line marker of its own). The SDK hands
+/// each of these to the handler exactly once (see [`Gate`] for when that holds).
 pub(crate) fn counted(method: &str, params: &serde_json::Value) -> bool {
-    (method == "session/update" || method == MALFORMED_LINE_METHOD) && params.is_object()
+    matches!(
+        method,
+        "session/update" | MALFORMED_LINE_METHOD | SKIPPED_UPDATE_METHOD
+    ) && params.is_object()
 }
 
 fn malformed_marker(bytes: usize) -> String {

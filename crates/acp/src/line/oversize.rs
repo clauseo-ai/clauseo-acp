@@ -14,15 +14,79 @@
 //!
 //! An `"id"` after `"params"` is not seen: such a line is a request the agent then never hears
 //! back on, which harms only that agent.
+//!
+//! What the skipped line says ([`SkippedUpdate`]) is read from the same start, after
+//! `"params"`: its `sessionId`, and in its `update` the `sessionUpdate`, `toolCallId` and
+//! `status`, each a plain string, the last of a repeated key winning. Any other value is walked
+//! over, counting brackets outside strings, without being decoded or checked. The read stops at
+//! the update's `content`, at a key written with an escape, at anything it cannot walk, and
+//! where the start ends: a field not read by then stays unknown. Both adapters write `status`
+//! before `content` in a `tool_call_update`: claude-agent-acp 0.89.1 writes `_meta` (the tool's
+//! name), `toolCallId`, `sessionUpdate`, `status`, then the output fields
+//! (`tool-calls/renderer.js`, `result`); codex-acp 2.2.2 writes `sessionUpdate`, `toolCallId`,
+//! `name`, `kind`, `title`, `status`, then `content` (`AcpToolCallRenderer.render`), but a
+//! status it adds to a rendered update with no status goes after the content.
 
 /// The method a skippable line names.
 pub(super) const UPDATE_METHOD: &str = "session/update";
 
-/// Whether `head`, the start of a line, shows a `session/update` notification (see the module
-/// doc).
-pub(super) fn is_update_notification(head: &[u8]) -> bool {
+/// The method of the notification that stands in for a skipped `session/update`, so what it
+/// said reaches the inbound handler in order with the agent's other messages (as the
+/// malformed-line marker does). Only the reader writes it: an agent's line naming it is
+/// malformed (`envelope.rs`).
+pub(crate) const SKIPPED_UPDATE_METHOD: &str = "_clauseo/skipped_update";
+
+/// The `sessionUpdate` of a tool call's update, the only kind the host does more with.
+pub(crate) const TOOL_CALL_UPDATE: &str = "tool_call_update";
+
+/// What the start of a skipped `session/update` says (see the module doc). Each field is
+/// `None` when the start did not show it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SkippedUpdate {
+    /// `params.sessionId`.
+    pub(crate) session: Option<String>,
+    /// `params.update.sessionUpdate` is `tool_call_update` (`true`) or another kind.
+    pub(crate) tool_call_update: Option<bool>,
+    /// `params.update.toolCallId`.
+    pub(crate) tool_call: Option<String>,
+    /// `params.update.status`, when it is one of ACP's four.
+    pub(crate) status: Option<&'static str>,
+}
+
+impl SkippedUpdate {
+    /// The [`SKIPPED_UPDATE_METHOD`] notification for this update of `bytes` bytes. Its params
+    /// hold `bytes`, then `sessionId`, `kind` (`tool_call_update` or `other`), `toolCallId` and
+    /// `status`, each `null` when unknown.
+    pub(super) fn marker(&self, bytes: usize) -> String {
+        let kind = self
+            .tool_call_update
+            .map(|tool| if tool { TOOL_CALL_UPDATE } else { "other" });
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": SKIPPED_UPDATE_METHOD,
+            "params": {
+                "bytes": bytes,
+                "sessionId": self.session,
+                "kind": kind,
+                "toolCallId": self.tool_call,
+                "status": self.status,
+            },
+        })
+        .to_string()
+    }
+}
+
+/// What `head`, the start of a line, says when it shows a `session/update` notification (see
+/// the module doc); `None` when it does not, and the line is not skippable.
+pub(super) fn skipped_update(head: &[u8]) -> Option<SkippedUpdate> {
     let mut cursor = Cursor { head, at: 0 };
-    cursor.update_notification().unwrap_or(false)
+    if cursor.update_notification() != Some(true) {
+        return None;
+    }
+    let mut skipped = SkippedUpdate::default();
+    // `None` here only says where the read stopped; what it read by then stands.
+    let _stopped = cursor.params(&mut skipped);
+    Some(skipped)
 }
 
 /// A read position in the start of a line.
@@ -33,7 +97,8 @@ struct Cursor<'a> {
 
 impl<'a> Cursor<'a> {
     /// `Some(true)` for a `session/update` notification, `Some(false)` for a line the start shows
-    /// is something else, `None` for one it cannot read.
+    /// is something else, `None` for one it cannot read. On `Some(true)` it stands at the value
+    /// of `params`.
     fn update_notification(&mut self) -> Option<bool> {
         self.expect(b'{')?;
         let mut method: Option<&[u8]> = None;
@@ -50,6 +115,57 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// Reads `params`' `sessionId` and `update` into `out`. `None` where the read stops.
+    fn params(&mut self, out: &mut SkippedUpdate) -> Option<()> {
+        self.expect(b'{')?;
+        loop {
+            let key = self.plain_string()?;
+            self.expect(b':')?;
+            match key {
+                b"sessionId" => {
+                    out.session = None;
+                    out.session = Some(self.text()?);
+                }
+                b"update" => self.update(out)?,
+                _ => self.value()?,
+            }
+            if !self.next_member()? {
+                return Some(());
+            }
+        }
+    }
+
+    /// Reads the update's `sessionUpdate`, `toolCallId` and `status` into `out`, up to its
+    /// `content`. `None` where the read stops.
+    fn update(&mut self, out: &mut SkippedUpdate) -> Option<()> {
+        self.expect(b'{')?;
+        loop {
+            let key = self.plain_string()?;
+            self.expect(b':')?;
+            match key {
+                // What comes after the content is not read.
+                b"content" => return None,
+                b"sessionUpdate" => {
+                    out.tool_call_update = None;
+                    out.tool_call_update =
+                        Some(self.plain_string()? == TOOL_CALL_UPDATE.as_bytes());
+                }
+                b"toolCallId" => {
+                    out.tool_call = None;
+                    out.tool_call = Some(self.text()?);
+                }
+                b"status" => {
+                    out.status = None;
+                    out.status = Some(status(self.plain_string()?)?);
+                }
+                _ => self.value()?,
+            }
+            if !self.next_member()? {
+                return Some(());
+            }
+        }
+    }
+
     /// Skips JSON whitespace.
     fn whitespace(&mut self) {
         while let Some(b' ' | b'\t' | b'\n' | b'\r') = self.head.get(self.at) {
@@ -63,6 +179,19 @@ impl<'a> Cursor<'a> {
         (self.head.get(self.at) == Some(&byte)).then(|| self.at += 1)
     }
 
+    /// Skips whitespace, then `,` (`Some(true)`: another member follows) or `}` (`Some(false)`:
+    /// the object ends).
+    fn next_member(&mut self) -> Option<bool> {
+        self.whitespace();
+        let next = match self.head.get(self.at)? {
+            b',' => true,
+            b'}' => false,
+            _ => return None,
+        };
+        self.at += 1;
+        Some(next)
+    }
+
     /// Skips whitespace, then a string with no escape, giving its bytes.
     fn plain_string(&mut self) -> Option<&'a [u8]> {
         self.expect(b'"')?;
@@ -73,6 +202,15 @@ impl<'a> Cursor<'a> {
         }
         self.at += end + 1;
         rest.get(..end)
+    }
+
+    /// A plain string that is UTF-8 with no control character, as JSON allows, copied.
+    fn text(&mut self) -> Option<String> {
+        let bytes = self.plain_string()?;
+        if bytes.iter().any(|byte| *byte < 0x20) {
+            return None;
+        }
+        std::str::from_utf8(bytes).ok().map(str::to_owned)
     }
 
     /// Skips whitespace, then a plain string, a number, `true`, `false` or `null`.
@@ -90,4 +228,65 @@ impl<'a> Cursor<'a> {
         }
         (self.at > start).then_some(())
     }
+
+    /// Skips whitespace, then any value: a string (escapes allowed), an object or an array
+    /// (walked by its brackets outside strings, its depth counted, never recursed), or a
+    /// scalar. Nothing is decoded or checked.
+    fn value(&mut self) -> Option<()> {
+        self.whitespace();
+        match self.head.get(self.at)? {
+            b'"' => self.string(),
+            b'{' | b'[' => self.nested(),
+            _ => self.scalar(),
+        }
+    }
+
+    /// Skips a string from its opening quote, escapes allowed.
+    fn string(&mut self) -> Option<()> {
+        self.at += 1;
+        loop {
+            let rest = self.head.get(self.at..)?;
+            let end = memchr::memchr2(b'"', b'\\', rest)?;
+            self.at += end + 1;
+            if rest.get(end) == Some(&b'"') {
+                return Some(());
+            }
+            // The escaped byte.
+            self.at += 1;
+        }
+    }
+
+    /// Skips an object or an array from its opening bracket to the bracket that closes it.
+    fn nested(&mut self) -> Option<()> {
+        let mut depth = 0_usize;
+        loop {
+            match self.head.get(self.at)? {
+                b'"' => {
+                    self.string()?;
+                    continue;
+                }
+                b'{' | b'[' => depth += 1,
+                b'}' | b']' => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        self.at += 1;
+                        return Some(());
+                    }
+                }
+                _ => {}
+            }
+            self.at += 1;
+        }
+    }
+}
+
+/// One of ACP's four tool call statuses, as written.
+fn status(text: &[u8]) -> Option<&'static str> {
+    Some(match text {
+        b"pending" => "pending",
+        b"in_progress" => "in_progress",
+        b"completed" => "completed",
+        b"failed" => "failed",
+        _ => return None,
+    })
 }

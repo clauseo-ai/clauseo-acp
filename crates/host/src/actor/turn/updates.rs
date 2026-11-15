@@ -66,7 +66,8 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
             | AcpEvent::Limit { .. }
             | AcpEvent::TooLong { .. }
             | AcpEvent::ConnectionLost { .. }
-            | AcpEvent::Warning { .. } => false,
+            | AcpEvent::Warning { .. }
+            | AcpEvent::UpdateSkipped { .. } => false,
         }
     {
         agent.replayed.push(*event);
@@ -173,6 +174,11 @@ pub(super) fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             offline::on_connection_lost(actor, thread, origin, &lost);
         }
         AcpEvent::Warning { session, warning } => warning::log(thread, session.as_ref(), &warning),
+        AcpEvent::UpdateSkipped {
+            session,
+            origin,
+            acp_tool_call_id,
+        } => super::skipped::on_skipped(actor, thread, session, origin, acp_tool_call_id),
     }
 }
 
