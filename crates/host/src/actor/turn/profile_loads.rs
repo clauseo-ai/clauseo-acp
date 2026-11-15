@@ -81,13 +81,17 @@ pub(super) fn launch_keys(
             .profile
             .codex_config(&agent_id, written.as_ref(), packs);
         codex.keys = profile::codex_keys(keys, web_search, folders)?;
-        // The data-folder fence (`agent::codex_fence`), in every Codex session.
+        // The data-folder fence (`agent::codex_fence`), in every Codex session, and the other
+        // matters' (`agent::matter_fence`).
+        let matters = &prepared.run.data_deny.matters;
+        let other_matters: Vec<PathBuf> = matters.denied_reads().map(Path::to_path_buf).collect();
         let session = crate::agent::codex_fence::Session {
             run_root: &prepared.run.root,
             notes: &prepared.run.notes,
             codex_home: &codex.home,
             listed: &prepared.run.codex_listed,
             socket_dir: socket_dir(&prepared.run),
+            other_matters: &other_matters,
         };
         let fence =
             crate::agent::codex_fence::keys(actor.effective.locations(), session, cfg!(windows));
@@ -325,12 +329,13 @@ fn claude_sandbox(
         })
         .collect();
     let claude_home = actor.effective.locations().agent_home(agent_id.as_str());
-    // Every other matter's folder the host knows now; one registered later is the residual.
-    let other_matters: Vec<PathBuf> = actor
+    // Every other matter's folder the launch knew (forgotten ones too), but those the lawyer
+    // let this conversation read (`agent::matter_fence`); one registered later is the residual.
+    let other_matters: Vec<PathBuf> = run
+        .data_deny
         .matters
-        .iter()
-        .filter(|(id, _)| **id != run.key.matter)
-        .map(|(_, entry)| PathBuf::from(&entry.row.folder_path))
+        .fenced_folders()
+        .map(Path::to_path_buf)
         .collect();
     let paths = SandboxPaths {
         matter,

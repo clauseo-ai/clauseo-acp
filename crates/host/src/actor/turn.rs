@@ -19,6 +19,7 @@ mod close;
 mod codex_cap;
 mod end;
 mod failure;
+pub(crate) mod fence;
 mod forced_mode;
 pub(crate) mod idle;
 mod inputs;

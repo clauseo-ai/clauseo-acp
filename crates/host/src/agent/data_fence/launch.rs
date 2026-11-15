@@ -11,8 +11,8 @@
 //! folder that exists is denied whole, and in this session's own project only its sessions'
 //! `tool-results` folders are left out ([`claude_projects`]).
 //!
-//! Outside `<data>`, every other registered matter's folder is denied whole, each spelling
-//! ([`other_matters`]): with `auto` mode Claude reads outside its working folders unasked.
+//! Outside `<data>`, what of every other matter the session is kept out of
+//! (`agent::matter_fence`): with `auto` mode Claude reads outside its working folders unasked.
 //!
 //! The residual, accepted: a run folder, a matter's notes or another matter's Claude project
 //! made after the launch is in no rule until the next launch (its transcripts are). The host's
@@ -22,7 +22,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use super::{DENIED, READ_ONLY, SHARED, escape};
-use crate::network_paths::FOLD_CASE;
+use crate::agent::matter_fence::MatterFence;
 
 /// Stands for any one name in an own folder's place ([`claude_projects`]'s session id). A
 /// file name can't hold a NUL, so no real name is this. Followed by text, it stands for any name
@@ -97,8 +97,8 @@ pub(crate) struct LaunchDeny {
     /// ([`own_reads`]): what Claude may list and read with no question to the auto-mode
     /// classifier (`super::own_allow_rules`). None before the launch prep has them.
     pub(crate) own_reads: Vec<String>,
-    /// Every other registered matter's folder, each spelling ([`other_matters`]), denied whole.
-    pub(crate) matters: Vec<PathBuf>,
+    /// The other matters' fence (`agent::matter_fence`): empty until the launch prep resolves it.
+    pub(crate) matters: MatterFence,
 }
 
 impl LaunchDeny {
@@ -122,7 +122,7 @@ impl LaunchDeny {
             targets,
             kept,
             own_reads: Vec::new(),
-            matters: Vec::new(),
+            matters: MatterFence::default(),
         }
     }
 }
@@ -175,40 +175,6 @@ pub(crate) fn own_reads(data: &Path, folders: &[&Path]) -> Vec<String> {
         let pattern = pattern.join("/");
         if !pattern.is_empty() && !out.contains(&pattern) {
             out.push(pattern);
-        }
-    }
-    out
-}
-
-/// Each spelling of every other matter's folder in `others` (the registered matters' folders
-/// but this one's), for [`LaunchDeny::matters`]: its canonical path, then the path as stored
-/// when that differs (as stored alone when it does not resolve), as Claude Code matches a rule
-/// against both the path asked for and where it leads. A folder that is not absolute, or that
-/// is or holds one of `keep` (the session's matter folder and `<data>`, each spelling) by
-/// either spelling is left out whole: a rule on it would cover the session's own places.
-/// Compared by names, folded where the file system folds. Reads the file system.
-pub(crate) fn other_matters(others: &[PathBuf], keep: &[&Path]) -> Vec<PathBuf> {
-    let keep: Vec<_> = keep
-        .iter()
-        .map(|place| super::key(place, FOLD_CASE))
-        .collect();
-    let mut out = Vec::new();
-    for folder in others.iter().filter(|folder| folder.is_absolute()) {
-        let mut spellings: Vec<PathBuf> = dunce::canonicalize(folder).into_iter().collect();
-        if !spellings.contains(folder) {
-            spellings.push(folder.clone());
-        }
-        let holds = spellings.iter().any(|spelling| {
-            let spelling = super::key(spelling, FOLD_CASE);
-            keep.iter().any(|place| place.starts_with(&spelling))
-        });
-        if holds {
-            continue;
-        }
-        for spelling in spellings {
-            if !out.contains(&spelling) {
-                out.push(spelling);
-            }
         }
     }
     out

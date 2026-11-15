@@ -299,13 +299,19 @@ pub(crate) struct Session<'a> {
     /// seatbelt.rs:318-322, 381-382`; Linux's seccomp denies `connect` in the restricted mode,
     /// `codex-rs/linux-sandbox/src/landlock.rs:201-203`); this deny is a second wall.
     pub(crate) socket_dir: Option<&'a Path>,
+    /// What of every other matter the session is kept out of: the fence paths of each matter
+    /// the lawyer did not let this conversation read (`agent::matter_fence`), denied by their
+    /// own paths. An invited matter is in no deny, and never in `additionalDirectories`, which
+    /// is writable.
+    pub(crate) other_matters: &'a [PathBuf],
 }
 
 /// The fence's denied paths: the `Locations` paths, the store's and the search index's database
 /// files, [`DATA_DENIED`] (`browser` among them: every session's browser folder, the unfenced
 /// guard's `--cwd`, is in it), Claude's whole folder, [`AGENTS_DENIED`], Codex's sign-in
 /// markers and [`CODEX_HOME_DENIED`] and [`CODEX_DATABASES`] in its home, then what the launch
-/// listed ([`Listed`], each path only under the folder it was listed from). A path that is or
+/// listed ([`Listed`], each path only under the folder it was listed from), and what of every
+/// other matter the session is kept out of ([`Session::other_matters`]). A path that is or
 /// holds the session's run folder, its notes or Codex's home is left out, with a warning. Last,
 /// each of [`SESSION_PARENTS`] and the runtime folder that the launch could not list, whole, and
 /// the session's browser socket folder ([`Session::socket_dir`]) and the own run folder's
@@ -382,6 +388,7 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
                 .cloned(),
         );
     }
+    denied.extend(session.other_matters.iter().cloned());
     denied.retain(|path| {
         let own = [session.run_root, session.notes, session.codex_home];
         let keep = !own.iter().any(|folder| folder.starts_with(path));

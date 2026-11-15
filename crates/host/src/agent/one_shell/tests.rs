@@ -134,6 +134,7 @@ static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence:
     targets: Vec::new(),
     kept: Vec::new(),
     own_reads: Vec::new(),
+    matters: crate::agent::matter_fence::MatterFence::NONE,
 };
 
 /// A Claude session's `_meta`, the hook setting other values for both variables and a `Bash`
