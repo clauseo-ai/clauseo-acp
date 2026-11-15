@@ -8,6 +8,7 @@ import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { gzipSync } from "node:zlib";
+import { getPlatformProxy } from "wrangler";
 
 export const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DAY_MS = 86_400_000;
@@ -98,8 +99,27 @@ export function tallyJson({ weeksAgo = 1, tally = uuid() } = {}) {
   };
 }
 
-function wrangler(args, persist) {
-  const run = spawnSync("pnpm", ["exec", "wrangler", ...args, "--persist-to", persist], {
+/** crates/counts' example panic report (schema/tests/crash.rs), found `weeksAgo` weeks ago. */
+export function crashJson({ weeksAgo = 0, report = uuid() } = {}) {
+  return {
+    schema: 1,
+    report,
+    week: week(weeksAgo),
+    version: "3.0.4",
+    channel: "stable",
+    os: "windows",
+    os_major: 11,
+    arch: "x86_64",
+    process: "host",
+    kind: "panic",
+    area: "store",
+    after_launch: true,
+    location: { file: "crates/store/src/writer.rs", line: 212 },
+  };
+}
+
+function wrangler(args, persist, config) {
+  const run = spawnSync("pnpm", ["exec", "wrangler", ...args, "--persist-to", persist, "--config", config], {
     cwd: root,
     encoding: "utf8",
     env: ENV,
@@ -118,16 +138,17 @@ async function freePort() {
 
 /**
  * The Worker under `wrangler dev --local --test-scheduled`, with a fresh local D1 that has the
- * migrations applied. `post`, `send` and `sql` talk to it; `stop` ends it and deletes its D1.
+ * migrations applied, from `config` (a wrangler config in this folder). `post`, `send`, `sql` and
+ * `object` (an R2 object's text) talk to it; `stop` ends it and deletes its D1 and R2.
  */
-export async function startWorker() {
+export async function startWorker({ config = "wrangler.toml" } = {}) {
   mkdirSync(join(root, ".wrangler"), { recursive: true });
   const persist = mkdtempSync(join(root, ".wrangler", "test-"));
-  wrangler(["d1", "migrations", "apply", "clauseo-counts", "--local"], persist);
+  wrangler(["d1", "migrations", "apply", "clauseo-counts", "--local"], persist, config);
   const port = await freePort();
   const dev = spawn(
     "pnpm",
-    ["exec", "wrangler", "dev", "--local", "--test-scheduled", "--ip", "127.0.0.1", "--port", String(port), "--persist-to", persist],
+    ["exec", "wrangler", "dev", "--local", "--test-scheduled", "--ip", "127.0.0.1", "--port", String(port), "--persist-to", persist, "--config", config],
     { cwd: root, env: ENV, stdio: ["ignore", "pipe", "pipe"] },
   );
   let output = "";
@@ -160,12 +181,22 @@ export async function startWorker() {
   };
 
   /** The rows of one SQL statement on the local D1. */
-  const sql = (statement) => JSON.parse(wrangler(["d1", "execute", "clauseo-counts", "--local", "--json", "--command", statement], persist))[0].results;
+  const sql = (statement) => JSON.parse(wrangler(["d1", "execute", "clauseo-counts", "--local", "--json", "--command", statement], persist, config))[0].results;
+
+  // The R2 binding through wrangler's platform proxy over the same local files.
+  let proxy;
+  /** The text of one object in the local crash bucket, or null when there is none. */
+  const object = async (key) => {
+    proxy ??= await getPlatformProxy({ configPath: join(root, config), persist: { path: join(persist, "v3") } });
+    const found = await proxy.env.CRASH.get(key);
+    return found === null ? null : await found.text();
+  };
 
   const stop = async () => {
+    await proxy?.dispose();
     dev.kill("SIGTERM");
     await new Promise((resolve) => (dev.exitCode === null ? dev.on("exit", resolve) : resolve()));
     rmSync(persist, { recursive: true, force: true });
   };
-  return { send, post, sql, stop };
+  return { send, post, sql, object, stop };
 }

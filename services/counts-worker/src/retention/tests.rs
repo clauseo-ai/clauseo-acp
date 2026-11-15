@@ -15,6 +15,7 @@ struct Tables {
     tallies: BTreeMap<String, String>,
     reports: BTreeSet<(String, String)>,
     install_weeks: BTreeSet<(String, String)>,
+    crashes: BTreeSet<(String, String)>,
 }
 
 fn text(param: &Param) -> &str {
@@ -48,6 +49,10 @@ impl Tables {
                 let cut = text(&values[0]).to_owned();
                 self.install_weeks.retain(|(_, week)| *week >= cut);
             }
+            DELETE_CRASHES => {
+                let cut = text(&values[0]).to_owned();
+                self.crashes.retain(|(_, week)| *week >= cut);
+            }
             other => panic!("unknown statement {other}"),
         }
     }
@@ -76,7 +81,7 @@ fn id(n: usize) -> String {
 fn the_cut_offs_are_today_90_days_and_396_days_back() {
     let statements = deletes(monday()).unwrap();
     assert_eq!(statements.len(), STATEMENTS);
-    assert_eq!(STATEMENTS, 34);
+    assert_eq!(STATEMENTS, 35);
     assert_eq!(
         statements[0],
         (DELETE_RATES, vec![Param::Text("2026-11-09".to_owned())])
@@ -87,6 +92,8 @@ fn the_cut_offs_are_today_90_days_and_396_days_back() {
         match *sql {
             DELETE_TALLIES | DELETE_INSTALL_WEEKS => assert_eq!(cut, "2025-W41"),
             DELETE_REPORTS => assert_eq!(cut, "2026-08-11"),
+            // 365 days before is Sunday 2025-11-09, in ISO week 45.
+            DELETE_CRASHES => assert_eq!(cut, "2025-W45"),
             other => panic!("unexpected {other}"),
         }
     }
@@ -145,7 +152,17 @@ fn a_backlog_larger_than_any_range_is_cleared_in_one_run_and_kept_rows_stay() {
         tables.install_weeks.insert((id(n), week.to_owned()));
     }
 
-    assert_eq!(tables.prune(monday()), 34);
+    for (n, week) in ["2025-W44", "2025-W45", "2026-W45"].into_iter().enumerate() {
+        tables.crashes.insert((id(n), week.to_owned()));
+    }
+
+    assert_eq!(tables.prune(monday()), 35);
+    let crash_weeks: Vec<&str> = tables
+        .crashes
+        .iter()
+        .map(|(_, week)| week.as_str())
+        .collect();
+    assert_eq!(crash_weeks, ["2025-W45", "2026-W45"]);
     let weeks: Vec<&str> = tables
         .install_weeks
         .iter()
@@ -162,7 +179,7 @@ fn a_backlog_larger_than_any_range_is_cleared_in_one_run_and_kept_rows_stay() {
 fn a_run_fills_first_then_deletes_within_the_budget() {
     let statements = plan(monday()).unwrap();
     assert_eq!(statements.len(), PLAN);
-    assert_eq!(PLAN, 36);
+    assert_eq!(PLAN, 37);
     let fills = fills(monday().day().unwrap()).unwrap();
     assert_eq!(statements[..FILLS], fills[..]);
     assert_eq!(statements[FILLS..], deletes(monday()).unwrap()[..]);

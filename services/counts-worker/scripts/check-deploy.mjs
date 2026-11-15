@@ -37,6 +37,10 @@ const EXPECTED = {
   triggers: { crons: ["0 3 * * *"] },
 };
 
+/** The one R2 binding: required in the committed file, optional in the deploy copy (left out
+ * until the bucket exists), and nothing else when present. */
+export const R2 = { binding: "CRASH", bucket_name: "clauseo-crash", jurisdiction: "eu" };
+
 /** The one D1 binding, less its id. */
 const D1 = { binding: "DB", database_name: "clauseo-counts", migrations_dir: "migrations" };
 
@@ -56,8 +60,8 @@ export function problems(text, { deployed = false } = {}) {
   }
   const found = [];
   for (const key of Object.keys(config)) {
-    if (!(key in expected) && key !== "d1_databases") {
-      found.push(`${key}: not allowed (only ${[...Object.keys(expected), "d1_databases"].join(", ")})`);
+    if (!(key in expected) && key !== "d1_databases" && key !== "r2_buckets") {
+      found.push(`${key}: not allowed (only ${[...Object.keys(expected), "d1_databases", "r2_buckets"].join(", ")})`);
     }
   }
   for (const [key, want] of Object.entries(expected)) {
@@ -65,6 +69,9 @@ export function problems(text, { deployed = false } = {}) {
       found.push(`${key}: must be ${JSON.stringify(want)}, is ${JSON.stringify(config[key])}`);
     }
   }
+  const r2 = plain(config.r2_buckets);
+  const r2Fits = r2 === undefined ? deployed : isDeepStrictEqual(r2, [R2]);
+  if (!r2Fits) found.push(`r2_buckets: must be [${JSON.stringify(R2)}]${deployed ? " or absent" : ""}`);
   const d1 = plain(config.d1_databases);
   if (!Array.isArray(d1) || d1.length !== 1) {
     found.push("d1_databases: must hold exactly one database");

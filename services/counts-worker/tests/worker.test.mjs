@@ -178,12 +178,12 @@ test("a tally is stored once per tally id, and refused outside its rules", async
   assert.equal(worker.sql(`SELECT COUNT(*) AS n FROM tally WHERE tally = '${other}'`)[0].n, 1);
 });
 
-test("any other path is 404, another method on the two paths 405", async () => {
-  for (const path of ["/", "/v1/crash", "/v1/query", "/v1/releases", "/dash", "/v1/counts/", "/v1/Counts"]) {
+test("any other path is 404, another method on the three paths 405", async () => {
+  for (const path of ["/", "/v1/crash/", "/v1/query", "/v1/releases", "/dash", "/v1/counts/", "/v1/Counts"]) {
     assert.equal((await worker.post(path, { days: [dayJson()] })).status, 404, path);
     assert.equal((await worker.send(path)).status, 404, `GET ${path}`);
   }
-  for (const path of ["/v1/counts", "/v1/tally"]) {
+  for (const path of ["/v1/counts", "/v1/tally", "/v1/crash"]) {
     for (const method of ["GET", "PUT", "DELETE", "PATCH"]) {
       const response = await worker.send(path, { method });
       assert.equal(response.status, 405, `${method} ${path}`);
@@ -193,7 +193,7 @@ test("any other path is 404, another method on the two paths 405", async () => {
   }
 });
 
-test("the daily cron deletes reports after 90 days, tallies after 396 and past days' counts, over every id range", async () => {
+test("the daily cron deletes reports after 90 days, tallies after 396, crashes after 365 and past days' counts", async () => {
   const old = uuid();
   const kept = uuid();
   const insert = (install, dayText) =>
@@ -201,6 +201,8 @@ test("the daily cron deletes reports after 90 days, tallies after 396 and past d
   const tally = (id, weekText) =>
     `INSERT INTO tally VALUES ('${id}', '${weekText}', '3.0.4', 'stable', 'linux', NULL, 'x86_64', 'per_user', 0, '{}')`;
   const oldTally = uuid();
+  const oldCrash = uuid();
+  const keptCrash = uuid();
   const keptTally = uuid();
   // A backlog spread over all 16 id ranges, larger than any one range: 2,500 reports and 1,200
   // tallies, the first hex digit of each id cycling through 0 to f.
@@ -214,6 +216,8 @@ test("the daily cron deletes reports after 90 days, tallies after 396 and past d
       `${series(2_500)} INSERT INTO report SELECT printf('%x%07x-0000-4000-8000-00000000000a', i % 16, i), '${day(120)}', '3.0.4', 'stable', 'macos', 15, 'aarch64', 'en', '{}' FROM n`,
       `${series(1_200)} INSERT INTO tally SELECT printf('%x%07x-0000-4000-8000-00000000000b', i % 16, i), '${week(70)}', '3.0.4', 'stable', 'linux', NULL, 'x86_64', 'per_user', 0, '{}' FROM n`,
       `INSERT INTO rate VALUES ('counts', '${day(1)}', 3), ('tally', '${day(2)}', 4) ON CONFLICT DO NOTHING`,
+      // A crash row past its 365 days, and one in its last week.
+      `INSERT INTO crash VALUES ('${oldCrash}', '${week(54)}', '3.0.4', 'linux', 'x86_64', 'panic', 'store', 'panic'), ('${keptCrash}', '${week(51)}', '3.0.4', 'linux', 'x86_64', 'panic', 'store', 'panic')`,
     ].join("; "),
   );
   const count = (sql) => worker.sql(sql)[0].n;
@@ -224,6 +228,7 @@ test("the daily cron deletes reports after 90 days, tallies after 396 and past d
     worker.sql(`SELECT ${column} AS id FROM ${table} WHERE ${column} IN (${list.map((id) => `'${id}'`).join(", ")})`).map((row) => row.id);
   assert.deepEqual(ids("report", "install", [old, kept]), [kept]);
   assert.deepEqual(ids("tally", "tally", [oldTally, keptTally]), [keptTally]);
+  assert.deepEqual(ids("crash", "report", [oldCrash, keptCrash]), [keptCrash]);
   assert.equal(count(`SELECT COUNT(*) AS n FROM report WHERE day < '${day(90)}'`), 0);
   assert.equal(count(`SELECT COUNT(*) AS n FROM tally WHERE week < '${week(56)}'`), 0);
   assert.equal(count(`SELECT COUNT(*) AS n FROM rate WHERE day < '${day(0)}'`), 0);

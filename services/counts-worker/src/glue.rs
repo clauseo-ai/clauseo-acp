@@ -2,7 +2,7 @@
 //! goes through the steps in this order, and stops at the first that refuses it: method and
 //! path, the two headers, a read capped at the gzip limit, the inflate, the crate's parser, the
 //! daily count, then the rows. Nothing before the daily count touches D1, so a refused request
-//! never does.
+//! never does. A crash report has the hourly count instead, then its R2 object and its row.
 //!
 //! This is the only file that touches the request; `tests/source.test.mjs` holds it to the one
 //! `header` function below, with its two names.
@@ -17,6 +17,7 @@ use worker::{
 use clauseo_counts::schema::Time;
 
 use crate::body::{Limited, check_headers, inflate};
+use crate::crash::{self, BUCKET, BUMP_CRASH_RATE, DELETE_PAST_HOURS, HOURLY_CAP, INSERT_CRASH};
 use crate::retention::plan;
 use crate::route::{Refusal, Route};
 use crate::rows::{Accepted, BUMP_RATE, Param, accept};
@@ -76,6 +77,9 @@ async fn receive(request: &mut Request, env: &Env) -> Result<(), Refusal> {
     let gzip = read(request, route.gzip_cap()).await?;
     let json = inflate(&gzip, route.json_cap())?;
     let now = now();
+    if route == Route::Crash {
+        return store_crash(env, &json, now).await;
+    }
     let accepted = accept(route, &json, now)?;
     let db = env.d1(DB)?;
     bump(&db, route, now).await?;
@@ -107,6 +111,29 @@ async fn bump(db: &D1Database, route: Route, now: Time) -> Result<(), Refusal> {
     ];
     let count: Option<i64> = statement(db, BUMP_RATE, &values)?.first(Some("n")).await?;
     count.map(drop).ok_or(Refusal::Busy)
+}
+
+/// A crash report past the parser: `503` while the bucket is unbound, then the hour's count
+/// (`429` at the cap), then the object, then the row. The object goes first: if the row fails,
+/// the sender retries and the same object is written again.
+async fn store_crash(env: &Env, json: &[u8], now: Time) -> Result<(), Refusal> {
+    let upload = crash::accept(json, now)?;
+    let Ok(bucket) = env.bucket(BUCKET) else {
+        return Err(Refusal::Unavailable);
+    };
+    let db = env.d1(DB)?;
+    let hour = crash::hour(now).ok_or(Refusal::Failed)?;
+    statement(&db, DELETE_PAST_HOURS, &[Param::Text(hour.clone())])?
+        .run()
+        .await?;
+    let values = [Param::Text(hour), Param::Int(HOURLY_CAP)];
+    let count: Option<i64> = statement(&db, BUMP_CRASH_RATE, &values)?
+        .first(Some("n"))
+        .await?;
+    count.ok_or(Refusal::Busy)?;
+    bucket.put(upload.key, upload.body).execute().await?;
+    statement(&db, INSERT_CRASH, &upload.row)?.run().await?;
+    Ok(())
 }
 
 /// Inserts every row in one batch, which D1 runs as one transaction.

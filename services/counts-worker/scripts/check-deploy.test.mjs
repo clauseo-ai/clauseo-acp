@@ -86,3 +86,20 @@ test("the route is the custom domain alone, and the database the one binding", (
   assert.notDeepEqual(problems(twoDatabases), []);
   assert.deepEqual(problems("not [toml").length, 1);
 });
+
+test("the R2 binding: required in the committed file, optional in the deploy copy, exact either way", () => {
+  const R2 = '[[r2_buckets]]\nbinding = "CRASH"\nbucket_name = "clauseo-crash"\njurisdiction = "eu"\n';
+  assert.ok(committed.includes(R2));
+  assert.notDeepEqual(problems(edited(R2, "")), [], "the committed file without it");
+  const deployCopy = edited(BUILD, "", edited(PLACEHOLDER_ID, REAL_ID));
+  assert.deepEqual(problems(edited(R2, "", deployCopy), { deployed: true }), [], "a copy without it");
+  for (const [from, to] of [
+    ['jurisdiction = "eu"', 'jurisdiction = "us"'],
+    ['jurisdiction = "eu"\n', ""],
+    ['bucket_name = "clauseo-crash"', 'bucket_name = "other"'],
+    ['binding = "CRASH"', 'binding = "CRASH"\npreview_bucket_name = "x"'],
+  ]) {
+    assert.notDeepEqual(problems(edited(from, to)), [], `${from} -> ${to}`);
+    assert.notDeepEqual(problems(edited(from, to, deployCopy), { deployed: true }), [], `deploy copy: ${from} -> ${to}`);
+  }
+});
