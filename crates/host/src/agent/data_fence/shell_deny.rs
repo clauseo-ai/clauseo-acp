@@ -148,8 +148,8 @@ pub(crate) fn windows_shell_deny_rules(
 }
 
 /// [`windows_shell_deny_rules`] without the forms that write a configured data folder through a
-/// variable (`%APPDATA%`, `$env:USERPROFILE`, `~`, …): what a launch sheds when its settings would
-/// outgrow the file Claude Code reads (`agent::loads::profile`). The default folder loses
+/// variable (`%APPDATA%`, `$env:USERPROFILE`, `~`, …): what a launch sheds when its settings
+/// would outgrow the file Claude Code reads (`agent::loads::profile`). The default folder loses
 /// nothing: its name alone stands for all of those.
 pub(crate) fn windows_shell_deny_rules_without_variables(
     deny: &LaunchDeny,

@@ -49,7 +49,7 @@ use identity::DataIdentity;
 use resolve::{Disk, Found};
 
 use crate::network_paths::resolve::Entry;
-use crate::network_paths::{NetEnv, fold_name, refused_windows_name};
+use crate::network_paths::{fold_name, refused_windows_name};
 pub(crate) use check::{PathsChecked, check_paths};
 pub(crate) use command::ShellKind;
 pub(crate) use health::DataFenceHealth;
@@ -340,7 +340,7 @@ impl FenceCheck {
     /// resolve.
     #[cfg(test)]
     pub(crate) fn touches_data_as(&self, insensitive: bool) -> bool {
-        let net = NetEnv::current();
+        let net = crate::network_paths::NetEnv::current();
         self.touches_data_on(insensitive, &Disk::real(&net))
     }
 

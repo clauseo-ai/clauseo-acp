@@ -95,7 +95,7 @@ fn a_parent_is_fenced_by_its_siblings_along_the_way_never_the_own_matter() {
 #[test]
 fn the_own_matter_is_never_fenced() {
     let (_dir, root) = tree("mfence-own", &["own", "data"]);
-    let fence = fence(&root, "own", &[("own", false), ("relative/x", false)]);
+    let fence = fence(&root, "own", &[("own", false)]);
     assert!(fence.denied_edits().next().is_none());
     // A folder that is not absolute is in no rule.
     let relative = MatterFence::asked(vec![Other::new(id(9), "R".into(), "rel".into(), false)])

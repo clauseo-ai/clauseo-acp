@@ -278,11 +278,12 @@ pub(crate) const SHED_AT: usize = 1_887_436;
 
 /// `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`; on Windows also its
 /// `Bash` and `PowerShell` rules, `data_fence::windows_shell_deny_rules`, without the variable
-/// forms when all of them would take the settings past [`SHED_AT`], counting the allow rules,
-/// then the other matters' as many as fit, [`matter_rules_within`]), and `permissions.allow` the Read of the built-in skills' folder and the own folders' listing
-/// and reading (`data_fence::claude_allow_rules`), each after any the hook put there. A hook
-/// value at `permissions`, `deny` or `allow` of another type is replaced. With no spelling (a
-/// unit test's keys) nothing changes.
+/// forms when all of them would take the settings past [`SHED_AT`], counting the allow rules, then
+/// the other matters' as many as fit, [`matter_rules_within`]), and `permissions.allow` the Read of
+/// the built-in skills' folder and the own folders' listing and reading
+/// (`data_fence::claude_allow_rules`), each after any the hook put there. A hook value at
+/// `permissions`, `deny` or `allow` of another type is replaced. With no spelling (a unit test's
+/// keys) nothing changes.
 fn deny_data_folder(
     settings: &mut Map<String, Value>,
     data: &crate::agent::data_fence::LaunchDeny,

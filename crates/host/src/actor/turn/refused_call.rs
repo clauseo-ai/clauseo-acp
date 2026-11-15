@@ -98,23 +98,21 @@ pub(super) fn seen(
 /// The paths `fields` name: each location (a matter path taken from `own`, the matter
 /// folder), then `rawInput`'s (`data_fence::candidates`); a relative one taken from `own`.
 fn paths(fields: &CallFields<'_>, own: &Path) -> Vec<PathBuf> {
-    let mut named: Vec<PathBuf> = fields
+    let located = fields
         .locations
         .iter()
         .filter_map(|location| match location {
             ToolLocation::Inside { path, .. } => Some(own.join(path.as_str())),
             ToolLocation::Outside { display } => Some(PathBuf::from(display)),
             ToolLocation::Unknown { .. } => None,
-        })
-        .collect();
+        });
     let input = match fields.raw_input {
         Some(TextOrBlob::Inline(text)) => serde_json::from_str(text).ok(),
         Some(TextOrBlob::Blob(_)) | None => None,
     };
     let candidates = crate::agent::data_fence::candidates(&[], input.as_ref(), cfg!(windows));
-    named.extend(candidates);
-    named
-        .into_iter()
+    located
+        .chain(candidates)
         .map(|path| {
             if path.is_absolute() {
                 path

@@ -87,8 +87,8 @@ pub(crate) fn other_matter_on(
 }
 
 /// The innermost other matter one of `words` names by a fence path's text, `\` and `/` read
-/// alike, followed by the word's end, a separator, a quote or a space: a matter `Smith` is not
-/// named by `…\Smith 2\x`.
+/// alike, followed by the word's end, a separator or a quote (a word is split at spaces
+/// already, so a space in it is part of a name): a matter `Smith` is not named by `…\Smith 2\x`.
 fn named_in_words(
     words: &[String],
     matters: &[(MatterId, Vec<PathBuf>)],
@@ -113,7 +113,7 @@ fn named_in_words(
                 }
                 let named = word.match_indices(needle).any(|(at, _)| {
                     let rest = word.get(at + needle.len()..).unwrap_or_default();
-                    rest.is_empty() || rest.starts_with(['/', '"', '\'', ' ', '\t'])
+                    rest.is_empty() || rest.starts_with(['/', '"', '\''])
                 });
                 if named && best.is_none_or(|(len, _)| needle.len() > len) {
                     best = Some((needle.len(), *id));

@@ -847,6 +847,7 @@ export type CommandId = string;
  *  outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
  *  `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
  *  `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
+ *  `AllowMatterRead`, `WithdrawMatterRead`,
  *  `InstallBrowser`, `CancelBrowserInstall`, `RecheckBrowserPolicy`, the four update commands, the
  *  connector commands, the two allowed-site commands and `SetNetwork` answer `Done`; the last three
  *  kinds store no receipt, as the three browser commands do not.
