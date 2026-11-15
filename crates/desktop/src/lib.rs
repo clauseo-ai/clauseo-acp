@@ -49,10 +49,9 @@
 //!   `subscribe_app`, `ack`, `display_info`, `setup`) and the same drag pair, and the bridge admits
 //!   from it only `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and `GetSettings`
 //!   (and `RefreshLimits`, and the updater's `SetUpdateMode`, `CheckForUpdate` and
-//!   `GetUpdate`, 0037), and of the app feed
-//!   only `settings_changed` and `update_changed`: never the matter and thread lists (0028).
-//!   `setup` (0048, `setup.rs`) has its own allow-list per window, and its events go to both
-//!   windows.
+//!   `GetUpdate`, 0037), and of the app feed only `settings_changed` and `update_changed`:
+//!   never the matter and thread lists (0028). `setup` (0048, `setup.rs`) has its own
+//!   allow-list per window, and its events go to both windows.
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
 //!   The `e2e` build adds `perf_channel_bytes` (`e2e.rs`, granted by `capabilities/e2e.json`),
 //!   and the `marks` build `marks_memory` and `marks_finish` (`marks.rs`,
@@ -66,8 +65,7 @@
 //!   300 of a run (`ipc.rs`): its name, start, length, outcome, and no argument.
 //! - One `ipc::Channel` per window carries its stream (`bridge/`): each message an event's JSON
 //!   as the host encoded it, a setup event (0048), a fragment of either, or a stream failure,
-//!   always below 8 KB (and in
-//!   the `e2e` build an event with its receive time, `timed`). At most
+//!   always below 8 KB (and in the `e2e` build an event with its receive time, `timed`). At most
 //!   256 KB unacknowledged per window; a 5 s watchdog that fires once per stall. A window's
 //!   channel lives until the window is destroyed (`Bridge::close_window`).
 //!   `docs/decisions/0012-desktop-bridge.md` records the commands, the capability and the message
@@ -121,6 +119,7 @@ mod host_log;
 mod host_start;
 mod ipc;
 mod jailed;
+mod last_run;
 mod machine_memory;
 #[cfg(feature = "marks")]
 mod marks;
@@ -309,6 +308,8 @@ pub fn run() -> tauri::Result<()> {
             // The caption buttons' window commands, on Windows and Linux.
             window_frame::grant_caption_commands(app)?;
             let locations = Locations::resolve_without_documents(&SystemDirs, &SystemEnv)?;
+            // Before the window and the host: a crash from here on counts (last_run.rs).
+            last_run::start(app.handle(), locations.data_dir());
             // Managed before the window opens: a command reaching unmanaged state fails.
             app.manage(open::AppData(locations.data_dir().to_path_buf()));
             app.manage(open::OpenGates::default());
@@ -441,6 +442,7 @@ fn start_host<R: Runtime>(
                 reused,
             )))
             .with_sign_in_again(clauseo_agents::is_sign_in_again)
+            .with_last_run_unclean(last_run::unclean(&app))
             .with_key_retry(key_retry)
             .with_limits_reader(readers);
         let config = refusals.into_iter().fold(config, |config, (agent, code)| {
@@ -538,6 +540,7 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
         // No thread for it: exit now; the host's next start repairs what it left open.
         fallback_exit.mark_stopped();
         host_log::flush_app(&fallback);
+        last_run::closed(&fallback);
         fallback.exit(code);
     }
 }
