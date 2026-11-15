@@ -213,3 +213,51 @@ fn an_added_file_a_command_names_proved_absent_at_the_start_is_the_agents() {
     };
     assert!(made_flagged(&clean, &moved, 100));
 }
+
+/// A file a shell command of the turn deleted (`rm`, `Remove-Item`) or moved (`mv`, both
+/// sides), by its path or a folder holding it, is the agent's; a file the commands don't name, or
+/// name only within a longer name, stays flagged.
+#[test]
+fn a_deleted_or_renamed_file_a_command_names_is_the_agents() {
+    let old = [
+        file("Drafts/a.docx", 1),
+        file("gone.docx", 2),
+        file("kept.docx", 3),
+        file("moved.docx", 4),
+        file("other.docx", 5),
+    ];
+    let new = [file("Archive/moved.docx", 4)];
+    let commands: BTreeSet<String> = ["Drafts", "gone.docx", "moved.docx", "Archive", "other"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    let start = TurnStart {
+        commands: &commands,
+        record: None,
+        tree: &old,
+        reads: &FirstReads::default(),
+        entries: &[],
+        at: Timestamp::ZERO,
+    };
+    let flagged: Vec<(String, bool)> = diff(&old, &new, &BTreeSet::new())
+        .unwrap()
+        .into_iter()
+        .map(|change| flag(change, &BTreeSet::new(), &start))
+        .map(|change| {
+            (
+                change.path().as_str().to_owned(),
+                change.may_include_lawyer_edits(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        flagged,
+        [
+            ("Archive/moved.docx".to_owned(), false),
+            ("Drafts/a.docx".to_owned(), false),
+            ("gone.docx".to_owned(), false),
+            ("kept.docx".to_owned(), true),
+            ("other.docx".to_owned(), true),
+        ]
+    );
+}

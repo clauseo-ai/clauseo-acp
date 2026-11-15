@@ -84,10 +84,14 @@ fn popd_leaves_the_folder_unknown() {
     assert_eq!(targets("echo x > a.md && popd && echo y > b.md"), ["a.md"]);
 }
 
+/// A move changes both its sides (`tests/deletes.rs` has the rest of the delete forms).
 #[test]
-fn mv_writes_nothing() {
-    assert_eq!(targets("mv lawyer.docx tmp && mv tmp lawyer.docx"), none());
-    assert_eq!(targets("mv -t Sub lawyer.docx"), none());
+fn mv_names_both_sides() {
+    assert_eq!(
+        targets("mv lawyer.docx tmp && mv tmp lawyer.docx"),
+        ["lawyer.docx", "tmp"]
+    );
+    assert_eq!(targets("mv -t Sub lawyer.docx"), ["Sub", "lawyer.docx"]);
 }
 
 #[test]
@@ -436,3 +440,5 @@ fn a_powershell_command_nested_past_the_cap_is_credited_nothing() {
         assert_eq!(targets_ps(&within), ["Reply.docx"], "{open}");
     }
 }
+
+mod deletes;
