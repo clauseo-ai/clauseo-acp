@@ -300,11 +300,8 @@ fn stage_as(
         lost: 0,
     };
     fill(&mut file)?;
-    #[cfg(unix)]
-    if keep && let Some(temp) = &staged.temp {
-        // Before the sync, which then covers the metadata too.
-        staged.lost = keep::copy(target, temp, &file);
-    }
+    // Before the sync, which then covers the metadata too.
+    staged.lost = kept_metadata(keep, target, staged.temp.as_deref(), &file);
     fsync::sync_file(&file).map_err(|err| Error::io("sync", target, err))?;
     Ok(staged)
 }
@@ -343,6 +340,22 @@ impl Staged {
             }
         }
     }
+}
+
+/// Unix: when `keep`, the target's metadata copied to the temp file ([`keep::copy`]); the
+/// number of things lost.
+#[cfg(unix)]
+fn kept_metadata(keep: bool, target: &Path, temp: Option<&Path>, file: &File) -> u32 {
+    match temp {
+        Some(temp) if keep => keep::copy(target, temp, file),
+        _ => 0,
+    }
+}
+
+/// Elsewhere nothing: `ReplaceFileW` keeps the metadata at the rename.
+#[cfg(not(unix))]
+fn kept_metadata(_keep: bool, _target: &Path, _temp: Option<&Path>, _file: &File) -> u32 {
+    0
 }
 
 /// Windows: `temp` in the place of `target` by `ReplaceFileW`, which keeps the target's
