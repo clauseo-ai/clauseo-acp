@@ -52,3 +52,6 @@ flate = "flate"
 Cpy = "Cpy"
 # The shell's file operation flags (FOF_NO_UI, FOF_ALLOWUNDO), in crates/matters/src/trash/.
 FOF = "FOF"
+# Apple's unique device identifier (UDID), in upstream agent-browser's iOS code, which the patches
+# in crates/desktop/agent-browser/patches/ quote as context.
+udid = "udid"
