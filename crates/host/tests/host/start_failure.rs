@@ -69,6 +69,6 @@ fn an_exit_right_after_initialize_is_a_failed_start() {
 /// The one unreadable case: a `session/new` answer that does not decode.
 #[test]
 fn an_answer_that_does_not_decode_is_unreadable() {
-    let (code, _) = first_turn_fails("start_new_session_malformed", "new-session-malformed");
-    assert_eq!(code, ErrorCode::AgentProtocolError);
+    let (code, detail) = first_turn_fails("start_new_session_malformed", "new-session-malformed");
+    assert_eq!(code, ErrorCode::AgentProtocolError, "{detail}");
 }

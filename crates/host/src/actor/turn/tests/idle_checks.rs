@@ -124,6 +124,8 @@ fn a_turn_held_for_the_sign_in_alone_keeps_its_agent() {
 #[test]
 fn a_launch_with_no_turn_keeps_its_agent() {
     let mut rig = rig("idle-alone-launch", ONE_MODE, "exit");
+    // The launch is held past the start's bound on purpose: only the idle stop is under test.
+    rig.actor.turn_path.no_start_bound = true;
     let thread = rig.thread();
     let (reply, _answer) = oneshot::channel();
     let command = CommandEnvelope {

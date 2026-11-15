@@ -236,6 +236,8 @@ fn a_turn_held_for_the_sign_in_keeps_its_agent() {
 #[test]
 fn a_launch_and_a_load_keep_their_agent() {
     let mut rig = rig("idle-busy-launch", TWO_ANSWERS, "exit");
+    // The launch is held past the start's bound on purpose: only the idle stop is under test.
+    rig.actor.turn_path.no_start_bound = true;
     let thread = rig.thread();
     send_prompt(&mut rig, 10, thread);
     // The launch's folder checks run off the actor: no agent yet, nothing to stop.
