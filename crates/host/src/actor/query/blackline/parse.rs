@@ -15,6 +15,11 @@
 //!   starts with `{` is the view's own (`{stet ...}`, `{summary: ...}`, `{warning ...}`,
 //!   `{section 1 ends: ...}`, `{position: ...}`), and everything after `{appendix}` (the
 //!   notes and comments the page cites) is skipped;
+//! - what a tracked row or cell is: `{row inserted #11 R}` or `{row deleted …}` on a row, and
+//!   `{cell inserted …}` or `{cell deleted …}` on a cell's first block, whose paragraphs show no
+//!   change of their own: each of them is `added` (all its text inserted) or `removed` (all
+//!   deleted), in nested tables too; another row or cell word (`{cell merged …}`) gives
+//!   [`BlacklineNotice::MayDiffer`];
 //! - how tables nest: a table inside a cell is a `t` line inside the outer table, tagged `{+}`
 //!   when it is not the cell's first block, with its own rows and its own `{/table}`. Each
 //!   `{/table}` closes the innermost open table. A cell's paragraphs are paragraphs of the
@@ -47,7 +52,7 @@ use clauseo_protocol::{BlacklineNotice, BlacklineParagraph, ParagraphChange, Wor
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
-use line::{Seen, marker, paragraph};
+use line::{Mark, Seen, marker, paragraph};
 
 mod count;
 mod line;
@@ -301,8 +306,10 @@ const HEAD: [&str; 5] = ["{stet ", "{rules:", "{authors:", "{summary:", "{warnin
 /// The paragraphs of a redline view's text, in order, and what was left out.
 pub(crate) fn read_text(text: &str) -> Text {
     let mut read = Text::default();
-    // How many tables are open: 0 outside any, 1 in a top-level table's rows.
-    let mut depth = 0_usize;
+    // The open tables, outermost first, each with its current row's and cell's change, to the
+    // depth cap; `past` counts the tables open past it.
+    let mut levels: Vec<Level> = Vec::new();
+    let mut past = 0_usize;
     for (number, line) in logical_lines(text) {
         let line = line.as_str();
         let at = |why| Unreadable { line: number, why };
@@ -312,17 +319,26 @@ pub(crate) fn read_text(text: &str) -> Text {
         if line == "{appendix}" {
             break;
         }
-        if let Some(counted) = count::summary_count(line) {
-            read.counted = counted;
-            continue;
+        match count::summary_count(line) {
+            count::Summary::Count(counted) => {
+                read.counted = counted;
+                continue;
+            }
+            // A summary whose count this reader can't read: the check can't be made, so say so.
+            count::Summary::Unreadable => {
+                read.seen.unknown = true;
+                continue;
+            }
+            count::Summary::NotSummary => {}
         }
         if !HEAD.iter().any(|head| line.starts_with(head)) {
             count::ids_in(line, &mut read.ids);
         }
         if line == "{/table}" {
-            match depth.checked_sub(1) {
-                Some(outer) => depth = outer,
-                None => read.skip(at("a table end with no table open")),
+            if past > 0 {
+                past -= 1;
+            } else if levels.pop().is_none() {
+                read.skip(at("a table end with no table open"));
             }
             continue;
         }
@@ -331,8 +347,11 @@ pub(crate) fn read_text(text: &str) -> Text {
             continue;
         }
         if line.starts_with('{') {
-            // A line of the view's own this reader does not know: a newer stetdoc's, noted.
-            if !STRUCTURE.iter().any(|known| line.starts_with(known)) {
+            // A line of the view's own this reader does not know (a newer stetdoc's), and a
+            // section's tracked change (`{section 1 ends: next-page mark …}`), which no paragraph
+            // shows, are noted.
+            let section_mark = line.starts_with("{section ") && line.contains(" mark ");
+            if section_mark || !STRUCTURE.iter().any(|known| line.starts_with(known)) {
                 read.seen.unknown = true;
             }
             continue;
@@ -343,18 +362,21 @@ pub(crate) fn read_text(text: &str) -> Text {
         };
         if letters == "t" {
             // A `t` line opens a table whatever its markup, so its `{/table}` still closes it.
-            depth = depth.saturating_add(1);
-            if depth > MAX_TABLE_DEPTH {
+            if past > 0 || levels.len() >= MAX_TABLE_DEPTH {
+                past += 1;
                 read.skip(at("a table nested past the depth cap"));
-            } else {
-                match table(content) {
-                    Ok(formatted) => read.seen.unknown |= formatted,
-                    Err(why) => read.skip(at(why)),
-                }
+                continue;
+            }
+            // A table that starts a cell carries the cell's tags.
+            enter_cell(&mut levels, content, &mut read.seen);
+            levels.push(Level::default());
+            match table(content) {
+                Ok(formatted) => read.seen.unknown |= formatted,
+                Err(why) => read.skip(at(why)),
             }
             continue;
         }
-        if depth > MAX_TABLE_DEPTH {
+        if past > 0 {
             read.skip(at("a block of a table nested past the depth cap"));
             continue;
         }
@@ -362,7 +384,8 @@ pub(crate) fn read_text(text: &str) -> Text {
             "p" => {
                 // What the paragraph held counts only once it reads.
                 let mut seen = read.seen;
-                match paragraph(content, &mut seen) {
+                enter_cell(&mut levels, content, &mut seen);
+                match paragraph(content, &mut seen, whole(&levels)) {
                     Ok(paragraph) => {
                         read.seen = seen;
                         read.paragraphs.push(paragraph);
@@ -371,17 +394,64 @@ pub(crate) fn read_text(text: &str) -> Text {
                     Err(why) => read.skip(at(why)),
                 }
             }
-            "r" if depth == 0 => read.skip(at("a row outside a table")),
-            // A row holds no text; a row marker a newer stetdoc adds is noted, not guessed at.
-            "r" => match marker(content) {
-                Ok((body, _)) if body == "row" || body.starts_with("row ") => {}
-                Ok(_) => read.seen.unknown = true,
-                Err(_) => read.skip(at("a table or row line without its marker")),
+            // A row holds no text, but its change marks its paragraphs; a row word a newer
+            // stetdoc adds, and a row's format change after its marker, are noted.
+            "r" => match (levels.last_mut(), marker(content)) {
+                (None, _) => read.skip(at("a row outside a table")),
+                (Some(level), Ok((body, after))) => {
+                    let (mark, unknown) = line::row_of(body);
+                    *level = Level {
+                        row: mark,
+                        cell: Mark::None,
+                    };
+                    read.seen.unknown |= unknown || !after.trim().is_empty();
+                }
+                (Some(_), Err(_)) => read.skip(at("a table or row line without its marker")),
             },
             _ => read.skip(at("a block of a kind the reader does not know")),
         }
     }
     read
+}
+
+/// One open table: the change of its current row and of its current cell.
+#[derive(Debug, Clone, Copy)]
+struct Level {
+    row: Mark,
+    cell: Mark,
+}
+
+impl Default for Level {
+    fn default() -> Self {
+        Self {
+            row: Mark::None,
+            cell: Mark::None,
+        }
+    }
+}
+
+/// A block line inside a table: unless it goes on its cell (`{+}`), it starts a new cell, whose
+/// change its tags give; a cell tag this reader does not know is noted in `seen`.
+fn enter_cell(levels: &mut [Level], content: &str, seen: &mut Seen) {
+    let Some(level) = levels.last_mut() else {
+        return;
+    };
+    let tags = line::cell_tags(content);
+    if !tags.continues {
+        level.cell = tags.mark;
+    }
+    seen.unknown |= tags.unknown;
+}
+
+/// The change a paragraph takes from the rows and cells it stands in: the innermost table's
+/// cell's or row's, then the next table out's, and so on; `None` when none is marked.
+fn whole(levels: &[Level]) -> Mark {
+    levels
+        .iter()
+        .rev()
+        .flat_map(|level| [level.cell, level.row])
+        .find(|mark| *mark != Mark::None)
+        .unwrap_or(Mark::None)
 }
 
 /// The view's lines, each with the number of its first physical line (from 1): a line that ends

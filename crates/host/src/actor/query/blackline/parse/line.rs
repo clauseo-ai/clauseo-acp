@@ -89,18 +89,79 @@ pub(super) fn cell_tag(body: &str) -> bool {
     }
 }
 
-/// The paragraph-mark change a paragraph starts with, if any.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Mark {
+/// A tracked insertion or deletion of a whole: a paragraph's mark (`{¶+ …}`), a table row
+/// (`{row inserted …}`) or a cell (`{cell deleted …}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mark {
     None,
     Inserted,
     Deleted,
 }
 
+/// What a table row's marker body (`row`, `row header`, `row inserted #11 R`) says: its
+/// change, and whether it holds a word this reader does not know (a newer stetdoc's).
+pub(super) fn row_of(body: &str) -> (Mark, bool) {
+    let mut words = body.split(' ');
+    if words.next() != Some("row") {
+        return (Mark::None, true);
+    }
+    let mut mark = Mark::None;
+    for word in words {
+        match word {
+            "header" => {}
+            "inserted" => mark = Mark::Inserted,
+            "deleted" => mark = Mark::Deleted,
+            // The change's id and author come last.
+            _ if word.starts_with('#') => return (mark, false),
+            _ => return (mark, true),
+        }
+    }
+    (mark, false)
+}
+
+/// The cell tags a block line starts with (after its ref): whether it goes on its cell (`{+}`),
+/// the cell's change (`{cell inserted #13 R}`, `{cell deleted …}`), and whether a cell tag holds
+/// a word this reader does not know (`{cell merged …}` among them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CellTags {
+    pub(super) continues: bool,
+    pub(super) mark: Mark,
+    pub(super) unknown: bool,
+}
+
+/// The cell tags of `content`, read from its leading markers; markup that does not read stops
+/// the scan, and the line's own read reports it.
+pub(super) fn cell_tags(content: &str) -> CellTags {
+    let mut tags = CellTags {
+        continues: false,
+        mark: Mark::None,
+        unknown: false,
+    };
+    let mut rest = content;
+    while rest.starts_with('{') && !rest.starts_with("{++") && !rest.starts_with("{--") {
+        let Ok((body, after)) = marker(rest) else {
+            break;
+        };
+        let mut words = body.split(' ');
+        match (words.next(), words.next()) {
+            (Some("+"), _) => tags.continues = true,
+            (Some("cell"), Some("inserted")) => tags.mark = Mark::Inserted,
+            (Some("cell"), Some("deleted")) => tags.mark = Mark::Deleted,
+            (Some("cell"), _) => tags.unknown = true,
+            _ => {}
+        }
+        rest = after.strip_prefix(' ').unwrap_or(after);
+    }
+    tags
+}
+
 /// One paragraph from its content: the tags, then the text; `seen` notes what it holds.
+/// `whole` is the change of the row or cell it stands in, which marks none of its text itself:
+/// in an inserted one all its text is inserted, in a deleted one all deleted.
 pub(super) fn paragraph(
     content: &str,
     seen: &mut Seen,
+    whole: Mark,
 ) -> Result<BlacklineParagraph, &'static str> {
     // What this paragraph holds, added to `seen` once it reads.
     let mut own = Seen::default();
@@ -128,6 +189,23 @@ pub(super) fn paragraph(
     }
     let mut runs: Vec<BlacklineRun> = Vec::new();
     inline(&mut rest, RunKind::Same, None, &mut runs, &mut own)?;
+    if whole != Mark::None {
+        let to = if whole == Mark::Inserted {
+            RunKind::Ins
+        } else {
+            RunKind::Del
+        };
+        let mut marked = Vec::with_capacity(runs.len());
+        for run in runs {
+            let kind = match (whole, run.kind) {
+                (Mark::Inserted, RunKind::Same) | (Mark::Deleted, _) => to,
+                (_, kind) => kind,
+            };
+            push(&mut marked, kind, &run.text);
+        }
+        runs = marked;
+        mark = whole;
+    }
     let all = |kind: RunKind| runs.iter().all(|run| run.kind == kind);
     let change = match mark {
         Mark::Inserted if all(RunKind::Ins) => ParagraphChange::Added,

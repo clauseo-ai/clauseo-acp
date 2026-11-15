@@ -4,7 +4,7 @@
 
 use clauseo_protocol::BlacklineNotice::{ChangesOutsideText, HiddenText, MayDiffer, PartNotShown};
 use clauseo_protocol::BlacklineParagraph;
-use clauseo_protocol::ParagraphChange::{Changed, Formatted, Same as Kept};
+use clauseo_protocol::ParagraphChange::{Added, Changed, Formatted, Removed, Same as Kept};
 use clauseo_protocol::RunKind::{Del, Ins, Same};
 
 use super::super::line::MAX_CHANGE_DEPTH;
@@ -330,4 +330,90 @@ fn joining_wrapped_lines_is_linear() {
         started.elapsed()
     );
     assert_eq!(read.paragraphs.len(), 1);
+}
+
+/// A tracked row or cell (stetdoc 0.9.3's view of documents that hold one): its paragraphs show
+/// no change of their own, so each is `added` or `removed` whole, in a nested table too, and
+/// the rows and cells around them are untouched.
+#[test]
+fn tracked_rows_and_cells_mark_their_paragraphs() {
+    let paragraphs = |json: &str| {
+        let read = read(json);
+        assert_eq!(read.blackline.notices, [], "{json}");
+        read.blackline.paragraphs
+    };
+    let kept = |text| para(Kept, &[(Same, text)]);
+    assert_eq!(
+        paragraphs(fixture!("view-row-ins.json")),
+        [
+            kept("Intro."),
+            kept("Kept A."),
+            kept("Kept B."),
+            para(Added, &[(Ins, "New A.")]),
+            para(Added, &[(Ins, "New B.")]),
+        ]
+    );
+    assert_eq!(
+        paragraphs(fixture!("view-row-del.json"))[3..],
+        [
+            para(Removed, &[(Del, "Gone A.")]),
+            para(Removed, &[(Del, "Gone B.")])
+        ]
+    );
+    assert_eq!(
+        paragraphs(fixture!("view-cell-ins.json"))[1..],
+        [kept("Kept A."), para(Added, &[(Ins, "New cell.")])]
+    );
+    assert_eq!(
+        paragraphs(fixture!("view-cell-del.json"))[1..],
+        [kept("Kept A."), para(Removed, &[(Del, "Gone cell.")])]
+    );
+    // The inserted inner row's paragraph, and nothing of the outer cell around it.
+    assert_eq!(
+        paragraphs(fixture!("view-row-ins-nested.json"))[1..],
+        [
+            kept("Outer."),
+            kept("Inner kept."),
+            para(Added, &[(Ins, "Inner new.")]),
+            para(Kept, &[]),
+        ]
+    );
+}
+
+/// A cell's mark covers the later blocks of its cell (`{+}`) and ends at the next cell or row;
+/// a row or cell word this reader does not know, or a row's format change, says the blackline
+/// may differ.
+#[test]
+fn a_cell_mark_spans_its_cell_and_unknown_row_words_may_differ() {
+    let read = read_text(concat!(
+        "t1 {table cols=2}\n",
+        "r1 {row}\n",
+        "p1 {cell deleted #3 C} Gone.\n",
+        "p2 {+} Also gone.\n",
+        "p3 Kept.\n",
+        "r2 {row}\n",
+        "p4 Kept too.\n",
+        "{/table}"
+    ));
+    let changes: Vec<_> = read.paragraphs.iter().map(|p| p.change).collect();
+    assert_eq!(changes, [Removed, Removed, Kept, Kept]);
+    assert!(!read.seen.unknown);
+    for odd in [
+        "r1 {row repeating #3 C}",
+        "r1 {row} {rev row #4 C}",
+        "r1 {row}\np1 {cell merged #5 C} x",
+    ] {
+        let read = read_text(&format!("t1 {{table cols=1}}\n{odd}\n{{/table}}"));
+        assert!(read.seen.unknown, "{odd}");
+    }
+}
+
+/// A summary whose count can't be read says the blackline may differ, rather than turning the
+/// count check off without a word.
+#[test]
+fn an_unreadable_summary_may_differ() {
+    let view = with_text(fixture!("view-notes.json"), |text| {
+        text.replace("6 tracked changes", "six tracked changes")
+    });
+    assert_eq!(read_view(&view).unwrap().blackline.notices, [MayDiffer]);
 }
