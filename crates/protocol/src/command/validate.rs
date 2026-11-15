@@ -227,6 +227,15 @@ impl HostCommand {
                 done: _,
             }
             | Self::SweepDone { day_start: _ }
+            // Whether the matter is another known one is the host's check.
+            | Self::AllowMatterRead {
+                thread: _,
+                matter: _,
+            }
+            | Self::WithdrawMatterRead {
+                thread: _,
+                matter: _,
+            }
             // No fields; a second download while one runs is the host's refusal (state).
             | Self::InstallBrowser {}
             | Self::CancelBrowserInstall {}

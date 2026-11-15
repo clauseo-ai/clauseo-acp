@@ -25,12 +25,13 @@ use crate::open_enum::{UnknownKind, serialize_one_key};
 pub use payload::{
     AgentNamed, AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
     CompactionChanged, ConfigOptionsReplaced, ContentAppended, ElicitationExpired,
-    ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
-    ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
-    PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended,
-    ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, ToolCallStarted,
-    ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
-    UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
+    ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterReadAllowed,
+    MatterReadWithdrawn, MatterRelocated, ModeChanged, Notice, OutsideEdits, PageVisited,
+    PermissionExpired, PermissionRequested, PermissionResolved, PlanReplaced, QueuedPromptEdited,
+    SteerResolved, StepUndone, TextAppended, ThreadArchived, ThreadCreated, ThreadDone,
+    ThreadRenamed, ThreadSnoozed, ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed,
+    TurnQueued, TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored,
+    WebResult, WebSearchRecorded,
 };
 
 /// `true` for the `matter` stream, `false` for `thread`; any other word does not compile.
@@ -204,6 +205,10 @@ domain_events! {
     ThreadSnoozed(ThreadSnoozed) = "thread_snoozed", thread;
     /// The thread was marked done or not done, by the lawyer or the morning sweep (host).
     ThreadDone(ThreadDone) = "thread_done", thread;
+    /// The lawyer let the thread read another matter's files (host).
+    MatterReadAllowed(MatterReadAllowed) = "matter_read_allowed", thread;
+    /// The lawyer withdrew that (host).
+    MatterReadWithdrawn(MatterReadWithdrawn) = "matter_read_withdrawn", thread;
     /// An agent session started or was loaded (acp).
     AgentSessionAttached(AgentSessionAttached) = "agent_session_attached", thread;
     /// The agent's own display name, from `initialize` (host).

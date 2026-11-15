@@ -10,7 +10,7 @@ use clauseo_protocol::{
     TurnEnded, TurnFailed, WebResult, WebSearchRecorded,
 };
 
-use crate::fixtures::{checkpoint_id, message_id, tool_call_id, turn_id};
+use crate::fixtures::{checkpoint_id, matter_id, message_id, tool_call_id, turn_id};
 
 /// One `TurnFailed` of turn 3 for each later code, in the order the corpus first saw them.
 pub(super) fn failures() -> Vec<DomainEvent> {
@@ -291,10 +291,21 @@ pub(super) fn notices() -> Vec<DomainEvent> {
         },
         Notice {
             level: NoticeLevel::Warning,
-            text: "Clauseo stopped a step: ChatGPT tried to go online by running a command. \
-                   ChatGPT can use web search instead."
+            text: "Clauseo stopped a step: the AI tried to read another matter's files (Smith)."
                 .to_owned(),
-            kind: Some(NoticeKind::ShellNetworkBlocked),
+            kind: Some(NoticeKind::OtherMatterRefused {
+                matter: matter_id(3),
+                name: "Smith".to_owned(),
+            }),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Too many matters to keep apart: the AI's commands may reach 4 other matters."
+                .to_owned(),
+            kind: Some(NoticeKind::MattersUnfenced {
+                matters: vec![matter_id(3)],
+                more: 3,
+            }),
         },
         Notice {
             level: NoticeLevel::Warning,

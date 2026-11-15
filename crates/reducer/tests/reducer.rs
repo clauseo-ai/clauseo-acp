@@ -33,6 +33,8 @@ mod props;
 mod queued;
 #[path = "reducer/queued_order.rs"]
 mod queued_order;
+#[path = "reducer/read_matters.rs"]
+mod read_matters;
 #[path = "reducer/resuming.rs"]
 mod resuming;
 #[path = "reducer/snapshot.rs"]

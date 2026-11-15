@@ -55,6 +55,10 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         }
         DomainEvent::ThreadSnoozed(event) => triage::snoozed(state, event, out),
         DomainEvent::ThreadDone(event) => triage::done(state, *event, out),
+        DomainEvent::MatterReadAllowed(event) => triage::read_allowed(state, event.matter, out),
+        DomainEvent::MatterReadWithdrawn(event) => {
+            triage::read_withdrawn(state, event.matter, out);
+        }
         DomainEvent::AgentNamed(event) => {
             update_header(state, "agent_named", out, |h| {
                 set_some(&mut h.agent_name, &event.agent_name)
@@ -263,6 +267,7 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         tools: Vec::new(),
         snoozed_until: None,
         done: false,
+        read_matters: Vec::new(),
         mode_id: None,
         config_options: Vec::new(),
         commands: Vec::new(),
