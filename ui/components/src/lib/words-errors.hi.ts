@@ -202,6 +202,26 @@ export const HI = {
   // an MCP import too long to show whole in one native confirm (provisional Hindi)
   "There are too many tools to import at once, so nothing was imported. Add them one at a time.":
     "एक साथ आयात करने के लिए टूल बहुत अधिक हैं, इसलिए कुछ भी आयात नहीं हुआ। इन्हें एक-एक करके जोड़ें।",
+  // matter.folder_backslash: the matter folder's path has a backslash, where the agent can't start. Draft English
+  // (Rohan to approve); this Hindi is provisional
+  "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.":
+    "Claude इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.":
+    "ChatGPT इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "{name} can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.":
+    "{name} इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.":
+    "AI इस मामले के फ़ोल्डर में काम नहीं कर सकता, क्योंकि उसके नाम में बैकस्लैश (\\) है। Finder में फ़ोल्डर का नाम बदलें, उसके बाद फिर से प्रयास करें।",
+  // agent.folder_inaccessible: the agent couldn't open the matter folder as it started. Draft English (Rohan to
+  // approve); this Hindi is provisional
+  "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
+    "Claude मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  "ChatGPT couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
+    "ChatGPT मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  "{name} couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
+    "{name} मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
+    "AI मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

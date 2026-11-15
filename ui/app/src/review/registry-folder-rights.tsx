@@ -2,14 +2,16 @@
 // fence or couldn't check, the text it opens for IT, the toolbar's Not protected, the reason on an Editing files card,
 // in the real room over FakeTransport, the host's folder_support set on the one matter; and New matter's warning for
 // a folder picked, the host's FolderSupport answering; and on the Mac, Open Privacy settings and its line under a turn
-// macOS kept out of the matter's folder (FR-22, FR-23). Apart from registry.tsx to keep that file under the size
-// limit. The mode picker's off options (FR16, FR17) wait on a mode picker.
+// macOS kept out of the matter's folder (FR-22, FR-23); and on macOS and Linux, a folder whose name has a backslash, in
+// New matter's warning and Locate's step (FR-24 to FR-26, drafts). Apart from registry.tsx to keep that file under
+// the size limit. The mode picker's off options (FR16, FR17) wait on a mode picker.
 import type { ReactNode } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { tbt } from "@clauseo/components/lib/words-toolbar.ts";
 import { PRIVACY_KEYS } from "@clauseo/components/lib/words-errors.ts";
 import { step, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
+import { LocateWarning } from "../room/locate-warning.tsx";
 import type { FolderSupportKind, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER, NEW_MATTER, roomHost, threadHost, type Step } from "./hosts.ts";
@@ -42,9 +44,11 @@ const room = (kind: FolderSupportKind) => () =>
   roomHost([{ ...MATTER, folder_display: "D:\\Matters\\Acme Traders", folder_support: kind }]);
 const INFO = '[data-testid="folder-notice"] .room-info';
 
-/** New matter over a host whose picker gives a folder on the approved page's drive and whose check reads `kind`. */
+/** New matter over a host whose picker gives a folder on the approved page's drive and whose check reads `kind`; on
+ * Windows, where the drive's backslashes are the separator. */
 const picking = (kind: FolderSupportKind) => () =>
   new FakeTransport({
+    platform: "windows",
     query: (query) =>
       typeof query === "object" && "folder_support" in query
         ? { folder_support: { support: kind } }
@@ -64,6 +68,40 @@ const holding = () =>
     pickFolder: () => new Promise(() => {}),
   });
 const warned = (kind: FolderSupportKind) => () => <RoomAfter host={picking(kind)} steps={PICKED} />;
+/** New matter on a Mac whose picker gives a folder whose name has a backslash: its warning under the folder line. */
+const slashed = () => (
+  <RoomAfter
+    host={() =>
+      new FakeTransport({
+        platform: "mac",
+        query: (query) =>
+          typeof query === "object" && "folder_support" in query
+            ? { folder_support: {} }
+            : { matters: [MATTER] },
+        pickFolder: () => ({ folder: "review-folder", display: "Documents/Rathi\\ Steels" }),
+      })
+    }
+    steps={PICKED}
+  />
+);
+/** Locate's step for a folder picked whose name has a backslash, shown by itself: its buttons do nothing here. */
+const locateStep = () => (
+  <LocateWarning
+    held={{
+      matter: MATTER.matter,
+      display: "Documents/Rathi\\ Steels",
+      again: async () => {},
+      anyway: async () => {},
+    }}
+    onClose={() => {}}
+  />
+);
+const BACKSLASH = [
+  w("This folder's name has a backslash (\\)."),
+  w(
+    "Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.",
+  ),
+];
 const entry = (id: string, words: WordsRef, render: () => ReactNode): Entry => ({
   id,
   words,
@@ -219,4 +257,10 @@ export const FOLDER_RIGHTS: Entry[] = [
   // matter.folder_permission's stop on the Mac (room/thread/privacy-settings.tsx): the button, then the line under it
   entry("FR-22", errorWords(PRIVACY_KEYS.button), () => <RoomOver host={kept} />),
   entry("FR-23", errorWords(PRIVACY_KEYS.line), () => <RoomOver host={kept} />),
+  // on macOS and Linux, New matter's warning for a folder whose name has a backslash: its title and body, then its name
+  // (draft); its buttons are FR-09 and FR-10
+  entry("FR-24", joined([...BACKSLASH, w("This folder's name has a backslash")]), slashed),
+  // Locate's step for such a folder: the same title and body, Choose another folder (FR-09), and Locate anyway (draft)
+  entry("FR-25", joined(BACKSLASH), locateStep),
+  entry("FR-26", w("Locate anyway"), locateStep),
 ];

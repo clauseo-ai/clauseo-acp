@@ -1,6 +1,8 @@
-// New matter's folder warning (FR7, FR8, FR13, FR14): a picked folder on a network drive, or on a drive without file
-// permissions, under the form's folder line, why behind its info icon. Its buttons (FR9, FR10) are the form's
-// (matter-form.tsx). Part of New matter's chunk (folder-check.tsx), with its words (words-folder.ts).
+// New matter's folder warning (FR7, FR8, FR13, FR14, FR24): a picked folder on a network drive, or on a drive without
+// file permissions, under the form's folder line, why behind its info icon; or, on macOS and Linux, a folder whose name
+// has a backslash, where Claude can't start (folder-backslash.ts), said whole with no info icon. Its buttons (FR9,
+// FR10) are the form's (matter-form.tsx). Part of New matter's chunk (folder-check.tsx), with its words
+// (words-folder.ts).
 import "./folder-warning.css";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { IconAbout, IconNotProtected } from "@clauseo/components/icons/icons.tsx";
@@ -9,19 +11,33 @@ import { useWords } from "@clauseo/components/lib/words.ts";
 import { Tooltip } from "@clauseo/components/ui/tooltip.tsx";
 
 /** The readings that warn. */
-export type Warned = "network" | "no_permissions";
+export type Warned = "network" | "no_permissions" | "backslash";
 
-/** Each warning's words: its name (tooltip and accessible name), title, what shows, and what its info icon says. */
-const SAYS: Readonly<Record<Warned, { name: FolderKey; head: FolderKey; info: FolderKey }>> = {
+/** What a drive's warning says after its title. */
+const DRIVE = "Claude asks before every change. ChatGPT can't work here." satisfies FolderKey;
+
+/** Each warning's words: its name (tooltip and accessible name), title, what shows after it, and what its info icon
+ * says, if it has one. */
+const SAYS: Readonly<
+  Record<Warned, { name: FolderKey; head: FolderKey; rest: FolderKey; info?: FolderKey }>
+> = {
   network: {
     name: "This folder is on a network drive",
     head: "On a network drive",
+    rest: DRIVE,
     info: "Clauseo can't keep Claude and ChatGPT inside a folder on a network drive.",
   },
   no_permissions: {
     name: "This drive doesn't keep file permissions",
     head: "No file permissions",
+    rest: DRIVE,
     info: "Clauseo can't keep Claude and ChatGPT inside a folder on this drive. USB drives often don't keep permissions.",
+  },
+  // draft (Rohan to approve)
+  backslash: {
+    name: "This folder's name has a backslash",
+    head: "This folder's name has a backslash (\\).",
+    rest: "Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.",
   },
 };
 
@@ -30,7 +46,7 @@ export function FolderWarning({ kind }: { kind: Warned }) {
   const { lang } = useWords();
   const says = SAYS[kind];
   const name = fr(lang, says.name);
-  const info = fr(lang, says.info);
+  const info = says.info === undefined ? null : fr(lang, says.info);
   return (
     <div
       className="folder-warning text-small"
@@ -49,13 +65,15 @@ export function FolderWarning({ kind }: { kind: Warned }) {
           <Say>{fr(lang, says.head)}</Say>
         </b>
         <span className="folder-warning-rest">
-          <Say>{fr(lang, "Claude asks before every change. ChatGPT can't work here.")}</Say>
+          <Say>{fr(lang, says.rest)}</Say>
         </span>
-        <Tooltip content={info}>
-          <button type="button" className="room-info" aria-label={info}>
-            <IconAbout size={14} />
-          </button>
-        </Tooltip>
+        {info !== null && (
+          <Tooltip content={info}>
+            <button type="button" className="room-info" aria-label={info}>
+              <IconAbout size={14} />
+            </button>
+          </Tooltip>
+        )}
       </p>
     </div>
   );

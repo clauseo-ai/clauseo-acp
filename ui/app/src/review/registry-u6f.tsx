@@ -6,7 +6,8 @@
 // thread's line for a turn Clauseo stopped on the agent's request for files outside the matter, name the agent the same
 // way: Codex's turn as ChatGPT, and the AI alone. So do U3-54 and U3-55, the line for a turn the model refused as too
 // long to read (StopReason too_long). U6F-19 to U6F-21 are agent.service_error's, and U6F-22 to U6F-24 agent.quiet's,
-// never a send's refusal: the stop line under the answer so far, with Try again.
+// never a send's refusal: the stop line under the answer so far, with Try again. U6F-25 to U6F-27 are
+// matter.folder_backslash's and U6F-28 to U6F-30 agent.folder_inaccessible's (drafts), the same way.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { type AgentName, errorWords as sentence } from "@clauseo/components/lib/words-errors.ts";
@@ -50,6 +51,15 @@ const quietStopped = (agent: AgentId) => () => (
         entries: [QUESTION, ANSWER, step(7, { stop: "failed", failure: "agent.quiet" })],
         agent,
       })
+    }
+  />
+);
+
+/** A turn `agent` couldn't start in the matter's folder (`code`): the stop line under the question, with Try again. */
+const folderStopped = (code: ErrorCode, agent: AgentId) => () => (
+  <RoomOver
+    host={() =>
+      threadHost({ entries: [QUESTION, step(7, { stop: "failed", failure: code })], agent })
     }
   />
 );
@@ -233,6 +243,54 @@ export const U6F: Entry[] = [
     words: errorWords("The AI stopped answering. Try again."),
     screen: "room/thread",
     render: nameless("agent.quiet"),
+  },
+  {
+    id: "U6F-25",
+    words: errorWords(
+      "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    ),
+    screen: "room/thread",
+    render: folderStopped("matter.folder_backslash", "codex-acp"),
+  },
+  {
+    id: "U6F-26",
+    words: errorWords(
+      "{name} can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    ),
+    screen: "room/thread",
+    render: folderStopped("matter.folder_backslash", "gemini"),
+  },
+  {
+    id: "U6F-27",
+    words: errorWords(
+      "The AI can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+    ),
+    screen: "room/thread",
+    render: nameless("matter.folder_backslash"),
+  },
+  {
+    id: "U6F-28",
+    words: errorWords(
+      "ChatGPT couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    ),
+    screen: "room/thread",
+    render: folderStopped("agent.folder_inaccessible", "codex-acp"),
+  },
+  {
+    id: "U6F-29",
+    words: errorWords(
+      "{name} couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    ),
+    screen: "room/thread",
+    render: folderStopped("agent.folder_inaccessible", "gemini"),
+  },
+  {
+    id: "U6F-30",
+    words: errorWords(
+      "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+    ),
+    screen: "room/thread",
+    render: nameless("agent.folder_inaccessible"),
   },
   {
     id: "U3-52",

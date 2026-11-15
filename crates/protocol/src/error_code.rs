@@ -354,6 +354,15 @@ error_codes! {
         import would add, with their programs, arguments, URLs and variable or header names, \
         are too long to show whole in one confirm (over 2,000 characters), so nothing was \
         imported.";
+    MatterFolderBackslash = "matter.folder_backslash", retryable: false, meaning: "The \
+        matter folder's path has a backslash (`\\`) in a folder's name, on macOS or Linux, where \
+        the agent cannot start in such a folder (Claude Code exits with \"Can't access working \
+        directory\"), so the host did not start it. Renaming the folder fixes it.";
+    AgentFolderInaccessible = "agent.folder_inaccessible", retryable: true, meaning: "The \
+        agent could not open the matter folder as its working folder when it started (Claude \
+        Code's \"Can't access working directory\" in its answer to a startup request), though \
+        the host found the folder there just before. Asking again can work once the folder is \
+        back where the matter expects it.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

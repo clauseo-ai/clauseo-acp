@@ -42,12 +42,19 @@ const NAME = "Mehta v. Mehta";
 /** The check's answer for one pick: a reading, a refusal (thrown), or one the test settles later. */
 type Check = PickedFolderSupport | HostError | Promise<PickedFolderSupport>;
 
-/** Today's host, picking `folders` in turn, its FolderSupport answering `checks` in turn. */
-function checking(checks: Check[], folders = ["ref-a", "ref-b"]) {
+/** Today's host, picking `folders` in turn, its FolderSupport answering `checks` in turn; on Windows, where the
+ * displays' backslashes are the separator, unless `platform` says otherwise. */
+function checking(
+  checks: Check[],
+  folders = ["ref-a", "ref-b"],
+  platform: FakeHost["platform"] = "windows",
+  display = (folder: string) => `D:\\Matters\\${folder}`,
+) {
   let list: MatterSummary[] = [A];
   let picks = 0;
   let asked = 0;
   const h: FakeHost = {
+    platform,
     query: (query: HostQuery) => {
       if (typeof query === "object" && "folder_support" in query) {
         const check = checks[asked++] ?? {};
@@ -65,7 +72,7 @@ function checking(checks: Check[], folders = ["ref-a", "ref-b"]) {
     },
     pickFolder: () => {
       const folder = folders[picks++] ?? "ref-z";
-      return { folder, display: `D:\\Matters\\${folder}` };
+      return { folder, display: display(folder) };
     },
   };
   return h;
@@ -268,4 +275,70 @@ test("Create waits at most 5 s for a check that doesn't answer, then makes the m
   vi.useRealTimers();
   await settle();
   expect(created(transport)).toEqual([existing("ref-a")]);
+});
+
+// FR24 (draft): on macOS and Linux a folder whose name has a backslash, where Claude can't start, warns at once from
+// the picked folder's display, with the same two buttons; never on Windows, where `\` is the separator, nor for a
+// plain path
+const SLASHED = (folder: string) =>
+  folder === "ref-a" ? "Documents/Clauseo\\ Test\\ Matter" : `Documents/${folder}`;
+const BACKSLASH_SAYS =
+  fr("en", "This folder's name has a backslash (\\).") +
+  fr(
+    "en",
+    "Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.",
+  );
+
+test.each(["mac", "linux"] as const)(
+  "on %s, a folder whose name has a backslash: its warning, then Choose another folder picks again",
+  async (platform) => {
+    const transport = await mount(checking([{}, {}], ["ref-a", "ref-b"], platform, SLASHED));
+    await openForm();
+    await press("matter-existing");
+    expect(warning()?.dataset["kind"]).toBe("backslash");
+    expect(warning()?.getAttribute("aria-label")).toBe(
+      fr("en", "This folder's name has a backslash"),
+    );
+    expect(warning()?.textContent).toBe(BACKSLASH_SAYS);
+    expect(fr("en", "This folder's name has a backslash (\\).")).toBe(
+      "This folder's name has a backslash (" + String.fromCharCode(92) + ").",
+    );
+    expect(warning()?.querySelector(".room-info")).toBeNull();
+    expect(byId("folder-choose")?.textContent).toBe(fr("en", "Choose another folder"));
+    expect(byId("folder-anyway")?.textContent).toBe(fr("en", "Create anyway"));
+    expect(byId("create-matter")).toBeNull();
+    await press("folder-choose");
+    expect(transport.only("pick_folder")).toHaveLength(2);
+    expect(warning()).toBeNull();
+    await press("create-matter");
+    expect(created(transport)).toEqual([existing("ref-b")]);
+  },
+);
+
+test.each(["mac", "linux"] as const)(
+  "on %s, Create anyway makes the matter in the folder with a backslash",
+  async (platform) => {
+    const transport = await mount(checking([{}], ["ref-a"], platform, SLASHED));
+    await openForm();
+    await press("matter-existing");
+    await press("folder-anyway");
+    expect(created(transport)).toEqual([existing("ref-a")]);
+  },
+);
+
+test("no backslash warning on Windows, nor for a plain path on macOS or Linux", async () => {
+  await mount(checking([{}], ["ref-a"], "windows", () => "D:\\Matters\\Clauseo\\ Test"));
+  await openForm();
+  await press("matter-existing");
+  expect(warning()).toBeNull();
+  expect(byId("create-matter")).not.toBeNull();
+  for (const platform of ["mac", "linux"] as const) {
+    await act(async () => root?.unmount());
+    host?.remove();
+    await mount(checking([{}], ["ref-a"], platform, () => "Documents/Clauseo Test Matter"));
+    await openForm();
+    await press("matter-existing");
+    expect(warning()).toBeNull();
+    expect(byId("create-matter")).not.toBeNull();
+  }
 });

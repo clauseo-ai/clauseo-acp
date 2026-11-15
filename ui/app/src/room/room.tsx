@@ -71,6 +71,7 @@ import { usePaperLinks } from "./paper-links.ts";
 import { useMatterMoves, usePapers } from "./use-papers.ts";
 import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
+import { LocateWarningHost } from "./locate-warning-host.tsx";
 import { usePickWait } from "./picker-wait.ts";
 import { useDraftMenus } from "./config-menus.ts";
 import { FolderChooserHost } from "./folder-chooser-host.tsx";
@@ -499,6 +500,7 @@ function RoomFrame({
         </Suspense>
       )}
       {shield.note}
+      <LocateWarningHost held={matters.located} />
       <LocateFolderContext value={locate}>
         <main className="room-centre" ref={nodes.slot("centre")}>
           {/* UD1's first run, in the first load: a lazy one's Suspense fallback held the welcome back for React's

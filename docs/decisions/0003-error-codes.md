@@ -151,6 +151,8 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `agent.service_error` | The agent's service had a problem on its side and the agent gave up on the turn: an AIR `sessionFailure` of severity `error` offering `retry` or `new_session`, in a category no other code reads (codex-acp's `internal_error`, `provider_error`, `overloaded`). The answer so far is kept; asking again can work. | yes | host (a prompt whose `end_turn` carries such a failure, `PromptEnd::failed`; `actor/turn/gave_up.rs`); retryable because the agent itself offers `retry`. A JSON-RPC error to `session/prompt` stays `agent.protocol_error`: it cannot be told from a malformed reply |
 | `agent.quiet` | The agent sent nothing for 5 minutes while answering, with no tool running and no question waiting for the lawyer, so the host ended the turn (D-050's backstop: a blocked network the host's probe could not see, such as a proxy that asks for credentials or one that inspects TLS). The answer so far is kept; asking again can work. | yes | host (a turn the agent sent nothing on for 5 minutes, with no tool running and no question waiting; the D-050 backstop in `actor/turn/offline/quiet.rs`); retryable because the agent may answer once the blocked network clears |
 | `mcp.import_too_large` | The servers an import would add, with their programs, arguments, URLs and variable or header names, are too long to show whole in one confirm (over 2,000 characters), so nothing was imported. | no | host (the MCP import, when its servers are too long for one confirm; settings and keychain untouched) |
+| `matter.folder_backslash` | The matter folder's path has a backslash (`\`) in a folder's name, on macOS or Linux, where the agent cannot start in such a folder (Claude Code exits with "Can't access working directory"), so the host did not start it. Renaming the folder fixes it. | no | host (a launch's preparation, `agent/folder_name.rs`: the folder the agent would start in has a `\` in its path, for the kinds `REFUSES_BACKSLASH` lists, Claude only; never on Windows, where `\` is the separator). Not retryable: the folder is renamed first |
+| `agent.folder_inaccessible` | The agent could not open the matter folder as its working folder when it started (Claude Code's "Can't access working directory" in its answer to a startup request), though the host found the folder there just before. Asking again can work once the folder is back where the matter expects it. | yes | host (a launch whose startup request was answered with an error whose message or `data` says "Can't access working directory", claude-agent-acp's -32603 with `data.details` holding Claude Code's stderr; `agent/folder_access.rs`). Before, it read as `agent.protocol_error` |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -189,6 +191,18 @@ folder with -32602 "`cwd` does not exist", which said nothing the lawyer could a
 now opens the folder itself before a launch on macOS and refuses with this code, and maps that one
 agent answer to it too. The open waits while macOS asks the lawyer, for up to two minutes; one
 unanswered by then is this code too, never `matter.folder_missing`. Not retryable: the lawyer changes a privacy setting first, then asks again.
+
+`matter.folder_backslash` and `agent.folder_inaccessible` were added on 2026-11-15, at the
+orchestrator's request (a launch blocker on a Mac: a matter whose folder's name held literal
+backslashes, `Clauseo\ Test\ Matter`, where every Claude conversation failed as
+`agent.protocol_error`, "Claude sent something Clauseo can't read"). Claude Code 2.1.293 exits at
+start in any working folder whose path has a `\` ("Can't access working directory …: Path …
+does not exist"), and claude-agent-acp answers `session/new` with -32603 "Internal error",
+Claude Code's stderr in `data.details`. Codex works in such a folder (RC2, tested by hand), so
+only Claude is refused; listing Codex in `REFUSES_BACKSLASH` refuses it too. The host now
+refuses a Claude launch in such a folder before it starts, and maps any startup answer saying
+"Can't access working directory" to `agent.folder_inaccessible`. New matter and Locate warn
+before such a folder becomes a matter's.
 
 `matter.folder_in_clauseo_data`, `matter.folder_inside_matter` and `matter.folder_holds_matter`
 were added on 2026-11-11 (folder PR 2), so the app can say a refused folder's reason in plain
