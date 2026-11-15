@@ -292,7 +292,8 @@ pub struct PrivacySettings {
     /// Whether Clauseo keeps and sends its anonymous usage counts. On by default; nothing is
     /// kept or sent before the lawyer's first act.
     pub counts: bool,
-    /// Whether Clauseo sends crash reports. Off by default.
+    /// Firm IT's lock on crash reports, which go with the counts: a policy `false` turns them off
+    /// while counts stay on. Nothing else reads this key; the lawyer's own value is not used.
     pub crash_reports: bool,
 }
 

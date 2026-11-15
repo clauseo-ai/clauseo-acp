@@ -103,6 +103,8 @@ pub(crate) struct Seen {
 pub(crate) struct FakeUpload {
     answers: Mutex<VecDeque<Result<u16, UploadError>>>,
     seen: Mutex<Vec<Seen>>,
+    /// Never answers: each POST stays in flight until it is dropped.
+    hang: bool,
 }
 
 impl FakeUpload {
@@ -110,6 +112,15 @@ impl FakeUpload {
         FakeUpload {
             answers: Mutex::new(answers.iter().copied().collect()),
             seen: Mutex::new(Vec::new()),
+            hang: false,
+        }
+    }
+
+    /// A fake that records each POST and never answers it.
+    pub(crate) fn hanging() -> FakeUpload {
+        FakeUpload {
+            hang: true,
+            ..FakeUpload::answering(&[Ok(204)])
         }
     }
 
@@ -128,6 +139,9 @@ impl Upload for FakeUpload {
             path,
             body: gzip_body,
         });
+        if self.hang {
+            return Box::pin(futures::future::pending());
+        }
         let mut answers = self.answers.lock().unwrap();
         let answer = if answers.len() > 1 {
             answers.pop_front().unwrap()

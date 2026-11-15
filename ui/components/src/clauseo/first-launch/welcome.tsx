@@ -249,7 +249,7 @@ function Counts({
         <span className="text-muted">
           <Say>
             {w(
-              "How many questions, which features, how long answers take. Never your papers, your questions or the answers.",
+              "How many questions, which features, how long answers take, and a short report if Clauseo crashes. Never your papers, your questions or the answers.",
             )}
           </Say>
         </span>

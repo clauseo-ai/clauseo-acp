@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::about::About;
 use crate::schema::{Day, DayCells, Event, InstallId, Time};
-use crate::sender::{Outcome, Post, PostId};
+use crate::sender::{Cancelled, Outcome, Post, PostId};
 use crate::state::State;
 use crate::store::{Op, Store};
 
@@ -201,6 +201,13 @@ impl Counts {
     /// When the last counts POST of this run started (crash reports keep an hour from it).
     pub fn last_post(&self) -> Option<Time> {
         self.state().sender.last_post
+    }
+
+    /// A crash report's POST is about to go: a signal that ends when counts turn off, which
+    /// must cancel it. None when counts are not saving, and then nothing may go.
+    pub(crate) fn crash_post(&self) -> Option<Cancelled> {
+        let mut state = self.state();
+        (state.mode == Mode::Saving).then(|| state.sender.crash_post())
     }
 
     /// Makes no counts POST before `until`: a crash report goes an hour before it.

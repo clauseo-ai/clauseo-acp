@@ -9,5 +9,16 @@
     "at": "2026-11-15",
     "by": "crash-reports-app (provisional; final English for Rohan's approval)",
     "note": "Settings, Privacy: the anonymous counts' switch, after UEP-26's line; crash reports follow the counts (decision 0060)"
+  },
+  "UC-750": {
+    "en": "How many questions, which features, how long answers take, and a short report if Clauseo crashes. Never your papers, your questions or the answers.",
+    "hi": "कितने प्रश्न, कौन-सी सुविधाएँ, उत्तर कितना समय लेते हैं, और Clauseo क्रैश हो तो एक छोटी रिपोर्ट। आपके दस्तावेज़, आपके प्रश्न या उत्तर कभी नहीं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "crash-reports-app (provisional; final English for Rohan's approval)",
+    "note": "First run, the welcome's counts line: UD1-08's approved words with crash reports added, so a lawyer who never opens Settings is told (security review of #1099); UD1-08 retired. Settings keeps UEP-26 and UC-261"
   }
 }

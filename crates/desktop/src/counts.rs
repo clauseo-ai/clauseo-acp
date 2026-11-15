@@ -23,9 +23,10 @@
 //! - The setup pump's `agent_install` and `sign_in` ([`AppCounts`], `CountsState::bump`).
 //! - The upload ([`upload`]): HTTPS only, to the endpoint of the build.
 //! - Crash reports ([`crashes`], decision record 0060): opened with the counts, taken in and sent
-//!   by the same tick after the counts' half ([`crash_tick`]), which asks the host again just
-//!   before, for `privacy.counts` and whether policy locks `privacy.crash_reports` off. The
-//!   main window's first focus marks later crashes `after_launch`.
+//!   by the same tick after the counts' half ([`crash_tick`]), which asks the host for
+//!   `privacy.counts` and whether policy locks `privacy.crash_reports` off, and asks it afresh
+//!   just before the POST. Counts turned off while that POST is in flight cancel it. The main
+//!   window's first focus marks later crashes `after_launch`.
 //!
 //! `app_opened` (`cold`) is the host's: it counts it once it has started (`actor/counting.rs`),
 //! so desktop adds none. R23 adds `after_update`.
@@ -296,7 +297,8 @@ pub(crate) fn spawn_ticker(
     tauri::async_runtime::spawn(async move {
         loop {
             tick_once(&counts, &upload, now(), host_counts_on(&cell)).await;
-            crash_tick(&crashes, &counts, &upload, now(), host_switch(&cell)).await;
+            let cell = &cell;
+            crash_tick(&crashes, &counts, &upload, now(), move || host_switch(cell)).await;
             async_io::Timer::after(TICK).await;
         }
     })
@@ -304,18 +306,19 @@ pub(crate) fn spawn_ticker(
 
 /// The crash half of a tick at `now`: reads `switch` (no value: nothing changes, nothing is
 /// sent), then takes in new crash reports, deletes what the switch no longer allows, and sends
-/// the report due ([`send_crash_due`]).
-pub(crate) async fn crash_tick(
+/// the report due ([`send_crash_due`]), calling `switch` again for a fresh read of the host's
+/// settings just before the POST.
+pub(crate) async fn crash_tick<F, Fut>(
     crashes: &Crashes,
     counts: &Counts,
     upload: &dyn Upload,
     now: Time,
-    switch: impl Future<Output = Option<Switch>>,
-) {
-    let Some(switch) = switch.await else {
-        return;
-    };
-    send_crash_due(crashes, counts, upload, now, &|| switch).await;
+    switch: F,
+) where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Option<Switch>>,
+{
+    send_crash_due(crashes, counts, upload, now, switch).await;
 }
 
 /// One tick at `now`: saves on a blocking thread, then reads `effective_on` and makes the POST

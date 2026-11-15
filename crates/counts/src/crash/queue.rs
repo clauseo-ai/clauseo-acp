@@ -1,16 +1,17 @@
 //! The queue on disk and its schedule in memory. A report's file is `<secs>-<id>.json`, `secs`
 //! the crash's Unix time, which gives its age and its first try; the file's bytes never change.
+//! Every read is [`read_capped`]'s, and a file that does not read whole as a report is deleted.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::Path;
 
 use crate::random::Rng;
-use crate::schema::{Day, Event, Time, parse_crash};
+use crate::schema::{Day, Event, Time, crash_body, parse_crash};
 use crate::sender::{Outcome, gzip};
 use crate::{Counts, write};
 
-use super::{CrashPost, Crashes, MAX_AGE_SECS, MAX_QUEUED};
+use super::{CrashPost, Crashes, MAX_AGE_SECS, MAX_QUEUED, read_capped};
 
 /// No crash report goes within this long after a counts POST, and no counts POST within this
 /// long after a crash report.
@@ -129,8 +130,7 @@ pub(super) fn ingest(
     let mut queued = names(&queue_dir).len();
     for (secs, name) in new {
         let path = new_dir.join(&name);
-        let report = std::fs::read(&path)
-            .ok()
+        let report = read_capped(&path)
             .zip(week)
             .and_then(|(bytes, week)| parse_crash(&bytes, week).ok());
         if let Some(report) = &report
@@ -160,8 +160,10 @@ pub(super) fn ingest(
     first
 }
 
-/// See [`Crashes::due`]: the oldest report whose try has come, read back, checked and gzipped.
-/// A report that no longer reads as one is deleted.
+/// See [`Crashes::due`]: the oldest report whose try has come, read back through `parse_crash`,
+/// written again by `crash_body` and gzipped, so only what still passes the schema leaves, in the
+/// app's own bytes. A report that no longer reads as one (changed, too big, not a plain file) is
+/// deleted.
 pub(super) fn due(crashes: &Crashes, now: Time) -> Option<CrashPost> {
     let queue_dir = crashes.queue_dir();
     let week = now.day()?.week();
@@ -180,10 +182,10 @@ pub(super) fn due(crashes: &Crashes, now: Time) -> Option<CrashPost> {
             continue;
         }
         let path = queue_dir.join(&name);
-        let body = std::fs::read(&path)
-            .ok()
-            .filter(|bytes| parse_crash(bytes, week).is_ok())
-            .and_then(|bytes| gzip(&bytes));
+        let body = read_capped(&path)
+            .and_then(|bytes| parse_crash(&bytes, week).ok())
+            .and_then(|report| crash_body(&report, week).ok())
+            .and_then(|json| gzip(&json));
         if let Some(gzip_body) = body {
             return Some(CrashPost { name, gzip_body });
         }

@@ -160,11 +160,13 @@ pub(crate) struct Sender {
     pub(crate) last_post: Option<Time>,
     /// No POST before this: a crash report went less than an hour ago.
     pub(crate) hold_until: Option<Time>,
+    /// Dropped to cancel the crash report's POST in flight, as `in_flight`'s is.
+    crash_cancel: Option<oneshot::Sender<()>>,
 }
 
 impl Sender {
-    /// Counts off: drops every round and the POST in flight (which cancels it), and keeps
-    /// counting post numbers.
+    /// Counts off: drops every round and the POST in flight (which cancels it), a crash
+    /// report's POST in flight too, and keeps counting post numbers.
     pub(crate) fn reset(&mut self) {
         *self = Sender {
             next_id: self.next_id,
@@ -172,6 +174,13 @@ impl Sender {
             hold_until: self.hold_until,
             ..Sender::default()
         };
+    }
+
+    /// A crash report's POST starts: the signal that ends when counts turn off (`reset`).
+    pub(crate) fn crash_post(&mut self) -> Cancelled {
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        self.crash_cancel = Some(cancel_tx);
+        Cancelled(cancel_rx)
     }
 
     /// At the first tick: the daily send goes 0 to 10 minutes from now.

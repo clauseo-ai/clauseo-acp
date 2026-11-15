@@ -5,13 +5,19 @@
 //!   `<data_dir>/crash/new/`: a panic from the host's panic hook ([`Crashes::prepare_panic`]),
 //!   a renderer gone from desktop's webview hook ([`Crashes::record_renderer_gone`]). A native
 //!   crash's handler can only append a line to the file [`Crashes::open_native`] opened at start
-//!   ([`native_line`]); the next start turns that line into a report. The bytes written are the
-//!   bytes sent, before gzip.
+//!   ([`native_line`]); the next start turns that line into a report. A report is read back
+//!   through `parse_crash` and sent as `crash_body` writes it again, so a file changed on disk
+//!   goes only while it still passes the schema, and the bytes sent are the app's own.
+//! - Hostile files: a file under `crash/` is read only when it is a plain file of at most
+//!   `MAX_CRASH_JSON` bytes ([`read_capped`]); the native record is deleted, then made anew
+//!   (`create_new`), so a link put in its place is never followed.
 //! - The tick ([`send_crash_due`], desktop's 60 s tick): each new report adds `crash` to the week's
 //!   tally, then moves into `<data_dir>/crash/queue/` when crash reports may be sent, or is
 //!   deleted. At most [`MAX_QUEUED`] wait, each at most [`MAX_AGE_SECS`].
 //! - Sending: 1 to 24 h after the crash at random, never within an hour of a counts POST, one at
-//!   a time. A 2xx or `400` deletes the report; anything else keeps it for a later try.
+//!   a time. A 2xx or `400` deletes the report; anything else (the Worker's `429` over its
+//!   hourly cap, a `503`, no answer) keeps it for a later try, until its 30 days. Counts turned
+//!   off while the POST is in flight cancel it and delete every report.
 //! - Off: counts off deletes `<data_dir>/crash/` and stops recording; crash reports locked off by
 //!   policy delete every report and still let crashes reach the tally.
 
@@ -20,13 +26,16 @@ mod queue;
 mod record;
 
 use std::fs::File;
-use std::io;
+use std::future::Future;
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::about::About;
-use crate::schema::{RendererGoneReason, Time};
+use crate::schema::{MAX_CRASH_JSON, RendererGoneReason, Time};
+use futures::future::{Either, select};
+
 use crate::sender::Outcome;
 use crate::upload::{Upload, UploadError, UploadPath};
 use crate::write;
@@ -77,6 +86,8 @@ struct Inner {
     launched: AtomicBool,
     /// Whether this process has crashed already: one panic or native report per run.
     crashed: AtomicBool,
+    /// Whether a renderer gone was recorded: one such report per run, apart from the above.
+    renderer_gone: AtomicBool,
     /// The schedule; never taken at crash time.
     queue: Mutex<Queue>,
 }
@@ -92,6 +103,7 @@ impl Crashes {
                 recording: AtomicBool::new(false),
                 launched: AtomicBool::new(false),
                 crashed: AtomicBool::new(false),
+                renderer_gone: AtomicBool::new(false),
                 queue: Mutex::new(Queue::new(seed)),
             }),
         }
@@ -165,9 +177,10 @@ impl Crashes {
         Pending::new(&self.new_dir(), &report, now).ok()
     }
 
-    /// The webview's renderer went: writes its report now, while recording.
+    /// The webview's renderer went: writes its report now, while recording, the first time in
+    /// this run only (a renderer that keeps failing makes one report).
     pub fn record_renderer_gone(&self, reason: RendererGoneReason, now: Time) -> io::Result<()> {
-        if !self.recording() {
+        if !self.recording() || self.inner.renderer_gone.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
         match record::renderer_gone(&self.inner.about, self.launched(), reason, now) {
@@ -178,14 +191,15 @@ impl Crashes {
 
     /// At start, while recording: turns a native crash the last run left into a new report
     /// (the next tick takes it in), then opens the native record empty for this run's handler.
-    /// Not recording, it deletes the record and returns `None`.
+    /// Not recording, it deletes the record and returns `None`. A record past
+    /// [`MAX_CRASH_JSON`] bytes, or not a plain file, holds no report.
     pub fn open_native(&self, now: Time) -> io::Result<Option<File>> {
         let path = self.native_path();
         if !self.recording() {
             write::remove_file(&path)?;
             return Ok(None);
         }
-        if let Ok(bytes) = std::fs::read(&path)
+        if let Some(bytes) = read_capped(&path)
             && let Some(report) = native::report(&bytes, &self.inner.about, now)
         {
             Pending::new(&self.new_dir(), &report, now)?.write()?;
@@ -239,34 +253,69 @@ impl Crashes {
 pub struct CrashPost {
     /// Its file's name, to pass back to [`Crashes::sent`].
     pub name: String,
-    /// The stored bytes, gzipped.
+    /// The stored report as `parse_crash` read it and `crash_body` wrote it again, gzipped.
     pub gzip_body: Vec<u8>,
 }
 
+/// The file at `path` whole, when it is a plain file (not a link) of at most
+/// [`MAX_CRASH_JSON`] bytes: none for a bigger one, any other kind or a failed read. Never reads
+/// more than one byte past the limit.
+pub(crate) fn read_capped(path: &Path) -> Option<Vec<u8>> {
+    if !std::fs::symlink_metadata(path).ok()?.is_file() {
+        return None;
+    }
+    let limit = u64::try_from(MAX_CRASH_JSON).ok()?.saturating_add(1);
+    let mut bytes = Vec::new();
+    File::open(path)
+        .ok()?
+        .take(limit)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() <= MAX_CRASH_JSON).then_some(bytes)
+}
+
 /// The crash half of desktop's tick at `now`: reads `switch`, ingests, and sends the report due,
-/// if any, reading `switch` again just before the POST. A sent report holds counts' POSTs for an
-/// hour after it.
-pub async fn send_crash_due(
+/// if any, reading `switch` afresh just before the POST. No value from `switch` (the host did
+/// not answer) changes nothing and sends nothing. A sent report holds counts' POSTs for an hour
+/// after it. Counts turned off while the POST is in flight cancel it (the request is dropped
+/// and its answer never read) and delete every report.
+pub async fn send_crash_due<F, Fut>(
     crashes: &Crashes,
     counts: &Counts,
     upload: &dyn Upload,
     now: Time,
-    switch: &(dyn Fn() -> Switch + Sync),
-) {
+    switch: F,
+) where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Option<Switch>>,
+{
+    let Some(first) = switch().await else {
+        return;
+    };
     // A failed change is tried again on the next tick.
-    drop(crashes.ingest(counts, switch(), now));
+    drop(crashes.ingest(counts, first, now));
     let Some(post) = crashes.due(counts, now) else {
         return;
     };
-    let switch = switch();
-    if !switch.may_send() {
-        drop(crashes.ingest(counts, switch, now));
+    let Some(again) = switch().await else {
+        return;
+    };
+    if !again.may_send() {
+        drop(crashes.ingest(counts, again, now));
         return;
     }
+    let Some(cancelled) = counts.crash_post() else {
+        return;
+    };
     counts.hold_posts_until(now.plus(queue::COUNTS_GAP_SECS));
-    let outcome = match upload.post(UploadPath::Crash, post.gzip_body).await {
-        Ok(status) => Outcome::Status(status),
-        Err(UploadError) => Outcome::Failed,
+    let outcome = match select(upload.post(UploadPath::Crash, post.gzip_body), cancelled).await {
+        Either::Left((Ok(status), _)) => Outcome::Status(status),
+        Either::Left((Err(UploadError), _)) => Outcome::Failed,
+        Either::Right(((), _)) => {
+            // Off while in flight: the POST is dropped here, and the reports go with counts.
+            drop(crashes.clear());
+            return;
+        }
     };
     crashes.sent(&post.name, outcome, now);
 }

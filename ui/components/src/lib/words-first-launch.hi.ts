@@ -15,6 +15,9 @@ export const HI = {
   "Send anonymous counts.": "गुमनाम गिनती भेजें।",
   "How many questions, which features, how long answers take. Never your papers, your questions or the answers.":
     "कितने प्रश्न, कौन-सी सुविधाएँ, और उत्तर कितना समय लेते हैं। आपके दस्तावेज़, आपके प्रश्न या उत्तर कभी नहीं।",
+  // the welcome's counts line, crash reports with them (0060, UC-750); the line above is Settings'
+  "How many questions, which features, how long answers take, and a short report if Clauseo crashes. Never your papers, your questions or the answers.":
+    "कितने प्रश्न, कौन-सी सुविधाएँ, उत्तर कितना समय लेते हैं, और Clauseo क्रैश हो तो एक छोटी रिपोर्ट। आपके दस्तावेज़, आपके प्रश्न या उत्तर कभी नहीं।",
   "What's sent": "क्या भेजा जाता है",
 
   // getting the agent ready, on the working line (design): its size first, then the download's
