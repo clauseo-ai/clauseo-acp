@@ -114,6 +114,7 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             "the file changed since the list",
         ),
         failed(ErrorCode::WordNotDocx, "not a Word document"),
+        failed(ErrorCode::WordTooLarge, "stetdoc refused: limit_exceeded"),
         failed(ErrorCode::WordEditFailed, "stetdoc timed out"),
         failed(
             ErrorCode::MatterFolderPermission,

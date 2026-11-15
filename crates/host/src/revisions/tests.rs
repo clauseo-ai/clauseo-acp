@@ -267,6 +267,23 @@ fn the_batch_dates_and_names() {
     }
 }
 
+/// `limit_exceeded` and `malformed_input` both exit 6: the code in stetdoc's JSON decides which,
+/// never the exit.
+#[test]
+fn a_limit_and_a_damaged_file_share_exit_6_and_part_by_their_code() {
+    let refusal = |name: &str| format!("{{\"error\":{{\"code\":\"{name}\",\"message\":\"m\"}}}}");
+    assert_eq!(
+        code(answer(Ok(exited(6, &refusal("limit_exceeded"))))),
+        ErrorCode::WordTooLarge
+    );
+    assert_eq!(
+        code(answer(Ok(exited(6, &refusal("malformed_input"))))),
+        ErrorCode::WordNotDocx
+    );
+    // An exit 6 with no code that reads stays a failed run, never either of them.
+    assert_eq!(code(answer(Ok(exited(6, "")))), ErrorCode::WordEditFailed);
+}
+
 #[test]
 fn stetdocs_exits_map_to_codes() {
     assert_eq!(answer(Ok(exited(0, "{\"a\":1}"))).unwrap(), json!({"a": 1}));
@@ -282,6 +299,7 @@ fn stetdocs_exits_map_to_codes() {
         ("stale_files", 4, ErrorCode::WordRevisionsStale),
         ("malformed_input", 6, ErrorCode::WordNotDocx),
         ("corrupt_complement", 6, ErrorCode::WordNotDocx),
+        ("limit_exceeded", 6, ErrorCode::WordTooLarge),
         ("invalid_payload", 2, ErrorCode::WordEditFailed),
         ("internal", 7, ErrorCode::WordEditFailed),
     ] {

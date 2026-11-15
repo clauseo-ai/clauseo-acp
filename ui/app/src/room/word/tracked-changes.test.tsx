@@ -486,6 +486,32 @@ test("a file the tool can't read, and no tool, say their lines in place of the l
   }
 });
 
+test("a file over a size limit says it is too large, never that it may be damaged", async () => {
+  h = await mount({
+    list: () => {
+      throw refusal("word.too_large");
+    },
+  });
+  await openChanges();
+  expect(line()).toBe("This file is too large for Clauseo to show its tracked changes.");
+  expect(line()).not.toContain("damaged");
+  expect(rows()).toHaveLength(0);
+  expect(panel()?.querySelector(".rd-accept-all")).toBeNull();
+  expect(panel()?.querySelector('[data-testid="word-changes-retry"]')).toBeNull();
+});
+
+test("a file the tool can't read still says it may be damaged", async () => {
+  h = await mount({
+    list: () => {
+      throw refusal("word.not_docx");
+    },
+  });
+  await openChanges();
+  expect(line()).toBe(
+    "Clauseo can't read the tracked changes in this file. It may be damaged, or it may not be a Word document.",
+  );
+});
+
 test("a failed edit says so with Try again, which sends the decision again as a new command", async () => {
   let fails = true;
   h = await mount({

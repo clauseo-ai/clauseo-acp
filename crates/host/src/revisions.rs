@@ -286,8 +286,9 @@ impl Copy {
     /// Empties the job's folder, then copies the matter's file into it. A path missing or
     /// reached through a link out of the folder is `missing`; one that is there but not a
     /// regular file (a folder) is `word.not_docx`. The file is read with downloads off: one that
-    /// is cloud-only or over the size cap is never opened and is `word.edit_failed`
-    /// (`Matter::read_local`), as no write of it could be checkpointed.
+    /// is cloud-only or over the size cap is never opened (`Matter::read_local`), as no write of
+    /// it could be checkpointed: over the cap it is `word.too_large`, cloud-only
+    /// `word.edit_failed`.
     fn take(matter: &Matter, job: &RevisionsJob, missing: ErrorCode) -> Result<Self, Error> {
         let no_such = || Error::refused(missing, "the matter has no such file");
         match inside(matter.folder(), &job.path) {
@@ -307,6 +308,11 @@ impl Copy {
                 }
                 return io_error("read the file", source);
             }
+            if matches!(err, clauseo_matters::Error::NotVersioned { .. })
+                && over_cap(&matter.folder().join(job.path.as_str()))
+            {
+                return Error::refused(ErrorCode::WordTooLarge, "the file is over the size cap");
+            }
             Error::Matters(err)
         })?;
         write::remove_tree(&job.work).map_err(|err| io_error("empty the work folder", &err))?;
@@ -320,6 +326,13 @@ impl Copy {
         let version = DocVersion::from_bytes(Sha256::digest(&bytes).into());
         Ok(Self { read, version })
     }
+}
+
+/// Whether the file at `file` is over the matters' size cap (`clauseo_matters::FILE_CAP_BYTES`,
+/// the cap the host's matters keep), so a refused read of it was the cap and not a cloud-only
+/// file. Reads the length only, which downloads nothing.
+fn over_cap(file: &Path) -> bool {
+    std::fs::metadata(file).is_ok_and(|metadata| metadata.len() > clauseo_matters::FILE_CAP_BYTES)
 }
 
 /// What `folder`/`path` is.

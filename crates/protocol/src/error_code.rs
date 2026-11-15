@@ -387,6 +387,10 @@ error_codes! {
         service, or a proxy or firewall in front of it, refused, timed out or blocked the \
         connection, or its name did not resolve. The answer so far is kept; asking again can \
         work.";
+    WordTooLarge = "word.too_large", retryable: false, meaning: "The Word file is over the \
+        matters' size cap (512,000,000 bytes) or one of stetdoc's limits (its `limit_exceeded`: \
+        the package's size, entry count or compression ratio, an XML part's size, depth or node \
+        count), so its tracked changes were not read or decided.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

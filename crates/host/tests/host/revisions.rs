@@ -395,6 +395,21 @@ fn a_folder_is_not_docx() {
     rig.host.shutdown();
 }
 
+/// A file over the matters' size cap is too large, never a file that is not Word's: stetdoc
+/// never runs on it.
+#[test]
+fn a_file_over_the_size_cap_is_too_large() {
+    let rig = Rig::new("revisions-over-cap", true);
+    write::sized(
+        &rig.folder.join("Huge.docx"),
+        clauseo_matters::FILE_CAP_BYTES + 1,
+    );
+    let error = rig.list("Huge.docx").unwrap_err();
+    assert_eq!(error.code(), ErrorCode::WordTooLarge);
+    assert!(rig.calls().is_empty(), "stetdoc ran: {:?}", rig.calls());
+    rig.host.shutdown();
+}
+
 #[test]
 fn a_file_open_in_word_is_refused_before_stetdoc_runs() {
     let rig = Rig::new("revisions-locked", true);
@@ -448,6 +463,7 @@ fn stetdoc_failing_or_answering_badly_is_a_failed_edit_and_writes_nothing() {
         ("garbage", ErrorCode::WordEditFailed),
         ("not_found 3", ErrorCode::WordRevisionsStale),
         ("malformed_input 6", ErrorCode::WordNotDocx),
+        ("limit_exceeded 6", ErrorCode::WordTooLarge),
     ] {
         write::write(&rig.bin.join("edit.txt"), script.as_bytes());
         rig.host

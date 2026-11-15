@@ -225,7 +225,8 @@ pub enum HostQuery {
     },
     /// The tracked changes of one Word file of a matter, read with stetdoc from a private copy
     /// (`revisions.rs`). Answered `QueryResult::Revisions`. Writes nothing. A file that is not
-    /// a `.docx` or does not read as one is `word.not_docx`; no stetdoc, `word.stetdoc_missing`.
+    /// a `.docx` or does not read as one is `word.not_docx`; one over stetdoc's limits,
+    /// `word.too_large`; no stetdoc, `word.stetdoc_missing`.
     ListRevisions {
         /// The matter.
         matter: MatterId,
