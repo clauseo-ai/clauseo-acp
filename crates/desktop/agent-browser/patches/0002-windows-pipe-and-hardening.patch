@@ -39,7 +39,7 @@ only; macOS and Linux behave as upstream (plus 0001).
   with the logon SID among its restricting SIDs (so the probe can open its desktop), or a
   filtered one without SeDebugPrivilege or Administrators; a failed check prints both tokens.
 - tests/mcp_call_cli.rs (every OS, test only): the subprocess timeout (10 s) can be raised with
-  AB_TEST_SUBPROCESS_TIMEOUT_SECS, which the build workflow sets for x86_64 macOS under Rosetta;
+  AB_TEST_SUBPROCESS_TIMEOUT_SECS, which agent-browser-build.mjs sets for x86_64 macOS under Rosetta;
   the user-config test does not run on Windows, where dirs::home_dir() ignores HOME and
   USERPROFILE.
 

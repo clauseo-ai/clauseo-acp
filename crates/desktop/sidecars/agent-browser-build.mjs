@@ -25,6 +25,9 @@
 // pin's two lines for that triple. .github/workflows/agent-browser-build.yml runs it on a runner
 // per triple (native, except x64 macOS, cross-compiled on an ARM64 Mac).
 //
+// An x86_64 macOS build tested on an ARM64 Mac runs its tests under Rosetta, so its CLI subprocess
+// tests get 60 s each instead of 10 (`testEnv`).
+//
 // `build` refuses to run when `git status` shows uncommitted changes in the patches folder, and
 // when the toolchain's `rustc -vV` commit-hash is not the pin's `rustc_commit`.
 //
@@ -366,6 +369,22 @@ function linkerVersions(env) {
   return { msvc_tools: tools, link: null };
 }
 
+/** The seconds upstream's CLI subprocess tests (tests/mcp_call_cli.rs) wait under Rosetta. */
+export const ROSETTA_TEST_TIMEOUT_SECS = '60';
+
+/**
+ * `env` for `cargo test`: an x86_64 macOS build tested on an ARM64 Mac runs its tests under
+ * Rosetta, where the first launches of the binary are slow, so the CLI subprocess tests get
+ * AB_TEST_SUBPROCESS_TIMEOUT_SECS=60 instead of their 10 s, unless it is set already. Here and
+ * not in the workflow: the workflow file is read from the branch it is dispatched on, this
+ * script from the commit it builds.
+ */
+export function testEnv(env, triple, host = { platform: process.platform, arch: process.arch }) {
+  const rosetta = triple === 'x86_64-apple-darwin' && host.platform === 'darwin' && host.arch === 'arm64';
+  if (!rosetta || env.AB_TEST_SUBPROCESS_TIMEOUT_SECS) return env;
+  return { ...env, AB_TEST_SUBPROCESS_TIMEOUT_SECS: ROSETTA_TEST_TIMEOUT_SECS };
+}
+
 /** The value of `key = "..."` among the lines of the first section headed `header` that `match`es. */
 function sectionValue(text, header, key, match = () => true) {
   for (const section of text.replace(/\r\n/g, '\n').split(/^(?=\[)/m)) {
@@ -432,7 +451,7 @@ async function build({ target, out }, { pin, patchDir, log, fetch }) {
       throw new Error(`agent-browser: rustc's commit-hash is ${found}, the pin's rustc_commit is ${pin.rustcCommit}`);
     }
     // The tests first: a failing one stops the build, so nothing untested is published.
-    run('cargo', ['test', '--locked', '--target', target], { cwd: join(src, 'cli'), env });
+    run('cargo', ['test', '--locked', '--target', target], { cwd: join(src, 'cli'), env: testEnv(env, target) });
     run('cargo', ['build', '--release', '--locked', '--target', target], { cwd: join(src, 'cli'), env });
 
     const outDir = resolve(out);
