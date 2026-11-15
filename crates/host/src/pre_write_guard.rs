@@ -78,6 +78,12 @@
 //!     none (a default output: `textutil -convert docx Contract.txt`), as are `stetdoc mcp` and
 //!     `stetdoc init` outright; an unknown subcommand or option in a command naming a held file is
 //!     refused.
+//!   - stetdoc's reads, which Claude's allow rules run with no question: with the fence
+//!     Claude's entry passes (`--fence-*`, `names::GuardFence`), a `view`, `inspect`,
+//!     `check` or `lookup` whose document's real path lies in the data folder (but the
+//!     session's own folders), another matter's folder or a protected root is refused, and so
+//!     is one whose document it can't follow (`names::stetdoc`'s `reads`). Anywhere else, a
+//!     template in the lawyer's Documents too, it reads as before.
 //!
 //!   Not caught: the guard stops an agent overwriting a held document by accident; it is not a
 //!   boundary against an agent set on evading it (stage C's sandbox is). It misses a command
@@ -170,6 +176,7 @@ use serde_json::Value;
 use codex::{has_codex_part, in_codex_folder, patch_targets};
 // The data folder fence reads a command's `sh -c` scripts as this guard does
 // (`agent/data_fence/command.rs`).
+pub(crate) use names::GuardFence;
 use reach::Reach;
 pub(crate) use shell::script as shell_script;
 use shell::{shell_targets, walked_resolutions};
@@ -218,7 +225,11 @@ fn run_timed(
     let found = match input.take(MAX_INPUT).read_to_end(&mut bytes) {
         Ok(_) => {
             timings::mark("read");
-            refusal(&bytes, matter_arg(args).as_deref())
+            refusal(
+                &bytes,
+                matter_arg(args).as_deref(),
+                &GuardFence::from_args(args),
+            )
         }
         Err(_) => Err(Ignored::Unreadable),
     };
@@ -307,6 +318,8 @@ enum Refusal {
     CodexFolder,
     /// A shell command runs `stetdoc mcp` or `stetdoc init`.
     StetdocServe,
+    /// A stetdoc read's document lies in a fenced place (`names::stetdoc`'s `reads`).
+    StetdocRead(names::Fenced),
 }
 
 impl Refusal {
@@ -324,16 +337,53 @@ impl Refusal {
             Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
                                    in its shell: run the stetdoc command you need directly."
                 .to_owned(),
+            Self::StetdocRead(fenced) => read_reason(fenced),
         }
+    }
+}
+
+/// What the agent is told for a fenced stetdoc read. Another matter's says "was denied" and
+/// names the matter's folder, words #1085's refusal detector (`outside/refused_call.rs`:
+/// `PHRASES`, `names_fenced`) takes for a refusal on that matter, so its offer to invite
+/// the matter can follow. The others are plain refusals.
+fn read_reason(fenced: &names::Fenced) -> String {
+    match fenced {
+        names::Fenced::Matter(word, folder) => format!(
+            "Reading {word} with stetdoc was denied: it is in another matter's folder ({}), \
+             which this conversation has no access to. Tell the lawyer it is another matter's \
+             folder.",
+            folder.display()
+        ),
+        names::Fenced::Data(word) => format!(
+            "Clauseo doesn't let the agent read {word} with stetdoc: it is in Clauseo's own data \
+             folder."
+        ),
+        names::Fenced::Protected(word) => format!(
+            "Clauseo doesn't let the agent read {word} with stetdoc: it is in a place Clauseo \
+             protects on this computer."
+        ),
+        names::Fenced::Unchecked(word) => format!(
+            "Clauseo couldn't tell where {word} leads, so this stetdoc command doesn't run. Give \
+             stetdoc the document's full path, with no variable, ~, wildcard or link it can't \
+             follow, and no folder change in the same command."
+        ),
+        names::Fenced::Overflow(word) => format!(
+            "Clauseo couldn't check {word} against this computer's other matters, so stetdoc may \
+             read only in this matter's folder and the session's own folders now."
+        ),
     }
 }
 
 /// Why the hook input `bytes` is refused, if it is, with `matter` the folder from the
 /// arguments: a patch target in the matter's `.codex` folder, or under Codex's hook (no
 /// `matter`) a `Bash` word with a `.codex` part, else the first target that lies in the matter
-/// folder and is held open. [`Ignored`] when the input cannot be read or has a shape the guard
-/// does not know.
-fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignored> {
+/// folder and is held open; before that, a stetdoc read `fence` refuses. [`Ignored`] when the
+/// input cannot be read or has a shape the guard does not know.
+fn refusal(
+    bytes: &[u8],
+    matter: Option<&Path>,
+    fence: &GuardFence,
+) -> Result<Option<Refusal>, Ignored> {
     if bytes.iter().all(u8::is_ascii_whitespace) {
         return Err(Ignored::Empty);
     }
@@ -398,6 +448,11 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
             escape,
             ..
         } => {
+            let disk = crate::network_paths::resolve::Disk::real(reach.net());
+            let read = names::fenced_read(text, *escape, (&base, &folder), fence, &disk);
+            if let Some(fenced) = read {
+                return Ok(Some(Refusal::StetdocRead(fenced)));
+            }
             if let Some(path) = listed(held_at(patch)) {
                 timings::mark("resolve");
                 return Ok(Some(Refusal::HeldOpen(path)));

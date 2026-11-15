@@ -298,6 +298,9 @@ pub(crate) struct GuardHook<'a> {
     /// Forced ask (`agent/forced_ask.rs`): the hook runs before every tool, with
     /// [`ASK_ALL_FLAG`](crate::agent::forced_ask::ASK_ALL_FLAG) after the folder.
     pub(crate) ask_all: bool,
+    /// Where stetdoc's reads may not go (`pre_write_guard::GuardFence`), passed after the rest;
+    /// none in a test about other keys.
+    pub(crate) fence: Option<&'a crate::pre_write_guard::GuardFence>,
 }
 
 /// The tools the pre-write guard's hook runs before: Claude Code's file tools (`MultiEdit` is
@@ -311,7 +314,8 @@ pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 
 /// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
 /// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools;
-/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` last.
+/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` after the
+/// folder; then the stetdoc read fence's arguments (`fence`, `GuardFence::args`).
 /// The matter folder goes as an argument because the hook input's `cwd` follows the agent's
 /// `cd`. `None`, with a warning, when `program` or `matter` is no UTF-8 string: JSON cannot
 /// carry it, and a lossy copy could run another program or guard another folder.
@@ -333,6 +337,7 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         program,
         matter,
         ask_all,
+        fence,
     } = guard;
     let (Some(command), Some(matter)) = (program.to_str(), matter.to_str()) else {
         tracing::warn!(
@@ -341,17 +346,24 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         );
         return None;
     };
-    let mut args = vec![
+    let mut args: Vec<String> = [
         crate::pre_write_guard::FLAG,
         crate::pre_write_guard::MATTER_FLAG,
         matter,
-    ];
+    ]
+    .map(str::to_owned)
+    .to_vec();
     let matcher = if ask_all {
-        args.push(crate::agent::forced_ask::ASK_ALL_FLAG);
+        args.push(crate::agent::forced_ask::ASK_ALL_FLAG.to_owned());
         crate::agent::forced_ask::EVERY_TOOL
     } else {
         GUARD_MATCHER
     };
+    args.extend(
+        fence
+            .map(crate::pre_write_guard::GuardFence::args)
+            .unwrap_or_default(),
+    );
     Some(serde_json::json!({
         "matcher": matcher,
         "hooks": [{

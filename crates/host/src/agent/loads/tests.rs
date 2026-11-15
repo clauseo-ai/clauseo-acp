@@ -155,6 +155,7 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
         program: &program,
         matter: &matter,
         ask_all: false,
+        fence: None,
     });
     let entry = json!({
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
@@ -218,6 +219,7 @@ fn a_path_that_is_not_utf8_gets_no_entry() {
         program,
         matter,
         ask_all: false,
+        fence: None,
     };
     assert_eq!(guard_entry(hook(odd, plain)), None);
     assert_eq!(guard_entry(hook(plain, odd)), None);

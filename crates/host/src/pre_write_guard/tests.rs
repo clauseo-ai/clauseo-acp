@@ -525,4 +525,5 @@ mod codex;
 mod devanagari;
 mod fixtures;
 mod gaps;
+mod stetdoc_reads;
 mod timings;

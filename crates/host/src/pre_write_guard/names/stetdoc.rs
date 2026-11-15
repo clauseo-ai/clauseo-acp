@@ -7,6 +7,10 @@ use crate::pre_write_guard::shell::command_words;
 use crate::stetdoc_args::parse;
 use crate::stetdoc_args::{Form, args_of, form};
 
+mod reads;
+pub(crate) use reads::GuardFence;
+pub(in crate::pre_write_guard) use reads::{Fenced, fenced_read};
+
 /// What a `stetdoc` segment does to held files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::pre_write_guard) enum Stetdoc<'a> {

@@ -24,6 +24,9 @@ use crate::browser::seed_sites::SEED_SITES;
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
 
+mod fence;
+use fence::{built_in_skills, guard_fence, other_matter_folders};
+
 /// `tools.web_search` and `tools.browser`, with whether each is locked.
 fn switches(actor: &Actor) -> (Switch, Switch) {
     let tools = &actor.effective.settings().tools;
@@ -216,6 +219,7 @@ pub(super) fn session_loads(
         matter: Some(matter),
         trusted_servers: &trusted,
     });
+    let fence = guard_fence(actor, &run);
     let guard = actor
         .pre_write_guard
         .as_deref()
@@ -223,6 +227,7 @@ pub(super) fn session_loads(
             program,
             matter,
             ask_all: forced_ask,
+            fence: Some(&fence),
         });
     // Without the guard's hook, a forced-ask session would rest on the ask rules alone, and a
     // hook that is missing fails open: refuse it.
@@ -312,24 +317,9 @@ fn claude_sandbox(
     matter: &Path,
 ) -> Result<ClaudeSandbox, Off> {
     let tmp = crate::agent::temp::temp_dir(&run.root);
-    let skills: Vec<PathBuf> = run
-        .data_deny
-        .spellings
-        .iter()
-        .map(|data| {
-            crate::agent::data_fence::BUILT_IN_SKILLS
-                .iter()
-                .fold(data.clone(), |path, name| path.join(name))
-        })
-        .collect();
+    let skills = built_in_skills(run);
     let claude_home = actor.effective.locations().agent_home(agent_id.as_str());
-    // Every other matter's folder the host knows now; one registered later is the residual.
-    let other_matters: Vec<PathBuf> = actor
-        .matters
-        .iter()
-        .filter(|(id, _)| **id != run.key.matter)
-        .map(|(_, entry)| PathBuf::from(&entry.row.folder_path))
-        .collect();
+    let other_matters = other_matter_folders(actor, run);
     let paths = SandboxPaths {
         matter,
         work: &run.work,
