@@ -323,3 +323,32 @@ fn a_prompt_sent_right_after_a_withdrawal_runs_on_the_new_rules() {
     );
     rig.finish();
 }
+
+/// The limited notice is told once while it lasts; a launch without the limit (any agent but a
+/// limited Claude, `profile_loads::claude_fence`) ends it, so the next limited launch tells it
+/// again.
+#[test]
+fn a_launch_without_the_limit_ends_it_so_the_next_tells_again() {
+    use clauseo_protocol::{DomainEvent, NoticeKind};
+
+    use super::super::outside::fence::tell_limited;
+
+    let mut rig = Rig::start("turn-shell-limited-again", "");
+    let thread = rig.thread();
+    let told = |rig: &mut Rig| {
+        rig.settle_commits();
+        let log = rig.log(thread);
+        log.iter()
+            .filter(|event| {
+                matches!(event, DomainEvent::Notice(notice)
+                    if notice.kind == Some(NoticeKind::ShellLimited))
+            })
+            .count()
+    };
+    tell_limited(&mut rig.actor, thread, true);
+    tell_limited(&mut rig.actor, thread, true);
+    assert_eq!(told(&mut rig), 1);
+    tell_limited(&mut rig.actor, thread, false);
+    tell_limited(&mut rig.actor, thread, true);
+    assert_eq!(told(&mut rig), 2);
+}

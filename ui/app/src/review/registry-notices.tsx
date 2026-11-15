@@ -99,8 +99,8 @@ const CONTEXT_NOTICE = notice(6, { text: CONTEXT, kind: "context_not_restored" }
 /** Claude's auto mode isn't available, so the session runs in acceptEdits. */
 const AUTO_NOTICE = notice(6, { text: AUTO_UNAVAILABLE, kind: "auto_mode_unavailable" });
 const LIMITED =
-  "Claude's commands can't open this matter's files right now; it can still read and edit them.";
-/** Another matter inside this one, and its entries couldn't be re-opened safely: Claude's commands can't open it. */
+  "Claude's commands can't reach some folders right now; it can still read and edit this matter's files.";
+/** Claude's sandbox keeps its commands out of some folders: a matter inside this one, or a deny widened. */
 const LIMITED_NOTICE = notice(6, { level: "info", text: LIMITED, kind: "shell_limited" });
 const BLOCKED = "Clauseo stopped a step: {name} tried to reach outside this matter.";
 const BLOCKED_ALONE = "Clauseo stopped a step: the AI tried to reach outside this matter.";

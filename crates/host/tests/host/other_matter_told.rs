@@ -194,15 +194,19 @@ fn lower_drive(path: &Path) -> String {
 
 /// Claude Code's words drift, so they are not the only sign: a failed Read in a matter the
 /// conversation is not invited into is named whatever it says (a directory deny's words with
-/// the drive in lower case; words no release has used), and so is a failed command whose text
-/// names such a matter's folder; a failed Read in the conversation's own matter is not.
+/// the drive in lower case; words no release has used); a failed Read in the conversation's
+/// own matter is not. Nor is a matter only a call's output names: a document in the matter
+/// that spells Doe's folder, printed by a `grep` that fails on a missing file and a locked one,
+/// offers nothing.
 #[test]
-fn a_failed_read_or_command_in_another_matter_is_named_whatever_its_words() {
+fn a_failed_read_in_another_matter_is_named_whatever_its_words_and_output_names_none() {
     let dir = Dir::new("other_matter_any_words", &[]);
     let folder = dir.folder("m", &[("a.txt", "a")]);
     let smith = dir.folder("Smith", &[("lease.pdf", "x")]);
     let jones = dir.folder("Jones", &[("deed.pdf", "y")]);
     let doe = dir.folder("Doe", &[("will.pdf", "z")]);
+    let planted = format!("see {}", doe.display());
+    write::write(&folder.join("received.txt"), planted.as_bytes());
     let own = dunce::canonicalize(&folder).unwrap();
     let lease = dunce::canonicalize(smith.join("lease.pdf")).unwrap();
     let deed = dunce::canonicalize(jones.join("deed.pdf")).unwrap();
@@ -231,11 +235,15 @@ fn a_failed_read_or_command_in_another_matter_is_named_whatever_its_words() {
         &json!({"file_path": deed}),
         "Access blocked by policy",
     ));
-    let words = format!("ls: cannot open '{}': no luck", will.display());
+    let words = format!(
+        "./received.txt:1:see {}\ngrep: missing.txt: No such file or directory\n\
+         grep: ./locked: Permission denied",
+        will.display()
+    );
     lines.extend(failed_call(
         "t3",
         "execute",
-        &json!({"command": "ls x"}),
+        &json!({"command": "grep -rn Doe . missing.txt"}),
         &words,
     ));
     lines.push(json!({"respond": {"to": "p1", "result": {"stopReason": "end_turn"}}}));
@@ -247,7 +255,7 @@ fn a_failed_read_or_command_in_another_matter_is_named_whatever_its_words() {
     let matter = host.create_matter("m", &folder);
     let smith = host.create_matter("Smith", &smith);
     let jones = host.create_matter("Jones", &jones);
-    let doe = host.create_matter("Doe", &doe);
+    host.create_matter("Doe", &doe);
     let thread = host.create_thread(matter, FAKE);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Read them.");
@@ -264,11 +272,7 @@ fn a_failed_read_or_command_in_another_matter_is_named_whatever_its_words() {
     };
     assert_eq!(
         kinds(&events),
-        [
-            named(smith, "Smith"),
-            named(jones, "Jones"),
-            named(doe, "Doe")
-        ],
+        [named(smith, "Smith"), named(jones, "Jones")],
         "{}",
         events.dump()
     );

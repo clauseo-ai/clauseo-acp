@@ -16,19 +16,22 @@
 //! that is denied by your permission settings."), so the words are not the only sign: a failed
 //! Read or Edit (a Write is one) on a path in a matter the conversation is not invited into is
 //! a refusal whatever it says (the deny is what stops it there; a missing file there offering
-//! the invite is harmless), and so is any failed call whose text names such a matter's folder.
-//! The words still count for the rest (a shell call's paths can't all be read).
+//! the invite is harmless). The words still count for the rest (a shell call's paths can't all
+//! be read). The matter named is only ever one the call's own arguments target: its path
+//! argument, or a path word of its command, matched whole name by name as the fence matches
+//! (`matter_fence::innermost`). What a call printed never names one: a document in the matter
+//! that spells another matter's folder, printed by a failing `grep`, would otherwise have
+//! Clauseo offer the lawyer to open that other client's matter.
 
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{
-    ContentBlock, MatterId, TextOrBlob, ThreadId, ToolCallContent, ToolCallStatus, ToolKind,
-    ToolLocation,
+    ContentBlock, TextOrBlob, ThreadId, ToolCallContent, ToolCallStatus, ToolKind, ToolLocation,
 };
 
 use super::super::super::Actor;
 use super::super::current;
-use crate::agent::matter_fence::{MatterFence, innermost};
+use crate::agent::matter_fence::innermost;
 use crate::sent::CallFields;
 
 /// Words in a failed call's output that say it was refused: the OS's (`access is denied`,
@@ -73,11 +76,6 @@ pub(in crate::actor::turn) fn seen(
     let found = paths(fields, &own);
     let failed = fields.status == Some(ToolCallStatus::Failed);
     let refused = failed && says_refused(fields.content, raw_output);
-    let named_in_text = if failed {
-        names_fenced(fence, fields.content, raw_output)
-    } else {
-        None
-    };
     let Some(current) = current(actor, thread) else {
         return;
     };
@@ -109,59 +107,11 @@ pub(in crate::actor::turn) fn seen(
     };
     let fence = &run.data_deny.matters;
     let hit = named.iter().find_map(|path| innermost(fence, path));
-    let matter = match hit {
-        Some(other) if refused || (file_call && !other.invited) => Some(other.id),
-        _ => named_in_text,
-    };
-    if let Some(matter) = matter {
-        super::tell_other_matter(actor, thread, matter);
+    if let Some(other) = hit
+        && (refused || (file_call && !other.invited))
+    {
+        super::tell_other_matter(actor, thread, other.id);
     }
-}
-
-/// The matter the conversation is not invited into whose folder (a spelling of it) a failed
-/// call's text or `rawOutput` names, followed by a separator or the end of a word; case folded,
-/// and on Windows `/` read as `\`.
-fn names_fenced(
-    fence: &MatterFence,
-    content: &[ToolCallContent],
-    raw_output: Option<&TextOrBlob>,
-) -> Option<MatterId> {
-    let fold = |text: &str| {
-        let text = text.to_lowercase();
-        if cfg!(windows) {
-            text.replace('/', "\\")
-        } else {
-            text
-        }
-    };
-    let texts: Vec<String> = texts(content, raw_output).map(|text| fold(&text)).collect();
-    // A name goes on past the folder with a letter, a digit, `_`, `-`, or a `.` before more.
-    let holds = |text: &str, folder: &str| {
-        text.match_indices(folder).any(|(at, _)| {
-            let mut rest = text.get(at + folder.len()..).unwrap_or_default().chars();
-            let goes_on = |c: char| c.is_alphanumeric() || matches!(c, '_' | '-');
-            match rest.next() {
-                None => true,
-                Some('.') => !rest.next().is_some_and(goes_on),
-                Some(c) => !goes_on(c),
-            }
-        })
-    };
-    fence
-        .others
-        .iter()
-        .filter(|other| !other.invited)
-        .find(|other| {
-            other
-                .spellings
-                .iter()
-                .filter_map(|s| s.to_str())
-                .any(|folder| {
-                    let folder = fold(folder);
-                    folder.len() > 3 && texts.iter().any(|text| holds(text, &folder))
-                })
-        })
-        .map(|other| other.id)
 }
 
 /// The paths `fields` name: each location (a matter path taken from `own`, the matter
