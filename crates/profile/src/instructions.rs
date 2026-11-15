@@ -54,9 +54,9 @@ pub fn connectors_part(with_case_law: bool) -> &'static str {
 pub const BROWSER: &str = include_str!("../assets/instructions/browser.txt");
 
 /// What a session without the browser is told when the lawyer or the firm turned it off, the
-/// firm's browser policy left it out, or it is a Claude session on macOS or Linux, where Claude
-/// has no browser for launch (`servers::no_browser`): Claude then reads pages with its web fetch
-/// tool and `curl`.
+/// firm's browser policy left it out, the agent has no browser on this OS (`servers::no_browser`)
+/// or it is a Claude session whose sandbox fell back off (the host's `profile_loads::claude`):
+/// Claude then reads pages with its web fetch tool and `curl`.
 pub const BROWSER_OFF: &str = include_str!("../assets/instructions/browser-off.txt");
 
 /// What a session without the browser is told when no supported browser is installed: one plain
@@ -65,8 +65,15 @@ pub const BROWSER_NONE: &str = include_str!("../assets/instructions/browser-none
 
 /// What a Codex session with the browser gets instead of [`BROWSER`]: Codex has no shell browser
 /// (its sandbox blocks it, approved or not), only the `browser` MCP entry's tools
-/// (`servers::browser_mcp`), so the part names those tools and never `agent-browser`.
+/// (`servers::browser_mcp`), so the part names those tools and never `agent-browser`. Its shell
+/// has no network, so it saves a file only by the browser, which delivers it to the matter.
 pub const BROWSER_CODEX: &str = include_str!("../assets/instructions/browser-codex.txt");
+
+/// What a Claude session with the `browser` MCP entry gets: [`BROWSER_CODEX`]'s rules without
+/// "your shell has no internet", which is false for Claude (its sandbox lets `curl` reach any
+/// public host), and with the same way to save a file: click or open its link, and the guard
+/// delivers it to `downloads/` in the matter.
+pub const BROWSER_CLAUDE_MCP: &str = include_str!("../assets/instructions/browser-claude-mcp.txt");
 
 /// The line a Codex session on macOS gets after the instructions (D-045): Codex runs an approved
 /// ("escalated") command under Seatbelt too, whose base policy blocks the mach-lookup of system
@@ -180,11 +187,11 @@ pub fn claude_scale(research: bool) -> Option<String> {
 /// Which browser part a session gets in place of `{browser}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserPart {
-    /// The session has the browser: Claude the `agent-browser` command ([`BROWSER`]), Codex the
-    /// `browser` MCP entry's tools ([`BROWSER_CODEX`]).
+    /// The session has the browser: the `browser` MCP entry's tools ([`BROWSER_CODEX`],
+    /// [`BROWSER_CLAUDE_MCP`]), or the dormant `agent-browser` command ([`BROWSER`]).
     On,
-    /// Turned off, left out by policy, or no browser for this agent on this OS (Claude anywhere,
-    /// Codex on Windows, `servers::no_browser`): [`BROWSER_OFF`].
+    /// Turned off, left out by policy, or no browser for this agent here (either agent on
+    /// Windows, `servers::no_browser`; Claude with its sandbox off): [`BROWSER_OFF`].
     Off,
     /// No supported browser on this computer: [`BROWSER_NONE`].
     NotInstalled,
@@ -206,16 +213,30 @@ pub fn browser_part(part: BrowserPart) -> &'static str {
     }
 }
 
-/// [`browser_part`], with [`BROWSER_CODEX`] in place of the shell rules for a session that has
-/// the browser through the `browser` MCP entry (`mcp`: Codex's, `servers::browser_mcp`). A
-/// session with the shell tool (Claude's) gets the shell rules, never the entry's line.
-pub fn browser_part_for(part: BrowserPart, mcp: bool) -> &'static str {
+/// How a session with the browser reaches it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserRoute {
+    /// The `agent-browser` shell command (no agent's for launch, `servers::shell_browser`).
+    Shell,
+    /// Codex's `browser` MCP entry (`servers::browser_mcp`).
+    CodexEntry,
+    /// Claude's `browser` MCP entry (`servers::browser_mcp`).
+    ClaudeEntry,
+}
+
+/// [`browser_part`], with the entry's part in place of the shell rules for a session that has
+/// the browser through the `browser` MCP entry: [`BROWSER_CODEX`] for Codex,
+/// [`BROWSER_CLAUDE_MCP`] for Claude. A session with the shell tool gets the shell rules, never
+/// an entry's line.
+pub fn browser_part_for(part: BrowserPart, route: BrowserRoute) -> &'static str {
     static ON_CODEX: std::sync::LazyLock<String> =
         std::sync::LazyLock::new(|| format!(" {}", BROWSER_CODEX.trim()));
-    if mcp && part == BrowserPart::On {
-        &ON_CODEX
-    } else {
-        browser_part(part)
+    static ON_CLAUDE: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", BROWSER_CLAUDE_MCP.trim()));
+    match (part, route) {
+        (BrowserPart::On, BrowserRoute::CodexEntry) => &ON_CODEX,
+        (BrowserPart::On, BrowserRoute::ClaudeEntry) => &ON_CLAUDE,
+        _ => browser_part(part),
     }
 }
 

@@ -162,7 +162,7 @@ fn meta(forced_ask: bool) -> Value {
         forced_ask,
         data: &NO_DENY,
         case_law: false,
-        browser: false,
+        browser: crate::agent::loads::profile::ClaudeBrowser::None,
         sandbox: None,
         matter: Some(Path::new(MATTER)),
         trusted_servers: &[],

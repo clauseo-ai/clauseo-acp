@@ -179,6 +179,7 @@ fn notice_kind() {
         r#""shell_network_blocked_no_web_search""#,
         &NoticeKind::ShellNetworkBlockedNoWebSearch,
     );
+    decodes_in_both(r#""sandbox_off""#, &NoticeKind::SandboxOff);
     let pack = PackId::new("nda-kit").unwrap();
     let skipped = NoticeKind::SkillPackNotLoaded {
         pack,

@@ -348,7 +348,7 @@ fn claude_pre_allows_case_law_only_with_our_entry() {
     use crate::agent::loads::profile::{ClaudeKeys, Folders, Login, claude_options};
     let allowed = |case_law: bool, forced_ask: bool| {
         let mut options = json!({"allowedTools": [
-            "mcp__browser", "mcp__case-law", "mcp__case-law__search_law", "mcp__case-law-firm"
+            "mcp__docs", "mcp__case-law", "mcp__case-law__search_law", "mcp__case-law-firm"
         ]})
         .as_object()
         .cloned()
@@ -369,7 +369,7 @@ fn claude_pre_allows_case_law_only_with_our_entry() {
             forced_ask,
             data: &crate::agent::data_fence::LaunchDeny::default(),
             case_law,
-            browser: false,
+            browser: crate::agent::loads::profile::ClaudeBrowser::None,
             sandbox: None,
             matter: None,
             trusted_servers: &[],
@@ -380,7 +380,7 @@ fn claude_pre_allows_case_law_only_with_our_entry() {
     assert_eq!(
         allowed(true, false),
         Some(json!([
-            "mcp__browser",
+            "mcp__docs",
             "mcp__case-law-firm",
             "mcp__case-law__search_law",
             "mcp__case-law__read_document",
@@ -391,7 +391,7 @@ fn claude_pre_allows_case_law_only_with_our_entry() {
     );
     assert_eq!(
         allowed(false, false),
-        Some(json!(["mcp__browser", "mcp__case-law-firm"]))
+        Some(json!(["mcp__docs", "mcp__case-law-firm"]))
     );
     assert_eq!(allowed(true, true), None::<Value>);
 }

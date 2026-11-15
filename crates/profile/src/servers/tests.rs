@@ -115,23 +115,21 @@ fn the_case_law_entry_names_the_relay_and_the_token_file_only() {
     );
 }
 
-/// Codex gets the entry on macOS and Linux and no browser at all on Windows. Claude has no
-/// browser on any OS, neither the entry nor its shell command, so the command is copied nowhere.
-/// An agent with no kind (a test's) is left as it was.
+/// Both agents get the entry on macOS and Linux and no browser at all on Windows (Claude's there
+/// is a later change). No agent gets the shell command, so the command is copied nowhere. An
+/// agent with no kind (a test's) is left as it was.
 #[test]
-fn codex_has_the_entry_off_windows_and_claude_no_browser_anywhere() {
+fn both_agents_have_the_entry_off_windows_and_no_browser_on_it() {
     use clauseo_protocol::AgentKind;
     for windows in [false, true] {
-        assert!(!browser_mcp_on(Some(AgentKind::Claude), windows));
         assert!(!browser_mcp_on(None, windows));
         assert!(!no_browser_on(None, windows));
-    }
-    for windows in [false, true] {
-        assert!(no_browser_on(Some(AgentKind::Claude), windows));
         assert!(!shell_browser_on(windows));
     }
-    assert!(browser_mcp_on(Some(AgentKind::Codex), false));
-    assert!(!no_browser_on(Some(AgentKind::Codex), false));
-    assert!(!browser_mcp_on(Some(AgentKind::Codex), true));
-    assert!(no_browser_on(Some(AgentKind::Codex), true));
+    for kind in [AgentKind::Codex, AgentKind::Claude] {
+        assert!(browser_mcp_on(Some(kind), false), "{kind:?}");
+        assert!(!no_browser_on(Some(kind), false), "{kind:?}");
+        assert!(!browser_mcp_on(Some(kind), true), "{kind:?}");
+        assert!(no_browser_on(Some(kind), true), "{kind:?}");
+    }
 }

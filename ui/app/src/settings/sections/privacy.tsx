@@ -185,7 +185,7 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
               tools={tools}
               tool="browser"
               label={w.s("Browser")}
-              note={w.s("ChatGPT uses it. Runs on this computer.")}
+              note={w.s("Claude and ChatGPT use it. Runs on this computer.")}
             />
           )}
         </Group>

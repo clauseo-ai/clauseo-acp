@@ -121,7 +121,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `config_options_replaced` | options | acp | yes | T |
 | `commands_available` | commands | acp | yes | T |
 | `usage_updated` | context_used?, context_size?, cost? | acp | yes | T |
-| `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `auto_mode_unavailable`, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`), `outside_matter_blocked`, `shell_network_blocked`, `shell_network_blocked_no_web_search`, `held_open_blocked` with file, `codex_folder_blocked`, `guard_step_blocked`, `guard_steps_more` with more; host notices only; `text` is the fallback) | acp, host | yes | T |
+| `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `auto_mode_unavailable`, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`), `outside_matter_blocked`, `shell_network_blocked`, `shell_network_blocked_no_web_search`, `held_open_blocked` with file, `codex_folder_blocked`, `guard_step_blocked`, `guard_steps_more` with more, `sandbox_off`; host notices only; `text` is the fallback) | acp, host | yes | T |
 | `compaction_changed` | status, summary? | acp | yes | T |
 | `files_changed` | turn, files, skipped | matters, through the host | yes | T |
 | `turn_failed` | turn, code, detail? (never shown) | host, acp | yes | T |

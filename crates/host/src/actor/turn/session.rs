@@ -447,6 +447,9 @@ fn attach_commit(
     if let Some(notice) = claude_mode::notice(actor, thread) {
         out.push(actor, notice)?;
     }
+    if let Some(notice) = super::profile_loads::claude::notice(actor, thread) {
+        out.push(actor, notice)?;
+    }
     // The skill packs the launch left out, each pack and reason told once per thread (0040).
     for notice in super::launch_checks::pack_notices(actor, thread) {
         out.push(actor, notice)?;

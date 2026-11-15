@@ -1,12 +1,13 @@
 {
   "UC-213": {
-    "en": "ChatGPT uses it. Runs on this computer.",
-    "hi": "ChatGPT इसका उपयोग करता है। यह इसी कंप्यूटर पर चलता है।",
+    "en": "Claude and ChatGPT use it. Runs on this computer.",
+    "hi": "Claude और ChatGPT इसका उपयोग करते हैं। यह इसी कंप्यूटर पर चलता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-11",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-16",
-    "by": "Rohan (review page, 2026-11-16)"
+    "hi_at": "2026-11-15",
+    "hi_by": "browser1 (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "browser1 (provisional; Rohan to approve on the copy page)",
+    "note": "Reworded 2026-11-15 from \"ChatGPT uses it. Runs on this computer.\": Claude gets the same guarded browser on macOS (and Linux) in browser PR-1. The row stays hidden on Windows"
   }
 }

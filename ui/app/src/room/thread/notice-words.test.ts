@@ -32,6 +32,15 @@ test("Claude's auto mode unavailable gives the app's line, in English and Hindi"
   );
 });
 
+test("Claude's sandbox not starting gives one line for its asking and its missing browser, in English and Hindi", () => {
+  expect(noticeLine("sandbox_off", en)).toBe(
+    "Clauseo couldn't start Claude's safeguards for this matter, so Claude asks before running commands and has no browser in this conversation.",
+  );
+  expect(noticeLine("sandbox_off", words("hi"))).toBe(
+    "Clauseo इस मामले के लिए Claude के सुरक्षा उपाय शुरू नहीं कर सका, इसलिए Claude कमांड चलाने से पहले पूछता है और इस बातचीत में उसके पास ब्राउज़र नहीं है।",
+  );
+});
+
 test("the data-fence refusal's line names the agent as the stop line does", () => {
   const claude = { kind: "claude", name: "claude-acp" } as const;
   expect(noticeLine("outside_matter_blocked", en, claude)).toBe(

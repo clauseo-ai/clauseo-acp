@@ -15,6 +15,8 @@
 
 pub(crate) mod browser;
 pub(crate) mod case_law;
+#[cfg(test)]
+mod claude_browser_tests;
 mod codex;
 #[cfg(test)]
 mod codex_entry_tests;
