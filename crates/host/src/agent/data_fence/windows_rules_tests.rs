@@ -67,7 +67,9 @@ fn rendered() -> String {
     let deny = launch();
     let mut out = String::new();
     let mut section = |title: &str, lines: Vec<String>| {
-        out.push_str(&format!("## {title}\n"));
+        out.push_str("## ");
+        out.push_str(title);
+        out.push('\n');
         for line in lines {
             out.push_str(&line);
             out.push('\n');
