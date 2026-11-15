@@ -521,6 +521,9 @@ mod lawyer_status;
 #[path = "host/matter_read.rs"]
 mod matter_read;
 #[cfg(test)]
+#[path = "host/other_matter_told.rs"]
+mod other_matter_told;
+#[cfg(test)]
 #[path = "host/shell_folder.rs"]
 mod shell_folder;
 #[cfg(test)]
