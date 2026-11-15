@@ -22,6 +22,7 @@ import { HI as mcpTools } from "./words-mcp-tools.hi.ts";
 import { HI as planCard } from "./words-plan-card.hi.ts";
 import { HI as protection } from "./words-protection.hi.ts";
 import { HI as reader } from "./words-reader.hi.ts";
+import { HI as refusals } from "./words-refusals.hi.ts";
 import { HI as room } from "./words-room.hi.ts";
 import { HI as scan } from "./words-scan.hi.ts";
 import { HI as settings } from "./words-settings.hi.ts";
@@ -64,6 +65,7 @@ export const HINDI = {
   "plan-card": planCard,
   protection,
   reader,
+  refusals,
   room,
   scan,
   settings,

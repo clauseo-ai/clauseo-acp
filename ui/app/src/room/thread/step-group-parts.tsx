@@ -2,7 +2,8 @@
 // output offers "Show the result" (U17): the press opens what came back under the row, its block loaded on the first
 // press (tool-result/result-load.ts); an error read there turns the row's mark to Failed and its icon to the break.
 // A task leads with plain words and folds its command under "Show the command", its paths cut to the matter; a step
-// that failed says why in one line under its words (D-017, task-words.ts).
+// that failed says why in one line under its words (D-017, task-words.ts); one Claude's own checks refused says so
+// in plain words instead (refusals.ts).
 import { memo, Suspense, useId, useState } from "react";
 import { StepRow } from "@clauseo/components/clauseo/step-group.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
@@ -16,6 +17,7 @@ import { eligible } from "./tool-result/eligible.ts";
 import { ResultBlock } from "./tool-result/result-load.ts";
 import { useMatterFolder } from "../folder-support.ts";
 import { CommandFold } from "./command-fold.tsx";
+import { refusalWhy } from "./refusals.ts";
 import { taskOf, whyOf } from "./task-words.ts";
 
 /** One tool call's row in an open group: its time in the thread's clock words, today's as the row first showed.
@@ -51,7 +53,7 @@ export const CallRow = memo(function CallRow({
       background={call.background !== undefined}
       time={at === null ? null : { text: stamp(lang, at, now), iso: isoOf(at) }}
       failed={failed}
-      why={whyOf(call, folder)}
+      why={refusalWhy(lang, call) ?? whyOf(call, folder)}
       resultOpen={output === undefined ? undefined : open}
       result={
         output === undefined && command === null ? undefined : (

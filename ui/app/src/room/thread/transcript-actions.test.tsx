@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // The finished answer's Copy and Try again (D-026, D-027), a code block's Copy, and a task's row and permission prompt
-// in plain words with the command folded and cut to the matter (D-016, D-017, D-046), in the real room.
+// in plain words with the command folded and cut to the matter (D-016, D-017, D-046), and a refused step's plain
+// why (#plain-refusal), in the real room.
 import { afterEach, expect, test, vi } from "vitest";
 import {
   agentText,
@@ -116,6 +117,29 @@ test("a task's row says the program and the paper, folds its command cut to the 
   expect(h.all("tool-call")[0]!.querySelector("[data-testid=tool-call-why]")?.textContent).toBe(
     "Error: the file is password-protected",
   );
+});
+
+test("a step Claude's safety check refused says why in plain words under its row, not the raw text", async () => {
+  h = await mount();
+  const text =
+    "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access] " +
+    "Reading outside the matter. If you have other tasks that don't depend on this action, continue working on those.";
+  const read: ViewEntry = {
+    tool_call: {
+      ...toolCall(7, 201, "failed").tool_call!,
+      raw_output: { inline: JSON.stringify(text) },
+      content: [{ text: { text: { inline: "```\n" + text + "\n```" } } }],
+    },
+  };
+  h.deliver([reset([ASKED, read, toolCall(8, 202, "completed"), ANSWER, step(30)])]);
+  await h.settle();
+  await h.click(h.one("step-group")?.querySelector("button"));
+  const why = h.all("tool-call")[0]!.querySelector("[data-testid=tool-call-why]")?.textContent;
+  expect(why).toBe(
+    "Claude's built-in safety check stopped this: it looked like reaching files or systems Claude wasn't asked " +
+      "to use. Nothing was changed, and Claude carries on another way.",
+  );
+  expect(h.all("tool-call")[0]!.textContent).not.toMatch(/classifier|auto mode|Unauthorized/);
 });
 
 test("a task's permission prompt says what it would do in plain words, its command folded and cut", async () => {
