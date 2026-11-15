@@ -16,15 +16,11 @@ use clauseo_profile::subagents::{
 use clauseo_protocol::AgentKind;
 use serde_json::{Value, json};
 
-/// What Claude's instructions end with: a blank line and the "Working at scale" part, or nothing
-/// when it does not ship.
+/// What the profile's Claude instructions end with: a blank line and the "Working at scale"
+/// part without the research bullets (the host adds them beside a researcher), or nothing when
+/// it does not ship.
 pub(super) fn claude_scale_suffix() -> String {
-    claude_scale(research()).map_or_else(String::new, |scale| format!("\n\n{scale}"))
-}
-
-/// Whether Claude's part holds the research bullets: the text ships and so does a researcher.
-fn research() -> bool {
-    SHIP_RESEARCH_TEXT && RESEARCHER_ARM.is_some()
+    claude_scale(false).map_or_else(String::new, |scale| format!("\n\n{scale}"))
 }
 
 /// Every `{…}` token in `text`, by its opening brace up to the closing one.
@@ -69,10 +65,7 @@ fn only_claude_gets_working_at_scale_and_it_comes_last() {
         claude.contains("## Working at scale"),
         SHIP_WORKING_AT_SCALE
     );
-    assert_eq!(
-        claude.contains(SCALE_RESEARCH.trim()),
-        SHIP_WORKING_AT_SCALE && research()
-    );
+    assert!(!claude.contains(SCALE_RESEARCH.trim()));
     assert!(!profile.instructions().contains("Working at scale"));
     let meta = profile.session_meta(Some(AgentKind::Claude)).unwrap();
     assert_eq!(meta["systemPrompt"]["append"], claude.as_str());
@@ -320,5 +313,26 @@ fn the_python_runtime_bundles_what_the_scale_text_names() {
             "{package} locked"
         );
         assert!(smoke.contains(import), "{import}");
+    }
+}
+
+/// The runtime installs after the agent, so a session can start without pypdf or python-docx:
+/// "Working at scale" names the fallbacks and forbids installing, and the macOS shell line no
+/// longer says `python3` has those libraries.
+#[test]
+fn a_missing_library_means_textutil_or_stetdoc_and_never_an_install() {
+    let line = SCALE_CLAUDE
+        .lines()
+        .find(|line| line.contains("(python-docx)"))
+        .unwrap();
+    assert!(
+        line.contains("If pypdf or python-docx is missing"),
+        "{line}"
+    );
+    assert!(line.contains("`textutil` (macOS) or `stetdoc`"), "{line}");
+    assert!(line.contains("never install packages"), "{line}");
+    let shell = clauseo_profile::instructions::claude_shell(true).unwrap();
+    for library in ["python-docx", "pypdf", "openpyxl", "it has"] {
+        assert!(!shell.contains(library), "{library}: {shell}");
     }
 }

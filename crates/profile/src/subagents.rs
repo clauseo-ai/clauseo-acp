@@ -9,8 +9,8 @@
 //! [`RESEARCHER_ARM`].
 //!
 //! The model is Claude Code's alias `haiku`, which Claude Code 2.1.293 resolves for the login
-//! (its catalog's newest Haiku on Anthropic's own login). Where Haiku is not known to be served,
-//! the host sends `inherit` instead, so a helper runs on the conversation's model
+//! (its catalog's newest Haiku on Anthropic's own login). Where Haiku is not known to be served
+//! (Bedrock, Vertex, Foundry), the host sends no agents and no "Working at scale" part at all
 //! (`agent::loads::subagents` in the host). `effort` is read by 2.1.293 for an agent it is given
 //! (its agent schema takes it, and a helper's effort is the agent's own) and applies only on a
 //! model that takes an effort level; on one that does not, Claude Code drops it without a word.
@@ -24,7 +24,7 @@ pub const PAPER_READER: &str = "paper-reader";
 pub const RESEARCHER: &str = "researcher";
 
 /// The paper reader's model: `haiku` (arm C2f) or `sonnet` (exp-armb). Measured setting. The
-/// host swaps it for `inherit` on a login where Haiku is not known to be served.
+/// host sends no helpers on a login where Haiku is not known to be served.
 pub const PAPER_READER_MODEL: &str = "haiku";
 
 /// The paper reader's reasoning effort, as arm C2f ran it. Claude Code applies it only on a model

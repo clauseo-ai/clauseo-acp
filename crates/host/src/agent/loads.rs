@@ -191,7 +191,8 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   `extraArgs` (either makes Claude Code refuse to start there).
 /// - In every mode: no `mcpServers`. A hook cannot add servers through `_meta`.
 /// - With `keys` (a Claude agent): [`profile::claude_options`], before the guard's entry, so
-///   the guard's `hooks` and `disableAllHooks` go over whatever settings it merged.
+///   the guard's `hooks` and `disableAllHooks` go over whatever settings it merged; then
+///   [`subagents::subagent_meta`], which settles `agents` and the append's last part.
 /// - With a `guard` ([`GuardHook`]): [`guard_entry`] appended to
 ///   `claudeCode.options.settings.hooks.PreToolUse`, after any entries the hook put there, and
 ///   `settings.disableAllHooks: false`, so a user's own `disableAllHooks` (user settings load)
@@ -231,6 +232,7 @@ pub(crate) fn session_meta(
     options.insert("settingSources".to_owned(), Value::from(sources.to_vec()));
     if let Some(keys) = keys {
         profile::claude_options(&mut options, keys);
+        subagents::subagent_meta(&mut meta, &mut options, keys.login, keys.web_search.on);
     }
     if let Some(entry) = guard.and_then(guard_entry) {
         let mut settings = take_object(&mut options, "settings");

@@ -226,14 +226,15 @@ impl ClauseoProfile {
 
     /// Claude's instructions: [`Self::instructions_for`] Claude, then on macOS (`macos`) a blank
     /// line and [`instructions::claude_shell`]'s line, which Codex never gets, then a blank line
-    /// and [`instructions::claude_scale`], last, as the timing harness appended it.
+    /// and [`instructions::claude_scale`], last, as the timing harness appended it. The part
+    /// never holds the research bullets here: the host adds them only in a session that keeps the
+    /// researcher (web search on), and takes the whole part out on a cloud login, with the agents.
     pub fn claude_instructions_for(&self, macos: bool) -> String {
         let mut text = self.instructions_for(AgentKind::Claude);
         if let Some(line) = instructions::claude_shell(macos) {
             text = format!("{text}\n\n{line}");
         }
-        let research = instructions::SHIP_RESEARCH_TEXT && subagents::RESEARCHER_ARM.is_some();
-        match instructions::claude_scale(research) {
+        match instructions::claude_scale(false) {
             Some(scale) => format!("{text}\n\n{scale}"),
             None => text,
         }

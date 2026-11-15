@@ -98,18 +98,19 @@ get), in `crates/profile/tests/legal/budgets.rs`:
 |---|---|---|
 | `legal.md` | 1,327 | 1,360 (kept; the count rounds up to 1,350) |
 | The text both agents share: tools part with the stetdoc line, `legal.md` | 1,719 | 1,800 (kept; the count rounds up to 1,750) |
-| Claude's `systemPrompt.append` on macOS: tools part with the stetdoc line, `legal.md`, shell line, "Working at scale" | 2,211 | 2,250 (new) |
+| Claude's `systemPrompt.append` on macOS: tools part with the stetdoc line, `legal.md`, shell line, "Working at scale" | 2,216 | 2,250 (new) |
 | Codex's `developer_instructions` on macOS: tools part with the stetdoc line, `legal.md`, offline line, refusal line, macOS line, built-in skills index | 1,996 | 2,000 (the 1,800 cap counted only the shared text and the index) |
 | The paper reader's prompt (all a helper gets) | 188 | 200 (new) |
 | The researcher's prompt (RH2 629, RH3 649) | 649 | 650 (new) |
 
 The skills index keeps its own 150 words (0031), and a launch's pack lines their 600 (0040).
 "Working at scale" stays arm C2f's text, less the words that sent digests through files (452 to
-433): the measurements found no shorter text that did as well (arm E, 268 words, was 13% slower
-and never delegated), and C2f's no-polling line is what prevents the 902-second stall. A rule
+433), plus what to do when pypdf or python-docx is missing (444; the shell line lost its claim
+that `python3` has them, 55 to 49): the measurements found no shorter text that did as well
+(arm E, 268 words, was 13% slower and never delegated), and C2f's no-polling line is what prevents the 902-second stall. A rule
 that needs more words makes room or amends these caps; stage E's research rules (about 33 net
 words in `legal.md`) fit `legal.md` (1,360), the shared text (about 1,752) and Claude's (about
-2,244), and leave Codex's text about 29 over, which that change fits.
+2,249), and leave Codex's text about 29 over, which that change fits.
 
 ## Status
 
