@@ -88,6 +88,7 @@ import { IT_ENTRIES } from "./registry-it.tsx";
 import { UC_MCP_CONFIRM } from "./registry-uc-mcp-confirm.tsx";
 import { UC_MCP_IMPORT } from "./registry-uc-mcp-import.tsx";
 import { UC_PASTE_CHIP } from "./registry-uc-paste-chip.tsx";
+import { UC_ONE_FILE } from "./registry-uc-one-file.tsx";
 import { MCP_TOOLS } from "./registry-mcp-tools.tsx";
 import { UC_SKILLS } from "./registry-uc-skills.tsx";
 import { UC_AGENTS } from "./registry-uc-agents.tsx";
@@ -431,6 +432,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UC_MCP_CONFIRM,
   ...UC_MCP_IMPORT,
   ...UC_PASTE_CHIP,
+  ...UC_ONE_FILE,
   ...SAC,
   {
     id: "U2-01",
