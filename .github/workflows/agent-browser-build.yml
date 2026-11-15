@@ -123,7 +123,9 @@ jobs:
           - { target: x86_64-pc-windows-msvc, runner: windows-2025, ext: .exe }
           - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, ext: .exe }
           - { target: aarch64-apple-darwin, runner: macos-15, ext: "" }
-          - { target: x86_64-apple-darwin, runner: macos-15, ext: "" }
+          # Cross-built on an ARM64 Mac, so its tests run under Rosetta: the CLI subprocess
+          # tests (mcp_call_cli) get 60 s instead of 10 s each (AB_TEST_SUBPROCESS_TIMEOUT_SECS).
+          - { target: x86_64-apple-darwin, runner: macos-15, ext: "", test_timeout: "60" }
     env:
       TARGET: ${{ matrix.target }}
       OUT: ${{ github.workspace }}/agent-browser-out
@@ -149,6 +151,8 @@ jobs:
           rustup toolchain install "$channel" --profile minimal --target "$TARGET"
 
       - name: Build agent-browser from the pinned source and the patches
+        env:
+          AB_TEST_SUBPROCESS_TIMEOUT_SECS: ${{ matrix.test_timeout }}
         run: node crates/desktop/sidecars/agent-browser-build.mjs build --target "$TARGET" --out "$OUT"
 
       - name: The exe imports no VC++ runtime DLL (crt-static)

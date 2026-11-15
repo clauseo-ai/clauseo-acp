@@ -38,6 +38,10 @@ only; macOS and Linux behave as upstream (plus 0001).
   run under a token as a sandbox gives one (windows_test_token.rs): a write-restricted token
   with the logon SID among its restricting SIDs (so the probe can open its desktop), or a
   filtered one without SeDebugPrivilege or Administrators; a failed check prints both tokens.
+- tests/mcp_call_cli.rs (every OS, test only): the subprocess timeout (10 s) can be raised with
+  AB_TEST_SUBPROCESS_TIMEOUT_SECS, which the build workflow sets for x86_64 macOS under Rosetta;
+  the user-config test does not run on Windows, where dirs::home_dir() ignores HOME and
+  USERPROFILE.
 
 diff --git a/cli/Cargo.toml b/cli/Cargo.toml
 index c474f89..e9200b0 100644
@@ -3704,6 +3708,73 @@ index 571e812..e0a4ae5 100644
 +        .contains("disabled on Windows"));
 +    assert!(!socket_dir(&tmp).join("dashboard.pid").exists());
 +}
+diff --git a/cli/tests/mcp_call_cli.rs b/cli/tests/mcp_call_cli.rs
+index 4800b45..a5f239a 100644
+--- a/cli/tests/mcp_call_cli.rs
++++ b/cli/tests/mcp_call_cli.rs
+@@ -21,6 +21,15 @@ fn command(home: &TempDir) -> Command {
+     command
+ }
+ 
++/// How long one CLI or MCP subprocess may take: 10 s, or AB_TEST_SUBPROCESS_TIMEOUT_SECS (a
++/// build that runs under emulation, as x86_64 macOS under Rosetta, sets more).
++fn subprocess_timeout() -> Duration {
++    std::env::var("AB_TEST_SUBPROCESS_TIMEOUT_SECS")
++        .ok()
++        .and_then(|secs| secs.trim().parse().ok())
++        .map_or(Duration::from_secs(10), Duration::from_secs)
++}
++
+ fn run(command: &mut Command, input: &str) -> Output {
+     tokio::runtime::Builder::new_current_thread()
+         .enable_all()
+@@ -34,14 +43,14 @@ fn run(command: &mut Command, input: &str) -> Output {
+                 .stderr(Stdio::piped())
+                 .spawn()
+                 .unwrap();
+-            tokio::time::timeout(Duration::from_secs(10), async move {
++            tokio::time::timeout(subprocess_timeout(), async move {
+                 let mut stdin = child.stdin.take().unwrap();
+                 stdin.write_all(input.as_bytes()).await.unwrap();
+                 drop(stdin);
+                 child.wait_with_output().await.unwrap()
+             })
+             .await
+-            .expect("CLI/MCP subprocess exceeded 10 seconds")
++            .unwrap_or_else(|_| panic!("CLI/MCP subprocess exceeded {:?}", subprocess_timeout()))
+         })
+ }
+ 
+@@ -183,6 +192,9 @@ fn mcp_call_allows_every_tool_unless_profiles_limit_it() {
+         .contains("not enabled"));
+ }
+ 
++// Not on Windows: the user config is under dirs::home_dir(), which Windows answers from the
++// Known Folder API whatever HOME or USERPROFILE say, so the test's home is not the one read.
++#[cfg(not(windows))]
+ #[test]
+ fn cli_and_mcp_keep_user_config_when_project_settings_require_trust() {
+     let home = tempfile::tempdir().unwrap();
+@@ -469,7 +481,7 @@ fn mcp_survives_selected_config_removed_or_corrupted_after_startup() {
+                     .stderr(Stdio::piped())
+                     .spawn()
+                     .unwrap();
+-                tokio::time::timeout(Duration::from_secs(10), async {
++                tokio::time::timeout(subprocess_timeout(), async {
+                     let mut stdin = child.stdin.take().unwrap();
+                     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+                     let initialize = json!({
+@@ -553,7 +565,9 @@ fn mcp_survives_selected_config_removed_or_corrupted_after_startup() {
+                     assert!(output.status.success(), "{output:?}");
+                 })
+                 .await
+-                .expect("MCP config regression exceeded 10 seconds");
++                .unwrap_or_else(|_| {
++                    panic!("MCP config regression exceeded {:?}", subprocess_timeout())
++                });
+             });
+     }
+ }
 diff --git a/cli/tests/obscura_cli.rs b/cli/tests/obscura_cli.rs
 index 6c7da16..55e0b53 100644
 --- a/cli/tests/obscura_cli.rs
