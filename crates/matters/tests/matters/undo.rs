@@ -93,7 +93,8 @@ const PDF: &[u8] = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<< /Type /Catalog >>\
 
 /// An agent's shell command (`rm`, `Remove-Item`) deletes a `.docx` and a `.pdf` behind the
 /// matter's back: no tool call names them, the file system call is a plain `remove_file`. The
-/// after-turn checkpoint lists both as deleted, and undo puts back the exact bytes.
+/// after-turn checkpoint lists both as deleted, each flagged as possibly the lawyer's (no tool
+/// call or shell command of the turn named it, `diff::flag`), and undo puts back the exact bytes.
 #[test]
 fn undo_restores_docx_and_pdf_deleted_by_a_shell_command() {
     let fx = Fixture::new("undo-shell-delete");
@@ -108,8 +109,8 @@ fn undo_restores_docx_and_pdf_deleted_by_a_shell_command() {
     assert_eq!(
         created(after, 3),
         [
-            deleted("Contract.docx", DOCX),
-            deleted("bundle/Exhibit A.pdf", PDF),
+            deleted("Contract.docx", DOCX).with_lawyer_edits(),
+            deleted("bundle/Exhibit A.pdf", PDF).with_lawyer_edits(),
         ]
     );
 
