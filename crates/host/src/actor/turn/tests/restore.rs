@@ -74,11 +74,17 @@ fn restores(rig: &mut Rig) -> usize {
 /// The files the restores the thread's next note tells name, held or in the note already.
 fn noted(rig: &Rig, thread: ThreadId) -> Vec<String> {
     let turn = &rig.actor.threads[&thread].turn;
-    let told = turn.note.iter().flatten().filter_map(|told| match told {
-        Told::Restored(restore) => Some(restore),
-        Told::Undone(_) => None,
-    });
-    turn.restored
+    let told = turn
+        .note
+        .told
+        .iter()
+        .flatten()
+        .filter_map(|told| match told {
+            Told::Restored(restore) => Some(restore),
+            Told::Undone(_) => None,
+        });
+    turn.note
+        .restored
         .iter()
         .chain(told)
         .flat_map(|restore| restore.back.iter().chain(&restore.removed))

@@ -23,11 +23,11 @@ use crate::write;
 
 /// The bundled scenarios' folder.
 const SCENARIOS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fake_agent/scenarios");
-const NEXT: &str = "Then summarise the rent review.";
-const AFTER: &str = "Now list the parties.";
+pub(crate) const NEXT: &str = "Then summarise the rent review.";
+pub(crate) const AFTER: &str = "Now list the parties.";
 
 /// The note after `files` were undone, in that order (`crates/host/src/undo_note.rs`).
-fn note(files: &str) -> String {
+pub(crate) fn note(files: &str) -> String {
     format!(
         "Note from Clauseo: since your last turn, the lawyer put these files back to an earlier \
          version, and removed those it did not have: {files}. Read them again before relying \
@@ -36,7 +36,7 @@ fn note(files: &str) -> String {
 }
 
 /// A `session/prompt` labelled `label` whose blocks are exactly `texts`.
-fn prompt_exactly(label: &str, texts: &[&str]) -> Value {
+pub(crate) fn prompt_exactly(label: &str, texts: &[&str]) -> Value {
     let blocks: Vec<Value> = texts
         .iter()
         .map(|text| json!({"type": "text", "text": text}))
@@ -45,17 +45,17 @@ fn prompt_exactly(label: &str, texts: &[&str]) -> Value {
         "params": {"sessionId": "sess-1", "prompt": blocks}}})
 }
 
-fn end_turn(label: &str) -> Value {
+pub(crate) fn end_turn(label: &str) -> Value {
     json!({"respond": {"to": label, "result": {"stopReason": "end_turn"}}})
 }
 
 /// A prompt labelled `label` and answered `end_turn`, whose blocks are exactly `texts`.
-fn answered(label: &str, texts: &[&str]) -> [Value; 2] {
+pub(crate) fn answered(label: &str, texts: &[&str]) -> [Value; 2] {
     [prompt_exactly(label, texts), end_turn(label)]
 }
 
 /// A turn that edits `file`, as either adapter may report it.
-fn edits(label: &str, file: &str) -> Vec<Value> {
+pub(crate) fn edits(label: &str, file: &str) -> Vec<Value> {
     vec![
         json!({"expect": {"method": "session/prompt", "as": label,
             "params": {"sessionId": "sess-1"}}}),
@@ -96,7 +96,7 @@ fn reopen(agent: &str) -> Vec<Value> {
 }
 
 /// The handshake file of `agent`'s first run.
-fn handshake(agent: &str) -> &'static str {
+pub(crate) fn handshake(agent: &str) -> &'static str {
     if agent == CODEX {
         "codex-handshake.jsonl"
     } else {
@@ -105,7 +105,7 @@ fn handshake(agent: &str) -> &'static str {
 }
 
 /// Writes the scenario of a run after a restart: `agent` reopens `sess-1`, then plays `steps`.
-fn reopened(dir: &Dir, name: &str, agent: &str, steps: Vec<Value>) -> Scenario {
+pub(crate) fn reopened(dir: &Dir, name: &str, agent: &str, steps: Vec<Value>) -> Scenario {
     let mut text = json!({"scenario": name, "description": "the undo note's reopened agent",
         "on_stdin_close": "exit"})
     .to_string();
@@ -120,7 +120,7 @@ fn reopened(dir: &Dir, name: &str, agent: &str, steps: Vec<Value>) -> Scenario {
 }
 
 /// Undoes `turn`'s edit of `file` and waits for the `StepUndone`.
-fn undo(
+pub(crate) fn undo(
     host: &Running,
     events: &mut Events,
     thread: ThreadId,
@@ -142,14 +142,25 @@ fn undo(
 }
 
 /// Runs a prompt `text` to its end; returns how it stopped.
-fn run_prompt(host: &Running, events: &mut Events, thread: ThreadId, text: &str) -> StopReason {
+pub(crate) fn run_prompt(
+    host: &Running,
+    events: &mut Events,
+    thread: ThreadId,
+    text: &str,
+) -> StopReason {
     let (turn, _) = host.prompt(thread, text);
     events.until_turn_ended(turn).stop
 }
 
 /// Run 1 on the same data folder: the agent plays `steps` after reopening its session, `NEXT`
 /// and then `AFTER` are sent, and both must end `EndTurn` with no mismatch.
-fn after_restart(dir: &Dir, thread: ThreadId, agent: &str, name: &str, steps: Vec<Value>) {
+pub(crate) fn after_restart(
+    dir: &Dir,
+    thread: ThreadId,
+    agent: &str,
+    name: &str,
+    steps: Vec<Value>,
+) {
     let scenario = reopened(dir, name, agent, steps);
     dir.set_agents(&[(agent, scenario)]);
     let host = dir.start(1);

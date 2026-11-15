@@ -493,6 +493,9 @@ fn matter_events() -> Vec<DomainEvent> {
             scope: RestoreScope::Files {
                 paths: vec![path("a.docx")],
             },
+            written: vec![path("a.docx")],
+            removed: vec![path("b.docx")],
+            more: Some(3),
         }
         .into(),
         MatterRelocated {

@@ -3,7 +3,8 @@
 
 use clauseo_protocol::{
     CheckpointKind, CheckpointRecorded, DomainEvent, MarkerEntry, MarkerKind, MatterCreated,
-    MatterKind, MatterRelocated, OutsideEdits, RestoreScope, VersionRestored, ViewEntry,
+    MatterKind, MatterPath, MatterRelocated, OutsideEdits, RestoreScope, VersionRestored,
+    ViewEntry,
 };
 use clauseo_reducer::{Anomaly, ViewChange, apply};
 
@@ -103,6 +104,9 @@ fn version_restored_on_a_thread_stream_folds_to_its_marker() {
             checkpoint,
             scope: RestoreScope::Matter,
             undoes: Some(undone),
+            written: vec![MatterPath::new("brief.txt").unwrap()],
+            removed: Vec::new(),
+            more: None,
         })
         .unwrap();
     let out = apply(&mut state, &envelope).unwrap();
@@ -115,6 +119,9 @@ fn version_restored_on_a_thread_stream_folds_to_its_marker() {
             checkpoint,
             scope: RestoreScope::Matter,
             undoes: Some(undone),
+            written: vec![MatterPath::new("brief.txt").unwrap()],
+            removed: Vec::new(),
+            more: None,
         },
         ts: envelope.ts,
     });

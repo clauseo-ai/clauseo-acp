@@ -24,7 +24,7 @@ use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, RestoreDone, RestoreJob};
 use crate::pipeline::{Draft, MatterEvent};
-use crate::undo_note::{RestoreNote, Told};
+use crate::undo_note::RestoreNote;
 
 mod revisions;
 
@@ -198,6 +198,9 @@ fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<Res
     } = restored;
     let mut events = undo::outside_edits_events(outside_edits)?;
     let id = checkpoint.outcome.id();
+    // The log names the files for the agent's note too, so a restart does not lose it.
+    let (written, removed, more) = crate::undo_note::capped(written, removed);
+    let mut created = None;
     if events.is_empty()
         && let CheckpointOutcome::Reused(id) = checkpoint.outcome
         && !known::recorded(actor, ask.matter, id)
@@ -220,7 +223,11 @@ fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<Res
             checkpoint: id,
             scope: ask.scope.clone().into(),
             undoes: ask.undoes,
+            written: written.clone(),
+            removed: removed.clone(),
+            more: (more > 0).then_some(more),
         };
+        created = Some(id);
         thread = ask.thread.map(|thread| (thread, restored.clone()));
         events.push(MatterEvent::plain(restored));
     }
@@ -228,6 +235,8 @@ fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<Res
     let note = RestoreNote {
         back: written,
         removed,
+        more,
+        checkpoint: created,
         at: actor.now().wall,
     };
     Ok(RestoreLog {
@@ -270,7 +279,7 @@ fn log_commit(actor: &mut Actor, matter: MatterId, log: &RestoreLog) -> Result<(
             actor.pipeline.push(
                 &mut draft,
                 StreamId::Thread(*thread),
-                DomainEvent::VersionRestored(restored.clone()),
+                DomainEvent::from(restored.clone()),
                 Some(ctx.id),
                 now,
                 &mut actor.ids,
@@ -333,8 +342,9 @@ pub(crate) fn committed(actor: &mut Actor, matter: MatterId, durable: bool) {
 }
 
 /// Adds the restore to the next prompt's note of every thread of `matter`, after what the note
-/// holds. Kept in memory only: `VersionRestored` does not list the files written, so a restart
-/// before a thread's next prompt loses this part of its note. No turn of the matter can start
+/// holds. Its `VersionRestored` lists the files too, so after a restart the note reads them
+/// from the matter's log (`undo_note::inputs`); a restore logged before that list was added is
+/// not told after a restart. A restore whose commit failed is told from here. No turn can start
 /// between the restore and this call (the restore holds the writer), so the note follows the
 /// matter's timeline.
 fn note_restored(actor: &mut Actor, matter: MatterId, note: Option<&RestoreNote>) {
@@ -343,10 +353,7 @@ fn note_restored(actor: &mut Actor, matter: MatterId, note: Option<&RestoreNote>
     };
     for entry in actor.threads.values_mut() {
         if entry.row.matter == matter {
-            match entry.turn.note.as_mut() {
-                Some(told) => told.push(Told::Restored(note.clone())),
-                None => entry.turn.restored.push(note.clone()),
-            }
+            entry.turn.note.add_restore(note);
         }
     }
 }

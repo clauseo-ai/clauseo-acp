@@ -112,6 +112,8 @@ pub(crate) enum LogFor {
         turn: TurnId,
         reply: Reply<QueryResult>,
     },
+    /// The undo note's restores: the thread's matter's log after this checkpoint (`note.rs`).
+    Restores(clauseo_protocol::CheckpointId),
 }
 
 impl super::JobKind {

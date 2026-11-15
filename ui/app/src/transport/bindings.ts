@@ -3623,6 +3623,12 @@ export type MarkerKind =
 	scope: RestoreScope,
 	/**  The `restore` checkpoint it took back, if it did. */
 	undoes?: CheckpointId,
+	/**  The files it wrote, as the event lists them; missing from older logs. */
+	written?: MatterPath[],
+	/**  The files it removed, as the event lists them; missing from older logs. */
+	removed?: MatterPath[],
+	/**  How many files it wrote or removed past those lists; missing when none. */
+	more?: number,
 } }) & { compaction?: never; matter_relocated?: never; step_undone?: never } | 
 /**  The matter's folder was located after it moved (matter stream): "Found at {folder}". */
 ({ matter_relocated: {
@@ -7342,6 +7348,15 @@ export type VersionRestored = {
 	scope: RestoreScope,
 	/**  The `restore` checkpoint this one took back, if it did. Missing from older logs. */
 	undoes?: CheckpointId,
+	/**
+	 *  The files it wrote, back as the version had them, for the agent's note; the host keeps
+	 *  the first few hundred. Missing from older logs, and empty is left out.
+	 */
+	written?: MatterPath[],
+	/**  The files it removed, which the version did not have, kept as `written` is. */
+	removed?: MatterPath[],
+	/**  How many files it wrote or removed past those two lists; missing when none. */
+	more?: number,
 };
 
 /**
