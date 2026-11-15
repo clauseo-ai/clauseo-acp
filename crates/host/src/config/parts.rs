@@ -146,6 +146,10 @@ pub(crate) struct UpdateSeams {
     pub(crate) last_run_unclean: bool,
 }
 
+#[expect(
+    clippy::multiple_inherent_impl,
+    reason = "config.rs is at its 600-line limit; the last run's flag lives beside its part"
+)]
 impl HostConfig {
     /// The run before this one did not quit through its own quit (default: it did): the desktop's
     /// mark in the data folder was still there. `LastExit` says so, for the room's notice, with

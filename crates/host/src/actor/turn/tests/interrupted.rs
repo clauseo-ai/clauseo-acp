@@ -106,12 +106,12 @@ fn an_undo_is_recorded_before_r8_runs_and_named_after_a_crash() {
             files: Some(clauseo_protocol::Count::new(1).unwrap()),
         }]
     );
-    assert!(pending(&mut rig).is_empty(), "start-up cleared the record");
+    assert_eq!(pending(&mut rig), Vec::new(), "start-up cleared the record");
     // The start after names nothing.
     let mut rig = rig.restart(2);
     let view = last_exit(&mut rig);
     assert!(!view.unclean);
-    assert!(view.interrupted.is_empty());
+    assert_eq!(view.interrupted, Vec::new());
     rig.finish();
 }
 
@@ -123,11 +123,13 @@ fn a_finished_undo_leaves_no_record() {
     rig.run_until("the undo's answer", |_| false_until_answered(&mut answer));
     rig.settle_commits();
     assert!(!rig.scratch_file("brief.txt").exists(), "R8 undid the file");
-    assert!(pending(&mut rig).is_empty());
+    // The writer passed on; its record's delete is a matter job until it comes back.
+    rig.run_until("the record's delete", |actor| actor.work.matter_jobs == 0);
+    assert_eq!(pending(&mut rig), Vec::new());
     let mut rig = rig.restart(1);
     let view = last_exit(&mut rig);
     assert!(!view.unclean);
-    assert!(view.interrupted.is_empty());
+    assert_eq!(view.interrupted, Vec::new());
     rig.finish();
 }
 
@@ -156,6 +158,6 @@ fn an_unclean_exit_with_nothing_recorded_says_only_that() {
     });
     let view = last_exit(&mut rig);
     assert!(view.unclean);
-    assert!(view.interrupted.is_empty());
+    assert_eq!(view.interrupted, Vec::new());
     rig.finish();
 }

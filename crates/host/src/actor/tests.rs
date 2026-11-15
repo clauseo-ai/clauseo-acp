@@ -75,6 +75,7 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::FolderSupport(_)
         | QueryResult::SkillPacks(_)
         | QueryResult::Update(_)
+        | QueryResult::LastExit(_)
         | QueryResult::Protection(_)
         | QueryResult::AllowedSites(_)
         | QueryResult::WordBlackline(_)
