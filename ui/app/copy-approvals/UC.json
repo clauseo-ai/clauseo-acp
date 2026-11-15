@@ -1035,38 +1035,5 @@
     "at": "2026-11-11",
     "by": "orchestrator (IT sweep, 2026-11-11)",
     "note": "the key panel's help under ChatGPT, on the first screen and in Settings, Plans, before the existing where-it's-kept sentence; was UD1-32 and UD2-63 (IT sweep)"
-  },
-  "UC-261": {
-    "en": "In a header or footer",
-    "hi": "हेडर या फ़ुटर में",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-15",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "tracked-changes-all-parts (en provisional, for the orchestrator)",
-    "note": "Where a tracked change outside the document's main text is, beside its kind's label (tracked changes in headers, footers, notes and comments)"
-  },
-  "UC-262": {
-    "en": "In a footnote or endnote",
-    "hi": "फ़ुटनोट या एंडनोट में",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-15",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "tracked-changes-all-parts (en provisional, for the orchestrator)",
-    "note": "Where a tracked change outside the document's main text is, beside its kind's label (tracked changes in headers, footers, notes and comments)"
-  },
-  "UC-263": {
-    "en": "In a comment",
-    "hi": "टिप्पणी में",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-15",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "tracked-changes-all-parts (en provisional, for the orchestrator)",
-    "note": "Where a tracked change outside the document's main text is, beside its kind's label (tracked changes in headers, footers, notes and comments)"
   }
 }
