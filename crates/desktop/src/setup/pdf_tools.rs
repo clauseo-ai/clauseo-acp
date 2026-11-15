@@ -38,12 +38,11 @@ pub(crate) fn usable(folder: &Path) -> bool {
     })
 }
 
-/// The bundled folder for this app ([`bundled_folder`] from its executable and
-/// `resource_dir`), when it holds both programs; one log line either way, with no path. A
-/// debug build has none. Reads the disk: on the host-start thread.
-pub(crate) fn find(resource_dir: Option<&Path>) -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let folder = bundled_folder(cfg!(target_os = "macos"), exe.parent()?, resource_dir)?;
+/// The bundled folder for an app whose executable is in `exe_dir` ([`bundled_folder`]), when it
+/// holds both programs; one log line either way, with no path. A debug build has none. Reads
+/// the disk: on the host-start thread (`DesktopProfile::build_in`).
+pub(crate) fn found(macos: bool, exe_dir: &Path, resource_dir: Option<&Path>) -> Option<PathBuf> {
+    let folder = bundled_folder(macos, exe_dir, resource_dir)?;
     let found = usable(&folder);
     tracing::info!(
         found,

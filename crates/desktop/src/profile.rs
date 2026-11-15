@@ -70,6 +70,8 @@ pub(crate) struct DesktopProfile {
     browser_tool: Option<PathBuf>,
     /// The stetdoc [`stetdoc_program`] found, for the Word blackline; `None` when none was.
     stetdoc: Option<PathBuf>,
+    /// The bundled `pdftoppm` and `pdfinfo`'s folder (`setup::pdf_tools::found`), if found.
+    pdf_tools: Option<PathBuf>,
 }
 
 impl DesktopProfile {
@@ -116,6 +118,7 @@ impl DesktopProfile {
         let exe_dir = exe.parent().unwrap_or_else(|| Path::new(""));
         let bundled = bundled_stetdoc(layout.macos, exe_dir, layout.resource_dir);
         let found = stetdoc_program(bundled.as_deref(), path, !cfg!(debug_assertions));
+        let pdf_tools = crate::setup::pdf_tools::found(layout.macos, exe_dir, layout.resource_dir);
         let paths = paths_for(locations, exe, found.clone())?;
         let cached = paths.claude_skills();
         let seen = paths.stetdoc_seen();
@@ -156,6 +159,7 @@ impl DesktopProfile {
         }
         Ok(Self {
             stetdoc: program,
+            pdf_tools,
             ..Self::over(live, prepend)
         }
         .with_browser_tool(browser_tool))
@@ -181,6 +185,7 @@ impl DesktopProfile {
             prepend_stetdoc,
             browser_tool: None,
             stetdoc: None,
+            pdf_tools: None,
         }
     }
 
@@ -524,7 +529,7 @@ impl ProfileHook for DesktopProfile {
 /// profile, stetdoc's folder first on the agents' `PATH` when stetdoc was found, that stetdoc
 /// for the Word blackline (`HostConfig::with_stetdoc`), and the shell browser's folder when its
 /// copy is there (the host puts it on a session's `PATH` only when that session has the
-/// browser); with no
+/// browser), and the bundled PDF tools' folder; with no
 /// profile (it could not be built) the hook adds only setup's variables.
 pub(crate) fn with_profile(
     config: HostConfig,
@@ -546,6 +551,8 @@ pub(crate) fn with_profile(
         }
         None => config,
     };
+    // The PDF tools' folder follows the Python runtime's on the agents' PATH (setup/hook.rs).
+    let hook = hook.with_pdf_tools(profile.pdf_tools.clone());
     config.with_profile_hook(Box::new(hook.over(Box::new(profile))))
 }
 

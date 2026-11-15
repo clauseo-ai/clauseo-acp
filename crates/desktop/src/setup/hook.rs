@@ -19,8 +19,8 @@
 //! And to Claude's and Codex's session `PATH` (`ProfileHook::agent_path`), Clauseo's Python
 //! runtime folders from the [`PythonSlot`] (`setup/python_path.rs`), which the setup thread
 //! fills once Python is `Ready` and empties otherwise, then, while there are any, the bundled
-//! PDF tools' folder (`pdf_tools.rs`: `pdftoppm` and `pdfinfo` run that runtime); the host puts
-//! them after stetdoc's.
+//! PDF tools' folder (`setup/pdf_tools.rs`: `pdftoppm` and `pdfinfo` run that runtime); the
+//! host puts them after stetdoc's.
 //!
 //! Both snapshots are refreshed on each `SettingsChanged` (`setup/refresh.rs`). [`setup_vars`] is
 //! the one function that makes these variables: the limits readers take the same ones
@@ -65,7 +65,7 @@ pub(crate) struct SetupHook {
     plans: Plans,
     network: NetworkSlot,
     python: PythonSlot,
-    /// The bundled `pdftoppm` and `pdfinfo`'s folder (`pdf_tools::find`), if found.
+    /// The bundled `pdftoppm` and `pdfinfo`'s folder (`setup::pdf_tools::found`), if found.
     pdf_tools: Option<PathBuf>,
 }
 

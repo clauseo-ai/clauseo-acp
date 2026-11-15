@@ -51,6 +51,7 @@ mod keys;
 mod leave;
 mod login_check;
 mod network;
+pub(crate) mod pdf_tools;
 mod python_path;
 mod readers;
 mod refresh;
