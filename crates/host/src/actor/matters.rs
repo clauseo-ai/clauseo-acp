@@ -67,6 +67,7 @@ pub(super) fn start_worker(
 ) -> Result<MatterWorker<MatterTag>, Error> {
     let post = actor.post.clone();
     MatterWorker::start(
+        (matter, Arc::clone(&actor.clock)),
         settings_of(actor),
         Box::new(move |tag, reply| {
             let _gone = post.try_send(Input::Matter { matter, tag, reply });
@@ -85,14 +86,16 @@ pub(crate) fn settings_of(actor: &Actor) -> clauseo_matters::Settings {
     }
 }
 
-/// The worker of a known matter, started and sent its open on first use.
+/// The worker of a known matter, started and sent its open on first use, and started again
+/// when its thread has ended ([`MatterWorker::is_alive`]).
 pub(crate) fn matter_worker(
     actor: &mut Actor,
     matter: MatterId,
 ) -> Result<&MatterWorker<MatterTag>, Error> {
-    let started = match actor.check_matter(matter)?.worker {
-        Some(_) => None,
-        None => Some((start_worker(actor, matter)?, registry(actor, matter))),
+    let started = if live_worker(actor, matter)? {
+        None
+    } else {
+        Some((start_worker(actor, matter)?, registry(actor, matter)))
     };
     let entry = actor
         .matters
@@ -117,6 +120,19 @@ pub(crate) fn matter_worker(
         .worker
         .as_ref()
         .ok_or_else(|| Error::Internal(format!("matter {matter} has no worker")))
+}
+
+/// Whether known matter `matter` has a worker whose thread runs. A thread that ended is logged
+/// here; the caller starts a new worker in its place, and the old one is joined as it drops.
+pub(super) fn live_worker(actor: &Actor, matter: MatterId) -> Result<bool, Error> {
+    match &actor.check_matter(matter)?.worker {
+        Some(worker) if worker.is_alive() => Ok(true),
+        Some(_) => {
+            tracing::warn!(%matter, "a matter's worker had stopped; a new one starts");
+            Ok(false)
+        }
+        None => Ok(false),
+    }
 }
 
 /// What a folder for `matter` is checked against: the folders import refuses, every other

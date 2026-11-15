@@ -29,7 +29,7 @@ use clauseo_protocol::{
 
 use super::commands::{AfterCommand, CommandCtx};
 use super::input::MatterTag;
-use super::matters::{registry, start_worker};
+use super::matters::{live_worker, registry, start_worker};
 use super::{Actor, Tag, turn};
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -97,9 +97,10 @@ fn send_locate(
     (folder, created): (PathBuf, bool),
     registry: crate::matter_worker::Registry,
 ) -> Result<(), Error> {
-    let started = match actor.check_matter(matter)?.worker {
-        Some(_) => None,
-        None => Some(start_worker(actor, matter)?),
+    let started = if live_worker(actor, matter)? {
+        None
+    } else {
+        Some(start_worker(actor, matter)?)
     };
     let entry = actor
         .matters
