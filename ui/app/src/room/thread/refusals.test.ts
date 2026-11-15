@@ -28,6 +28,19 @@ const refused = (text: string, status: ToolCallStatus = "failed"): ToolCallEntry
 const CHECK = "Claude's built-in safety check stopped this";
 const CARRY = "Nothing was changed.";
 
+test("Claude Code 2.1.293's built-in safety check on a command reads as the general line", () => {
+  const sent = "Permission for this command was denied by a built-in Claude Code safety check";
+  const call = refused(sent);
+  expect(refusalOf(call)).toEqual({ kind: "check", looked: "other" });
+  expect(refusalWhy("en", call)).toBe(`${CHECK}. ${CARRY}`);
+  expect(refusalWhy("hi", call)).toBe(refusalWords[`${CHECK}. ${CARRY}`]);
+  expect(refusalWhy("hi", call)).toMatch(/^Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया। कुछ नहीं बदला।$/);
+  // and with whatever Claude Code adds after it
+  expect(refusalWhy("en", refused(`${sent}. Try a different approach.`))).toBe(
+    `${CHECK}. ${CARRY}`,
+  );
+});
+
 test("a safety check block reads its rule's name in plain words, never the raw text", () => {
   const why = refusalWhy(
     "en",
