@@ -19,16 +19,16 @@ fn join(name: &str) -> Join {
 }
 
 /// A text-only result, the live server's shape.
-fn text_result(text: &str) -> Value {
+pub(super) fn text_result(text: &str) -> Value {
     json!({"content": [{"type": "text", "text": text}], "isError": false})
 }
 
-fn links(name: &str, result: &Value) -> Vec<FoundLink> {
+pub(super) fn links(name: &str, result: &Value) -> Vec<FoundLink> {
     found(&join(name), &raw(result)).unwrap().links
 }
 
 /// A golden fixture's links, as (title, link) pairs.
-fn golden(name: &str, fixture: &str) -> Vec<(String, String)> {
+pub(super) fn golden(name: &str, fixture: &str) -> Vec<(String, String)> {
     let path = format!(
         "{}/../connectors/fixtures/mcp/{fixture}",
         env!("CARGO_MANIFEST_DIR")
@@ -43,7 +43,7 @@ fn golden(name: &str, fixture: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-fn pairs(expected: &[(&str, &str)]) -> Vec<(String, String)> {
+pub(super) fn pairs(expected: &[(&str, &str)]) -> Vec<(String, String)> {
     expected
         .iter()
         .map(|(title, id)| {
