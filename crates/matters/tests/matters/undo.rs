@@ -79,6 +79,91 @@ fn undo_restores_before_contents_and_deletes_created() {
     );
 }
 
+/// A minimal `.docx`-shaped file: a stored zip holding `[Content_Types].xml`.
+const DOCX: &[u8] =
+    b"PK\x03\x04\x14\x00\x00\x00\x00\x00\x00\x00!\x00\xeeGXf\x1d\x00\x00\x00\x1d\x00\
+\x00\x00\x13\x00\x00\x00[Content_Types].xml<?xml version=\x221.0\x22?><Types/>PK\x01\x02\x14\x03\
+\x14\x00\x00\x00\x00\x00\x00\x00!\x00\xeeGXf\x1d\x00\x00\x00\x1d\x00\x00\x00\x13\x00\x00\x00\x00\
+\x00\x00\x00\x00\x00\x00\x00\x80\x01\x00\x00\x00\x00[Content_Types].xmlPK\x05\x06\x00\x00\x00\x00\
+\x01\x00\x01\x00A\x00\x00\x00N\x00\x00\x00\x00\x00";
+
+/// A minimal `.pdf`-shaped file, with the binary comment line real PDFs carry.
+const PDF: &[u8] = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n\
+<< /Root 1 0 R >>\n%%EOF\n";
+
+/// An agent's shell command (`rm`, `Remove-Item`) deletes a `.docx` and a `.pdf` behind the
+/// matter's back: no tool call names them, the file system call is a plain `remove_file`. The
+/// after-turn checkpoint lists both as deleted, and undo puts back the exact bytes.
+#[test]
+fn undo_restores_docx_and_pdf_deleted_by_a_shell_command() {
+    let fx = Fixture::new("undo-shell-delete");
+    fx.write("Contract.docx", DOCX);
+    fx.write("bundle/Exhibit A.pdf", PDF);
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+
+    crate::support::remove_file(fx.file("Contract.docx"));
+    crate::support::remove_file(fx.file("bundle/Exhibit A.pdf"));
+    let after = matter.after_turn(&meta(3), &tools(&[])).unwrap();
+    assert_eq!(
+        created(after, 3),
+        [
+            deleted("Contract.docx", DOCX),
+            deleted("bundle/Exhibit A.pdf", PDF),
+        ]
+    );
+
+    let paths = ["Contract.docx", "bundle/Exhibit A.pdf"];
+    let undone = undo(&mut matter, (1, 3), &paths, (4, 5)).unwrap();
+    assert_eq!(undone.outside_edits, None);
+    assert_eq!(
+        undone.restored,
+        [path("Contract.docx"), path("bundle/Exhibit A.pdf")]
+    );
+    assert_none(&undone.kept);
+    assert_none(&undone.edited_since);
+    assert_eq!(
+        created(undone.checkpoint, 5),
+        [
+            added("Contract.docx", DOCX),
+            added("bundle/Exhibit A.pdf", PDF),
+        ]
+    );
+    assert_eq!(fx.read("Contract.docx"), DOCX);
+    assert_eq!(fx.read("bundle/Exhibit A.pdf"), PDF);
+    assert_no_temp_files(&fx.folder);
+}
+
+/// What undo cannot bring back, pinned as it is today: a file never versioned, deleted by a
+/// shell command, leaves no trace in the step. An over-cap file and a cloud-only one, both there
+/// since the import (skipped then, so no earlier copy), and a file created and deleted inside
+/// the turn: the after-turn checkpoint lists no change and no skipped file for any of them, so
+/// there is nothing to undo and nothing names them.
+#[test]
+fn shell_delete_of_an_unversioned_file_leaves_nothing_to_undo() {
+    let mut fx = Fixture::new("undo-shell-delete-unversioned");
+    fx.limits = Limits {
+        file_cap_bytes: 10,
+        import_warn_bytes: 1_000_000,
+    };
+    fx.write("small.txt", "small");
+    fx.write("Ledger.pdf", [7_u8; 20]);
+    fx.write("Online.docx", "only in the cloud");
+    fx.probe.mark(fx.file("Online.docx"));
+    let mut matter = fx.import();
+    assert_none(&matter.before_turn(&meta(2)).unwrap().skipped);
+
+    fx.write("scratch.txt", "made and gone in one turn");
+    crate::support::remove_file(fx.file("scratch.txt"));
+    crate::support::remove_file(fx.file("Ledger.pdf"));
+    crate::support::remove_file(fx.file("Online.docx"));
+    fx.probe.unmark(fx.file("Online.docx"));
+    let after = matter.after_turn(&meta(3), &tools(&[])).unwrap();
+    assert_none(&after.changes);
+    assert_none(&after.skipped);
+    assert_eq!(fx.read("small.txt"), b"small");
+}
+
 #[test]
 fn undo_keep_decision_leaves_file() {
     let (fx, mut matter) = stepped("undo-keep");
