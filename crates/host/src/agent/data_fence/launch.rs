@@ -93,6 +93,10 @@ pub(crate) struct LaunchDeny {
     /// ([`own_reads`]): what Claude may list and read with no question to the auto-mode
     /// classifier (`super::own_allow_rules`). None before the launch prep has them.
     pub(crate) own_reads: Vec<String>,
+    /// The 8.3 short names Windows gave `<data>`'s own folder name (`AICLAU~1.DES`), which the
+    /// shell rules name alone (`super::windows_shell_deny_rules`). None off Windows, nor where
+    /// the volume makes no short names ([`short_names`]).
+    pub(crate) short_names: Vec<String>,
 }
 
 impl LaunchDeny {
@@ -116,6 +120,7 @@ impl LaunchDeny {
             targets,
             kept,
             own_reads: Vec::new(),
+            short_names: Vec::new(),
         }
     }
 }
@@ -153,6 +158,47 @@ pub(crate) fn launch_deny(
         })
         .collect();
     deny
+}
+
+/// The 8.3 short names of `<data>`'s own folder name ([`LaunchDeny::short_names`]): for each of
+/// `spellings` on a drive (`C:\…`; never a share, which a short-name lookup would have to
+/// reach), the last name of the short path Windows gives for it ([`super::words::short_name`]),
+/// when that is an alias ([`alias_of`]). None off Windows.
+pub(crate) fn short_names(spellings: &[PathBuf]) -> Vec<String> {
+    let mut out = Vec::new();
+    for spelling in spellings {
+        let on_drive = spelling.to_str().is_some_and(|text| {
+            let mut chars = text.chars();
+            matches!(
+                (chars.next(), chars.next(), chars.next()),
+                (Some(drive), Some(':'), Some('\\' | '/')) if drive.is_ascii_alphabetic()
+            )
+        });
+        let Some(short) = on_drive
+            .then(|| super::words::short_name(spelling))
+            .flatten()
+        else {
+            continue;
+        };
+        if let Some(name) = alias_of(spelling, &short)
+            && !out.contains(&name)
+        {
+            out.push(name);
+        }
+    }
+    out
+}
+
+/// The last name of `short` when it is an 8.3 alias of `long`'s last name: it holds a `~` and
+/// is not the same name in another case. Names split by hand at `\` and `/`, as `Path` off
+/// Windows reads a Windows path as one name.
+pub(super) fn alias_of(long: &Path, short: &Path) -> Option<String> {
+    let last = |path: &Path| {
+        let text = path.to_str()?.trim_end_matches(['\\', '/']);
+        text.rsplit(['\\', '/']).next().map(str::to_owned)
+    };
+    let (long, short) = (last(long)?, last(short)?);
+    (short.contains('~') && !short.eq_ignore_ascii_case(&long)).then_some(short)
 }
 
 /// `folders` (the session's own work and notes folders) as patterns under `data`,

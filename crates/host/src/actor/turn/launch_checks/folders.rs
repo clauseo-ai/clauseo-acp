@@ -35,8 +35,11 @@ pub(super) fn launch_deny(
     let projects = claude_home.map_or_else(Vec::new, |home| {
         data_fence::claude_projects(home, &[&cwd, stored])
     });
-    let mut deny = data_fence::launch_deny(data_spellings(data), data, &own, &projects);
+    let spellings = data_spellings(data);
+    let short_names = data_fence::short_names(&spellings);
+    let mut deny = data_fence::launch_deny(spellings, data, &own, &projects);
     deny.own_reads = data_fence::own_reads(data, &[&run.work, &run.notes]);
+    deny.short_names = short_names;
     deny
 }
 

@@ -26,6 +26,9 @@ pub(super) struct Form {
     pub(super) lead: String,
     pub(super) junctions: &'static [&'static str],
     pub(super) shells: Shells,
+    /// A folder's name alone (Clauseo's own, or `<data>`'s 8.3 short name), not a path: the
+    /// escaped form's `\\` after it is a separator like any, never a run (`super::after_sep`).
+    pub(super) alone: bool,
 }
 
 /// The shells a rule is for: a form of `<data>` that only one of them can write (`$env:VAR`
@@ -59,14 +62,26 @@ pub(super) fn forms(
     variables: bool,
 ) -> Vec<Form> {
     let mut forms: Vec<Form> = Vec::new();
-    let mut push = |lead: String, junctions: &'static [&'static str], shells: Shells| {
+    let mut named = |lead: String, junctions: &'static [&'static str], shells, alone| {
         if !lead.is_empty() && !forms.iter().any(|form| form.lead == lead) {
             forms.push(Form {
                 lead,
                 junctions,
                 shells,
+                alone,
             });
         }
+    };
+    // Windows' 8.3 alias of `<data>`'s own name (`AICLAU~1.DES`), which a command may write
+    // in place of it under any parent; alone, as no lawyer's folder is named so. Windows gives
+    // it in capitals and reads it in any case; Bash rules match as written, so in lower case too.
+    for short in &deny.short_names {
+        named(short.clone(), &JUNCTIONS, Shells::Both, true);
+        named(short.to_lowercase(), &JUNCTIONS, Shells::Bash, true);
+    }
+    let mut push = |lead: String, junctions: &'static [&'static str], shells: Shells| {
+        let alone = lead == clauseo_settings::IDENTIFIER;
+        named(lead, junctions, shells, alone);
     };
     for spelling in &deny.spellings {
         let Some(text) = spelling.to_str() else {

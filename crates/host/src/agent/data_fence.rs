@@ -54,7 +54,9 @@ use crate::network_paths::resolve::Entry;
 use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, touchable};
 pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
-pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
+pub(crate) use launch::{
+    LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads, short_names,
+};
 pub(crate) use shell_deny::{
     own_shell_allow_rules, windows_shell_deny_rules, windows_shell_deny_rules_without_variables,
 };

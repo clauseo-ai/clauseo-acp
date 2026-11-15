@@ -68,10 +68,22 @@
 //! (`clauseo_settings::IDENTIFIER`), which every other way of writing it (a drive, a share or
 //! device path, `%LOCALAPPDATA%` in any case, `~`, `$HOME`, …) ends in.
 //!
-//! A deny list is not a fence. Not caught, the accepted residual of `auto` on Windows (decision
-//! record 0030): a path built at run time, a variable of the agent's own, a `cd` first (a `cd`
+//! Windows' 8.3 alias of the data folder's own name (`AICLAU~1.DES`, [`LaunchDeny::short_names`])
+//! is a form of its own, named alone as Clauseo's name is (`forms`), in capitals and, for Bash,
+//! in lower case. The rules match a command's text, not what it does, so every reader that names
+//! a denied place is refused alike: `type`, `cat`, `Get-Content`, `gc`, `Select-String`,
+//! `findstr`, `copy`, `robocopy`, `git --git-dir=…`, `sqlite3`, `python -c "open(…)"`
+//! (`shell_deny_readers_tests.rs`). No rule here asks: each is a deny, which refuses the command
+//! and never reaches the lawyer.
+//!
+//! A deny list is not a fence: these rules are advisory, and on Windows nothing at the OS level
+//! stands behind them (decision record 0030, "The data folder fence"; the threat model's
+//! "Sandbox", an accepted risk). Not caught, the accepted residual of `auto` on Windows: a path
+//! built at run time, a variable of the agent's own, a `cd` first (a `cd`
 //! into the own run folder, then `cd ..` twice), a glob inside a name (`run\01a1*`), other
-//! letter cases in Bash (`AI.CLAUSEO.DESKTOP`), an 8.3 short name, a script that opens the file,
+//! letter cases in Bash (`AI.CLAUSEO.DESKTOP`), an 8.3 short name of an entry inside the data
+//! folder (`SEARCH~1.SQL`), or of the data folder when the launch could not read it (on a share,
+//! or the lookup failed), a script that opens the file,
 //! a run folder, matter or project made after the launch whose name starts no group, and, for a
 //! configured data folder (not `ai.clauseo.desktop`) alone, its own path written other than
 //! whole: a `..` or `.\` step or a mixed separator inside it (`D:\FirmData\.\Clauseo`), a share or
@@ -217,7 +229,7 @@ fn rules(
         }
         // Clauseo's own folder name ends the escaped form too (`…\\ai.clauseo.desktop\\run`),
         // and the escaped form is written with `\\` throughout.
-        let strict = form.lead != clauseo_settings::IDENTIFIER && !form.lead.contains("\\\\");
+        let strict = !form.alone && !form.lead.contains("\\\\");
         alone(&lead, strict, &mut contents, &mut ends);
         for junction in form.junctions {
             let lead_sep = text(&format!("{}{junction}", form.lead));
@@ -543,6 +555,9 @@ mod index_tests;
 #[cfg(test)]
 #[path = "shell_deny_launch_tests.rs"]
 mod launch_tests;
+#[cfg(test)]
+#[path = "shell_deny_readers_tests.rs"]
+mod readers_tests;
 #[cfg(test)]
 #[path = "shell_deny_real_tests.rs"]
 mod real_tests;
