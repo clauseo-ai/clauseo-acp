@@ -1199,6 +1199,9 @@ dependencies = [
 [[package]]
 name = "clauseo-pdf"
 version = "0.0.0"
+dependencies = [
+ "windows",
+]
 
 [[package]]
 name = "clauseo-process"
