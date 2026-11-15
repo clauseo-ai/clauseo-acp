@@ -24,10 +24,12 @@
 //! - `Import` (`import.rs`) saves the importable servers of one app as `SaveServer` adds them,
 //!   and puts its result in the view; the counts the view shows come from a scan of the apps'
 //!   config off the actor.
-//! - A session reads the list at its launch (`agent::loads::lawyer`): a change reaches the next
-//!   session started.
+//! - A session reads the list at its launch (`agent::loads::lawyer`). Each change bumps the
+//!   Tools revision ([`McpOnActor::tools_rev`]); a save that writes a keychain value also bumps
+//!   that server's ([`McpOnActor::secret_revs`]). A live agent whose servers would differ is
+//!   stopped once it is idle (`turn/idle/tools.rs`), and its next prompt relaunches it.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use clauseo_connectors::StoreError;
 use clauseo_protocol::{ErrorCode, McpCommand, McpServerEdit};
@@ -77,6 +79,10 @@ pub(crate) struct McpOnActor {
     pub(crate) import_busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// How the last import went, for the view.
     pub(crate) last_import: Option<clauseo_protocol::McpImportResult>,
+    /// Bumped by each change to the list written (`changed`).
+    pub(crate) tools_rev: u64,
+    /// By server, bumped by each save that wrote one of its keychain values.
+    pub(crate) secret_revs: BTreeMap<String, u64>,
 }
 
 /// A save whose keychain steps ran, and what its settings write takes.
@@ -306,6 +312,10 @@ fn write_settings(
         .mcp
         .missing
         .retain(|(server, _)| Some(server) != previous.as_ref() && *server != name);
+    if !undo.is_empty() {
+        // Its entry still reads `{"keychain": true}`: only this tells a live agent apart.
+        *actor.mcp.secret_revs.entry(name).or_default() += 1;
+    }
     changed(actor, ctx);
     tidy(actor, after, None);
     Ok(())
@@ -313,6 +323,7 @@ fn write_settings(
 
 /// A change written: the view to every app subscriber, then the receipt.
 fn changed(actor: &mut Actor, ctx: CommandCtx) {
+    actor.mcp.tools_rev += 1;
     view::publish(actor);
     if let Err(error) = super::settings::receipt(actor, &ctx) {
         actor.finish_command(ctx.id, Err(error));

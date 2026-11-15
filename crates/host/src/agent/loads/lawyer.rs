@@ -49,8 +49,10 @@ use zeroize::Zeroizing;
 
 use super::McpControl;
 
+mod key;
 mod redact;
 
+pub(crate) use key::ToolsKey;
 pub(crate) use redact::redacted;
 
 /// Finds a server's program: a bare name on this computer's search paths, or an absolute path
@@ -65,6 +67,8 @@ pub(crate) struct McpSecrets {
     values: BTreeMap<String, Zeroizing<String>>,
     unreadable: BTreeSet<String>,
     commands: BTreeMap<String, PathBuf>,
+    /// What the run's servers are made from ([`ToolsKey`]), taken with the reads.
+    pub(crate) key: ToolsKey,
 }
 
 impl fmt::Debug for McpSecrets {
@@ -73,6 +77,7 @@ impl fmt::Debug for McpSecrets {
             .field("values", &self.values.len())
             .field("unreadable", &self.unreadable.len())
             .field("commands", &self.commands.len())
+            .field("key", &self.key)
             .finish()
     }
 }
@@ -111,6 +116,7 @@ impl McpSecrets {
                 })
                 .collect(),
             unreadable: BTreeSet::new(),
+            key: ToolsKey::default(),
             commands: commands
                 .iter()
                 .map(|(typed, path)| ((*typed).to_owned(), PathBuf::from(path)))
@@ -166,6 +172,7 @@ pub(crate) struct Reads {
     store: Option<Arc<dyn SecretStore>>,
     resolve: Resolve,
     wanted: Wanted,
+    key: ToolsKey,
 }
 
 impl Reads {
@@ -176,12 +183,20 @@ impl Reads {
             store: actor.wiring.mcp_secrets.clone(),
             resolve: Arc::clone(&actor.wiring.mcp_resolve),
             wanted: wanted(&actor.effective, actor.protection.safe_workspace()),
+            key: ToolsKey::of(
+                &actor.effective,
+                actor.protection.safe_workspace(),
+                &actor.mcp.secret_revs,
+                actor.mcp.tools_rev,
+            ),
         }
     }
 
     /// The reads and the resolves ([`read`]): blocking, on the launch-prep thread.
     pub(crate) fn read(self) -> McpSecrets {
-        read(self.store.as_deref(), &self.resolve, self.wanted)
+        let mut secrets = read(self.store.as_deref(), &self.resolve, self.wanted);
+        secrets.key = self.key;
+        secrets
     }
 }
 

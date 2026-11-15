@@ -198,13 +198,13 @@ fn reads_keep_only_usable_values() {
     let debug = format!("{secrets:?}");
     assert_eq!(
         debug,
-        "McpSecrets { values: 1, unreadable: 3, commands: 1 }"
+        "McpSecrets { values: 1, unreadable: 3, commands: 1, key: ToolsKey { rev: 0, servers: 0 } }"
     );
     assert!(!debug.contains("s3cr3t"));
     let none = lawyer::read(None, &resolve, wanted);
     assert_eq!(
         format!("{none:?}"),
-        "McpSecrets { values: 0, unreadable: 4, commands: 1 }"
+        "McpSecrets { values: 0, unreadable: 4, commands: 1, key: ToolsKey { rev: 0, servers: 0 } }"
     );
 }
 
