@@ -123,16 +123,14 @@ fn the_author_keeps_letters_marks_digits_and_four_marks_of_punctuation_only() {
 #[test]
 fn the_claude_fragment_holds_only_the_profiles_keys() {
     let mut meta = profile().session_meta(Some(AgentKind::Claude)).unwrap();
-    // One snapshot for every OS: macOS's Claude line (legal.rs checks it) is taken off first.
+    // One snapshot for every OS: macOS's Claude line (legal.rs checks it) is taken out first; the
+    // "Working at scale" part, when it ships, follows it.
     if let Some(line) = clauseo_profile::instructions::claude_shell(cfg!(target_os = "macos")) {
         let append = &mut meta["systemPrompt"]["append"];
-        let alone = append
-            .as_str()
-            .unwrap()
-            .strip_suffix(&format!("\n\n{line}"))
-            .unwrap()
-            .to_owned();
-        *append = Value::String(alone);
+        let text = append.as_str().unwrap();
+        let line = format!("\n\n{line}");
+        assert!(text.contains(&line));
+        *append = Value::String(text.replacen(&line, "", 1));
     }
     let options = meta["claudeCode"]["options"].as_object().unwrap();
     assert!(

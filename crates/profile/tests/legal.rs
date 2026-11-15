@@ -10,6 +10,8 @@ mod codex_pdf;
 mod index;
 #[path = "legal/rules.rs"]
 mod rules;
+#[path = "legal/subagents.rs"]
+mod subagents;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -189,7 +191,7 @@ fn legal_names_matter_brief() {
 /// even approved. Codex on macOS is told in one sentence; elsewhere never, and Claude has its own.
 #[test]
 fn only_codex_on_macos_is_told_which_commands_never_run() {
-    use clauseo_profile::instructions::{CODEX_SHELL_OFFLINE, codex_shell};
+    use clauseo_profile::instructions::{CODEX_REFUSAL, CODEX_SHELL_OFFLINE, codex_shell};
     use clauseo_protocol::AgentKind;
     let line = codex_shell(true).unwrap();
     assert_eq!(codex_shell(false), None);
@@ -208,11 +210,12 @@ fn only_codex_on_macos_is_told_which_commands_never_run() {
     }
     let profile = launch_profile(&std::env::temp_dir().join("d045-codex-line"));
     let mac = profile.codex_instructions_for(true);
-    // Every Codex session's offline line comes first, macOS or not.
+    // Every Codex session's offline line, then its refusal line, come first, macOS or not.
     let shared = format!(
-        "{}\n\n{}",
+        "{}\n\n{}\n\n{}",
         profile.instructions_for(AgentKind::Codex),
-        CODEX_SHELL_OFFLINE.trim()
+        CODEX_SHELL_OFFLINE.trim(),
+        CODEX_REFUSAL.trim()
     );
     assert_eq!(mac, format!("{shared}\n\n{line}"));
     assert_eq!(profile.codex_instructions_for(false), shared);
