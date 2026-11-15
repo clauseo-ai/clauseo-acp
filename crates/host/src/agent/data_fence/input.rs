@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use super::{command, search};
+use super::{ShellKind, command, search};
 
 /// Keys whose text Claude Code's own tools write or run, or treat as a pattern, not as a path:
 /// read elsewhere (`command`, a Glob's `pattern`, a Grep's `glob`) or not at all.
@@ -77,13 +77,18 @@ pub(crate) fn candidates_words(raw_input: Option<&Value>, windows: bool) -> Vec<
         .collect()
 }
 
-/// The folders a request may search the whole of ([`search::search_roots`]). Without repeats.
-pub(crate) fn candidates_roots(raw_input: Option<&Value>, windows: bool) -> Vec<PathBuf> {
+/// The folders a request may search the whole of ([`search::search_roots`]), its command read
+/// as `shell`, the shell of the tool that sent it. Without repeats.
+pub(crate) fn candidates_roots(
+    raw_input: Option<&Value>,
+    windows: bool,
+    shell: ShellKind,
+) -> Vec<PathBuf> {
     let Some(input) = raw_input else {
         return Vec::new();
     };
     let mut out: Vec<PathBuf> = Vec::new();
-    for root in search::search_roots(input, &command_lines(input), windows) {
+    for root in search::search_roots(input, &command_lines(input), windows, shell) {
         if !out.contains(&root) {
             out.push(root);
         }

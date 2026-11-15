@@ -166,6 +166,9 @@ mod allowed_stores;
 #[cfg(all(test, unix))]
 #[path = "host/data_fence.rs"]
 mod data_fence;
+#[cfg(all(test, unix))]
+#[path = "host/data_fence_tool_shell.rs"]
+mod data_fence_tool_shell;
 #[cfg(test)]
 #[path = "host/documents_later.rs"]
 mod documents_later;

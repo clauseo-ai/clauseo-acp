@@ -77,10 +77,10 @@ const WALKERS: [&str; 15] = [
 ];
 
 /// Commands that walk a folder they are given with `-r`, `-R` or `--recursive` (or a cluster of
-/// short options holding `r` or `R`; for `ls` only `R`, for `cp` `a` too; for `grep` also `-d
-/// recurse` and `--directories=recurse`).
-const RECURSIVE_WITH_FLAG: [&str; 11] = [
-    "grep", "egrep", "fgrep", "cp", "rm", "chmod", "chown", "chgrp", "scp", "diff", "ls",
+/// short options holding `r` or `R`; for `ls` and GNU's `dir` only `R`, for `cp` `a` too; for
+/// `grep` also `-d recurse` and `--directories=recurse`).
+const RECURSIVE_WITH_FLAG: [&str; 12] = [
+    "grep", "egrep", "fgrep", "cp", "rm", "chmod", "chown", "chgrp", "scp", "diff", "ls", "dir",
 ];
 
 /// Words that run the command after them (`sudo grep -r …`), with their own options first.
@@ -90,10 +90,10 @@ const WRAPPERS: [&str; 12] = [
 ];
 
 /// PowerShell commands that walk a folder given `-Recurse` in any of its spellings
-/// ([`powershell_recurses`]), whatever shell runs the line: Get-ChildItem, Copy-Item and
-/// Remove-Item (the cmdlets of PowerShell's file system provider that take `-Recurse`; Get-Item
-/// takes none), with their aliases that no POSIX system ships (GNU's `dir` sorts in reverse
-/// with `-r`; walking a folder from it is a rare over-block, as `dir` is mostly PowerShell's).
+/// ([`powershell_recurses`]): Get-ChildItem, Copy-Item and Remove-Item (the cmdlets of
+/// PowerShell's file system provider that take `-Recurse`; Get-Item takes none), with their
+/// aliases that no POSIX system ships but `dir`. Read so in a line not known to be POSIX: when
+/// the shell is unknown, GNU's `dir -r` (reverse order) walks too, a rare over-block.
 const POWERSHELL_WALKERS: [&str; 11] = [
     "get-childitem",
     "gci",
@@ -109,7 +109,7 @@ const POWERSHELL_WALKERS: [&str; 11] = [
 ];
 
 /// The aliases of [`POWERSHELL_WALKERS`]' cmdlets that are POSIX commands too (`ls -r` sorts in
-/// reverse, `rm -s` is no option): read as PowerShell's only in a line known to be PowerShell.
+/// reverse, `rm -s` is no option): read as PowerShell's only in a PowerShell line.
 const POWERSHELL_SHARED: [&str; 4] = ["ls", "cp", "rm", "rmdir"];
 
 /// Verbs of PowerShell's cmdlet names (`Get-Item`): a line running one is PowerShell.
@@ -126,24 +126,26 @@ const POWERSHELL_VERBS: [&str; 24] = [
 /// for a PowerShell walker the value of `-Path:x` and `-LiteralPath:x` too), and the working
 /// folder (`.`), where most start when given none.
 ///
-/// The fence is not told which tool sent the line (Bash or PowerShell), so it is known to be
-/// PowerShell only by its text ([`segment_groups`]): a script given to `pwsh` or `powershell`
-/// with `-Command`, or a line (or script) one of whose commands is a cmdlet (`Get-…`, a
-/// [`POWERSHELL_VERBS`] verb and a dash) or a [`POWERSHELL_WALKERS`] name.
-pub(crate) fn recursive_roots(line: &str, windows: bool) -> Vec<PathBuf> {
+/// Which shell reads each part of the line ([`segment_groups`]): `shell`, the tool that sent
+/// it, for the line itself; a script's shell for a script given to `pwsh` or `powershell`
+/// (PowerShell) or `sh` and its kin (POSIX); the line's for `eval`'s. Where the tool is not
+/// known ([`ShellKind::Unknown`]) a group of commands is PowerShell by its text: one of them is a
+/// cmdlet (`Get-…`, a [`POWERSHELL_VERBS`] verb and a dash), `iex` or a
+/// [`POWERSHELL_WALKERS`] name.
+pub(crate) fn recursive_roots(line: &str, windows: bool, shell: ShellKind) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for (group, powershell) in segment_groups(line, windows) {
+    for (group, group_shell) in segment_groups(line, windows, shell) {
         for words in group {
             let found = command_at(&words).and_then(|at| words.get(at..));
             let Some((command, args)) = found.and_then(<[String]>::split_first) else {
                 continue;
             };
             let name = command_name(command, windows);
-            if !is_recursive(&name, args, powershell) {
+            if !is_recursive(&name, args, group_shell) {
                 continue;
             }
             out.push(PathBuf::from("."));
-            let walker = powershell_walker(&name, powershell);
+            let walker = powershell_walker(&name, group_shell);
             for word in args {
                 if let Some(value) = walker.then(|| path_value(word)).flatten() {
                     out.push(PathBuf::from(home_as_tilde(value)));
@@ -156,33 +158,68 @@ pub(crate) fn recursive_roots(line: &str, windows: bool) -> Vec<PathBuf> {
     out
 }
 
-/// A command line's simple commands ([`segments`]) in groups: the line's own, then each
-/// script's, each with whether it is known to be PowerShell: a script given to `pwsh` or
-/// `powershell`, or a group one of whose commands is PowerShell's own ([`powershell_name`]).
-fn segment_groups(line: &str, windows: bool) -> Vec<(Vec<Vec<String>>, bool)> {
+/// The shell a command line is written for, as the tool that sent it says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShellKind {
+    /// A POSIX shell: Claude Code's `Bash` tool (Git Bash on Windows).
+    Posix,
+    /// Claude Code's `PowerShell` tool.
+    PowerShell,
+    /// Not known (no tool name, or another tool's, as Codex's): read by the line's text.
+    Unknown,
+}
+
+impl ShellKind {
+    /// The shell of a call whose tool is named `tool_name` (ACP's `name`): `Bash` or
+    /// `PowerShell`, in any case; any other name or none is [`ShellKind::Unknown`].
+    pub(crate) fn of_tool(tool_name: Option<&str>) -> Self {
+        match tool_name {
+            Some(name) if name.eq_ignore_ascii_case("PowerShell") => Self::PowerShell,
+            Some(name) if name.eq_ignore_ascii_case("Bash") => Self::Posix,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// A command line's simple commands ([`segments`]) in groups, the line's own then each
+/// script's, each with the shell that reads it ([`recursive_roots`]): [`ShellKind::Unknown`] made
+/// PowerShell when one of the group's commands is PowerShell's own ([`powershell_name`]).
+fn segment_groups(
+    line: &str,
+    windows: bool,
+    shell: ShellKind,
+) -> Vec<(Vec<Vec<String>>, ShellKind)> {
     let outer = split_line(line, windows);
     let escape = if windows {
         Escape::Backtick
     } else {
         Escape::Backslash
     };
-    let mut groups = vec![(outer.clone(), false)];
+    let mut groups = vec![(outer.clone(), shell)];
     for words in &outer {
         let from = command_at(words).and_then(|at| words.get(at..));
         if let Some((script, inner)) = from.and_then(|from| shell_script(from, escape)) {
             let program = from.and_then(<[String]>::first);
             let name = program.map(|word| command_name(word, windows));
-            let pwsh = matches!(name.as_deref(), Some("pwsh" | "powershell"));
+            let script_shell = match name.as_deref() {
+                Some("pwsh" | "powershell") => ShellKind::PowerShell,
+                Some("sh" | "bash" | "zsh" | "dash" | "ksh") => ShellKind::Posix,
+                _ => shell,
+            };
             let inner = split_line(&script, matches!(inner, Escape::Backtick));
-            groups.push((inner, pwsh));
+            groups.push((inner, script_shell));
         }
     }
-    for (group, powershell) in &mut groups {
-        *powershell = *powershell
-            || group.iter().any(|words| {
+    for (group, shell) in &mut groups {
+        let powershell = || {
+            group.iter().any(|words| {
                 let word = command_at(words).and_then(|at| words.get(at));
                 word.is_some_and(|word| powershell_name(&command_name(word, windows)))
-            });
+            })
+        };
+        if *shell == ShellKind::Unknown && powershell() {
+            *shell = ShellKind::PowerShell;
+        }
     }
     groups
 }
@@ -196,10 +233,17 @@ fn powershell_name(name: &str) -> bool {
     cmdlet || name == "iex" || POWERSHELL_WALKERS.contains(&name)
 }
 
-/// Whether `name` is a PowerShell command that takes `-Recurse`: a [`POWERSHELL_WALKERS`] name,
-/// or in a PowerShell line (`powershell`) a [`POWERSHELL_SHARED`] one.
-fn powershell_walker(name: &str, powershell: bool) -> bool {
-    POWERSHELL_WALKERS.contains(&name) || (powershell && POWERSHELL_SHARED.contains(&name))
+/// Whether `name` is a PowerShell command that takes `-Recurse` in a line `shell` reads: in
+/// PowerShell a [`POWERSHELL_WALKERS`] or [`POWERSHELL_SHARED`] name, where the shell is
+/// unknown a [`POWERSHELL_WALKERS`] one, in a POSIX shell none.
+fn powershell_walker(name: &str, shell: ShellKind) -> bool {
+    match shell {
+        ShellKind::PowerShell => {
+            POWERSHELL_WALKERS.contains(&name) || POWERSHELL_SHARED.contains(&name)
+        }
+        ShellKind::Unknown => POWERSHELL_WALKERS.contains(&name),
+        ShellKind::Posix => false,
+    }
 }
 
 /// The dashes PowerShell takes before a parameter's name: `-`, en dash, em dash, horizontal bar.
@@ -276,21 +320,21 @@ fn command_name(word: &str, windows: bool) -> String {
 
 /// Whether the command `name` with `args` walks the folders it is given: a [`WALKERS`] one,
 /// any command given `-Recurse` in full (any dash, any `:value`), a PowerShell walker given
-/// any spelling of it ([`powershell_walker`], [`powershell_recurses`]; `powershell`: the line
-/// is known to be PowerShell), or a [`RECURSIVE_WITH_FLAG`] one with its flag.
-fn is_recursive(name: &str, args: &[String], powershell: bool) -> bool {
+/// any spelling of it ([`powershell_walker`] in a line `shell` reads, [`powershell_recurses`]),
+/// or a [`RECURSIVE_WITH_FLAG`] one with its flag.
+fn is_recursive(name: &str, args: &[String], shell: ShellKind) -> bool {
     let full = |arg: &String| parameter_name(arg).is_some_and(|name| name == "recurse");
     if WALKERS.contains(&name) || args.iter().any(full) {
         return true;
     }
-    if powershell_walker(name, powershell) && args.iter().any(|arg| powershell_recurses(arg)) {
+    if powershell_walker(name, shell) && args.iter().any(|arg| powershell_recurses(arg)) {
         return true;
     }
     if !RECURSIVE_WITH_FLAG.contains(&name) {
         return false;
     }
     let letters: &[char] = match name {
-        "ls" => &['R'],
+        "ls" | "dir" => &['R'],
         "cp" => &['r', 'R', 'a'],
         _ => &['r', 'R'],
     };
@@ -332,7 +376,7 @@ pub(crate) fn command_words(line: &str, windows: bool) -> Vec<String> {
 /// them (`pre_write_guard`'s `shell_script`). One level only: a script's own scripts are not
 /// read.
 fn segments(line: &str, windows: bool) -> Vec<Vec<String>> {
-    let groups = segment_groups(line, windows);
+    let groups = segment_groups(line, windows, ShellKind::Unknown);
     groups.into_iter().flat_map(|(group, _)| group).collect()
 }
 

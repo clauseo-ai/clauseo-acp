@@ -33,11 +33,22 @@ pub(super) fn layout(test: &str) -> TempDir {
     dir
 }
 
-/// The check for session `s1` of the matter at `root/matter`, for `paths` and `raw_input`.
+/// The check for session `s1` of the matter at `root/matter`, for `paths` and `raw_input`,
+/// from a tool whose shell is not known.
 pub(super) fn check(
     root: &Path,
     paths: &[&str],
     raw_input: Option<&serde_json::Value>,
+) -> FenceCheck {
+    check_as(root, paths, raw_input, super::ShellKind::Unknown)
+}
+
+/// [`check`] of a request from a tool whose shell is `shell`.
+pub(super) fn check_as(
+    root: &Path,
+    paths: &[&str],
+    raw_input: Option<&serde_json::Value>,
+    shell: super::ShellKind,
 ) -> FenceCheck {
     let data = root.join("data");
     let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
@@ -54,7 +65,7 @@ pub(super) fn check(
         cwd: root.join("matter"),
         home: Some(root.to_owned()),
         paths: candidates(&paths, raw_input, cfg!(windows)),
-        roots: candidates_roots(raw_input, cfg!(windows)),
+        roots: candidates_roots(raw_input, cfg!(windows), shell),
         words: candidates_words(raw_input, cfg!(windows)),
         health: super::DataFenceHealth::default(),
         vars: Vec::new(),
