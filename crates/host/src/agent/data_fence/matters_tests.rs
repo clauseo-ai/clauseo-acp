@@ -267,3 +267,44 @@ fn an_other_matters_rules_name_the_folder_and_all_under_it() {
         "{allow:?}"
     );
 }
+
+/// Stage D's own allows open the session's matter (Claude Code's working folder, and a
+/// `Read` allow over it) and its own work and notes folders; a matter inside the session's
+/// matter is still denied for Read and Edit, a deny beating every allow in Claude Code
+/// (`own_allow.rs`), while the rest of the matter stays open.
+#[test]
+fn a_child_matter_stays_denied_inside_the_matters_own_allow() {
+    let dir = layout("matters-child-allow");
+    let root = dir.path();
+    let matter = dunce::canonicalize(root.join("matter")).unwrap();
+    crate::write::create_dir_all(&matter.join("child")).unwrap();
+    crate::write::write_file(&matter.join("child/deed.pdf"), b"x").unwrap();
+    let data = root.join("data");
+    let fence = matters(
+        &[(matter.join("child"), false)],
+        &[matter.as_path()],
+        &[data.as_path()],
+    );
+    let deny = LaunchDeny {
+        spellings: vec![data.clone()],
+        own_reads: vec!["run/s1/work".to_owned(), "agent-state/m1/notes".to_owned()],
+        matters: fence,
+        ..LaunchDeny::default()
+    };
+    let rules = claude_deny_rules(&deny);
+    let mut allow = claude_allow_rules(&deny);
+    let base = rule_path(matter.to_str().unwrap(), cfg!(windows));
+    allow.push(format!("Read({base}/**)"));
+    // Claude Code: a matching deny ends it; an allow counts only when no deny matches.
+    let decide =
+        |tool: &str, path: &Path| !denied(&rules, tool, path) && denied(&allow, tool, path);
+    for tool in ["Read", "Edit"] {
+        assert!(
+            denied(&rules, tool, &matter.join("child/deed.pdf")),
+            "{tool}: {rules:#?}"
+        );
+        assert!(denied(&rules, tool, &matter.join("child")), "{tool}");
+    }
+    assert!(!decide("Read", &matter.join("child/deed.pdf")));
+    assert!(decide("Read", &matter.join("sub/a.txt")), "{rules:#?}");
+}
