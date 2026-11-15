@@ -169,6 +169,19 @@ export const HI = {
     "Clauseo ने एक काम रोक दिया: {name} ने इस मामले के बाहर पहुँचने की कोशिश की।",
   "Clauseo stopped a step: the AI tried to reach outside this matter.":
     "Clauseo ने एक काम रोक दिया: AI ने इस मामले के बाहर पहुँचने की कोशिश की।",
+  // a file deleted during a step that Clauseo kept no copy of (only online, or too large), so no undo brings it back:
+  // the thread's notice and Versions' note on the change say the same; {file} named as Versions names files,
+  // {service} the folder's sync service (provisional, UC-720 to UC-724)
+  "{file} was deleted during this step. Clauseo had no copy of it to bring back. It was only in {service}, so {service}'s recycle bin may still have it.":
+    "{file} इस काम के दौरान हटा दी गई। Clauseo के पास इसकी कोई प्रति नहीं थी जिसे वापस लाया जा सके। यह केवल {service} में थी, इसलिए {service} के रीसायकल बिन में यह अब भी हो सकती है।",
+  "{file} was deleted during this step. Clauseo had no copy of it to bring back. It was only online, so your cloud service's recycle bin may still have it.":
+    "{file} इस काम के दौरान हटा दी गई। Clauseo के पास इसकी कोई प्रति नहीं थी जिसे वापस लाया जा सके। यह केवल ऑनलाइन थी, इसलिए आपकी क्लाउड सेवा के रीसायकल बिन में यह अब भी हो सकती है।",
+  "{file} was deleted during this step. Clauseo had no copy of it to bring back, because it was too large to keep versions of.":
+    "{file} इस काम के दौरान हटा दी गई। Clauseo के पास इसकी कोई प्रति नहीं थी जिसे वापस लाया जा सके, क्योंकि यह संस्करण रखने के लिए बहुत बड़ी थी।",
+  "{file} was deleted during this step. Clauseo had no copy of it to bring back.":
+    "{file} इस काम के दौरान हटा दी गई। Clauseo के पास इसकी कोई प्रति नहीं थी जिसे वापस लाया जा सके।",
+  "{n} more files that Clauseo had no copy of were deleted during this step.":
+    "ऐसी {n} और फ़ाइलें इस काम के दौरान हटा दी गईं जिनकी Clauseo के पास कोई प्रति नहीं थी।",
   // Clauseo declined, unasked, a shell command of the agent's that needed the internet (Codex's
   // curl or wget); {name} as above (provisional, TN-13), and the AI where none is known
   // (provisional, TN-14)

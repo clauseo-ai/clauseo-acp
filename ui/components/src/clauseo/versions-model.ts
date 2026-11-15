@@ -7,6 +7,7 @@ import type { Lang } from "../lib/display.ts";
 import { clock } from "../lib/words.ts";
 import { fileName } from "../lib/words-core.ts";
 import { listOf, vt } from "../lib/words-versions.ts";
+import type { GoneFile } from "../lib/words-thread.ts";
 
 /* ---------- days ---------- */
 
@@ -65,6 +66,9 @@ export type Version = {
   state: MatterState;
   /** A file added with this version that is too large to keep versions of: its name and size, as the computer says. */
   large?: { file: string; size: string };
+  /** The files deleted with this version that Clauseo kept no copy of (only online, or too large), so no undo brings
+   * them back: each path in the matter and why it had not been versioned (words-thread.ts goneLines). */
+  gone?: readonly GoneFile[];
 };
 
 /** The time of the version that undoes, and its day. */

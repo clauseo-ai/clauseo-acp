@@ -415,6 +415,10 @@ fn turn_end_events() -> Vec<DomainEvent> {
                 path: path("big.zip"),
                 reason: SkippedFileReason::OverSizeCap,
             }],
+            gone: vec![SkippedFile {
+                path: path("Scans/brief.docx"),
+                reason: SkippedFileReason::CloudOnly,
+            }],
         }
         .into(),
         TurnFailed {

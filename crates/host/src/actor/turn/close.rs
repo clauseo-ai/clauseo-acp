@@ -1,9 +1,10 @@
 //! The commit that closes a turn. Every path that ends a turn (step 7, a turn that never
 //! started, a dequeued turn, the retry of a failed end, start-up repair) builds one
 //! [`TurnClose`] and pushes it with [`TurnClose::push_into`], which keeps the order rules:
-//! expiries, cancelled (or completed) tool calls, the matter's checkpoint events, `FilesChanged`,
-//! `TurnFailed`, `TurnEnded`, `TurnStoppedAtLimit`, and the detach last, so R6 leaves the
-//! thread in the state the detach gives.
+//! expiries, cancelled (or completed) tool calls, the matter's checkpoint events, `FilesChanged`
+//! (then the notice of files gone with no copy, `end/files.rs`), `TurnFailed`, `TurnEnded`,
+//! `TurnStoppedAtLimit`, and the detach last, so R6 leaves the thread in the state the detach
+//! gives.
 //!
 //! A stop at the limit whose reset time a limits read is to give has no `TurnStoppedAtLimit`
 //! in its close: [`log_limit_stop`] logs it alone once the read is done and the close is
@@ -19,7 +20,7 @@ use clauseo_protocol::{
 use super::super::Actor;
 use super::out::Out;
 use super::skipped::{self, Skipped};
-use super::{LimitMark, cancel};
+use super::{LimitMark, cancel, end};
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
 use crate::pipeline::MatterEvent;
@@ -155,6 +156,9 @@ impl TurnClose {
         }
         if let Some(files) = &self.files {
             out.push(actor, files.clone())?;
+            if let Some(notice) = end::gone_notice(&files.gone) {
+                out.push(actor, notice)?;
+            }
         }
         if let Some((code, detail)) = &self.failure {
             let detail = detail.clone().map(|detail| detail_of(actor, detail));

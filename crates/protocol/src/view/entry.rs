@@ -397,6 +397,10 @@ pub struct StepEntry {
     /// started, and in a step folded before the field.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub checkpoint_before: Option<CheckpointId>,
+    /// The files gone during it that Clauseo had no copy of (from its `FilesChanged`), with why
+    /// each had not been versioned. Missing reads as empty, and empty is left out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gone: Vec<SkippedFile>,
     /// The after-turn checkpoint; `None` when it failed, and the step cannot be undone.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub checkpoint_after: Option<CheckpointId>,

@@ -264,3 +264,33 @@ test("a skill pack notice with no pack gives null, so the row shows its text", (
     noticeLine({ skill_pack_not_loaded: { reason: "changed" } } as unknown as NoticeKind, en),
   ).toBeNull();
 });
+
+test("files gone with no copy: each named with why, the recycle bin only for a file that was only online", () => {
+  const kind = (files: { path: string; reason: "cloud_only" | "over_size_cap" }[], more = 0) =>
+    ({ files_gone_no_copy: { files, more } }) as NoticeKind;
+  const brief = { path: "Drafts/Brief.docx", reason: "cloud_only" } as const;
+  const scan = { path: "Scans/Photos.zip", reason: "over_size_cap" } as const;
+  expect(noticeLine(kind([brief]), en, undefined, "OneDrive")).toBe(
+    `${iso("Brief.docx")} was deleted during this step. Clauseo had no copy of it to bring back. It was only in OneDrive, so OneDrive's recycle bin may still have it.`,
+  );
+  expect(noticeLine(kind([brief]), en)).toBe(
+    `${iso("Brief.docx")} was deleted during this step. Clauseo had no copy of it to bring back. It was only online, so your cloud service's recycle bin may still have it.`,
+  );
+  const large = noticeLine(kind([scan]), en, undefined, "OneDrive");
+  expect(large).toBe(
+    `${iso("Photos.zip")} was deleted during this step. Clauseo had no copy of it to bring back, because it was too large to keep versions of.`,
+  );
+  expect(large).not.toContain("recycle bin");
+  // more than are named: the rest counted after them
+  expect(noticeLine(kind([brief, scan], 3), en)).toMatch(
+    /may still have it\. .*too large to keep versions of\. 3 more files that Clauseo had no copy of were deleted during this step\.$/,
+  );
+  expect(noticeLine(kind([scan]), words("hi"))).toBe(
+    `${iso("Photos.zip")} इस काम के दौरान हटा दी गई। Clauseo के पास इसकी कोई प्रति नहीं थी जिसे वापस लाया जा सके, क्योंकि यह संस्करण रखने के लिए बहुत बड़ी थी।`,
+  );
+  // none named and none counted, or a shape this version doesn't read: the notice's own text
+  expect(noticeLine(kind([]), en)).toBeNull();
+  expect(
+    noticeLine({ files_gone_no_copy: { files: "x", more: 0 } } as unknown as NoticeKind, en),
+  ).toBeNull();
+});

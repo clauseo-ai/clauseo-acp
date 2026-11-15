@@ -182,6 +182,10 @@ pub struct Checkpoint {
     /// Files not versioned that are new or whose size or modification time changed since the
     /// last checkpoint, sorted by path.
     pub skipped: Vec<SkippedFile>,
+    /// Files the last checkpoint skipped (cloud-only, over the size cap) that are gone from the
+    /// folder now, sorted by path, each with why it had not been versioned: Clauseo holds no
+    /// copy of them, so no undo can bring them back (`gone.rs`). Empty when reused.
+    pub gone: Vec<SkippedFile>,
 }
 
 /// An undo of one step: the changes between two checkpoints, file by file.

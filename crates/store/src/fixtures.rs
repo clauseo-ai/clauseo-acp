@@ -185,6 +185,7 @@ fn event(n: u64) -> DomainEvent {
                 .expect("a valid change"),
             ],
             skipped: vec![],
+            gone: vec![],
         }
         .into(),
         249 => TurnEnded {

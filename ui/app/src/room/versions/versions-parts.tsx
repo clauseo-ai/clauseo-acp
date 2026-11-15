@@ -40,6 +40,7 @@ import {
   conversationOf,
   doneLines,
   failedLine,
+  goneNote,
   named,
   unsavedAt,
   unsavedLine,
@@ -330,7 +331,7 @@ export function VersionsCentre({
                 did: didOf(lang, shown, fileName),
                 comparing: look.kind === "back" && look.comparing,
                 undoable: takesBack(s, shown),
-                note: failure?.text ?? null,
+                note: failure?.text ?? goneNote(lang, shown, place),
                 noteAction: locateAct,
               }
         }

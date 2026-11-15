@@ -206,6 +206,7 @@ pub fn files_changed(turn: TurnId) -> Fx<DomainEvent> {
         turn,
         files: file_changes()?,
         skipped: vec![],
+        gone: vec![],
     }
     .into())
 }
