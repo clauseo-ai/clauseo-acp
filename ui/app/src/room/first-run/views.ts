@@ -19,8 +19,9 @@ import { NAME, planOf } from "./acts.ts";
  * whole MB below. 0 stays 0. */
 export const aboutMb = (mb: number): number => (mb >= 100 ? Math.round(mb / 10) * 10 : mb);
 
-/** The install as the working line shows it, from the host's InstallProgress; null with nothing to say. */
-export function installView(setup: AgentSetup | undefined): InstallView | null {
+/** The install as the working line shows it, from the host's InstallProgress; null with nothing to say. `online`: what
+ * the window says of the network (online.ts), so a waiting install says it can't reach the download, not "offline". */
+export function installView(setup: AgentSetup | undefined, online: boolean): InstallView | null {
   const install = setup?.install;
   if (install === undefined || install === "managed") return null;
   if (install === "installing") return { kind: "installing" };
@@ -46,7 +47,8 @@ export function installView(setup: AgentSetup | undefined): InstallView | null {
       totalMb,
     };
   }
-  if ("waiting" in install && install.waiting !== undefined) return { kind: "offline" };
+  if ("waiting" in install && install.waiting !== undefined)
+    return online ? { kind: "offline", online } : { kind: "offline" };
   if ("failed" in install && install.failed !== undefined) {
     const f = install.failed;
     if (f.code === "agent.install_blocked") return { kind: "blocked", hosts: f.hosts };
@@ -59,18 +61,20 @@ export function installView(setup: AgentSetup | undefined): InstallView | null {
   return null;
 }
 
-/** A waiting sign-in as the gate and the plan's line say it: offline, it opens when the download reconnects; with the
- * plan installed while the other plan's sign-in is under way, it opens after that one (one sign-in at a time); else it
- * opens when the plan is ready. `agent` left out (a caller that doesn't know it), never the second. */
+/** A waiting sign-in as the gate and the plan's line say it: its install waiting, it opens when the download reconnects
+ * (`online`, the window online meanwhile: when setting up can continue); with the plan installed while the other
+ * plan's sign-in is under way, it opens after that one (one sign-in at a time); else it opens when the plan is ready.
+ * `agent` left out (a caller that doesn't know it), never the second. */
 export function queuedView(
   setup: AgentSetup | undefined,
   state: SetupState,
   agent: AgentId | undefined,
+  online: boolean,
 ): Extract<GateView, { kind: "queued" }> {
   const install = setup?.install;
   const offline =
     typeof install === "object" && "waiting" in install && install.waiting !== undefined;
-  if (offline) return { kind: "queued", offline };
+  if (offline) return online ? { kind: "queued", offline, online } : { kind: "queued", offline };
   const ahead = agent === undefined ? null : signInAhead(state, agent);
   const installed = install === "managed" || isReady(install);
   return ahead !== null && installed
@@ -78,18 +82,20 @@ export function queuedView(
     : { kind: "queued", offline };
 }
 
-/** The gate for a plan's sign-in, or null when it is signed in or nothing is known of it (a host before R20). */
+/** The gate for a plan's sign-in, or null when it is signed in or nothing is known of it (a host before R20). `online`:
+ * what the window says of the network, for a queued sign-in whose install waits (queuedView). */
 export function gateView(
   setup: AgentSetup | undefined,
   state: SetupState,
   clock: (at: number) => string,
-  agent?: AgentId,
+  agent: AgentId | undefined,
+  online: boolean,
 ): GateView | null {
   const signIn = setup?.signIn;
   if (signIn === undefined || isSignedIn(signIn)) return null;
   if (state.keyOpen) return { kind: "key" };
   if (signIn === "checking") return { kind: "checking" };
-  if (signIn === "queued") return queuedView(setup, state, agent);
+  if (signIn === "queued") return queuedView(setup, state, agent, online);
   if ("signed_out" in signIn && signIn.signed_out !== undefined) {
     // none found and reuse off are the plain sign-in screen here; Plans (UD2) says them
     const found = signIn.signed_out.found;
@@ -133,8 +139,8 @@ const awaited = (setup: AgentSetup | undefined): boolean => {
 
 /** The document tools' line, from SetupInfo's `python`; null with nothing to say: unavailable, ready, or an older host
  * that says nothing. Their size before the download shows only while a plan still says its own, once for all of them
- * (no plan's size counts it). */
-export function toolsView(state: SetupState): ToolsView | null {
+ * (no plan's size counts it). Waiting with the window `online`, it says it can't reach the download. */
+export function toolsView(state: SetupState, online: boolean): ToolsView | null {
   const python = state.python;
   if (python === null || python === "unavailable") return null;
   if (python === "installing")
@@ -154,7 +160,8 @@ export function toolsView(state: SetupState): ToolsView | null {
       totalMb,
     };
   }
-  if (python.waiting !== undefined) return { kind: "waiting" };
+  if (python.waiting !== undefined)
+    return online ? { kind: "waiting", online } : { kind: "waiting" };
   if (python.failed !== undefined) {
     const { cause, blocked_by } = python.failed;
     // Windows' app control refused it: a retry can't help

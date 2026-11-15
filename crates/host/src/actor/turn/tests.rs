@@ -22,6 +22,7 @@ mod offline_codex;
 mod offline_network;
 mod offline_quiet;
 mod offline_target;
+mod offline_truth;
 mod order;
 mod own_cancel;
 mod own_restart;

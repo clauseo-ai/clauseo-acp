@@ -142,7 +142,7 @@ fn codex_s_retries_then_silence_end_the_turn_offline_and_nothing_raw_is_shown() 
     let kinds = || log.iter().map(kind).collect::<Vec<_>>();
     assert_eq!(
         ended(&log, turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline)),
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable)),
         "{:?}",
         kinds()
     );
@@ -225,7 +225,7 @@ fn codex_giving_up_on_its_connection_ends_the_turn_offline() {
     let log = rig.log(thread);
     assert_eq!(
         ended(&log, turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
     rig.finish();
@@ -310,7 +310,7 @@ fn codex_s_retries_10_s_apart_end_the_turn_offline_30_s_after_the_first() {
     until_ended(&mut rig, thread);
     assert_eq!(
         ended(&rig.log(thread), turn),
-        (Some(StopReason::Failed), Some(ErrorCode::AgentOffline))
+        (Some(StopReason::Failed), Some(ErrorCode::AgentUnreachable))
     );
     for late in retries {
         rig.actor.on_input(late);

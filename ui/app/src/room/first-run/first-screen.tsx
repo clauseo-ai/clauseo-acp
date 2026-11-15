@@ -12,6 +12,7 @@ import { useDisplay, type Platform } from "@clauseo/components/lib/display.ts";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type { FolderRefId } from "../../transport/protocol.ts";
+import { useOnline } from "../../transport/online.ts";
 import {
   PLANS,
   isReady,
@@ -70,12 +71,22 @@ export function FirstScreen({
   state: SetupState;
 }) {
   const { lang, platform } = useDisplay();
+  const online = useOnline();
   const plans: FootPlan[] = PLANS.map((agent) => {
     const name = NAME[planOf(agent)];
     const setup = state.agents[agent];
     // the cancelled sign-in's note goes under the row, in Welcome's own slot, not in it
     const install = unnoted(
-      welcomeFoot(lang, agent, name, setup, state, footActs(store, agent, state), IDS.install),
+      welcomeFoot(
+        lang,
+        agent,
+        name,
+        setup,
+        state,
+        online,
+        footActs(store, agent, state),
+        IDS.install,
+      ),
     );
     return {
       key: agent,
@@ -92,7 +103,7 @@ export function FirstScreen({
   // the papers line names the one plan in play, else both
   const inPlay = planInPlay(state);
   // the document tools, under the two rows: their size before, their download after a plan is ready
-  const tools = toolsView(state);
+  const tools = toolsView(state, online);
   const retryThrough = readyPlan(state);
   const [form, setForm] = useState(false);
   const [refused, setRefused] = useState<Refused | null>(null);

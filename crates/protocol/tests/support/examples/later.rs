@@ -155,6 +155,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentFolderInaccessible,
             "the agent could not open the matter folder as its working folder",
         ),
+        failed(
+            ErrorCode::AgentUnreachable,
+            "the agent could not reach its service; probe class=refused via=direct status=0",
+        ),
     ]
 }
 

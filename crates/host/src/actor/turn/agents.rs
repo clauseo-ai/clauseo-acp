@@ -19,7 +19,8 @@ use super::super::input::Input;
 use super::key_retry::KeyRetry;
 use super::launch_checks::{self, Prepared};
 use super::{
-    AgentReply, TurnInput, TurnPhase, current, end, host_stopping, lost, session, state, steps,
+    AgentReply, TurnInput, TurnPhase, current, end, host_stopping, lost, offline, session, state,
+    steps,
 };
 use crate::agent::{self, AgentLink};
 use crate::error::Error;
@@ -394,7 +395,12 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         agent.stage = Stage::Closed;
     }
     match reply {
-        AgentReply::Prompt { turn, result } => end::on_prompt_done(actor, thread, turn, result),
+        AgentReply::Prompt { turn, result } => {
+            // A failure for the connection may wait for the host's probe first.
+            if let Some(result) = offline::hold_for_probe(actor, thread, turn, result) {
+                end::on_prompt_done(actor, thread, turn, result);
+            }
+        }
         AgentReply::Config { ctx, pick, result } => {
             super::answers::on_config(actor, thread, (ctx, pick), same, result);
         }

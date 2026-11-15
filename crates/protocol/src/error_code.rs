@@ -163,8 +163,10 @@ error_codes! {
     SettingsLocked = "settings.locked", retryable: false, meaning: "The change names a setting \
         that the firm's policy sets, so the lawyer cannot change it; nothing was changed.";
     AgentInstallOffline = "agent.install_offline", retryable: true, meaning: "The agent's install \
-        cannot reach its hosts: name resolution or connect failed with no route. The install \
-        waits and tries again by itself.";
+        cannot reach its hosts: name resolution failed, connect failed with no route, or the \
+        connection was reset, aborted or timed out. The install waits and tries again by itself; \
+        the app says it is offline only while the window says so, else that the download cannot \
+        be reached.";
     AgentInstallBlocked = "agent.install_blocked", retryable: false, meaning: "A proxy or \
         firewall blocked the agent's download: a 403 or 407 from a proxy, a TLS failure, or a web \
         page where a file should be.";
@@ -293,9 +295,9 @@ error_codes! {
         matter's folder (on macOS, Files and Folders in Privacy & Security), so no agent works \
         in it: allow Clauseo there, then ask again.";
     AgentOffline = "agent.offline", retryable: true, meaning: "The agent lost its connection \
-        while answering: it could not reach its service (connection refused, no network, no \
-        name resolution, connect timed out). The answer so far is kept; asking again can work \
-        once the computer is back online.";
+        while answering and the computer is offline: the window said offline and the host's own \
+        probe of the agent's service did not get through either. The answer so far is kept; \
+        asking again can work once the computer is back online.";
     MatterFolderInClauseoData = "matter.folder_in_clauseo_data", retryable: false,
         meaning: "The folder is, holds or sits inside Clauseo's data folder; one that is or sits \
         inside the matters' history folder in it is `matter.folder_in_matters_root`.";
@@ -348,8 +350,9 @@ error_codes! {
     AgentQuiet = "agent.quiet", retryable: true, meaning: "The agent sent nothing for 5 minutes \
         while answering, with no tool running and no question waiting for the lawyer, so the \
         host ended the turn (D-050's backstop: a blocked network the host's probe could not see, \
-        such as a proxy that asks for credentials or one that inspects TLS). The answer so far \
-        is kept; asking again can work.";
+        such as a proxy that asks for credentials or one that inspects TLS); or the agent's own \
+        request to its service timed out while the host's probe reached that service (a slow \
+        service). The answer so far is kept; asking again can work.";
     McpImportTooLarge = "mcp.import_too_large", retryable: false, meaning: "The servers an \
         import would add, with their programs, arguments, URLs and variable or header names, \
         are too long to show whole in one confirm (over 2,000 characters), so nothing was \
@@ -379,6 +382,11 @@ error_codes! {
     BlacklineFormatUnknown = "blackline.format_unknown", retryable: false, meaning: "stetdoc's \
         view of the blackline is in a format this Clauseo does not know (a header other than \
         `stet 1`, or none), so nothing is shown rather than a guess.";
+    AgentUnreachable = "agent.unreachable", retryable: true, meaning: "The agent could not get \
+        through to its service while answering, and the computer did not seem offline: the \
+        service, or a proxy or firewall in front of it, refused, timed out or blocked the \
+        connection, or its name did not resolve. The answer so far is kept; asking again can \
+        work.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

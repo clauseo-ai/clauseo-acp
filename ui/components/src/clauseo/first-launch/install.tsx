@@ -29,7 +29,9 @@ export type InstallView =
       totalMb: number;
     }
   | { kind: "installing" }
-  | { kind: "offline" }
+  /** The host's agent.install_offline: the download waits and resumes by itself. `online`: the window says it is online
+   * meanwhile, so the download can't be reached, and the line says that, not "You're offline". */
+  | { kind: "offline"; online?: boolean }
   | { kind: "blocked"; hosts: readonly string[] }
   | { kind: "disk"; need: number; free: number }
   /** `setup`: every file downloaded, and setting them up failed (agent.install_setup_failed). */
@@ -205,7 +207,10 @@ export function installLine(
     case "offline":
       return {
         kind: "wait",
-        words: errorWords(lang, "agent.install_offline"),
+        words:
+          view.online === true
+            ? w("Setting up can't reach the download right now. It tries again by itself.")
+            : errorWords(lang, "agent.install_offline"),
         pill: null,
         code: "agent.install_offline",
         actions: wrap(

@@ -497,6 +497,25 @@ const UC_KEY: Entry[] = (
   render: render(scene),
 }));
 
+/** UC-534 and UC-535: the install waiting (agent.install_offline) while the window says it is online, so the download
+ * can't be reached: the plan's line (the document tools' line says it too), and its queued sign-in (offline truth). */
+const UC_UNREACHABLE: Entry[] = [
+  {
+    id: "UC-534",
+    words: firstLaunchWords(
+      "Setting up can't reach the download right now. It tries again by itself.",
+    ),
+    screen: "first-launch/dl-offline",
+    render: render({ first: true, events: [offline], online: true }),
+  },
+  {
+    id: "UC-535",
+    words: firstLaunchWords("Your browser opens when setting up can continue."),
+    screen: "first-launch/plan-queued",
+    render: render({ events: [offline, signIn(CLAUDE, "queued")], online: true }),
+  },
+];
+
 /** UC-153: ChatGPT ready while Claude's sign-in is under way, on the first screen: sign-ins go one at a time, so its
  * row says its browser opens after Claude's (the parallel installs; UC's id, this file's scene). */
 const AFTER_SIGN_IN: Entry = {
@@ -567,6 +586,7 @@ export const UD1: readonly Entry[] = [
   TOOLS_OFFLINE,
   REUSE_UNUSABLE,
   ...UC_KEY,
+  ...UC_UNREACHABLE,
   AFTER_SIGN_IN,
   STILL_DOWNLOADING,
   ...UC_KEY_LINE,

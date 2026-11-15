@@ -8,6 +8,7 @@ import { afterEach, vi } from "vitest";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { uuid } from "../../testing/stream-script.ts";
 import { FakeTransport, type FakeHost } from "../../transport/fake-transport.ts";
+import { OnlineSource, fakeOnline } from "../../transport/online.ts";
 import type {
   AgentId,
   CommandOutcome,
@@ -44,6 +45,8 @@ let mounting: Promise<unknown> | null = null;
  * cannot hang the hook. */
 const MOUNT_WAIT_MS = 8_000;
 const noop = () => {};
+/** The window's network the room follows (online.ts), the test's own: never jsdom's navigator.onLine. */
+let network = fakeOnline(false);
 
 afterEach(async () => {
   if (mounting !== null) {
@@ -131,6 +134,9 @@ export type RigOptions = {
   threads?: ThreadSummary[];
   /** The options each listed agent last reported (AgentSummary.config_options); none by default. */
   options?: ConfigOption[];
+  /** What the window says of the network (navigator.onLine); offline unless a test says so, so a waiting install says
+   * the offline words. setOnline changes it after. */
+  online?: boolean;
 };
 
 /** The room over a fake host with the setup wire. */
@@ -201,9 +207,22 @@ async function mountRoom(o: RigOptions) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () => root?.render(<Room transport={transport} />));
+  network = fakeOnline(o.online ?? false);
+  await act(async () =>
+    root?.render(
+      <OnlineSource.Provider value={network}>
+        <Room transport={transport} />
+      </OnlineSource.Provider>,
+    ),
+  );
   await settle();
   return transport;
+}
+
+/** The window going online or offline, as its `online` / `offline` event says, then the room renders. */
+export async function setOnline(online: boolean) {
+  await act(async () => network.set(online));
+  await settle();
 }
 
 /** Lets the answers, the lazy chunks and the effects run. */

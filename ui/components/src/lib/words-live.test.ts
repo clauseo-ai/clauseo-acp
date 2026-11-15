@@ -235,6 +235,15 @@ const PLANNED_LINES = [
     "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
     "AI मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
   ],
+  [
+    "agent.unreachable",
+    "Clauseo couldn't reach ChatGPT. Try again.",
+    "Clauseo, ChatGPT तक नहीं पहुँच सका। फिर से प्रयास करें।",
+    "Clauseo couldn't reach gemini. Try again.",
+    "Clauseo, gemini तक नहीं पहुँच सका। फिर से प्रयास करें।",
+    "Clauseo couldn't reach the AI. Try again.",
+    "Clauseo, AI तक नहीं पहुँच सका। फिर से प्रयास करें।",
+  ],
 ] as const;
 
 test.each(PLANNED_LINES)(

@@ -114,6 +114,7 @@ test("with H10 faked: Restart for agent.exited, agent.launch_failed and thread.i
     "agent.quiet",
     "matter.folder_backslash",
     "agent.folder_inaccessible",
+    "agent.unreachable",
   ])
     expect(stoppedLine("en", brk(code), 0, { onRestart: () => {}, refused: null })).toBeNull();
   // and before H10 only agent.exited takes the line
@@ -158,6 +159,7 @@ test("the stopped question comes back only before H10, only for the codes asking
   expect(refillOf(brk("agent.quiet"), true, null)).toBeNull();
   expect(refillOf(brk("matter.folder_backslash"), true, null)).toBeNull();
   expect(refillOf(brk("agent.folder_inaccessible"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.unreachable"), true, null)).toBeNull();
 });
 
 test("agent.service_error (#1030): no Restart, no time mark, no working line, with H10 or without", () => {
@@ -209,6 +211,28 @@ test.each([
   expect(errorWords("en", code, { kind: undefined, name: null })).toBe(
     said.replace("Claude", "The AI"),
   );
+});
+
+test("agent.unreachable (offline truth): no Restart, no time mark, no working line, with H10 or without", () => {
+  const b = brk("agent.unreachable");
+  expect(RESTARTS.has("agent.unreachable")).toBe(false);
+  expect(takesMark(b.step)).toBe(false);
+  expect(stoppedLine("en", b, 0, null)).toBeNull();
+  expect(stoppedLine("en", b, 0, { onRestart: () => {}, refused: null })).toBeNull();
+  const lines = [
+    [{ kind: "claude", name: "claude-acp" }, "Claude", "Claude"],
+    [{ kind: "codex", name: "codex-acp" }, "ChatGPT", "ChatGPT"],
+    [{ kind: undefined, name: "gemini" }, "gemini", "gemini"],
+    [{ kind: undefined, name: null }, "the AI", "AI"],
+  ] as const;
+  for (const [agent, en, hi] of lines) {
+    expect(errorWords("en", "agent.unreachable", agent)).toBe(
+      `Clauseo couldn't reach ${en}. Try again.`,
+    );
+    expect(errorWords("hi", "agent.unreachable", agent)).toBe(
+      `Clauseo, ${hi} तक नहीं पहुँच सका। फिर से प्रयास करें।`,
+    );
+  }
 });
 
 test("a stream that failed: its line and code; Try again only for a retryable code, and it calls retry", () => {

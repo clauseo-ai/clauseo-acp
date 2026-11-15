@@ -18,6 +18,7 @@ import {
   type SetupState,
 } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
+import { useOnline } from "../../transport/online.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import type { SectionContext } from "../sections.tsx";
 import { ToolsLine } from "@clauseo/components/clauseo/first-launch/tools.tsx";
@@ -87,7 +88,8 @@ export function Plans({ ctx }: { ctx: SectionContext }) {
 }
 
 function PlansTools({ state, retry }: { state: SetupState; retry: (agent: AgentId) => void }) {
-  const view = toolsView(state);
+  const online = useOnline();
+  const view = toolsView(state, online);
   if (view === null) return null;
   const through = readyPlan(state);
   return (

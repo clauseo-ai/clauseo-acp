@@ -1,11 +1,13 @@
 // The install's view from the host's words (views.ts): the download's size as "about" (the
 // nearest 10 MB from 100 MB up, whole MB below), and a download's done MB never above its total.
 import { expect, test } from "vitest";
-import type { AgentSetup } from "../../store/setup.ts";
-import { aboutMb, installView } from "./views.ts";
+import { CLAUDE, type AgentSetup, type SetupState } from "../../store/setup.ts";
+import { aboutMb, installView as viewOf, queuedView, toolsView } from "./views.ts";
 
 const setup = (install: NonNullable<AgentSetup["install"]>, mb?: number): AgentSetup =>
   mb === undefined ? { install } : { install, mb };
+/** The install's view with the window offline: the network's words change only a waiting install's. */
+const installView = (s: AgentSetup) => viewOf(s, false);
 
 test("about: 160 MB stays 160, 182 MB reads about 180, 165 MB about 170, under 100 MB whole", () => {
   expect(aboutMb(160)).toBe(160);
@@ -71,4 +73,39 @@ test("a failed set-up is a failed view marked setup; a failed download is not", 
 test("installing has no bytes; paused says the size it had, about", () => {
   expect(installView(setup("installing"))).toEqual({ kind: "installing" });
   expect(installView(setup("paused", 182))).toEqual({ kind: "missing", mb: 180 });
+});
+
+test("a waiting install, its queued sign-in and the waiting document tools carry online only with the window online", () => {
+  const waiting = setup({ waiting: { code: "agent.install_offline", hosts: [], log: [] } });
+  expect(viewOf(waiting, false)).toStrictEqual({ kind: "offline" });
+  expect(viewOf(waiting, true)).toStrictEqual({ kind: "offline", online: true });
+  const state: SetupState = {
+    keys: true,
+    python: null,
+    agents: {},
+    chosen: CLAUDE,
+    picked: false,
+    queued: null,
+    pending: null,
+    keyOpen: false,
+    pasting: false,
+    copied: null,
+    counts: { on: true, locked: false, started: false },
+    locked: [],
+  };
+  expect(queuedView(waiting, state, undefined, false)).toStrictEqual({
+    kind: "queued",
+    offline: true,
+  });
+  expect(queuedView(waiting, state, undefined, true)).toStrictEqual({
+    kind: "queued",
+    offline: true,
+    online: true,
+  });
+  const tools: SetupState = {
+    ...state,
+    python: { waiting: { code: "agent.install_offline", hosts: [], log: [] } },
+  };
+  expect(toolsView(tools, false)).toStrictEqual({ kind: "waiting" });
+  expect(toolsView(tools, true)).toStrictEqual({ kind: "waiting", online: true });
 });

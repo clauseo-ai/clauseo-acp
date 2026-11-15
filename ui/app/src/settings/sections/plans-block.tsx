@@ -36,6 +36,7 @@ import {
   type SetupStore,
 } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
+import { useOnline } from "../../transport/online.ts";
 import type { AgentId, FoundLogin, SignIn } from "../../transport/protocol.ts";
 import { Managed } from "./parts.tsx";
 import { MainAct, OtherAct, PlanCard, Stopped } from "./plans-card.tsx";
@@ -81,7 +82,8 @@ function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
       return setup?.signIn === "queued"
         ? { kind: "gate" }
         : { kind: "add", mb: aboutMb(setup?.mb ?? 0), paused: true };
-    if (installView(setup) !== null) return { kind: "install" };
+    // only whether the install has a line: the network's words don't change that
+    if (installView(setup, false) !== null) return { kind: "install" };
   }
   const signIn = setup?.signIn;
   if (signIn === undefined) return { kind: "none" };
@@ -145,6 +147,7 @@ export function PlanBlock({
   blockRef: (el: HTMLElement | null) => void;
 }) {
   const { lang } = useDisplay();
+  const online = useOnline();
   const s = (key: SettingsKey, slots?: Record<string, string | number>) => st(lang, key, slots);
   const plan: Plan = agent === CODEX ? "chatgpt" : "claude";
   const name = NAME[plan];
@@ -317,7 +320,7 @@ export function PlanBlock({
       case "install": {
         const working = installLine(
           lang,
-          installView(setup),
+          installView(setup, online),
           name,
           {
             retry: () => command({ retry_agent_install: { agent } }),
@@ -431,6 +434,8 @@ export function PlanBlock({
           setup,
           { ...store.state(), keyOpen: false, pasting },
           (at) => clockOf(at, at, zone, lang).time,
+          undefined,
+          online,
         );
         // a sign-in that stopped in a way the card says: the card, with no key link (the key stands under it)
         if (view !== null && view.kind === "failed" && isStopped(view.code)) {

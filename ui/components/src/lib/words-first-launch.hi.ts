@@ -50,6 +50,10 @@ export const HI = {
   Details: "विवरण",
   // the download done, while npm puts it together: no bytes to count and no time to promise (new)
   "Setting up {name}…": "{name} सेट अप हो रहा है…",
+  // agent.install_offline while the window says it is online: the download's address can't be reached, so not
+  // "You're offline" (new; the plans' line and the document tools' line)
+  "Setting up can't reach the download right now. It tries again by itself.":
+    "सेटअप अभी डाउनलोड तक नहीं पहुँच पा रहा। यह अपने-आप फिर से कोशिश करेगा।",
 
   // the fine print, up front (design)
   "Your papers stay on this computer. {name} sees the parts it reads to answer you.":
@@ -63,6 +67,8 @@ export const HI = {
   // UC-141: the quiet way to the key panel, in Connectors' Hindi (U15-09)
   "Use an API key instead": "इसके बजाय API key इस्तेमाल करें",
   "Your browser opens when you reconnect.": "दोबारा कनेक्ट होते ही आपका ब्राउज़र खुलेगा।",
+  // the install waits while the window says it is online: the download can't be reached, so not "reconnect" (new)
+  "Your browser opens when setting up can continue.": "सेटअप आगे बढ़ने पर आपका ब्राउज़र खुलेगा।",
   // UC-139 and UC-140: the field names the key by its maker; "API key" stays in Latin script (D-069)
   "Anthropic API key": "Anthropic API key",
   "OpenAI API key": "OpenAI API key",

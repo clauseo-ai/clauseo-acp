@@ -18,7 +18,10 @@ export type NetworkSource = {
   onLine: () => boolean;
 };
 
-const pageSource = (): NetworkSource => ({ events: window, onLine: () => navigator.onLine });
+export const pageSource = (): NetworkSource => ({
+  events: window,
+  onLine: () => navigator.onLine,
+});
 
 /** Watches the network for `transport`'s host and sends `set_network` on each change. Returns the stop. */
 export function watchNetwork(

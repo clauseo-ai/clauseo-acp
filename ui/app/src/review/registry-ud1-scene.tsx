@@ -2,6 +2,7 @@
 // over a FakeTransport that carries the setup wire, the first screen (no matter yet) or matter A open.
 import type { SettingsView, SetupEvent } from "../transport/protocol.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
+import { FIXED_OFFLINE, FIXED_ONLINE, OnlineSource } from "../transport/online.ts";
 import { MATTER } from "./hosts.ts";
 import { RoomDriven, type DrivenStep } from "./registry-ud1-switching.tsx";
 import { RoomClicking, RoomOver } from "./states.tsx";
@@ -23,6 +24,9 @@ export type Scene = {
     NonNullable<ConstructorParameters<typeof FakeTransport>[0]>,
     "pickFolder" | "dispatch"
   >;
+  /** What the window says of the network (online.ts): offline unless the scene says so, never the review page's own,
+   * so a waiting install's scene says the same words wherever the page is opened. */
+  online?: boolean;
 };
 
 /** The room over a fake host with the setup wire, in the scene. */
@@ -61,10 +65,19 @@ function host(s: Scene): () => FakeTransport {
     });
 }
 
-/** The entry's render: the room over the scene's host, pressed or driven as the scene says. */
-export const render = (s: Scene) =>
-  s.steps !== undefined
-    ? () => <RoomDriven host={host(s)} steps={s.steps ?? []} />
-    : s.clicks === undefined
-      ? () => <RoomOver host={host(s)} />
-      : () => <RoomClicking host={host(s)} clicks={s.clicks ?? []} />;
+/** The room over the scene's host, pressed or driven as the scene says. */
+const room = (s: Scene) =>
+  s.steps !== undefined ? (
+    <RoomDriven host={host(s)} steps={s.steps} />
+  ) : s.clicks === undefined ? (
+    <RoomOver host={host(s)} />
+  ) : (
+    <RoomClicking host={host(s)} clicks={s.clicks} />
+  );
+
+/** The entry's render: the scene's room, on the scene's network. */
+export const render = (s: Scene) => () => (
+  <OnlineSource.Provider value={s.online === true ? FIXED_ONLINE : FIXED_OFFLINE}>
+    {room(s)}
+  </OnlineSource.Provider>
+);
