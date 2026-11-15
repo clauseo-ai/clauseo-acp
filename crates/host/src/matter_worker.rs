@@ -21,6 +21,7 @@ use clauseo_protocol::{
 
 use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
 use crate::agent::folder_support::CheckSource;
+use crate::clock::Clock;
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::network_paths::resolve::Disk;
@@ -321,15 +322,18 @@ pub(crate) struct MatterWorker<T: Send + 'static> {
 }
 
 impl<T: Send + 'static> MatterWorker<T> {
-    /// Starts the thread. Each reply goes to `post` with its job's tag, in job order.
+    /// Starts matter `matter`'s thread, which reads `clock` only to pace a worker that keeps
+    /// panicking. Each reply goes to `post` with its job's tag, in job
+    /// order; a job that panics is answered too (`crash.rs`).
     pub(crate) fn start(
+        (matter, clock): (MatterId, Arc<dyn Clock>),
         settings: Settings,
         post: Box<dyn Fn(T, MatterReply) + Send>,
     ) -> Result<Self, Error> {
         let (jobs, receiver) = mpsc::channel::<(MatterJob, T)>();
         let thread = thread::Builder::new()
             .name(THREAD_NAME.to_owned())
-            .spawn(move || run(&settings, &receiver, &*post))
+            .spawn(move || crash::run((matter, &*clock), &settings, &receiver, &*post))
             .map_err(|err| Error::Internal(format!("could not start {THREAD_NAME}: {err}")))?;
         Ok(Self {
             jobs: Some(jobs),
@@ -341,6 +345,23 @@ impl<T: Send + 'static> MatterWorker<T> {
     pub(crate) fn send(&self, job: MatterJob, tag: T) -> Result<(), Error> {
         let jobs = self.jobs.as_ref().ok_or(Error::Closed)?;
         jobs.send((job, tag)).map_err(|_closed| Error::Closed)
+    }
+
+    /// A worker whose thread has ended, as after a panic outside `crash.rs`'s guard (tests).
+    #[cfg(test)]
+    pub(crate) const fn ended() -> Self {
+        Self {
+            jobs: None,
+            thread: None,
+        }
+    }
+
+    /// Whether the thread still runs. It ends only when a panic escapes `crash.rs`'s guard;
+    /// then the actor starts a new worker (`actor/matters.rs`).
+    pub(crate) fn is_alive(&self) -> bool {
+        self.thread
+            .as_ref()
+            .is_some_and(|thread| !thread.is_finished())
     }
 
     /// Lets the thread finish the jobs already queued, then joins it. Set an import's cancel flag
@@ -363,19 +384,6 @@ impl<T: Send + 'static> Drop for MatterWorker<T> {
         if let Err(err) = self.join() {
             tracing::warn!(error = %Cause(&err), "the matter thread panicked");
         }
-    }
-}
-
-/// The thread's loop: one job at a time until the actor drops its sender.
-fn run<T>(
-    settings: &Settings,
-    jobs: &mpsc::Receiver<(MatterJob, T)>,
-    post: &dyn Fn(T, MatterReply),
-) {
-    let mut slot = Slot::Empty;
-    while let Ok((job, tag)) = jobs.recv() {
-        let reply = handle(settings, &mut slot, job);
-        post(tag, reply);
     }
 }
 
@@ -565,6 +573,7 @@ fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, E
 
 mod checkpoints;
 mod claims;
+mod crash;
 mod import;
 mod jobs;
 mod relocate;
@@ -573,6 +582,8 @@ mod too_deep;
 
 use checkpoints::{repair, root_commit, timeline_entry, turn_checkpoint};
 pub(crate) use claims::{Claim, Claimed, Held, check_registry, is_same_folder};
+#[cfg(test)]
+pub(crate) use crash::hook;
 use import::import;
 pub(crate) use import::{ImportEnd, made};
 pub(crate) use relocate::{Registry, Relink};

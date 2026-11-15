@@ -10,6 +10,11 @@ use crate::pipeline::tests::support::TempDir;
 use crate::sent::TurnPaths;
 use crate::write;
 
+/// The OS clock, for a worker's pacing.
+fn clock() -> std::sync::Arc<dyn crate::clock::Clock> {
+    std::sync::Arc::new(crate::clock::SystemClock)
+}
+
 /// A valid v7 UUID, distinct per `n`.
 fn v7(n: u32) -> Uuid {
     let mut random = [0_u8; 10];
@@ -26,6 +31,7 @@ fn create_then_checkpoints_on_the_matter_thread() {
     let folder = root.join("matter");
     let (tx, rx) = mpsc::channel::<(u32, MatterReply, Option<String>)>();
     let worker = MatterWorker::<u32>::start(
+        (MatterId::new(v7(2)).unwrap(), clock()),
         matter_settings(&root.join("data")),
         Box::new(move |tag, reply| {
             let name = std::thread::current().name().map(str::to_owned);
@@ -137,6 +143,7 @@ fn a_listing_says_where_the_folder_lives_from_the_matter_thread() {
     let brief = folder.join("brief.txt");
     let (tx, rx) = mpsc::channel::<(MatterReply, Option<String>)>();
     let worker = MatterWorker::<u32>::start(
+        (MatterId::new(v7(2)).unwrap(), clock()),
         matter_settings(&root.join("data")),
         Box::new(move |_tag, reply| {
             let name = std::thread::current().name().map(str::to_owned);
@@ -181,6 +188,7 @@ fn a_job_before_any_matter_is_an_internal_error() {
     let (tx, rx) = mpsc::channel();
     let root = std::env::temp_dir();
     let worker = MatterWorker::<()>::start(
+        (MatterId::new(v7(2)).unwrap(), clock()),
         matter_settings(&root),
         Box::new(move |(), reply| tx.send(reply).unwrap()),
     )
@@ -211,6 +219,7 @@ fn a_job_before_any_matter_is_an_internal_error() {
 fn worker(root: &std::path::Path) -> (MatterWorker<u32>, mpsc::Receiver<MatterReply>) {
     let (tx, rx) = mpsc::channel::<MatterReply>();
     let worker = MatterWorker::<u32>::start(
+        (MatterId::new(v7(2)).unwrap(), clock()),
         matter_settings(&root.join("data")),
         Box::new(move |_tag, reply| tx.send(reply).unwrap()),
     )
