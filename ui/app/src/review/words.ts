@@ -26,6 +26,7 @@ import { fl, type FirstLaunchKey } from "@clauseo/components/lib/words-first-lau
 import { rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
 import { roomHindi } from "@clauseo/components/lib/words-room.hi.ts";
 import { rdt, type ReaderKey } from "@clauseo/components/lib/words-reader.ts";
+import { refusal, type RefusalKey } from "@clauseo/components/lib/words-refusals.ts";
 import { brk, type BreakKey } from "@clauseo/components/lib/words-breaks.ts";
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { startup, type StartupKey } from "@clauseo/components/lib/words-startup.ts";
@@ -169,6 +170,14 @@ export const uiWords = (key: UiKey): WordsRef => ({
   key,
   text: (lang) => ui(lang, key),
   later: ui.hi[key] === null,
+});
+
+/** The line under a step's row that Claude's own checks refused (words-refusals.ts). */
+export const refusalLineWords = (key: RefusalKey): WordsRef => ({
+  file: "lib/words-refusals.ts",
+  key,
+  text: (lang) => refusal(lang, key),
+  later: refusal.hi[key] === null,
 });
 
 /** A string of the judgment reader and Word's lines (words-reader.ts), such as Open in Word. */
