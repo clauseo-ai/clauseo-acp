@@ -61,6 +61,7 @@ impl<R: Runtime> FolderConfirm for NativeFolderConfirm<'_, R> {
             crate::dialogs::confirm(
                 &self.app,
                 Owner::Main,
+                crate::dialogs::DefaultButton::Cancel,
                 MessageLevel::Info,
                 title,
                 message,

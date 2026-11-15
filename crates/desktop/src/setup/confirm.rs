@@ -21,7 +21,7 @@ use rfd::MessageLevel;
 use tauri::{AppHandle, Runtime};
 
 use crate::dialogs::words::{ConfirmWords, Key};
-use crate::dialogs::{BoxFuture, Owner, confirm};
+use crate::dialogs::{BoxFuture, DefaultButton, Owner, confirm};
 
 /// What a setup confirm asks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +93,7 @@ impl<R: Runtime> SetupConfirm for NativeSetupConfirm<R> {
         confirm(
             &self.app,
             Owner::Main,
+            DefaultButton::Cancel,
             MessageLevel::Info,
             title,
             message,

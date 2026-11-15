@@ -1,36 +1,72 @@
-//! The confirms' buttons: Cancel first, so it is the default and focused button, and only the
-//! accepting button's own label accepts.
+//! The confirms' buttons: Cancel first, so it is the default and focused button, except the
+//! link's, where the link's button is; only the accepting button's own label accepts.
 
 use rfd::{MessageButtons, MessageDialogResult};
 
 use super::*;
 use crate::open::LinkWords;
 
-/// The `(first, second)` labels `cancel_first` gives `ok` and `cancel`.
-fn order(ok: &str, cancel: &str) -> (String, String) {
-    match cancel_first(ok, cancel) {
+/// The `(first, second)` labels `buttons` gives `ok` and `cancel` with `default`.
+fn order(default: DefaultButton, ok: &str, cancel: &str) -> (String, String) {
+    match buttons(default, ok, cancel) {
         MessageButtons::OkCancelCustom(first, second) => (first, second),
         other => panic!("{other:?}"),
     }
 }
 
 #[test]
-fn cancel_comes_first_in_both_confirms() {
+fn the_default_button_comes_first() {
+    let (ok, cancel) = ("Open link", "Cancel");
+    let cancel_first = (cancel.to_owned(), ok.to_owned());
+    let ok_first = (ok.to_owned(), cancel.to_owned());
+    assert_eq!(order(DefaultButton::Cancel, ok, cancel), cancel_first);
+    assert_eq!(order(DefaultButton::Ok, ok, cancel), ok_first);
+}
+
+#[test]
+fn cancel_comes_first_in_always_allow_and_open_first_in_the_link_confirm() {
     // "Always allow" (U4), both languages.
     for language in [Language::En, Language::Hi] {
         let words = always_allow_words(language);
         assert_eq!(
-            order(&words.ok, &words.cancel),
+            order(DefaultButton::Cancel, &words.ok, &words.cancel),
             (words.cancel.clone(), words.ok.clone())
         );
     }
-    // The link confirm, both kinds, both languages.
+    // The link confirm, both kinds, both languages: its button first, so Return opens.
     for words in LinkWords::every_table_for_tests() {
         assert_eq!(
-            order(&words.ok, &words.cancel),
-            (words.cancel.clone(), words.ok.clone())
+            order(DefaultButton::Ok, &words.ok, &words.cancel),
+            (words.ok.clone(), words.cancel.clone())
         );
         assert_ne!(words.ok, words.cancel);
+    }
+}
+
+/// Only the link confirm passes `DefaultButton::Ok`; every other confirm keeps Cancel.
+#[test]
+fn only_the_link_confirm_makes_its_button_the_default() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let callers = [
+        ("src/open/native.rs", "DefaultButton::Ok"),
+        ("src/dialogs.rs", "DefaultButton::Cancel"),
+        ("src/chooser/choose.rs", "DefaultButton::Cancel"),
+        ("src/setup/confirm.rs", "DefaultButton::Cancel"),
+        ("src/mcp.rs", "DefaultButton::Cancel"),
+    ];
+    for (file, default) in callers {
+        let text = std::fs::read_to_string(dir.join(file)).unwrap();
+        let calls = text.matches("confirm(\n").count();
+        assert!(calls >= 1, "{file} draws no confirm");
+        assert!(text.contains(default), "{file} lacks {default}");
+        if file != "src/dialogs.rs" {
+            let other = if default.ends_with("Ok") {
+                "DefaultButton::Cancel"
+            } else {
+                "DefaultButton::Ok"
+            };
+            assert!(!text.contains(other), "{file} passes {other}");
+        }
     }
 }
 
@@ -48,6 +84,27 @@ fn only_the_accepting_button_accepts() {
         MessageDialogResult::Custom(String::new()),
     ] {
         assert!(!accepted(&declined, ok), "{declined:?}");
+    }
+}
+
+/// In either order, what rfd answers for each button is that button's own label, so pressing
+/// the accepting one accepts and pressing Cancel declines; Escape or closing (rfd's plain
+/// `Cancel`) declines too.
+#[test]
+fn either_order_accepts_only_the_accepting_button() {
+    for words in LinkWords::every_table_for_tests() {
+        for default in [DefaultButton::Ok, DefaultButton::Cancel] {
+            let (first, second) = order(default, &words.ok, &words.cancel);
+            let pressed = |label: String| accepted(&MessageDialogResult::Custom(label), &words.ok);
+            let (first_accepts, second_accepts) = (pressed(first), pressed(second));
+            assert_eq!(first_accepts, default == DefaultButton::Ok, "{default:?}");
+            assert_eq!(
+                second_accepts,
+                default == DefaultButton::Cancel,
+                "{default:?}"
+            );
+            assert!(!accepted(&MessageDialogResult::Cancel, &words.ok));
+        }
     }
 }
 

@@ -63,28 +63,57 @@ pub(crate) fn always_allow_words(language: Language) -> ConfirmWords {
     ConfirmWords::new(language, keys, &[])
 }
 
+/// Which button of a confirm is the default, the one Return answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DefaultButton {
+    /// Cancel, so a stray key never accepts: every confirm but the link's.
+    Cancel,
+    /// The accepting button: the link's confirm only, where the lawyer has just clicked the link.
+    Ok,
+}
+
+/// The buttons of a confirm with `default` first. rfd draws the first button as the default on
+/// both OSes: macOS's alert (`NSAlert`, or `CFUserNotification` with no window) makes it the
+/// Return button, and Windows' task dialog, given no default, focuses it (Return, Enter and
+/// Space). Escape answers rfd's plain `Cancel` on Windows and the button titled "Cancel" on
+/// macOS, whichever is first. See [`cancel_first`] and [`ok_first`].
+pub(crate) fn buttons(default: DefaultButton, ok: &str, cancel: &str) -> MessageButtons {
+    match default {
+        DefaultButton::Cancel => cancel_first(ok, cancel),
+        DefaultButton::Ok => ok_first(ok, cancel),
+    }
+}
+
 /// The buttons of a confirm: `cancel` first, so it is the default and focused button (Return
 /// and Enter on both OSes, Space on Windows) and a stray key never accepts. `ok` second.
 pub(crate) fn cancel_first(ok: &str, cancel: &str) -> MessageButtons {
     MessageButtons::OkCancelCustom(cancel.to_owned(), ok.to_owned())
 }
 
-/// Whether a confirm drawn with [`cancel_first`] was accepted: only rfd's answer for a press of
-/// the `ok` button, `Custom(ok)`. Its plain `Cancel` (Escape, Alt+F4 or the close button on
-/// Windows, a stopped sheet on macOS, a dialog that failed) and anything else decline.
+/// The buttons of the link's confirm: `ok` first, so it is the default and focused button
+/// (Return and Enter on both OSes, Space on Windows). `cancel` second.
+pub(crate) fn ok_first(ok: &str, cancel: &str) -> MessageButtons {
+    MessageButtons::OkCancelCustom(ok.to_owned(), cancel.to_owned())
+}
+
+/// Whether a confirm drawn with [`buttons`], in either order, was accepted: only rfd's answer for
+/// a press of the `ok` button, `Custom(ok)`. Its plain `Cancel` (Escape, Alt+F4 or the close
+/// button on Windows, a stopped sheet on macOS, a dialog that failed), `Custom(cancel)` and
+/// anything else decline.
 pub(crate) fn accepted(result: &MessageDialogResult, ok: &str) -> bool {
     matches!(result, MessageDialogResult::Custom(label) if label == ok)
 }
 
 /// Draws a native confirm on `app`, over `owner`'s window (see [`owner_label`]; main when that
-/// window is gone), with [`cancel_first`]'s buttons, and answers [`accepted`]. rfd is called
-/// directly, as the dialog plugin itself calls it (built on the main thread, awaited on a thread
-/// of its own), because the plugin turns rfd's plain `Cancel` into `Custom(<second label>)`,
-/// which with Cancel first is the accepting label. A dialog that never answers (the app closing,
-/// no main thread, no thread) counts as declined.
+/// window is gone), with [`buttons`] in `default`'s order, and answers [`accepted`]. rfd is
+/// called directly, as the dialog plugin itself calls it (built on the main thread, awaited on a
+/// thread of its own), because the plugin turns rfd's plain `Cancel` into
+/// `Custom(<second label>)`, which with Cancel first is the accepting label. A dialog that never
+/// answers (the app closing, no main thread, no thread) counts as declined.
 pub(crate) fn confirm<R: Runtime>(
     app: &AppHandle<R>,
     owner: Owner,
+    default: DefaultButton,
     level: MessageLevel,
     title: String,
     message: String,
@@ -96,7 +125,7 @@ pub(crate) fn confirm<R: Runtime>(
     let parent = app
         .get_webview_window(label)
         .or_else(|| app.get_webview_window(MAIN_WINDOW));
-    let buttons = cancel_first(&ok, cancel);
+    let buttons = buttons(default, &ok, cancel);
     // Not posted (the event loop has gone): the closure and its sender drop, which declines.
     let _unposted = app.run_on_main_thread(move || {
         let mut dialog = rfd::AsyncMessageDialog::new()
@@ -220,6 +249,7 @@ impl<R: Runtime> Confirm for NativeConfirm<'_, R> {
             confirm(
                 &self.app,
                 Owner::Main,
+                DefaultButton::Cancel,
                 level,
                 title,
                 message,

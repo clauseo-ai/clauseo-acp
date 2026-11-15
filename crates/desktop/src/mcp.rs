@@ -165,6 +165,7 @@ impl<R: Runtime> LaunchDrawer for NativeLaunchDrawer<R> {
         crate::dialogs::confirm(
             &self.app,
             Owner::SettingsOrMain,
+            crate::dialogs::DefaultButton::Cancel,
             rfd::MessageLevel::Warning,
             words.title,
             words.message,
