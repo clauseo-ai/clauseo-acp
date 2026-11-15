@@ -126,3 +126,31 @@ fn the_python_folders_go_to_claude_and_codex_only_as_the_slot_holds_them() {
     let bare = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), Arc::default());
     assert_eq!(bare.agent_path(&agents[0]), Vec::<PathBuf>::new());
 }
+
+/// The bundled pdftoppm and pdfinfo run the Python runtime, so their folder goes on Claude's and
+/// Codex's PATH after the runtime's folders, and only while those are there.
+#[test]
+fn the_pdf_tools_folder_follows_the_python_folders_for_claude_and_codex() {
+    let python = PythonSlot::default();
+    let pdf = PathBuf::from("/Applications/Clauseo.app/Contents/Helpers/pdf");
+    let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), Arc::default())
+        .with_python(Arc::clone(&python))
+        .with_pdf_tools(Some(pdf.clone()));
+    let agents = [id("claude-acp"), id("codex-acp"), id("gemini-acp")];
+    for agent in &agents {
+        assert_eq!(hook.agent_path(agent), Vec::<PathBuf>::new(), "{agent}");
+    }
+    let bin = PathBuf::from("/data/agents/runtime/clauseo-python/bin");
+    python.write().unwrap().push(bin.clone());
+    assert_eq!(hook.agent_path(&agents[0]), [bin.clone(), pdf.clone()]);
+    assert_eq!(hook.agent_path(&agents[1]), [bin.clone(), pdf]);
+    assert_eq!(hook.agent_path(&agents[2]), Vec::<PathBuf>::new());
+    python.write().unwrap().clear();
+    assert_eq!(hook.agent_path(&agents[1]), Vec::<PathBuf>::new());
+    // Not found (a debug build, a bundle without it): the Python folders alone.
+    let without = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), Arc::default())
+        .with_python(Arc::clone(&python))
+        .with_pdf_tools(None);
+    python.write().unwrap().push(bin.clone());
+    assert_eq!(without.agent_path(&agents[0]), [bin]);
+}

@@ -328,7 +328,7 @@ fn alone_in_its_folder(program: &Path) -> bool {
 
 /// Whether `path` is a file the OS would run: on Unix, a file with an execute bit; on Windows,
 /// a file whose extension is in `PATHEXT` (default `.COM;.EXE;.BAT;.CMD`).
-fn is_program(path: &Path) -> bool {
+pub(crate) fn is_program(path: &Path) -> bool {
     let Ok(meta) = std::fs::metadata(path) else {
         return false;
     };

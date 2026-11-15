@@ -244,14 +244,16 @@ impl ClauseoProfile {
         self.codex_instructions_for(cfg!(target_os = "macos"))
     }
 
-    /// Codex's instructions: [`Self::instructions_for`] Codex, a blank line and
-    /// [`instructions::CODEX_SHELL_OFFLINE`], then on macOS (`macos`) a blank line and
-    /// [`instructions::codex_shell`]'s line; Claude gets neither.
+    /// Codex's instructions: [`Self::instructions_for`] Codex, a blank line,
+    /// [`instructions::CODEX_SHELL_OFFLINE`], a blank line and [`instructions::codex_pdf`]'s
+    /// line, then on macOS (`macos`) a blank line and [`instructions::codex_shell`]'s line.
+    /// Claude gets none of them.
     pub fn codex_instructions_for(&self, macos: bool) -> String {
         let text = format!(
-            "{}\n\n{}",
+            "{}\n\n{}\n\n{}",
             self.instructions_for(AgentKind::Codex),
-            instructions::CODEX_SHELL_OFFLINE.trim()
+            instructions::CODEX_SHELL_OFFLINE.trim(),
+            instructions::codex_pdf()
         );
         match instructions::codex_shell(macos) {
             Some(line) => format!("{text}\n\n{line}"),

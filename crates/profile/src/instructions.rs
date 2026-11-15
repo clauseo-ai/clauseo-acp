@@ -103,6 +103,18 @@ pub fn codex_shell(macos: bool) -> Option<&'static str> {
     macos.then(|| CODEX_SHELL_MACOS.trim())
 }
 
+/// The line every Codex session gets after the instructions, on every OS (scanned PDFs): Codex
+/// has no PDF input and its image viewer reads PNG, JPEG, GIF and WebP only, so it renders pages
+/// with Clauseo's own `pdftoppm` (the `clauseo-pdf` crate, on its `PATH` with the Python runtime)
+/// into `{work_folder}`, which its sandbox may write and the host fills. Claude gets none: its Read
+/// runs that `pdftoppm` itself for a PDF over 10 pages.
+pub const CODEX_PDF: &str = include_str!("../assets/instructions/codex-pdf.txt");
+
+/// [`CODEX_PDF`], trimmed.
+pub fn codex_pdf() -> &'static str {
+    CODEX_PDF.trim()
+}
+
 /// The line a Claude session on macOS gets after the instructions: Claude Code's own sandbox
 /// (the host's `agent::loads::sandbox`) runs every command under Seatbelt with Apple events off
 /// and no way out (`allowUnsandboxedCommands: false`), and its Mach list has no Spotlight or

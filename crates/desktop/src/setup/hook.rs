@@ -18,7 +18,9 @@
 //!
 //! And to Claude's and Codex's session `PATH` (`ProfileHook::agent_path`), Clauseo's Python
 //! runtime folders from the [`PythonSlot`] (`setup/python_path.rs`), which the setup thread
-//! fills once Python is `Ready` and empties otherwise; the host puts them after stetdoc's.
+//! fills once Python is `Ready` and empties otherwise, then, while there are any, the bundled
+//! PDF tools' folder (`pdf_tools.rs`: `pdftoppm` and `pdfinfo` run that runtime); the host puts
+//! them after stetdoc's.
 //!
 //! Both snapshots are refreshed on each `SettingsChanged` (`setup/refresh.rs`). [`setup_vars`] is
 //! the one function that makes these variables: the limits readers take the same ones
@@ -63,6 +65,8 @@ pub(crate) struct SetupHook {
     plans: Plans,
     network: NetworkSlot,
     python: PythonSlot,
+    /// The bundled `pdftoppm` and `pdfinfo`'s folder (`pdf_tools::find`), if found.
+    pdf_tools: Option<PathBuf>,
 }
 
 impl SetupHook {
@@ -75,6 +79,7 @@ impl SetupHook {
             plans,
             network,
             python: PythonSlot::default(),
+            pdf_tools: None,
         }
     }
 
@@ -82,6 +87,16 @@ impl SetupHook {
     #[must_use]
     pub(crate) fn with_python(self, python: PythonSlot) -> Self {
         Self { python, ..self }
+    }
+
+    /// This hook with the PDF tools' folder `folder` after the Python folders, while there are
+    /// any.
+    #[must_use]
+    pub(crate) fn with_pdf_tools(self, folder: Option<PathBuf>) -> Self {
+        Self {
+            pdf_tools: folder,
+            ..self
+        }
     }
 
     /// This hook over `profile`, whose calls it hands through.
@@ -238,17 +253,22 @@ impl ProfileHook for SetupHook {
         self.profile.pack_write(agent, request)
     }
 
-    /// The Python runtime's folders, as the setup thread last put them in the slot, for a
-    /// Claude or Codex agent; none for any other. A read of memory only: no I/O.
+    /// The Python runtime's folders, as the setup thread last put them in the slot, then the PDF
+    /// tools' folder when there are any, for a Claude or Codex agent; none for any other. A read
+    /// of memory only: no I/O.
     fn agent_path(&self, agent: &AgentId) -> Vec<PathBuf> {
-        match AgentKind::of(agent) {
-            Some(AgentKind::Claude | AgentKind::Codex) => self
-                .python
-                .read()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone(),
-            None => Vec::new(),
+        if AgentKind::of(agent).is_none() {
+            return Vec::new();
         }
+        let mut dirs = self
+            .python
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(folder) = self.pdf_tools.as_ref().filter(|_| !dirs.is_empty()) {
+            dirs.push(folder.clone());
+        }
+        dirs
     }
 
     fn browser_tool(&self) -> Option<PathBuf> {

@@ -1,0 +1,25 @@
+[package]
+name = "clauseo-pdf"
+version = "0.0.0"
+description = "Clauseo's own pdftoppm and pdfinfo: launchers that run its Python runtime's pypdfium2."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Two programs, one per poppler tool the agents call; each is the same launcher for its tool
+# (src/lib.rs), bundled in a folder of its own (.github/scripts/sidecars.mjs, PDF_TOOLS).
+[[bin]]
+name = "pdftoppm"
+path = "src/bin/pdftoppm.rs"
+
+[[bin]]
+name = "pdfinfo"
+path = "src/bin/pdfinfo.rs"
+
+# No dependencies: std only. The rendering is the Python script's (src/clauseo_pdf.py), on the
+# runtime's pypdfium2 and Pillow.
+[dependencies]

@@ -45,7 +45,9 @@
 #   putting clauseo-agent-browser in Contents/Helpers; gitignored), which every `tauri build` and
 #   `tauri bundle` of a shipped build passes last. It also puts stetdoc (crates/desktop/stetdoc.toml)
 #   in a folder of its own: Contents/Helpers/stetdoc/stetdoc on macOS (bundle.macOS.files),
-#   <resources>/stetdoc/stetdoc[.exe] elsewhere (bundle.resources; on Windows the install folder).
+#   <resources>/stetdoc/stetdoc[.exe] elsewhere (bundle.resources; on Windows the install folder),
+#   and Clauseo's own pdftoppm and pdfinfo (crates/pdf) together in pdf/ the same way, on macOS
+#   and Windows only.
 # - The block-list snapshot, behind one switch: check's output bundle_blocklist, 'false' for
 #   launch (the plain build never reads the snapshot, as nothing in it enforces the list; the Safe
 #   workspace sets it to 'true'). On, the `blocklist` job downloads clauseo-ai/blocklist's
@@ -540,6 +542,8 @@ jobs:
       # target's whole list). S15 adds its rows to the script's table. stetdoc is fetched from its
       # pin as binaries/clauseo-stetdoc-$TARGET and bundled in its own stetdoc/ folder, never in
       # externalBin; a target its pin marks pending (Windows, until the crt-static release) fails here.
+      # On macOS and Windows it also builds crates/pdf's pdftoppm and pdfinfo with this job's flags,
+      # as binaries/clauseo-pdftoppm-$TARGET and clauseo-pdfinfo-$TARGET, bundled together in pdf/.
       # The updater public key the sandbox's build.rs builds in (stage C), before sidecars.mjs
       # compiles it, always in plugins.updater.pubkey's format (base64 of the whole minisign .pub
       # text): a release's from tauri.conf.json, a test run's updater-test.pub, which is stored in
@@ -664,8 +668,8 @@ jobs:
 
       # The bundler signs the .app ad hoc (APPLE_SIGNING_IDENTITY "-") until S20a's Developer ID,
       # then the updater archive with the mode's key, which only this step holds. First this step
-      # signs the browser helper and stetdoc, which the overlay's bundle.macOS.files puts in
-      # Contents/Helpers and Contents/Helpers/stetdoc:
+      # signs the browser helper, stetdoc and the PDF tools, which the overlay's bundle.macOS.files
+      # puts in Contents/Helpers, Contents/Helpers/stetdoc and Contents/Helpers/pdf:
       # the bundler copies those files without signing them, and the .app's seal needs nested code
       # signed before it. The same identity and options as the bundler's own codesign (--force,
       # the hardened runtime of tauri.conf.json, no entitlements); a real identity adds a secure
@@ -690,7 +694,7 @@ jobs:
           fi
           [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }
           [ -n "$APPLE_SIGNING_IDENTITY" ] || { echo "::error::APPLE_SIGNING_IDENTITY is empty"; exit 1; }
-          for key in Helpers/clauseo-agent-browser Helpers/stetdoc/stetdoc; do
+          for key in Helpers/clauseo-agent-browser Helpers/stetdoc/stetdoc Helpers/pdf/pdftoppm Helpers/pdf/pdfinfo; do
             rel=$(jq -er --arg key "$key" '.bundle.macOS.files[$key]' crates/desktop/release/sidecars.generated.json) ||
               { echo "::error::sidecars.generated.json puts nothing at Contents/$key"; exit 1; }
             helper=crates/desktop/$rel
@@ -714,8 +718,8 @@ jobs:
 
       # The .app as bundled, before anything uploads it. Contents/MacOS, which the agent's sandbox
       # can reach, holds exactly the main executable and the overlay's externalBin sidecars;
-      # Contents/Helpers holds exactly clauseo-agent-browser and stetdoc/ (holding only stetdoc),
-      # each executable and signed; and the whole
+      # Contents/Helpers holds exactly clauseo-agent-browser, stetdoc/ (holding only stetdoc) and
+      # pdf/ (holding only pdfinfo and pdftoppm), each executable and signed; and the whole
       # bundle verifies, strictly and deep. Each check fails the leg.
       - name: The .app keeps the browser helper in Contents/Helpers, and verifies
         if: runner.os == 'macOS'
@@ -732,18 +736,21 @@ jobs:
             { echo "::error::$app/Contents/MacOS holds $have; it may hold only $want"; exit 1; }
           [ -d "$app/Contents/Helpers" ] || { echo "::error::$app has no Contents/Helpers"; exit 1; }
           helpers=$(ls -A "$app/Contents/Helpers" | LC_ALL=C sort | tr '\n' ' ')
-          [ "$helpers" = "clauseo-agent-browser stetdoc " ] ||
-            { echo "::error::$app/Contents/Helpers holds $helpers; it must hold only clauseo-agent-browser and stetdoc/"; exit 1; }
+          [ "$helpers" = "clauseo-agent-browser pdf stetdoc " ] ||
+            { echo "::error::$app/Contents/Helpers holds $helpers; it must hold only clauseo-agent-browser, pdf/ and stetdoc/"; exit 1; }
           [ "$(ls -A "$app/Contents/Helpers/stetdoc")" = stetdoc ] ||
             { echo "::error::$app/Contents/Helpers/stetdoc must hold only stetdoc"; exit 1; }
-          for helper in "$app/Contents/Helpers/clauseo-agent-browser" "$app/Contents/Helpers/stetdoc/stetdoc"; do
+          [ "$(ls -A "$app/Contents/Helpers/pdf" | LC_ALL=C sort | tr '\n' ' ')" = "pdfinfo pdftoppm " ] ||
+            { echo "::error::$app/Contents/Helpers/pdf must hold only pdfinfo and pdftoppm"; exit 1; }
+          for helper in "$app/Contents/Helpers/clauseo-agent-browser" "$app/Contents/Helpers/stetdoc/stetdoc" \
+            "$app/Contents/Helpers/pdf/pdftoppm" "$app/Contents/Helpers/pdf/pdfinfo"; do
             [ -f "$helper" ] && [ -x "$helper" ] || { echo "::error::$helper is not an executable file"; exit 1; }
             codesign --verify --strict --verbose=2 "$helper" ||
               { echo "::error::codesign --verify --strict fails on $helper"; exit 1; }
           done
           codesign --verify --deep --strict --verbose=2 "$app" ||
             { echo "::error::codesign --verify --deep --strict fails on $app"; exit 1; }
-          echo "- $TARGET Clauseo.app: Contents/MacOS holds $have; Contents/Helpers holds $helpers(stetdoc/stetdoc; signed); the .app verifies --deep --strict" |
+          echo "- $TARGET Clauseo.app: Contents/MacOS holds $have; Contents/Helpers holds $helpers(stetdoc/stetdoc, pdf/pdftoppm, pdf/pdfinfo; signed); the .app verifies --deep --strict" |
             tee -a "$GITHUB_STEP_SUMMARY"
 
       # Each leg's assets, under the names latest-json.mjs lists.
@@ -979,7 +986,8 @@ jobs:
 
       # S20a signs every PE the installers take: Clauseo.exe and each file in
       # crates/desktop/binaries/ (clauseo-mcp, clauseo-agent-browser, clauseo-stetdoc, which the
-      # installers place as stetdoc\stetdoc.exe, later S15's tools), before NSIS.
+      # installers place as stetdoc\stetdoc.exe, clauseo-pdftoppm and clauseo-pdfinfo, placed as
+      # pdf\pdftoppm.exe and pdf\pdfinfo.exe, later S15's tools), before NSIS.
       - name: SignPath, the exe and the sidecars (S20a)
         if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
         run: |

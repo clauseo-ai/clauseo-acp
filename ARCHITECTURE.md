@@ -97,6 +97,7 @@ to write instead.
 | `citations` | Deterministic citation parsing and checks | protocol, legal | tauri | planned |
 | `skills` | Skill format, built-in skills, validation, install through `profile` | protocol, profile | tauri | planned |
 | `mcp` | The `clauseo-mcp` sidecar: the browser guard in front of agent-browser's MCP server, and the connector relay client (0050) | serde, serde_json, getrandom; nix (Unix only); windows (Windows only) | tauri, tokio, reqwest, hyper, ureq, curl, rustls, native-tls | exists |
+| `pdf` | Clauseo's own `pdftoppm` and `pdfinfo` for the agents (scanned PDFs): launchers that run the Python runtime on a bundled script over pypdfium2 and Pillow; no poppler | none (std only) | tauri, tokio, host, agents | exists |
 
 The broker (keys, cache and limits for outside services, plus the socket the sandboxed sidecar
 reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists), `ui/components`
