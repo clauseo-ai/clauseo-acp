@@ -54,13 +54,27 @@ pub(super) fn tool_call(
             sources.started(turn, id, agent, &call)
         })
     };
+    let folder = fallback_folder(actor, thread);
+    let saved =
+        state(actor, thread).map(|state| state.sources.fallbacks.started(&call, folder.as_deref()));
     let (built, _fields) = build::tool_call_started(turn, id, call);
     commit(actor, thread, [built.value.into()], built.blobs)?;
     sourced(
         actor,
         thread,
-        source.into_iter().chain(case_law.into_iter().flatten()),
+        source
+            .into_iter()
+            .chain(case_law.into_iter().flatten())
+            .chain(saved.into_iter().flatten().map(DomainEvent::from)),
     )
+}
+
+/// Clauseo's own downloads folder for the matter of the thread's running session
+/// (`agent::loads::browser::fallback_downloads`), as its guard got it; none when the thread
+/// has no session folders, and then no result is read for saved files.
+fn fallback_folder(actor: &mut Actor, thread: ThreadId) -> Option<std::path::PathBuf> {
+    let run = state(actor, thread)?.run.as_ref()?;
+    Some(crate::agent::loads::browser::fallback_downloads(&run.notes))
 }
 
 /// What a tool call adds to the thread's sources (`sources.rs`), asked of the thread's state
@@ -141,6 +155,14 @@ pub(super) fn tool_update(
                 .into_iter()
                 .collect(),
             };
+            let folder = fallback_folder(actor, thread);
+            if let Some(state) = state(actor, thread) {
+                let saved = state
+                    .sources
+                    .fallbacks
+                    .updated(acp_id, &patch, folder.as_deref());
+                source.extend(saved.into_iter().map(DomainEvent::from));
+            }
         }
         Context::Outside { replay: false } => {}
     }

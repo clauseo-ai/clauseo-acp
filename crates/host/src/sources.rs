@@ -2,7 +2,8 @@
 //! calls themselves (synthesis §3.3, seam 3: tool calls are looked up by name and shape) and shown
 //! in the answer's sources list.
 //!
-//! - [`browser`]: the browser's own opens, `PageVisited { via: Browser }` (S27).
+//! - [`browser`]: the browser's own opens, `PageVisited { via: Browser }` (S27), and the files
+//!   its guard saved outside the matter, a `Notice` each (`browser::Fallbacks`).
 //! - [`case_law`]: the case-law connector's searches and reads (R24), joined to what the relay
 //!   saw of the same call: `WebSearchRecorded { source: CaseLaw }`, `PageVisited { via: CaseLaw }`.
 //! - [`claude`]: Claude Code's own `WebSearch` and `WebFetch` (S26): a search is
@@ -42,6 +43,9 @@ pub(crate) const MAX_RESULT_URL_CHARS: usize = 2_000;
 #[derive(Debug, Default)]
 pub(crate) struct Sources {
     browser: browser::Opens,
+    /// The `browser` calls whose result may name a file the guard saved outside the matter
+    /// (`browser::Fallbacks`), and the files told.
+    pub(crate) fallbacks: browser::Fallbacks,
     /// A Codex agent's unfinished calls of the `browser` server's tools, for its permission
     /// requests (`actor/turn/asks.rs`); no record comes of them.
     codex_browser: browser::CodexTools,

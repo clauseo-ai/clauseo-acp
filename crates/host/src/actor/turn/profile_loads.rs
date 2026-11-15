@@ -66,7 +66,9 @@ pub(super) fn launch_keys(
         let (_, browser_switch) = switches(actor);
         let matter = super::session::folder(actor, thread)?;
         let downloads = matter.join(browser::DOWNLOADS_FOLDER);
-        let inputs = browser_inputs(actor, &prepared.run, (control, browser_switch), &downloads);
+        let fallback = browser::fallback_downloads(&prepared.run.notes);
+        let folders = (downloads.as_path(), fallback.as_path());
+        let inputs = browser_inputs(actor, &prepared.run, (control, browser_switch), folders);
         let (_, entry) = browser::hook_servers(actor.profile.mcp_servers(&agent_id), &inputs);
         let shell = shell_browser(actor, &prepared.run, &agent_id);
         let kind = AgentKind::of(&agent_id);
@@ -167,7 +169,9 @@ pub(super) fn session_loads(
     let part = connectors_part(case_law_entry.is_some());
     let (web_search, browser_switch) = switches(actor);
     let downloads = matter.join(browser::DOWNLOADS_FOLDER);
-    let inputs = browser_inputs(actor, &run, (control, browser_switch), &downloads);
+    let fallback = browser::fallback_downloads(&run.notes);
+    let folders = (downloads.as_path(), fallback.as_path());
+    let inputs = browser_inputs(actor, &run, (control, browser_switch), folders);
     // Codex's `browser` entry (`clauseo_profile::servers::browser_mcp`), filled or left out.
     let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
     egress::unread_secret(&run, browser_state.as_ref());
@@ -441,12 +445,13 @@ fn case_law_servers(
 }
 
 /// What the `browser` entry of `run`'s session needs (`agent::loads::browser`), whose
-/// matter's downloads folder is `matter_downloads`.
+/// matter's downloads folder is `downloads.0` and Clauseo's own downloads folder for the
+/// matter `downloads.1` (`browser::fallback_downloads`).
 fn browser_inputs<'a>(
     actor: &Actor,
     run: &'a RunFolders,
     (control, switch): (loads::McpControl, Switch),
-    matter_downloads: &'a Path,
+    (matter_downloads, fallback_downloads): (&'a Path, &'a Path),
 ) -> BrowserInputs<'a> {
     BrowserInputs {
         switch,
@@ -461,6 +466,7 @@ fn browser_inputs<'a>(
         executable: run.chrome.as_deref(),
         browser_dir: &run.browser,
         matter_downloads,
+        fallback_downloads,
         claims: run.browser_session.as_deref().map(Claims::of),
     }
 }

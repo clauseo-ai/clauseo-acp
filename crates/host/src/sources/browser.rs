@@ -18,6 +18,9 @@
 //! or the guard's "Clauseo does not allow" refusal), and so does an update the host does not log in
 //! the live turn: `Origin::Late` and `Origin::Replay` never reach here (`actor/turn/updates.rs`).
 
+mod fallback;
+pub(crate) use fallback::Fallbacks;
+
 use std::collections::BTreeMap;
 
 use clauseo_acp::ToolCall;

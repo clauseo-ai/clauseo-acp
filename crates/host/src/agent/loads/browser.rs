@@ -35,13 +35,13 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clauseo_acp::McpServer;
 use clauseo_profile::instructions::BrowserPart;
 use clauseo_profile::placeholders::{
     self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_SERVERS, MATTER_DOWNLOADS,
-    PROXY_PORT, PROXY_SECRET_FILE, SESSION_ID, SOCKET_DIR,
+    MATTER_FALLBACK_DOWNLOADS, PROXY_PORT, PROXY_SECRET_FILE, SESSION_ID, SOCKET_DIR,
 };
 use clauseo_profile::servers::BROWSER;
 use clauseo_protocol::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
@@ -51,6 +51,20 @@ use super::McpControl;
 /// The matter's folder for what the browser saves, `<session folder>/downloads`
 /// (`{matter_downloads}`), which the guard makes.
 pub(crate) const DOWNLOADS_FOLDER: &str = "downloads";
+
+/// Clauseo's own downloads folder for a matter, `<data>/agent-state/<matter id>/downloads`
+/// (`{matter_fallback_downloads}`), beside the matter's `notes` folder (`RunFolders::notes`):
+/// where the guard saves a file, marked, when the matter's drive cannot keep the "downloaded
+/// from the internet" mark. The guard makes it; its parent is made with the notes folder.
+pub(crate) fn fallback_downloads(notes: &Path) -> PathBuf {
+    notes.with_file_name(DOWNLOADS_FOLDER)
+}
+
+/// [`fallback_downloads`] of `matter` under the data folder `data`, for the desktop's reveal of
+/// a file the guard saved there (`NoticeKind::DownloadOutsideMatter`).
+pub fn matter_fallback_downloads(data: &Path, matter: clauseo_protocol::MatterId) -> PathBuf {
+    crate::agent::matter_state_dir(data, matter).join(DOWNLOADS_FOLDER)
+}
 
 /// A `tools.*` switch as the settings hold it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +115,9 @@ pub(crate) struct BrowserInputs<'a> {
     /// The matter's downloads folder, `<session folder>/downloads`, where the guard delivers
     /// what the browser saves (`{matter_downloads}`).
     pub(crate) matter_downloads: &'a Path,
+    /// Clauseo's own downloads folder for the matter ([`fallback_downloads`]), where the guard
+    /// saves what the matter's drive cannot keep marked (`{matter_fallback_downloads}`).
+    pub(crate) fallback_downloads: &'a Path,
     /// The session's claimed ports, socket folder and agent-browser name, if they were claimed.
     pub(crate) claims: Option<Claims<'a>>,
 }
@@ -210,13 +227,14 @@ fn browser_entry(
     } else {
         (None, None)
     };
-    let (Some(executable), Some(browser_dir), Some(matter_downloads)) = (
+    let (Some(executable), Some(browser_dir), Some(matter_downloads), Some(fallback)) = (
         executable.to_str(),
         dunce::simplified(inputs.browser_dir).to_str(),
         dunce::simplified(inputs.matter_downloads).to_str(),
+        dunce::simplified(inputs.fallback_downloads).to_str(),
     ) else {
         tracing::warn!(
-            "the Chrome, the session's browser folder or the matter's folder is not UTF-8: the \
+            "the Chrome, the session's browser folder or a downloads folder is not UTF-8: the \
              browser is left out"
         );
         return Err(ToolsUnavailableReason::BrowserNotInstalled);
@@ -236,6 +254,7 @@ fn browser_entry(
     let mut values = vec![
         (BROWSER_DIR, browser_dir),
         (MATTER_DOWNLOADS, matter_downloads),
+        (MATTER_FALLBACK_DOWNLOADS, fallback),
         (SESSION_ID, claims.name),
         (BROWSER_EXECUTABLE, executable),
         (CDP_PORT, cdp_port.as_str()),

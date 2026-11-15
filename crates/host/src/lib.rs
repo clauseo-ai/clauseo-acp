@@ -282,6 +282,7 @@ mod view;
 mod window;
 mod write;
 
+pub use agent::loads::browser::matter_fallback_downloads;
 pub use agent::loads::{
     GUARD_EXE, codex_guard_program, codex_hook_config, codex_hook_config_with_home,
 };

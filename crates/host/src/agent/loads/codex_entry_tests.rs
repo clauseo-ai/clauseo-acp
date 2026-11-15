@@ -20,6 +20,8 @@ fn codex_server(windows: bool) -> McpServer {
         "{browser_dir}",
         "--downloads",
         "{matter_downloads}",
+        "--fallback-downloads",
+        "{matter_fallback_downloads}",
         "--cdp-port",
         "{cdp_port}",
     ];
@@ -111,6 +113,8 @@ fn codex_s_entry_goes_with_the_session_s_proxy_on_each_os() {
             "/data/run/t-1/browser",
             "--downloads",
             "/matters/smith/downloads",
+            "--fallback-downloads",
+            "/data/agent-state/m1/downloads",
             "--cdp-port",
             "61101",
         ];
@@ -172,4 +176,23 @@ fn codex_on_windows_gets_no_entry_and_no_browser_state() {
             );
         }
     }
+}
+
+#[test]
+fn the_fallback_folder_is_the_notes_folders_sibling_the_desktop_reveals_in() {
+    let data = PathBuf::from(crate::testing::abs("/data"));
+    let data = data.as_path();
+    let matter = crate::pipeline::tests::support::id(7);
+    let notes = crate::agent::matter_state_dir(data, matter).join("notes");
+    let folder = super::browser::fallback_downloads(&notes);
+    assert_eq!(
+        folder,
+        super::browser::matter_fallback_downloads(data, matter)
+    );
+    assert_eq!(
+        folder,
+        data.join("agent-state")
+            .join(matter.to_string())
+            .join("downloads")
+    );
 }

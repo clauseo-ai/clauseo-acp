@@ -327,6 +327,15 @@ pub(super) fn notices() -> Vec<DomainEvent> {
             text: "Clauseo stopped 3 more steps.".to_owned(),
             kind: Some(NoticeKind::GuardStepsMore { more: 3 }),
         },
+        Notice {
+            level: NoticeLevel::Info,
+            text: "The browser saved judgment.pdf in Clauseo's folder for this matter, not in the \
+                   matter folder."
+                .to_owned(),
+            kind: Some(NoticeKind::DownloadOutsideMatter {
+                name: "judgment.pdf".to_owned(),
+            }),
+        },
     ];
     notices.extend(
         [

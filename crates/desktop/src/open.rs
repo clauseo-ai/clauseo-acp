@@ -2,8 +2,8 @@
 //! `open_external` opens an https, http or mailto link in the default browser or mail app, a
 //! plain web link at once and a mailto or misleading one after a native confirm naming where it
 //! goes (`ask.rs`); `open_file` opens a document of a matter with its
-//! default app; `reveal` shows a matter's folder, or the app data folder, in Finder or File
-//! Explorer. The webview names a file by the `FileRefId` the host issued and a folder by its
+//! default app; `reveal` shows a matter's folder, the app data folder, or a file the browser saved in
+//! Clauseo's own downloads folder for a matter, in Finder or File Explorer. The webview names a file by the `FileRefId` the host issued and a folder by its
 //! matter, never by a path. The host, the confirm and the OS sit behind traits, so tests run
 //! without a window and never open anything.
 
@@ -54,7 +54,7 @@ pub(crate) const DOCUMENT_TYPES: &[&str] = &[
 pub(crate) struct AppData(pub(crate) PathBuf);
 
 /// What `reveal` shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RevealTarget {
@@ -62,6 +62,15 @@ pub(crate) enum RevealTarget {
     Matter(MatterId),
     /// Clauseo's app data folder: the event store, the version store and the settings.
     AppData,
+    /// A file the browser saved in Clauseo's own downloads folder for the matter
+    /// (`<app data>/agent-state/<matter>/downloads`), by its name there
+    /// (`NoticeKind::DownloadOutsideMatter`), never by a path.
+    Download {
+        /// The matter.
+        matter: MatterId,
+        /// The file's name: one component, no separator.
+        name: String,
+    },
 }
 
 /// The host's side: what a file ref names, and where a matter's folder is.
@@ -357,6 +366,9 @@ pub(crate) async fn reveal<O: Opener + 'static>(
     target: RevealTarget,
 ) -> Result<(), HostError> {
     let (folder, check, late) = match target {
+        RevealTarget::Download { matter, name } => {
+            return reveal_download(locate, opener, app_data, wait, matter, &name).await;
+        }
         RevealTarget::Matter(matter) => (
             locate.matter_folder(matter).await?,
             Some((locate.marker_check(), matter)),
@@ -377,4 +389,51 @@ pub(crate) async fn reveal<O: Opener + 'static>(
     .await?;
     let opener = Arc::clone(opener);
     bounded::bounded("reveal", wait, late, move || opener.reveal(&folder)).await
+}
+
+/// `reveal` of a file the browser saved outside the matter: shows
+/// `<app data>/agent-state/<matter>/downloads/<name>` selected in that folder. The matter must
+/// be one the host knows (`command.unknown_matter`); `name` one plain component (no `/` or
+/// `\`, not `.` or `..`) and the folder a real folder and the file a regular file, neither a
+/// link, else `command.invalid`. The checks and the reveal each run on a thread of their own,
+/// waited on for at most `wait`: past it, `internal`, with no path.
+async fn reveal_download<O: Opener + 'static>(
+    locate: &dyn Locate,
+    opener: &Arc<O>,
+    app_data: &Path,
+    wait: Duration,
+    matter: MatterId,
+    name: &str,
+) -> Result<(), HostError> {
+    if !plain_name(name) {
+        return Err(invalid("the file name is not one plain name"));
+    }
+    locate.matter_folder(matter).await?;
+    let folder = clauseo_host::matter_fallback_downloads(app_data, matter);
+    let file = folder.join(name);
+    let late = ErrorCode::Internal;
+    let file = bounded::bounded("reveal check", wait, late, move || {
+        let real = |path: &Path| std::fs::symlink_metadata(path).map(|meta| meta.file_type());
+        if !real(&folder).is_ok_and(|kind| kind.is_dir()) {
+            return Err(invalid("the downloads folder is not there"));
+        }
+        if !real(&file).is_ok_and(|kind| kind.is_file()) {
+            return Err(invalid("the file is not there, or is not a plain file"));
+        }
+        Ok(file)
+    })
+    .await?;
+    let opener = Arc::clone(opener);
+    bounded::bounded("reveal", wait, late, move || opener.reveal(&file)).await
+}
+
+/// Whether `name` is one plain file name: not empty, no `/` or `\`, no `:` on Windows (a
+/// stream or a drive), and not `.` or `..`.
+fn plain_name(name: &str) -> bool {
+    let windows_colon = cfg!(windows) && name.contains(':');
+    let separator = name.contains(['/', '\\']);
+    !name.is_empty()
+        && Path::new(name).file_name() == Some(std::ffi::OsStr::new(name))
+        && !separator
+        && !windows_colon
 }

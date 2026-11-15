@@ -43,7 +43,13 @@ fn a_held_marker_check_answers_folder_missing_without_holding_the_caller() {
     let matter = RevealTarget::Matter(host.located.matter);
 
     let started = gate::now();
-    let refused = block_on(reveal(&host, &opener, scratch.path(), SHORT, matter));
+    let refused = block_on(reveal(
+        &host,
+        &opener,
+        scratch.path(),
+        SHORT,
+        matter.clone(),
+    ));
     assert_no_answer(refused, &folder);
     let gate = gate::Gate::default();
     let clock = Clock::new();

@@ -30,6 +30,11 @@ pub const BROWSER_DIR: &str = "{browser_dir}";
 /// agent's `cwd`), as the browser guard's `--downloads`: where a file the browser saves is
 /// delivered. Filled like [`BROWSER_DIR`]; the guard makes the folder.
 pub const MATTER_DOWNLOADS: &str = "{matter_downloads}";
+/// Clauseo's own downloads folder for the matter, `<data>/agent-state/<matter id>/downloads`, as
+/// the browser guard's `--fallback-downloads`: where the guard saves a file, marked as downloaded
+/// from the internet, when the matter's drive cannot keep that mark. Filled like
+/// [`BROWSER_DIR`]; the guard makes the folder when it first needs it.
+pub const MATTER_FALLBACK_DOWNLOADS: &str = "{matter_fallback_downloads}";
 /// The egress proxy's port for the session. Unfillable (no proxy): the host drops `browser`
 /// and shows `NoProxy`.
 pub const PROXY_PORT: &str = "{proxy_port}";
@@ -89,9 +94,10 @@ pub const IN_INSTRUCTIONS: [&str; 4] = [WORK_FOLDER, MATTER_NOTES, CONNECTORS, B
 /// The tokens the host fills in the `browser` and `case-law` entries. The browser entry holds
 /// [`SOCKET_DIR`] on macOS and Linux only and [`DAEMON_PORT`] on Windows only; the host fills
 /// whichever it finds. Only `case-law` holds [`RELAY_PORT`] and [`RELAY_TOKEN_FILE`].
-pub const IN_SERVERS: [&str; 11] = [
+pub const IN_SERVERS: [&str; 12] = [
     BROWSER_DIR,
     MATTER_DOWNLOADS,
+    MATTER_FALLBACK_DOWNLOADS,
     PROXY_PORT,
     PROXY_SECRET_FILE,
     SESSION_ID,

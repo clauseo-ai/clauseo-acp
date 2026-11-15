@@ -97,6 +97,13 @@ pub fn session_folder(stored: &Path) -> PathBuf {
     }
 }
 
+/// `<data>/agent-state/<matter id>`: Clauseo's own folder for a matter, which holds its agents'
+/// notes (`actor/turn/launch_checks/folders.rs` `notes_dir`) and the browser's fallback downloads
+/// (`loads::browser::matter_fallback_downloads`).
+pub(crate) fn matter_state_dir(data: &Path, matter: clauseo_protocol::MatterId) -> PathBuf {
+    data.join("agent-state").join(matter.to_string())
+}
+
 /// `canonical`, unless its text starts with Windows' verbatim prefix `\\?\`: then `stored`.
 /// `dunce` strips the prefix only where the plain spelling means the same folder (a local drive
 /// path), so one that is left (`\\?\UNC\srv\share`, a path too long or with a reserved name)
