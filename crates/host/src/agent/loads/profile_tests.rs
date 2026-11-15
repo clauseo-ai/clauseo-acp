@@ -62,10 +62,6 @@ pub(super) fn browser_server() -> McpServer {
                 "{browser_executable}".to_owned(),
             ),
             (
-                "AGENT_BROWSER_STREAM_PORT".to_owned(),
-                "{stream_port}".to_owned(),
-            ),
-            (
                 "AGENT_BROWSER_SOCKET_DIR".to_owned(),
                 "{socket_dir}".to_owned(),
             ),
@@ -78,7 +74,6 @@ pub(super) fn claims() -> Claims<'static> {
     Claims {
         name: "t-1",
         cdp_port: 61_101,
-        stream_port: 61_100,
         daemon_port: None,
         socket_dir: Some(Path::new("/tmp/clauseo-ab-0123456789abcdef")),
     }
@@ -143,7 +138,6 @@ fn the_browser_entry_is_filled_per_session() {
             "http://127.0.0.1:8123",
             "t-1",
             "/Applications/Chrome",
-            "61100",
             "/tmp/clauseo-ab-0123456789abcdef",
         ]
     );

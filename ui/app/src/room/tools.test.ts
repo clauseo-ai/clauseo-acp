@@ -211,16 +211,27 @@ test("no browser on the computer: what to install, by the OS, and that a new con
   expect(words(missing, { policy: { state: "clear" } }).reason).toBe("Install Chrome");
 });
 
-test("the firm's browser policy blocks every browser, on either OS", () => {
+test("the firm's browser policy blocks every browser: on Windows, ask the firm's IT", () => {
   const blocked: KnownTool = { tool: "browser", state: "browser_blocked_by_policy" };
-  for (const platform of ["mac", "windows"] as const)
+  const windows =
+    "Your firm's settings stop apps from using Microsoft Edge and Google Chrome. " +
+    "Ask your firm's IT to allow Clauseo, then start a new conversation.";
+  for (const [platform, note] of [
+    ["mac", POLICY],
+    ["linux", POLICY],
+    ["windows", windows],
+  ] as const)
     expect(words(blocked, { platform })).toMatchObject({
       glyph: "locked",
       reason: "Blocked by a browser policy",
       reasonTip: null,
-      note: POLICY,
+      note,
       settings: false,
     });
+  expect(toolRow("hi", blocked, { ...ROOM, platform: "windows" }).note).toBe(
+    "आपकी फ़र्म की सेटिंग्स ऐप्स को Microsoft Edge और Google Chrome का उपयोग नहीं करने देतीं। " +
+      "अपनी फ़र्म की IT टीम से Clauseo को अनुमति देने के लिए कहें, फिर एक नई बातचीत शुरू करें।",
+  );
 });
 
 test("a browser policy Clauseo couldn't check says it checks again", () => {

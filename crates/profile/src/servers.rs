@@ -10,7 +10,7 @@ use clauseo_protocol::AgentKind;
 use crate::paths::ProfilePaths;
 use crate::placeholders::{
     BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, MATTER_DOWNLOADS, RELAY_PORT,
-    RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR, STREAM_PORT,
+    RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR,
 };
 
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
@@ -149,10 +149,6 @@ fn browser_for(paths: &ProfilePaths, windows: bool) -> ProfileServer {
         (
             "AGENT_BROWSER_EXECUTABLE_PATH".to_owned(),
             BROWSER_EXECUTABLE.to_owned(),
-        ),
-        (
-            "AGENT_BROWSER_STREAM_PORT".to_owned(),
-            STREAM_PORT.to_owned(),
         ),
     ]);
     if !windows {

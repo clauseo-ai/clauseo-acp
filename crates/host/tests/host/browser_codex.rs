@@ -83,7 +83,6 @@ fn codex_gets_the_entry_with_no_proxy_off_windows_and_claude_no_browser() {
         {"name": "AGENT_BROWSER_CONFIG", "value": "/cfg/agent-browser.json"},
         {"name": "AGENT_BROWSER_SESSION", "value": session},
         {"name": "AGENT_BROWSER_EXECUTABLE_PATH", "value": "/chrome"},
-        {"name": "AGENT_BROWSER_STREAM_PORT", "value": "{{any}}"},
     ]});
     // Codex on Windows has no browser at all, whatever the hook offers: no entry goes.
     let servers = if cfg!(windows) {

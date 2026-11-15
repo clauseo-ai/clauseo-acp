@@ -169,6 +169,14 @@ export const UET: Entry[] = [
     ),
     [browser("browser_blocked_by_policy")],
   ),
+  entry(
+    "UC-550",
+    popWords(
+      "Your firm's settings stop apps from using Microsoft Edge and Google Chrome. Ask your firm's IT to allow Clauseo, then start a new conversation.",
+    ),
+    [browser("browser_blocked_by_policy")],
+    WINDOWS,
+  ),
   // the firm's browser policy couldn't be read: the reason, then in full under it, and Try again
   entry("UET-46", lineWords("Couldn't check browser settings"), [
     browser("browser_policy_unreadable"),

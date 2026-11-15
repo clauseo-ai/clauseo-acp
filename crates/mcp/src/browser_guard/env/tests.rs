@@ -40,7 +40,6 @@ fn required(os: Os) -> Vec<(&'static str, String)> {
     if os == Os::Unix {
         vars.push(("AGENT_BROWSER_SOCKET_DIR", SOCKET.to_owned()));
     }
-    vars.push(("AGENT_BROWSER_STREAM_PORT", "61100".to_owned()));
     vars
 }
 
@@ -166,7 +165,7 @@ fn each_required_variable_missing_is_named() {
 #[test]
 fn each_required_variable_invalid_is_named() {
     let cwd = abs("cwd");
-    let cases: [(&str, &str, &str); 12] = [
+    let cases: [(&str, &str, &str); 9] = [
         (
             "AGENT_BROWSER_CONFIG",
             "relative/agent-browser.json",
@@ -204,21 +203,6 @@ fn each_required_variable_invalid_is_named() {
             "must be an absolute path",
         ),
         ("AGENT_BROWSER_SOCKET_DIR", "", "must be an absolute path"),
-        (
-            "AGENT_BROWSER_STREAM_PORT",
-            "80",
-            "must be a port from 1024 to 65535 with no leading zero",
-        ),
-        (
-            "AGENT_BROWSER_STREAM_PORT",
-            "065000",
-            "must be a port from 1024 to 65535",
-        ),
-        (
-            "AGENT_BROWSER_STREAM_PORT",
-            "65536",
-            "must be a port from 1024 to 65535",
-        ),
     ];
     for (name, bad, words) in cases {
         let source = source_with(&[(name, bad)], name);
@@ -265,7 +249,7 @@ fn unix_map_is_exactly_the_allow_list() {
             "AGENT_BROWSER_SCREENSHOT_DIR",
             "AGENT_BROWSER_SESSION",
             "AGENT_BROWSER_SOCKET_DIR",
-            "AGENT_BROWSER_STREAM_PORT",
+            "AGENT_BROWSER_STREAM_DISABLED",
             "ALL_PROXY",
             "HOME",
             "HTTPS_PROXY",
@@ -279,7 +263,6 @@ fn unix_map_is_exactly_the_allow_list() {
         ]
     );
     assert_eq!(get(&env, "AGENT_BROWSER_SOCKET_DIR"), SOCKET);
-    assert_eq!(get(&env, "AGENT_BROWSER_STREAM_PORT"), "61100");
     assert_eq!(get(&env, "HTTP_PROXY"), "http://127.0.0.1:8080");
     assert_eq!(get(&env, "http_proxy"), "http://127.0.0.1:8080");
     assert_eq!(get(&env, "AGENT_BROWSER_IDLE_TIMEOUT_MS"), "600000");
@@ -513,11 +496,23 @@ fn unix_takes_the_hosts_socket_folder_and_windows_keeps_cwd_run() {
 }
 
 #[test]
-fn the_stream_port_passes_through_and_the_cdp_port_is_no_longer_pinned() {
+fn no_stream_port_is_needed_or_passed_and_the_cdp_port_is_no_longer_pinned() {
     let cwd = Path::new("/state/browser");
     for os in [Os::Unix, Os::Windows] {
+        // Route 2: a host that still passes a stream port, even a bad one, changes nothing.
+        for given in [
+            &[][..],
+            &[("AGENT_BROWSER_STREAM_PORT", "61100")],
+            &[("AGENT_BROWSER_STREAM_PORT", "80")],
+        ] {
+            let env = build(&source_for(os, given, ""), os, cwd, &WindowsDirs::default()).unwrap();
+            assert!(
+                !env.contains_key("AGENT_BROWSER_STREAM_PORT"),
+                "{os:?} {given:?}"
+            );
+            assert_eq!(get(&env, "AGENT_BROWSER_STREAM_DISABLED"), "1", "{os:?}");
+        }
         let mut env = build(&source_for(os, &[], ""), os, cwd, &WindowsDirs::default()).unwrap();
-        assert_eq!(get(&env, "AGENT_BROWSER_STREAM_PORT"), "61100", "{os:?}");
         assert_eq!(
             get(&env, "AGENT_BROWSER_ARGS"),
             "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",

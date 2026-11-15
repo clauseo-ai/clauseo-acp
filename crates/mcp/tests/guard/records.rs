@@ -40,7 +40,7 @@ fn orphan_chrome(scratch: &Scratch) -> Guard {
             .unwrap(),
     );
     let mut command = Command::new(scratch.path().join(CHROME));
-    command.args([flag.as_str(), "--remote-debugging-port=61198"]);
+    command.arg(flag);
     let chrome = Guard::start(command);
     // Its pid file says it runs.
     crate::lifecycle::pid_in(&scratch.path().join("chrome.pid"));

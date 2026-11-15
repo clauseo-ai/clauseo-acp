@@ -191,8 +191,8 @@ fn chrome_that_exits_early_with_unknown_text_is_not_started_again() {
     let last = stderr.trim_end().lines().last().unwrap_or_default();
     assert!(
         last.starts_with(
-            "clauseo-mcp browser-guard: Chrome stopped before it listened on the claimed \
-             debugging port"
+            "clauseo-mcp browser-guard: the browser stopped before it answered on its DevTools \
+             pipe"
         ) && last.contains("Something else went wrong"),
         "{stderr}"
     );

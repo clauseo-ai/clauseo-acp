@@ -15,6 +15,15 @@ agent-browser with an environment built from scratch and checks every tool call 
 
 Source lines below are agent-browser's, at tag v0.41.1, under `cli/src/`.
 
+Amended 2026-11-15 (route 2, PR W1): no browser has a DevTools TCP port on any system any more.
+The guard drives it over a DevTools pipe and relays that to agent-browser on a 127.0.0.1
+websocket with a 256-bit secret path and a peer check (only agent-browser's own processes). It
+hides itself (a protected DACL on Windows, which its children get too; PR_SET_DUMPABLE 0 on Linux)
+and tells agent-browser to start no stream server. On Windows the browser is Microsoft Edge, else
+a Program Files Google Chrome, never Chrome for Testing. Decision record 0060 has the attack, the
+spike results and the design. What this record says below about Chrome's debugging port, the
+claimed port and the `DevTools listening` line is history.
+
 ## Decision
 
 ### The guard (`crates/mcp`, the first S27 pull request)
@@ -679,14 +688,18 @@ host condition). The guard's own command line refuses (exit 2) agent-browser's a
 `AGENT_BROWSER_ARGS`, naming any of these anywhere in a value (`--args=...,--no-sandbox`).
 
 **What can reach Chrome's command line.** Only the guard's own constants, the proxy URL (checked
-to be `http://127.0.0.1:<port>`), the profile path and the claimed port. Nothing the agent sends:
+to be `http://127.0.0.1:<port>`), the profile path and, since route 2 (decision record 0060), the
+`--remote-debugging-pipe` switch with, on Windows, the pipe's two handle values (no port). Nothing the agent sends:
 agent-browser only connects to the guard's Chrome (`AGENT_BROWSER_CDP`) and never launches one,
 so its `--args`, `AGENT_BROWSER_ARGS` (fixed to the WebRTC flag) and the config file (`{}`,
 written by the host) never reach Chrome; and the filter refuses every flag-shaped string in a
 tool call and every `extraArgs` token but six output flags (`filter.rs`).
 
-**The refusal.** Chrome's stderr, read up to its endpoint line, is matched against the messages
-Chromium prints when the sandbox cannot start:
+**The refusal.** Chrome's stderr, read until Chrome answers the guard's `Browser.getVersion` on
+its `DevTools` pipe (route 2, decision record 0060; before it, up to the endpoint line), is
+matched against the messages Chromium prints when the sandbox cannot start; a match seen with the
+answer still refuses, and a pipe that ends first waits up to 2 s for stderr to say why
+(`chrome/pipe.rs`):
 - Linux, `content/browser/zygote_host/zygote_host_impl_linux.cc`: "No usable sandbox!",
   "Running as root without --no-sandbox is not supported", "Zygote process exited prematurely",
   "Failed to receive boot message from zygote", "Failed to receive hello message from zygote";
@@ -1217,6 +1230,8 @@ claims a `BrowserSession`:
 - `BrowserPorts { cdp, stream, daemon }`, each a stage C `PortClaim`: `cdp` and `stream` from
   `ports::claim_port()`, `daemon` on Windows only (below). No other session of this host is
   handed them while they are held. They fill `{cdp_port}`, `{stream_port}` and `{daemon_port}`.
+  (2026-11-15, record 0060: the stream port is gone. The host claims no `stream` port and the
+  profile passes no `AGENT_BROWSER_STREAM_PORT`; agent-browser's stream server is off.)
 - macOS and Linux: one `BrowserSocketDir` (`BrowserSocketDir::create()`), whose `path()`, the
   `/tmp/...` form, fills `{socket_dir}`; never `canonical()`, which on macOS is 8 bytes longer
   (`/private/tmp/...`) and counts against the socket path's 103 bytes.

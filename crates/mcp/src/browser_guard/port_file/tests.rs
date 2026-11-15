@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use std::path::Path;
 
-use super::{Expected, Found, Status, judge, read};
+use super::{Expected, Found, Status, judge, judge_off, read};
 
 const DAEMON: &str = "daemon port";
 
@@ -138,22 +138,40 @@ fn the_verdict_alone_refuses_a_link_and_an_unreadable_file() {
     ));
 }
 
-/// The stream server's file sits beside the daemon's, as `<session>.stream`, and its refusal
-/// names it.
+/// Windows: the stream server's file sits beside the daemon's, as `<session>.stream`, read the
+/// same way; any content refuses.
 #[test]
 fn the_stream_file_is_read_the_same_way() {
     let scratch = Scratch::new("stream");
-    let expected = Expected::stream(&scratch.0, "s-1", 61_100);
+    let expected = Expected::stream_off(&scratch.0, "s-1");
     assert_eq!(expected.file, scratch.0.join("s-1.stream"));
     assert_eq!(expected.check(), Status::Pending);
-    crate::write::write(&expected.file, b"61100").unwrap();
-    assert_eq!(expected.check(), Status::Matches);
-    // agent-browser's fallback: the port the OS gave the stream server instead.
+    // The upstream agent-browser's server, on the port the OS gave it.
     crate::write::write(&expected.file, b"40117").unwrap();
     assert_eq!(
         expected.check(),
         Status::Refused(
-            "agent-browser's stream port file says 40117, not the claimed port 61100".to_owned()
+            "agent-browser wrote a stream port file, but its stream server must be off on Windows"
+                .to_owned()
         )
     );
+}
+
+/// Windows: the stream server is off, so any `.stream` file at all ends agent-browser.
+#[test]
+fn a_stream_file_is_refused_when_the_stream_server_is_off() {
+    assert_eq!(judge_off(Found::Missing, "stream port"), Status::Pending);
+    assert_eq!(
+        judge_off(Found::Bytes(Vec::new()), "stream port"),
+        Status::Pending
+    );
+    for found in [Found::Bytes(b"61100".to_vec()), Found::Link, Found::NotFile] {
+        assert!(matches!(
+            judge_off(found, "stream port"),
+            Status::Refused(_)
+        ));
+    }
+    let off = Expected::stream_off(Path::new("/run"), "s");
+    assert_eq!(off.file, Path::new("/run").join("s.stream"));
+    assert_eq!(off.port, None);
 }

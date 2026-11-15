@@ -36,8 +36,6 @@ pub(crate) struct Scratch {
     pub(crate) session: String,
     /// The guard's `--cdp-port`, claimed as the host claims it.
     pub(crate) cdp: PortClaim,
-    /// `AGENT_BROWSER_STREAM_PORT`.
-    pub(crate) stream: PortClaim,
     /// Windows: the guard's `--daemon-port`, the hash of [`Self::session`].
     pub(crate) daemon: Option<PortClaim>,
     /// macOS and Linux: `AGENT_BROWSER_SOCKET_DIR`, made as the host makes it; removed on drop.
@@ -60,7 +58,6 @@ impl Scratch {
             root,
             session,
             cdp: ports::claim_browser_port().expect("claim the CDP port"),
-            stream: ports::claim_browser_port().expect("claim the stream port"),
             daemon,
             #[cfg(unix)]
             socket_dir: clauseo_sandbox::BrowserSocketDir::create()

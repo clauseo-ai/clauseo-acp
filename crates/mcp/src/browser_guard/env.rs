@@ -40,8 +40,13 @@ pub(crate) const SESSION: &str = "AGENT_BROWSER_SESSION";
 /// guard's environment, which `socket.rs` checks. Windows: `<cwd>\run`, whatever the
 /// environment says.
 pub(crate) const SOCKET_DIR: &str = "AGENT_BROWSER_SOCKET_DIR";
-/// The stream server's port, claimed by the host for the session.
-pub(crate) const STREAM_PORT: &str = "AGENT_BROWSER_STREAM_PORT";
+/// Tells the patched agent-browser (route 2's W2) to start no stream server, an unauthenticated
+/// listener that drives the browser; set on every system, and agent-browser gets no stream port
+/// (`AGENT_BROWSER_STREAM_PORT`, which the host no longer claims) anywhere. agent-browser 0.41.1
+/// has no such switch and always starts one on a port the OS picks: on Windows the guard refuses
+/// its `.stream` file and ends it (`port_file.rs`); on macOS and Linux it lets it be, until the
+/// patched agent-browser ships there.
+pub(crate) const STREAM_OFF: &str = "AGENT_BROWSER_STREAM_DISABLED";
 /// Chrome's extra arguments, were agent-browser to launch one: only [`WEBRTC_ARG`]. With
 /// [`CDP`] set it never does; the guard starts Chrome (`chrome.rs`). The debugging port is no
 /// longer pinned here: past agent-browser's own `--remote-debugging-port=0` it stopped Chrome
@@ -186,7 +191,6 @@ enum Problem {
     NotProxy,
     NotSession,
     NotAbsolute,
-    NotPort,
 }
 
 impl fmt::Display for EnvError {
@@ -205,10 +209,6 @@ impl fmt::Display for EnvError {
             ),
             Problem::NotSession => write!(f, "{name} must be 1 to 64 of A-Z a-z 0-9 _ -"),
             Problem::NotAbsolute => write!(f, "{name} must be an absolute path"),
-            Problem::NotPort => write!(
-                f,
-                "{name} must be a port from {MIN_PORT} to 65535 with no leading zero"
-            ),
         }
     }
 }
@@ -216,7 +216,7 @@ impl fmt::Display for EnvError {
 /// The child's whole environment but [`CDP`], which [`set_cdp`] adds once Chrome is up. Fails
 /// on the first required variable that is missing or invalid, in the order config, proxy (only
 /// when set: with none, no proxy variable reaches the child), executable path, session, socket
-/// folder (Unix only), stream port; never falls back. The Unix
+/// folder (Unix only); never falls back. The Unix
 /// socket folder is checked here only for being absolute; `socket.rs` checks the folder itself.
 /// On Windows, `dirs` supplies the defaults [`windows_defaults`] gives the variables the guard's
 /// environment lacks.
@@ -256,13 +256,6 @@ pub(crate) fn build(
         .to_owned(),
         Os::Windows => windows_socket_dir(cwd).into_os_string(),
     };
-    let stream_port = required(
-        source,
-        os,
-        STREAM_PORT,
-        |v, _| port_of(v).is_some(),
-        Problem::NotPort,
-    )?;
 
     let mut env = BTreeMap::new();
     let mut set = |name: &str, value: &OsStr| {
@@ -275,7 +268,7 @@ pub(crate) fn build(
     set(EXECUTABLE_PATH, executable);
     set(SESSION, session);
     set(SOCKET_DIR, &socket_dir);
-    set(STREAM_PORT, stream_port);
+    set(STREAM_OFF, OsStr::new("1"));
     set(ARGS, OsStr::new(WEBRTC_ARG));
     for (name, value) in FIXED {
         if *name != PROXY_BYPASS || proxy.is_some() {

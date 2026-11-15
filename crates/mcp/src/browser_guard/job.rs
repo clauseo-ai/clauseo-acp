@@ -29,8 +29,10 @@ use windows::Win32::System::JobObjects::{
 };
 use windows::core::PCWSTR;
 
+use super::harden::Hardened;
+
 pub(crate) use child::{Child, ChildStderr, ChildStdin};
-pub(crate) use spawn::{Io, Launch, windows_dirs};
+pub(crate) use spawn::{Io, Launch, inheritable, windows_dirs};
 
 /// The exit code the job's end gives its processes.
 const TERMINATED: u32 = 1;
@@ -39,13 +41,15 @@ const TERMINATED: u32 = 1;
 #[derive(Debug)]
 pub(crate) struct Job {
     job: OwnedHandle,
+    /// The descriptors every child starts with (`harden.rs`); none only in this module's tests.
+    hardened: Option<Hardened>,
 }
 
 impl Job {
     /// Starts `launch` in the job, running: nothing the guard starts is ever outside it
     /// (`job/spawn.rs`).
     pub(crate) fn spawn(&self, launch: &Launch<'_>) -> io::Result<Child> {
-        spawn::spawn(self.handle(), launch)
+        spawn::spawn(self.handle(), self.hardened.as_ref(), launch)
     }
 
     /// Ends every process in the job: Chrome, agent-browser and its daemon. Returns whether
@@ -59,9 +63,20 @@ impl Job {
         HANDLE(self.job.as_raw_handle())
     }
 
-    /// A new job that ends its processes when its last handle closes. No breakaway flag is
-    /// set, so a process in it cannot start one outside it.
-    pub(crate) fn new() -> io::Result<Job> {
+    /// A new job that ends its processes when its last handle closes, whose children all
+    /// start with `hardened`'s descriptors. No breakaway flag is set, so a process in it cannot
+    /// start one outside it.
+    pub(crate) fn new(hardened: Hardened) -> io::Result<Job> {
+        Self::make(Some(hardened))
+    }
+
+    /// A job whose children start unhardened, for this module's tests.
+    #[cfg(test)]
+    pub(crate) fn unhardened() -> io::Result<Job> {
+        Self::make(None)
+    }
+
+    fn make(hardened: Option<Hardened>) -> io::Result<Job> {
         // SAFETY: no security attributes and no name are valid arguments; the handle returned
         // is owned by the `Job` built from it, which closes it once.
         let raw = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
@@ -69,7 +84,10 @@ impl Job {
         // SAFETY: `raw` is the open handle CreateJobObjectW just returned, which nothing else
         // owns; the `OwnedHandle` closes it once, on drop.
         let owned = unsafe { OwnedHandle::from_raw_handle(raw.0) };
-        let job = Job { job: owned };
+        let job = Job {
+            job: owned,
+            hardened,
+        };
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         let size = u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
@@ -89,5 +107,7 @@ impl Job {
     }
 }
 
+#[cfg(test)]
+mod harden_tests;
 #[cfg(test)]
 mod tests;

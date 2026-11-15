@@ -12,7 +12,7 @@ use clauseo_profile::claude::{OPTION_KEYS, SETTINGS_KEYS};
 use clauseo_profile::instructions::{TOOLS, word_count};
 use clauseo_profile::placeholders::{
     self, BROWSER, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_INSTRUCTIONS,
-    IN_SERVERS, MATTER_NOTES, PROXY_PORT, SESSION_ID, SOCKET_DIR, STREAM_PORT, WORK_FOLDER,
+    IN_SERVERS, MATTER_NOTES, PROXY_PORT, SESSION_ID, SOCKET_DIR, WORK_FOLDER,
 };
 use clauseo_profile::{
     BrowserSidecars, ClauseoProfile, CodexConfig, Instructions, ProfileError, ProfilePaths,
@@ -326,7 +326,6 @@ fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
     if cfg!(unix) {
         expected.push(("AGENT_BROWSER_SOCKET_DIR", "{socket_dir}".to_owned()));
     }
-    expected.push(("AGENT_BROWSER_STREAM_PORT", "{stream_port}".to_owned()));
     assert_eq!(env, expected);
 }
 
@@ -364,7 +363,6 @@ fn a_folder_named_like_a_token_stays_literal_and_json_escapes_it() {
             (PROXY_PORT, "1"),
             (BROWSER_EXECUTABLE, "/c"),
             (SOCKET_DIR, "/tmp/clauseo-ab-0123456789abcdef"),
-            (STREAM_PORT, "61100"),
             (CDP_PORT, "61101"),
             (DAEMON_PORT, "61102"),
         ]

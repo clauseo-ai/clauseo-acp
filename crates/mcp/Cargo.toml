@@ -25,6 +25,10 @@ path = "src/main.rs"
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# The DevTools relay's secret (src/browser_guard/devtools/handshake.rs): 256 bits from the OS's
+# random source (ProcessPrng on Windows, getrandom(2) on Linux). Already in the workspace for the
+# egress proxy's token; it needs only cfg-if and libc (r-efi and wasip2 on other targets).
+getrandom = { workspace = true }
 
 # Unix only: `killpg` and `kill` for the guard's Chrome process group and agent-browser's
 # detached daemon, and the pid of the process listening on the daemon's socket (`socket`:
@@ -32,9 +36,17 @@ serde_json = { workspace = true }
 # profile's files written and the folder listed relative to a folder opened once (`fs`: openat,
 # renameat, unlinkat; `dir`: fdopendir; in src/write/unix.rs), and the effective user, whose
 # root refuses the browser on Linux (`user`: geteuid; src/browser_guard/chrome/sandbox.rs), through nix's safe wrappers. nix needs only libc, bitflags and cfg-if; no
-# socket crate.
+# socket crate. Route 2 (decision record 0060): `fs`'s `fcntl` and `nix::libc::dup2` put the
+# browser's DevTools pipe at fds 3 and 4 (src/browser_guard/chrome/pipe.rs), and `process` brings
+# Linux's `prctl::set_dumpable` (src/browser_guard/harden.rs).
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["socket", "fs", "dir", "user"] }
+nix = { workspace = true, features = [
+  "socket",
+  "fs",
+  "dir",
+  "user",
+  "process",
+] }
 
 # macOS only: `getxattr` and `setxattr` for a download's `com.apple.quarantine` mark
 # (src/browser_guard/downloads/marks.rs, src/write/mac.rs). libc is already nix's dependency.
@@ -50,9 +62,23 @@ libc = { workspace = true }
 # `Win32_System_SystemInformation` is for `GetWindowsDirectoryW` and `GetSystemDirectoryW`, the
 # folders a child's `SystemRoot`, `windir` and `ComSpec` default to
 # (src/browser_guard/job/spawn.rs).
+# Route 2 (decision record 0060): `Win32_Security_Authorization` for the guard's protected DACL
+# (`ConvertStringSecurityDescriptorToSecurityDescriptorW`, `SetSecurityInfo`,
+# `ConvertSidToStringSidW`, src/browser_guard/harden.rs); `Win32_System_Pipes` for `CreatePipe`,
+# the browser's DevTools pipe (src/browser_guard/chrome/pipe.rs); `Win32_System_Registry` for
+# `RegGetValueW`, the firm's `RemoteDebuggingAllowed` policy (src/browser_guard/browsers/policy.rs);
+# `Win32_Networking_WinSock` for the relay's listener with `SO_EXCLUSIVEADDRUSE` set before its
+# bind (src/browser_guard/devtools/listen.rs); `Win32_NetworkManagement_IpHelper` for
+# `GetExtendedTcpTable`, the owner of a relay client's socket (src/browser_guard/devtools/peer.rs).
+# All in the `windows` crate already here.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_Networking_WinSock",
+  "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
+  "Win32_System_Pipes",
+  "Win32_System_Registry",
   "Win32_System_SystemInformation",
 ] }
 

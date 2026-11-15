@@ -1188,6 +1188,7 @@ name = "clauseo-mcp"
 version = "0.0.0"
 dependencies = [
  "clauseo-mcp",
+ "getrandom 0.3.4",
  "libc",
  "nix",
  "serde",

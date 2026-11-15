@@ -83,6 +83,7 @@ whose policy turns it off counts no relative shell write), the pre-write guard's
     `{socket_dir}` (macOS and Linux), `{stream_port}`, `{cdp_port}` and `{daemon_port}`
     (Windows), the last four from the session's claims (0029); an unfillable one of those
     drops the entry with `BrowserNotInstalled`.
+    (2026-11-15, record 0060: `{stream_port}` and `AGENT_BROWSER_STREAM_PORT` are gone.)
     `{browser_dir}` is one whole token, `<data>/run/<session id>/browser`, which the host joins
     with the platform's separators and fills with a `dunce`-simplified path (no `\\?\` prefix),
     so a Windows path never mixes separators. The
