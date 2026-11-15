@@ -11,6 +11,7 @@
     "build:review": "vite build --config vite.review.config.ts",
     "copy:check": "vitest run --config vite.review.config.ts",
     "copy:running": "node scripts/copy-running.mjs",
+    "copy:approve": "node scripts/copy-approve.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
     "lint:types": "oxlint --type-aware",

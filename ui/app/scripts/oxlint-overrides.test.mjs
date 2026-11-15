@@ -30,6 +30,8 @@ const DOORS = {
   // the one-shot split of copy-approvals.json into copy-approvals/, and its test's scratch folders
   "scripts/split-copy-approvals.mjs": ["write"],
   "scripts/split-copy-approvals.test.mjs": ["write"],
+  // records Rohan's answer to the page of the English not yet approved in copy-approvals/
+  "scripts/copy-approve.mjs": ["write"],
   // the running copy review page: writes ../copy-review/running/ and drives agent-browser for its shots
   "scripts/copy-running.mjs": ["write", "process"],
 };
@@ -114,6 +116,7 @@ describe("the exact-name overrides of .oxlintrc.json", () => {
       lacks("scripts/buildtime-proc.test.mjs", "write and process"),
       lacks("scripts/split-copy-approvals.mjs", "write"),
       lacks("scripts/split-copy-approvals.test.mjs", "write"),
+      lacks("scripts/copy-approve.mjs", "write"),
       lacks("scripts/copy-running.mjs", "write and process"),
     ]);
   });
