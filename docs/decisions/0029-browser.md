@@ -1594,8 +1594,8 @@ the release fetches the pinned asset, checks its hash and writes it into the des
 - **Our build** (2026-11-15): macOS and Windows take upstream's source at the pinned commit plus
   our patches (`crates/desktop/agent-browser/README.md`: a cross-platform switch that keeps the
   stream server off, offered upstream, and the Windows named pipe and hardening), built per
-  triple, Windows ARM64 natively, by `.github/workflows/agent-browser-build.yml` and published as
-  a pre-release of this repository under `patched_tag`. It replaces upstream's x64 asset, which
+  triple, Windows ARM64 natively, by the workflow `agent-browser-build.yml` (from PR #1089) and
+  published as a pre-release of this repository under `patched_tag`. It replaces upstream's x64 asset, which
   Windows on ARM used to run under x64 emulation. Linux keeps upstream's binary for now
   (development and CI only; the stream server is still on there).
 - **The license**: `LICENSES/Apache-2.0-agent-browser.txt`, a copy of upstream's `LICENSE` (upstream
