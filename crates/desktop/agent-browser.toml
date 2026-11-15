@@ -10,13 +10,15 @@
 #   - the `agent_browser_pin` test in crates/desktop (crates/desktop/src/agent_browser_pin.rs),
 #     which parses it with the toml crate.
 #
-# Format: four keys come before the first table, each once.
+# Format: five keys come before the first table, each once.
 #   - `version` is upstream's release tag without the `v`.
 #   - `patched_tag` names our release of the build, agent-browser-v<version>-clauseo.<n>, n
 #     counting up from 1 for each rebuild of the same version.
 #   - `upstream_commit` is the commit upstream's tag v<version> points at (40 lowercase hex), and
 #     `upstream_tarball_sha256` the SHA-256 of GitHub's source archive of that commit,
 #     https://github.com/vercel-labs/agent-browser/archive/<upstream_commit>.tar.gz.
+#   - `rustc_commit` is the commit-hash `rustc -vV` prints for the toolchain our build uses
+#     (rust-toolchain.toml's channel); agent-browser-build.mjs refuses to build with another.
 # Each table after them is one Rust target triple, with exactly two keys: `url` (the asset's
 # download URL) and `sha256` (the asset's SHA-256, 64 lowercase hex characters). A triple with no
 # build holds `none = true` instead, and the script then leaves that triple's sidecar out. Values
@@ -43,6 +45,7 @@ version = "0.41.1"
 patched_tag = "agent-browser-v0.41.1-clauseo.1"
 upstream_commit = "5868f7c05020e047c00e68e4abf9253cce864f41"
 upstream_tarball_sha256 = "ca59c4590a5a265d106c494d7726b9cde8575536d31834709dd525da8d778f6f"
+rustc_commit = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
 
 # Our build, see the header. The sha256 is the placeholder until the workflow has run.
 [aarch64-apple-darwin]

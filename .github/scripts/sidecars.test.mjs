@@ -50,6 +50,7 @@ async function pin(dir, { none = [], missing = [] } = {}) {
     `patched_tag = "${PATCHED_TAG}"`,
     `upstream_commit = "${"a".repeat(40)}"`,
     `upstream_tarball_sha256 = "${"b".repeat(64)}"`,
+    `rustc_commit = "${"d".repeat(40)}"`,
     "",
   ].join("\n");
   for (const triple of RELEASE_TARGETS.filter((t) => !missing.includes(t))) {
