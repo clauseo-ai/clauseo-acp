@@ -64,7 +64,9 @@ export function installView(setup: AgentSetup | undefined, online: boolean): Ins
 /** A waiting sign-in as the gate and the plan's line say it: its install waiting, it opens when the download reconnects
  * (`online`, the window online meanwhile: when setting up can continue); with the plan installed while the other
  * plan's sign-in is under way, it opens after that one (one sign-in at a time); else it opens when the plan is ready.
- * `agent` left out (a caller that doesn't know it), never the second. */
+ * `agent` left out (a caller that doesn't know it), never the second. The sign-in ahead in the browser shows its own
+ * line with its Cancel beside this one; with a code or switching accounts it shows no line on the first run's screens,
+ * so this one offers to cancel it (`ahead`). */
 export function queuedView(
   setup: AgentSetup | undefined,
   state: SetupState,
@@ -77,9 +79,13 @@ export function queuedView(
   if (offline) return online ? { kind: "queued", offline, online } : { kind: "queued", offline };
   const ahead = agent === undefined ? null : signInAhead(state, agent);
   const installed = install === "managed" || isReady(install);
-  return ahead !== null && installed
-    ? { kind: "queued", offline, after: NAME[planOf(ahead)] }
-    : { kind: "queued", offline };
+  if (ahead === null || !installed) return { kind: "queued", offline };
+  const other = state.agents[ahead]?.signIn;
+  const hidden =
+    typeof other === "object" && (other.device_code !== undefined || other.switching !== undefined);
+  return hidden
+    ? { kind: "queued", offline, after: NAME[planOf(ahead)], ahead: true }
+    : { kind: "queued", offline, after: NAME[planOf(ahead)] };
 }
 
 /** The gate for a plan's sign-in, or null when it is signed in or nothing is known of it (a host before R20). `online`:

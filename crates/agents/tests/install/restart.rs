@@ -1,7 +1,7 @@
 //! An agent's install cut short by a quit, found at the next start: its marker
 //! (`agents/<id>/.install-wanted`, `install::restart`) resumes it with no press, reusing the
-//! part of a tarball the quit left. An install never pressed, or paused by the lawyer, stays
-//! where it was.
+//! part of a tarball the quit left. An install never pressed, or paused or cancelled by the
+//! lawyer, stays where it was.
 
 use std::time::Duration;
 
@@ -106,4 +106,33 @@ fn an_install_never_pressed_or_paused_by_the_lawyer_stays_put_at_the_next_start(
     );
     assert_eq!(ranges(&fx).len(), before, "nothing fetched");
     assert_eq!(agents.state(&agent_a()), Some(a));
+}
+
+#[test]
+fn an_install_the_lawyer_cancelled_is_not_resumed_at_the_next_start() {
+    let fx = fixture("restart-cancelled");
+    fx.registry
+        .then(&tarball_path("adapter-a"), Behaviour::Stall);
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    fx.registry.wait_for_stalls(1);
+    assert!(marker(&fx).exists(), "written as the job starts");
+    agents.cancel_install(&agent_a());
+    events.until(&agent_a(), |s| matches!(s, InstallState::Missing { .. }));
+    fx.registry.release();
+    assert!(agents.shutdown(Duration::from_secs(20)), "the jobs ended");
+    drop(agents);
+    assert!(!marker(&fx).exists(), "a cancel removes it");
+    let before = ranges(&fx).len();
+    let (agents, events) = fx.start();
+    let (a, _) = events.first_states();
+    assert!(matches!(a, InstallState::Missing { .. }), "{a:?}");
+    agents.install(&agent_b());
+    let seen = events.until(&agent_b(), |s| *s == InstallState::Managed);
+    assert!(
+        seen.iter().all(|(agent, _)| *agent != agent_a()),
+        "{seen:?}"
+    );
+    assert_eq!(ranges(&fx).len(), before, "nothing fetched");
 }

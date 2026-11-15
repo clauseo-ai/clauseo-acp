@@ -46,6 +46,9 @@ impl SetupAgents for Real {
     fn retry(&self, _: &AgentId, _: bool) {
         self.call("retry");
     }
+    fn cancel_install(&self, _: &AgentId) {
+        self.call("cancel_install");
+    }
     fn state(&self, _: &AgentId) -> Option<InstallState> {
         self.call("state");
         None

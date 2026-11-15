@@ -1,6 +1,7 @@
 //! A settings read through the backend's own refresh (`apply_settings`, each
 //! `SettingsChanged`) gives `Agents` and the launch hook's snapshot the new network route; a
-//! command that reaches the network waits for the first route, so no try goes direct first; and
+//! command that reaches the network waits for the first route, so no try goes direct first (a
+//! cancel waits too, so it never overtakes its install); and
 //! the start's `agent.keys_loading` holds launches until that route is known.
 
 use std::pin::pin;
@@ -103,6 +104,32 @@ fn an_install_waits_for_the_first_route_and_goes_through_it() {
     assert_eq!(installs(), 1);
     let pushed = lock(&rig.agents.networks).clone();
     assert_eq!(pushed.first().and_then(|n| n.proxy.as_deref()), Some(FIRM));
+}
+
+/// A cancel sent after an install, both before the first route lands, waits for the route as
+/// the install does: it never reaches `Agents` ahead of the install it cancels.
+#[test]
+fn a_cancel_before_the_first_route_waits_behind_the_install() {
+    let rig = rig_unrouted();
+    lock(&rig.agents.states).insert(claude(), InstallState::Missing { download_bytes: 1 });
+    let setup = rig.setup();
+    let mut install = pin!(setup.run(MAIN, command("install_agent", &claude(), &json!({}))));
+    let mut cancel = pin!(setup.run(MAIN, command("cancel_agent_install", &claude(), &json!({}))));
+    let mut context = Context::from_waker(std::task::Waker::noop());
+    assert!(matches!(install.as_mut().poll(&mut context), Poll::Pending));
+    assert!(matches!(cancel.as_mut().poll(&mut context), Poll::Pending));
+    assert!(
+        rig.calls().is_empty(),
+        "before the route: {:?}",
+        rig.calls()
+    );
+    block_on(apply_settings(&rig.backend, SettingsRead::default()));
+    block_on(install).unwrap();
+    block_on(cancel).unwrap();
+    assert_eq!(
+        rig.calls(),
+        [("install", claude()), ("cancel_install", claude())]
+    );
 }
 
 /// Claude's `agent.keys_loading` from the host's start, as `SetupStart::launch_refusals` gives it.

@@ -538,23 +538,27 @@ const AFTER_SIGN_IN: Entry = {
   }),
 };
 
-/** UC-230: ChatGPT's waiting sign-in cancelled while it downloads, beside Claude's download: desktop drops only the
- * sign-in, so its row says the download carries on (the parallel installs; UC's id, this file's scene). */
-const STILL_DOWNLOADING: Entry = {
-  id: "UC-230",
-  words: firstLaunchWords(
-    "Sign-in cancelled. {name} is still downloading; sign in when it's ready.",
-  ),
-  screen: "first-launch/plan-cancel-downloading",
+/** UC-294: Claude's sign-in waits at desktop behind ChatGPT's device code, which has no line of its own on the first
+ * screen, so Claude's row offers to cancel it beside its own Cancel (installs-cancel; UC's id, this file's scene). Where
+ * the plan ahead's line shows with its own Cancel (a browser sign-in, Settings › Plans) the press isn't offered. */
+const CANCEL_AHEAD: Entry = {
+  id: "UC-294",
+  words: firstLaunchWords("Cancel {name}'s sign-in"),
+  screen: "first-launch/plan-after-code",
   render: render({
     first: true,
     events: [
-      install(CLAUDE, { downloading: { received: 13_000_000, total: 165_000_000 } }),
+      READY,
       signIn(CLAUDE, "queued"),
-      install(CODEX, { downloading: { received: 90_000_000, total: 139_000_000 } }),
-      signIn(CODEX, "queued"),
+      install(CODEX, { ready: { version: "0.1.0" } }),
+      signIn(CODEX, {
+        device_code: {
+          url: "https://auth.openai.com/codex/device",
+          code: "ABCD-1234",
+          expires_at: AT,
+        },
+      }),
     ],
-    clicks: ['[data-testid="plan-row"][data-agent="codex-acp"] [data-testid="signin-foot-cancel"]'],
   }),
 };
 
@@ -594,6 +598,6 @@ export const UD1: readonly Entry[] = [
   ...UC_KEY,
   ...UC_UNREACHABLE,
   AFTER_SIGN_IN,
-  STILL_DOWNLOADING,
+  CANCEL_AHEAD,
   ...UC_KEY_LINE,
 ];

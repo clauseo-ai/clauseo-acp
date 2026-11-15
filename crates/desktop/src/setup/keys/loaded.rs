@@ -53,13 +53,14 @@ impl LoadDone {
 /// sign-in's start (a stored key bars it), a leave (a key is a login that remains), an endpoint
 /// (it may leave a reused login) and a search for a login (its answer is composed with the key)
 /// read them. A key's save or removal writes them, and waits so that the load cannot land the
-/// old key after it. An install, a retry, a cancel, a pasted code, the sign-in page and a
+/// old key after it. An install, a retry, either cancel, a pasted code, the sign-in page and a
 /// sign-out neither read nor write a stored key (a sign-out ends the CLI's own login), and
 /// answer at once.
 pub(crate) fn needs_keys(command: &SetupCommand) -> bool {
     match command {
         SetupCommand::InstallAgent { .. }
         | SetupCommand::RetryAgentInstall { .. }
+        | SetupCommand::CancelAgentInstall { .. }
         | SetupCommand::CancelSignIn { .. }
         | SetupCommand::PasteSignInCode { .. }
         | SetupCommand::OpenSignInPage { .. }

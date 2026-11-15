@@ -32,7 +32,7 @@ import { usePickWait } from "../picker-wait.ts";
 import { markButton, markWelcome } from "../../start-marks.ts";
 import { IDS, NAME, planOf } from "./acts.ts";
 import { readyPlan, toolsView } from "./views.ts";
-import { browserNote, footActs, stillNote, welcomeFoot } from "./welcome-foot.tsx";
+import { browserNote, footActs, welcomeFoot } from "./welcome-foot.tsx";
 
 /** U2's new matter form in place, and a refused folder's words: New matter's chunk (new-matter.tsx), loaded as the
  * first screen needs them. */
@@ -82,7 +82,7 @@ export function FirstScreen({
   const plans: FootPlan[] = PLANS.map((agent) => {
     const name = NAME[planOf(agent)];
     const setup = state.agents[agent];
-    // the cancelled sign-in's note goes under the row, in Welcome's own slot, not in it
+    // a row's note goes under the row, in Welcome's own slot, not in it
     const install = unnoted(
       welcomeFoot(
         lang,
@@ -99,7 +99,7 @@ export function FirstScreen({
       key: agent,
       name,
       install,
-      note: stillNote(lang, name, setup) ?? browserNote(lang, agent, install, setup),
+      note: browserNote(lang, agent, install, setup),
       // ready here, or installed and signed in wherever that happened (D-012: Settings' sign-in left this window
       // with no row for the plan, since its install was never seen turning ready here)
       ready:

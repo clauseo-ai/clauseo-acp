@@ -6004,7 +6004,7 @@ export type SetupCommand =
 ({ install_agent: {
 	/**  The agent. */
 	agent: AgentId,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**
  *  Start a failed or paused install again. On a ready agent it retries the Python runtime
  *  instead (when Python is missing, waiting or failed): Python is one for the computer, so
@@ -6018,7 +6018,16 @@ export type SetupCommand =
 	agent: AgentId,
 	/**  Whether to go through the OS's proxy this time; missing means `false`. */
 	use_system_proxy?: boolean,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**
+ *  Stop the agent's install and remove what it downloaded: the plan goes back to not
+ *  installed. A sign-in waiting for that install goes too. Nothing happens to an agent that
+ *  is ready or not installing.
+ */
+({ cancel_agent_install: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**
  *  Sign in with the agent's plan login. A sign-in already running for the agent is joined,
  *  not restarted. On an agent not installed yet it starts the install and signs in once
@@ -6032,49 +6041,49 @@ export type SetupCommand =
 	 *  missing means `false`.
 	 */
 	console?: boolean,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**  Stop the sign-in that is running. */
 ({ cancel_sign_in: {
 	/**  The agent. */
 	agent: AgentId,
-} }) & { clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**  Give the running sign-in the code the lawyer pasted (Claude's paste route). */
 ({ paste_sign_in_code: {
 	/**  The agent. */
 	agent: AgentId,
 	/**  The pasted code: never stored, logged or shown. */
 	code: Secret,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**  Switch Codex's sign-in to its device code. */
 ({ use_device_code: {
 	/**  The agent. */
 	agent: AgentId,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_different_account?: never; use_found_login?: never } | 
 /**  Open the sign-in page again ("Didn't open?"); nothing happens when no page is known. */
 ({ open_sign_in_page: {
 	/**  The agent. */
 	agent: AgentId,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**  Sign Clauseo's own login out. Refused with `command.invalid` for a reused login. */
 ({ sign_out: {
 	/**  The agent. */
 	agent: AgentId,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**  "Use it": reuse the login [`SignIn::LoginFound`] showed. */
 ({ use_found_login: {
 	/**  The agent. */
 	agent: AgentId,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never } | 
 /**  "Sign in with a different account": leave the found or reused login and sign in. */
 ({ use_different_account: {
 	/**  The agent. */
 	agent: AgentId,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_found_login?: never } | 
 /**  "Stop using it here": stop reusing the lawyer's own login; it stays signed in. */
 ({ stop_using_login: {
 	/**  The agent. */
 	agent: AgentId,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**
  *  Look again for a login the lawyer already has, turning reuse back on. An **accepted**
  *  `FindLogin` ends in exactly one `SignInChanged`, sent even when the state is unchanged:
@@ -6085,19 +6094,19 @@ export type SetupCommand =
 ({ find_login: {
 	/**  The agent. */
 	agent: AgentId,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**  Store an API key for the agent in the OS keychain. */
 ({ set_agent_key: {
 	/**  The agent. */
 	agent: AgentId,
 	/**  The key: kept only in the keychain. */
 	key: Secret,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**  Remove the agent's API key from the keychain. */
 ({ clear_agent_key: {
 	/**  The agent. */
 	agent: AgentId,
-} }) & { cancel_sign_in?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**
  *  Set or clear the agent's firm endpoint (`plans.<id>.endpoint`), after a native confirm.
  *  The settings crate checks the URL.
@@ -6107,7 +6116,7 @@ export type SetupCommand =
 	agent: AgentId,
 	/**  The endpoint, an `https` URL; missing or `null` clears it. */
 	url?: string,
-} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never };
+} }) & { cancel_agent_install?: never; cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never };
 
 /**
  *  What desktop's `setup` stream arm carries. A new subscription first gets `SetupInfo`, then

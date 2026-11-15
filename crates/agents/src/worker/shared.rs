@@ -247,6 +247,7 @@ impl Default for Inner {
             jobs: std::collections::BTreeMap::new(),
             python_job: None,
             next_job: 0,
+            missing_bytes: std::collections::BTreeMap::new(),
             tries: std::collections::BTreeMap::new(),
             closed: false,
         }
@@ -269,6 +270,9 @@ impl Inner {
                 inner.installed.remove(agent);
             }
             None => {}
+        }
+        if let InstallState::Missing { download_bytes } = state {
+            inner.missing_bytes.insert(agent.clone(), download_bytes);
         }
         inner.states.insert(agent.clone(), state.clone());
         // Fails only when every receiver is gone; nobody is listening then.
@@ -307,19 +311,29 @@ impl Inner {
         }
     }
 
-    /// Adds `ticket` as its agent's running job, with nothing reserved yet.
-    pub(super) fn add_job(&mut self, ticket: Ticket) {
+    /// Adds `ticket` as its agent's running job, with nothing reserved yet; `cleanup` for a
+    /// cancel's clean-up job.
+    pub(super) fn add_job(&mut self, ticket: Ticket, cleanup: bool) {
         let agent = ticket.agent.clone();
         let slot = Slot {
             ticket,
             reserve: Reserve::default(),
+            cleanup,
         };
         self.jobs.insert(agent, slot);
     }
 
-    /// Whether `agent` has a running job.
+    /// Whether `agent` has a running install job (a cancel's clean-up is none).
     pub(super) fn running(&self, agent: &AgentId) -> bool {
-        self.jobs.contains_key(agent)
+        self.jobs.get(agent).is_some_and(|slot| !slot.cleanup)
+    }
+
+    /// The agents with a running install job (clean-ups left out).
+    pub(super) fn installing(&self) -> impl Iterator<Item = &AgentId> {
+        self.jobs
+            .iter()
+            .filter(|(_, slot)| !slot.cleanup)
+            .map(|(agent, _)| agent)
     }
 
     /// The agent whose job installs Python now, if any.
@@ -334,7 +348,7 @@ impl Inner {
     /// Stops `agent`'s running job, if any; no other agent's. It becomes `Paused`, unless
     /// `superseded` (a new job of the same agent, a retry while it waits: quiet). A job past its
     /// agent's `Ready`, installing Python, leaves the agent `Ready`; Python's download goes
-    /// back to `Missing`, its partial file kept.
+    /// back to `Missing`, its partial file kept. A cancel's clean-up stops with no event.
     pub(super) fn stop_job(
         &mut self,
         events: &async_channel::Sender<AgentsEvent>,
@@ -345,6 +359,9 @@ impl Inner {
             return;
         };
         running.ticket.cancel.cancel();
+        if running.cleanup {
+            return;
+        }
         if self.python_job == Some(running.ticket.job) {
             self.python_job = None;
             let going = matches!(

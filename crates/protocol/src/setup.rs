@@ -49,6 +49,13 @@ pub enum SetupCommand {
         #[serde(default)]
         use_system_proxy: bool,
     },
+    /// Stop the agent's install and remove what it downloaded: the plan goes back to not
+    /// installed. A sign-in waiting for that install goes too. Nothing happens to an agent that
+    /// is ready or not installing.
+    CancelAgentInstall {
+        /// The agent.
+        agent: AgentId,
+    },
     /// Sign in with the agent's plan login. A sign-in already running for the agent is joined,
     /// not restarted. On an agent not installed yet it starts the install and signs in once
     /// it is ready (`Queued` meanwhile).
@@ -140,6 +147,7 @@ impl SetupCommand {
         match self {
             Self::InstallAgent { agent }
             | Self::RetryAgentInstall { agent, .. }
+            | Self::CancelAgentInstall { agent }
             | Self::StartSignIn { agent, .. }
             | Self::CancelSignIn { agent }
             | Self::PasteSignInCode { agent, .. }
@@ -161,6 +169,7 @@ impl SetupCommand {
         match self {
             Self::InstallAgent { .. } => SetupAction::InstallAgent,
             Self::RetryAgentInstall { .. } => SetupAction::RetryAgentInstall,
+            Self::CancelAgentInstall { .. } => SetupAction::CancelAgentInstall,
             Self::StartSignIn { .. } => SetupAction::StartSignIn,
             Self::CancelSignIn { .. } => SetupAction::CancelSignIn,
             Self::PasteSignInCode { .. } => SetupAction::PasteSignInCode,
@@ -186,6 +195,8 @@ pub enum SetupAction {
     InstallAgent,
     /// [`SetupCommand::RetryAgentInstall`].
     RetryAgentInstall,
+    /// [`SetupCommand::CancelAgentInstall`].
+    CancelAgentInstall,
     /// [`SetupCommand::StartSignIn`].
     StartSignIn,
     /// [`SetupCommand::CancelSignIn`].
@@ -216,9 +227,10 @@ pub enum SetupAction {
 
 impl SetupAction {
     /// Every action, in declaration order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::InstallAgent,
         Self::RetryAgentInstall,
+        Self::CancelAgentInstall,
         Self::StartSignIn,
         Self::CancelSignIn,
         Self::PasteSignInCode,

@@ -10,6 +10,8 @@
 //!   install starts only from the lawyer's `InstallAgent` (choosing a card, with no confirm: the
 //!   card shows the size first), `RetryAgentInstall`, or a sign-in pressed before the agent is
 //!   installed (`pending.rs`), which starts or joins the install and runs at its `Ready`.
+//!   `CancelAgentInstall` stops it (`Agents::cancel_install`: back to `Missing`, its partial
+//!   files removed) and drops a sign-in press waiting for it.
 //! - **Sign-in.** Each `AgentsEvent::Signin` goes to [`Compose`], which sends every
 //!   `SignInChanged`. `OpenUrl` (an address S18's shim captured and checked against the
 //!   snapshot's sign-in hosts) opens with `open::open_url_unconfirmed`, https only. A
@@ -168,6 +170,12 @@ impl AgentsBackend {
             SetupCommand::RetryAgentInstall {
                 use_system_proxy, ..
             } => retry(self, &agent, use_system_proxy)?,
+            SetupCommand::CancelAgentInstall { .. } => {
+                let _gate = lock(&self.signin_gate);
+                // A press waiting for this install goes with it: the sign-in is back to S18's.
+                pending::drop_press(self, &agent, "install cancelled");
+                agents.cancel_install(&agent);
+            }
             SetupCommand::StartSignIn { console, .. } => {
                 if switch::stale_start(self, &agent) {
                     return Ok(());

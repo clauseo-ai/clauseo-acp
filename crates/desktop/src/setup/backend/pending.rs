@@ -29,8 +29,8 @@
 //!   and when it ends `Failed`: the failed view shows with its Retry, and a retry that ends
 //!   `Ready` carries on to the sign-in the lawyer asked for.
 //! - **Dropped** when the install ends `Paused`, when the agent turns out `Managed`, on
-//!   `CancelSignIn` (the install carries on), on `SignOut`, and when a key or an endpoint takes
-//!   over (`AgentsBackend::end_sign_in`).
+//!   `CancelSignIn` (the install carries on), on `CancelAgentInstall` (the install stops too),
+//!   on `SignOut`, and when a key or an endpoint takes over (`AgentsBackend::end_sign_in`).
 //!   Nothing another agent does drops it.
 //! - One per agent: a second press replaces the first (`Setup` lets it past the sign-in join).
 //! - Memory only: nothing of it outlives a quit.

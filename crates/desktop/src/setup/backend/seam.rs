@@ -15,6 +15,8 @@ pub(crate) trait SetupAgents: Send + Sync {
     fn install(&self, agent: &AgentId);
     /// `Agents::retry`.
     fn retry(&self, agent: &AgentId, use_system_proxy: bool);
+    /// `Agents::cancel_install`: the install stops, its files go, the agent is `Missing`.
+    fn cancel_install(&self, agent: &AgentId);
     /// `Agents::state`.
     fn state(&self, agent: &AgentId) -> Option<InstallState>;
     /// `Agents::installed`.
@@ -62,6 +64,9 @@ impl SetupAgents for Agents {
     }
     fn retry(&self, agent: &AgentId, use_system_proxy: bool) {
         Agents::retry(self, agent, use_system_proxy);
+    }
+    fn cancel_install(&self, agent: &AgentId) {
+        Agents::cancel_install(self, agent);
     }
     fn state(&self, agent: &AgentId) -> Option<InstallState> {
         Agents::state(self, agent)

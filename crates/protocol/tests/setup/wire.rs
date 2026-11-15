@@ -41,6 +41,10 @@ fn every_command() -> Vec<(String, SetupCommand)> {
             },
         ),
         (
+            plain("cancel_agent_install"),
+            SetupCommand::CancelAgentInstall { agent: a() },
+        ),
+        (
             r#"{"start_sign_in":{"agent":"claude-acp","console":true}}"#.to_owned(),
             SetupCommand::StartSignIn {
                 agent: a(),

@@ -53,6 +53,7 @@ impl Real {
 impl crate::setup::backend::SetupAgents for Real {
     fn install(&self, _: &AgentId) {}
     fn retry(&self, _: &AgentId, _: bool) {}
+    fn cancel_install(&self, _: &AgentId) {}
     fn state(&self, _: &AgentId) -> Option<InstallState> {
         None
     }

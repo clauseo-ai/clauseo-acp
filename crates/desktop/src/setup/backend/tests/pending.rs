@@ -1,7 +1,8 @@
 //! A sign-in pressed before its agent is installed (`pending.rs`): it starts the install, is
 //! kept as a pending press (`Queued`), and runs at the install's `Ready` through the direct
 //! press's checks, taken then; `Waiting` and `Failed` keep it (a retry's `Ready` signs in),
-//! `Paused`, `Managed` and `CancelSignIn` drop it, a second press replaces it; and no policy
+//! `Paused`, `Managed`, `CancelSignIn` and `CancelAgentInstall` drop it, a second press
+//! replaces it; and no policy
 //! or managed path installs.
 
 use clauseo_agents::testing::failed;
@@ -341,6 +342,33 @@ fn cancel_while_pending_drops_the_press_and_the_install_carries_on() {
     assert_eq!(
         rig.calls(),
         [("install", claude()), ("check_status", claude())]
+    );
+}
+
+/// `CancelAgentInstall` while the press waits reaches `Agents::cancel_install` and drops the
+/// press: the sign-in is back to S18's, and a later `Ready` signs nothing in.
+#[test]
+fn cancel_agent_install_cancels_the_install_and_drops_the_press() {
+    let rig = rig(true);
+    not_installed(&rig, &claude());
+    press(&rig, "start_sign_in", &claude(), &json!({}));
+    let mut feed = rig.events.follow();
+    press(&rig, "cancel_agent_install", &claude(), &json!({}));
+    assert_eq!(pending(&rig, &claude()), None);
+    assert_eq!(
+        rig.calls(),
+        [("install", claude()), ("cancel_install", claude())]
+    );
+    let shown = sign_ins(setup_events(&mut feed), &claude());
+    assert!(
+        matches!(shown.as_slice(), [SignIn::Queued, SignIn::SignedOut { .. }]),
+        "{shown:?}"
+    );
+    pump(&rig, &claude(), vec![ready()]);
+    assert!(
+        !rig.calls().contains(&("sign_in", claude())),
+        "{:?}",
+        rig.calls()
     );
 }
 

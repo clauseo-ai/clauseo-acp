@@ -390,6 +390,9 @@ impl SetupAgents for FakeSignin {
     fn retry(&self, agent: &AgentId, use_system_proxy: bool) {
         self.real.retry(agent, use_system_proxy);
     }
+    fn cancel_install(&self, agent: &AgentId) {
+        self.real.cancel_install(agent);
+    }
     fn state(&self, agent: &AgentId) -> Option<InstallState> {
         self.real.state(agent)
     }
