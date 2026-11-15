@@ -7,7 +7,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-pub(crate) use crate::network_paths::resolve::{Disk, drive_form};
+pub(crate) use crate::network_paths::resolve::{Disk, comparable, drive_form};
 use crate::network_paths::resolve::{Walked, walk as walk_on};
 use crate::network_paths::{is_url, under_share_matter};
 

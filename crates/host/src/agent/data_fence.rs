@@ -511,9 +511,11 @@ pub(crate) fn check_paths(
 }
 
 /// `path`'s parts for a prefix comparison, folded when `insensitive` ([`fold_name`]: a deny
-/// folds at least as broadly as the file system, `ſ` and the Kelvin sign included).
+/// folds at least as broadly as the file system, `ſ` and the Kelvin sign included), a long
+/// path's verbatim `\\?\C:\` read as `C:\` ([`resolve::comparable`]).
 fn key(path: &Path, insensitive: bool) -> Vec<OsString> {
-    path.components()
+    resolve::comparable(path)
+        .components()
         .map(|part| {
             let part = part.as_os_str();
             if insensitive {

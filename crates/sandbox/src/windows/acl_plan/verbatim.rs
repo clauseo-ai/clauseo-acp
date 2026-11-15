@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// Pure text, the same on every OS; a path that isn't Windows-shaped (a Unix path in the tests) is
 /// left as it is under the prefix. A name that isn't Unicode is kept as it is, except in a device
 /// or share path, which is read lossily.
-pub(in crate::windows) fn verbatim(path: &Path) -> PathBuf {
+pub(crate) fn verbatim(path: &Path) -> PathBuf {
     let path = backslashed(path);
     let bytes = path.as_os_str().as_encoded_bytes();
     if bytes.starts_with(br"\\?\") {

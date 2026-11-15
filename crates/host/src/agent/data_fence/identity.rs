@@ -25,7 +25,7 @@ use std::path::Path;
 
 use super::health::{Captured, DataFenceHealth, Id};
 use crate::network_paths::file_ids::is_no_file_ids;
-use crate::network_paths::resolve::{Fs, no_such_name};
+use crate::network_paths::resolve::{Fs, comparable, no_such_name};
 
 /// An identity that could not be read.
 struct Unreadable;
@@ -133,9 +133,13 @@ impl<'a> DataIdentity<'a> {
         let Some(data) = self.data else {
             return false;
         };
+        // By their text with a long path's verbatim `\\?\` read as plain (`comparable`).
+        let real_data = self.real_data.map(comparable);
         let a_parent_of_data = |folder: &Path| {
-            self.real_data
-                .is_some_and(|real| real != folder && real.starts_with(folder))
+            let folder = comparable(folder);
+            real_data
+                .as_deref()
+                .is_some_and(|real| real != folder.as_ref() && real.starts_with(&folder))
         };
         path.ancestors()
             .filter(|folder| !a_parent_of_data(folder))
@@ -176,5 +180,31 @@ impl<'a> DataIdentity<'a> {
                 Err(Unreadable)
             }
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod long_tests {
+    use std::path::{Path, PathBuf};
+
+    use super::{DataFenceHealth, DataIdentity};
+    use crate::network_paths::resolve::tests::FakeFs;
+
+    /// A long path's verbatim folders above the data folder (`dunce` keeps `\\?\` past 260
+    /// characters) are known by their text as the data folder's parents, so an unreadable home
+    /// does not refuse it.
+    #[test]
+    fn a_long_verbatim_path_skips_the_data_folders_parents() {
+        let data = Path::new(r"C:\Users\a\AppData\Roaming\Clauseo");
+        let mut fs = FakeFs::with(&[]);
+        fs.ids.insert(data.to_path_buf(), (1, 7));
+        fs.unreadable_ids.push(PathBuf::from(r"\\?\C:\Users\a"));
+        let health = DataFenceHealth::default();
+        let identity = DataIdentity::capture(&fs, data, &health);
+        let mut long = String::from(r"\\?\C:\Users\a\Documents\");
+        while long.len() < 280 {
+            long.push_str(r"A long folder name\");
+        }
+        assert!(!identity.holds(Path::new(&long)));
     }
 }
