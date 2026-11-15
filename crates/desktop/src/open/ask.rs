@@ -92,7 +92,8 @@ const TYPOGRAPHIC: [char; 10] = [
 /// what was found (link.tsx's `couldHideAHost` is the same rule). True when it holds:
 /// - a default-ignorable code point (`ignorable`), or an interlinear annotation mark;
 /// - an image ([`IMAGE`]);
-/// - in a word (split on ASCII whitespace) holding a character outside ASCII: such a character
+/// - in a word (split on ASCII whitespace), its closing full stop left out
+///   (`without_closing_stop`), holding a character outside ASCII: such a character
 ///   next to an ASCII letter, digit or `.`, as written or once folded (`fold`), unless it is
 ///   [`TYPOGRAPHIC`] and its neighbour is not a `.`; or, folded, a `.` between two letters or
 ///   digits of any script (`ｂａｎｋ．ｃｏｍ`, `𝐛𝐚𝐧𝐤᠃𝐜𝐨𝐦`, `аррӏе᠃сом`). Only all-ASCII words
@@ -107,12 +108,25 @@ pub(crate) fn could_hide_a_host(text: &str) -> bool {
         return true;
     }
     text.split(|c: char| c.is_ascii_whitespace()).any(|word| {
+        let word = without_closing_stop(word);
         if word.is_ascii() {
             return false;
         }
         let folded = fold(word);
         touches_ascii(word) || touches_ascii(&folded) || dotted_run(&folded)
     })
+}
+
+/// `word` without its closing full stop: the run of `.` and curly closing quotes it ends in,
+/// when that run holds a `.` (`आदेश.` reads `आदेश`, `“order”.` reads `“order`). Nothing follows
+/// the stop in the word, so it joins no labels into a host (link.tsx's `withoutClosingStop`).
+fn without_closing_stop(word: &str) -> &str {
+    let kept = word.trim_end_matches(['.', '\u{2019}', '\u{201D}']);
+    if word[kept.len()..].contains('.') {
+        kept
+    } else {
+        word
+    }
 }
 
 /// Whether `word` has a character outside ASCII next to an ASCII letter, digit or `.`, other

@@ -337,6 +337,10 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
         return tool?.as == null
           ? say("Ran a task.", "Tried to run a task.")
           : toolDone(lang, tool.as, tried);
+      // a chained command is counted, not named by its first program ("Ran New-Item." for three); the fold under the
+      // row still shows it whole
+      if (t.count > 1)
+        return say("Ran {n} tasks.", "Tried to run {n} tasks.", { n: String(t.count) });
       return t.paper === null
         ? say("Ran {program}.", "Tried to run {program}.", { program: t.program })
         : say("Ran {program} on {name}.", "Tried to run {program} on {name}.", {

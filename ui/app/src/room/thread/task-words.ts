@@ -9,8 +9,11 @@ import { toolNameOf } from "./tool-names.ts";
 export type Task = {
   /** The agent's own short words for the task, or null. */
   own: string | null;
-  /** The program it ran ("python3"), or null. */
+  /** The program it ran ("python3"), or null: the first of a chained command's. */
   program: string | null;
+  /** How many programs the command runs, chained with `&&`, `||`, `;` or `|` (a `cd` or a `set` not counted):
+   * past one, the row counts them ("Ran 2 tasks.") rather than name only the first; 0 with no command. */
+  count: number;
   /** The file name of the paper it ran on, or null. */
   paper: string | null;
   /** The whole command, its paths within the matter cut to the matter, or null with none. */
@@ -38,6 +41,8 @@ const SHELLS: ReadonlySet<string> = new Set([
 const PAPER = /\.(pdf|docx?|rtf|odt|txt|md|xlsx?|csv|pptx?|eml|msg|html?|jpe?g|png|tiff?)$/i;
 /** Words that start a command but say nothing of what it ran. */
 const PREFIX: ReadonlySet<string> = new Set(["sudo", "env", "time", "nice", "exec", "command"]);
+/** Programs that only move to a folder or set a variable: never what a command ran, never counted. */
+const PLACE: ReadonlySet<string> = new Set(["cd", "set", "pushd", "popd", "Set-Location"]);
 
 const short = (s: string): string => {
   const t = s.trim().replace(/\s+/g, " ");
@@ -83,17 +88,42 @@ function words(command: string): string[] {
   return out;
 }
 
-/** The program a command runs: the first word of its first part that isn't a `cd`, a variable set, or a prefix. */
-function programOf(command: string): string | null {
-  for (const part of command.split(/&&|\|\||;|\|/)) {
+/** A command line's parts, chained with `&&`, `||`, `;` or `|` as sh and PowerShell chain them: split outside
+ * quotes, past a backslash's escape (`find … -exec rm {} \;` is one part), never at `2>&1`'s lone `&`. */
+function partsOf(command: string): string[] {
+  const parts: string[] = [];
+  let quote: string | null = null;
+  let from = 0;
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]!;
+    if (quote !== null) {
+      if (c === quote) quote = null;
+      else if (c === "\\" && quote === '"') i += 1;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === "\\") i += 1;
+    else if (c === ";" || c === "|" || (c === "&" && command[i + 1] === "&")) {
+      parts.push(command.slice(from, i));
+      if (c !== ";" && command[i + 1] === c) i += 1;
+      from = i + 1;
+    }
+  }
+  parts.push(command.slice(from));
+  return parts;
+}
+
+/** The programs a command runs, one per part: each part's first word that isn't a variable set or a prefix, a part
+ * that only moves to a folder or sets a variable (PLACE) left out. */
+function programsOf(command: string): string[] {
+  const out: string[] = [];
+  for (const part of partsOf(command)) {
     const ws = words(part.trim()).filter((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
     while (ws.length > 0 && PREFIX.has(ws[0]!)) ws.shift();
     const first = ws[0];
-    if (first === undefined || first === "cd" || first === "set") continue;
+    if (first === undefined || PLACE.has(first)) continue;
     const name = baseName(first);
-    return name === "" ? null : name;
+    if (name !== "") out.push(name);
   }
-  return null;
+  return out;
 }
 
 /** The first paper a command names, by its file name: a quoted or bare word ending in a paper's extension,
@@ -161,10 +191,12 @@ export function taskOf(entry: ToolCallEntry, folder: string | null = null): Task
     toolNameOf(titled) === undefined;
   const command = given ?? (looks ? titled : null);
   const cwd = text(raw?.["cwd"]) ?? text(raw?.["workdir"]);
-  const program = command === null ? null : programOf(command);
+  const programs = command === null ? [] : programsOf(command);
+  const program = programs[0] ?? null;
   return {
     own: own === null ? null : short(own),
     program,
+    count: programs.length,
     paper: command === null ? null : paperOf(command),
     command: command === null ? null : inMatter(command, folder, cwd),
     described: own === null && program === null ? describedOf(entry, titled, looks) : null,

@@ -416,6 +416,19 @@ test.each([
     "[bank.example.com or evil.example.net](https://evil.example.net/x)",
     "evil.example.net",
   ],
+  ["Hindi before a closing stop", "[आदेश देखें.](https://evil.example.net/x)", null],
+  ["a curly quote before a closing stop", "[the “judgment”.](https://evil.example.net/x)", null],
+  [
+    "a look-alike host with a closing stop",
+    "[ｂａｎｋ．ｅｘａｍｐｌｅ．ｃｏｍ.](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  [
+    "Hindi touching a dot inside a word",
+    "[बैंक.example.com](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  ["a mixed word with a closing stop", "[naïve”.](https://evil.example.net/x)", "evil.example.net"],
 ])("the link-host hint with %s", (_, text, expected) => {
   show(text);
   const hint = host.querySelector('[data-clauseo="link-host"]');

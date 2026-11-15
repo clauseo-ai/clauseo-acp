@@ -78,6 +78,8 @@ export const HI = {
   // the paper it would run it on (D-016); the command itself folds under "Show the command"
   "Run {program} on {name}.": "{name} पर {program} चलाना।",
   "Run {program}.": "{program} चलाना।",
+  // a chained command, counted rather than named by its first program (UC-302; provisional)
+  "Run {n} tasks.": "{n} काम चलाना।",
   // what Clauseo asks to do, under the ask, where the agent named the request only by a tool's or a permission's
   // name (UC-160 to UC-165; provisional): the name itself is never shown
   "Clauseo asks to let a command reach the internet.":
