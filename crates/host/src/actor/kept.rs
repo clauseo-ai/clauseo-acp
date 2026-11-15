@@ -1,10 +1,18 @@
 //! The lawyer's view of the rules "Always for this matter" kept (`agent/always.rs`):
 //! `HostQuery::KeptPermissions` lists a matter's rules, each read into a kind and a subject
 //! ([`describe`]), and `HostCommand::RemoveKeptPermission` takes one back. Both read or write the
-//! matter's file on a thread of their own; a removal then comes back to the actor
-//! ([`Input::Kept`]) so no running agent of the matter applies the rule any more
-//! (`turn::always::forget`). Logs name no rule: a command can be the lawyer's own words.
+//! matter's file on a thread of their own; a removal's outcome then comes back to the actor
+//! ([`Input::Kept`]) to answer the command. Logs name no rule: a command can be the lawyer's own
+//! words.
+//!
+//! The lawyer's removal always wins. On the actor, before its file is touched, no running agent
+//! of the matter applies the rule any more (`turn::always::forget`), whether or not the file
+//! held it (an add's write can still be pending, or have failed); the [`Ledger`] drops it from
+//! the rules a launch read before the removal, when its agent is built; and its file operation
+//! carries the ledger's sequence number, so an add that started earlier can't put it back
+//! (`agent/always/store.rs`).
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -27,12 +35,52 @@ const JOB: Job = Job {
     wait: LAUNCH_WAIT,
 };
 
+/// The lawyer's adds and removals of kept rules this run, numbered in the order the actor saw
+/// them, and the rules removed since, by matter.
+#[derive(Debug, Default)]
+pub(crate) struct Ledger {
+    /// The last number given.
+    seq: u64,
+    /// Each matter's rules the lawyer removed and did not keep again since.
+    removed: BTreeMap<MatterId, BTreeSet<String>>,
+}
+
+impl Ledger {
+    /// The lawyer kept `rule` for `matter` (again): its add's number.
+    pub(crate) fn keep(&mut self, matter: MatterId, rule: &str) -> u64 {
+        if let Some(removed) = self.removed.get_mut(&matter) {
+            removed.remove(rule);
+        }
+        self.next()
+    }
+
+    /// The lawyer removed `rule` from `matter`: its removal's number.
+    fn remove(&mut self, matter: MatterId, rule: &str) -> u64 {
+        self.removed
+            .entry(matter)
+            .or_default()
+            .insert(rule.to_owned());
+        self.next()
+    }
+
+    /// `rules`, read for a launch of `matter`, without those the lawyer removed since.
+    pub(crate) fn drop_removed(&self, matter: MatterId, rules: &mut BTreeSet<String>) {
+        if let Some(removed) = self.removed.get(&matter) {
+            rules.retain(|rule| !removed.contains(rule));
+        }
+    }
+
+    fn next(&mut self) -> u64 {
+        self.seq += 1;
+        self.seq
+    }
+}
+
 /// A removal's outcome, from its thread.
 #[derive(Debug)]
 pub(crate) struct Removed {
     ctx: CommandCtx,
     matter: MatterId,
-    rule: String,
     outcome: Result<bool, Error>,
 }
 
@@ -65,19 +113,21 @@ pub(super) fn list(actor: &Actor, matter: MatterId, reply: Reply<QueryResult>) {
     }
 }
 
-/// `HostCommand::RemoveKeptPermission`: the removal off the actor, then [`on_removed`].
+/// `HostCommand::RemoveKeptPermission`: the rule is forgotten and recorded on the actor (see
+/// the module doc), then removed from the file off the actor, then [`on_removed`].
 pub(super) fn remove(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId, rule: String) {
     if let Err(error) = check_matter(actor, matter) {
         actor.finish_command(ctx.id, Err(error));
         return;
     }
+    super::turn::always::forget(actor, matter, &rule);
+    let seq = actor.kept.remove(matter, &rule);
     let file: PathBuf = always::file_of(actor.effective.data_dir(), matter);
     let clock = Arc::clone(&actor.clock);
     let ctx = *ctx;
     actor.spawn_post(async move {
-        let key = rule.clone();
         let removed = off_actor(clock, JOB, move || {
-            always::remove_now(&file, &key).map_err(|error| {
+            always::remove_now(&file, &rule, seq).map_err(|error| {
                 tracing::warn!(error = %Cause(&error), "a kept permission was not removed");
                 Error::Internal("the kept permission could not be removed".to_owned())
             })
@@ -86,23 +136,19 @@ pub(super) fn remove(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId, rule
         Input::Kept(Box::new(Removed {
             ctx,
             matter,
-            rule,
             outcome: removed,
         }))
     });
 }
 
-/// A removal came back: a rule that was there is forgotten by every agent of its matter.
+/// A removal came back: the command is answered. The agents forgot the rule when it was asked
+/// for; forgetting it again here would also drop one the lawyer kept again since.
 pub(super) fn on_removed(actor: &mut Actor, done: Removed) {
     let Removed {
         ctx,
         matter,
-        rule,
         outcome: removed,
     } = done;
-    if let Ok(true) = removed {
-        super::turn::always::forget(actor, matter, &rule);
-    }
     tracing::info!(%matter, removed = ?removed.as_ref().ok(), "the lawyer removed a kept permission");
     actor.finish_command(ctx.id, removed.map(|_was| CommandOutcome::Done));
 }

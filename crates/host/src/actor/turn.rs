@@ -1,6 +1,5 @@
-//! The turn path: prompts and their turns, the agents that run them, the writer queue of each
-//! matter, cancel, the commands that answer an agent, undo, start-up reconciliation and the turn
-//! path's part of shutdown.
+//! The turn path: prompts and their turns, the agents that run them, each matter's writer queue,
+//! cancel, the commands answering an agent, undo, start-up reconciliation and its part of shutdown.
 //!
 //! A turn moves through the steps of the brief's "The turn": the `UserMessage` commit, the
 //! agent's launch (`agents.rs`), the writer queue and the before-turn checkpoint, the prompt, and

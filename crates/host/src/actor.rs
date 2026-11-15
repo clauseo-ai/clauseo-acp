@@ -114,6 +114,8 @@ pub(crate) struct Actor {
     /// Each skill pack's generation, bumped by every `SetSkillPack` for it: an `on`'s read
     /// writes only while its generation is still the pack's (`settings/packs.rs`).
     pub(crate) pack_generations: BTreeMap<clauseo_protocol::PackId, u64>,
+    /// The lawyer's adds and removals of kept "Always" rules this run (`kept.rs`).
+    pub(crate) kept: kept::Ledger,
     /// The policy lock causes last logged (`settings/lock_causes.rs`): a reload logs a change.
     pub(crate) lock_causes: Vec<clauseo_settings::LockReason>,
     /// The usage counts (`HostConfig::with_counts`), or none: every call site is then a no-op

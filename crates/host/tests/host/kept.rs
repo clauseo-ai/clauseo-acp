@@ -1,6 +1,7 @@
 //! The lawyer's side of "Always for this matter" (`actor/kept.rs`): `KeptPermissions` lists a
 //! matter's kept rules in plain kinds, `RemoveKeptPermission` takes one out of the file and out
-//! of the running agent, and an "Always" that kept nothing logs a notice saying it was allowed
+//! of the running agent (even when the file never held it, and from a launch that read the file
+//! before the removal), and an "Always" that kept nothing logs a notice saying it was allowed
 //! this once only.
 
 use std::path::Path;
@@ -140,6 +141,75 @@ fn a_removed_rule_leaves_the_file_and_the_running_agent() {
     let left: Vec<String> = kept(&host, matter).into_iter().map(|k| k.rule).collect();
     assert_eq!(left, ["Bash(npm run lint)"]);
     // The same session asks the lawyer again; the scenario expects the lawyer's reject.
+    let (turn, _) = host.prompt(thread, "Run them again.");
+    answer_from(&host, &mut events, thread, 1, &["reject"]);
+    events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    host.shutdown();
+}
+
+/// A launch that read the file before the lawyer's removal reached it never applies the rule:
+/// its agent is built without the rules removed since (`actor/kept.rs` `Ledger`). The rule is
+/// written back after the removal, as such a launch read it.
+#[test]
+fn a_rule_removed_while_a_launch_read_it_is_not_applied() {
+    let dir = Dir::new(
+        "kept_launch_race",
+        &[(CLAUDE, Scenario::Local("claude-always-remove"))],
+    );
+    let host = dir.start(0);
+    let (matter, thread, _folder) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
+    keep(&dir, matter, &["Bash(npm test)"]);
+    let remove = HostCommand::RemoveKeptPermission {
+        matter,
+        rule: "Bash(npm test)".to_owned(),
+    };
+    assert_eq!(host.ok(remove), CommandOutcome::Done);
+    keep(&dir, matter, &["Bash(npm test)"]);
+    // The lawyer is asked both times: allow once, then reject.
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Run the tests.");
+    answer_from(&host, &mut events, thread, 0, &["allow-once"]);
+    events.until_turn_ended(turn);
+    let (turn, _) = host.prompt(thread, "Run them again.");
+    answer_from(&host, &mut events, thread, 1, &["reject"]);
+    events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    host.shutdown();
+}
+
+/// A rule the lawyer kept that the file doesn't hold (its write failed, or is still pending) is
+/// still removed from the running agent: the removal forgets it whether or not the file held it.
+#[test]
+fn a_removed_rule_the_file_lost_leaves_the_running_agent() {
+    let dir = Dir::new(
+        "kept_unpersisted",
+        &[(CLAUDE, Scenario::Local("claude-always-remove"))],
+    );
+    let host = dir.start(0);
+    let (matter, thread, _folder) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Run the tests.");
+    answer_from(&host, &mut events, thread, 0, &["allow-with-updates"]);
+    events.until_turn_ended(turn);
+    // Once its write is done, the file loses the rule, as if the write had failed.
+    let file = dir
+        .data()
+        .join("agent-state")
+        .join(matter.to_string())
+        .join("claude-allow.json");
+    let stored = || std::fs::read_to_string(&file).is_ok_and(|text| text.contains("npm test"));
+    crate::support::wait("the kept rule", async {
+        while !stored() {
+            async_io::Timer::after(std::time::Duration::from_millis(20)).await;
+        }
+    });
+    keep(&dir, matter, &[]);
+    let remove = HostCommand::RemoveKeptPermission {
+        matter,
+        rule: "Bash(npm test)".to_owned(),
+    };
+    assert_eq!(host.ok(remove), CommandOutcome::Done);
     let (turn, _) = host.prompt(thread, "Run them again.");
     answer_from(&host, &mut events, thread, 1, &["reject"]);
     events.until_turn_ended(turn);
