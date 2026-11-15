@@ -51,6 +51,7 @@ pub(crate) mod limits;
 mod locate;
 mod main_loop;
 mod matter_details;
+mod matter_read;
 mod matters;
 mod mcp;
 mod papers;

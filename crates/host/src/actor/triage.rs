@@ -68,7 +68,12 @@ pub(super) fn mark_done(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, d
 /// (no command refuses an archived thread). Every event is logged, a repeat too: the loaded
 /// state is only what is durable, so it cannot tell a repeat from an undo of a change still in
 /// flight.
-fn log_thread_event(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, event: DomainEvent) {
+pub(super) fn log_thread_event(
+    actor: &mut Actor,
+    ctx: &CommandCtx,
+    thread: ThreadId,
+    event: DomainEvent,
+) {
     if let Err(error) = super::commands::listed_thread(actor, thread) {
         actor.finish_command(ctx.id, Err(error));
         return;

@@ -247,6 +247,12 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::SnoozeThread { thread, until } => triage::snooze(actor, ctx, thread, until),
         HostCommand::MarkThreadDone { thread, done } => triage::mark_done(actor, ctx, thread, done),
         HostCommand::SweepDone { day_start } => triage::sweep_done(actor, ctx, day_start),
+        HostCommand::AllowMatterRead { thread, matter } => {
+            super::matter_read::allow(actor, ctx, thread, matter);
+        }
+        HostCommand::WithdrawMatterRead { thread, matter } => {
+            super::matter_read::withdraw(actor, ctx, thread, matter);
+        }
         HostCommand::CreateThread {
             matter,
             agent,
