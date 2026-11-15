@@ -1,21 +1,34 @@
-//! stetdoc at the app's start: what the agents get of it, and one more check in the background
-//! when its first run was only slow.
+//! stetdoc at the app's start: what the agents get of it at once, and the tries that run in the
+//! background when the start did not wait for an answer.
 //!
-//! The app waits for [`start`] before the host starts, so it gets [`FIRST_LIMIT`] for
-//! `--version` and the skill together. A new, unsigned program's first run can take longer
-//! while the OS scans it (Defender or Smart App Control on Windows, after an install or an
-//! update), and it answers in milliseconds afterwards. So a `--version` that only passed the
-//! limit keeps stetdoc on at once, with the skill a previous run cached when one loads, and
-//! [`recheck`] runs the same two steps again, off the start, within [`RECHECK_LIMIT`]:
+//! The app waits for [`start`] before the host starts, and every command and sign-in wait for
+//! the host. A new, unsigned program's first run can take seconds while the OS scans it
+//! (Defender or Smart App Control on Windows, after an install or an update, or again after a
+//! signature update), and it answers in milliseconds afterwards. So:
 //!
-//! - it works: stetdoc stays on, with the skill it loaded, from the next agent start;
-//! - `--version` fails for real (an error exit, no version, no start): stetdoc is treated as
-//!   absent for the agent starts that follow;
-//! - it passes the limit again, or only the skill fails: nothing changes.
+//! - a stetdoc already seen to answer (the same file, by path, size and modification time, as
+//!   the marker [`seen`] keeps under the app's data says) gets one try within [`Limits::seen`]
+//!   (3 s) at the start, `--version` and the skill together;
+//! - one not seen yet (a first run after an install or an update) gets no try at the start: the
+//!   host starts at once.
 //!
-//! A `--version` that fails for real within [`FIRST_LIMIT`] is absent at once, and nothing is
-//! checked again. The functions take the launcher and the timer, so tests drive them with the
-//! stub stetdoc and timers that end at once or never.
+//! Either way, a stetdoc the start has no answer from (not seen, or its try timed out or did not
+//! start) stays on at once, with the skill a previous run cached when one loads, and
+//! [`recheck`] runs the same two steps on a thread of its own, one try after another while
+//! they time out or do not start: [`Limits::unseen`] (20 s, not seen yet only), then
+//! [`Limits::retry`] (20 s), then [`Limits::recheck`] (30 s). A stetdoc that hangs is killed
+//! at each limit. What the first try with an answer found goes into the profile for the agent
+//! starts that follow:
+//!
+//! - it works: stetdoc stays on, with the skill it loaded;
+//! - `--version` fails for real (an error exit, no version), or the last try did not start:
+//!   stetdoc is treated as absent;
+//! - the last try passes its limit too, or only the skill fails: nothing changes.
+//!
+//! An answer, at the start or in the background, is recorded in the marker, so the next start
+//! gives the stetdoc 3 s. A `--version` that fails for real at the start is absent at once, and
+//! nothing is checked again. The functions take the launcher and the timer, so tests drive them
+//! with the stub stetdoc and timers the test controls.
 
 use std::cell::Cell;
 use std::path::Path;
@@ -28,17 +41,48 @@ use futures::future::{Either, select};
 use super::{RunError, SKILL_FILE, STETDOC, load_skill_at, skill_source, version_within};
 use crate::skills::{SkillSource, is_current, manifest::Manifest};
 
+pub mod seen;
+
 /// The target of the start's support lines: host.log keeps info only from `clauseo_*::lifecycle`
 /// targets.
 const LIFECYCLE: &str = "clauseo_profile::stetdoc::lifecycle";
 
-/// How long the first check at start-up may take, both runs together (`--version`, then
-/// `skills get core` when the cached skill is stale). The host starts after it, and every
-/// command waits for the host, so this bounds how long a slow stetdoc delays the app.
+/// How long the try at start-up may take, both runs together (`--version`, then `skills get
+/// core` when the cached skill is stale), for a stetdoc already seen to answer. The host starts
+/// after it, and every command waits for the host, so this bounds how long a slow stetdoc
+/// delays the app.
 pub const FIRST_LIMIT: Duration = Duration::from_secs(3);
 
-/// How long the background check after a slow first run may take, both runs together.
+/// How long the first background try may take for a stetdoc not seen to answer yet, and the
+/// next try after one that timed out or did not start.
+pub const LONG_LIMIT: Duration = Duration::from_secs(20);
+
+/// How long the last background try may take, both runs together.
 pub const RECHECK_LIMIT: Duration = Duration::from_secs(30);
+
+/// The limits of the start's tries: [`Self::APP`] in the app; tests pass their own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    /// The try at the start, for a stetdoc already seen to answer.
+    pub seen: Duration,
+    /// The first background try, for a stetdoc not seen to answer yet.
+    pub unseen: Duration,
+    /// The background try after one that timed out or did not start.
+    pub retry: Duration,
+    /// The last background try.
+    pub recheck: Duration,
+}
+
+impl Limits {
+    /// The app's: 3 s at the start for a stetdoc seen before; in the background 20 s for one
+    /// not seen yet, 20 s for the retry, then 30 s.
+    pub const APP: Self = Self {
+        seen: FIRST_LIMIT,
+        unseen: LONG_LIMIT,
+        retry: LONG_LIMIT,
+        recheck: RECHECK_LIMIT,
+    };
+}
 
 /// What one [`check`] found.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,11 +92,27 @@ pub enum Found {
     /// `--version` worked but the skill did not load (`skills get core` failed or took too
     /// long, or its text was refused).
     NoSkill,
-    /// `--version` failed for real: it did not start, exited with an error, or printed no
-    /// version.
+    /// `--version` failed for real: it exited with an error, or printed no version.
     Broken,
+    /// `--version` could not be started (missing, not a program, refused, or held by the OS).
+    NotStarted,
     /// `--version` passed the limit: stetdoc may work but be slow.
     TimedOut,
+}
+
+impl Found {
+    /// Whether `--version` answered, with the skill or without.
+    #[must_use]
+    pub fn answered(&self) -> bool {
+        matches!(self, Self::Skill(_) | Self::NoSkill)
+    }
+
+    /// Whether a try that found this gets the next one: it passed the limit or did not start,
+    /// either of which a scanning OS can cause.
+    #[must_use]
+    pub fn retried(&self) -> bool {
+        matches!(self, Self::TimedOut | Self::NotStarted)
+    }
 }
 
 /// What the agents get of stetdoc.
@@ -82,64 +142,103 @@ impl State {
     }
 }
 
-/// What [`start`] decided: the state the agents start with, and whether [`recheck`] should run.
+/// What [`start`] decided: the state the agents start with, and the background tries'
+/// limits, in order (none when the start has its answer).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Start {
     /// The state from now on, until a [`recheck`] changes it.
     pub state: State,
-    /// Whether the first `--version` only passed its limit, so the check runs again.
-    pub recheck: bool,
+    /// The limits of the tries [`recheck`] runs, one after another while they time out or do
+    /// not start.
+    pub later: Vec<Duration>,
 }
 
-/// The first check, within [`FIRST_LIMIT`], of `program` with `cached` as the skills folder a
-/// previous run wrote. Starts stetdoc and reads files: off the host thread.
+/// stetdoc at the start, with `cached` as the skills folder a previous run wrote and `seen` as
+/// the marker of the stetdoc last seen to answer: one try within [`Limits::seen`] when `seen`
+/// names `program`, none otherwise. Starts stetdoc and reads and writes files: off the host
+/// thread.
 pub async fn start<T: Timer>(
     launcher: &dyn Launcher,
     timer: &T,
     program: &Path,
     cached: &Path,
+    seen: &Path,
+    limits: Limits,
 ) -> Start {
-    let found = check(launcher, timer, program, cached, FIRST_LIMIT).await;
-    first(found, || cached_skill(cached))
+    if !seen::is_seen(seen, program) {
+        let skill = cached_skill(cached);
+        tracing::info!(
+            target: LIFECYCLE,
+            cached_skill = skill.is_some(),
+            "stetdoc has not been seen to answer yet (a new install or update); it stays on and \
+             is tried in the background"
+        );
+        return Start {
+            state: State::On(skill),
+            later: vec![limits.unseen, limits.retry, limits.recheck],
+        };
+    }
+    let found = check(launcher, timer, program, cached, limits.seen).await;
+    first(found, limits, || cached_skill(cached))
 }
 
-/// What the agents start with after a first check that found `found`; `cached` gives the
-/// skill a previous run cached, read only after a timeout.
-pub fn first(found: Found, cached: impl FnOnce() -> Option<SkillSource>) -> Start {
-    let (state, recheck) = match found {
-        Found::Skill(skill) => (State::On(Some(skill)), false),
-        Found::NoSkill => (State::On(None), false),
-        Found::Broken => (State::Off, false),
-        Found::TimedOut => {
+/// What the agents start with after the try at the start found `found`; `cached` gives the
+/// skill a previous run cached, read only when the background tries follow.
+pub fn first(found: Found, limits: Limits, cached: impl FnOnce() -> Option<SkillSource>) -> Start {
+    let (state, later) = match found {
+        Found::Skill(skill) => (State::On(Some(skill)), Vec::new()),
+        Found::NoSkill => (State::On(None), Vec::new()),
+        Found::Broken => (State::Off, Vec::new()),
+        Found::TimedOut | Found::NotStarted => {
             let skill = cached();
             tracing::warn!(
                 target: LIFECYCLE,
-                limit_secs = FIRST_LIMIT.as_secs(),
+                timed_out = found == Found::TimedOut,
+                limit_secs = limits.seen.as_secs(),
                 cached_skill = skill.is_some(),
-                "stetdoc took too long on its first run; it stays on and is checked again \
-                 in the background"
+                "stetdoc did not answer at the start (the OS may be scanning it); it stays on \
+                 and is tried again in the background"
             );
-            (State::On(skill), true)
+            (State::On(skill), vec![limits.retry, limits.recheck])
         }
     };
-    Start { state, recheck }
+    Start { state, later }
 }
 
-/// The check after a slow first run, within [`RECHECK_LIMIT`]: the state to put in place of
-/// `current`, or `None` to keep it. Starts stetdoc and reads files: on a thread of its own.
+/// The background tries, within `later`'s limits one after another while they time out or do
+/// not start: the state to put in place of `current`, or `None` to keep it. Records an answer
+/// in `seen`. Starts stetdoc and reads and writes files: on a thread of its own.
 pub async fn recheck<T: Timer>(
     launcher: &dyn Launcher,
     timer: &T,
     program: &Path,
     cached: &Path,
+    seen: &Path,
     current: &State,
+    later: &[Duration],
 ) -> Option<State> {
-    let found = check(launcher, timer, program, cached, RECHECK_LIMIT).await;
-    after(current, found)
+    for (at, &limit) in later.iter().enumerate() {
+        let found = check(launcher, timer, program, cached, limit).await;
+        if found.answered() {
+            seen::record(seen, program);
+        }
+        if found.retried() && at + 1 < later.len() {
+            tracing::warn!(
+                target: LIFECYCLE,
+                timed_out = found == Found::TimedOut,
+                limit_secs = limit.as_secs(),
+                "stetdoc did not answer in the background; it is tried once more"
+            );
+            continue;
+        }
+        return after(current, found, limit);
+    }
+    None
 }
 
-/// What a background check that found `found` does to `current`: the new state, or `None`.
-pub fn after(current: &State, found: Found) -> Option<State> {
+/// What a background check within `limit` that found `found` does to `current`: the new
+/// state, or `None`.
+pub fn after(current: &State, found: Found, limit: Duration) -> Option<State> {
     match found {
         Found::Skill(skill) => {
             tracing::info!(
@@ -157,7 +256,7 @@ pub fn after(current: &State, found: Found) -> Option<State> {
             );
             None
         }
-        Found::Broken => {
+        Found::Broken | Found::NotStarted => {
             tracing::warn!(
                 target: LIFECYCLE,
                 outcome = "broken",
@@ -170,7 +269,7 @@ pub fn after(current: &State, found: Found) -> Option<State> {
             tracing::warn!(
                 target: LIFECYCLE,
                 outcome = "timed_out",
-                limit_secs = RECHECK_LIMIT.as_secs(),
+                limit_secs = limit.as_secs(),
                 cached_skill = current.skill().is_some(),
                 "stetdoc took too long again; it stays on with no fresh skill"
             );
@@ -214,6 +313,10 @@ pub async fn check<T: Timer>(
         Some(Err(RunError::Failed(err))) => {
             tracing::warn!(%err, "stetdoc --version failed; stetdoc is treated as absent");
             Found::Broken
+        }
+        Some(Err(RunError::NotStarted(err))) => {
+            tracing::warn!(%err, "stetdoc --version did not start");
+            Found::NotStarted
         }
         None if version_worked.get() => {
             tracing::warn!(

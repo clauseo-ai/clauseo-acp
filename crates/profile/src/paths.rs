@@ -138,6 +138,15 @@ impl ProfilePaths {
         self.claude_plugin.join("skills")
     }
 
+    /// The marker of the stetdoc last seen to answer, `<data>/profile/stetdoc-seen`
+    /// (`skills::stetdoc::start::seen`), beside Claude's plugin.
+    pub fn stetdoc_seen(&self) -> PathBuf {
+        self.claude_plugin
+            .parent()
+            .unwrap_or(&self.claude_plugin)
+            .join("stetdoc-seen")
+    }
+
     /// The folder for `HostConfig::with_agent_path_prepend`: stetdoc's own (U13's `stetdoc/`
     /// resource folder). Everything in it becomes a bare command for the agents, so it must hold
     /// stetdoc alone. None, with a warning, when it is the folder of a browser sidecar or of the

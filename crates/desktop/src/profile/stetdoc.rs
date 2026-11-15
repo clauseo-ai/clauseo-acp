@@ -1,6 +1,10 @@
-//! stetdoc in the launch profile (`clauseo_profile::skills::stetdoc::start`): the first check
-//! on the host-start thread, and, when its `--version` only passed the limit, one more check on
-//! a thread of its own whose answer goes into [`Live`] for the next agent start.
+//! stetdoc in the launch profile (`clauseo_profile::skills::stetdoc::start`): on the host-start
+//! thread, one 3 s try for a stetdoc seen to answer before and none for one not seen yet (the
+//! OS may be scanning it); when the start has no answer, the background tries (20 s for one not
+//! seen yet, then 20 s, then 30 s) on a thread of their own, whose answer goes into [`Live`] for
+//! the agent starts that follow. An agent already running keeps the profile it started with: a
+//! conversation whose agent started before the answer gets the skill when its agent starts again
+//! (after 300 s idle, for one) or in a new conversation. Nothing is shown to the lawyer.
 //!
 //! Only the profile itself (the instructions' stetdoc line and the skills) changes after the
 //! start. stetdoc's folder on the agents' `PATH` and the Word blackline's program are given to
@@ -9,16 +13,17 @@
 //!
 //! Each hook call reads the profile as it is then, and one launch makes several calls (its
 //! skills writes on the launch-prep thread, then its `_meta` and Codex keys). So once per
-//! session, when the background check's answer lands between them, within its 30 s window, a
+//! session, when the background answer lands between them (within 70 s of the start), a
 //! launch may mix the two: a Codex launch may get the new skills index over the files the old
 //! profile wrote. The next launch is consistent.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
+use std::time::Duration;
 
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
 use clauseo_profile::ClauseoProfile;
-use clauseo_profile::skills::stetdoc::start::{self, Start, State};
+use clauseo_profile::skills::stetdoc::start::{self, Limits, Start, State};
 
 /// The rendered profile the hook reads at each call, put in place whole when the background
 /// check ends. A read takes the lock only to clone an `Arc`; the profile is rendered before
@@ -49,11 +54,20 @@ impl Live {
     }
 }
 
-/// The first check of `program`, within `start::FIRST_LIMIT`, with `cached` as the skills
-/// folder a previous launch wrote. Starts stetdoc and reads files: on the host-start thread.
-pub(super) fn first(program: &Path, cached: &Path) -> Start {
+/// stetdoc at the start within `limits`, with `cached` as the skills folder a previous launch
+/// wrote and `seen` as the marker of the stetdoc seen to answer (`ProfilePaths::stetdoc_seen`).
+/// Starts stetdoc and reads files: on the host-start thread, which waits at most `limits.seen`
+/// (3 s in the app), and not at all for a stetdoc not seen yet.
+pub(super) fn first(program: &Path, cached: &Path, seen: &Path, limits: Limits) -> Start {
     let launcher = PassthroughLauncher::new(SpawnOptions::new());
-    async_io::block_on(start::start(&launcher, &AsyncIoTimer, program, cached))
+    async_io::block_on(start::start(
+        &launcher,
+        &AsyncIoTimer,
+        program,
+        cached,
+        seen,
+        limits,
+    ))
 }
 
 /// `base` (the profile with no skills yet) with stetdoc as `state` says, and the browser's
@@ -66,17 +80,20 @@ pub(super) fn render(base: ClauseoProfile, state: &State, browser: bool) -> Clau
     profile
 }
 
-/// What the background check needs: the program and the cached skills folder, the state the
-/// agents start with, and how to render the profile again.
+/// What the background tries need: the program, the cached skills folder, the marker of the
+/// stetdoc seen to answer and the tries' limits, the state the agents start with, and how to
+/// render the profile again.
 pub(super) struct Recheck {
     pub(super) program: PathBuf,
     pub(super) cached: PathBuf,
+    pub(super) seen: PathBuf,
+    pub(super) later: Vec<Duration>,
     pub(super) state: State,
     pub(super) base: ClauseoProfile,
     pub(super) browser: bool,
 }
 
-/// Starts the background check on a thread of its own, within `start::RECHECK_LIMIT`, and puts
+/// Starts the background tries on a thread of its own, within `Recheck::later`, and puts
 /// its answer in `live` when it changes the state. Never waited for: nothing joins the thread,
 /// so the app's shutdown does not wait on it, and the process's exit ends it. A stetdoc still
 /// running then goes with its Job Object on Windows; on macOS and Linux it is left to finish
@@ -88,6 +105,8 @@ pub(super) fn recheck_later(recheck: Recheck, live: Live) {
             let Recheck {
                 program,
                 cached,
+                seen,
+                later,
                 state,
                 base,
                 browser,
@@ -98,7 +117,9 @@ pub(super) fn recheck_later(recheck: Recheck, live: Live) {
                 &AsyncIoTimer,
                 &program,
                 &cached,
+                &seen,
                 &state,
+                &later,
             ));
             if let Some(state) = next {
                 live.set(render(base, &state, browser));

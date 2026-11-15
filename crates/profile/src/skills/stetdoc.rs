@@ -224,7 +224,10 @@ fn first_heading(text: &str) -> Option<&str> {
 pub enum RunError {
     /// It ran past its limit and was killed with its tree.
     TimedOut(ProfileError),
-    /// It did not start, exited with an error, or printed what cannot be used.
+    /// It could not be started: the launch itself failed (missing, not a program, refused, or
+    /// held by the OS a moment, as a scanner may hold a new program).
+    NotStarted(ProfileError),
+    /// It exited with an error, or printed what cannot be used.
     Failed(ProfileError),
 }
 
@@ -233,7 +236,7 @@ impl RunError {
     #[must_use]
     pub fn into_error(self) -> ProfileError {
         match self {
-            Self::TimedOut(error) | Self::Failed(error) => error,
+            Self::TimedOut(error) | Self::NotStarted(error) | Self::Failed(error) => error,
         }
     }
 }
@@ -252,8 +255,8 @@ pub async fn run<T: Timer>(
         .map_err(RunError::into_error)
 }
 
-/// [`run`] within `limit`: the deadline is [`RunError::TimedOut`], any other failure
-/// [`RunError::Failed`].
+/// [`run`] within `limit`: the deadline is [`RunError::TimedOut`], a failed launch
+/// [`RunError::NotStarted`], any other failure [`RunError::Failed`].
 pub async fn run_within<T: Timer>(
     launcher: &dyn Launcher,
     timer: &T,
@@ -266,10 +269,10 @@ pub async fn run_within<T: Timer>(
         .await
         .map_err(|failure| {
             let error = stetdoc_error(args, failure.to_string());
-            if failure == RunFailure::TimedOut {
-                RunError::TimedOut(error)
-            } else {
-                RunError::Failed(error)
+            match failure {
+                RunFailure::TimedOut => RunError::TimedOut(error),
+                RunFailure::Launch(_) => RunError::NotStarted(error),
+                RunFailure::TooMuchOutput { .. } | RunFailure::Read(_) => RunError::Failed(error),
             }
         })?;
     if ran.code != Some(0) {

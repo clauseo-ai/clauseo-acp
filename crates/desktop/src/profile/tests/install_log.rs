@@ -4,6 +4,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
+use clauseo_profile::skills::stetdoc::start::Limits;
 use clauseo_settings::Locations;
 
 use super::super::{DesktopProfile, LIFECYCLE, Layout};
@@ -20,6 +21,7 @@ fn build(locations: &Locations, path: &std::path::Path, shell: bool) -> DesktopP
         macos: false,
         resource_dir: None,
         shell_browser: shell,
+        limits: Limits::APP,
     };
     DesktopProfile::build_in(locations, &layout, Some(path.as_os_str())).unwrap()
 }

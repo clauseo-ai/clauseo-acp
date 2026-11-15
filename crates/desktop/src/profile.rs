@@ -3,10 +3,12 @@
 //!
 //! [`DesktopProfile::build`] does every file and process call once, on the host-start thread
 //! (`host_start.rs`), before the host starts: it finds the bundled programs, runs stetdoc for
-//! its skill, and renders the skills. When stetdoc's first `--version` only passed its limit,
-//! one more check runs on a thread of its own and puts the profile it renders in place for the
-//! next agent start (`profile/stetdoc.rs`). The hook's methods then only map what it holds, as
-//! the trait requires: they read no file, start nothing and keep nothing between calls.
+//! its skill (one 3 s try for a stetdoc seen to answer before, none for one not seen yet), and
+//! renders the skills. When the start has no answer from stetdoc, the background tries (20 s for
+//! one not seen yet, then 20 s, then 30 s) run on a thread of their own and put the profile they
+//! render in place for the next agent start (`profile/stetdoc.rs`). The hook's
+//! methods then only map what it holds, as the trait requires: they read no file, start nothing
+//! and keep nothing between calls.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -15,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_host::{HostConfig, McpServer, PackRequest, ProfileHook};
-use clauseo_profile::skills::stetdoc::start::State;
+use clauseo_profile::skills::stetdoc::start::{Limits, State};
 use clauseo_profile::{
     BrowserSidecars, ClauseoProfile, PackWrite, PacksWritten, ProfileError, ProfilePaths,
     ProfileServer, SkillWrite, SkillsWritten,
@@ -98,6 +100,7 @@ impl DesktopProfile {
             macos: cfg!(target_os = "macos"),
             resource_dir,
             shell_browser: clauseo_profile::servers::shell_browser(),
+            limits: Limits::APP,
         };
         Self::build_in(locations, &layout, path)
     }
@@ -115,12 +118,13 @@ impl DesktopProfile {
         let found = stetdoc_program(bundled.as_deref(), path, !cfg!(debug_assertions));
         let paths = paths_for(locations, exe, found.clone())?;
         let cached = paths.claude_skills();
+        let seen = paths.stetdoc_seen();
         // The program in its plain form (`ProfilePaths::new`: no `\\?\` prefix on Windows), for
         // the checks and the Word blackline.
         let program = found.as_ref().map(|_| paths.stetdoc().to_path_buf());
         let start = program
             .as_deref()
-            .map(|program| stetdoc::first(program, &cached));
+            .map(|program| stetdoc::first(program, &cached, &seen, layout.limits));
         // stetdoc stays on when its skill fails or its `--version` only passed the limit: only a
         // stetdoc whose `--version` fails for real is treated as absent, with no PATH entry and
         // no stetdoc line.
@@ -137,11 +141,13 @@ impl DesktopProfile {
         let base = ClauseoProfile::new(paths, None);
         let live = Live::new(stetdoc::render(base.clone(), &state, with_browser));
         if let (Some(program), Some(start)) = (&program, &start)
-            && start.recheck
+            && !start.later.is_empty()
         {
             let recheck = stetdoc::Recheck {
                 program: program.clone(),
                 cached,
+                seen,
+                later: start.later.clone(),
                 state,
                 base,
                 browser: with_browser,
@@ -292,6 +298,8 @@ pub(crate) struct Layout<'a> {
     /// Whether an agent gets `agent-browser` as a shell command on this OS, so it is copied
     /// (`clauseo_profile::servers::shell_browser`, [`install_browser`]).
     pub(crate) shell_browser: bool,
+    /// The limits of stetdoc's checks at the start: `Limits::APP` in the app.
+    pub(crate) limits: Limits,
 }
 
 /// Whether `program` is the only program in its folder. A folder found on `PATH` that holds
