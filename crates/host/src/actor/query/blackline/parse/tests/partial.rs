@@ -3,9 +3,9 @@
 //! left out, a view with no line that reads, a format it does not know, and the depth caps.
 
 use clauseo_protocol::BlacklineNotice::{ChangesOutsideText, HiddenText, MayDiffer, PartNotShown};
-use clauseo_protocol::BlacklineParagraph;
 use clauseo_protocol::ParagraphChange::{Added, Changed, Formatted, Removed, Same as Kept};
 use clauseo_protocol::RunKind::{Del, Ins, Same};
+use clauseo_protocol::{BlacklineObject, BlacklineParagraph, BlacklineRun, RunKind};
 
 use super::super::line::MAX_CHANGE_DEPTH;
 use super::super::{MAX_TABLE_DEPTH, Read, ViewFailure, read_text, read_view};
@@ -185,7 +185,7 @@ fn a_view_with_nothing_readable_fails() {
         matches!(failure, ViewFailure::NothingRead { skipped: 2, .. }),
         "{failure}"
     );
-    let empty = read_view(&view("{stet 1 mode=redline}\n{position: none}")).unwrap();
+    let empty = read_view(&view("{stet 1 mode=redline}\n{summary: 1 section}")).unwrap();
     assert_eq!(empty.blackline.paragraphs, []);
     assert_eq!(empty.blackline.notices, []);
 }
@@ -453,4 +453,104 @@ fn a_tracked_section_change_may_differ() {
     ));
     assert!(!unknown("{section 1 ends: next-page}"));
     assert!(!unknown("{section 2 ends: continuous title-page}"));
+}
+
+/// A run that stands for an object, inserted or deleted.
+fn object(kind: RunKind, object: BlacklineObject) -> BlacklineRun {
+    BlacklineRun {
+        kind,
+        text: String::new(),
+        object: Some(object),
+    }
+}
+
+/// A change with no text of its own is never dropped: stetdoc 0.9.3's inserted signature
+/// picture (`{++{img}++}{#0 C}`) is an inserted picture, and a deleted note's reference, a field,
+/// a link and an empty deletion each stand as their object, so the paragraph is changed.
+#[test]
+fn a_change_with_no_text_stands_as_its_object() {
+    let read = read(fixture!("view-picture.json"));
+    assert_eq!(read.blackline.notices, []);
+    let mut expected = para(Changed, &[(Same, "Signed: ")]);
+    expected.runs.push(object(Ins, BlacklineObject::Picture));
+    assert_eq!(read.blackline.paragraphs[1], expected);
+    for (line, kind, what) in [
+        ("p1 a{--{fn1}--}{#1 C}", Del, BlacklineObject::Note),
+        ("p1 a{++{page}++}{#1 C}", Ins, BlacklineObject::Field),
+        (
+            "p1 a{++{chart \"Sales\"}++}{#1 C}",
+            Ins,
+            BlacklineObject::Chart,
+        ),
+        (
+            "p1 a{--{link \"x\"}{/link}--}{#1 C}",
+            Del,
+            BlacklineObject::Other,
+        ),
+        ("p1 a{----}{#1 C}", Del, BlacklineObject::Other),
+    ] {
+        let mut expected = para(Changed, &[(Same, "a")]);
+        expected.runs.push(object(kind, what));
+        assert_eq!(read_text(line).paragraphs, [expected], "{line}");
+    }
+}
+
+/// stetdoc marks nothing when only a link's address changes; the reader shows the view as it
+/// is (the host, which has both files, says it may differ: `run.rs`).
+#[test]
+fn a_changed_link_address_reads_as_the_view_shows_it() {
+    let read = read(fixture!("view-link.json"));
+    assert_eq!(read.blackline.notices, []);
+    assert!(read.blackline.paragraphs.iter().all(|p| p.change == Kept));
+}
+
+/// A view with no summary can't be checked, and a change a line names that no paragraph shows
+/// as changed may be missing: each says the blackline may differ.
+#[test]
+fn a_missing_summary_or_an_unshown_change_may_differ() {
+    let no_summary = with_text(fixture!("view-nested.json"), |text| {
+        text.replace("{summary: 2 tracked changes (C 2) · 1 section}\n", "")
+    });
+    assert_eq!(
+        read_view(&no_summary).unwrap().blackline.notices,
+        [MayDiffer]
+    );
+    let unshown = with_text(fixture!("view-nested.json"), |text| {
+        text.replace("p6 Last", "p6 {style \"Body\" #7 C} Last")
+            .replace("2 tracked changes (C 2)", "3 tracked changes (C 3)")
+    });
+    assert_eq!(read_view(&unshown).unwrap().blackline.notices, [MayDiffer]);
+}
+
+/// The rule, over every fixture view stetdoc printed: each change it counted is shown, as a
+/// changed paragraph or a placeholder, or a notice says the blackline may not show it all. The
+/// reader models a closed list of tokens; anything else it meets can't pass for unchanged.
+#[test]
+fn every_change_stetdoc_counts_is_shown_or_noted() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/blackline");
+    let mut views = vec![dir.join("view.json")];
+    for entry in std::fs::read_dir(dir.join("partial")).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if name.starts_with("view-") && name.ends_with(".json") {
+            views.push(path);
+        }
+    }
+    assert!(views.len() >= 17, "{views:?}");
+    for path in views {
+        let json = std::fs::read_to_string(&path).unwrap();
+        let notices = read_view(&json).unwrap().blackline.notices;
+        let view: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let text = read_text(view["text"].as_str().unwrap());
+        let noted = notices
+            .iter()
+            .any(|notice| matches!(notice, PartNotShown | ChangesOutsideText | MayDiffer));
+        assert!(
+            noted || text.covered.len() >= text.counted,
+            "{}: {} shown of {} counted, notices {notices:?}",
+            path.display(),
+            text.covered.len(),
+            text.counted
+        );
+    }
 }

@@ -3,7 +3,16 @@
 // revisions' words. Pure: no DOM, no React.
 
 /** A run of words: the same in both, added in the later, or taken out of it. mine: the lawyer wrote it. */
-export type Run = { kind: "same" | "ins" | "del"; text: string; mine: boolean };
+/** What a marked-up run with no text of its own stands for (the host's BlacklineObject): a picture, a chart, a
+ * shape, a note's reference, a field, or anything else ("other", and "unknown" from a newer host). */
+export type MarkedObject = "picture" | "chart" | "shape" | "note" | "field" | "other" | "unknown";
+
+export type Run = {
+  kind: "same" | "ins" | "del";
+  text: string;
+  mine: boolean;
+  object?: MarkedObject;
+};
 type Word = { text: string; mine: boolean };
 
 /** A word with what joins it inside, "P-2", "12(3)", "A.B", or one mark of punctuation, each with its trailing
@@ -105,7 +114,7 @@ export type ParaDiff = {
  * it holds hidden text. Both kinds are open: a newer host may send one this version doesn't know ("unknown"). */
 export type MarkedParagraph = {
   change: ParaDiff["kind"] | "formatted" | "not_shown" | "unknown";
-  runs: readonly { kind: Run["kind"] | "unknown"; text: string }[];
+  runs: readonly { kind: Run["kind"] | "unknown"; text: string; object?: MarkedObject | null }[];
   hidden?: boolean;
 };
 
@@ -127,6 +136,7 @@ export const markedDiffs = (paragraphs: readonly MarkedParagraph[]): ParaDiff[] 
         kind: r.kind === "unknown" ? "same" : r.kind,
         text: r.text,
         mine: false,
+        ...(r.object === undefined || r.object === null ? {} : { object: r.object }),
       })),
       ...(note === undefined ? {} : { note }),
       ...(p.hidden === true ? { hidden: true } : {}),

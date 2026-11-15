@@ -95,3 +95,26 @@ test("a formatting change and a place not shown read as changed with their note;
     { place: 1, kind: "changed", runs: [], note: "not_shown" },
   ]);
 });
+
+test("a run that stands for an object keeps it; a text run has none", () => {
+  expect(
+    markedDiffs([
+      {
+        change: "changed",
+        runs: [
+          { kind: "same", text: "a", object: null },
+          { kind: "ins", text: "", object: "picture" },
+        ],
+      },
+    ]),
+  ).toEqual([
+    {
+      place: 0,
+      kind: "changed",
+      runs: [
+        { kind: "same", text: "a", mine: false },
+        { kind: "ins", text: "", mine: false, object: "picture" },
+      ],
+    },
+  ]);
+});

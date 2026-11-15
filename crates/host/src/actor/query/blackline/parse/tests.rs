@@ -26,6 +26,7 @@ pub(super) fn para(change: ParagraphChange, runs: &[(RunKind, &str)]) -> Blackli
             .map(|&(kind, text)| BlacklineRun {
                 kind,
                 text: text.to_owned(),
+                object: None,
             })
             .collect(),
     }

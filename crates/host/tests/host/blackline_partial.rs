@@ -175,3 +175,30 @@ fn the_real_stetdoc_blacklines_nested_tables_and_hidden_text() {
         Err(error) => assert_eq!(error.code(), ErrorCode::BlacklineNestedTable, "{error}"),
     }
 }
+
+/// Two versions that differ only in a link's address: stetdoc marks no change, and the host,
+/// which has both files, says the blackline may differ rather than show "no changes". The same
+/// file on both sides says nothing.
+#[test]
+fn a_difference_stetdoc_does_not_mark_may_differ() {
+    let answer = |name: &str, old: &[u8], new: &[u8]| {
+        let dir = dir(name);
+        let stetdoc = fake_with_view(&dir, "view-link.json");
+        let (host, matter, from, _folder) =
+            pair_matter_launching(&dir, Some(&stetdoc), Arc::new(dir.launcher()), old, new);
+        let answer = blackline(host.query(query(matter, DOC, from, None)));
+        host.shutdown();
+        answer
+    };
+    let (old, new) = (partial("link-old.docx"), partial("link-new.docx"));
+    let differ = answer("blackline_link_differs", &old, &new);
+    assert_eq!(differ.notices, [BlacklineNotice::MayDiffer]);
+    assert!(
+        differ
+            .paragraphs
+            .iter()
+            .all(|p| p.change == ParagraphChange::Same)
+    );
+    let same = answer("blackline_link_same", &new, &new);
+    assert_eq!(same.notices, []);
+}

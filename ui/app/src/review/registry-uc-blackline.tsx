@@ -1,5 +1,5 @@
 // UC's copy review entries for a Word document's marked-up changes in Versions (UC-113 to UC-116, and its notices and
-// the Word tool's own refusals, UC-307 to UC-315, UC-368 to UC-370), apart from
+// the Word tool's own refusals, UC-307 to UC-315, UC-368 to UC-371, UC-377 to UC-381), apart from
 // registry-uc.tsx to keep that file under the size limit: the notice compared with now, over registry-u8.tsx's host,
 // whose word_blackline runs, fails or cuts the document short as each entry asks. UC_ALL is registry-uc.tsx's UC
 // entries, then registry-uc-blocks.tsx's UC_BLOCKS, then these, so registry.tsx lists UC in one place.
@@ -81,6 +81,36 @@ const REFUSALS: [string, string, VersionKey][] = [
   ],
 ];
 
+/** A marked-up notice whose changes hold no text of their own: each object the host can name, inserted or deleted
+ * (UC-371, UC-377 to UC-381). */
+const OBJECT_PARAGRAPHS: BlacklineParagraph[] = [
+  {
+    change: "changed",
+    runs: [
+      { kind: "same", text: "Signed: " },
+      { kind: "ins", text: "", object: "picture" },
+      { kind: "same", text: " Annexed: " },
+      { kind: "ins", text: "", object: "chart" },
+      { kind: "del", text: "", object: "shape" },
+      { kind: "same", text: " As stated" },
+      { kind: "del", text: "", object: "note" },
+      { kind: "same", text: ", page " },
+      { kind: "ins", text: "", object: "field" },
+      { kind: "del", text: "", object: "other" },
+    ],
+  },
+];
+
+/** Each object's bracketed word, with its id. */
+const OBJECTS: [string, VersionKey][] = [
+  ["UC-371", "[picture]"],
+  ["UC-377", "[chart]"],
+  ["UC-378", "[shape]"],
+  ["UC-379", "[footnote]"],
+  ["UC-380", "[field]"],
+  ["UC-381", "[object]"],
+];
+
 export const UC_BLACKLINE: Entry[] = [
   compared("UC-113", versionWords("Marking up the changes…"), { ...COMPARED, mark: "hold" }),
   compared(
@@ -99,6 +129,9 @@ export const UC_BLACKLINE: Entry[] = [
   ...NOTICES.map(([id, notice, words]) =>
     compared(id, versionWords(words), { ...COMPARED, mark: { notices: [notice] } }),
   ),
+  ...OBJECTS.map(([id, words]) =>
+    compared(id, versionWords(words), { ...COMPARED, mark: { paragraphs: OBJECT_PARAGRAPHS } }),
+  ),
   compared("UC-369", versionWords("This part couldn't be shown."), {
     ...COMPARED,
     mark: { paragraphs: ODD_PARAGRAPHS },
@@ -114,6 +147,6 @@ export const UC_BLACKLINE: Entry[] = [
 
 /**
  * UC's entries: registry-uc.tsx's (UC-01 to UC-78), registry-uc-blocks.tsx's (UC-80 to UC-106), then
- * the Word blackline's (UC-113 to UC-116, UC-307 to UC-315, UC-368 to UC-370).
+ * the Word blackline's (UC-113 to UC-116, UC-307 to UC-315, UC-368 to UC-371, UC-377 to UC-381).
  */
 export const UC_ALL: Entry[] = [...UC, ...UC_BLOCKS, ...UC_BLACKLINE];

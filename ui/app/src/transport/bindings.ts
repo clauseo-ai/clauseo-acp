@@ -559,9 +559,38 @@ export type BlacklineParagraph = {
 export type BlacklineRun = {
 	/**  Kept, inserted or deleted. */
 	kind: RunKind,
-	/**  The text, as the document has it: a tab is `\t` and a line break `\n`. */
+	/**
+	 *  The text, as the document has it: a tab is `\t` and a line break `\n`. Empty for an
+	 *  object run.
+	 */
 	text: string,
+	/**
+	 *  What the run stands for when a change holds no text of its own, such as an inserted
+	 *  picture or a deleted footnote reference: the app names it. Missing for a text run, and
+	 *  missing reads as none.
+	 */
+	object?: BlacklineObject | null,
 };
+
+/**  What an inserted or deleted stretch with no text of its own stands for. */
+export type BlacklineObject = 
+/**  A picture. */
+"picture" | 
+/**  A chart. */
+"chart" | 
+/**  A shape, or a text box with no text. */
+"shape" | 
+/**  A footnote's or an endnote's reference. */
+"note" | 
+/**  A field, such as a page number or a date Word fills in. */
+"field" | 
+/**
+ *  Anything else: a link, a comment's anchor, a content control, an embedded object, or a
+ *  change that held nothing at all.
+ */
+"other" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**
  *  A 32-byte BLAKE3 digest naming a blob. A human-readable format (JSON) writes its text form, 64

@@ -28,6 +28,7 @@ fn query_result_word_blackline() {
     let run = |kind, text: &str| BlacklineRun {
         kind,
         text: text.to_owned(),
+        object: None,
     };
     let paragraph = |change, runs| BlacklineParagraph {
         change,

@@ -27,6 +27,10 @@ unit tests (`src/actor/query/blackline/parse/tests/partial.rs`) and the host tes
   already hold a tracked row insertion or deletion, a cell insertion or deletion, and a row
   inserted in a table inside a cell (`{row inserted #11 R}`, `{cell deleted #14 R}`; the
   paragraphs inside show no change of their own).
+- `picture-old.docx`, `picture-new.docx`: a signature picture inserted after "Signed: ".
+  `view-picture.json`: `p2 Signed: {++{img}++}{#0 C}`, a change with no text.
+- `link-old.docx`, `link-new.docx`: only a link's address changes (`acct-111` to `acct-999`).
+  `view-link.json`: stetdoc marks no change and gives no warning.
 - `inner-last-old.docx`, `inner-last-new.docx`: an inner table that is the last thing in its
   cell, removed in the new version. `compare-inner-last.json` is what `stetdoc compare --json`
   printed for them: `validation_failed`, exit 5 (stetdoc's fix comes after its PR #22).

@@ -130,5 +130,71 @@
     "at": "2026-11-15",
     "by": "blackline-never-fails (en provisional, for the orchestrator)",
     "note": "above a blackline paragraph that holds text Word hides, shown as ordinary text (BlacklineParagraph hidden)"
+  },
+  "UC-371": {
+    "en": "[picture]",
+    "hi": "[चित्र]",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject picture)"
+  },
+  "UC-377": {
+    "en": "[chart]",
+    "hi": "[चार्ट]",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject chart)"
+  },
+  "UC-378": {
+    "en": "[shape]",
+    "hi": "[आकृति]",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject shape)"
+  },
+  "UC-379": {
+    "en": "[footnote]",
+    "hi": "[फ़ुटनोट]",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject note)"
+  },
+  "UC-380": {
+    "en": "[field]",
+    "hi": "[फ़ील्ड]",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject field)"
+  },
+  "UC-381": {
+    "en": "[object]",
+    "hi": "[वस्तु]",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject other)"
   }
 }

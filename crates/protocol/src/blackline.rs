@@ -38,8 +38,9 @@ pub struct WordBlackline {
 pub struct BlacklineParagraph {
     /// How the paragraph changed as a whole.
     pub change: ParagraphChange,
-    /// Its text as runs, in order; two runs next to each other never have the same kind, and
-    /// no run is empty. An empty paragraph has none, and so does one `not_shown`.
+    /// Its text as runs, in order; two text runs next to each other never have the same kind,
+    /// and only an object run is empty. An empty paragraph has none, and so does one
+    /// `not_shown`.
     pub runs: Vec<BlacklineRun>,
     /// Whether it holds text that Word hides (or that is hard to see), which its runs show as
     /// ordinary text. False is left out, and missing reads as false.
@@ -53,8 +54,14 @@ pub struct BlacklineParagraph {
 pub struct BlacklineRun {
     /// Kept, inserted or deleted.
     pub kind: RunKind,
-    /// The text, as the document has it: a tab is `\t` and a line break `\n`.
+    /// The text, as the document has it: a tab is `\t` and a line break `\n`. Empty for an
+    /// object run.
     pub text: String,
+    /// What the run stands for when a change holds no text of its own, such as an inserted
+    /// picture or a deleted footnote reference: the app names it. Missing for a text run, and
+    /// missing reads as none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object: Option<BlacklineObject>,
 }
 
 open_unit_enum! {
@@ -110,4 +117,24 @@ open_unit_enum! {
         MayDiffer,
     }
     test mod blackline_notice;
+}
+
+open_unit_enum! {
+    /// What an inserted or deleted stretch with no text of its own stands for.
+    pub enum BlacklineObject {
+        /// A picture.
+        Picture,
+        /// A chart.
+        Chart,
+        /// A shape, or a text box with no text.
+        Shape,
+        /// A footnote's or an endnote's reference.
+        Note,
+        /// A field, such as a page number or a date Word fills in.
+        Field,
+        /// Anything else: a link, a comment's anchor, a content control, an embedded object, or a
+        /// change that held nothing at all.
+        Other,
+    }
+    test mod blackline_object;
 }

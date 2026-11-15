@@ -3,7 +3,8 @@ a paragraph past stetdoc's wrap, and an inner table that ends its cell and is re
 compare stetdoc 0.9.3 refuses), a sentence struck through and one hidden as tracked format
 changes, a changed footnote and header, and documents that already hold a tracked row
 insertion, a row deletion, a cell insertion and deletion, and a row inserted in a nested table
-(viewed as they are, with no compare). Standard library only; writes into the current folder, with
+(viewed as they are, with no compare); and pairs where a signature picture is inserted and
+where only a link's address changes. Standard library only; writes into the current folder, with
 make_docs.py's package writer (run make_docs.py's pairs from a temporary folder: it writes
 other files too)."""
 import os
@@ -116,3 +117,44 @@ pkg('cell-ins.docx', p('Intro.') + grid(row(cell(p('Kept A.')) + cell(p('New cel
 pkg('cell-del.docx', p('Intro.') + grid(row(cell(p('Kept A.')) + cell(p('Gone cell.'), f'<w:cellDel w:id="14" {D}/>')), 2) + S)
 INNER = grid(row(cell(p('Inner kept.'))) + row(cell(p('Inner new.')), f'<w:ins w:id="15" {D}/>'), 1)
 pkg('row-ins-nested.docx', p('Intro.') + grid(row(cell(p('Outer.') + INNER + p(''))), 1) + S)
+
+
+# A signature picture inserted after "Signed: " (stetdoc prints `{++{img}++}{#0 C}`), and a link
+# whose address alone changes (stetdoc marks no change at all).
+import base64  # noqa: E402
+
+PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==')
+DRAW_NS = ('xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+           'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+           'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"')
+DRAWING = (f'<w:r><w:drawing><wp:inline {DRAW_NS}><wp:extent cx="914400" cy="914400"/>'
+           '<wp:docPr id="1" name="Signature"/><a:graphic><a:graphicData '
+           'uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr>'
+           '<pic:cNvPr id="1" name="sig.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill>'
+           '<a:blip r:embed="rIdImg"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr>'
+           '<a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm>'
+           '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData>'
+           '</a:graphic></wp:inline></w:drawing></w:r>')
+
+
+def signed(name, with_picture):
+    body = (p('Intro.') + '<w:p><w:r><w:t xml:space="preserve">Signed: </w:t></w:r>'
+            + (DRAWING if with_picture else '') + '</w:p>' + S)
+    pkg(name, body, {'word/media/sig.png': PNG},
+        f'<Relationship Id="rIdImg" Type="{R}image" Target="media/sig.png"/>',
+        '<Default Extension="png" ContentType="image/png"/>')
+
+
+signed('picture-old.docx', False)
+signed('picture-new.docx', True)
+
+
+def linked(name, target):
+    rel = f'<Relationship Id="rIdL" Type="{R}hyperlink" Target="{target}" TargetMode="External"/>'
+    body = (p('Intro.') + '<w:p><w:r><w:t xml:space="preserve">Pay to </w:t></w:r>'
+            '<w:hyperlink r:id="rIdL"><w:r><w:t>the account</w:t></w:r></w:hyperlink></w:p>' + S)
+    pkg(name, body, None, rel)
+
+
+linked('link-old.docx', 'https://bank.example/acct-111')
+linked('link-new.docx', 'https://bank.example/acct-999')
