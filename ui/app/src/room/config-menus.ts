@@ -32,6 +32,7 @@ export function menusOf(
   shown: readonly Pickable[],
   valueOf: (p: Pickable) => string,
   pick: (p: Pickable, value: string) => void,
+  scope?: string,
 ): readonly ConfigMenu[] {
   return shown.map((p) => {
     // the Default row in the name of what it stands for, so the trigger says "Opus 5.5", never "Default"; the menu
@@ -39,6 +40,7 @@ export function menusOf(
     const resolved = resolvedDefault(p);
     return {
       id: p.id,
+      scope,
       label: th(lang, p.category === "model" ? "Model" : "Effort"),
       value: valueOf(p),
       options: p.choices.map((c) =>
@@ -76,6 +78,8 @@ export function useDraftMenus(
       pickables(options),
       (p) => draftValue(p, picked?.[p.id], remembered?.[p.id]),
       (p, value) => conversations.pick(p.id, value),
+      // a new conversation's, for its plan: another plan's values come in silently
+      `draft:${agent}`,
     );
   }, [drafting, agent, agents, picks, prefs, lang, conversations]);
 }
@@ -133,6 +137,7 @@ export function useThreadMenus(
       pickables(options),
       (p) => (held !== null && held.id === p.id ? held.value : p.current),
       choose,
+      `thread:${thread}`,
     );
   }, [thread, options, pending, lang, choose]);
 }

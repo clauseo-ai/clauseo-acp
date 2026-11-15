@@ -10,6 +10,7 @@ import { settled } from "../lib/late.ts";
 import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 import { Composer, type ComposerProps, type SlashCommand } from "./composer.tsx";
+import { SAY_AFTER_MS } from "./composer-menu-logic.ts";
 import { fromComposer } from "./composer-keys.ts";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 import { useRoom, type RoomScope } from "./room-scope.ts";
@@ -422,10 +423,39 @@ test("a polite live region says how many commands the menu opened with, then the
   expect(live()).toBe(region);
   await key("ArrowDown");
   expect(live()?.textContent).toBe("/restart");
-  await edit("/c");
+  await key("ArrowDown");
   expect(live()?.textContent).toBe("/compact");
   await key("Escape");
   expect(live()?.textContent).toBe("");
   await edit("/c /comp");
   expect(live()?.textContent).toBe("1 command");
+});
+
+test("as typing narrows the commands the live region says the new count once typing stops, and No results when none match", async () => {
+  await mount(composer({}));
+  await focus();
+  const live = () => document.querySelector<HTMLElement>('[aria-live="polite"]');
+  const pause = () => act(() => new Promise((r) => setTimeout(r, SAY_AFTER_MS + 50)));
+  await edit("/");
+  expect(live()?.textContent).toBe("3 commands");
+  await edit("/r");
+  // not at once: a count per key would flood a screen reader
+  expect(live()?.textContent).toBe("3 commands");
+  await edit("/re");
+  await pause();
+  expect(live()?.textContent).toBe("2 commands");
+  await edit("/res");
+  await pause();
+  expect(live()?.textContent).toBe("1 command");
+  await edit("/resx");
+  expect(document.querySelector('[data-testid="composer-menu"]')).toBeNull();
+  await edit("/resxy");
+  await pause();
+  expect(live()?.textContent).toBe("No results");
+  // a menu closed by Escape says nothing more
+  await edit("/");
+  expect(live()?.textContent).toBe("3 commands");
+  await key("Escape");
+  await pause();
+  expect(live()?.textContent).toBe("");
 });

@@ -16,8 +16,10 @@
 //! 5. The new content is stored as a blob, then `writeback::apply` stages it beside the file,
 //!    checks the file's stat against that checkpoint's cache again and renames. A file changed
 //!    since the walk is `word.revisions_stale`, one held open by then `matter.file_locked`;
-//!    either way nothing is written. A crash here leaves the file old or new, never torn, and a
-//!    new one recorded by the next checkpoint as outside edits.
+//!    either way nothing is written. A hold already released when it is checked again (an
+//!    antivirus scanning the file for a moment) with the file's stat still the walk's is no
+//!    change: the write is tried once more. A crash here leaves the file old or new, never torn,
+//!    and a new one recorded by the next checkpoint as outside edits.
 //! 6. The `revisions` checkpoint.
 //!
 //! Once the rename is made the replace succeeds, whatever fails after it: a folder sync in
@@ -90,22 +92,30 @@ pub(crate) fn replace(
     let blob = store(core, settings, request.new)?;
     let op = Op::Write(path.clone(), blob);
     let trash = settings.trash.as_ref();
-    let checkpoint = match writeback::apply_or_partial(core, folder, trash, &[&op]) {
-        // 6. The revisions checkpoint.
-        Ok(_deleted) => after_write(take_revisions(core, folder, settings, request)),
-        // Written, then a sync failed: no checkpoint over a rename that may not last.
-        Err(Failed {
-            error,
-            changed: true,
-        }) => after_write(Err(error)),
-        // The stat moved since the walk: changed, unless a program holds it now.
-        Err(Failed {
-            error: Error::FileLocked { .. },
-            ..
-        }) if locks::held_open(folder, path).is_none() => {
-            return Err(changed(path));
+    let mut tries = 0;
+    let checkpoint = loop {
+        tries += 1;
+        match write_once(core, folder, trash, &op) {
+            // 6. The revisions checkpoint.
+            Ok(_deleted) => break after_write(take_revisions(core, folder, settings, request)),
+            // Written, then a sync failed: no checkpoint over a rename that may not last.
+            Err(Failed {
+                error,
+                changed: true,
+            }) => break after_write(Err(error)),
+            // The stat moved since the walk, or a program held the file at the rename.
+            Err(Failed {
+                error: Error::FileLocked { .. },
+                changed: false,
+            }) => match held_again(core, folder, &op)? {
+                Again::Moved => return Err(changed(path)),
+                // Held at the rename, released by now and unchanged: write it again, once.
+                Again::Released if tries < 2 => {}
+                // Held now, or held again at the second rename.
+                Again::Held | Again::Released => return Err(locked(path)),
+            },
+            Err(Failed { error, .. }) => return Err(error),
         }
-        Err(Failed { error, .. }) => return Err(error),
     };
     Ok(Replaced {
         outside_edits,
@@ -113,6 +123,54 @@ pub(crate) fn replace(
         before_commit,
         checkpoint,
     })
+}
+
+/// What a `matter.file_locked` from step 5's write meant, checked again once it failed.
+enum Again {
+    /// A program holds the file now.
+    Held,
+    /// Its stat moved since the walk (or another spelling of it appeared): someone changed it.
+    Moved,
+    /// Neither: a hold at the rename (an antivirus scan) that is over, the file as walked.
+    Released,
+}
+
+/// The file of `op` checked again after its write failed with `matter.file_locked`: held open
+/// now, changed since the walk, or a hold already released.
+fn held_again(core: &Core, folder: &Path, op: &Op) -> Result<Again, Error> {
+    if locks::held_open(folder, op.path()).is_some() {
+        return Ok(Again::Held);
+    }
+    if writeback::moved_since(core, folder, &[op])?.is_empty() {
+        Ok(Again::Released)
+    } else {
+        Ok(Again::Moved)
+    }
+}
+
+/// One try of step 5's write. With the `test-support` feature, first the hold
+/// `test_support::hold_at_replace_write` armed for the file.
+fn write_once(
+    core: &Core,
+    folder: &Path,
+    trash: &dyn crate::trash::Trash,
+    op: &Op,
+) -> Result<writeback::Deleted, Failed> {
+    #[cfg(feature = "test-support")]
+    if crate::test_support::held_at_replace_write(&folder.join(op.path().as_str())) {
+        return Err(Failed {
+            error: locked(op.path()),
+            changed: false,
+        });
+    }
+    writeback::apply_or_partial(core, folder, trash, &[op])
+}
+
+/// [`Error::FileLocked`] naming `path`.
+fn locked(path: &MatterPath) -> Error {
+    Error::FileLocked {
+        paths: vec![path.clone()],
+    }
 }
 
 /// See [`crate::Matter::read_local`].

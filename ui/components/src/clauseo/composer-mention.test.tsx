@@ -16,6 +16,7 @@ import {
   IconFileWord,
 } from "../icons/icons.tsx";
 import type { ComposerHandle, MentionList } from "./composer.tsx";
+import { SAY_AFTER_MS } from "./composer-menu-logic.ts";
 import {
   unmount,
   paper,
@@ -320,4 +321,23 @@ test("the IME guard in the menu's refresh alone: a selection change mid-composit
     document.dispatchEvent(new Event("selectionchange"));
   });
   expect(names()).toHaveLength(3);
+});
+
+test("as typing narrows the papers the live region says the new count once typing stops, and No results when none match", async () => {
+  const { mentions } = source();
+  await mount(composer({ mentions }));
+  await focus();
+  const pause = () => act(() => new Promise((r) => setTimeout(r, SAY_AFTER_MS + 50)));
+  await edit("@");
+  await act(async () => {});
+  expect(said()).toBe("3 papers");
+  await edit("@not");
+  expect(said()).toBe("3 papers");
+  await pause();
+  expect(names()).toEqual(["Notice.pdf"]);
+  expect(said()).toBe("1 paper");
+  await edit("@notz");
+  expect(menu()).toBeNull();
+  await pause();
+  expect(said()).toBe("No results");
 });

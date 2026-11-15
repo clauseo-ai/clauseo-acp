@@ -405,7 +405,11 @@ fn stage_all<'a>(
 /// since), and those a file spelled otherwise now stands for ([`respelled`]), sorted:
 /// something wrote to them after the cache was written. No checkpoint has seen a file spelled
 /// otherwise that appeared after the walk, so replacing it would lose it for good.
-fn moved_since(core: &Core, folder: &Path, ops: &[&Op]) -> Result<Vec<MatterPath>, Error> {
+pub(crate) fn moved_since(
+    core: &Core,
+    folder: &Path,
+    ops: &[&Op],
+) -> Result<Vec<MatterPath>, Error> {
     let mut names = Names::default();
     let mut moved = Vec::new();
     for op in ops {
