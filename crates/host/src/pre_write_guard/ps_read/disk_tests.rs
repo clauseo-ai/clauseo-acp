@@ -18,10 +18,25 @@ use crate::network_paths::resolve::{Disk, Entry};
 use crate::network_paths::tests::plain_net;
 use crate::testing::abs;
 
-impl Tree for FakeFs {
+/// The fake disk's listings, and its files' hard-link counts: 1 unless `links` says (`None`: an
+/// error).
+struct FakeTree<'a> {
+    fs: &'a FakeFs,
+    links: &'a BTreeMap<PathBuf, Option<u64>>,
+}
+
+impl Tree for FakeTree<'_> {
+    fn links(&self, file: &Path) -> io::Result<u64> {
+        match self.links.get(file) {
+            Some(Some(count)) => Ok(*count),
+            Some(None) => Err(io::ErrorKind::PermissionDenied.into()),
+            None => Ok(1),
+        }
+    }
+
     fn children(&self, dir: &Path, limit: usize) -> io::Result<Vec<(OsString, Entry)>> {
         let mut out = Vec::new();
-        for (path, kind) in &self.names {
+        for (path, kind) in &self.fs.names {
             let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
                 continue;
             };
@@ -101,6 +116,7 @@ struct Case {
     matter: PathBuf,
     folders: Folders,
     cwd: Option<String>,
+    links: BTreeMap<PathBuf, Option<u64>>,
 }
 
 impl Case {
@@ -111,6 +127,7 @@ impl Case {
             matter: abs("/m").into(),
             folders: folders(),
             cwd: Some(abs("/m")),
+            links: BTreeMap::new(),
         }
     }
 
@@ -118,13 +135,17 @@ impl Case {
     fn answer_input(&self, input: &Value) -> Option<Value> {
         let net: NetEnv = plain_net(cfg!(windows));
         let real = |path: &Path| self.real.get(path).cloned();
+        let tree = FakeTree {
+            fs: &self.fs,
+            links: &self.links,
+        };
         let look = Look {
             disk: Disk {
                 fs: &self.fs,
                 real: &real,
                 net: &net,
             },
-            tree: &self.fs,
+            tree: &tree,
         };
         let mut hook = json!({
             "session_id": "s",
@@ -305,6 +326,23 @@ fn other_case_and_short_names_run_as_the_canonical_path() {
     assert_eq!(case.command("gc @/D/state.sqlite"), None);
 }
 
+/// Get-Content reads only a file with one hard link: another name could be outside every
+/// folder. A count that can't be read refuses too; listing such a file reads nothing.
+#[test]
+fn a_file_with_another_hard_link_is_not_read() {
+    let mut case = Case::new();
+    case.links.insert(abs("/m/a.txt").into(), Some(2));
+    case.links.insert(abs("/m/Drafts/b.docx").into(), None);
+    assert_eq!(case.command("gc @/m/a.txt"), None);
+    assert_eq!(case.command("gc @/m/Drafts/b.docx -Raw"), None);
+    assert_eq!(case.command("gci @/m/sub; gc @/m/a.txt"), None);
+    assert_eq!(
+        case.command("gci @/m/a.txt"),
+        Some(format!("{PIN}{}", gci("/m/a.txt", "")))
+    );
+    assert!(case.command("gc @/m/sub/c.txt").is_some());
+}
+
 /// A name the walk can't vouch for (an unknown reparse point answers as an error), in the
 /// path or in a listed folder, refuses; so does a listing past [`MAX_ENTRIES`].
 #[test]
@@ -399,7 +437,7 @@ fn windows_names_and_long_paths_refuse() {
 
 /// Through the whole guard on the real disk: the allow and its rewrite on stdout, exit 0;
 /// nothing without `--ps-read` or for an outside path; forced ask's `ask` instead under
-/// `--ask-all`.
+/// `--ask-all`; nothing for a hard link to an outside file (its real link count).
 #[test]
 fn the_guard_allows_a_real_read_and_rewrites_it() {
     let root = std::env::temp_dir().join(format!("clauseo-ps-read-{}", std::process::id()));
@@ -456,6 +494,14 @@ fn the_guard_allows_a_real_read_and_rewrites_it() {
     ask.push("--ask-all".to_owned());
     ask.extend(args[2..].iter().cloned());
     assert!(run(&ask, "m/a.txt").contains(r#""permissionDecision":"ask""#));
+    // A second name for a file outside: the real link count refuses it.
+    crate::write::hard_link(
+        &root.join("out").join("s.txt"),
+        &root.join("m").join("h.txt"),
+    )
+    .unwrap();
+    assert_eq!(run(&args, "m/h.txt"), "");
+    assert_ne!(run(&args, "m/a.txt"), "");
     #[cfg(unix)]
     {
         crate::write::symlink(&root.join("d"), &root.join("m").join("j")).unwrap();

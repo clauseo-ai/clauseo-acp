@@ -15,6 +15,7 @@
 //! PowerShell found must answer the same.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -225,16 +226,22 @@ fn shells() -> Vec<PathBuf> {
     found
 }
 
-/// `shell`'s answers for `lines`.
+/// Runs `script` with `shell` (from a file in a fresh folder named by `tag`), with `env` set:
+/// its exit code, stdout and stderr.
 #[expect(
     clippy::disallowed_methods,
-    reason = "a test runs the real PowerShell once to compare its parser with the allowlist's"
+    reason = "a test runs the real PowerShell to compare its parser with the allowlist's"
 )]
-fn ask(shell: &Path, lines: &[String]) -> Vec<Value> {
-    let dir = std::env::temp_dir().join(format!("clauseo-ps-diff-{}", std::process::id()));
+fn ask(
+    shell: &Path,
+    script: &str,
+    env: &[(&str, OsString)],
+    tag: &str,
+) -> (Option<i32>, String, String) {
+    let dir = std::env::temp_dir().join(format!("clauseo-ps-{tag}-{}", std::process::id()));
     crate::write::create_dir_all(&dir).unwrap();
-    let script = dir.join("diff.ps1");
-    crate::write::write_file(&script, SCRIPT.as_bytes()).unwrap();
+    let file = dir.join("script.ps1");
+    crate::write::write_file(&file, script.as_bytes()).unwrap();
     let output = std::process::Command::new(shell)
         .args([
             "-NoProfile",
@@ -243,24 +250,31 @@ fn ask(shell: &Path, lines: &[String]) -> Vec<Value> {
             "Bypass",
             "-File",
         ])
-        .arg(&script)
-        .env("CLAUSEO_PS_CORPUS", serde_json::to_string(lines).unwrap())
+        .arg(&file)
+        .envs(env.iter().map(|(name, value)| (*name, value)))
         .env("DOTNET_EnableWriteXorExecute", "0")
         .output()
         .unwrap();
     crate::write::remove_dir_all(&dir).unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        output.status.success(),
-        "{}: {stdout} {}",
-        shell.display(),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    (
+        output.status.code(),
+        text(&output.stdout),
+        text(&output.stderr),
+    )
+}
+
+/// `shell`'s answers for `lines` ([`SCRIPT`]).
+fn parsed(shell: &Path, lines: &[String]) -> Vec<Value> {
+    let corpus = OsString::from(serde_json::to_string(lines).unwrap());
+    let (code, stdout, stderr) = ask(shell, SCRIPT, &[("CLAUSEO_PS_CORPUS", corpus)], "diff");
+    assert_eq!(code, Some(0), "{}: {stdout} {stderr}", shell.display());
     serde_json::from_str::<Vec<Value>>(stdout.trim()).unwrap()
 }
 
-#[test]
-fn powershell_reads_each_accepted_line_and_its_rewrite_as_the_allowlist_does() {
+/// The PowerShell programs found, or `None` (the test skips) when there are none and
+/// `CLAUSEO_PS_DIFF_REQUIRE` is not set.
+fn found() -> Option<Vec<PathBuf>> {
     let shells = shells();
     if shells.is_empty() {
         assert!(
@@ -268,8 +282,102 @@ fn powershell_reads_each_accepted_line_and_its_rewrite_as_the_allowlist_does() {
             "CLAUSEO_PS_DIFF_REQUIRE is set and no PowerShell was found"
         );
         eprintln!("skipped: no PowerShell on this machine");
-        return;
+        return None;
     }
+    Some(shells)
+}
+
+/// A planted module's whole text: it leaves a mark when it loads.
+const PLANTED: &str = "[System.IO.File]::AppendAllText($env:CLAUSEO_PS_MARK, 'planted')\n";
+
+/// After the pin: a cmdlet of each module, then where each module and `$PSHOME` are.
+const AFTER_PIN: &str = concat!(
+    "Microsoft.PowerShell.Management\\Get-ChildItem -LiteralPath $PSHOME | ",
+    "Microsoft.PowerShell.Utility\\Select-Object -First 1 | Out-Null\n",
+    "Write-Output ('H=' + $PSHOME)\n",
+    "Write-Output ('M=' + (Get-Module Microsoft.PowerShell.Management).ModuleBase)\n",
+    "Write-Output ('U=' + (Get-Module Microsoft.PowerShell.Utility).ModuleBase)\n",
+);
+
+/// The text after `tag` on its line of `out`, lowercased.
+fn after(out: &str, tag: &str) -> String {
+    let line = out.lines().find_map(|line| line.trim().strip_prefix(tag));
+    line.unwrap_or_else(|| panic!("no {tag} in {out}"))
+        .to_lowercase()
+}
+
+/// The pin, run: both modules come from `$PSHOME` though a module of each name is planted
+/// first in the user's module folder (`HOME`'s, PowerShell 7 on Unix, where without the pin
+/// the planted Utility loads) and on `PSModulePath` (which 5.1 reads first), and none of them
+/// loads; when one of the two can't be loaded, the command stops with exit 1 before anything
+/// after the pin runs.
+#[test]
+fn the_pin_loads_both_modules_from_pshome_or_stops() {
+    let Some(shells) = found() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("clauseo-ps-pin-{}", std::process::id()));
+    let mark = dir.join("mark");
+    let mods = dir.join("mods");
+    let user = dir
+        .join("home")
+        .join(".local")
+        .join("share")
+        .join("powershell")
+        .join("Modules");
+    for folder in [&mods, &user] {
+        for name in [
+            "Microsoft.PowerShell.Management",
+            "Microsoft.PowerShell.Utility",
+        ] {
+            let module = folder.join(name);
+            crate::write::create_dir_all(&module).unwrap();
+            let file = module.join(format!("{name}.psm1"));
+            crate::write::write_file(&file, PLANTED.as_bytes()).unwrap();
+        }
+    }
+    let env = [
+        ("PSModulePath", mods.into_os_string()),
+        ("HOME", dir.join("home").into_os_string()),
+        ("CLAUSEO_PS_MARK", mark.clone().into_os_string()),
+    ];
+    let missing = "Microsoft.PowerShell.ClauseoMissing";
+    let broken = PIN.replacen("Microsoft.PowerShell.Utility", missing, 1);
+    for shell in &shells {
+        let name = shell.display();
+        if cfg!(unix) {
+            let unpinned = "Microsoft.PowerShell.Utility\\Select-Object -InputObject 1 | Out-Null";
+            let _ran = ask(shell, unpinned, &env, "unpinned");
+            assert!(
+                mark.exists(),
+                "{name}: without the pin the planted module does not load"
+            );
+            crate::write::remove_file(&mark).unwrap();
+        }
+        let (code, out, err) = ask(shell, &format!("{PIN}{AFTER_PIN}"), &env, "pinned");
+        assert_eq!(code, Some(0), "{name}: {out} {err}");
+        let home = after(&out, "H=");
+        for tag in ["M=", "U="] {
+            assert!(after(&out, tag).starts_with(&home), "{name}: {tag} {out}");
+        }
+        assert!(!mark.exists(), "{name}: a planted module loaded");
+        let (code, out, _) = ask(
+            shell,
+            &format!("{broken}Write-Output reached"),
+            &env,
+            "broken",
+        );
+        assert_eq!(code, Some(1), "{name}: {out}");
+        assert!(!out.contains("reached"), "{name}: {out}");
+    }
+    crate::write::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn powershell_reads_each_accepted_line_and_its_rewrite_as_the_allowlist_does() {
+    let Some(shells) = found() else {
+        return;
+    };
     let canonical = if cfg!(windows) { r"C:\m\x" } else { "/m/x" };
     let mut lines = Vec::new();
     let mut wants = Vec::new();
@@ -289,7 +397,7 @@ fn powershell_reads_each_accepted_line_and_its_rewrite_as_the_allowlist_does() {
     }
     let mut answers = Vec::new();
     for shell in &shells {
-        let got = ask(shell, &lines);
+        let got = parsed(shell, &lines);
         assert_eq!(got.len(), lines.len(), "{}", shell.display());
         for ((answer, (want, rewritten)), line) in got.iter().zip(&wants).zip(&lines) {
             assert_eq!(

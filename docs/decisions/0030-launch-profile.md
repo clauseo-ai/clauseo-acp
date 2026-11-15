@@ -759,9 +759,10 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   `;`, at most one `| Select-Object` each) whose every path resolves, by the network-safe walk,
   into the matter folder or those two folders with no link below them (a listed folder's
   entries, and with `-Recurse` its whole subtree, too), the guard answers `allow` with an
-  `updatedInput` command it writes itself: a fixed `Import-Module` of the Management module from
-  `$PSHOME`, then module-qualified cmdlets with full parameter names and `-LiteralPath
-  '<canonical path>'`. Anything else gets no output, so Claude Code's own path runs. Why: Claude
+  `updatedInput` command it writes itself: a fixed, guarded `Import-Module` of the Management
+  and Utility modules from `$PSHOME` (`exit 1` when either fails), then module-qualified cmdlets
+  with full parameter names and `-LiteralPath '<canonical path>'`; Get-Content only of a file
+  with one hard link. Anything else gets no output, so Claude Code's own path runs. Why: Claude
   Code allows such lines itself and then hands them to the server classifier, which refuses many;
   a hook allow skips both classifiers and Claude Code's path check (measured on 2.1.293), so the
   guard does its own check, and the deny rules still apply to the rewritten text.

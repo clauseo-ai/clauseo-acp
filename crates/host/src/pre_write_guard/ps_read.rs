@@ -11,17 +11,19 @@
 //!
 //! - The line must match the small grammar in `parse.rs` (Get-ChildItem, Get-Content, `|
 //!   Select-Object`, joined by `;`).
-//! - The command run is not the agent's text: [`parse::PIN`] (the Management module loaded from
-//!   `$PSHOME`), then each statement with module-qualified names, full parameter names and
-//!   `-LiteralPath '<canonical path>'`. So a lexer difference, an alias or function shadowing a
-//!   name, the starting folder, wildcard or number parsing and quote handling cannot make an
-//!   allow read anything but the checked paths.
+//! - The command run is not the agent's text: [`parse::PIN`] (the Management and Utility
+//!   modules loaded from `$PSHOME`, or exit 1), then each statement with module-qualified
+//!   names, full parameter names and `-LiteralPath '<canonical path>'`. So a lexer difference,
+//!   an alias or function shadowing a name, the starting folder, wildcard or number parsing and
+//!   quote handling cannot make an allow read anything but the checked paths.
 //! - Each path is resolved by the network-safe walk ([`walk`]: no network location touched, each
 //!   link read and checked first, on Windows each name in its canonical case and long form). The
 //!   result must be local, exist, lie in a qualifying folder ([`Roots`]) and reach no link below
 //!   that folder, neither on the way the agent wrote it nor on the canonical path; Get-Content's
-//!   target a file. A listed folder's entries hold no link; with `-Recurse` the whole subtree,
-//!   at most [`MAX_ENTRIES`] entries for the line, hidden ones included. On Windows a reparse
+//!   target a file with one hard link (another name elsewhere could be outside every folder;
+//!   a count that can't be read refuses). A listed folder's entries hold no link; with
+//!   `-Recurse` the whole subtree, at most [`MAX_ENTRIES`] entries for the line, hidden ones
+//!   included. On Windows a reparse
 //!   point other than a link counts only when its tag is a known local kind (a `OneDrive`
 //!   placeholder is; `local_reparse_tag`); anything else refuses. A canonical path over 259
 //!   characters, or in a `\\?\` form, refuses.
@@ -120,6 +122,10 @@ pub(crate) trait Tree {
     /// The names in `dir` and what each is (a link as [`Entry::Link`]; an error for a reparse
     /// point of a kind not known to be local), an error past `limit` entries.
     fn children(&self, dir: &Path, limit: usize) -> io::Result<Vec<(OsString, Entry)>>;
+
+    /// How many hard links the file at `file` has, never following a link at it; an error
+    /// when that can't be read.
+    fn links(&self, file: &Path) -> io::Result<u64>;
 }
 
 /// The real disk's listings.
@@ -159,6 +165,23 @@ impl Tree for RealTree {
             out.push((item.file_name(), entry));
         }
         Ok(out)
+    }
+
+    fn links(&self, file: &Path) -> io::Result<u64> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            Ok(std::fs::symlink_metadata(file)?.nlink())
+        }
+        #[cfg(windows)]
+        {
+            crate::network_paths::link_count(file).map(u64::from)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = file;
+            Err(io::ErrorKind::Unsupported.into())
+        }
     }
 }
 
@@ -403,7 +426,14 @@ fn target(
         return None;
     }
     match (source, look.disk.fs.entry(&target).ok()?) {
-        (_, Entry::File) => {}
+        // A second name elsewhere (a hard link) would let the read reach a file outside the
+        // folder; the count can't be read: refuse.
+        (Source::Read { .. }, Entry::File) => {
+            if look.tree.links(&target).ok()? != 1 {
+                return None;
+            }
+        }
+        (Source::List { .. }, Entry::File) => {}
         (Source::List { recurse, .. }, Entry::Dir) => {
             if !clean(&target, *recurse, look.tree, budget) {
                 return None;

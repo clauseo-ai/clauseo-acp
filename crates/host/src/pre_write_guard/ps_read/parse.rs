@@ -50,12 +50,20 @@ const MAX_PROPERTY: usize = 64;
 /// The longest path text.
 const MAX_PATH_TEXT: usize = 1024;
 
-/// What every rewritten command starts with: the Management module loaded from PowerShell's own
-/// install folder (`$PSHOME`, which PowerShell sets itself and the user cannot write), so a
-/// module of that name planted earlier on `PSModulePath` (the user's Documents first) cannot
-/// load in its place. Fixed text: nothing from the agent's line is in it.
-pub(crate) const PIN: &str =
-    r#"Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Management" -Force; "#;
+/// What every rewritten command starts with: the two modules its cmdlets come from, Management
+/// and Utility, loaded from PowerShell's own install folder (`$PSHOME`, which PowerShell sets
+/// itself and the user cannot write), so a module of either name planted earlier on
+/// `PSModulePath` (the user's Documents first) cannot load in its place; `Import-Module` itself
+/// by its Core-qualified name. When either load fails (an execution policy, an odd layout) the
+/// command stops (`exit 1`) before any cmdlet runs, never falling back to `PSModulePath`. Fixed
+/// text: nothing from the agent's line is in it.
+pub(crate) const PIN: &str = concat!(
+    r"try { ",
+    r#"Microsoft.PowerShell.Core\Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Management" "#,
+    r"-Force -ErrorAction Stop; ",
+    r#"Microsoft.PowerShell.Core\Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Utility" "#,
+    r"-Force -ErrorAction Stop } catch { exit 1 }; ",
+);
 
 /// A line the allowlist understands: its statements, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]

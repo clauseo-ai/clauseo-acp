@@ -5,8 +5,8 @@
 //! Also an open file's attributes and reparse tag, for the papers scan (`revisions/marks.rs`).
 #![expect(
     unsafe_code,
-    reason = "FFI to QueryDosDeviceW, FindFirstFileW, GetShortPathNameW, file identity and an \
-              open file's attributes and reparse tag"
+    reason = "FFI to QueryDosDeviceW, FindFirstFileW, GetShortPathNameW, file identity, a \
+              file's hard-link count and an open file's attributes and reparse tag"
 )]
 
 use std::os::windows::ffi::OsStrExt as _;
@@ -16,9 +16,9 @@ use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_ID_INFO, FILE_REMOTE_PROTOCOL_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FileAttributeTagInfo, FileIdInfo, FileRemoteProtocolInfo, FindClose, FindFirstFileW,
-    GetFileInformationByHandleEx, GetShortPathNameW, GetVolumeInformationByHandleW, OPEN_EXISTING,
-    QueryDosDeviceW, WIN32_FIND_DATAW,
+    FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdInfo, FileRemoteProtocolInfo, FileStandardInfo,
+    FindClose, FindFirstFileW, GetFileInformationByHandleEx, GetShortPathNameW,
+    GetVolumeInformationByHandleW, OPEN_EXISTING, QueryDosDeviceW, WIN32_FIND_DATAW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -109,6 +109,38 @@ pub(super) fn identity(path: &Path) -> std::io::Result<(u64, u128)> {
     // SAFETY: `handle` was opened above and is closed once.
     let _closed = unsafe { CloseHandle(handle) };
     read
+}
+
+/// The number of hard links of the local file at `path` (`FileStandardInfo`), opened with no
+/// access and without following a link at it, only once the walk has vouched for its path: the
+/// PowerShell read allowlist reads only a file with one (`pre_write_guard/ps_read.rs`).
+pub(crate) fn link_count(path: &Path) -> std::io::Result<u32> {
+    let path = wide(path);
+    // SAFETY: `path` is NUL-terminated and outlives the call; no access is asked, every share
+    // mode is allowed, and a link at the path is opened itself, never followed.
+    let handle: HANDLE = unsafe {
+        CreateFileW(
+            PCWSTR(path.as_ptr()),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+    }
+    .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+    let mut info = FILE_STANDARD_INFO::default();
+    let size = u32::try_from(size_of::<FILE_STANDARD_INFO>()).unwrap_or(0);
+    // SAFETY: `handle` was opened above and stays open for the call; `info` is a
+    // FILE_STANDARD_INFO of `size` bytes written in place.
+    let queried = unsafe {
+        GetFileInformationByHandleEx(handle, FileStandardInfo, (&raw mut info).cast(), size)
+    };
+    // SAFETY: `handle` was opened above and is closed once.
+    let _closed = unsafe { CloseHandle(handle) };
+    queried.map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+    Ok(info.NumberOfLinks)
 }
 
 /// The identity of the open `file`: its volume's serial number and its 128-bit file ID

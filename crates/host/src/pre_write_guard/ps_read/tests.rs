@@ -37,11 +37,18 @@ fn rewritten(line: &str, paths: &[&str]) -> String {
     rewrite(&win(line).unwrap(), &quoted).unwrap()
 }
 
+/// The pin is exactly the fixed, guarded load of Management and Utility from `$PSHOME`.
 #[test]
-fn the_pin_is_the_fixed_import_of_the_management_module_from_pshome() {
+fn the_pin_is_the_fixed_guarded_import_of_both_modules_from_pshome() {
     assert_eq!(
         PIN,
-        r#"Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Management" -Force; "#
+        concat!(
+            r#"try { Microsoft.PowerShell.Core\Import-Module -Name "#,
+            r#""$PSHOME\Modules\Microsoft.PowerShell.Management" -Force -ErrorAction Stop; "#,
+            r#"Microsoft.PowerShell.Core\Import-Module -Name "#,
+            r#""$PSHOME\Modules\Microsoft.PowerShell.Utility" -Force -ErrorAction Stop "#,
+            r"} catch { exit 1 }; ",
+        )
     );
 }
 
@@ -390,7 +397,7 @@ proptest! {
             let paths = vec!["'C:\\m'".to_owned(); parsed.statements.len()];
             let command = rewrite(&parsed, &paths).unwrap();
             prop_assert!(command.starts_with(PIN));
-            prop_assert_eq!(command.matches("Import-Module").count(), 1);
+            prop_assert_eq!(command.matches("Import-Module").count(), 2);
             prop_assert!(!command.strip_prefix(PIN).unwrap_or_default().contains(['$', '`', '"']));
         }
     }

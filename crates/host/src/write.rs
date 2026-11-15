@@ -339,3 +339,10 @@ pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::windows::fs::symlink_dir(target, link)
 }
+
+/// Makes a hard link at `link` to `original`: one file under two names. For unit tests (the
+/// PowerShell read allowlist refuses such a file).
+#[cfg(test)]
+pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
+    std::fs::hard_link(original, link)
+}
