@@ -32,12 +32,12 @@ test("Claude's auto mode unavailable gives the app's line, in English and Hindi"
   );
 });
 
-test("Claude's commands kept out of a matter that holds another give the app's line (UC-382)", () => {
+test("Claude's commands kept out of some folders give the app's line (UC-382)", () => {
   expect(noticeLine("shell_limited", en)).toBe(
-    "Claude's commands can't open this matter's files right now; it can still read and edit them.",
+    "Claude's commands can't reach some folders right now; it can still read and edit this matter's files.",
   );
   expect(noticeLine("shell_limited", words("hi"))).toBe(
-    "Claude की कमांड अभी इस मामले की फ़ाइलें नहीं खोल सकतीं; वह उन्हें अब भी पढ़ और संपादित कर सकता है।",
+    "Claude की कमांड अभी कुछ फ़ोल्डर तक नहीं पहुँच सकतीं; वह इस मामले की फ़ाइलें अब भी पढ़ और संपादित कर सकता है।",
   );
 });
 

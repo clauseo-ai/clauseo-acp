@@ -111,7 +111,8 @@ pub(super) fn launch_keys(
 }
 
 /// The fence's parts of a Claude session's `meta` (`outside::fence::after_meta`), with whether
-/// its sandbox widened a deny (`sandbox::sandbox_denies`). Claude's alone.
+/// its sandbox widened a deny (`sandbox::sandbox_denies`). Claude's alone; another agent's launch
+/// ends the limited notice's run (`outside::fence::tell_limited`).
 fn claude_fence(
     actor: &mut Actor,
     thread: ThreadId,
@@ -122,6 +123,8 @@ fn claude_fence(
     if kind == Some(AgentKind::Claude) {
         let limited = run.claude_tmp.is_some() && sandbox::sandbox_denies(run).limited;
         super::outside::fence::after_meta(actor, thread, run, meta, limited);
+    } else {
+        super::outside::fence::tell_limited(actor, thread, false);
     }
 }
 

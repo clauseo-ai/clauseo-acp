@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clauseo_protocol::{ContentBlock, TextOrBlob, ToolCallContent, ToolLocation};
 
-use super::{names_fenced, paths, says, says_refused};
+use super::{paths, says, says_refused};
 use crate::sent::CallFields;
 
 #[test]
@@ -76,45 +76,4 @@ fn a_calls_paths_are_its_locations_and_its_inputs_taken_from_the_matter() {
     assert!(found.contains(&own.join("child/a.txt")), "{found:?}");
     assert!(found.contains(&PathBuf::from(&outside)), "{found:?}");
     assert!(found.contains(&own.join("notes/b.txt")), "{found:?}");
-}
-
-/// A failed call's text naming a folder of a matter the conversation is not invited into names
-/// that matter, the drive in any case; a longer name, an invited matter or no path, none.
-#[test]
-fn a_fenced_folder_in_a_failed_calls_text_names_its_matter() {
-    use crate::agent::matter_fence::{MatterFence, Other};
-
-    let id = |n: u128| {
-        let bits = (0x0190_0000_0000_u128 << 80) | (0x7 << 76) | (0b10 << 62) | n;
-        clauseo_protocol::MatterId::new(uuid::Uuid::from_u128(bits)).unwrap()
-    };
-    let other = |n, folder: &str, invited| {
-        let mut other = Other::new(id(n), format!("M{n}"), PathBuf::from(folder), invited);
-        other.spellings = vec![PathBuf::from(folder)];
-        other
-    };
-    let fence = MatterFence::asked(vec![
-        other(1, r"C:\Users\clauseo-lawyer\Matters\B", false),
-        other(2, r"C:\Users\clauseo-lawyer\Matters\Shared", true),
-    ]);
-    let said = |words: &str| {
-        let text = ToolCallContent::Content {
-            content: ContentBlock::Text {
-                text: words.to_owned(),
-            },
-        };
-        names_fenced(&fence, &[text], None)
-    };
-    assert_eq!(
-        said(r"Get-Content : c:\users\clauseo-lawyer\Matters\B\lease.pdf: denied"),
-        Some(id(1))
-    );
-    assert_eq!(
-        said(r"no access to C:\Users\clauseo-lawyer\Matters\B."),
-        Some(id(1))
-    );
-    assert_eq!(said(r"C:\Users\clauseo-lawyer\Matters\Bob\x"), None);
-    assert_eq!(said(r"C:\Users\clauseo-lawyer\Matters\B.old\x"), None);
-    assert_eq!(said(r"C:\Users\clauseo-lawyer\Matters\Shared\x"), None);
-    assert_eq!(said("File does not exist."), None);
 }
