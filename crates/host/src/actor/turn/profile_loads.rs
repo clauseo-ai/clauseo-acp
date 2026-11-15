@@ -111,6 +111,21 @@ pub(super) fn launch_keys(
     Ok(())
 }
 
+/// The fence's parts of a Claude session's `meta` (`outside::fence::after_meta`), with whether
+/// its sandbox widened a deny (`sandbox::sandbox_denies`). Claude's alone.
+fn claude_fence(
+    actor: &mut Actor,
+    thread: ThreadId,
+    kind: Option<AgentKind>,
+    run: &RunFolders,
+    meta: &mut Map<String, Value>,
+) {
+    if kind == Some(AgentKind::Claude) {
+        let limited = run.claude_tmp.is_some() && sandbox::sandbox_denies(run).limited;
+        super::outside::fence::after_meta(actor, thread, run, meta, limited);
+    }
+}
+
 /// What [`session_loads`] gives a session call: `_meta`, the MCP servers and ACP's
 /// `additionalDirectories`.
 pub(super) type SessionLoads = (Map<String, Value>, Vec<McpServer>, Vec<PathBuf>);
@@ -265,8 +280,7 @@ pub(super) fn session_loads(
         claude.as_ref(),
     );
     profile::fill_meta(&mut meta, folders)?;
-    let limited = run.claude_tmp.is_some() && sandbox::sandbox_denies(&run).limited;
-    super::outside::fence::after_meta(actor, thread, &run, &mut meta, limited);
+    claude_fence(actor, thread, kind, &run, &mut meta);
     super::offline::probe::session_meta(actor, thread, &meta);
     if run.browser_policy_read {
         // What the app heard from a "Try again" follows this newer read.

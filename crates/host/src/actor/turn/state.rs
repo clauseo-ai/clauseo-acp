@@ -318,4 +318,8 @@ pub(super) struct Told {
     /// The paths each tool call of the turn named, by ACP's id, kept only while the launch
     /// fenced other matters: a refusal names the matter it hit (`outside/refused_call.rs`).
     pub(super) call_paths: std::collections::BTreeMap<String, Vec<std::path::PathBuf>>,
+    /// The tool calls of the turn that read or edit a file (a Write is an edit), by ACP's id,
+    /// kept while the launch fenced other matters: one that fails in a fenced matter's folder
+    /// is a refusal, whatever its words (`outside/refused_call.rs`).
+    pub(super) file_calls: std::collections::BTreeSet<String>,
 }

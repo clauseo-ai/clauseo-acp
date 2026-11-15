@@ -124,6 +124,17 @@ test("Clauseo's own deny rules say the place is off limits, without the path or 
     expect(refusalWhy("en", refused(text)), text).toBe(line);
     expect(whyOf(refused(text))).toMatch(/^Permission to/);
   }
+  // A folder's deny (Claude Code 0.3.293, Windows and macOS alike), as the tool result wraps it.
+  for (const text of [
+    "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>",
+    "File is covered by a Read deny rule in your permission settings and cannot be edited.",
+    "File is covered by a Read deny rule in your permission settings and cannot be written.",
+  ]) {
+    expect(refusalWhy("en", refused(text)), text).toBe(line);
+  }
+  expect(
+    refusalOf(refused("grep: File is in a directory that is denied by your permission settings.")),
+  ).toBeNull();
 });
 
 test("the content alone, as the first result update has it, is read too; an array result's text as well", () => {

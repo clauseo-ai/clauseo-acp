@@ -2,8 +2,9 @@
 //! permission request into another matter's folder is rejected unasked, the agent is steered the
 //! other-matter note, and the lawyer sees one `OtherMatterRefused` notice naming that matter,
 //! once a turn; a tool call that fails as refused on a path in another matter is told the same
-//! way, without a note; once the conversation may read that matter, a refusal there is the plain
-//! outside-the-matter notice, with nothing to offer.
+//! way, without a note, and a failed Read there whatever its words; once the conversation may
+//! read that matter, a refusal there is the plain outside-the-matter notice, with nothing to
+//! offer.
 
 use std::path::Path;
 
@@ -42,10 +43,16 @@ fn ask(id: &str, file: &Path) -> [Value; 2] {
 fn refused_read(id: &str, file: &Path) -> [Value; 2] {
     let file = file.display().to_string();
     let words = format!("Permission to read {file} has been denied.");
+    failed_call(id, "read", &json!({"file_path": file}), &words)
+}
+
+/// A call `id` of `kind` with `input` that fails with `words`.
+fn failed_call(id: &str, kind: &str, input: &Value, words: &str) -> [Value; 2] {
+    let title = if kind == "read" { "Read" } else { "Bash" };
     [
         json!({"update": {"update": {"sessionUpdate": "tool_call", "toolCallId": id,
-            "title": "Read", "kind": "read", "status": "pending",
-            "rawInput": {"file_path": file}}}}),
+            "title": title, "kind": kind, "status": "pending",
+            "rawInput": input}}}),
         json!({"update": {"update": {"sessionUpdate": "tool_call_update", "toolCallId": id,
             "status": "failed", "content": [{"type": "content",
                 "content": {"type": "text", "text": words}}]}}}),
@@ -79,6 +86,8 @@ fn text_of(lines: &[Value]) -> String {
 }
 
 /// The thread's notices' kinds.
+/// No `MattersUnfenced` among them: the fake is no Claude, whose Windows shell rules alone are
+/// reported left out (`outside/fence.rs`'s `after_meta`), so on Windows too there is none.
 fn kinds(events: &crate::observe::Events) -> Vec<Option<NoticeKind>> {
     events
         .events()
@@ -168,6 +177,98 @@ fn a_refused_read_in_another_matter_is_named_and_an_invited_one_is_not() {
     assert_eq!(
         kinds(&events),
         [Some(named), Some(NoticeKind::OutsideMatterBlocked)],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}
+
+/// `path` with a drive letter, if it has one, in lower case (`c:\…`).
+fn lower_drive(path: &Path) -> String {
+    let text = path.display().to_string();
+    match text.as_bytes() {
+        [drive, b':', ..] => format!("{}{}", char::from(*drive).to_ascii_lowercase(), &text[1..]),
+        _ => text,
+    }
+}
+
+/// Claude Code's words drift, so they are not the only sign: a failed Read in a matter the
+/// conversation is not invited into is named whatever it says (a directory deny's words with
+/// the drive in lower case; words no release has used), and so is a failed command whose text
+/// names such a matter's folder; a failed Read in the conversation's own matter is not.
+#[test]
+fn a_failed_read_or_command_in_another_matter_is_named_whatever_its_words() {
+    let dir = Dir::new("other_matter_any_words", &[]);
+    let folder = dir.folder("m", &[("a.txt", "a")]);
+    let smith = dir.folder("Smith", &[("lease.pdf", "x")]);
+    let jones = dir.folder("Jones", &[("deed.pdf", "y")]);
+    let doe = dir.folder("Doe", &[("will.pdf", "z")]);
+    let own = dunce::canonicalize(&folder).unwrap();
+    let lease = dunce::canonicalize(smith.join("lease.pdf")).unwrap();
+    let deed = dunce::canonicalize(jones.join("deed.pdf")).unwrap();
+    let will = dunce::canonicalize(doe.join("will.pdf")).unwrap();
+    let directory = "<tool_use_error>File is in a directory that is denied by your permission \
+        settings.</tool_use_error>";
+    let mut lines = handshake("other-matter-any-words");
+    let missing = own.join("gone.txt").display().to_string();
+    lines.extend(failed_call(
+        "t0",
+        "read",
+        &json!({"file_path": missing}),
+        "File does not exist.",
+    ));
+    let lower = lower_drive(&lease);
+    lines.extend(failed_call(
+        "t1",
+        "read",
+        &json!({"file_path": lower}),
+        directory,
+    ));
+    let deed = deed.display().to_string();
+    lines.extend(failed_call(
+        "t2",
+        "read",
+        &json!({"file_path": deed}),
+        "Access blocked by policy",
+    ));
+    let words = format!("ls: cannot open '{}': no luck", will.display());
+    lines.extend(failed_call(
+        "t3",
+        "execute",
+        &json!({"command": "ls x"}),
+        &words,
+    ));
+    lines.push(json!({"respond": {"to": "p1", "result": {"stopReason": "end_turn"}}}));
+    let file = folder.with_file_name("other-matter-any-words.jsonl");
+    write::write(&file, text_of(&lines).as_bytes());
+    dir.set_agents(&[(FAKE, Scenario::Written(file))]);
+
+    let host = dir.start(0);
+    let matter = host.create_matter("m", &folder);
+    let smith = host.create_matter("Smith", &smith);
+    let jones = host.create_matter("Jones", &jones);
+    let doe = host.create_matter("Doe", &doe);
+    let thread = host.create_thread(matter, FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Read them.");
+    let ended = events.until_turn_ended(turn);
+    host.settle();
+    events.drain_ready();
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let named = |matter, name: &str| {
+        Some(NoticeKind::OtherMatterRefused {
+            matter,
+            name: name.to_owned(),
+        })
+    };
+    assert_eq!(
+        kinds(&events),
+        [
+            named(smith, "Smith"),
+            named(jones, "Jones"),
+            named(doe, "Doe")
+        ],
         "{}",
         events.dump()
     );
