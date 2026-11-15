@@ -74,25 +74,21 @@ pub(super) fn story_parts(main: &str, rels: &[u8]) -> Vec<String> {
     parts
 }
 
-/// The story parts by the names Word gives them, among the zip's entry `names` in their order,
-/// at most one past [`MAX_PARTS`] as [`story_parts`] gives them, for a main document whose
-/// relationships the scan could not read (too large, or not UTF-8): `word/header*.xml`,
-/// `word/footer*.xml`, `word/footnotes.xml`, `word/endnotes.xml` and `word/comments.xml`.
-pub(super) fn usual_story_parts<'a>(names: impl Iterator<Item = &'a str>) -> Vec<String> {
+/// Every XML part under `word/` among the zip's entry `names`, in their order, but `main` and
+/// relationships parts (`_rels/`), each once, at most one past [`MAX_PARTS`] as [`story_parts`]
+/// gives them: what the scan reads for a main document whose relationships it could not read (too
+/// large, or not UTF-8), since any of them could be a story part those relationships name.
+pub(super) fn word_parts<'a>(main: &str, names: impl Iterator<Item = &'a str>) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     for name in names {
         let Some(file) = name.strip_prefix("word/") else {
             continue;
         };
-        let numbered = ["header", "footer"]
-            .iter()
-            .any(|start| file.starts_with(start))
-            && std::path::Path::new(file)
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("xml"))
-            && !file.contains('/');
-        let one = matches!(file, "footnotes.xml" | "endnotes.xml" | "comments.xml");
-        if (numbered || one) && !parts.iter().any(|part| part == name) {
+        let xml = std::path::Path::new(file)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("xml"));
+        let rels = file.split('/').any(|folder| folder == "_rels");
+        if xml && !rels && name != main && !parts.iter().any(|part| part == name) {
             parts.push(name.to_owned());
         }
         if parts.len() > MAX_PARTS {
@@ -216,7 +212,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        Relationship, main_part, relationships, rels_of, resolve, story_parts, usual_story_parts,
+        Relationship, main_part, relationships, rels_of, resolve, story_parts, word_parts,
     };
     use crate::clock::{Clock as _, SystemClock};
 
@@ -311,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn the_usual_story_parts_are_word_s_names_for_them() {
+    fn without_relationships_every_xml_part_under_word_is_read() {
         let names = [
             "[Content_Types].xml",
             "word/document.xml",
@@ -325,15 +321,23 @@ mod tests {
             "word/headers/a.xml",
             "header1.xml",
             "word/commentsExtended.xml",
+            "word/letterhead.XML",
+            "word/_rels/document.xml.rels",
+            "word/_rels/extra.xml",
+            "word/header1.xml",
         ];
         assert_eq!(
-            usual_story_parts(names.into_iter()),
+            word_parts("word/document.xml", names.into_iter()),
             [
                 "word/header1.xml",
                 "word/footer12.xml",
                 "word/footnotes.xml",
                 "word/endnotes.xml",
                 "word/comments.xml",
+                "word/styles.xml",
+                "word/headers/a.xml",
+                "word/commentsExtended.xml",
+                "word/letterhead.XML",
             ]
         );
     }
