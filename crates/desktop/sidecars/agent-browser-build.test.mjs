@@ -19,6 +19,7 @@ import {
   buildEnv,
   checkCommitted,
   checkSha,
+  checkVersion,
   main,
   orderPatches,
   parseArgs,
@@ -88,21 +89,35 @@ function archive(commit, files, { symlink } = {}) {
 }
 
 const CARGO = '[package]\nname = "agent-browser"\nversion = "0.41.1"\n';
-const PATCH = [
-  "diff --git a/cli/Cargo.toml b/cli/Cargo.toml",
-  "--- a/cli/Cargo.toml",
-  "+++ b/cli/Cargo.toml",
-  "@@ -1,3 +1,3 @@",
-  " [package]",
-  ' name = "agent-browser"',
-  '-version = "0.41.1"',
-  '+version = "0.41.1-clauseo"',
-  "",
-].join("\n");
+const LOCK = '[[package]]\nname = "aes"\nversion = "0.8.4"\n\n[[package]]\nname = "agent-browser"\nversion = "0.41.1"\n';
+/** The version patch, as 0003: Cargo.toml and Cargo.lock to `version`. */
+const versionPatch = (version) =>
+  [
+    "diff --git a/cli/Cargo.lock b/cli/Cargo.lock",
+    "--- a/cli/Cargo.lock",
+    "+++ b/cli/Cargo.lock",
+    "@@ -4,4 +4,4 @@",
+    " ",
+    " [[package]]",
+    ' name = "agent-browser"',
+    '-version = "0.41.1"',
+    `+version = "${version}"`,
+    "diff --git a/cli/Cargo.toml b/cli/Cargo.toml",
+    "--- a/cli/Cargo.toml",
+    "+++ b/cli/Cargo.toml",
+    "@@ -1,3 +1,3 @@",
+    " [package]",
+    ' name = "agent-browser"',
+    '-version = "0.41.1"',
+    `+version = "${version}"`,
+    "",
+  ].join("\n");
+const PATCH = versionPatch("0.41.1-clauseo.1");
+const SOURCE = { "cli/Cargo.toml": CARGO, "cli/Cargo.lock": LOCK };
 
 let counter = 0;
 /** A pin fixture for `gz`'s commit and hash, and a patch folder holding `patches`. */
-async function fixture(gz, patches, commit = COMMIT) {
+async function fixture(gz, patches, commit = COMMIT, build = 1) {
   counter += 1;
   const dir = join(root, `fixture-${counter}`);
   const patchDir = join(dir, "patches");
@@ -113,7 +128,7 @@ async function fixture(gz, patches, commit = COMMIT) {
     pinPath,
     [
       'version = "0.41.1"',
-      'patched_tag = "agent-browser-v0.41.1-clauseo.1"',
+      `patched_tag = "agent-browser-v0.41.1-clauseo.${build}"`,
       `upstream_commit = "${commit}"`,
       `upstream_tarball_sha256 = "${sha(gz)}"`,
       `rustc_commit = "${"d".repeat(40)}"`,
@@ -221,7 +236,7 @@ describe("checkSha and tarInfo", () => {
   });
 
   test("tarInfo reads the commit, the commit time and the symlinks", () => {
-    const gz = archive(COMMIT, { "cli/Cargo.toml": CARGO }, { symlink: ".claude" });
+    const gz = archive(COMMIT, SOURCE, { symlink: ".claude" });
     assert.deepEqual(tarInfo(gz), {
       commit: COMMIT,
       mtime: MTIME,
@@ -283,7 +298,7 @@ describe("check", () => {
   const quiet = () => {};
 
   test("applies the patches to the pinned archive, through tar and git", async () => {
-    const gz = archive(COMMIT, { "cli/Cargo.toml": CARGO }, { symlink: ".claude" });
+    const gz = archive(COMMIT, SOURCE, { symlink: ".claude" });
     const { pinPath, patchDir } = await fixture(gz, { "0001-version.patch": PATCH });
     const server = serve(gz);
     const lines = [];
@@ -299,24 +314,58 @@ describe("check", () => {
   });
 
   test("an archive whose sha256 is not the pin's is refused", async () => {
-    const gz = archive(COMMIT, { "cli/Cargo.toml": CARGO });
+    const gz = archive(COMMIT, SOURCE);
     const { pinPath, patchDir } = await fixture(gz, { "0001-version.patch": PATCH });
     const other = archive(COMMIT, { "cli/Cargo.toml": `${CARGO}# changed\n` });
     await assert.rejects(main(["check"], { pinPath, patchDir, fetch: serve(other).fetch, log: quiet }), /refused/);
   });
 
   test("an archive of another commit is refused, even with the pinned sha256", async () => {
-    const gz = archive("f".repeat(40), { "cli/Cargo.toml": CARGO });
+    const gz = archive("f".repeat(40), SOURCE);
     const { pinPath, patchDir } = await fixture(gz, { "0001-version.patch": PATCH });
     await assert.rejects(main(["check"], { pinPath, patchDir, fetch: serve(gz).fetch, log: quiet }), /names commit/);
   });
 
+  test("a version patch that is not patched_tag's version is refused", async () => {
+    const gz = archive(COMMIT, SOURCE);
+    // A .2 rebuild whose version patch still says .1: the pin's tag is .2 here.
+    const { pinPath, patchDir } = await fixture(gz, { "0001-version.patch": PATCH }, COMMIT, 2);
+    await assert.rejects(
+      main(["check"], { pinPath, patchDir, fetch: serve(gz).fetch, log: quiet }),
+      /Cargo\.toml says version 0\.41\.1-clauseo\.1, but patched_tag agent-browser-v0\.41\.1-clauseo\.2 needs 0\.41\.1-clauseo\.2/,
+    );
+  });
+
   test("a misnamed patch fails before any download", async () => {
-    const gz = archive(COMMIT, { "cli/Cargo.toml": CARGO });
+    const gz = archive(COMMIT, SOURCE);
     const { pinPath, patchDir } = await fixture(gz, { "windows.patch": PATCH });
     const server = serve(gz);
     await assert.rejects(main(["check"], { pinPath, patchDir, fetch: server.fetch, log: quiet }), /NNNN/);
     assert.equal(server.calls.length, 0);
+  });
+});
+
+describe("checkVersion", () => {
+  const tag = "agent-browser-v0.41.1-clauseo.2";
+  const toml = (v) => `[package]\nname = "agent-browser"\nversion = "${v}"\n\n[dependencies]\nversion = "9"\n`;
+  const lock = (v) => LOCK.replace(/"0\.41\.1"$/m, `"${v}"`);
+
+  test("passes when Cargo.toml and Cargo.lock both say patched_tag's version", () => {
+    checkVersion(toml("0.41.1-clauseo.2"), lock("0.41.1-clauseo.2"), tag);
+  });
+
+  test("refuses either file at another version, or with none", () => {
+    assert.throws(() => checkVersion(toml("0.41.1-clauseo.1"), lock("0.41.1-clauseo.2"), tag), /Cargo\.toml says version 0\.41\.1-clauseo\.1/);
+    assert.throws(() => checkVersion(toml("0.41.1-clauseo.2"), lock("0.41.1-clauseo.1"), tag), /Cargo\.lock says version 0\.41\.1-clauseo\.1/);
+    assert.throws(() => checkVersion(toml("0.41.1-clauseo.2"), "", tag), /Cargo\.lock says version null/);
+    assert.throws(() => checkVersion("[dependencies]\nversion = \"0.41.1-clauseo.2\"\n", lock("0.41.1-clauseo.2"), tag), /Cargo\.toml says version null/);
+  });
+
+  test("the real patches give the real pin's version", async () => {
+    const pin = parsePin(await readFile(new URL("../agent-browser.toml", import.meta.url), "utf8"));
+    const patch = await readFile(new URL("../agent-browser/patches/0003-version-suffix.patch", import.meta.url), "utf8");
+    const added = [...patch.matchAll(/^\+version = "([^"]*)"$/gm)].map((m) => m[1]);
+    assert.deepEqual(added, Array(2).fill(pin.patchedTag.replace(/^agent-browser-v/, "")));
   });
 });
 

@@ -1,29 +1,38 @@
-windows: daemon over a protected named pipe, protected processes, no loopback servers
+windows: daemon over a protected named pipe with a session key, protected processes, no loopback servers
 
 Clauseo's patch to vercel-labs/agent-browser v0.41.1, applied after 0001. Windows code paths
 only; macOS and Linux behave as upstream (plus 0001).
 
 - The daemon listens on \\.\pipe\clauseo-ab-<128-bit random hex> instead of loopback TCP, with
   four instances listening at once. <session>.pipe records the pipe id with the daemon's pid and
-  creation time (never a command-line argument). The first instance is created with
+  creation time and their HMAC-SHA256 with the session key (never a command-line argument); a
+  record without a valid HMAC is ignored. The first instance is created with
   FILE_FLAG_FIRST_PIPE_INSTANCE; every instance has a protected DACL for the user and SYSTEM and
   rejects remote clients. After a client connects the daemon reads its process token
   (GetNamedPipeClientProcessId, OpenProcessToken, IsTokenRestricted) and disconnects a restricted
   client, or any it cannot check, before writing a byte.
+- The session key (session_key.rs): the launcher passes 32 random bytes per session in
+  AGENT_BROWSER_SESSION_KEY (64 lowercase hex). Every connection starts with a mutual
+  challenge-response: each side sends a fresh 32-byte nonce and proves the key with HMAC-SHA256
+  over its role, the session name and both nonces, compared in constant time. The daemon serves
+  no client without the key; the client refuses a daemon of another session or key. main takes
+  the key out of the process environment first thing; spawn_hardened gives it back to its
+  children only (the daemon, the MCP server's CLI runs). Without a valid key the CLI and the
+  daemon refuse to run. hmac and sha2 are already upstream dependencies.
 - The client connects at SECURITY_IDENTIFICATION and refuses a pipe whose server is not the
   recorded daemon: the same pid and creation time (so a reused pid fails), this executable, and an
   unrestricted token.
-- A live daemon (pid and creation time match) keeps its files and is not replaced: a busy pipe is
-  waited for, and the CLI does not start a second daemon over it. The taskkill fallback is gone
-  (the protected DACL denies PROCESS_TERMINATE anyway).
+- A live daemon (a keyed record, pid and creation time match) keeps its files and is not
+  replaced: a busy pipe is waited for, and the CLI does not start a second daemon over it. The
+  taskkill fallback is gone (the protected DACL denies PROCESS_TERMINATE anyway).
 - Every agent-browser process applies
-  D:P(A;;0x1FFFFF;;;SY)(A;;0x101000;;;<user SID>)(A;;0x101000;;;OW) to itself and its main thread
-  first thing in main; the daemon's runtime threads get it as they start; the daemon (from the
-  CLI) and the CLI (from the MCP server) start with it as their process and first-thread
-  descriptor through CreateProcessW, inheriting only their stdio handles.
-- Every other child (Chrome, engines, ffmpeg, plugins, probes) starts through child_command,
-  which on Windows gives it only the base Windows environment variables.
+  D:P(A;;0x1FFFFF;;;SY)(A;;0x101000;;;<user SID>)(A;;0x101000;;;OW) to itself and
+  D:P(A;;0x1FFFFF;;;SY)(A;;0x100800;;;<user SID>)(A;;0x100800;;;OW) to its main thread first
+  thing in main; the daemon's runtime threads get the thread DACL as they start; the daemon (from
+  the CLI) and the CLI (from the MCP server) start with both as their process and first-thread
+  descriptors through CreateProcessW, inheriting only their stdio handles.
 - Streaming, `inspect` and the dashboard are always off on Windows (0001's switch forced on).
+- Tests that start a daemon on Windows (tls_cli, obscura_cli) pass a test session key.
 
 diff --git a/cli/Cargo.toml b/cli/Cargo.toml
 index c474f89..e9200b0 100644
@@ -38,96 +47,8 @@ index c474f89..e9200b0 100644
  
  [dev-dependencies]
  tempfile = "3"
-diff --git a/cli/src/child_command.rs b/cli/src/child_command.rs
-new file mode 100644
-index 0000000..d936fd4
---- /dev/null
-+++ b/cli/src/child_command.rs
-@@ -0,0 +1,82 @@
-+//! Commands for the programs agent-browser starts without its protected descriptor.
-+//!
-+//! On Windows such a child (Chrome, an engine, ffmpeg, a plugin, a probe like `where`) can be
-+//! opened by any process of the user, a sandboxed one included, and its environment read. So
-+//! there it starts with only the variables a Windows program needs to run: agent-browser's own
-+//! settings, the CDP url among them, stay out of its memory. Elsewhere this is `Command::new`.
-+
-+use std::ffi::OsStr;
-+use std::process::Command;
-+
-+/// The variables a child keeps on Windows.
-+#[cfg(windows)]
-+const BASE_ENV: &[&str] = &[
-+    "ALLUSERSPROFILE",
-+    "APPDATA",
-+    "CommonProgramFiles",
-+    "CommonProgramFiles(x86)",
-+    "CommonProgramW6432",
-+    "ComSpec",
-+    "COMPUTERNAME",
-+    "HOMEDRIVE",
-+    "HOMEPATH",
-+    "LOCALAPPDATA",
-+    "NUMBER_OF_PROCESSORS",
-+    "OS",
-+    "PATH",
-+    "PATHEXT",
-+    "PROCESSOR_ARCHITECTURE",
-+    "PROCESSOR_IDENTIFIER",
-+    "ProgramData",
-+    "ProgramFiles",
-+    "ProgramFiles(x86)",
-+    "ProgramW6432",
-+    "PUBLIC",
-+    "SystemDrive",
-+    "SystemRoot",
-+    "TEMP",
-+    "TMP",
-+    "USERDOMAIN",
-+    "USERNAME",
-+    "USERPROFILE",
-+    "windir",
-+];
-+
-+/// `Command::new(program)`, with the environment cut down to `BASE_ENV` on Windows. Variables a
-+/// call site sets afterwards are kept.
-+pub fn child_command(program: impl AsRef<OsStr>) -> Command {
-+    #[allow(unused_mut)]
-+    let mut command = Command::new(program);
-+    #[cfg(windows)]
-+    {
-+        command.env_clear();
-+        for name in BASE_ENV {
-+            if let Some(value) = std::env::var_os(name) {
-+                command.env(name, value);
-+            }
-+        }
-+    }
-+    command
-+}
-+
-+#[cfg(all(test, windows))]
-+mod tests {
-+    use super::*;
-+
-+    #[test]
-+    fn a_child_keeps_only_the_base_variables() {
-+        let _guard = crate::test_utils::EnvGuard::new(&["AGENT_BROWSER_CDP"]);
-+        _guard.set(
-+            "AGENT_BROWSER_CDP",
-+            "ws://127.0.0.1:1/devtools/browser/secret",
-+        );
-+        let mut command = child_command("cmd.exe");
-+        command.env("SET_BY_CALLER", "1");
-+        let envs: Vec<_> = command.get_envs().collect();
-+        assert!(envs
-+            .iter()
-+            .any(|(k, v)| *k == "SET_BY_CALLER" && v.is_some()));
-+        assert!(envs.iter().all(|(k, _)| *k != "AGENT_BROWSER_CDP"));
-+        assert!(envs.iter().any(|(k, _)| *k == "SystemRoot"));
-+    }
-+}
 diff --git a/cli/src/connection.rs b/cli/src/connection.rs
-index 887dae5..137f08e 100644
+index 887dae5..afd3891 100644
 --- a/cli/src/connection.rs
 +++ b/cli/src/connection.rs
 @@ -8,7 +8,9 @@ use std::hash::{Hash, Hasher};
@@ -220,12 +141,14 @@ index 887dae5..137f08e 100644
      remove_daemon_files(&get_socket_dir(), session);
  }
  
-@@ -403,42 +429,32 @@ pub fn walk_daemons() -> DaemonInventory {
+@@ -403,42 +429,37 @@ pub fn walk_daemons() -> DaemonInventory {
      inventory
  }
  
 +/// The daemon's `.pipe` record: its pipe id, pid and creation time. It is the only place a
 +/// client learns the pipe: there is no derived fallback, and the id never goes on a command line.
++/// A record without the MAC of this session's key is ignored, as is every record when this
++/// process has no key (see session_key).
  #[cfg(windows)]
 -fn get_port_path(session: &str) -> PathBuf {
 -    SessionFile::Port.path(session)
@@ -241,7 +164,8 @@ index 887dae5..137f08e 100644
 -    }
 -    session.to_string()
 +fn read_pipe_record(session: &str) -> Option<crate::windows_pipe::PipeRecord> {
-+    crate::windows_pipe::read_pipe_record(&SessionFile::Pipe.path(session))
++    let key = crate::session_key::session_key()?;
++    crate::windows_pipe::read_pipe_record(&SessionFile::Pipe.path(session), session, key)
  }
  
 +/// Whether the daemon the session's `.pipe` record names is still running: the same pid with
@@ -265,7 +189,7 @@ index 887dae5..137f08e 100644
 -/// so before this session's daemon writes its file that port can belong to
 -/// another daemon with the same session name.
 +/// Connects to the session's daemon over its pipe, refusing a pipe whose server is not the
-+/// recorded daemon (see `windows_pipe::check_server`).
++/// recorded daemon (see `windows_pipe::check_server`) or does not prove the session key.
  #[cfg(windows)]
 -pub fn resolve_port(session: &str) -> Option<u16> {
 -    fs::read_to_string(get_port_path(session))
@@ -275,14 +199,16 @@ index 887dae5..137f08e 100644
 +    session: &str,
 +    busy_wait: Duration,
 +) -> Result<crate::windows_pipe::PipeStream, String> {
++    let key = crate::session_key::session_key()
++        .ok_or_else(|| format!("Failed to connect: {}", crate::session_key::no_key_error()))?;
 +    let record = read_pipe_record(session)
 +        .ok_or_else(|| "Failed to connect: daemon has not written its pipe file".to_string())?;
-+    crate::windows_pipe::PipeStream::connect(&record, busy_wait)
++    crate::windows_pipe::PipeStream::connect(&record, session, key, busy_wait)
 +        .map_err(|e| format!("Failed to connect: {}", e))
  }
  
  pub fn daemon_ready(session: &str) -> bool {
-@@ -449,13 +465,7 @@ pub fn daemon_ready(session: &str) -> bool {
+@@ -449,13 +470,7 @@ pub fn daemon_ready(session: &str) -> bool {
      }
      #[cfg(windows)]
      {
@@ -297,7 +223,7 @@ index 887dae5..137f08e 100644
      }
  }
  
-@@ -796,15 +806,11 @@ fn kill_stale_daemon(session: &str) {
+@@ -796,15 +811,11 @@ fn kill_stale_daemon(session: &str) {
                      thread::sleep(Duration::from_millis(100));
                  }
              }
@@ -317,7 +243,7 @@ index 887dae5..137f08e 100644
          }
      }
  
-@@ -815,11 +821,20 @@ fn kill_stale_daemon(session: &str) {
+@@ -815,11 +826,20 @@ fn kill_stale_daemon(session: &str) {
  fn wait_for_daemon_exit(session: &str, timeout: Duration) -> bool {
      let start = Instant::now();
      while start.elapsed() < timeout {
@@ -339,10 +265,17 @@ index 887dae5..137f08e 100644
      !daemon_ready(session)
  }
  
-@@ -860,6 +875,20 @@ pub(crate) fn prevent_stdio_handle_inheritance() {
+@@ -860,6 +880,27 @@ pub(crate) fn prevent_stdio_handle_inheritance() {
  pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult, String> {
      let mut restarted = false;
  
++    // On Windows a daemon serves only clients with its session key: without one there is
++    // nothing to reach or start.
++    #[cfg(windows)]
++    if crate::session_key::session_key().is_none() {
++        return Err(crate::session_key::no_key_error());
++    }
++
 +    // On Windows a live daemon whose pipe is busy for a moment is waited for, not
 +    // replaced: a second daemon would take over its files and the first one,
 +    // which cannot be killed, would linger.
@@ -360,7 +293,7 @@ index 887dae5..137f08e 100644
      // Socket connectivity is the sole liveness check — no PID check — so
      // callers in a different PID namespace (e.g. unshare) can still reuse
      // an existing daemon they can reach over the socket.
-@@ -894,6 +923,15 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
+@@ -894,6 +935,15 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
      // Clean up any stale socket/pid files before starting fresh
      cleanup_stale_files(session);
  
@@ -376,7 +309,7 @@ index 887dae5..137f08e 100644
      // Ensure socket directory exists
      let socket_dir = get_socket_dir();
      if !socket_dir.exists() {
-@@ -935,8 +973,14 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
+@@ -935,8 +985,14 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
      let exe_path = env::current_exe().map_err(|e| e.to_string())?;
      let exe_path = exe_path.canonicalize().unwrap_or(exe_path);
  
@@ -392,7 +325,7 @@ index 887dae5..137f08e 100644
  
      #[cfg(unix)]
      {
-@@ -964,7 +1008,7 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
+@@ -964,7 +1020,7 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
  
      #[cfg(windows)]
      {
@@ -401,7 +334,7 @@ index 887dae5..137f08e 100644
  
          prevent_stdio_handle_inheritance();
  
-@@ -976,12 +1020,12 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
+@@ -976,12 +1032,12 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
          const DETACHED_PROCESS: u32 = 0x00000008;
  
          daemon_child = Some(
@@ -420,7 +353,7 @@ index 887dae5..137f08e 100644
          );
      }
  
-@@ -1054,10 +1098,11 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
+@@ -1054,10 +1110,11 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
  
      #[cfg(unix)]
      let endpoint_info = format!("socket: {}", SessionFile::Socket.path(session).display());
@@ -435,7 +368,7 @@ index 887dae5..137f08e 100644
      };
  
      Err(format!("Daemon failed to start ({})", endpoint_info))
-@@ -1073,11 +1118,7 @@ fn connect(session: &str) -> Result<Connection, String> {
+@@ -1073,11 +1130,7 @@ fn connect(session: &str) -> Result<Connection, String> {
      }
      #[cfg(windows)]
      {
@@ -448,7 +381,7 @@ index 887dae5..137f08e 100644
      }
  }
  
-@@ -1237,7 +1278,7 @@ fn send_command_once(cmd: &Value, session: &str) -> Result<Response, SendError>
+@@ -1237,7 +1290,7 @@ fn send_command_once(cmd: &Value, session: &str) -> Result<Response, SendError>
      let mut json_str = serde_json::to_string(cmd).map_err(|e| SendError::NotSent(e.to_string()))?;
      json_str.push('\n');
  
@@ -457,7 +390,7 @@ index 887dae5..137f08e 100644
  
      stream.set_read_timeout(Some(read_timeout_for(cmd))).ok();
      stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
-@@ -1883,32 +1924,24 @@ mod tests {
+@@ -1883,32 +1936,30 @@ mod tests {
  
      #[test]
      #[cfg(windows)]
@@ -486,13 +419,13 @@ index 887dae5..137f08e 100644
 +        guard.remove("XDG_RUNTIME_DIR");
          guard.remove("AGENT_BROWSER_NAMESPACE");
 -        let unnamespaced = get_port_for_session("work");
--
+ 
 -        guard.set("AGENT_BROWSER_NAMESPACE", "Worktree: One");
 -        let namespaced_one = get_port_for_session("work");
 -
 -        guard.set("AGENT_BROWSER_NAMESPACE", "Worktree: Two");
 -        let namespaced_two = get_port_for_session("work");
- 
+-
 -        assert_ne!(namespaced_one, unnamespaced);
 -        assert_ne!(namespaced_two, unnamespaced);
 -        assert_ne!(namespaced_one, namespaced_two);
@@ -501,137 +434,31 @@ index 887dae5..137f08e 100644
 +        assert!(read_pipe_record("pipe-test").is_none());
 +        assert!(!recorded_daemon_alive("pipe-test"));
 +        let error = connect_pipe("pipe-test", Duration::ZERO).err().unwrap();
-+        assert!(error.contains("pipe file"), "{}", error);
++        // The test process has a session key only if its environment gave one.
++        let expected = if crate::session_key::session_key().is_some() {
++            "pipe file"
++        } else {
++            crate::session_key::ENV
++        };
++        assert!(error.contains(expected), "{}", error);
 +        assert!(daemon_unreachable(&error));
      }
  
      // === Daemon Version Mismatch Detection Tests ===
-diff --git a/cli/src/doctor/chrome.rs b/cli/src/doctor/chrome.rs
-index a862bc5..101388c 100644
---- a/cli/src/doctor/chrome.rs
-+++ b/cli/src/doctor/chrome.rs
-@@ -206,7 +206,7 @@ fn query_chrome_version(path: &Path) -> Option<String> {
- 
- #[cfg(not(windows))]
- fn query_chrome_version(path: &Path) -> Option<String> {
--    let mut cmd = std::process::Command::new(path);
-+    let mut cmd = crate::child_command::child_command(path);
-     cmd.arg("--version");
-     run_version_command(cmd, VERSION_QUERY_TIMEOUT)
- }
-diff --git a/cli/src/doctor/ffmpeg.rs b/cli/src/doctor/ffmpeg.rs
-index e7e726e..3f69db6 100644
---- a/cli/src/doctor/ffmpeg.rs
-+++ b/cli/src/doctor/ffmpeg.rs
-@@ -6,7 +6,7 @@
- //! feature that needs ffmpeg, so a machine without it is still healthy.
- 
- use std::path::{Path, PathBuf};
--use std::process::{Command, Stdio};
-+use std::process::Stdio;
- 
- use super::helpers::which_path;
- use super::{Check, Status};
-@@ -147,7 +147,7 @@ fn reinstall_hint(os: &str) -> String {
- 
- /// Run `binary` with `args`, returning stdout when it exits successfully.
- fn run_ffmpeg(binary: &Path, args: &[&str]) -> Option<String> {
--    let output = Command::new(binary)
-+    let output = crate::child_command::child_command(binary)
-         .args(args)
-         .stdin(Stdio::null())
-         .stderr(Stdio::null())
-diff --git a/cli/src/doctor/fix.rs b/cli/src/doctor/fix.rs
-index 233ff70..1e86448 100644
---- a/cli/src/doctor/fix.rs
-+++ b/cli/src/doctor/fix.rs
-@@ -78,7 +78,7 @@ fn attempt_chrome_install() -> bool {
-         Ok(p) => p,
-         Err(_) => return false,
-     };
--    std::process::Command::new(exe)
-+    crate::child_command::child_command(exe)
-         .arg("install")
-         .status()
-         .map(|s| s.success())
-diff --git a/cli/src/doctor/helpers.rs b/cli/src/doctor/helpers.rs
-index 1128461..5d11f62 100644
---- a/cli/src/doctor/helpers.rs
-+++ b/cli/src/doctor/helpers.rs
-@@ -69,7 +69,7 @@ pub(super) fn which_path(name: &str) -> Option<std::path::PathBuf> {
-     } else {
-         "which"
-     };
--    let output = std::process::Command::new(probe)
-+    let output = crate::child_command::child_command(probe)
-         .arg(name)
-         .stdin(std::process::Stdio::null())
-         .stderr(std::process::Stdio::null())
-diff --git a/cli/src/install.rs b/cli/src/install.rs
-index 6491351..92539f5 100644
---- a/cli/src/install.rs
-+++ b/cli/src/install.rs
-@@ -215,7 +215,7 @@ fn validate_macos_version(version: &str) -> Result<(), String> {
- 
- #[cfg(target_os = "macos")]
- fn check_macos_version() -> Result<(), String> {
--    let output = Command::new("sw_vers")
-+    let output = crate::child_command::child_command("sw_vers")
-         .arg("-productVersion")
-         .output()
-         .map_err(|e| {
-@@ -902,10 +902,10 @@ fn privileged_command(pkg_mgr: &str) -> io::Result<Command> {
- 
- fn privileged_command_with(is_root: bool, has_sudo: bool, pkg_mgr: &str) -> io::Result<Command> {
-     if is_root {
--        return Ok(Command::new(pkg_mgr));
-+        return Ok(crate::child_command::child_command(pkg_mgr));
-     }
-     if has_sudo {
--        let mut command = Command::new("sudo");
-+        let mut command = crate::child_command::child_command("sudo");
-         command.arg(pkg_mgr);
-         return Ok(command);
-     }
-@@ -918,7 +918,7 @@ fn privileged_command_with(is_root: bool, has_sudo: bool, pkg_mgr: &str) -> io::
- fn which_exists(cmd: &str) -> bool {
-     #[cfg(unix)]
-     {
--        Command::new("which")
-+        crate::child_command::child_command("which")
-             .arg(cmd)
-             .stdout(Stdio::null())
-             .stderr(Stdio::null())
-@@ -928,7 +928,7 @@ fn which_exists(cmd: &str) -> bool {
-     }
-     #[cfg(windows)]
-     {
--        Command::new("where")
-+        crate::child_command::child_command("where")
-             .arg(cmd)
-             .stdout(Stdio::null())
-             .stderr(Stdio::null())
-@@ -939,7 +939,7 @@ fn which_exists(cmd: &str) -> bool {
- }
- 
- fn package_exists_apt(pkg: &str) -> bool {
--    Command::new("apt-cache")
-+    crate::child_command::child_command("apt-cache")
-         .arg("show")
-         .arg(pkg)
-         .stdout(Stdio::null())
 diff --git a/cli/src/main.rs b/cli/src/main.rs
-index 67d6a1a..772d5b7 100644
+index 67d6a1a..b9e09c0 100644
 --- a/cli/src/main.rs
 +++ b/cli/src/main.rs
-@@ -1,5 +1,6 @@
- mod ca_bundle;
- mod chat;
-+mod child_command;
- mod color;
- mod commands;
- mod connection;
-@@ -18,6 +19,12 @@ mod test_utils;
+@@ -12,12 +12,21 @@ mod output;
+ mod plugins;
+ mod read;
+ mod session_files;
++#[cfg(any(windows, test))]
++#[cfg_attr(not(windows), allow(dead_code))]
++mod session_key;
+ mod skills;
+ #[cfg(test)]
+ mod test_utils;
  mod tls;
  mod upgrade;
  mod validation;
@@ -644,25 +471,7 @@ index 67d6a1a..772d5b7 100644
  
  use serde_json::json;
  use sha2::{Digest, Sha256};
-@@ -26,7 +33,7 @@ use std::fs;
- #[cfg(unix)]
- use std::io::Write;
- use std::path::PathBuf;
--use std::process::{exit, Command};
-+use std::process::exit;
- 
- #[cfg(windows)]
- use windows_sys::Win32::Foundation::CloseHandle;
-@@ -632,7 +639,7 @@ fn canonical_path(path: PathBuf) -> PathBuf {
- }
- 
- fn git_toplevel() -> Option<PathBuf> {
--    let output = Command::new("git")
-+    let output = crate::child_command::child_command("git")
-         .args(["rev-parse", "--show-toplevel"])
-         .output()
-         .ok()?;
-@@ -1436,6 +1443,14 @@ fn run_close_all(flags: &Flags) {
+@@ -1436,6 +1445,18 @@ fn run_close_all(flags: &Flags) {
  }
  
  fn main() {
@@ -673,11 +482,15 @@ index 67d6a1a..772d5b7 100644
 +        eprintln!("agent-browser: could not protect this process: {}", e);
 +        exit(1);
 +    }
++    // Then take the session key out of the environment, so only the children started
++    // hardened get it back (see session_key).
++    #[cfg(windows)]
++    session_key::take_from_env();
 +
      // Rust ignores SIGPIPE by default, causing println! to panic on broken pipes.
      // Reset to SIG_DFL so the OS terminates the process cleanly instead.
      #[cfg(unix)]
-@@ -1464,7 +1479,16 @@ fn main() {
+@@ -1464,7 +1485,16 @@ fn main() {
              eprintln!("{} {}", color::error_indicator(), msg);
              exit(1);
          }
@@ -718,180 +531,8 @@ index eecc1a7..72e251b 100644
      let mut child = command.spawn().map_err(|e| e.to_string())?;
  
      if let Some(body) = stdin_body {
-diff --git a/cli/src/native/actions.rs b/cli/src/native/actions.rs
-index 037cf27..268a4d0 100644
---- a/cli/src/native/actions.rs
-+++ b/cli/src/native/actions.rs
-@@ -6024,11 +6024,13 @@ async fn handle_inspect(state: &mut DaemonState) -> Result<Value, String> {
- 
- fn open_url_in_browser(url: &str) {
-     #[cfg(target_os = "macos")]
--    let result = std::process::Command::new("open").arg(url).spawn();
-+    let result = crate::child_command::child_command("open").arg(url).spawn();
-     #[cfg(target_os = "linux")]
--    let result = std::process::Command::new("xdg-open").arg(url).spawn();
-+    let result = crate::child_command::child_command("xdg-open")
-+        .arg(url)
-+        .spawn();
-     #[cfg(target_os = "windows")]
--    let result = std::process::Command::new("cmd")
-+    let result = crate::child_command::child_command("cmd")
-         .args(["/c", "start", "", url])
-         .spawn();
-     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-diff --git a/cli/src/native/cdp/chrome.rs b/cli/src/native/cdp/chrome.rs
-index e939b29..6cd2918 100644
---- a/cli/src/native/cdp/chrome.rs
-+++ b/cli/src/native/cdp/chrome.rs
-@@ -4,8 +4,10 @@ use std::io::{BufRead, BufReader, Write};
- #[cfg(target_os = "linux")]
- use std::os::unix::ffi::OsStrExt;
- use std::path::{Path, PathBuf};
-+#[cfg(all(test, unix))]
-+use std::process::Command;
- #[cfg(not(windows))]
--use std::process::{Child, Command, Stdio};
-+use std::process::{Child, Stdio};
- use std::sync::Arc;
- use std::time::Duration;
- 
-@@ -254,7 +256,7 @@ fn maybe_start_xvfb(options: &LaunchOptions) -> Option<XvfbServer> {
-     let mut read_end = unsafe { std::fs::File::from_raw_fd(fds[0]) };
-     let write_end = unsafe { std::fs::File::from_raw_fd(fds[1]) };
- 
--    let mut child = match Command::new("Xvfb")
-+    let mut child = match crate::child_command::child_command("Xvfb")
-         .args([
-             "-displayfd",
-             &fds[1].to_string(),
-@@ -688,7 +690,7 @@ fn resolve_prepared_nss_home(options: &LaunchOptions) -> Result<Option<PreparedN
- 
- #[cfg(target_os = "linux")]
- fn run_certutil(args: &[&str], action: &str) -> Result<(), String> {
--    let output = Command::new("certutil").args(args).output().map_err(|e| {
-+    let output = crate::child_command::child_command("certutil").args(args).output().map_err(|e| {
-         format!(
-             "Failed to {action}: could not run certutil ({e}). Run agent-browser install --with-deps, or install libnss3-tools on Debian/Ubuntu or nss-tools on RPM Linux."
-         )
-@@ -832,7 +834,7 @@ fn try_launch_chrome(chrome_path: &Path, options: &LaunchOptions) -> Result<Chro
-     let xvfb = maybe_start_xvfb(options);
- 
-     #[cfg(not(windows))]
--    let mut cmd = Command::new(chrome_path);
-+    let mut cmd = crate::child_command::child_command(chrome_path);
-     #[cfg(not(windows))]
-     cmd.args(&args)
-         .stdin(Stdio::null())
-@@ -1106,7 +1108,10 @@ pub fn find_chrome() -> Option<PathBuf> {
-             "brave-browser-stable",
-         ];
-         for name in &candidates {
--            if let Ok(output) = Command::new("which").arg(name).output() {
-+            if let Ok(output) = crate::child_command::child_command("which")
-+                .arg(name)
-+                .output()
-+            {
-                 if output.status.success() {
-                     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                     if !path.is_empty() {
-diff --git a/cli/src/native/cdp/lightpanda.rs b/cli/src/native/cdp/lightpanda.rs
-index c8c6f9b..4f6e4d5 100644
---- a/cli/src/native/cdp/lightpanda.rs
-+++ b/cli/src/native/cdp/lightpanda.rs
-@@ -2,7 +2,9 @@ use std::collections::VecDeque;
- use std::io::{BufRead, BufReader};
- use std::net::TcpListener;
- use std::path::PathBuf;
--use std::process::{Child, Command, Stdio};
-+#[cfg(all(test, unix))]
-+use std::process::Command;
-+use std::process::{Child, Stdio};
- use std::sync::{Arc, Mutex};
- use std::time::Duration;
- 
-@@ -101,7 +103,10 @@ fn push_bounded(buffer: &Mutex<VecDeque<String>>, line: String) {
- pub fn find_lightpanda() -> Option<PathBuf> {
-     #[cfg(unix)]
-     {
--        if let Ok(output) = Command::new("which").arg("lightpanda").output() {
-+        if let Ok(output) = crate::child_command::child_command("which")
-+            .arg("lightpanda")
-+            .output()
-+        {
-             if output.status.success() {
-                 let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                 if !path.is_empty() {
-@@ -113,7 +118,10 @@ pub fn find_lightpanda() -> Option<PathBuf> {
- 
-     #[cfg(windows)]
-     {
--        if let Ok(output) = Command::new("where").arg("lightpanda").output() {
-+        if let Ok(output) = crate::child_command::child_command("where")
-+            .arg("lightpanda")
-+            .output()
-+        {
-             if output.status.success() {
-                 let path = String::from_utf8_lossy(&output.stdout)
-                     .lines()
-@@ -162,7 +170,7 @@ pub async fn launch_lightpanda(
-     };
-     let args = build_lightpanda_serve_args(port, options.proxy.as_deref());
- 
--    let mut child = Command::new(&binary_path)
-+    let mut child = crate::child_command::child_command(&binary_path)
-         .args(&args)
-         .stdin(Stdio::null())
-         .stdout(Stdio::piped())
-diff --git a/cli/src/native/cdp/obscura.rs b/cli/src/native/cdp/obscura.rs
-index 2b7425e..0a64a12 100644
---- a/cli/src/native/cdp/obscura.rs
-+++ b/cli/src/native/cdp/obscura.rs
-@@ -2,7 +2,9 @@ use std::collections::VecDeque;
- use std::io::{BufRead, BufReader};
- use std::net::TcpListener;
- use std::path::PathBuf;
--use std::process::{Child, Command, Stdio};
-+#[cfg(all(test, unix))]
-+use std::process::Command;
-+use std::process::{Child, Stdio};
- use std::sync::{Arc, Mutex};
- use std::time::Duration;
- 
-@@ -136,7 +138,10 @@ fn push_bounded(buffer: &Mutex<VecDeque<String>>, line: String) {
- pub fn find_obscura() -> Option<PathBuf> {
-     #[cfg(unix)]
-     {
--        if let Ok(output) = Command::new("which").arg("obscura").output() {
-+        if let Ok(output) = crate::child_command::child_command("which")
-+            .arg("obscura")
-+            .output()
-+        {
-             if output.status.success() {
-                 let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                 if !path.is_empty() {
-@@ -148,7 +153,10 @@ pub fn find_obscura() -> Option<PathBuf> {
- 
-     #[cfg(windows)]
-     {
--        if let Ok(output) = Command::new("where").arg("obscura").output() {
-+        if let Ok(output) = crate::child_command::child_command("where")
-+            .arg("obscura")
-+            .output()
-+        {
-             if output.status.success() {
-                 let path = String::from_utf8_lossy(&output.stdout)
-                     .lines()
-@@ -196,7 +204,7 @@ pub async fn launch_obscura(options: &ObscuraLaunchOptions) -> Result<ObscuraPro
-     };
-     let args = build_obscura_serve_args(port, options.proxy.as_deref(), options.stealth);
- 
--    let mut child = Command::new(&binary_path)
-+    let mut child = crate::child_command::child_command(&binary_path)
-         .args(&args)
-         .stdin(Stdio::null())
-         .stdout(Stdio::piped())
 diff --git a/cli/src/native/daemon.rs b/cli/src/native/daemon.rs
-index 4fb9666..98ac631 100644
+index 4fb9666..3cf8b0d 100644
 --- a/cli/src/native/daemon.rs
 +++ b/cli/src/native/daemon.rs
 @@ -76,8 +76,8 @@ pub async fn run_daemon(session: &str) {
@@ -914,7 +555,7 @@ index 4fb9666..98ac631 100644
      }
  
      let stream_path = SessionFile::Stream.path_in(&socket_dir, session);
-@@ -359,27 +359,23 @@ async fn run_socket_server(
+@@ -359,27 +359,28 @@ async fn run_socket_server(
      idle_timeout: Option<IdleTimeout>,
      autosave_interval_ms: u64,
  ) -> Result<(), String> {
@@ -939,22 +580,27 @@ index 4fb9666..98ac631 100644
 +    // A named pipe with a fresh random name, a user-and-SYSTEM DACL and a peer
 +    // check on every client (see windows_pipe). Clients learn the name only from
 +    // the .pipe file in the socket directory, which also records this process's
-+    // pid and creation time so they can check who serves the pipe.
++    // pid and creation time so they can check who serves the pipe, with the
++    // record's MAC.
++    // Every client must prove the session key first (see session_key).
++    let key = crate::session_key::session_key()
++        .cloned()
++        .ok_or_else(crate::session_key::no_key_error)?;
 +    let pipe_id = new_pipe_id().map_err(|e| format!("Failed to bind pipe: {}", e))?;
-+    let mut listener =
-+        PipeListener::bind(&pipe_id).map_err(|e| format!("Failed to bind pipe: {}", e))?;
++    let mut listener = PipeListener::bind(&pipe_id, session, key.clone())
++        .map_err(|e| format!("Failed to bind pipe: {}", e))?;
  
      let socket_dir = socket_path.parent().unwrap_or(std::path::Path::new("."));
 -    let port_path = SessionFile::Port.path_in(socket_dir, session);
 -    let _ = fs::write(&port_path, actual_port.to_string());
 +    let pipe_path = SessionFile::Pipe.path_in(socket_dir, session);
 +    PipeRecord::for_this_process(&pipe_id)
-+        .and_then(|record| write_pipe_record(&pipe_path, &record))
++        .and_then(|record| write_pipe_record(&pipe_path, &record, session, &key))
 +        .map_err(|e| format!("Failed to write the pipe file: {}", e))?;
  
      let state: std::sync::Arc<tokio::sync::Mutex<DaemonState>> =
          std::sync::Arc::new(tokio::sync::Mutex::new(DaemonState::new_with_stream(
-@@ -405,7 +401,7 @@ async fn run_socket_server(
+@@ -405,7 +406,7 @@ async fn run_socket_server(
          tokio::select! {
              accept_result = listener.accept() => {
                  match accept_result {
@@ -963,7 +609,7 @@ index 4fb9666..98ac631 100644
                          let state = state.clone();
                          let idle_activity = idle_activity.clone();
                          let close = close.clone();
-@@ -415,6 +411,8 @@ async fn run_socket_server(
+@@ -415,6 +416,8 @@ async fn run_socket_server(
                      }
                      Err(e) => {
                          let _ = writeln!(std::io::stderr(), "Accept error: {}", e);
@@ -972,7 +618,7 @@ index 4fb9666..98ac631 100644
                      }
                  }
              }
-@@ -718,11 +716,6 @@ fn get_daemon_socket_dir() -> PathBuf {
+@@ -718,11 +721,6 @@ fn get_daemon_socket_dir() -> PathBuf {
      crate::connection::get_socket_dir()
  }
  
@@ -984,7 +630,7 @@ index 4fb9666..98ac631 100644
  #[cfg(test)]
  mod tests {
      #[allow(unused_imports)]
-@@ -815,18 +808,6 @@ mod tests {
+@@ -815,18 +813,6 @@ mod tests {
          ));
      }
  
@@ -1003,41 +649,6 @@ index 4fb9666..98ac631 100644
      #[test]
      fn test_close_completed_response_requires_actual_close_result() {
          let confirmation_response = serde_json::json!({
-diff --git a/cli/src/native/providers.rs b/cli/src/native/providers.rs
-index aeff240..d10524d 100644
---- a/cli/src/native/providers.rs
-+++ b/cli/src/native/providers.rs
-@@ -786,7 +786,7 @@ mod agentcore {
-         }
- 
-         // Fall back to AWS CLI
--        let mut cmd = std::process::Command::new("aws");
-+        let mut cmd = crate::child_command::child_command("aws");
-         cmd.args(["configure", "export-credentials", "--format", "env"]);
- 
-         // Honor AWS_PROFILE
-diff --git a/cli/src/native/recording.rs b/cli/src/native/recording.rs
-index 0ff4b38..10f3545 100644
---- a/cli/src/native/recording.rs
-+++ b/cli/src/native/recording.rs
-@@ -696,7 +696,7 @@ pub fn recording_stop(state: &mut RecordingState) -> Result<Value, String> {
- }
- 
- fn build_ffmpeg_command(output_path: &str, fps: u32, cursor: bool) -> tokio::process::Command {
--    let mut cmd = tokio::process::Command::new("ffmpeg");
-+    let mut cmd = tokio::process::Command::from(crate::child_command::child_command("ffmpeg"));
-     let high_fps = fps > HIGH_FPS_THRESHOLD;
- 
-     // -hide_banner keeps the version and build banner out of stderr, so a
-@@ -1366,7 +1366,7 @@ fn ffmpeg_launch_error(error: impl std::fmt::Display) -> String {
- /// This keeps missing-binary failures ahead of browser attachment while the
- /// real encoder process is deferred until that attachment succeeds.
- pub async fn check_ffmpeg_available() -> Result<(), String> {
--    let status = tokio::process::Command::new("ffmpeg")
-+    let status = tokio::process::Command::from(crate::child_command::child_command("ffmpeg"))
-         .arg("-version")
-         .stdin(Stdio::null())
-         .stdout(Stdio::null())
 diff --git a/cli/src/native/stream/http.rs b/cli/src/native/stream/http.rs
 index b428183..bb08f8d 100644
 --- a/cli/src/native/stream/http.rs
@@ -1125,127 +736,6 @@ index 52dc255..8d363ab 100644
      format!("{} is disabled (AGENT_BROWSER_STREAM_DISABLED=1)", what)
  }
  
-diff --git a/cli/src/native/webdriver/appium.rs b/cli/src/native/webdriver/appium.rs
-index 3d85a5e..e466ff3 100644
---- a/cli/src/native/webdriver/appium.rs
-+++ b/cli/src/native/webdriver/appium.rs
-@@ -1,5 +1,5 @@
- use serde_json::{json, Value};
--use std::process::{Child, Command, Stdio};
-+use std::process::{Child, Stdio};
- use std::time::Duration;
- 
- use super::client::WebDriverClient;
-@@ -165,7 +165,7 @@ async fn is_appium_running(port: u16) -> bool {
- 
- fn launch_appium(port: u16) -> Result<Child, String> {
-     // Try npx appium first, then direct appium
--    let result = Command::new("npx")
-+    let result = crate::child_command::child_command("npx")
-         .args(["appium", "--relaxed-security", "--port", &port.to_string()])
-         .stdin(Stdio::null())
-         .stdout(Stdio::piped())
-@@ -174,7 +174,7 @@ fn launch_appium(port: u16) -> Result<Child, String> {
- 
-     match result {
-         Ok(child) => Ok(child),
--        Err(_) => Command::new("appium")
-+        Err(_) => crate::child_command::child_command("appium")
-             .args(["--relaxed-security", "--port", &port.to_string()])
-             .stdin(Stdio::null())
-             .stdout(Stdio::piped())
-diff --git a/cli/src/native/webdriver/ios.rs b/cli/src/native/webdriver/ios.rs
-index 2637938..92534d2 100644
---- a/cli/src/native/webdriver/ios.rs
-+++ b/cli/src/native/webdriver/ios.rs
-@@ -1,5 +1,4 @@
- use serde_json::{json, Value};
--use std::process::Command;
- 
- #[derive(Debug, Clone)]
- pub struct IosDevice {
-@@ -11,7 +10,7 @@ pub struct IosDevice {
- }
- 
- pub fn list_simulators() -> Result<Vec<IosDevice>, String> {
--    let output = Command::new("xcrun")
-+    let output = crate::child_command::child_command("xcrun")
-         .args(["simctl", "list", "devices", "--json"])
-         .output()
-         .map_err(|e| format!("Failed to run xcrun simctl: {}", e))?;
-@@ -59,7 +58,7 @@ pub fn list_simulators() -> Result<Vec<IosDevice>, String> {
- }
- 
- pub fn list_real_devices() -> Result<Vec<IosDevice>, String> {
--    let output = Command::new("xcrun")
-+    let output = crate::child_command::child_command("xcrun")
-         .args(["xctrace", "list", "devices"])
-         .output()
-         .map_err(|e| format!("Failed to run xcrun xctrace: {}", e))?;
-@@ -117,7 +116,7 @@ pub fn list_all_devices() -> Result<Vec<IosDevice>, String> {
- }
- 
- pub fn boot_simulator(udid: &str) -> Result<(), String> {
--    let output = Command::new("xcrun")
-+    let output = crate::child_command::child_command("xcrun")
-         .args(["simctl", "boot", udid])
-         .output()
-         .map_err(|e| format!("Failed to boot simulator: {}", e))?;
-@@ -133,7 +132,7 @@ pub fn boot_simulator(udid: &str) -> Result<(), String> {
- }
- 
- pub fn shutdown_simulator(udid: &str) -> Result<(), String> {
--    let output = Command::new("xcrun")
-+    let output = crate::child_command::child_command("xcrun")
-         .args(["simctl", "shutdown", udid])
-         .output()
-         .map_err(|e| format!("Failed to shutdown simulator: {}", e))?;
-diff --git a/cli/src/native/webdriver/safari.rs b/cli/src/native/webdriver/safari.rs
-index a6e489b..e8376ec 100644
---- a/cli/src/native/webdriver/safari.rs
-+++ b/cli/src/native/webdriver/safari.rs
-@@ -1,5 +1,5 @@
- use std::path::PathBuf;
--use std::process::{Child, Command, Stdio};
-+use std::process::{Child, Stdio};
- use std::time::Duration;
- 
- pub struct SafariDriverProcess {
-@@ -31,7 +31,10 @@ pub fn find_safaridriver() -> Option<PathBuf> {
-     }
- 
-     // Try PATH
--    if let Ok(output) = Command::new("which").arg("safaridriver").output() {
-+    if let Ok(output) = crate::child_command::child_command("which")
-+        .arg("safaridriver")
-+        .output()
-+    {
-         if output.status.success() {
-             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-             if !path.is_empty() {
-@@ -47,7 +50,7 @@ pub fn launch_safaridriver(port: u16) -> Result<SafariDriverProcess, String> {
-     let driver_path = find_safaridriver()
-         .ok_or("safaridriver not found. Safari WebDriver requires macOS with Safari.")?;
- 
--    let child = Command::new(&driver_path)
-+    let child = crate::child_command::child_command(&driver_path)
-         .arg("--port")
-         .arg(port.to_string())
-         .stdin(Stdio::null())
-diff --git a/cli/src/plugins.rs b/cli/src/plugins.rs
-index b70ea02..29119d8 100644
---- a/cli/src/plugins.rs
-+++ b/cli/src/plugins.rs
-@@ -204,7 +204,8 @@ async fn invoke_plugin_process(
-     timeout_secs: u64,
-     expose_plugin_error: bool,
- ) -> Result<serde_json::Value, String> {
--    let mut command = tokio::process::Command::new(&plugin.command);
-+    let mut command =
-+        tokio::process::Command::from(crate::child_command::child_command(&plugin.command));
-     command
-         .args(&plugin.args)
-         .stdin(Stdio::piped())
 diff --git a/cli/src/session_files.rs b/cli/src/session_files.rs
 index 18129f6..25e8d4a 100644
 --- a/cli/src/session_files.rs
@@ -1288,58 +778,365 @@ index 18129f6..25e8d4a 100644
              | SessionFile::Pid
              | SessionFile::Version
              | SessionFile::Config
-diff --git a/cli/src/upgrade.rs b/cli/src/upgrade.rs
-index c73843c..10b46d6 100644
---- a/cli/src/upgrade.rs
-+++ b/cli/src/upgrade.rs
-@@ -1,6 +1,6 @@
- use crate::color;
- use std::path::Path;
--use std::process::{exit, Command, Stdio};
-+use std::process::{exit, Stdio};
- 
- const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
- const NPM_REGISTRY_URL: &str = "https://registry.npmjs.org/agent-browser/latest";
-@@ -126,7 +126,7 @@ fn detect_install_method() -> InstallMethod {
- }
- 
- fn command_succeeds(cmd: &str, args: &[&str]) -> bool {
--    Command::new(cmd)
-+    crate::child_command::child_command(cmd)
-         .args(args)
-         .stdout(Stdio::null())
-         .stderr(Stdio::null())
-@@ -136,7 +136,7 @@ fn command_succeeds(cmd: &str, args: &[&str]) -> bool {
- }
- 
- fn command_output_contains(cmd: &str, args: &[&str], needle: &str) -> bool {
--    Command::new(cmd)
-+    crate::child_command::child_command(cmd)
-         .args(args)
-         .stderr(Stdio::null())
-         .output()
-@@ -182,7 +182,7 @@ fn run_upgrade_command(method: &InstallMethod) -> bool {
-     };
- 
-     println!("Running: {}", display);
--    Command::new(cmd)
-+    crate::child_command::child_command(cmd)
-         .args(args)
-         .status()
-         .map(|s| s.success())
+diff --git a/cli/src/session_key.rs b/cli/src/session_key.rs
+new file mode 100644
+index 0000000..4bd2c9f
+--- /dev/null
++++ b/cli/src/session_key.rs
+@@ -0,0 +1,339 @@
++//! The session key on Windows, which keeps every process without it off the daemon's pipe.
++//!
++//! The pipe's DACL lets in any process of the user, and its peer check refuses only restricted
++//! tokens, so an unsandboxed process of the same user could still send the daemon raw commands.
++//! The launcher (Clauseo's browser guard) therefore draws 32 random bytes per session and passes
++//! them in `AGENT_BROWSER_SESSION_KEY`, as 64 lowercase hex characters. Only the hardened
++//! processes hold the key:
++//!
++//! - `main` takes it out of this process's environment first thing ([`take_from_env`]), so no
++//!   child that std starts inherits it;
++//! - `spawn_hardened` puts it back for its children alone (the daemon, the MCP server's CLI
++//!   runs), each protected from creation;
++//! - it is never written to a file, put on a command line or printed.
++//!
++//! Each side proves the key without sending it. Every connection starts with this exchange,
++//! before any command ([`client_handshake`], [`server_handshake`]):
++//!
++//! 1. client: a fresh 32-byte nonce `c`;
++//! 2. daemon: a fresh nonce `s` and `HMAC-SHA256(key, "daemon" | session | c | s)`;
++//! 3. client: checks it (constant time), refusing a daemon of another session or key, then
++//!    sends `HMAC-SHA256(key, "client" | session | c | s)`;
++//! 4. daemon: checks it (constant time) and answers one byte; a client that fails is
++//!    disconnected before anything else is written.
++//!
++//! The daemon's `<session>.pipe` record carries `HMAC-SHA256(key, "record" | session | record)`
++//! too ([`record_mac`]): a record written without the key is ignored, so it can neither route a
++//! client nor pass for a live daemon.
++
++use std::fmt;
++use std::io::{self, Read, Write};
++use std::sync::OnceLock;
++use std::time::Duration;
++
++use hmac::{Hmac, Mac};
++use sha2::Sha256;
++
++/// The variable the launcher passes the key in.
++pub const ENV: &str = "AGENT_BROWSER_SESSION_KEY";
++
++const KEY_LEN: usize = 32;
++const NONCE_LEN: usize = 32;
++const MAC_LEN: usize = 32;
++/// The daemon's last byte of the exchange: the client is accepted.
++const ACCEPTED: u8 = 0x2b;
++/// How long either side waits for the other during the exchange.
++pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
++
++/// Which proof a MAC is: the roles differ so that one can never stand in for another.
++const DAEMON: &[u8] = b"agent-browser pipe daemon v1";
++const CLIENT: &[u8] = b"agent-browser pipe client v1";
++const RECORD: &[u8] = b"agent-browser pipe record v1";
++
++type HmacSha256 = Hmac<Sha256>;
++
++/// The session's 32-byte key. Its Debug output shows nothing of it.
++#[derive(Clone, PartialEq, Eq)]
++pub struct SessionKey([u8; KEY_LEN]);
++
++impl fmt::Debug for SessionKey {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str("SessionKey(..)")
++    }
++}
++
++impl SessionKey {
++    /// Exactly 64 lowercase hex characters; anything else is None.
++    pub fn parse(text: &str) -> Option<Self> {
++        let text = text.as_bytes();
++        if text.len() != KEY_LEN * 2 {
++            return None;
++        }
++        let mut key = [0u8; KEY_LEN];
++        for (byte, [high, low]) in key.iter_mut().zip(text.as_chunks::<2>().0) {
++            *byte = (nibble(*high)? << 4) | nibble(*low)?;
++        }
++        Some(Self(key))
++    }
++
++    /// The form [`parse`](Self::parse) reads, for a hardened child's environment only.
++    pub fn to_hex(&self) -> String {
++        hex::encode(self.0)
++    }
++
++    /// The MAC for `role` over the session name and the parts, each part length-prefixed so
++    /// that no two different inputs give the same message.
++    fn mac(&self, role: &[u8], session: &str, parts: &[&[u8]]) -> HmacSha256 {
++        let mut mac = HmacSha256::new_from_slice(&self.0).expect("HMAC takes any key length");
++        for part in [role, session.as_bytes()].iter().chain(parts) {
++            mac.update(&(part.len() as u64).to_be_bytes());
++            mac.update(part);
++        }
++        mac
++    }
++}
++
++fn nibble(c: u8) -> Option<u8> {
++    match c {
++        b'0'..=b'9' => Some(c - b'0'),
++        b'a'..=b'f' => Some(c - b'a' + 10),
++        _ => None,
++    }
++}
++
++static KEY: OnceLock<Option<SessionKey>> = OnceLock::new();
++
++/// Reads the key from the environment and removes the variable from this process's
++/// environment, so no child started without `spawn_hardened` inherits it. Called first thing
++/// in `main`, while the process has one thread. An invalid value counts as no key.
++pub fn take_from_env() {
++    let _ = KEY.set(take(ENV));
++}
++
++/// The key in variable `name`, which is removed from this process's environment.
++fn take(name: &str) -> Option<SessionKey> {
++    let key = std::env::var(name).ok().and_then(|v| SessionKey::parse(&v));
++    std::env::remove_var(name);
++    key
++}
++
++/// This process's key, if it was given a valid one.
++pub fn session_key() -> Option<&'static SessionKey> {
++    KEY.get_or_init(|| std::env::var(ENV).ok().and_then(|v| SessionKey::parse(&v)))
++        .as_ref()
++}
++
++/// The error for a process with no key.
++pub fn no_key_error() -> String {
++    format!(
++        "{ENV} is not set or not 64 lowercase hex characters; on Windows this build talks only \
++         to a daemon started with its session's key"
++    )
++}
++
++fn refused(why: &str) -> io::Error {
++    io::Error::new(io::ErrorKind::PermissionDenied, why.to_string())
++}
++
++fn nonce() -> io::Result<[u8; NONCE_LEN]> {
++    let mut nonce = [0u8; NONCE_LEN];
++    getrandom::getrandom(&mut nonce).map_err(|e| io::Error::other(e.to_string()))?;
++    Ok(nonce)
++}
++
++/// The MAC the daemon puts in its `<session>.pipe` record over the record's text `fields`.
++pub fn record_mac(key: &SessionKey, session: &str, fields: &str) -> String {
++    hex::encode(
++        key.mac(RECORD, session, &[fields.as_bytes()])
++            .finalize()
++            .into_bytes(),
++    )
++}
++
++/// Whether `mac` (hex) is [`record_mac`] of `fields`, compared in constant time.
++pub fn record_mac_matches(key: &SessionKey, session: &str, fields: &str, mac: &str) -> bool {
++    let Ok(mac) = hex::decode(mac) else {
++        return false;
++    };
++    key.mac(RECORD, session, &[fields.as_bytes()])
++        .verify_slice(&mac)
++        .is_ok()
++}
++
++/// The client's side of the exchange, on a stream whose reads and writes time out. Fails, as
++/// PermissionDenied, when the daemon does not prove the key or does not accept ours.
++pub fn client_handshake(
++    stream: &mut (impl Read + Write),
++    key: &SessionKey,
++    session: &str,
++) -> io::Result<()> {
++    let client = nonce()?;
++    stream.write_all(&client)?;
++    let mut reply = [0u8; NONCE_LEN + MAC_LEN];
++    stream
++        .read_exact(&mut reply)
++        .map_err(|_| refused("the pipe's server ended the session key exchange"))?;
++    let (server, proof) = reply.split_at(NONCE_LEN);
++    key.mac(DAEMON, session, &[&client, server])
++        .verify_slice(proof)
++        .map_err(|_| refused("the pipe's server does not hold this session's key"))?;
++    let ours = key.mac(CLIENT, session, &[&client, server]).finalize();
++    stream.write_all(&ours.into_bytes())?;
++    let mut answer = [0u8; 1];
++    match stream.read_exact(&mut answer) {
++        Ok(()) if answer[0] == ACCEPTED => Ok(()),
++        _ => Err(refused("the daemon refused this client's session key")),
++    }
++}
++
++/// The daemon's side of the exchange. Fails, as PermissionDenied, when the client does not
++/// prove the key; the caller then disconnects it without writing anything else.
++pub async fn server_handshake<S>(stream: &mut S, key: &SessionKey, session: &str) -> io::Result<()>
++where
++    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
++{
++    use tokio::io::{AsyncReadExt, AsyncWriteExt};
++    let mut client = [0u8; NONCE_LEN];
++    stream.read_exact(&mut client).await?;
++    let server = nonce()?;
++    let proof = key.mac(DAEMON, session, &[&client, &server]).finalize();
++    let mut reply = Vec::with_capacity(NONCE_LEN + MAC_LEN);
++    reply.extend_from_slice(&server);
++    reply.extend_from_slice(&proof.into_bytes());
++    stream.write_all(&reply).await?;
++    let mut theirs = [0u8; MAC_LEN];
++    stream.read_exact(&mut theirs).await?;
++    key.mac(CLIENT, session, &[&client, &server])
++        .verify_slice(&theirs)
++        .map_err(|_| refused("the client does not hold this session's key"))?;
++    stream.write_all(&[ACCEPTED]).await
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const HEX: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
++
++    fn key(hex: &str) -> SessionKey {
++        SessionKey::parse(hex).unwrap()
++    }
++
++    #[test]
++    fn only_64_lowercase_hex_characters_make_a_key() {
++        assert_eq!(key(HEX).to_hex(), HEX);
++        for bad in [
++            "",
++            &HEX[1..],
++            &format!("{HEX}0"),
++            &HEX.to_uppercase(),
++            &HEX.replace('0', "g"),
++            &HEX.replace("00", "é"),
++        ] {
++            assert!(SessionKey::parse(bad).is_none(), "{bad:?}");
++        }
++        assert_eq!(format!("{:?}", key(HEX)), "SessionKey(..)");
++    }
++
++    #[test]
++    fn the_record_mac_binds_the_key_the_session_and_the_fields() {
++        let k = key(HEX);
++        let other = key(&HEX.replace('f', "e"));
++        let mac = record_mac(&k, "s", "a 1 2");
++        assert!(record_mac_matches(&k, "s", "a 1 2", &mac));
++        assert!(!record_mac_matches(&other, "s", "a 1 2", &mac));
++        assert!(!record_mac_matches(&k, "t", "a 1 2", &mac));
++        assert!(!record_mac_matches(&k, "s", "a 1 3", &mac));
++        assert!(!record_mac_matches(&k, "s", "a 1 2", "zz"));
++        assert!(!record_mac_matches(&k, "s", "a 1 2", &mac[..62]));
++    }
++
++    /// Runs both sides over a socket pair: the daemon's with `daemon`, the client's with
++    /// `client` (None: a client that sends a command at once, as one without the key would).
++    #[cfg(unix)]
++    fn exchange(
++        daemon: (&SessionKey, &str),
++        client: Option<(&SessionKey, &str)>,
++    ) -> (io::Result<()>, io::Result<()>) {
++        let (ours, theirs) = std::os::unix::net::UnixStream::pair().unwrap();
++        for stream in [&ours, &theirs] {
++            stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).unwrap();
++        }
++        theirs.set_nonblocking(true).unwrap();
++        let (key, session) = (daemon.0.clone(), daemon.1.to_string());
++        let server = std::thread::spawn(move || {
++            let runtime = tokio::runtime::Builder::new_current_thread()
++                .enable_all()
++                .build()
++                .unwrap();
++            runtime.block_on(async move {
++                let mut stream = tokio::net::UnixStream::from_std(theirs).unwrap();
++                let result = tokio::time::timeout(
++                    HANDSHAKE_TIMEOUT,
++                    server_handshake(&mut stream, &key, &session),
++                )
++                .await
++                .unwrap_or_else(|_| Err(io::ErrorKind::TimedOut.into()));
++                drop(stream);
++                result
++            })
++        });
++        let mut ours = ours;
++        let client = match client {
++            Some((key, session)) => client_handshake(&mut ours, key, session),
++            None => {
++                ours.write_all(b"{\"id\":\"1\",\"action\":\"evaluate\",\"script\":\"1\"}\n")
++                    .unwrap();
++                ours.shutdown(std::net::Shutdown::Write).unwrap();
++                let mut rest = Vec::new();
++                let _ = ours.read_to_end(&mut rest);
++                Err(io::Error::other(format!("{} bytes back", rest.len())))
++            }
++        };
++        drop(ours);
++        (server.join().unwrap(), client)
++    }
++
++    #[cfg(unix)]
++    #[test]
++    fn the_right_key_passes_both_ways() {
++        let k = key(HEX);
++        let (daemon, client) = exchange((&k, "s"), Some((&k, "s")));
++        daemon.expect("the daemon accepts");
++        client.expect("the client accepts");
++    }
++
++    #[cfg(unix)]
++    #[test]
++    fn a_wrong_key_or_session_is_refused_by_the_client_first() {
++        let k = key(HEX);
++        let other = key(&HEX.replace('a', "b"));
++        for client in [(&other, "s"), (&k, "t")] {
++            let (daemon, client) = exchange((&k, "s"), Some(client));
++            assert_eq!(client.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
++            assert!(daemon.is_err(), "the daemon must not accept");
++        }
++    }
++
++    #[cfg(unix)]
++    #[test]
++    fn a_client_without_the_key_gets_no_reply_but_the_challenge() {
++        let k = key(HEX);
++        let (daemon, client) = exchange((&k, "s"), None);
++        assert!(daemon.is_err(), "the daemon must not accept");
++        // The daemon's nonce and proof only (64 bytes): never a command's reply.
++        assert_eq!(client.unwrap_err().to_string(), "64 bytes back");
++    }
++
++    #[test]
++    fn taking_the_key_removes_the_variable() {
++        // A name of this test's own: the process's key stays unset for the other tests.
++        const NAME: &str = "AB_SESSION_KEY_TAKE_TEST";
++        std::env::set_var(NAME, HEX);
++        assert_eq!(take(NAME), Some(key(HEX)));
++        assert!(std::env::var_os(NAME).is_none());
++        std::env::set_var(NAME, HEX.to_uppercase());
++        assert_eq!(take(NAME), None);
++        assert!(std::env::var_os(NAME).is_none());
++    }
++}
 diff --git a/cli/src/windows_pipe.rs b/cli/src/windows_pipe.rs
 new file mode 100644
-index 0000000..7aad1d0
+index 0000000..9709385
 --- /dev/null
 +++ b/cli/src/windows_pipe.rs
-@@ -0,0 +1,426 @@
+@@ -0,0 +1,501 @@
 +//! The daemon's named pipe on Windows, which replaces loopback TCP.
 +//!
 +//! A loopback port can be reached by any local process, a sandboxed one included. The pipe is
 +//! `\\.\pipe\clauseo-ab-<id>`, `<id>` being 128 random bits the daemon draws at start and
-+//! writes to `<session>.pipe` in the socket directory with its own pid and creation time; that
-+//! file is the only way a client learns the name (never a command-line argument). Four checks
-+//! stand behind the name:
++//! writes to `<session>.pipe` in the socket directory with its own pid and creation time and a
++//! MAC with the session key (`session_key`); that file is the only way a client learns the name
++//! (never a command-line argument), and a record without a valid MAC is ignored. The name is
++//! no secret: any process can list pipes. What stands behind it:
 +//!
 +//! - the first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE, so the daemon fails
 +//!   rather than join a pipe someone else created first;
@@ -1351,8 +1148,10 @@ index 0000000..7aad1d0
 +//!   restricted);
 +//! - the client checks that the pipe's server is the recorded daemon (pid and creation time, so
 +//!   a reused pid fails), runs this executable and has an unrestricted token, and connects at
-+//!   identification level only, so a pipe squatter can neither pose as the daemon nor
-+//!   impersonate the client.
++//!   identification level only, so a pipe squatter cannot impersonate the client;
++//! - then both sides prove the session key (`session_key::client_handshake` and
++//!   `server_handshake`) before the first command: the daemon serves no client without the
++//!   key, and the client talks to no daemon of another session or key.
 +
 +use std::ffi::c_void;
 +use std::io::{self, Read, Write};
@@ -1378,6 +1177,10 @@ index 0000000..7aad1d0
 +use windows_sys::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
 +use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 +
++use crate::session_key::{
++    client_handshake, record_mac, record_mac_matches, server_handshake, SessionKey,
++    HANDSHAKE_TIMEOUT,
++};
 +use crate::windows_security::{
 +    pipe_descriptor, process_creation_time, process_image, process_token_is_restricted, raw,
 +    same_executable, to_wide, SecurityDescriptor,
@@ -1406,7 +1209,8 @@ index 0000000..7aad1d0
 +    format!("{PIPE_PREFIX}{id}")
 +}
 +
-+/// What `<session>.pipe` holds: the pipe id, and the daemon serving it (pid and creation time).
++/// What `<session>.pipe` holds: the pipe id, and the daemon serving it (pid and creation time),
++/// followed in the file by the record's MAC with the session key.
 +#[derive(Debug, Clone, PartialEq, Eq)]
 +pub struct PipeRecord {
 +    pub id: String,
@@ -1425,31 +1229,45 @@ index 0000000..7aad1d0
 +        })
 +    }
 +
-+    /// `<id> <pid> <created>`; anything else, or an id `new_pipe_id` would not make, is None.
-+    fn parse(text: &str) -> Option<Self> {
++    /// `<id> <pid> <created>`, the part the MAC covers.
++    fn fields(&self) -> String {
++        format!("{} {} {}", self.id, self.pid, self.created)
++    }
++
++    /// `<id> <pid> <created> <mac>` with the MAC of `session` and `key`; anything else, or an id
++    /// `new_pipe_id` would not make, is None.
++    fn parse(text: &str, session: &str, key: &SessionKey) -> Option<Self> {
 +        let mut parts = text.split_whitespace();
-+        let (id, pid, created) = (parts.next()?, parts.next()?, parts.next()?);
++        let (id, pid, created, mac) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
 +        if parts.next().is_some() || !is_valid_pipe_id(id) {
 +            return None;
 +        }
-+        Some(Self {
++        let record = Self {
 +            id: id.to_string(),
 +            pid: pid.parse().ok()?,
 +            created: created.parse().ok()?,
-+        })
++        };
++        record_mac_matches(key, session, &record.fields(), mac).then_some(record)
 +    }
 +}
 +
-+/// The record in a `<session>.pipe` file, if the file holds a valid one.
-+pub fn read_pipe_record(path: &Path) -> Option<PipeRecord> {
-+    PipeRecord::parse(&std::fs::read_to_string(path).ok()?)
++/// The record in a `<session>.pipe` file, if the file holds a valid one with the MAC of
++/// `session` and `key`.
++pub fn read_pipe_record(path: &Path, session: &str, key: &SessionKey) -> Option<PipeRecord> {
++    PipeRecord::parse(&std::fs::read_to_string(path).ok()?, session, key)
 +}
 +
-+/// Writes `<session>.pipe` whole: a reader sees the old file, no file or the new record, never
-+/// a part of it.
-+pub fn write_pipe_record(path: &Path, record: &PipeRecord) -> io::Result<()> {
++/// Writes `<session>.pipe` whole, with the record's MAC: a reader sees the old file, no file
++/// or the new record, never a part of it.
++pub fn write_pipe_record(
++    path: &Path,
++    record: &PipeRecord,
++    session: &str,
++    key: &SessionKey,
++) -> io::Result<()> {
 +    let partial = path.with_extension("pipe.partial");
-+    let text = format!("{} {} {}", record.id, record.pid, record.created);
++    let fields = record.fields();
++    let text = format!("{fields} {}", record_mac(key, session, &fields));
 +    std::fs::write(&partial, text)?;
 +    std::fs::rename(&partial, path).inspect_err(|_| {
 +        let _ = std::fs::remove_file(&partial);
@@ -1483,6 +1301,42 @@ index 0000000..7aad1d0
 +    Ok(())
 +}
 +
++/// Opens the client end of pipe `id`, at identification level only. While every instance is
++/// busy it waits for a free one, for up to `busy_wait`.
++fn open(id: &str, busy_wait: Duration) -> io::Result<OwnedHandle> {
++    if !is_valid_pipe_id(id) {
++        return Err(io::Error::new(
++            io::ErrorKind::InvalidInput,
++            "invalid pipe id",
++        ));
++    }
++    let path = to_wide(&pipe_path(id));
++    let deadline = Instant::now() + busy_wait;
++    loop {
++        let handle = unsafe {
++            CreateFileW(
++                path.as_ptr(),
++                GENERIC_READ | GENERIC_WRITE,
++                0,
++                ptr::null(),
++                OPEN_EXISTING,
++                FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
++                0,
++            )
++        };
++        if handle != INVALID_HANDLE_VALUE {
++            return Ok(unsafe { OwnedHandle::from_raw_handle(handle as _) });
++        }
++        let error = io::Error::last_os_error();
++        let left = deadline.saturating_duration_since(Instant::now());
++        if error.raw_os_error() != Some(ERROR_PIPE_BUSY as i32) || left.is_zero() {
++            return Err(error);
++        }
++        let ms = left.as_millis().clamp(1, u32::MAX as u128 - 1) as u32;
++        unsafe { WaitNamedPipeW(path.as_ptr(), ms) };
++    }
++}
++
 +/// The client end: a blocking stream with optional read and write timeouts.
 +pub struct PipeStream {
 +    handle: OwnedHandle,
@@ -1491,52 +1345,30 @@ index 0000000..7aad1d0
 +}
 +
 +impl PipeStream {
-+    /// Opens the pipe `record` names and checks its server (`check_server`). While every
-+    /// instance is busy it waits for a free one, for up to `busy_wait`.
-+    pub fn connect(record: &PipeRecord, busy_wait: Duration) -> io::Result<Self> {
-+        let id = record.id.as_str();
-+        if !is_valid_pipe_id(id) {
-+            return Err(io::Error::new(
-+                io::ErrorKind::InvalidInput,
-+                "invalid pipe id",
-+            ));
-+        }
-+        let path = to_wide(&pipe_path(id));
-+        let deadline = Instant::now() + busy_wait;
-+        let handle = loop {
-+            let handle = unsafe {
-+                CreateFileW(
-+                    path.as_ptr(),
-+                    GENERIC_READ | GENERIC_WRITE,
-+                    0,
-+                    ptr::null(),
-+                    OPEN_EXISTING,
-+                    FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
-+                    0,
-+                )
-+            };
-+            if handle != INVALID_HANDLE_VALUE {
-+                break unsafe { OwnedHandle::from_raw_handle(handle as _) };
-+            }
-+            let error = io::Error::last_os_error();
-+            let left = deadline.saturating_duration_since(Instant::now());
-+            if error.raw_os_error() != Some(ERROR_PIPE_BUSY as i32) || left.is_zero() {
-+                return Err(error);
-+            }
-+            let ms = left.as_millis().clamp(1, u32::MAX as u128 - 1) as u32;
-+            unsafe { WaitNamedPipeW(path.as_ptr(), ms) };
-+        };
-+
++    /// Opens the pipe `record` names, checks its server (`check_server`) and runs the session
++    /// key exchange for `session` with `key`. While every instance is busy it waits for a
++    /// free one, for up to `busy_wait`.
++    pub fn connect(
++        record: &PipeRecord,
++        session: &str,
++        key: &SessionKey,
++        busy_wait: Duration,
++    ) -> io::Result<Self> {
++        let handle = open(&record.id, busy_wait)?;
 +        let mut server_pid = 0u32;
 +        if unsafe { GetNamedPipeServerProcessId(raw(&handle), &mut server_pid) } == 0 {
 +            return Err(io::Error::last_os_error());
 +        }
 +        check_server(server_pid, record)?;
-+        Ok(Self {
++        let mut stream = Self {
 +            handle,
-+            read_timeout: None,
-+            write_timeout: None,
-+        })
++            read_timeout: Some(HANDSHAKE_TIMEOUT),
++            write_timeout: Some(HANDSHAKE_TIMEOUT),
++        };
++        client_handshake(&mut stream, key, session)?;
++        stream.read_timeout = None;
++        stream.write_timeout = None;
++        Ok(stream)
 +    }
 +
 +    pub fn set_read_timeout(&mut self, timeout: Option<Duration>) {
@@ -1641,8 +1473,9 @@ index 0000000..7aad1d0
 +
 +impl PipeListener {
 +    /// Creates the pipe's instances, the first with FILE_FLAG_FIRST_PIPE_INSTANCE: fails if an
-+    /// instance of that name exists already. Call it inside a tokio runtime.
-+    pub fn bind(id: &str) -> io::Result<Self> {
++    /// instance of that name exists already. Clients must prove `key` for `session`. Call it
++    /// inside a tokio runtime.
++    pub fn bind(id: &str, session: &str, key: SessionKey) -> io::Result<Self> {
 +        if !is_valid_pipe_id(id) {
 +            return Err(io::Error::new(
 +                io::ErrorKind::InvalidInput,
@@ -1656,18 +1489,26 @@ index 0000000..7aad1d0
 +            instances.push(create_instance(&path, &descriptor, false)?);
 +        }
 +        let (sender, accepted) = tokio::sync::mpsc::channel(LISTENING_INSTANCES);
++        let keyed = Arc::new((session.to_string(), key));
 +        let slots = instances
 +            .into_iter()
 +            .map(|instance| {
-+                let slot = serve_slot(instance, path.clone(), descriptor.clone(), sender.clone());
++                let slot = serve_slot(
++                    instance,
++                    path.clone(),
++                    descriptor.clone(),
++                    keyed.clone(),
++                    sender.clone(),
++                );
 +                tokio::spawn(slot)
 +            })
 +            .collect();
 +        Ok(Self { accepted, slots })
 +    }
 +
-+    /// The next client that passed the peer check. Clients that fail it are disconnected
-+    /// before the daemon writes anything. Cancel safe.
++    /// The next client that passed the peer check and proved the session key. A client that
++    /// fails the peer check is disconnected before the daemon writes anything; one that fails
++    /// the key exchange has had only the daemon's challenge. Cancel safe.
 +    pub async fn accept(&mut self) -> io::Result<NamedPipeServer> {
 +        match self.accepted.recv().await {
 +            Some(result) => result,
@@ -1686,11 +1527,13 @@ index 0000000..7aad1d0
 +}
 +
 +/// One listening slot: waits for a client, puts a fresh instance in its place, then runs the
-+/// peer check and hands an accepted client to `accept`.
++/// peer check and starts the key exchange (`authenticate`), which hands an accepted client to
++/// `accept`.
 +async fn serve_slot(
 +    mut instance: NamedPipeServer,
 +    path: String,
 +    descriptor: Arc<SecurityDescriptor>,
++    keyed: Arc<(String, SessionKey)>,
 +    accepted: tokio::sync::mpsc::Sender<io::Result<NamedPipeServer>>,
 +) {
 +    loop {
@@ -1708,7 +1551,11 @@ index 0000000..7aad1d0
 +        let handed = match connected {
 +            Err(e) => accepted.send(Err(e)).await,
 +            Ok(()) => match client_refusal(&served) {
-+                None => accepted.send(Ok(served)).await,
++                None => {
++                    // In a task of its own, so a client that stalls the exchange holds no slot.
++                    tokio::spawn(authenticate(served, keyed.clone(), accepted.clone()));
++                    Ok(())
++                }
 +                Some(reason) => {
 +                    let _ = writeln!(io::stderr(), "Refused a pipe client: {}", reason);
 +                    let _ = served.disconnect();
@@ -1718,6 +1565,30 @@ index 0000000..7aad1d0
 +        };
 +        if handed.is_err() {
 +            return; // the listener is gone
++        }
++    }
++}
++
++/// The daemon's side of the key exchange, for at most `HANDSHAKE_TIMEOUT`: hands the client to
++/// `accept` once it has proved the key, else disconnects it.
++async fn authenticate(
++    mut served: NamedPipeServer,
++    keyed: Arc<(String, SessionKey)>,
++    accepted: tokio::sync::mpsc::Sender<io::Result<NamedPipeServer>>,
++) {
++    let (session, key) = (&keyed.0, &keyed.1);
++    let exchange = server_handshake(&mut served, key, session);
++    match tokio::time::timeout(HANDSHAKE_TIMEOUT, exchange).await {
++        Ok(Ok(())) => {
++            let _ = accepted.send(Ok(served)).await;
++        }
++        outcome => {
++            let reason = match outcome {
++                Ok(Err(e)) => e.to_string(),
++                _ => "the session key exchange timed out".to_string(),
++            };
++            let _ = writeln!(io::stderr(), "Refused a pipe client: {}", reason);
++            let _ = served.disconnect();
 +        }
 +    }
 +}
@@ -1761,15 +1632,16 @@ index 0000000..7aad1d0
 +mod tests;
 diff --git a/cli/src/windows_pipe_tests.rs b/cli/src/windows_pipe_tests.rs
 new file mode 100644
-index 0000000..3cf853f
+index 0000000..8ab885d
 --- /dev/null
 +++ b/cli/src/windows_pipe_tests.rs
-@@ -0,0 +1,393 @@
+@@ -0,0 +1,532 @@
 +//! Tests for the daemon pipe. The restricted-token tests start this test binary again, under a
 +//! write-restricted token made with CreateRestrictedToken (as Codex's Windows sandbox runs its
 +//! commands): as a client, which the daemon must disconnect before writing anything (a control
-+//! run with the normal token must be served), and as a would-be server, which a client must
-+//! refuse.
++//! run with the normal token and the session key must be served), and as a would-be server,
++//! which a client must refuse. The key tests: a client without the key, or with a wrong one, is
++//! never served, and a client refuses a daemon of another session or key.
 +
 +use super::*;
 +use std::os::windows::ffi::OsStrExt;
@@ -1778,9 +1650,15 @@ index 0000000..3cf853f
 +const HELPER_ID: &str = "AB_PIPE_TEST_ID";
 +const HELPER_PID: &str = "AB_PIPE_TEST_DAEMON_PID";
 +const HELPER_CREATED: &str = "AB_PIPE_TEST_DAEMON_CREATED";
++const HELPER_KEY: &str = "AB_PIPE_TEST_KEY";
 +const HELPER_TEST: &str = "windows_pipe::tests::pipe_client_helper";
 +const SLEEPER: &str = "AB_PIPE_TEST_SLEEP";
 +const SLEEPER_TEST: &str = "windows_pipe::tests::sleep_helper";
++
++/// The session name and keys the tests use (test values, never a real session's).
++const SESSION: &str = "pipe-test";
++const KEY: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
++const OTHER_KEY: &str = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100";
 +
 +/// The helper's exit codes.
 +const DISCONNECTED: i32 = 0;
@@ -1788,8 +1666,30 @@ index 0000000..3cf853f
 +const READ_TIMED_OUT: i32 = 11;
 +const SERVED: i32 = 20;
 +
++fn key() -> SessionKey {
++    SessionKey::parse(KEY).unwrap()
++}
++
++fn other_key() -> SessionKey {
++    SessionKey::parse(OTHER_KEY).unwrap()
++}
++
 +fn this_process(id: &str) -> PipeRecord {
 +    PipeRecord::for_this_process(id).unwrap()
++}
++
++fn bind(id: &str) -> PipeListener {
++    PipeListener::bind(id, SESSION, key()).unwrap()
++}
++
++/// The client end of pipe `id` with no check and no key exchange: what a process without the
++/// key, or upstream's client, gets.
++fn open_raw(id: &str) -> PipeStream {
++    PipeStream {
++        handle: open(id, Duration::from_secs(5)).expect("open"),
++        read_timeout: Some(Duration::from_secs(10)),
++        write_timeout: Some(Duration::from_secs(5)),
++    }
 +}
 +
 +#[test]
@@ -1815,37 +1715,50 @@ index 0000000..3cf853f
 +}
 +
 +#[test]
-+fn the_pipe_record_round_trips_and_garbage_is_ignored() {
++fn the_pipe_record_round_trips_and_only_a_keyed_record_is_read() {
 +    let dir = tempfile::tempdir().unwrap();
 +    let path = dir.path().join("s.pipe");
 +    let record = this_process(&new_pipe_id().unwrap());
-+    write_pipe_record(&path, &record).unwrap();
-+    assert_eq!(read_pipe_record(&path), Some(record.clone()));
++    write_pipe_record(&path, &record, SESSION, &key()).unwrap();
++    assert_eq!(
++        read_pipe_record(&path, SESSION, &key()),
++        Some(record.clone())
++    );
++    // Another key or session: the record is not this session's.
++    assert_eq!(read_pipe_record(&path, SESSION, &other_key()), None);
++    assert_eq!(read_pipe_record(&path, "other", &key()), None);
++    let text = std::fs::read_to_string(&path).unwrap();
++    let mac = text.rsplit(' ').next().unwrap().to_string();
++    let fields = format!("{} {} {}", record.id, record.pid, record.created);
 +    for bad in [
-+        r"\\evil\pipe\x 1 2".to_string(),
++        r"\\evil\pipe\x 1 2 00".to_string(),
 +        record.id.clone(),
-+        format!("{} {}", record.id, record.pid),
-+        format!("{} {} {} extra", record.id, record.pid, record.created),
-+        format!("{} x {}", record.id, record.created),
++        // A forged record without a MAC, or naming another live process with the old MAC.
++        fields.clone(),
++        format!("{} {} {} {mac}", record.id, record.pid + 4, record.created),
++        format!("{fields} {}", "0".repeat(64)),
++        format!("{fields} {mac} extra"),
++        format!("{} x {} {mac}", record.id, record.created),
 +    ] {
 +        std::fs::write(&path, &bad).unwrap();
-+        assert_eq!(read_pipe_record(&path), None, "{bad:?}");
++        assert_eq!(read_pipe_record(&path, SESSION, &key()), None, "{bad:?}");
 +    }
 +    assert!(!dir.path().join("s.pipe.partial").exists());
 +}
 +
 +#[tokio::test(flavor = "multi_thread")]
-+async fn a_client_reaches_the_daemon_and_a_second_first_instance_fails() {
++async fn a_client_with_the_key_reaches_the_daemon_and_a_second_first_instance_fails() {
 +    let id = new_pipe_id().unwrap();
-+    let mut listener = PipeListener::bind(&id).unwrap();
++    let mut listener = bind(&id);
 +    assert!(
-+        PipeListener::bind(&id).is_err(),
++        PipeListener::bind(&id, SESSION, key()).is_err(),
 +        "FILE_FLAG_FIRST_PIPE_INSTANCE must refuse"
 +    );
 +
 +    let record = this_process(&id);
 +    let client = tokio::task::spawn_blocking(move || {
-+        let mut stream = PipeStream::connect(&record, Duration::from_secs(5)).expect("connect");
++        let mut stream =
++            PipeStream::connect(&record, SESSION, &key(), Duration::from_secs(5)).expect("connect");
 +        stream.set_read_timeout(Some(Duration::from_secs(10)));
 +        stream.write_all(b"ping\n").unwrap();
 +        let mut reply = [0u8; 5];
@@ -1863,19 +1776,100 @@ index 0000000..3cf853f
 +}
 +
 +#[tokio::test(flavor = "multi_thread")]
++async fn a_client_without_the_key_gets_the_challenge_and_nothing_else() {
++    let id = new_pipe_id().unwrap();
++    let mut listener = bind(&id);
++    let client = tokio::task::spawn_blocking(move || {
++        let mut stream = open_raw(&id);
++        let _ = stream.write_all(b"{\"id\":\"t\",\"action\":\"evaluate\",\"script\":\"1\"}\n");
++        let mut back = Vec::new();
++        let _ = stream.read_to_end(&mut back);
++        back.len()
++    });
++    let outcome = tokio::time::timeout(Duration::from_secs(30), async {
++        tokio::select! {
++            accepted = listener.accept() => Err(format!("accepted: {:?}", accepted.map(|_| ()))),
++            back = client => Ok(back.unwrap()),
++        }
++    })
++    .await
++    .expect("the client was neither refused nor accepted");
++    // The daemon's nonce and proof (64 bytes), then the end: no command was read.
++    assert_eq!(outcome, Ok(64));
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn a_client_with_a_wrong_key_is_refused() {
++    let id = new_pipe_id().unwrap();
++    let mut listener = bind(&id);
++    let record = this_process(&id);
++    let client = tokio::task::spawn_blocking(move || {
++        PipeStream::connect(&record, SESSION, &other_key(), Duration::from_secs(5)).map(|_| ())
++    });
++    let outcome = tokio::time::timeout(Duration::from_secs(30), async {
++        tokio::select! {
++            accepted = listener.accept() => Err(format!("accepted: {:?}", accepted.map(|_| ()))),
++            result = client => Ok(result.unwrap()),
++        }
++    })
++    .await
++    .expect("the client was neither refused nor accepted");
++    let error = outcome.unwrap().expect_err("a wrong key must be refused");
++    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn the_client_refuses_a_daemon_of_another_session_or_key() {
++    // Two daemons in this process: session B's with this key, and this session's with another
++    // key. The client of this session, with this key, must refuse both.
++    let other_session = new_pipe_id().unwrap();
++    let other_keyed = new_pipe_id().unwrap();
++    let mut first = PipeListener::bind(&other_session, "another-session", key()).unwrap();
++    let mut second = PipeListener::bind(&other_keyed, SESSION, other_key()).unwrap();
++    let accept = tokio::spawn(async move {
++        loop {
++            tokio::select! {
++                a = first.accept() => if a.is_err() { break },
++                b = second.accept() => if b.is_err() { break },
++            }
++        }
++    });
++    let records = [this_process(&other_session), this_process(&other_keyed)];
++    let results = tokio::task::spawn_blocking(move || {
++        records
++            .map(|r| PipeStream::connect(&r, SESSION, &key(), Duration::from_secs(5)).map(|_| ()))
++    })
++    .await
++    .unwrap();
++    accept.abort();
++    for result in results {
++        let error = result.expect_err("a daemon of another session or key must be refused");
++        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
++        assert!(error.to_string().contains("key"), "{error}");
++    }
++}
++
++#[tokio::test(flavor = "multi_thread")]
 +async fn several_clients_connect_at_once_without_waiting() {
 +    let id = new_pipe_id().unwrap();
-+    let _listener = PipeListener::bind(&id).unwrap();
++    let mut listener = bind(&id);
++    let accept = tokio::spawn(async move {
++        let mut held = Vec::new();
++        while let Ok(server) = listener.accept().await {
++            held.push(server);
++        }
++    });
 +    let record = this_process(&id);
 +    let held = tokio::task::spawn_blocking(move || {
 +        // No busy wait at all, and every connection is held: each must still find a
 +        // listening instance.
 +        (0..LISTENING_INSTANCES)
-+            .map(|_| PipeStream::connect(&record, Duration::ZERO))
++            .map(|_| PipeStream::connect(&record, SESSION, &key(), Duration::ZERO))
 +            .collect::<Vec<_>>()
 +    })
 +    .await
 +    .unwrap();
++    accept.abort();
 +    for result in held {
 +        result.expect("a client found the pipe busy");
 +    }
@@ -1884,7 +1878,7 @@ index 0000000..3cf853f
 +#[tokio::test(flavor = "multi_thread")]
 +async fn the_client_refuses_a_server_that_is_not_the_recorded_daemon() {
 +    let id = new_pipe_id().unwrap();
-+    let mut listener = PipeListener::bind(&id).unwrap();
++    let mut listener = bind(&id);
 +    let accept = tokio::spawn(async move { while listener.accept().await.is_ok() {} });
 +    let right = this_process(&id);
 +    let wrong_pid = PipeRecord {
@@ -1897,7 +1891,8 @@ index 0000000..3cf853f
 +        ..right.clone()
 +    };
 +    let results = tokio::task::spawn_blocking(move || {
-+        [wrong_pid, reused_pid].map(|r| PipeStream::connect(&r, Duration::from_secs(5)).map(|_| ()))
++        [wrong_pid, reused_pid]
++            .map(|r| PipeStream::connect(&r, SESSION, &key(), Duration::from_secs(5)).map(|_| ()))
 +    })
 +    .await
 +    .unwrap();
@@ -1952,7 +1947,7 @@ index 0000000..3cf853f
 +#[tokio::test(flavor = "multi_thread")]
 +async fn a_restricted_token_client_is_disconnected_before_any_byte() {
 +    let id = new_pipe_id().unwrap();
-+    let mut listener = PipeListener::bind(&id).unwrap();
++    let mut listener = bind(&id);
 +    let helper_id = id.clone();
 +    let mut helper = tokio::task::spawn_blocking(move || run_helper(&helper_id, true));
 +    let outcome = tokio::time::timeout(Duration::from_secs(60), async {
@@ -1966,15 +1961,15 @@ index 0000000..3cf853f
 +    assert_eq!(
 +        outcome,
 +        Ok(DISCONNECTED),
-+        "1 = could not open, 11 = held open, 20 = served"
++        "1 = could not open, 11 = held open, 20 = given bytes"
 +    );
 +}
 +
 +#[tokio::test(flavor = "multi_thread")]
-+async fn control_an_unrestricted_helper_is_served() {
++async fn control_an_unrestricted_helper_with_the_key_is_served() {
 +    use tokio::io::AsyncWriteExt;
 +    let id = new_pipe_id().unwrap();
-+    let mut listener = PipeListener::bind(&id).unwrap();
++    let mut listener = bind(&id);
 +    let helper_id = id.clone();
 +    let helper = tokio::task::spawn_blocking(move || run_helper(&helper_id, false));
 +    let mut server = tokio::time::timeout(Duration::from_secs(60), listener.accept())
@@ -1985,7 +1980,9 @@ index 0000000..3cf853f
 +    assert_eq!(helper.await.unwrap(), SERVED);
 +}
 +
-+/// Run only as the child of the tests above (which set HELPER_ID); a no-op otherwise.
++/// Run only as the child of the tests above (which set HELPER_ID); a no-op otherwise. With
++/// HELPER_KEY it connects as a client with the key; without, it opens the pipe raw and counts
++/// any byte back as served.
 +#[test]
 +fn pipe_client_helper() {
 +    let Ok(id) = std::env::var(HELPER_ID) else {
@@ -1996,7 +1993,18 @@ index 0000000..3cf853f
 +        pid: std::env::var(HELPER_PID).unwrap().parse().unwrap(),
 +        created: std::env::var(HELPER_CREATED).unwrap().parse().unwrap(),
 +    };
-+    let code = match PipeStream::connect(&record, Duration::from_secs(5)) {
++    let key = std::env::var(HELPER_KEY)
++        .ok()
++        .and_then(|k| SessionKey::parse(&k));
++    let stream = match &key {
++        Some(key) => PipeStream::connect(&record, SESSION, key, Duration::from_secs(5)),
++        None => open(&record.id, Duration::from_secs(5)).map(|handle| PipeStream {
++            handle,
++            read_timeout: None,
++            write_timeout: None,
++        }),
++    };
++    let code = match stream {
 +        Err(_) => COULD_NOT_OPEN,
 +        Ok(mut stream) => {
 +            stream.set_read_timeout(Some(Duration::from_secs(10)));
@@ -2022,7 +2030,8 @@ index 0000000..3cf853f
 +    }
 +}
 +
-+/// Starts this test binary as the pipe client and returns its exit code.
++/// Starts this test binary as the pipe client and returns its exit code: under a restricted
++/// token without the key, or unrestricted with it.
 +fn run_helper(id: &str, restricted: bool) -> i32 {
 +    let exe = std::env::current_exe().unwrap();
 +    let daemon = this_process(id);
@@ -2034,6 +2043,7 @@ index 0000000..3cf853f
 +        .env(HELPER_CREATED, daemon.created.to_string());
 +    if !restricted {
 +        let status = command
++            .env(HELPER_KEY, KEY)
 +            .stdout(std::process::Stdio::null())
 +            .stderr(std::process::Stdio::null())
 +            .status()
@@ -2160,10 +2170,10 @@ index 0000000..3cf853f
 +}
 diff --git a/cli/src/windows_security.rs b/cli/src/windows_security.rs
 new file mode 100644
-index 0000000..bf29988
+index 0000000..3f1c066
 --- /dev/null
 +++ b/cli/src/windows_security.rs
-@@ -0,0 +1,374 @@
+@@ -0,0 +1,389 @@
 +//! Windows process and pipe security.
 +//!
 +//! Every agent-browser process protects itself first thing in `main`: its DACL lets SYSTEM do
@@ -2203,6 +2213,13 @@ index 0000000..bf29988
 +/// PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE (0x101000) and nothing else.
 +pub fn process_sddl(user_sid: &str) -> String {
 +    format!("D:P(A;;0x1FFFFF;;;SY)(A;;0x101000;;;{user_sid})(A;;0x101000;;;OW)")
++}
++
++/// The protected thread DACL: SYSTEM gets THREAD_ALL_ACCESS; the user and OWNER RIGHTS get
++/// THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE (0x100800) and nothing else: no
++/// THREAD_RESUME, GET_CONTEXT or SET_CONTEXT.
++pub fn thread_sddl(user_sid: &str) -> String {
++    format!("D:P(A;;0x1FFFFF;;;SY)(A;;0x100800;;;{user_sid})(A;;0x100800;;;OW)")
 +}
 +
 +/// The daemon pipe's protected DACL: full access for SYSTEM and the user, nobody else.
@@ -2275,6 +2292,11 @@ index 0000000..bf29988
 +    SecurityDescriptor::from_sddl(&process_sddl(&current_user_sid()?))
 +}
 +
++/// The descriptor every agent-browser thread gets (`thread_sddl`).
++pub fn thread_descriptor() -> io::Result<SecurityDescriptor> {
++    SecurityDescriptor::from_sddl(&thread_sddl(&current_user_sid()?))
++}
++
 +/// The descriptor of the daemon's pipe (`pipe_sddl`).
 +pub fn pipe_descriptor() -> io::Result<SecurityDescriptor> {
 +    SecurityDescriptor::from_sddl(&pipe_sddl(&current_user_sid()?))
@@ -2283,20 +2305,18 @@ index 0000000..bf29988
 +/// Replaces this process's DACL, and the calling thread's, with the protected one. Called first
 +/// thing in `main`, on the main thread.
 +pub fn harden_current_process() -> io::Result<()> {
-+    let descriptor = process_descriptor()?;
-+    set_dacl(unsafe { GetCurrentProcess() }, &descriptor)?;
-+    set_dacl(unsafe { GetCurrentThread() }, &descriptor)
++    set_dacl(unsafe { GetCurrentProcess() }, &process_descriptor()?)?;
++    harden_current_thread()
 +}
 +
-+/// Gives the calling thread the protected DACL (for a thread, the user keeps SYNCHRONIZE and
-+/// THREAD_RESUME, 0x101000: no GET_CONTEXT or SET_CONTEXT). Threads otherwise get the token's
++/// Gives the calling thread the protected thread DACL (`thread_sddl`). Threads otherwise get the token's
 +/// default DACL. That default is left alone on purpose: an anonymous pipe (std's, and
 +/// CreatePipe's) takes it, and the parent then opens the pipe's second end itself. A protected
 +/// default, which leaves OWNER RIGHTS only SYNCHRONIZE and 0x1000, would deny that open and
 +/// break every piped child. The pipes need no DACL of their own: each has one instance and is
 +/// connected at once.
 +pub fn harden_current_thread() -> io::Result<()> {
-+    set_dacl(unsafe { GetCurrentThread() }, &process_descriptor()?)
++    set_dacl(unsafe { GetCurrentThread() }, &thread_descriptor()?)
 +}
 +
 +/// `harden_current_thread` for a runtime's thread-start hook, which cannot return an error:
@@ -2515,6 +2535,10 @@ index 0000000..bf29988
 +            "D:P(A;;0x1FFFFF;;;SY)(A;;0x101000;;;S-1-5-21-1-2-3-1001)(A;;0x101000;;;OW)"
 +        );
 +        assert_eq!(
++            thread_sddl("S-1-5-21-1-2-3-1001"),
++            "D:P(A;;0x1FFFFF;;;SY)(A;;0x100800;;;S-1-5-21-1-2-3-1001)(A;;0x100800;;;OW)"
++        );
++        assert_eq!(
 +            pipe_sddl("S-1-5-21-1-2-3-1001"),
 +            "D:P(A;;GA;;;SY)(A;;GA;;;S-1-5-21-1-2-3-1001)"
 +        );
@@ -2525,6 +2549,7 @@ index 0000000..bf29988
 +        let sid = current_user_sid().expect("user SID");
 +        assert!(sid.starts_with("S-1-"));
 +        process_descriptor().expect("process descriptor");
++        thread_descriptor().expect("thread descriptor");
 +        pipe_descriptor().expect("pipe descriptor");
 +    }
 +
@@ -2540,10 +2565,10 @@ index 0000000..bf29988
 +}
 diff --git a/cli/src/windows_spawn.rs b/cli/src/windows_spawn.rs
 new file mode 100644
-index 0000000..0e5d5b1
+index 0000000..4754fea
 --- /dev/null
 +++ b/cli/src/windows_spawn.rs
-@@ -0,0 +1,487 @@
+@@ -0,0 +1,527 @@
 +//! Starting a child process that is protected from its first instruction.
 +//!
 +//! `std::process::Command` cannot pass a security descriptor to CreateProcess, so a child it
@@ -2553,7 +2578,7 @@ index 0000000..0e5d5b1
 +//!
 +//! It takes the program, arguments, environment changes and working directory from a
 +//! configured `Command`, so call sites keep building their commands as before. The child's
-+//! first thread gets the same descriptor (lpThreadAttributes). Only the child's
++//! first thread gets the protected thread descriptor (lpThreadAttributes). Only the child's
 +//! three stdio handles are inherited (PROC_THREAD_ATTRIBUTE_HANDLE_LIST), and only the child's
 +//! ends of its pipes are ever inheritable.
 +
@@ -2585,7 +2610,7 @@ index 0000000..0e5d5b1
 +    STARTF_USESTDHANDLES, STARTUPINFOEXW,
 +};
 +
-+use crate::windows_security::{process_descriptor, raw, to_wide};
++use crate::windows_security::{process_descriptor, raw, thread_descriptor, to_wide};
 +
 +/// What one of the child's stdio handles is connected to.
 +#[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2660,7 +2685,7 @@ index 0000000..0e5d5b1
 +    let program = application_name(Path::new(command.get_program()))?;
 +    let mut command_line = command_line(&program, command.get_args())?;
 +    let program = wide_os(&program)?;
-+    let environment = environment_block(command)?;
++    let environment = environment_block_with(command, crate::session_key::session_key())?;
 +    let current_dir = command
 +        .get_current_dir()
 +        .map(|d| wide_os(d.as_os_str()))
@@ -2698,14 +2723,16 @@ index 0000000..0e5d5b1
 +
 +    let descriptor = process_descriptor()?;
 +    let process_attributes: SECURITY_ATTRIBUTES = descriptor.attributes();
++    let thread = thread_descriptor()?;
++    let thread_attributes: SECURITY_ATTRIBUTES = thread.attributes();
 +    let mut info: PROCESS_INFORMATION = unsafe { mem::zeroed() };
 +    let ok = unsafe {
 +        CreateProcessW(
 +            program.as_ptr(),
 +            command_line.as_mut_ptr(),
 +            &process_attributes,
-+            // The child's first thread gets the same protected DACL.
-+            &process_attributes,
++            // The child's first thread gets the protected thread DACL.
++            &thread_attributes,
 +            1,
 +            creation_flags | EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
 +            environment.as_ptr().cast(),
@@ -2801,13 +2828,33 @@ index 0000000..0e5d5b1
 +
 +/// This process's environment with the command's changes applied, as a sorted
 +/// CREATE_UNICODE_ENVIRONMENT block. Names compare case-insensitively, as Windows does.
++/// Without the session key: for the tests' own children.
++#[cfg(test)]
 +pub(crate) fn environment_block(command: &Command) -> io::Result<Vec<u16>> {
++    environment_block_with(command, None)
++}
++
++/// `environment_block` with the session key added back (`session_key::ENV`). `main` takes it
++/// out of this process's environment, so only a child started here, hardened, gets it.
++pub(crate) fn environment_block_with(
++    command: &Command,
++    session_key: Option<&crate::session_key::SessionKey>,
++) -> io::Result<Vec<u16>> {
 +    let key = |name: &OsStr| name.to_string_lossy().to_uppercase();
 +    let mut vars: Vec<(OsString, OsString)> = std::env::vars_os().collect();
-+    for (name, value) in command.get_envs() {
-+        vars.retain(|(existing, _)| key(existing) != key(name));
++    let changes = command
++        .get_envs()
++        .map(|(name, value)| (name.to_owned(), value.map(OsStr::to_owned)));
++    let session_key = session_key.map(|k| {
++        (
++            OsString::from(crate::session_key::ENV),
++            Some(OsString::from(k.to_hex())),
++        )
++    });
++    for (name, value) in changes.chain(session_key) {
++        vars.retain(|(existing, _)| key(existing) != key(&name));
 +        if let Some(value) = value {
-+            vars.push((name.to_owned(), value.to_owned()));
++            vars.push((name, value));
 +        }
 +    }
 +    vars.sort_by_key(|(name, _)| key(name));
@@ -2964,6 +3011,24 @@ index 0000000..0e5d5b1
 +    }
 +
 +    #[test]
++    fn the_session_key_goes_only_into_the_block_of_a_hardened_child() {
++        let hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
++        let session_key = crate::session_key::SessionKey::parse(hex).unwrap();
++        let entry = format!("{}={hex}", crate::session_key::ENV);
++        let mut command = Command::new("x");
++        command.env(crate::session_key::ENV, "from the command");
++        let with = String::from_utf16_lossy(
++            &environment_block_with(&command, Some(&session_key)).unwrap(),
++        );
++        assert!(
++            with.split('\0').any(|e| e == entry),
++            "the key replaces any other value"
++        );
++        let without = String::from_utf16_lossy(&environment_block(&Command::new("x")).unwrap());
++        assert!(!without.contains(hex));
++    }
++
++    #[test]
 +    fn environment_changes_apply_case_insensitively() {
 +        let mut command = Command::new(r"C:\x.exe");
 +        command.env("AB_SPAWN_TEST_SET", "1").env_remove("PATH");
@@ -3081,3 +3146,50 @@ index 571e812..e0a4ae5 100644
 +        .contains("disabled on Windows"));
 +    assert!(!socket_dir(&tmp).join("dashboard.pid").exists());
 +}
+diff --git a/cli/tests/obscura_cli.rs b/cli/tests/obscura_cli.rs
+index 6c7da16..55e0b53 100644
+--- a/cli/tests/obscura_cli.rs
++++ b/cli/tests/obscura_cli.rs
+@@ -3,9 +3,12 @@ use std::process::{Command, Output, Stdio};
+ use tempfile::TempDir;
+ 
+ const BIN: &str = env!("CARGO_BIN_EXE_agent-browser");
++/// A test session key: on Windows this build's daemon serves only clients with its key.
++const SESSION_KEY: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+ 
+ /// Winsock fails to initialize (os error 10106) without SystemRoot, so a
+-/// cleared environment keeps the variables Windows needs to open sockets.
++/// cleared environment keeps the variables Windows needs to open sockets,
++/// plus the test session key.
+ fn windows_runtime_env() -> Vec<(String, std::ffi::OsString)> {
+     if !cfg!(windows) {
+         return Vec::new();
+@@ -13,6 +16,7 @@ fn windows_runtime_env() -> Vec<(String, std::ffi::OsString)> {
+     ["SystemRoot", "windir", "TEMP", "TMP"]
+         .into_iter()
+         .filter_map(|key| std::env::var_os(key).map(|value| (key.to_string(), value)))
++        .chain([("AGENT_BROWSER_SESSION_KEY".to_string(), SESSION_KEY.into())])
+         .collect()
+ }
+ 
+diff --git a/cli/tests/tls_cli.rs b/cli/tests/tls_cli.rs
+index 8908f4d..169e95a 100644
+--- a/cli/tests/tls_cli.rs
++++ b/cli/tests/tls_cli.rs
+@@ -12,6 +12,8 @@ use serde_json::Value;
+ use tempfile::TempDir;
+ 
+ const BIN: &str = env!("CARGO_BIN_EXE_agent-browser");
++/// A test session key: on Windows this build's daemon serves only clients with its key.
++const SESSION_KEY: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+ const CA_A: &str = include_str!("fixtures/tls/ca-a.pem");
+ const CA_B: &str = include_str!("fixtures/tls/ca-b.pem");
+ 
+@@ -161,6 +163,7 @@ impl Session {
+             .env("HOME", self.tmp.path())
+             .env("USERPROFILE", self.tmp.path())
+             .env("AGENT_BROWSER_SOCKET_DIR", self.tmp.path().join("sockets"))
++            .env("AGENT_BROWSER_SESSION_KEY", SESSION_KEY)
+             .env("NO_COLOR", "1")
+             .args(["--session", "tls", "--json"]);
+         if let Some(path) = &self.system_bundle {
