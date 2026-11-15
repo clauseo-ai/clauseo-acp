@@ -9,7 +9,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_FLAGS_AND_ATTRIBUTES, REPLACEFILE_IGNORE_ACL_ERRORS, REPLACEFILE_IGNORE_MERGE_ERRORS,
     ReplaceFileW, SetFileAttributesW,
 };
-use windows::core::{HSTRING, PCWSTR};
+use windows::core::HSTRING;
 
 use crate::long_path::long_path;
 
@@ -26,16 +26,19 @@ pub(super) fn set_attributes(path: &Path, attributes: u32) -> io::Result<()> {
 
 /// Puts the file `replacement` in the place of the file `replaced`, which keeps its attributes
 /// (read-only, hidden), its ACL, its alternate data streams (`Zone.Identifier`, the mark of a
-/// downloaded file), its creation time and its short name: what a rename over it drops. An
-/// attribute or ACL that cannot be merged does not fail it. No backup file. Both paths go
-/// through [`long_path`], as in [`set_attributes`].
-pub(super) fn replace_file(replaced: &Path, replacement: &Path) -> io::Result<()> {
+/// downloaded file), its creation time and its short name: what a rename over it drops. The old
+/// file is moved to `backup` on the way, so a failure never leaves it nowhere
+/// ([`super::replace_keeping`] reads what is on disk after one). An attribute or ACL that cannot
+/// be merged does not fail it. All three paths go through [`long_path`], as in
+/// [`set_attributes`].
+pub(super) fn replace_file(replaced: &Path, replacement: &Path, backup: &Path) -> io::Result<()> {
     let replaced = HSTRING::from(long_path(replaced).as_path());
     let replacement = HSTRING::from(long_path(replacement).as_path());
+    let backup = HSTRING::from(long_path(backup).as_path());
     let flags = REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS;
-    // SAFETY: both are NUL-terminated UTF-16 strings that outlive the call; the backup name,
-    // the exclude and the reserved pointers are null, as the call allows; it keeps no pointer.
-    unsafe { ReplaceFileW(&replaced, &replacement, PCWSTR::null(), flags, None, None) }
+    // SAFETY: the three are NUL-terminated UTF-16 strings that outlive the call; the exclude and
+    // reserved pointers are null, as the call requires; it keeps no pointer.
+    unsafe { ReplaceFileW(&replaced, &replacement, &backup, flags, None, None) }
         .map_err(win32_io_error)
 }
 

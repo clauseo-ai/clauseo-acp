@@ -26,7 +26,7 @@ fn rewrite(target: &Path) -> u32 {
             .map_err(|err| crate::Error::io("write", "x", err))
     })
     .unwrap();
-    let lost = staged.rename().unwrap().lost;
+    let lost = staged.rename().unwrap().lost.count;
     assert_eq!(std::fs::read(target).unwrap(), b"new");
     lost
 }
@@ -198,4 +198,45 @@ fn a_rewrite_keeps_hidden_and_the_zone_stream_on_windows() {
 fn a_new_file_is_renamed_into_place_on_windows() {
     let dir = TestDir::new("keep-windows-new");
     assert_eq!(rewrite(&dir.path().join("New.docx")), 0);
+}
+
+/// Linux: a read-only original (`0o444`) keeps its user attribute too: the mode is set after
+/// the attributes, which need a writable file. Skipped like the test above.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_read_only_original_keeps_a_user_xattr_on_linux() {
+    use rustix::io::Errno;
+    let dir = TestDir::new("keep-xattr-ro");
+    let target = old_file(&dir, "Lease.docx");
+    match set_xattr(&target, "user.clauseo.test", b"kept") {
+        Ok(()) => {}
+        Err(err) if err == Errno::NOTSUP || err == Errno::OPNOTSUPP => {
+            eprintln!("skipped: the test folder's file system takes no user xattrs");
+            return;
+        }
+        Err(err) => panic!("{err}"),
+    }
+    set_mode(&target, 0o444);
+    assert_eq!(rewrite(&target), 0);
+    assert_eq!(xattr(&target, "user.clauseo.test"), b"kept");
+    assert_eq!(mode(&target), 0o444);
+}
+
+/// macOS: a read-only original (`0o444`) keeps its Finder tag and quarantine flag.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_read_only_original_keeps_its_finder_tag_on_macos() {
+    const TAGS: &str = "com.apple.metadata:_kMDItemUserTags";
+    let dir = TestDir::new("keep-finder-ro");
+    let target = old_file(&dir, "Lease.docx");
+    set_xattr(&target, TAGS, b"bplist00 Red\n6").unwrap();
+    set_xattr(&target, "com.apple.quarantine", b"0081;6560c1a0;Safari;").unwrap();
+    set_mode(&target, 0o444);
+    assert_eq!(rewrite(&target), 0);
+    assert_eq!(xattr(&target, TAGS), b"bplist00 Red\n6");
+    assert_eq!(
+        xattr(&target, "com.apple.quarantine"),
+        b"0081;6560c1a0;Safari;"
+    );
+    assert_eq!(mode(&target), 0o444);
 }
