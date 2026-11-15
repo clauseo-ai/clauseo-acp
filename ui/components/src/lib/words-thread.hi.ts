@@ -200,7 +200,7 @@ export const HI = {
   "Clauseo stopped one more step.": "Clauseo ने एक और काम रोका।",
   "Clauseo stopped {n} more steps.": "Clauseo ने {n} और काम रोके।",
   // the browser saved a download in Clauseo's own folder for the matter, as the matter's drive can't keep the
-  // downloaded-from-the-internet mark; {file} is the file's name, isolated (provisional, TN-13)
+  // downloaded-from-the-internet mark; {file} is the file's name, isolated (provisional, UC-520)
   "The browser saved {file} in Clauseo's own folder for this matter, not in the matter's folder: the matter's drive can't mark downloads as coming from the internet.":
     "ब्राउज़र ने {file} को इस मामले के लिए Clauseo के अपने फ़ोल्डर में सहेजा है, मामले के फ़ोल्डर में नहीं: मामले की ड्राइव डाउनलोड को इंटरनेट से आया हुआ चिह्नित नहीं कर सकती।",
   // the composer

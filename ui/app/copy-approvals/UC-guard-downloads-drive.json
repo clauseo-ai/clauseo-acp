@@ -1,0 +1,13 @@
+{
+  "UC-520": {
+    "en": "The browser saved {file} in Clauseo's own folder for this matter, not in the matter's folder: the matter's drive can't mark downloads as coming from the internet.",
+    "hi": "ब्राउज़र ने {file} को इस मामले के लिए Clauseo के अपने फ़ोल्डर में सहेजा है, मामले के फ़ोल्डर में नहीं: मामले की ड्राइव डाउनलोड को इंटरनेट से आया हुआ चिह्नित नहीं कर सकती।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "guarddl notice (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "guarddl notice (provisional; Rohan batch review)",
+    "note": "Host notice NoticeKind::DownloadOutsideMatter (crates/host/src/sources/browser/fallback.rs): the browser saved a download in Clauseo's own folder for the matter (<app data>/agent-state/<matter>/downloads) because the matter's drive cannot keep the downloaded-from-the-internet mark. {file} is the file's plain name, isolated. The row ends with the existing Show in Finder / Show in File Explorer / Show in folder button, which reveals the file selected (reveal's download target)"
+  }
+}

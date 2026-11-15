@@ -218,7 +218,7 @@ export const TN: Entry[] = [
     ),
   },
   {
-    id: "TN-13",
+    id: "UC-520",
     words: threadWords(DOWNLOAD),
     screen: "room/thread",
     render: thread(DOWNLOAD_NOTICE),
