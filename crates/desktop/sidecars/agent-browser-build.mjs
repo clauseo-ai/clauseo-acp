@@ -11,11 +11,13 @@
 // `upstream_tarball_sha256` and the archive names that commit, extracts it to a temporary folder,
 // and applies every patch in order with `git apply`, after a `git apply --check` of each. It runs
 // on any machine with node, tar and git: it is the check that the patches apply cleanly to the
-// pinned tag. The temporary folder is removed whatever happens.
+// pinned tag. It then refuses the result unless the patched cli/Cargo.toml and cli/Cargo.lock
+// both give the crate the version `patched_tag` names (0003 sets it), so a rebuild that counts
+// the tag up cannot report the old version. The temporary folder is removed whatever happens.
 //
 // `build` does the same, then runs the patched source's own test suite for one of the six
 // release triples (`cargo test --locked --target <triple>`, as upstream's CI runs it; on Windows
-// this is where the pipe's restricted-token test and the hardening tests run), builds it with
+// this is where the pipe's restricted-token, session key and hardening tests run), builds it with
 // `cargo build --release --locked --target <triple>` in its cli/ folder, and writes
 // `<dir>/agent-browser-<triple>[.exe]` and `<dir>/agent-browser-<triple>.json`, the build record:
 // the triple, the exe's SHA-256 and size, `rustc -vV`, the MSVC tools and linker versions where
@@ -315,6 +317,9 @@ async function prepare({ pin, patchDir, log, fetch }) {
       patches.push({ name, sha256: sha256(await readFile(path)) });
       log(`applied ${name}`);
     }
+    const cli = join(src, 'cli');
+    const lock = existsSync(join(cli, 'Cargo.lock')) ? await readFile(join(cli, 'Cargo.lock'), 'utf8') : '';
+    checkVersion(await readFile(join(cli, 'Cargo.toml'), 'utf8'), lock, pin.patchedTag);
     return { work, src, epoch: info.mtime, patches };
   } catch (error) {
     await cleanup(work, log);
@@ -346,6 +351,38 @@ function linkerVersions(env) {
     }
   }
   return { msvc_tools: tools, link: null };
+}
+
+/** The value of `key = "..."` among the lines of the first section headed `header` that `match`es. */
+function sectionValue(text, header, key, match = () => true) {
+  for (const section of text.replace(/\r\n/g, '\n').split(/^(?=\[)/m)) {
+    const [head, ...lines] = section.split('\n');
+    if (head.trim() !== header || !match(lines)) continue;
+    for (const line of lines) {
+      const [name, ...rest] = line.split('=');
+      const value = rest.join('=').trim();
+      if (name.trim() === key && /^"[^"]*"$/.test(value)) return value.slice(1, -1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Throws unless the patched `cli/Cargo.toml` (`[package]`) and `cli/Cargo.lock` (the
+ * agent-browser package) both say the version `patchedTag` names: agent-browser-v<version>.
+ */
+export function checkVersion(cargoToml, cargoLock, patchedTag) {
+  const expected = patchedTag.replace(/^agent-browser-v/, '');
+  const isOurs = (lines) => lines.some((line) => line.trim() === 'name = "agent-browser"');
+  const found = [
+    ['cli/Cargo.toml', sectionValue(cargoToml, '[package]', 'version')],
+    ['cli/Cargo.lock', sectionValue(cargoLock, '[[package]]', 'version', isOurs)],
+  ];
+  for (const [file, version] of found) {
+    if (version !== expected) {
+      throw new Error(`agent-browser: the patched ${file} says version ${version}, but patched_tag ${patchedTag} needs ${expected}; update the version patch`);
+    }
+  }
 }
 
 /** Throws unless `status`, `git status --porcelain` for the patches folder, is empty. */

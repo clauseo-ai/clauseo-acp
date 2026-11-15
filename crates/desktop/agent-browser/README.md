@@ -33,31 +33,48 @@ daemon started with streaming on is not reused by a CLI that has it off. This is
 upstream; if upstream takes it, macOS can go back to upstream's binary (the pin accepts an
 upstream url for any triple).
 
-`patches/0002-windows-pipe-and-hardening.patch` (Windows code paths only; 30 files, +2029/-197,
-most of it three new modules and their tests):
+`patches/0002-windows-pipe-and-hardening.patch` (Windows code paths only; 16 files, +2555/-150,
+most of it four new modules and their tests):
 - the CLI reaches the daemon over the named pipe `\\.\pipe\clauseo-ab-<128-bit random hex>`
   instead of loopback TCP, with four instances listening at once. `<session>.pipe` in the socket
-  folder records the pipe id with the daemon's pid and creation time; the name is never on a
-  command line. The first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE, its DACL lets
-  only the user and SYSTEM in, and the daemon disconnects, before writing a byte, any client
-  whose process token is restricted (as a sandbox's is) or cannot be checked;
-- the CLI refuses a pipe whose server is not the recorded daemon (same pid and creation time,
-  this executable, an unrestricted token), and connects at identification level only;
+  folder records the pipe id with the daemon's pid and creation time, and an HMAC of them with
+  the session key; the name is never on a command line, and a record without a valid HMAC is
+  ignored. The first instance is created with FILE_FLAG_FIRST_PIPE_INSTANCE, its DACL lets only
+  the user and SYSTEM in, and the daemon disconnects, before writing a byte, any client whose
+  process token is restricted (as a sandbox's is) or cannot be checked;
+- the session key: the launcher (Clauseo's browser guard) passes 32 random bytes per session in
+  `AGENT_BROWSER_SESSION_KEY`. Every connection starts with a mutual challenge-response: each
+  side sends a fresh nonce and proves the key with HMAC-SHA256 over both nonces and the session
+  name, checked in constant time, so the key never crosses the pipe. The daemon serves no client
+  without the key (an unsandboxed process of the user included), and the CLI talks to no daemon
+  of another session or key. Each process takes the key out of its own environment first thing
+  and gives it back only to the children it starts hardened (the daemon, the MCP server's CLI
+  runs); it is never in a file or a log. Without a valid key the CLI and the daemon refuse to
+  run on Windows. HMAC-SHA256 comes from the `hmac` and `sha2` crates already in upstream's
+  `Cargo.lock`;
+- the CLI also refuses a pipe whose server is not the recorded daemon (same pid and creation
+  time, this executable, an unrestricted token), and connects at identification level only;
 - a live daemon keeps its files and is never replaced by a second one; the `taskkill` fallback
   is gone (the protected DACL denies PROCESS_TERMINATE anyway);
 - every agent-browser process (MCP server, CLI, daemon) sets the protected DACL
-  `D:P(A;;0x1FFFFF;;;SY)(A;;0x101000;;;<user SID>)(A;;0x101000;;;OW)` on itself and its main
-  thread first thing, the daemon's runtime threads get it as they start, and the CLI and the
-  daemon are started with it as their process and first-thread descriptor through
-  CreateProcessW;
-- every other child agent-browser starts on Windows (Chrome, engines, ffmpeg, plugins, probes)
-  gets only the base Windows environment variables, so the CDP url stays out of unprotected
-  memory;
+  `D:P(A;;0x1FFFFF;;;SY)(A;;0x101000;;;<user SID>)(A;;0x101000;;;OW)` on itself first thing,
+  and `D:P(A;;0x1FFFFF;;;SY)(A;;0x100800;;;<user SID>)(A;;0x100800;;;OW)` (no THREAD_RESUME,
+  GET_CONTEXT or SET_CONTEXT) on its main thread; the daemon's runtime threads get the thread
+  DACL as they start, and the CLI and the daemon are started through CreateProcessW with both
+  as their process and first-thread descriptors;
 - streaming, `inspect` and the dashboard are always off on Windows.
+
+Any other child agent-browser starts (Chrome, engines, ffmpeg, plugins, probes) starts through
+upstream's own code, with agent-browser's environment less the session key, and with the default
+process DACL. In Clauseo none of them is reachable on Windows: the guard starts Chrome itself and
+gives agent-browser its endpoint (`AGENT_BROWSER_CDP`), so the daemon launches no browser, and
+the guard refuses `--engine`.
 
 `patches/0003-version-suffix.patch` (every OS; 2 files): our build reports version
 `0.41.1-clauseo.1`, so the CLI's daemon version check tells a patched daemon from an unpatched
-one.
+one. `agent-browser-build.mjs` refuses the patched source unless its `cli/Cargo.toml` and
+`cli/Cargo.lock` both say the version the pin's `patched_tag` names, so a `-clauseo.2` rebuild
+cannot report `.1`.
 
 Linux keeps upstream's binary for now: dev and CI only, the stream server still on there.
 
@@ -74,7 +91,7 @@ tests run with `node --test 'crates/desktop/sidecars/*.test.mjs'`.
 
 ## Building and publishing
 
-The workflow `agent-browser-build.yml` (it lands with PR #1089), by hand:
+The workflow `.github/workflows/agent-browser-build.yml`, by hand:
 
 ```sh
 gh workflow run agent-browser-build.yml --ref <branch>                  # build only
@@ -86,7 +103,7 @@ Each target builds on its own runner: x86_64 Windows on `windows-2025`, ARM64 Wi
 `macos-15` (x86_64 cross-compiled, as release.yml builds the app). Each runs
 `node crates/desktop/sidecars/agent-browser-build.mjs build --target <triple> --out <dir>`:
 the patched source's own tests (`cargo test --locked`; on Windows these include the pipe's
-restricted-token test and the hardening tests), then `cargo build --release --locked` in `cli/`,
+restricted-token test, the session key tests and the hardening tests), then `cargo build --release --locked` in `cli/`,
 with rust-toolchain.toml's toolchain, path remaps and `SOURCE_DATE_EPOCH` set to the commit's
 time, plus on Windows `+crt-static` (no VC++ runtime DLL imports; the leg checks with
 `.github/scripts/pe-crt-imports.mjs`) and `/Brepro`. Each leg uploads the binary and its build
@@ -100,12 +117,14 @@ which the build log prints, into the pin's macOS and Windows tables, replacing t
 placeholder the fetch refuses.
 
 The build aims to be reproducible, but a runner image with a newer linker can still change the
-bytes. The release trusts the pinned sha256 of the published binary, not a rebuild. Signing
-needs nothing here, and nothing is notarised here: the release's sidecar fetch puts the binary at
-`crates/desktop/binaries/clauseo-agent-browser-<triple>[.exe]`, where release.yml signs it as
-today. On Windows `sign-windows` signs every PE there; on macOS the build leg codesigns
-`Contents/Helpers/clauseo-agent-browser` with the app's identity and the hardened runtime
-before bundling, and the app is notarised as a whole.
+bytes. The release trusts the pinned sha256 of the published binary, not a rebuild. Nothing is
+signed or notarised here: the release's sidecar fetch puts the binary at
+`crates/desktop/binaries/clauseo-agent-browser-<triple>[.exe]`, and release.yml treats it as it
+treats the app (ADR 0035, "Signing for the beta"). On macOS the build leg signs
+`Contents/Helpers/clauseo-agent-browser` ad hoc (identity `-`, with the hardened runtime), as
+the bundler signs the app, until there is a Developer ID; release-publish refuses any DMG that is
+not notarised and stapled, so no release goes out before then. On Windows the beta is unsigned:
+the SignPath step that will sign every PE in that folder (S20a) is not in release.yml yet.
 
 ## What the build trusts
 
