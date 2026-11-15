@@ -1,0 +1,35 @@
+{
+  "UC-283": {
+    "en": "Open anyway",
+    "hi": "फिर भी खोलें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "The first screen's Open the folder for a matter, a folder picked on a network drive or a drive without file permissions: the step's other button, which makes the folder a matter anyway. The step's title and words are New matter's warning's (FR-07, FR-08, FR-13, FR-14), Choose another folder as FR-09. The same words as #1060's FR-30 (its backslash step), so one entry can go when both are in"
+  },
+  "UC-284": {
+    "en": "On a network drive / Claude asks before every change. ChatGPT can't work here. / Clauseo can't keep Claude and ChatGPT inside a folder on a network drive. / Choose another folder",
+    "hi": "नेटवर्क ड्राइव पर / Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / Clauseo, Claude और ChatGPT को नेटवर्क ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता। / दूसरा फ़ोल्डर चुनें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "The first screen's step for a folder picked on a network drive: New matter's warning's words reused (FR-07's title, FR-08's body and why, FR-09's button), the why said in the step since it has no info icon; Open anyway as UC-283"
+  },
+  "UC-285": {
+    "en": "No file permissions / Claude asks before every change. ChatGPT can't work here. / Clauseo can't keep Claude and ChatGPT inside a folder on this drive. USB drives often don't keep permissions. / Choose another folder",
+    "hi": "फ़ाइल अनुमतियाँ नहीं / Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / Clauseo, Claude और ChatGPT को इस ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता। USB ड्राइव अक्सर अनुमतियाँ नहीं रखतीं। / दूसरा फ़ोल्डर चुनें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional)",
+    "note": "The first screen's step for a folder picked on a drive without file permissions: New matter's warning's words reused (FR-13's title, FR-14's body and why, FR-09's button); Open anyway as UC-283"
+  }
+}

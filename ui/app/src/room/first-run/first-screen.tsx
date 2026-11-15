@@ -3,7 +3,9 @@
 // plan the chosen one and starts its install and sign-in at once, beside the other plan's download; only its sign-in
 // waits, for the other plan's sign-in under way (the setup store's queue: one sign-in at a time, and nothing dropped).
 // Open the folder asks first about a folder whose path has a backslash, on macOS and Linux (FR30, folder-backslash.ts),
-// as New matter and Locate do: Choose another folder, or Open anyway.
+// as New matter and Locate do: Choose another folder, or Open anyway. And about a folder New matter would warn about, on
+// a network drive or a drive without file permissions (first-folder-check.ts, first-folder-step.tsx): the same two
+// buttons. A folder a matter on the list already uses opens that matter.
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { Welcome, type FootPlan } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
@@ -23,6 +25,7 @@ import {
 } from "../../store/setup.ts";
 import type { Matters } from "../matters.ts";
 import { hasBackslash } from "../folder-backslash.ts";
+import { usedBy, warningOf, type HeldFolder } from "../first-folder-check.ts";
 import type { HeldPick } from "../locate-held.ts";
 import type { Refused } from "../new-matter.tsx";
 import { usePickWait } from "../picker-wait.ts";
@@ -40,6 +43,10 @@ const RefusedOpen = lazy(() => loadNewMatter().then((m) => ({ default: m.Refused
 /** The step for a folder Claude can't start in (FR30): Locate's (locate-warning.tsx), loaded when a pick needs it. */
 const BackslashStep = lazy(() =>
   late(import("../locate-warning.tsx")).then((m) => ({ default: m.LocateWarning })),
+);
+/** The step for a folder New matter would warn about (first-folder-step.tsx), loaded when a pick needs it. */
+const FolderStep = lazy(() =>
+  late(import("../first-folder-step.tsx")).then((m) => ({ default: m.FirstFolderStep })),
 );
 
 /** The folder's own name, the last part of how it reads: on macOS and Linux a backslash is part of a name, never a
@@ -112,6 +119,8 @@ export function FirstScreen({
   const [making, setMaking] = useState(false);
   // a folder picked whose path has a backslash, held for its step (FR30): Choose another folder, or Open anyway
   const [held, setHeld] = useState<HeldPick | null>(null);
+  // a folder picked on a network drive or a drive without file permissions, held for its step
+  const [warned, setWarned] = useState<HeldFolder | null>(null);
   const makingNow = useRef(false);
   const wait = usePickWait();
   useEffect(() => store.count({ onboarding_step: { step: "welcome_shown" } }), [store]);
@@ -126,6 +135,16 @@ export function FirstScreen({
       setHeld({ display: picked.display, again: openFolder, anyway: () => make(picked) });
       return;
     }
+    // asked about as New matter asks; Open the folder waits meanwhile, "Opening the folder…" under it
+    makingNow.current = true;
+    setMaking(true);
+    const kind = await warningOf(matters, picked.folder);
+    makingNow.current = false;
+    setMaking(false);
+    if (kind !== null) {
+      setWarned({ display: picked.display, kind, again: openFolder, anyway: () => make(picked) });
+      return;
+    }
     await make(picked);
   };
   /** The folder picked made a matter. */
@@ -135,13 +154,18 @@ export function FirstScreen({
     makingNow.current = true;
     setMaking(true);
     try {
-      // made, or a matter the host already has for it (MatterCreated either way): the room opens it
+      // made, or a matter on the list that already uses the folder (MatterCreated naming it): the room opens it, its
+      // name as it was
       await matters.create(folderName(picked.display, platform), {
         existing_folder: { folder: picked.folder },
       });
     } catch (thrown) {
       const { code, matter } = toHostError(thrown);
-      setRefused({ code, path: picked.display, ...(matter === undefined ? {} : { matter }) });
+      // a matter on the list already uses the folder (matter.folder_is_matter, naming it): the lawyer asked to open
+      // that folder's matter, so it opens, nothing made or renamed
+      const used = await usedBy(matters, { code, matter });
+      if (used !== null) matters.open(used);
+      else setRefused({ code, path: picked.display, ...(matter === undefined ? {} : { matter }) });
     } finally {
       makingNow.current = false;
       setMaking(false);
@@ -158,6 +182,11 @@ export function FirstScreen({
             anyway="Open anyway"
             testId="first-backslash"
           />
+        </Suspense>
+      )}
+      {warned !== null && (
+        <Suspense fallback={null}>
+          <FolderStep held={warned} onClose={() => setWarned(null)} />
         </Suspense>
       )}
       <Welcome

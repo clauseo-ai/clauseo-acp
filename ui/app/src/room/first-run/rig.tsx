@@ -16,6 +16,7 @@ import type {
   HostCommand,
   InstallProgress,
   MatterSummary,
+  PickedFolderSupport,
   SettingsView,
   SetupCommand,
   SetupEvent,
@@ -126,8 +127,11 @@ export type RigOptions = {
   openSettings?: boolean;
   /** Answers create_matter in place of making MADE_MATTER: refuse by throwing, hold by never settling. */
   create?: (name: string) => CommandOutcome | Promise<CommandOutcome>;
-  /** The matters the host lists once `create` answers with a matter. */
+  /** The matters the host lists once `create` answers, with a matter or a refusal. */
   listAfter?: MatterSummary[];
+  /** Answers each FolderSupport query (New matter's folder check): a reading, or a refusal by throwing. Unset, the
+   * query is refused as not scripted. */
+  folderSupport?: () => PickedFolderSupport | Promise<PickedFolderSupport>;
   /** The folder the picker gives; null: cancelled. */
   picked?: { folder: string; display: string } | null;
   /** The open matter's threads (list_threads); none by default. */
@@ -159,6 +163,8 @@ async function mountRoom(o: RigOptions) {
       if (query === "list_matters") return { matters };
       if (query === "get_settings") return { settings: o.settings ?? settingsView() };
       if (typeof query === "object" && "list_threads" in query) return { threads: o.threads ?? [] };
+      if (typeof query === "object" && "folder_support" in query && o.folderSupport !== undefined)
+        return { folder_support: await o.folderSupport() };
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     dispatch: (envelope): CommandOutcome | Promise<CommandOutcome> => {
@@ -168,9 +174,11 @@ async function mountRoom(o: RigOptions) {
       if (c.create_matter !== undefined && answer !== undefined) {
         const name = c.create_matter.name;
         return (async () => {
-          const outcome = await answer(name);
-          if (o.listAfter !== undefined) matters = o.listAfter;
-          return outcome;
+          try {
+            return await answer(name);
+          } finally {
+            if (o.listAfter !== undefined) matters = o.listAfter;
+          }
         })();
       }
       if (c.create_matter !== undefined) {

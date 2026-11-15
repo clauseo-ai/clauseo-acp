@@ -60,6 +60,7 @@ export const HI = {
     "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
   // FR25 (draft): Locate's other button, which locates the matter in the folder warned about
   "Locate anyway": "फिर भी यही फ़ोल्डर चुनें",
-  // FR30 (draft): the first screen's other button, which opens the folder warned about as a matter
+  // FR30 (draft), and UC-283 (the first screen's step for a network drive or a drive without file permissions): the
+  // first screen's other button, which opens the folder warned about as a matter
   "Open anyway": "फिर भी खोलें",
 } as const;
