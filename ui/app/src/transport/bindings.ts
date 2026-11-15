@@ -539,13 +539,34 @@ export type BlacklineNotice =
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
+/**  What an inserted or deleted stretch with no text of its own stands for. */
+export type BlacklineObject = 
+/**  A picture. */
+"picture" | 
+/**  A chart. */
+"chart" | 
+/**  A shape, or a text box with no text. */
+"shape" | 
+/**  A footnote's or an endnote's reference. */
+"note" | 
+/**  A field, such as a page number or a date Word fills in. */
+"field" | 
+/**
+ *  Anything else: a link, a comment's anchor, a content control, an embedded object, or a
+ *  change that held nothing at all.
+ */
+"other" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
 /**  One paragraph of a blackline. */
 export type BlacklineParagraph = {
 	/**  How the paragraph changed as a whole. */
 	change: ParagraphChange,
 	/**
-	 *  Its text as runs, in order; two runs next to each other never have the same kind, and
-	 *  no run is empty. An empty paragraph has none, and so does one `not_shown`.
+	 *  Its text as runs, in order; two text runs next to each other never have the same kind,
+	 *  and only an object run is empty. An empty paragraph has none, and so does one
+	 *  `not_shown`.
 	 */
 	runs: BlacklineRun[],
 	/**
@@ -569,28 +590,8 @@ export type BlacklineRun = {
 	 *  picture or a deleted footnote reference: the app names it. Missing for a text run, and
 	 *  missing reads as none.
 	 */
-	object?: BlacklineObject | null,
+	object?: BlacklineObject,
 };
-
-/**  What an inserted or deleted stretch with no text of its own stands for. */
-export type BlacklineObject = 
-/**  A picture. */
-"picture" | 
-/**  A chart. */
-"chart" | 
-/**  A shape, or a text box with no text. */
-"shape" | 
-/**  A footnote's or an endnote's reference. */
-"note" | 
-/**  A field, such as a page number or a date Word fills in. */
-"field" | 
-/**
- *  Anything else: a link, a comment's anchor, a content control, an embedded object, or a
- *  change that held nothing at all.
- */
-"other" | 
-/**  A value from a newer Clauseo that this version does not know. */
-"unknown";
 
 /**
  *  A 32-byte BLAKE3 digest naming a blob. A human-readable format (JSON) writes its text form, 64
