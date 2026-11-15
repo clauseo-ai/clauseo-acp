@@ -6,7 +6,7 @@
 use clauseo_matters::{CheckpointOutcome, Error, Matter, RestoreFiles};
 use clauseo_protocol::{CheckpointKind, ErrorCode, MatterPath};
 
-use crate::fixture::{Fixture, cid, meta, path, read_at, restore_request, tools};
+use crate::fixture::{Fixture, assert_none, cid, meta, path, read_at, restore_request, tools};
 use crate::support;
 
 /// Checkpoint 1 holds `a.txt` "one", `b.txt` "bee" and `sub/deep/c.txt` "cee"; checkpoint 3,
@@ -45,7 +45,7 @@ fn one_changed_file_comes_back_alone_and_can_be_taken_back() {
         .restore(&restore_request(1, RestoreFiles::Only(&chosen), 4, 5))
         .unwrap();
     assert_eq!(restored.written, chosen);
-    assert!(restored.removed.is_empty());
+    assert_none(&restored.removed);
     assert_eq!(fx.read("a.txt"), b"one");
     assert_eq!(
         fx.read("b.txt"),
