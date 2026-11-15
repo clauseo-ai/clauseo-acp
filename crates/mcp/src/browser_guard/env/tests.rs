@@ -516,6 +516,18 @@ fn no_stream_port_is_needed_or_passed_and_the_cdp_port_is_no_longer_pinned() {
             assert_eq!(get(&env, "AGENT_BROWSER_STREAM_DISABLED"), "1", "{os:?}");
         }
         let mut env = build(&source_for(os, &[], ""), os, cwd, &WindowsDirs::default()).unwrap();
+        // The stream server's off switch on every OS, as W1 sets it on Windows, whatever the
+        // agent's own environment said.
+        assert_eq!(get(&env, "AGENT_BROWSER_STREAM_DISABLED"), "1", "{os:?}");
+        for value in ["0", "", "false"] {
+            let source = source_for(os, &[("AGENT_BROWSER_STREAM_DISABLED", value)], "");
+            let own = build(&source, os, cwd, &WindowsDirs::default()).unwrap();
+            assert_eq!(
+                get(&own, "AGENT_BROWSER_STREAM_DISABLED"),
+                "1",
+                "{os:?} {value:?}"
+            );
+        }
         assert_eq!(
             get(&env, "AGENT_BROWSER_ARGS"),
             "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
