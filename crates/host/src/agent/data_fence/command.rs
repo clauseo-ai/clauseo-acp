@@ -3,6 +3,12 @@
 //! word (`python3 -c "open('<data>/…')"`, `grep -f<data>/…`, `curl file://<data>/…`); the
 //! folders its recursive commands walk and its globs may match in; and all of that again in a
 //! script it gives to `sh -c` and its kin, one level down.
+//!
+//! The rule of this file: when a word could be read two ways, check it both ways. Each reading
+//! adds paths, commands or starting folders and none takes one away, since an extra one only
+//! refuses more: a word after an en dash is a PowerShell option and a folder's name; a walker
+//! after a script block's `{` is a command, while the words before it are read as they were;
+//! `x}` is both `x` closing a block and a name ending in `}`.
 
 use std::path::{Path, PathBuf};
 
@@ -123,8 +129,9 @@ const POWERSHELL_VERBS: [&str; 24] = [
 /// [`RECURSIVE_WITH_FLAG`] with its flag, or any command given PowerShell's `-Recurse` in full,
 /// or a PowerShell walker given one of its spellings, [`is_recursive`]): each of its operands
 /// (every word after the command that does not start with `-`, a leading `$HOME` made `~`,
-/// a closing `}` of a script block cut; for a PowerShell walker the value of `-Path:x` and
-/// `-LiteralPath:x` too), and the working folder (`.`), where most start when given none. A
+/// as written and with a script block's closing `}` cut; for a PowerShell walker the value of
+/// `-Path:x` and `-LiteralPath:x` too), and the working folder (`.`), where most start when
+/// given none; each of a segment's [`commands`]. A
 /// word starting with an en dash, em dash or horizontal bar stays a folder in every shell: Bash
 /// takes it for a name (a folder or junction `–j`), and in PowerShell it only adds a root.
 ///
@@ -139,25 +146,24 @@ pub(crate) fn recursive_roots(line: &str, windows: bool, shell: ShellKind) -> Ve
     let mut out = Vec::new();
     for (group, group_shell) in segment_groups(line, windows, shell) {
         for words in group {
-            let found = command_at(&words).and_then(|at| words.get(at..));
-            let Some((command, args)) = found.and_then(<[String]>::split_first) else {
-                continue;
-            };
-            let name = command_name(command, windows);
-            if !is_recursive(&name, args, group_shell) {
-                continue;
-            }
-            out.push(PathBuf::from("."));
-            let walker = powershell_walker(&name, group_shell);
-            for word in args {
-                if let Some(value) = walker.then(|| path_value(word)).flatten() {
-                    out.push(PathBuf::from(home_as_tilde(value)));
-                } else if !word.starts_with('-') && word != "}" {
-                    let word = match word.strip_suffix('}') {
-                        Some(cut) if !word.contains('{') => cut,
-                        _ => word.as_str(),
-                    };
+            for (name, args) in commands(&words, windows) {
+                if !is_recursive(&name, args, group_shell) {
+                    continue;
+                }
+                out.push(PathBuf::from("."));
+                let walker = powershell_walker(&name, group_shell);
+                for word in args {
+                    if let Some(value) = walker.then(|| path_value(word)).flatten() {
+                        out.push(PathBuf::from(home_as_tilde(value)));
+                    }
+                    if word.starts_with('-') {
+                        continue;
+                    }
                     out.push(PathBuf::from(home_as_tilde(word)));
+                    // A `}` closing a script block (`{ gci -r x}`), cut too.
+                    if let Some(cut) = word.strip_suffix('}').filter(|cut| !cut.is_empty()) {
+                        out.push(PathBuf::from(home_as_tilde(cut)));
+                    }
                 }
             }
         }
@@ -209,10 +215,12 @@ fn segment_groups(
     };
     let mut groups = vec![(outer.clone(), line_shell)];
     for words in &outer {
-        let from = command_at(words).and_then(|at| words.get(at..));
-        if let Some((script, inner)) = from.and_then(|from| shell_script(from, escape)) {
-            let program = from.and_then(<[String]>::first);
-            let name = program.map(|word| command_name(word, windows));
+        for at in command_starts(words) {
+            let from = words.get(at..).unwrap_or_default();
+            let Some((script, inner)) = shell_script(from, escape) else {
+                continue;
+            };
+            let name = from.first().map(|word| command_name(word, windows));
             let script_shell = match name.as_deref() {
                 Some("pwsh" | "powershell") => ShellKind::PowerShell,
                 Some("sh" | "bash" | "zsh" | "dash" | "ksh") => ShellKind::Posix,
@@ -225,8 +233,8 @@ fn segment_groups(
     for (group, shell) in &mut groups {
         let powershell = || {
             group.iter().any(|words| {
-                let word = command_at(words).and_then(|at| words.get(at));
-                word.is_some_and(|word| powershell_name(&command_name(word, windows)))
+                let mut names = commands(words, windows).into_iter();
+                names.any(|(name, _)| powershell_name(&name))
             })
         };
         if *shell == ShellKind::Unknown && powershell() {
@@ -292,21 +300,15 @@ fn powershell_recurses(word: &str) -> bool {
     recurse || depth || name == "s"
 }
 
-/// Words that run the script block after them (`1 | % { gci -r x }`), with their own options
-/// first, and the block's opening `{` (a POSIX shell's `{ grep -r x /p; }` too).
-const BLOCK_STARTS: [&str; 4] = ["%", "foreach-object", "foreach", "{"];
-
-/// Where a simple command's command word is: past assignments (`A=b`), [`WRAPPERS`] with
-/// their options (and `timeout`'s duration), and [`BLOCK_STARTS`] with theirs. A `{` joined to
-/// the command word (`{gci`, `%{gci`) is cut by [`command_name`].
+/// Where a simple command's command word is: past assignments (`A=b`) and [`WRAPPERS`] with
+/// their options (and `timeout`'s duration).
 fn command_at(words: &[String]) -> Option<usize> {
     let mut at = 0;
     while let Some(word) = words.get(at) {
         let assignment = word
             .split_once('=')
             .is_some_and(|(name, _)| !name.is_empty() && !name.contains(['/', '\\', '-']));
-        let block = BLOCK_STARTS.contains(&word.to_lowercase().as_str());
-        let wrapper = WRAPPERS.contains(&word.as_str()) || block;
+        let wrapper = WRAPPERS.contains(&word.as_str());
         if !assignment && !wrapper {
             return Some(at);
         }
@@ -324,10 +326,46 @@ fn command_at(words: &[String]) -> Option<usize> {
     None
 }
 
-/// A command word's name: its last path part, lowercased, without `.exe` and a script block's
-/// `{` or `%{` joined before it.
+/// Where a simple command's commands may start, each read ([`command_at`]): its command word,
+/// then after each word ending in `{` (a script block's opening: `1 | % { gci -r x }`,
+/// `ForEach-Object -Begin {} -Process { … }`, a POSIX shell's `{ grep -r x /p; }`), and at
+/// each word that starts with `{` or `%{` and goes on (`%{gci`; [`commands`] reads its name
+/// with them cut). The words before a block stay read as they were (the file's rule).
+fn command_starts(words: &[String]) -> Vec<usize> {
+    let mut out: Vec<usize> = command_at(words).into_iter().collect();
+    for (at, word) in words.iter().enumerate() {
+        if word.ends_with('{') {
+            let rest = words.get(at + 1..).unwrap_or_default();
+            out.extend(command_at(rest).map(|start| at + 1 + start));
+        }
+        let joined = word.trim_start_matches(['%', '{']);
+        if word.starts_with(['%', '{']) && word.contains('{') && !joined.is_empty() {
+            out.push(at);
+        }
+    }
+    out.dedup();
+    out
+}
+
+/// Each command of a simple command (at each of [`command_starts`]): its name
+/// ([`command_name`]; a word starting with `{` or `%{` also with them cut) and its arguments.
+fn commands(words: &[String], windows: bool) -> Vec<(String, &[String])> {
+    let mut out = Vec::new();
+    for at in command_starts(words) {
+        let Some((word, args)) = words.get(at..).and_then(<[String]>::split_first) else {
+            continue;
+        };
+        out.push((command_name(word, windows), args));
+        let joined = word.trim_start_matches(['%', '{']);
+        if joined.len() < word.len() && !joined.is_empty() {
+            out.push((command_name(joined, windows), args));
+        }
+    }
+    out
+}
+
+/// A command word's name: its last path part, lowercased, without `.exe`.
 fn command_name(word: &str, windows: bool) -> String {
-    let word = word.trim_start_matches(['%', '{']);
     let separator = |c: char| c == '/' || (windows && c == '\\');
     let name = word.rsplit(separator).next().unwrap_or(word).to_lowercase();
     name.strip_suffix(".exe").map(str::to_owned).unwrap_or(name)
@@ -369,14 +407,12 @@ fn is_recursive(name: &str, args: &[String], shell: ShellKind) -> bool {
 
 /// The command name of each simple command of a command line, its scripts' included
 /// ([`segments`]): the word past assignments and [`WRAPPERS`] (`sudo`, `env A=b`…), as its last
-/// path part, lowercased, without `.exe` ([`command_name`]).
+/// path part, lowercased, without `.exe` ([`command_name`]); and of each command a script
+/// block in it starts ([`commands`]).
 pub(crate) fn command_names(line: &str, windows: bool) -> Vec<String> {
     segments(line, windows)
         .iter()
-        .filter_map(|words| {
-            let word = words.get(command_at(words)?)?;
-            Some(command_name(word, windows))
-        })
+        .flat_map(|words| commands(words, windows).into_iter().map(|(name, _)| name))
         .collect()
 }
 

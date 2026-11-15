@@ -214,6 +214,8 @@ fn a_walker_in_a_script_block_is_read() {
         format!("1 | ForEach-Object -Process {{ Get-ChildItem -s {parent} }}"),
         format!("foreach ($x in 1) {{ gci -Depth 2 {parent} }}"),
         format!("{{ grep -r x {parent}; }}"),
+        format!("1 | ForEach-Object -Begin {{}} -Process {{ gci -r {parent} }}"),
+        format!("1 | ForEach-Object -Begin {{ Write-Host a }} -Process {{ gci -r {parent} }}"),
     ];
     let pass = [
         format!("1 | % {{ gci -r {matter} }}"),
@@ -250,4 +252,32 @@ fn with_no_tool_name_on_windows_ls_cp_rm_are_powershells() {
     }
     assert!(!walks("sort -r /p", true));
     assert!(!walks("bash -c 'ls -r /p'", true));
+}
+
+/// A folder whose name ends in `}` or is `}` (a link to the data folder's parent) is walked
+/// as named, not only as a script block's `x}` cut to `x`, in Bash and PowerShell alike.
+#[cfg(unix)]
+#[test]
+fn a_folder_named_with_a_closing_brace_is_still_walked() {
+    let dir = layout("cmd-brace-name");
+    let root = dir.path();
+    let matter = root.join("matter");
+    for name in ["j}", "}"] {
+        crate::write::symlink(root, &matter.join(name)).unwrap();
+    }
+    let judge = |shell, line: &str| {
+        let input = json!({ "command": line });
+        check_as(root, &[], Some(&input), shell).touches_data()
+    };
+    for (shell, line) in [
+        (ShellKind::Posix, "grep -r token 'j}'"),
+        (ShellKind::Posix, "ls -R '}'"),
+        (ShellKind::Posix, "grep -r token }"),
+        (ShellKind::PowerShell, "gci -r 'j}'"),
+        (ShellKind::PowerShell, "gci -r '}'"),
+        (ShellKind::Unknown, "ls -R 'j}'"),
+    ] {
+        assert!(judge(shell, line), "{shell:?} passed: {line}");
+    }
+    assert!(!judge(ShellKind::Posix, "grep -r token sub"));
 }
