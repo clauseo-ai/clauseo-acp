@@ -1,5 +1,5 @@
-// The room's notice after Clauseo closed unexpectedly, one RailNotice placed where the update notice goes (room.tsx):
-// at the rail's foot above Scratch matter where the rail stands, at the head of the wall where it folds away. The host's
+// The room's notice after Clauseo closed unexpectedly, one RailNotice placed where the update notice goes (room.tsx,
+// rail-shown.ts's useNoticePlace): the rail's foot, the work's head (one column, the welcome) or the wall's. The host's
 // LastExit, read once with `last_exit`, says whether the last run ended without its quit and which file actions it left
 // unfinished (an undo, a restore, accepting or rejecting tracked changes, each recorded before it touched a file).
 // "Clauseo closed unexpectedly." with "Your conversations are kept.", then a line per unfinished action, by count and

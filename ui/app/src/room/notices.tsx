@@ -1,6 +1,6 @@
-// What the room says about Clauseo itself, in the one place room.tsx puts it (the rail's foot, or the wall's head where
-// the rail folds away): the notice after Clauseo closed unexpectedly (crash-notice.tsx), then R23's update notice
-// (update-notice.tsx). Each shows nothing when it has nothing to say.
+// What the room says about Clauseo itself, in the one place room.tsx puts it (rail-shown.ts's useNoticePlace): the notice after Clauseo
+// closed unexpectedly (crash-notice.tsx), then R23's update notice (update-notice.tsx). Each shows nothing when it has
+// nothing to say.
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterSummary } from "../transport/protocol.ts";
 import type { AllThreads } from "./all-threads.ts";
