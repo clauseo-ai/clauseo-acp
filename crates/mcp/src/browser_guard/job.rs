@@ -9,6 +9,12 @@
 //! agent-browser and its daemon; so does the job's last handle closing when the guard exits,
 //! however it exits. The guard itself runs in the agent's job (`clauseo-process`); jobs nest.
 //!
+//! The guard's hardened copy (`harden.rs`) is the one process started outside such a job
+//! ([`start_copy`]): it stays in the guard's own jobs, as any child does, and makes its own job
+//! for Chrome and agent-browser. Its first process waits for it, and the copy watches that
+//! process as its parent (`parent.rs`), so whichever way the first process ends, the copy ends
+//! the browser and cleans up; a job that ended the copy with it would skip that cleanup.
+//!
 //! `clauseo-process` makes its job the same way, but for its async child and with dependencies
 //! this crate may not take (`ARCHITECTURE.md`), so the few job calls are repeated here.
 #![expect(
@@ -19,13 +25,21 @@
 mod child;
 mod spawn;
 
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
-use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::{
+    DUPLICATE_HANDLE_OPTIONS, DuplicateHandle, HANDLE, WAIT_OBJECT_0,
+};
 use windows::Win32::System::JobObjects::{
     CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
+};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, GetExitCodeProcess, INFINITE, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SYNCHRONIZE, WaitForSingleObject,
 };
 use windows::core::PCWSTR;
 
@@ -49,7 +63,7 @@ impl Job {
     /// Starts `launch` in the job, running: nothing the guard starts is ever outside it
     /// (`job/spawn.rs`).
     pub(crate) fn spawn(&self, launch: &Launch<'_>) -> io::Result<Child> {
-        spawn::spawn(self.handle(), self.hardened.as_ref(), launch)
+        spawn::spawn(Some(self.handle()), self.hardened.as_ref(), launch)
     }
 
     /// Ends every process in the job: Chrome, agent-browser and its daemon. Returns whether
@@ -105,6 +119,90 @@ impl Job {
         .map_err(|error| io::Error::other(format!("could not set the job's limit: {error}")))?;
         Ok(job)
     }
+}
+
+/// The guard's hardened copy, as its first process holds it: by a handle that may only wait for
+/// it and read its exit code.
+#[derive(Debug)]
+pub(crate) struct HardenedCopy(OwnedHandle);
+
+impl HardenedCopy {
+    /// Waits for the copy to exit and returns its exit code.
+    pub(crate) fn wait(&self) -> io::Result<u32> {
+        let handle = HANDLE(self.0.as_raw_handle());
+        // SAFETY: `handle` is open with SYNCHRONIZE while `self` lives; the wait takes no pointer.
+        if unsafe { WaitForSingleObject(handle, INFINITE) } != WAIT_OBJECT_0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut code = 0_u32;
+        // SAFETY: `handle` is open with PROCESS_QUERY_LIMITED_INFORMATION; `code` is a live u32
+        // the call writes.
+        unsafe { GetExitCodeProcess(handle, &raw mut code) }.map_err(io::Error::from)?;
+        Ok(code)
+    }
+}
+
+/// Starts the guard's hardened copy (`harden.rs`): this program again, as
+/// `browser-guard --hardened-copy <args...>`, with this process's environment, folder and
+/// standard handles, and `hardened`'s descriptors from its creation. Keeps only a handle that
+/// may wait for it and read its exit code: the all-access one `CreateProcessW` returns is
+/// closed at once, so no process that could take a handle of this one gets that one.
+pub(crate) fn start_copy(hardened: &Hardened, args: &[OsString]) -> io::Result<HardenedCopy> {
+    let program = std::env::current_exe()?;
+    let cwd = std::env::current_dir()?;
+    let mut env = BTreeMap::new();
+    for (name, value) in std::env::vars_os() {
+        let name = name.into_string().map_err(|name| {
+            io::Error::other(format!(
+                "the environment variable name {} is not Unicode",
+                name.display()
+            ))
+        })?;
+        env.insert(name, value);
+    }
+    let copy_args: Vec<OsString> = ["browser-guard", super::harden::HARDENED_COPY]
+        .into_iter()
+        .map(OsString::from)
+        .chain(args.iter().cloned())
+        .collect();
+    let mut child = spawn::spawn(
+        None,
+        Some(hardened),
+        &Launch {
+            program: &program,
+            args: &copy_args,
+            cwd: &cwd,
+            env: &env,
+            stdin: Io::Inherit,
+            stdout: Io::Inherit,
+            stderr: Io::Inherit,
+            inherit: &[],
+        },
+    )?;
+    let mut limited = HANDLE::default();
+    // SAFETY: the current process's pseudo handle needs no closing; `child`'s handle is open
+    // for the call, and `limited` is a live HANDLE the call writes. Not inheritable.
+    let duplicated = unsafe {
+        let me = GetCurrentProcess();
+        DuplicateHandle(
+            me,
+            HANDLE(child.as_raw_handle()),
+            me,
+            &raw mut limited,
+            (PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION).0,
+            false,
+            DUPLICATE_HANDLE_OPTIONS(0),
+        )
+    };
+    if let Err(error) = duplicated {
+        // A copy this process cannot wait for must not run on.
+        drop(child.kill());
+        return Err(io::Error::from(error));
+    }
+    // SAFETY: `limited` is the open handle DuplicateHandle just made, which nothing else owns.
+    let copy = HardenedCopy(unsafe { OwnedHandle::from_raw_handle(limited.0) });
+    drop(child);
+    Ok(copy)
 }
 
 #[cfg(test)]

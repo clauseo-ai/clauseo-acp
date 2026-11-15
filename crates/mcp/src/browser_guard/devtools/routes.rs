@@ -4,15 +4,20 @@
 //!   id (a guard id, a negative one, a fraction) is answered here with a CDP error and never
 //!   reaches the browser; a message with no id, a non-numeric one, or that is no JSON object is
 //!   dropped. What goes to the browser is the message as parsed and written again, so a
-//!   duplicate `"id"` key cannot mean one thing here and another there. A forwarded
-//!   `<Domain>.enable` or `.disable` is noted per session (when forwarded, not when the browser
-//!   confirms it: a refused enable brings no events anyway).
+//!   duplicate `"id"` key cannot mean one thing here and another there. A root-session command
+//!   (no `sessionId`) in a domain the guard's clients take (`Fetch`, once PR-3's `ProxyAuth`
+//!   is one) is answered here with a CDP error too: the guard and agent-browser share the root
+//!   session, so agent-browser's `Fetch.enable`, `Fetch.disable` or `Fetch.continueWithAuth`
+//!   there would cancel or answer for the guard's own. Page-session commands are not judged by
+//!   domain. A forwarded `<Domain>.enable` or `.disable` is noted per session (when forwarded,
+//!   not when the browser confirms it: a refused enable brings no events anyway); a new client
+//!   starts with none noted ([`Routes::client_connected`]).
 //! - **Replies** with a guard id go to the relay's own waiting call if it sent the command, else
 //!   to the guard's clients; never to agent-browser. Every other reply goes to agent-browser as
 //!   the browser wrote it.
 //! - **Events:** a root-session event of a method the clients take goes to them, and to
-//!   agent-browser only while it has that domain enabled on the root session. Every other event
-//!   goes to agent-browser.
+//!   agent-browser only while it has that domain enabled on the root session (which the
+//!   refusal above leaves it no way to do). Every other event goes to agent-browser.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::Sender;
@@ -31,6 +36,9 @@ pub(crate) struct Routes {
     pending: BTreeMap<i64, Sender<Reply>>,
     /// The event methods the guard's clients take, from the root session.
     methods: BTreeSet<String>,
+    /// The domains the guard's clients take on the root session: those of their events and of
+    /// their start commands. agent-browser's root-session commands in them are refused.
+    domains: BTreeSet<String>,
     /// The (session id, domain) pairs agent-browser has enabled; `""` is the root session.
     enabled: BTreeSet<(String, String)>,
 }
@@ -85,9 +93,28 @@ impl Routes {
         self.pending.remove(&id);
     }
 
-    /// The guard's clients take root-session events of `methods` from now on.
+    /// The guard's clients take root-session events of `methods` from now on, and their
+    /// domains.
     pub(crate) fn take_events<'a>(&mut self, methods: impl IntoIterator<Item = &'a str>) {
-        self.methods.extend(methods.into_iter().map(str::to_owned));
+        for method in methods {
+            self.domains.insert(domain_of(method).to_owned());
+            self.methods.insert(method.to_owned());
+        }
+    }
+
+    /// The guard's clients take the domains of `methods` (their start commands') on the root
+    /// session from now on.
+    pub(crate) fn take_domains<'a>(&mut self, methods: impl IntoIterator<Item = &'a str>) {
+        self.domains.extend(
+            methods
+                .into_iter()
+                .map(|method| domain_of(method).to_owned()),
+        );
+    }
+
+    /// A new agent-browser client is connected: nothing it enabled before counts for it.
+    pub(crate) fn client_connected(&mut self) {
+        self.enabled.clear();
     }
 
     /// Judges a message from agent-browser, noting a domain it enables or disables.
@@ -103,13 +130,15 @@ impl Routes {
             if !id.is_number() {
                 return FromClient::Drop;
             }
-            let refusal = json!({
-                "id": id,
-                "error": {"code": -32600, "message": "the id is outside agent-browser's range"},
-            });
-            return FromClient::Refuse(refusal.to_string());
+            return FromClient::Refuse(refusal(id, "the id is outside agent-browser's range"));
         }
         if let Some(method) = message.get("method").and_then(Value::as_str) {
+            if !message.contains_key("sessionId") && self.domains.contains(domain_of(method)) {
+                return FromClient::Refuse(refusal(
+                    id,
+                    "the guard takes this domain on the root session",
+                ));
+            }
             let session = session_of(message.get("sessionId"));
             if let Some(domain) = method.strip_suffix(".enable") {
                 self.enabled.insert((session, domain.to_owned()));
@@ -152,13 +181,24 @@ impl Routes {
         if message.contains_key("sessionId") || !self.methods.contains(method) {
             return FromBrowser::forward();
         }
-        let domain = method.split_once('.').map_or("", |(domain, _)| domain);
-        let forward = self.enabled.contains(&(String::new(), domain.to_owned()));
+        let forward = self
+            .enabled
+            .contains(&(String::new(), domain_of(method).to_owned()));
         FromBrowser {
             forward,
             guard: ToGuard::Event(Value::Object(message)),
         }
     }
+}
+
+/// The local CDP error (-32600, as JSON-RPC's invalid request) for agent-browser's command `id`.
+fn refusal(id: &Value, message: &str) -> String {
+    json!({"id": id, "error": {"code": -32600, "message": message}}).to_string()
+}
+
+/// A CDP method's domain: `Fetch` for `Fetch.enable`; the whole name if it has no dot.
+fn domain_of(method: &str) -> &str {
+    method.split_once('.').map_or(method, |(domain, _)| domain)
 }
 
 /// A message's `sessionId`, or `""` for the root session.

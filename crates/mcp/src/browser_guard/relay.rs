@@ -49,6 +49,7 @@
 pub(crate) mod lines;
 mod oneshot;
 pub(crate) mod pumps;
+pub(crate) mod redact;
 
 use std::io;
 use std::sync::Arc;

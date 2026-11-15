@@ -32,6 +32,8 @@ mod handshake;
 mod listen;
 mod nul;
 mod peer;
+#[cfg(any(target_os = "macos", test))]
+mod proc_info;
 mod routes;
 pub(crate) mod seam;
 
@@ -51,12 +53,18 @@ pub(crate) use routes::Reply;
 use routes::{FromClient, Routes, ToGuard};
 use seam::{CdpLink, GuardClient};
 
-/// How long a connection has to send its request head.
-const HANDSHAKE_WAIT: Duration = Duration::from_secs(5);
+use super::now;
+
+/// How long a connection has, in all, to send its request head once the peer check let it in.
+/// agent-browser sends its ~250 bytes at once; a slow or idle connection is closed by then.
+const HANDSHAKE_WAIT: Duration = Duration::from_secs(2);
 /// How long a write to the client may block before the client is dropped.
 const CLIENT_WRITE_WAIT: Duration = Duration::from_secs(30);
-/// How many connections may be in their handshake at once; more are closed unread.
-const MAX_HANDSHAKES: usize = 8;
+/// How many connections may be in their peer check or handshake at once; more are closed
+/// unread. Each has a thread of its own, so none waits behind another: this only bounds the
+/// threads. A connection from outside agent-browser's tree holds its place for the peer check
+/// only, and one from inside it for at most [`HANDSHAKE_WAIT`] more.
+const MAX_HANDSHAKES: usize = 64;
 
 /// The relay for one browser. Dropping it closes the client and the listener.
 pub(crate) struct Devtools {
@@ -80,14 +88,9 @@ struct Core {
     guard_clients: Mutex<Vec<Arc<dyn GuardClient>>>,
 }
 
-/// The relay's side of the seam: the guard's messages, written to the browser's pipe.
-struct PipeLink(
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "read only by PR-3's ProxyAuth, through send")
-    )]
-    Arc<Core>,
-);
+/// The relay's side of the seam: the guard's messages, written to the browser's pipe. The
+/// relay's own commands ([`Devtools::command`]) go through it too.
+struct PipeLink(Arc<Core>);
 
 impl CdpLink for PipeLink {
     fn send(&self, message: &Value) -> io::Result<()> {
@@ -144,7 +147,8 @@ impl Devtools {
     pub(crate) fn url(&self) -> String {
         format!(
             "ws://127.0.0.1:{}/devtools/browser/{}",
-            self.port, self.secret
+            self.port(),
+            self.secret
         )
     }
 
@@ -153,11 +157,7 @@ impl Devtools {
         *lock(&self.core.root) = Some(pid);
     }
 
-    /// The relay's port, for the guard's notes (the secret is never logged).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the tests only, for now")
-    )]
+    /// The relay's port (the secret is never logged).
     pub(crate) fn port(&self) -> u16 {
         self.port
     }
@@ -180,8 +180,8 @@ impl Devtools {
         if let Some(session) = session {
             message.insert("sessionId".to_owned(), Value::from(session));
         }
-        let text = Value::Object(message).to_string();
-        if let Err(error) = nul::write(&mut *lock(&self.core.to_browser), text.as_bytes()) {
+        let link = PipeLink(Arc::clone(&self.core));
+        if let Err(error) = link.send(&Value::Object(message)) {
             lock(&self.core.routes).forget(id);
             return Err(error);
         }
@@ -225,16 +225,22 @@ impl Devtools {
 
     /// [`Devtools::start_guard`]'s work for the given clients.
     pub(crate) fn attach(&self, clients: &[Arc<dyn GuardClient>]) -> Result<(), String> {
-        lock(&self.core.routes).take_events(
-            clients
-                .iter()
-                .flat_map(|client| client.events().iter().copied()),
-        );
+        let starts: Vec<(String, Value)> = clients
+            .iter()
+            .flat_map(|client| client.start_commands())
+            .collect();
+        {
+            let mut routes = lock(&self.core.routes);
+            routes.take_events(
+                clients
+                    .iter()
+                    .flat_map(|client| client.events().iter().copied()),
+            );
+            routes.take_domains(starts.iter().map(|(method, _)| method.as_str()));
+        }
         *lock(&self.core.guard_clients) = clients.to_vec();
-        for client in clients {
-            for (method, params) in client.start_commands() {
-                self.call(&method, params, None, seam::START_COMMAND_WAIT)?;
-            }
+        for (method, params) in starts {
+            self.call(&method, params, None, seam::START_COMMAND_WAIT)?;
         }
         Ok(())
     }
@@ -365,7 +371,7 @@ fn handshake_of(
     port: u16,
     secret: &str,
 ) -> Option<(u64, Vec<u8>)> {
-    stream.set_read_timeout(Some(HANDSHAKE_WAIT)).ok()?;
+    let deadline = now() + HANDSHAKE_WAIT;
     let mut head = Vec::new();
     let mut chunk = [0_u8; 1024];
     let end = loop {
@@ -374,6 +380,11 @@ fn handshake_of(
         }
         if head.len() > handshake::MAX_HEAD {
             not_found(stream);
+            return None;
+        }
+        // One deadline for the whole head, however it trickles in.
+        let left = deadline.saturating_duration_since(now());
+        if left.is_zero() || stream.set_read_timeout(Some(left)).is_err() {
             return None;
         }
         match stream.read(&mut chunk) {
@@ -400,6 +411,8 @@ fn handshake_of(
         && stream.set_write_timeout(Some(CLIENT_WRITE_WAIT)).is_ok()
         && stream.write_all(&reply).is_ok();
     let writer = stream.try_clone().ok().filter(|_| ready)?;
+    // A new client: what an earlier one enabled is not its.
+    lock(&core.routes).client_connected();
     let id = core.clients.fetch_add(1, Ordering::SeqCst);
     *client = Some(Client { id, stream: writer });
     Some((id, leftover))

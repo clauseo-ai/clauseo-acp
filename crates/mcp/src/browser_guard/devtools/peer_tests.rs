@@ -1,12 +1,14 @@
 //! The relay's peer check: a connection from outside agent-browser's tree is closed before a
-//! byte is read; one from agent-browser itself or a child of it gets as far as the request.
+//! byte is read; one from agent-browser itself or a child of it gets as far as the request, and
+//! no idle connection holds it up. macOS's socket record is judged on every system.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
 use super::peer::{stat_parent, tcp_line_inode};
-use super::tests::{relay, request};
+use super::proc_info::{AF_INET, INI_IPV4, SOCKINFO_TCP, SocketFdInfo, is_client_socket};
+use super::tests::{relay, request, right_path, upgrade};
 
 /// What the relay answers this process's `GET /json`, all of it, until it closes.
 fn reply_to_json(port: u16) -> String {
@@ -117,4 +119,68 @@ fn proc_stat_lines_name_the_parent_even_with_odd_names() {
     );
     assert_eq!(stat_parent("77 (a) b (c) R 12 77 77 0 -1"), Some(12));
     assert_eq!(stat_parent("garbage"), None);
+}
+
+#[test]
+fn idle_connections_neither_hold_up_agent_browser_nor_stay_open() {
+    let (devtools, _reads, _writes) = relay();
+    // More than the old limit of eight handshakes in flight, all silent.
+    let idle: Vec<TcpStream> = (0..12)
+        .map(|_| TcpStream::connect(("127.0.0.1", devtools.port())).unwrap())
+        .collect();
+    let (status, _client) = upgrade(&devtools, &right_path(&devtools));
+    assert!(status.starts_with("HTTP/1.1 101"), "{status}");
+    for mut stream in idle {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut byte = [0_u8; 1];
+        assert_eq!(
+            stream.read(&mut byte).unwrap(),
+            0,
+            "closed at the handshake's deadline"
+        );
+    }
+}
+
+/// macOS's record of the client's socket, from 127.0.0.1:50000 to the relay's 127.0.0.1:61000.
+fn client_socket() -> SocketFdInfo {
+    let mut info = SocketFdInfo::default();
+    info.psi.soi_kind = SOCKINFO_TCP;
+    info.psi.soi_family = AF_INET;
+    let ini = &mut info.psi.soi_proto.tcpsi_ini;
+    ini.insi_vflag = INI_IPV4;
+    ini.insi_laddr.i46a_addr4 = [127, 0, 0, 1];
+    ini.insi_faddr.i46a_addr4 = [127, 0, 0, 1];
+    ini.insi_lport = i32::from(50_000_u16.to_be());
+    ini.insi_fport = i32::from(61_000_u16.to_be());
+    info
+}
+
+#[test]
+fn macos_socket_records_match_only_the_whole_ipv4_loopback_pair() {
+    assert!(is_client_socket(&client_socket(), 50_000, 61_000));
+    assert!(
+        !is_client_socket(&client_socket(), 61_000, 50_000),
+        "the relay's own side"
+    );
+    assert!(!is_client_socket(&client_socket(), 50_001, 61_000));
+    let mut ipv6 = client_socket();
+    ipv6.psi.soi_proto.tcpsi_ini.insi_vflag = 0x2;
+    assert!(!is_client_socket(&ipv6, 50_000, 61_000), "not IPv4");
+    let mut elsewhere = client_socket();
+    elsewhere.psi.soi_proto.tcpsi_ini.insi_laddr.i46a_addr4 = [192, 168, 1, 1];
+    assert!(
+        !is_client_socket(&elsewhere, 50_000, 61_000),
+        "local address"
+    );
+    let mut remote = client_socket();
+    remote.psi.soi_proto.tcpsi_ini.insi_faddr.i46a_addr4 = [10, 0, 0, 1];
+    assert!(
+        !is_client_socket(&remote, 50_000, 61_000),
+        "foreign address"
+    );
+    let mut udp = client_socket();
+    udp.psi.soi_kind = 1;
+    assert!(!is_client_socket(&udp, 50_000, 61_000), "not TCP");
 }

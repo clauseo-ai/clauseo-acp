@@ -4,8 +4,9 @@
 //! process of the same user (a command in Codex's sandbox) could bind the same address and port
 //! with `SO_REUSEADDR` and take agent-browser's connection, and with it the secret in the
 //! request line. Std's `TcpListener::bind` cannot set the option before the bind, so the socket
-//! is made here and handed to std. Elsewhere std's bind is used: Unix refuses a second bind of a
-//! bound port to a different user, and the relay runs only on Windows outside tests.
+//! is made here and handed to std. On macOS and Linux, where the relay runs too, std's bind is
+//! used: the relay's socket never sets `SO_REUSEPORT` (std sets only `SO_REUSEADDR`), so both
+//! refuse any other socket's bind of the same address and port while it listens, whoever asks.
 
 use std::io;
 use std::net::TcpListener;

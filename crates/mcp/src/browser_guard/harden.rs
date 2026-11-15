@@ -25,8 +25,19 @@
 //! `clauseo-process`). The `P` blocks inherited entries; the `OW` (OWNER RIGHTS) entry takes away
 //! the owner's implicit `READ_CONTROL | WRITE_DAC`.
 //!
-//! [`Hardened::apply`] sets that DACL on the guard first thing, before any secret exists
-//! (`browser_guard.rs`), and keeps the descriptors for `CreateProcessW` (`job/spawn.rs`): its
+//! A DACL set on a running process is checked only when a handle is opened: a handle another
+//! process opened before `SetSecurityInfo` keeps its access. So the guard's first process holds
+//! nothing worth reading. It sets the DACL on itself ([`Hardened::apply`], so no new handle to it
+//! gets more) and starts a copy of itself with the descriptors from its creation
+//! (`job::start_copy`, the marker [`HARDENED_COPY`] first among its arguments), waits for it
+//! and passes on its exit code, holding only a `SYNCHRONIZE` and query handle to it. Only the
+//! copy makes the relay's secret, starts the browser and agent-browser and serves the agent; it
+//! first checks that it is hardened ([`Hardened::verified`]), so a forged marker only makes a
+//! guard that refuses to start. Linux's `PR_SET_DUMPABLE` has the same gap: a
+//! `/proc/<guard>/mem` opened before it keeps working. It is the guard's first act, and Linux is
+//! for development and CI only.
+//!
+//! The copy keeps the descriptors for `CreateProcessW` (`job/spawn.rs`): its
 //! `lpProcessAttributes` gets [`process_sddl`] and its `lpThreadAttributes` [`thread_sddl`], the
 //! same entries with the thread rights that mean the same (`THREAD_QUERY_LIMITED_INFORMATION |
 //! SYNCHRONIZE`; on a thread `0x1000` would be ``THREAD_RESUME``), so each child is hardened from
@@ -67,8 +78,21 @@ fn sddl(user: &str, rights: u32) -> String {
     format!("D:P(A;;0x1FFFFF;;;SY)(A;;0x{rights:X};;;{user})(A;;0x{rights:X};;;OW)")
 }
 
+/// The first argument after `browser-guard` that makes the guard the hardened copy its first
+/// process started (Windows).
+#[cfg(windows)]
+pub(crate) const HARDENED_COPY: &str = "--hardened-copy";
+
+/// The ACE types a hardened DACL may hold: `ACCESS_ALLOWED_ACE_TYPE` and `ACCESS_DENIED_ACE_TYPE`.
+#[cfg(windows)]
+const ALLOWED_ACE: u8 = 0;
+#[cfg(windows)]
+const DENIED_ACE: u8 = 1;
+
 #[cfg(windows)]
 pub(crate) use windows_impl::Hardened;
+#[cfg(all(windows, test))]
+pub(crate) use windows_impl::is_hardened;
 
 #[cfg(windows)]
 #[expect(
@@ -79,15 +103,18 @@ mod windows_impl {
     use std::io;
     use std::os::windows::io::{FromRawHandle, OwnedHandle};
 
+    use std::ffi::c_void;
     use windows::Win32::Foundation::{HANDLE, HLOCAL, LocalFree};
+
     use windows::Win32::Security::Authorization::{
         ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-        SDDL_REVISION_1, SE_KERNEL_OBJECT, SetSecurityInfo,
+        GetSecurityInfo, SDDL_REVISION_1, SE_KERNEL_OBJECT, SetSecurityInfo,
     };
     use windows::Win32::Security::{
-        ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetTokenInformation,
-        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
-        TOKEN_QUERY, TOKEN_USER, TokenUser,
+        ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce,
+        GetSecurityDescriptorDacl, GetTokenInformation, IsWellKnownSid,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+        TOKEN_QUERY, TOKEN_USER, TokenUser, WinLocalSystemSid,
     };
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
     use windows::core::{BOOL, HSTRING, PWSTR};
@@ -103,11 +130,7 @@ mod windows_impl {
         /// Sets the protected DACL on the guard's own process and returns the descriptors for
         /// its children.
         pub(crate) fn apply() -> io::Result<Hardened> {
-            let user = user_sid()?;
-            let hardened = Hardened {
-                process: Descriptor::from_sddl(&super::process_sddl(&user))?,
-                thread: Descriptor::from_sddl(&super::thread_sddl(&user))?,
-            };
+            let hardened = Hardened::build()?;
             let dacl = hardened.process.dacl()?;
             // SAFETY: the pseudo handle of the current process needs no closing; `dacl` points
             // into the descriptor `hardened` owns, live for the call.
@@ -126,6 +149,27 @@ mod windows_impl {
             Ok(hardened)
         }
 
+        /// The descriptors for the copy's children, once the copy has checked that its own
+        /// process was created hardened ([`is_hardened`]); an error otherwise.
+        pub(crate) fn verified() -> io::Result<Hardened> {
+            let hardened = Hardened::build()?;
+            // SAFETY: the pseudo handle of the current process needs no closing.
+            if !is_hardened(unsafe { GetCurrentProcess() })? {
+                return Err(io::Error::other(
+                    "its process grants the user more than the hardened DACL does",
+                ));
+            }
+            Ok(hardened)
+        }
+
+        fn build() -> io::Result<Hardened> {
+            let user = user_sid()?;
+            Ok(Hardened {
+                process: Descriptor::from_sddl(&super::process_sddl(&user))?,
+                thread: Descriptor::from_sddl(&super::thread_sddl(&user))?,
+            })
+        }
+
         /// `CreateProcessW`'s `lpProcessAttributes`; live while `self` is.
         pub(crate) fn process(&self) -> SECURITY_ATTRIBUTES {
             self.process.attributes()
@@ -137,13 +181,14 @@ mod windows_impl {
         }
     }
 
-    /// A self-relative security descriptor `ConvertStringSecurityDescriptorToSecurityDescriptorW`
-    /// allocated, freed once on drop.
+    /// A security descriptor Windows allocated with `LocalAlloc`
+    /// (`ConvertStringSecurityDescriptorToSecurityDescriptorW`, `GetSecurityInfo`), freed once on
+    /// drop.
     #[derive(Debug)]
     struct Descriptor(PSECURITY_DESCRIPTOR);
 
-    // SAFETY: the descriptor is written once, by its conversion, and only read afterwards (by
-    // `SetSecurityInfo` and `CreateProcessW`); nothing else holds the pointer.
+    // SAFETY: the descriptor is written once, by the call that made it, and only read afterwards
+    // (by `SetSecurityInfo`, `CreateProcessW` and `is_hardened`); nothing else holds the pointer.
     unsafe impl Send for Descriptor {}
     // SAFETY: as for `Send`: shared reads of memory nothing writes.
     unsafe impl Sync for Descriptor {}
@@ -196,10 +241,70 @@ mod windows_impl {
 
     impl Drop for Descriptor {
         fn drop(&mut self) {
-            // SAFETY: `self.0` was allocated by LocalAlloc in its conversion and is freed here,
-            // once.
+            // SAFETY: `self.0` was allocated by LocalAlloc in the call that made it and is freed
+            // here, once.
             unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
         }
+    }
+
+    /// Whether `process` (a handle with `READ_CONTROL`) has a DACL that grants no one but
+    /// SYSTEM more than `PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE`: allow and deny
+    /// entries only, every allow entry for SYSTEM or within those rights. A missing (null) DACL,
+    /// which grants everyone everything, or any other kind of entry is no.
+    pub(crate) fn is_hardened(process: HANDLE) -> io::Result<bool> {
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: `process` is open for the call; `dacl` and `descriptor` are live locals it
+        // writes, the descriptor LocalAlloc'd and freed below, `dacl` pointing into it.
+        let read = unsafe {
+            GetSecurityInfo(
+                process,
+                SE_KERNEL_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(&raw mut dacl),
+                None,
+                Some(&raw mut descriptor),
+            )
+        };
+        read.ok().map_err(io::Error::from)?;
+        let descriptor = Descriptor(descriptor);
+        let hardened = !dacl.is_null() && aces_within(dacl.cast_const())?;
+        drop(descriptor);
+        Ok(hardened)
+    }
+
+    /// Whether every entry of `dacl` (a valid ACL) is as [`is_hardened`] asks.
+    fn aces_within(dacl: *const ACL) -> io::Result<bool> {
+        // SAFETY: `dacl` points to a valid ACL, live for the call (the caller holds its
+        // descriptor).
+        let count = unsafe { (*dacl).AceCount };
+        for index in 0..u32::from(count) {
+            let mut ace: *mut c_void = std::ptr::null_mut();
+            // SAFETY: `index` is below the ACL's entry count; `ace` is a live local the call
+            // sets to point into the ACL.
+            unsafe { GetAce(dacl, index, &raw mut ace) }.map_err(io::Error::from)?;
+            // SAFETY: every ACE starts with an ACE_HEADER.
+            let kind = unsafe { (*ace.cast::<ACE_HEADER>()).AceType };
+            if kind == super::DENIED_ACE {
+                continue;
+            }
+            if kind != super::ALLOWED_ACE {
+                return Ok(false);
+            }
+            // SAFETY: an ACCESS_ALLOWED_ACE, whose SID starts at `SidStart`, inside the ACL.
+            let (mask, sid) = unsafe {
+                let allowed = ace.cast::<ACCESS_ALLOWED_ACE>();
+                ((*allowed).Mask, PSID((&raw mut (*allowed).SidStart).cast()))
+            };
+            // SAFETY: `sid` points to the entry's valid SID, live for the call.
+            let system = unsafe { IsWellKnownSid(sid, WinLocalSystemSid) }.as_bool();
+            if !system && mask & !super::PROCESS_RIGHTS != 0 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// The guard's user SID as a string (`S-1-5-21-...`).

@@ -114,17 +114,22 @@ fn wait_forever() -> ! {
 mod pipe {
     use std::fs::File;
 
-    /// Fds 3 (read) and 4 (write), Chromium's `kReadFD` and `kWriteFD`.
+    /// Fds 3 (read) and 4 (write), Chromium's `kReadFD` and `kWriteFD`; an error if either is
+    /// not open (a stub started without the pipe), rather than a wait on a fd that is no pipe.
     #[cfg(unix)]
-    #[expect(
-        clippy::unnecessary_wraps,
-        reason = "the same signature as Windows', which can fail to parse its handles"
-    )]
     pub(super) fn open() -> std::io::Result<(File, File)> {
         use std::os::fd::FromRawFd;
-        // SAFETY: the guard puts the pipe's ends at fds 3 and 4 before exec and nothing else in
-        // this process opens or owns them.
-        Ok(unsafe { (File::from_raw_fd(3), File::from_raw_fd(4)) })
+        // SAFETY: F_GETFD only reads a fd's flags, and fails with EBADF on one not open.
+        let open = |fd| unsafe { nix::libc::fcntl(fd, nix::libc::F_GETFD) } != -1;
+        if !open(3) || !open(4) {
+            return Err(std::io::Error::other(
+                "fds 3 and 4 are not open: no DevTools pipe",
+            ));
+        }
+        // SAFETY: the guard puts the pipe's ends at fds 3 and 4 before exec, both open as just
+        // checked, and nothing else in this process opens or owns them.
+        let (read, write) = unsafe { (File::from_raw_fd(3), File::from_raw_fd(4)) };
+        Ok((read, write))
     }
 
     /// The handles in `--remote-debugging-io-pipes=<read>,<write>`, decimal.
