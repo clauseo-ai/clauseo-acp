@@ -450,12 +450,18 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   - *The first load is bounded.* Desktop reads each agent's key on a thread of its own and its
     setup thread waits for them at most 10 s on its timer (`setup/keys/reads.rs`). Then, per
     agent: no item stored lifts the refusal, and it launches without a key; a key read fine lifts
-    it, and it launches with the key; a read that failed sets `agent.key_unreadable`. Such a
-    key never reads as "no key" and the agent never launches without it. A read that has not
+    it, and it launches with the key. A read that failed (the keychain's error) or has not
     answered by the bound sets `agent.key_unreadable` only for an agent the "key stored" marker
-    below marks; an unmarked agent has no key Clauseo stored, so it launches without one and no
-    refusal follows. The log line names the agent, "key unreadable" and the error's kind; never
-    the key, the item's name or a path.
+    below marks: such a key never reads as "no key" and the agent never launches without it, so
+    a firm's stored key is never skipped silently. An unmarked agent has no key Clauseo stored,
+    so it launches without one and no refusal follows. (Amended 2026-11-15, the orchestrator's
+    ruling on VM row M-d: a failed read used to set the refusal for every agent, and a Mac with
+    no login keychain, where every read fails, showed "Sign-in didn't finish." in place of Sign
+    in for agents that had never stored a key.) The accepted cost: a marker lost together with a
+    keychain error means one session without the stored key, until a read answers and the
+    marker is set again. The log line names the agent, "key unreadable" (or, unmarked, that the
+    read failed and it launches without a key) and the error's kind; never the key, the item's
+    name or a path.
   - *The "key stored" marker* (the orchestrator's ruling, a follow-up to #506). Desktop keeps,
     outside the keychain, a list of the agents Clauseo stored a key for:
     `<data_dir>/agents/key-stored.json`, `{"agents": ["claude-acp"]}`, beside the `firm-policy`
