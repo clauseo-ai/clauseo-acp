@@ -173,7 +173,7 @@ mod test_support;
 pub mod windows;
 
 #[cfg(unix)]
-pub use browser_dir::{BrowserSocketDir, DaemonProgram, Reap, Reaped, Swept};
+pub use browser_dir::{BrowserSocketDir, DaemonProgram, Monotonic, Reap, Reaped, Swept};
 pub use denial::{
     Access, CappedSink, Clock, DENIAL_WINDOW, DENIALS_PER_WINDOW, Denial, DenialSink, HostRefusal,
     PathClass, Reachability, SystemClock,

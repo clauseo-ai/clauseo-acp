@@ -1,5 +1,14 @@
 //! macOS: the listener from `LOCAL_PEERPID` and `getpeereid`; its executable from libproc's
 //! `proc_pidpath`; signals through `kill`, and its exit seen as the connection hanging up.
+//!
+//! macOS has no pidfd, so the signals go by pid. The open connection pins the socket, not the
+//! pid. The pid stays the listener's because the listener is the socket's single holder:
+//! agent-browser's daemon opens it close-on-exec, so no child keeps it, and the connection hangs
+//! up the moment that one process exits. The reap checks the connection has not hung up right
+//! before SIGTERM, and checks the identity and the hang-up again before SIGKILL. What is left is
+//! the microseconds between that check and `kill`, in which the daemon would have to exit and
+//! macOS hand its pid to a new process. macOS gives pids in rising order and wraps only at 99999,
+//! so that cannot happen within microseconds in practice.
 
 #![expect(
     unsafe_code,

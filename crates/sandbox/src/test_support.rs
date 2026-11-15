@@ -157,6 +157,28 @@ pub(crate) fn bind(path: &Path) -> std::os::unix::net::UnixListener {
     std::os::unix::net::UnixListener::bind(path).unwrap()
 }
 
+/// A Unix socket listener bound at `path` with a listen backlog of `backlog`, which never
+/// accepts unless the test does.
+#[cfg(unix)]
+pub(crate) fn bind_with_backlog(path: &Path, backlog: i32) -> std::os::fd::OwnedFd {
+    use rustix::net::{AddressFamily, SocketAddrUnix, SocketType};
+    let socket = rustix::net::socket(AddressFamily::UNIX, SocketType::STREAM, None).unwrap();
+    rustix::net::bind(&socket, &SocketAddrUnix::new(path).unwrap()).unwrap();
+    rustix::net::listen(&socket, backlog).unwrap();
+    socket
+}
+
+/// A FIFO at `path`.
+#[cfg(target_os = "linux")]
+pub(crate) fn fifo(path: &Path) {
+    rustix::fs::mkfifoat(
+        rustix::fs::CWD,
+        path,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+    )
+    .unwrap();
+}
+
 /// Removes the file at `path`.
 pub(crate) fn remove(path: &Path) {
     std::fs::remove_file(path).unwrap();

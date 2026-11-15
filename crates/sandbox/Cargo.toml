@@ -71,11 +71,8 @@ semver = { workspace = true }
 # The watcher (src/macos/watch.rs): `log stream` started as a child, its ndjson lines read on a
 # thread of its own with a once-a-second tick, each line parsed as JSON.
 # The upstream lookup's proxy settings and PAC runs (src/proxy/upstream/macos.rs).
-# The browser daemon reap's listener pid, uid and executable (src/browser_dir/reap/macos.rs):
-# getsockopt(LOCAL_PEERPID), getpeereid and libproc's proc_pidpath, which rustix has no binding for.
 [target.'cfg(target_os = "macos")'.dependencies]
 async-process = { workspace = true }
-libc = { workspace = true }
 objc2-cf-network = { workspace = true, features = ["std", "CFProxySupport"] }
 objc2-core-foundation = { workspace = true, features = [
   "CFArray",
@@ -94,7 +91,9 @@ objc2-core-foundation = { workspace = true, features = [
 # reap (src/browser_dir/reap.rs): the waits (poll), and on Linux the listener's credentials
 # (SO_PEERCRED) and its pidfd (pidfd_open, pidfd_send_signal), on macOS its signals (kill).
 # libc: the interface list (getifaddrs) of the proxy's own-network check
-# (src/proxy/local_net/unix.rs).
+# (src/proxy/local_net/unix.rs), and the daemon reap's calls rustix has no binding for: on Linux
+# getsockopt(SO_PEERPIDFD) (src/browser_dir/reap/linux.rs); on macOS getsockopt(LOCAL_PEERPID),
+# getpeereid and libproc's proc_pidpath (src/browser_dir/reap/macos.rs).
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["fs", "process", "net", "event"] }
 libc = { workspace = true }

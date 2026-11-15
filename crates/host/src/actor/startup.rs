@@ -44,7 +44,7 @@ pub(super) async fn open(
     // With the store's lock held, before the actor serves and so before any launch: the browser
     // socket folders a crashed run left, each one's agent-browser daemon ended first.
     #[cfg(unix)]
-    sweep_browser_daemons(&parts.wiring, parts.clock.as_ref());
+    sweep_browser_daemons(&parts.wiring, &parts.clock).await;
     // The index opens (or rebuilds) on its own thread: start-up does not wait for it.
     let search = crate::search::Search::start(
         data_dir,
@@ -298,16 +298,38 @@ async fn registry(store: &Store) -> Result<Registry, Error> {
 }
 
 /// The start-up sweep of the browser socket folders a crashed run left, each one's agent-browser
-/// daemon ended first (`browser::session::sweep_stale`), with one lifecycle line when a daemon
-/// was found. It runs where the sweep of the agents' process groups is to run, and joins that
-/// sweep's summary once both are one.
+/// daemon ended first (`browser::session::sweep_stale`), on a thread of its own: start-up waits
+/// for it at most [`SWEEP_WAIT`] on the host's clock, then goes on without it. One lifecycle line
+/// when a daemon was found. It runs where the sweep of the agents' process groups is to run, and
+/// joins that sweep's summary once both are one.
 #[cfg(unix)]
-fn sweep_browser_daemons(wiring: &crate::config::LaunchWiring, clock: &dyn crate::clock::Clock) {
-    let daemons = crate::browser::session::sweep_stale(
-        wiring.browser_socket_root.as_deref(),
-        wiring.agent_browser.as_deref(),
-        clock,
-    );
+async fn sweep_browser_daemons(
+    wiring: &crate::config::LaunchWiring,
+    clock: &Arc<dyn crate::clock::Clock>,
+) {
+    let root = wiring.browser_socket_root.clone();
+    let program = wiring.agent_browser.clone();
+    let sweep_clock = Arc::clone(clock);
+    let job = crate::agent::codex::prepare::Job {
+        what: "browser daemon sweep",
+        matter: None,
+        wait: SWEEP_WAIT,
+    };
+    let swept = crate::agent::codex::prepare::off_actor(Arc::clone(clock), job, move || {
+        Ok(crate::browser::session::sweep_stale(
+            root.as_deref(),
+            program.as_deref(),
+            sweep_clock.as_ref(),
+        ))
+    })
+    .await;
+    let daemons = match swept {
+        Ok(daemons) => daemons,
+        Err(error) => {
+            tracing::warn!(error = %Cause(&error), "the browser daemon sweep did not finish");
+            return;
+        }
+    };
     if daemons != clauseo_sandbox::Reaped::default() {
         tracing::info!(
             target: crate::log_file::LIFECYCLE,
@@ -318,3 +340,7 @@ fn sweep_browser_daemons(wiring: &crate::config::LaunchWiring, clock: &dyn crate
         );
     }
 }
+
+/// How long start-up waits for [`sweep_browser_daemons`]: its 2 s budget and a margin.
+#[cfg(unix)]
+const SWEEP_WAIT: std::time::Duration = std::time::Duration::from_secs(3);

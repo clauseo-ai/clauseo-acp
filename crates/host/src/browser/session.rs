@@ -159,11 +159,14 @@ impl BrowserSession {
 
     /// Makes the socket folder's drop end the daemon of `program` (the agent-browser the guard
     /// runs, its `--agent-browser`) listening in it, after the sandbox crate's identity checks.
-    /// A program that cannot be resolved leaves the daemon to its idle timeout, with a warning.
+    /// The reap takes at most 2 s in all on `clock`. A program that cannot be resolved leaves
+    /// the daemon to its idle timeout, with a warning.
     #[cfg(unix)]
-    pub(crate) fn reap_daemon_of(&mut self, program: &Path) {
+    pub(crate) fn reap_daemon_of(&mut self, program: &Path, clock: std::sync::Arc<dyn Clock>) {
         match DaemonProgram::new(program) {
-            Ok(program) => self.socket_dir.reap_on_drop(program),
+            Ok(program) => self
+                .socket_dir
+                .reap_on_drop(program, std::sync::Arc::new(move || clock.now().mono)),
             Err(error) => tracing::warn!(
                 error = %crate::log_file::Cause(&error),
                 "agent-browser's path was not resolved; its daemon is left to its idle timeout"

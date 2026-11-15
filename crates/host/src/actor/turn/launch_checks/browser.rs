@@ -84,6 +84,10 @@ pub(super) struct BrowserPrep {
     /// Where the socket folder goes; `None` is `/tmp`.
     #[cfg(unix)]
     socket_root: Option<PathBuf>,
+    /// The entry's agent-browser (its `--agent-browser` argument), whose daemon the socket
+    /// folder's drop ends, within its time on the host's clock.
+    #[cfg(unix)]
+    daemon: Option<(PathBuf, Arc<dyn crate::clock::Clock>)>,
     /// The browser as a shell tool (`ProfileHook::browser_tool`): no MCP entry, no proxy,
     /// no slot and no claims; the Chrome found is the session's `AGENT_BROWSER_EXECUTABLE_PATH`.
     shell: bool,
@@ -174,8 +178,8 @@ impl BrowserPrep {
                 #[cfg(unix)]
                 let session = {
                     let mut session = session;
-                    if let Some(program) = self.sidecars.get(1) {
-                        session.reap_daemon_of(program);
+                    if let Some((program, clock)) = &self.daemon {
+                        session.reap_daemon_of(program, Arc::clone(clock));
                     }
                     session
                 };
@@ -344,6 +348,8 @@ pub(super) fn browser_prep(
         allowed_anyway: settings.browser.allow_when_remote_debugging_disabled,
         #[cfg(unix)]
         socket_root: None,
+        #[cfg(unix)]
+        daemon: None,
         shell: false,
         proxy: false,
     };
@@ -387,18 +393,24 @@ pub(super) fn browser_prep(
     {
         return skip;
     }
+    let agent_browser = args
+        .iter()
+        .position(|arg| arg == "--agent-browser")
+        .and_then(|at| args.get(at + 1))
+        .map(PathBuf::from);
+    #[cfg(unix)]
+    let daemon = agent_browser
+        .clone()
+        .map(|program| (program, Arc::clone(&actor.clock)));
     let mut sidecars = vec![command];
-    sidecars.extend(
-        args.iter()
-            .position(|arg| arg == "--agent-browser")
-            .and_then(|at| args.get(at + 1))
-            .map(PathBuf::from),
-    );
+    sidecars.extend(agent_browser);
     BrowserPrep {
         sidecars,
         chrome: chrome_search(actor),
         #[cfg(unix)]
         socket_root: actor.wiring.browser_socket_root.clone(),
+        #[cfg(unix)]
+        daemon,
         proxy,
         ..skip
     }

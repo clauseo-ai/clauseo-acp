@@ -8,6 +8,9 @@
 //! reap connects, asks the kernel which process listens on the other end (`SO_PEERCRED` on
 //! Linux, `LOCAL_PEERPID` on macOS), and ends that process only when every check holds:
 //!
+//! - the connection is to that socket: its peer address is the socket's path (or names the same
+//!   socket inode), so a socket swapped for a link between the listing and the connect is
+//!   refused;
 //! - its pid is above 1 and not this process's;
 //! - its user id (`SO_PEERCRED`, `getpeereid`) is this process's effective one;
 //! - its executable's real path (`/proc/<pid>/exe`, libproc's `proc_pidpath`) is the
@@ -15,22 +18,29 @@
 //! - the connection has not hung up since, so the listener still runs (on Linux this is checked
 //!   after its pidfd is open, so the pidfd names that listener and no reused pid).
 //!
+//! The connect never blocks (a non-blocking socket): a listener whose backlog is full is
+//! refused, not waited on. At most [`MAX_SOCKETS`] sockets of a folder are looked at.
+//!
 //! A check that fails leaves the process alone, with one `warn!` line. Otherwise it gets SIGTERM,
 //! up to [`TERM_WAIT`] to exit, then SIGKILL and up to [`KILL_WAIT`]; every wait is capped by
 //! the time the caller has left. The connection that named the pid stays open until the last
-//! signal: no pid is read from a file or kept from an earlier look. On Linux the signals go
-//! through the pidfd; on macOS through `kill`, after the identity is checked again before
-//! SIGKILL.
+//! signal: no pid is read from a file or kept from an earlier look. On Linux the pidfd comes
+//! from the connection itself (`SO_PEERPIDFD`, kernel 6.5 and later), else from `pidfd_open` on
+//! the `SO_PEERCRED` pid, and the signals go through it. On macOS there is no pidfd: the open
+//! connection pins the socket, not the pid, and the signals go through `kill` by pid (see
+//! `macos.rs` for why that pid cannot be reused in between).
 //!
 //! Windows has no such folder: agent-browser's daemon is in the guard's Job Object there.
 
 use std::io::{self, Read as _};
-use std::os::unix::fs::FileTypeExt as _;
+use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rustix::event::{PollFd, PollFlags, Timespec};
+use rustix::io::Errno;
+use rustix::net::{AddressFamily, SocketAddrUnix, SocketType};
 use rustix::process::Signal;
 
 #[cfg(target_os = "linux")]
@@ -48,6 +58,9 @@ use other as os;
 
 /// The ending of a socket file the reap looks at.
 const SOCKET_SUFFIX: &str = ".sock";
+/// The most sockets of one folder a reap looks at; the rest count as left. A launch's folder
+/// holds one daemon socket.
+pub(super) const MAX_SOCKETS: usize = 16;
 /// How long a daemon gets to exit after SIGTERM.
 const TERM_WAIT: Duration = Duration::from_millis(300);
 /// How long the reap waits to see a daemon gone after SIGKILL.
@@ -87,7 +100,8 @@ pub struct Reaped {
     /// line each.
     pub refused: usize,
     /// Listeners signalled but still there after the waits, sockets not reached before the time
-    /// ran out, and folders that could not be read. A sweep keeps their folder for next time.
+    /// ran out or past [`MAX_SOCKETS`], and folders that could not be read. A sweep keeps their
+    /// folder for next time.
     pub left: usize,
 }
 
@@ -127,7 +141,7 @@ impl std::fmt::Debug for Reap<'_> {
 }
 
 /// What became of one socket's listener.
-enum Outcome {
+pub(super) enum Outcome {
     /// Nobody listens (or the listener exited before any signal).
     Nobody,
     /// Ended.
@@ -142,6 +156,7 @@ enum Outcome {
 /// module's documentation).
 pub(super) fn reap_folder(dir: &Path, reap: &Reap<'_>) -> Reaped {
     let mut reaped = Reaped::default();
+    let mut looked = 0usize;
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) => {
@@ -159,10 +174,11 @@ pub(super) fn reap_folder(dir: &Path, reap: &Reap<'_>) -> Reaped {
         if !is_socket_name || !entry.file_type().is_ok_and(|kind| kind.is_socket()) {
             continue;
         }
-        if (reap.left)().is_zero() {
+        if looked >= MAX_SOCKETS || (reap.left)().is_zero() {
             reaped.left += 1;
             continue;
         }
+        looked += 1;
         match reap_socket(&entry.path(), reap) {
             Outcome::Nobody => {}
             Outcome::Ended => reaped.ended += 1,
@@ -173,19 +189,95 @@ pub(super) fn reap_folder(dir: &Path, reap: &Reap<'_>) -> Reaped {
     reaped
 }
 
-/// Connects to the socket `path` and ends its listener if every check holds. The connection
-/// stays open until after the last signal.
-fn reap_socket(path: &Path, reap: &Reap<'_>) -> Outcome {
-    // A socket nobody listens on: nothing to end.
-    let Ok(stream) = UnixStream::connect(path) else {
-        return Outcome::Nobody;
+/// Connects to the socket `path` without blocking and ends its listener if every check holds.
+/// The connection stays open until after the last signal.
+pub(super) fn reap_socket(path: &Path, reap: &Reap<'_>) -> Outcome {
+    let stream = match connect(path) {
+        Ok(Some(stream)) => stream,
+        // A socket nobody listens on: nothing to end.
+        Ok(None) => return Outcome::Nobody,
+        Err(error) => {
+            tracing::warn!(
+                socket = %path.display(),
+                %error,
+                "browser daemon reap: a socket's listener does not take connections; it is left"
+            );
+            return Outcome::Refused;
+        }
     };
-    if stream.set_nonblocking(true).is_err() {
-        return Outcome::Nobody;
+    if !peer_is(&stream, path) {
+        tracing::warn!(
+            socket = %path.display(),
+            "browser daemon reap: the connection reached another socket; its listener is left"
+        );
+        return Outcome::Refused;
     }
     let outcome = end_listener(&stream, path, reap);
     drop(stream);
     outcome
+}
+
+/// A non-blocking, close-on-exec connection to the socket `path`: `Ok(None)` when nobody
+/// listens (refused, gone, not a socket, a path too long), an error when the listener would
+/// make the connect wait (its backlog is full: `EAGAIN`, `EINPROGRESS`).
+fn connect(path: &Path) -> io::Result<Option<UnixStream>> {
+    let Ok(address) = SocketAddrUnix::new(path) else {
+        return Ok(None);
+    };
+    let socket = new_socket()?;
+    match rustix::net::connect(&socket, &address) {
+        Ok(()) => Ok(Some(UnixStream::from(socket))),
+        Err(error @ (Errno::AGAIN | Errno::INPROGRESS)) => Err(error.into()),
+        Err(_) => Ok(None),
+    }
+}
+
+/// A Unix stream socket, non-blocking and close-on-exec.
+#[cfg(target_os = "linux")]
+fn new_socket() -> io::Result<std::os::fd::OwnedFd> {
+    use rustix::net::SocketFlags;
+    let flags = SocketFlags::CLOEXEC | SocketFlags::NONBLOCK;
+    Ok(rustix::net::socket_with(
+        AddressFamily::UNIX,
+        SocketType::STREAM,
+        flags,
+        None,
+    )?)
+}
+
+/// A Unix stream socket, non-blocking and close-on-exec (two calls: no `SOCK_CLOEXEC` here).
+#[cfg(not(target_os = "linux"))]
+fn new_socket() -> io::Result<std::os::fd::OwnedFd> {
+    let socket = rustix::net::socket(AddressFamily::UNIX, SocketType::STREAM, None)?;
+    rustix::io::fcntl_setfd(&socket, rustix::io::FdFlags::CLOEXEC)?;
+    rustix::io::ioctl_fionbio(&socket, true)?;
+    Ok(socket)
+}
+
+/// Whether `stream` is connected to the socket `path`: its peer's address is `path`, or names
+/// the socket inode `path` names (a listener that bound another spelling of the same path).
+fn peer_is(stream: &UnixStream, path: &Path) -> bool {
+    let Ok(peer) = stream.peer_addr() else {
+        return false;
+    };
+    let Some(peer) = peer.as_pathname() else {
+        return false;
+    };
+    if peer == path {
+        return true;
+    }
+    match (
+        std::fs::symlink_metadata(peer),
+        std::fs::symlink_metadata(path),
+    ) {
+        (Ok(peer), Ok(named)) => {
+            peer.file_type().is_socket()
+                && named.file_type().is_socket()
+                && peer.dev() == named.dev()
+                && peer.ino() == named.ino()
+        }
+        _ => false,
+    }
 }
 
 /// Identifies, checks and ends the listener at the other end of `stream`.
@@ -241,8 +333,8 @@ fn end_listener(stream: &UnixStream, path: &Path, reap: &Reap<'_>) -> Outcome {
 }
 
 /// A signal that failed: the process already gone (`ESRCH`) is ended; anything else leaves it.
-fn failed_signal(error: rustix::io::Errno, process: &os::Process) -> Outcome {
-    if error == rustix::io::Errno::SRCH {
+fn failed_signal(error: Errno, process: &os::Process) -> Outcome {
+    if error == Errno::SRCH {
         return Outcome::Ended;
     }
     tracing::warn!(

@@ -8,9 +8,9 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use super::super::{BrowserSocketDir, LOCK_SUFFIX, PREFIX};
-use super::{DaemonProgram, Reap, Reaped, reap_folder};
-use crate::browser_dir::Swept;
-use crate::test_support::{TempDir, bind, set_mode, spawn};
+use super::{DaemonProgram, Outcome, Reap, Reaped, connect, reap_folder, reap_socket};
+use crate::browser_dir::{Monotonic, Swept};
+use crate::test_support::{TempDir, bind, bind_with_backlog, set_mode, spawn};
 
 /// The variable that makes [`listener`] listen, on the socket path it holds.
 const LISTEN: &str = "CLAUSEO_REAP_TEST_LISTEN";
@@ -92,6 +92,11 @@ fn this_program() -> DaemonProgram {
     DaemonProgram::new(&std::env::current_exe().unwrap()).unwrap()
 }
 
+/// A clock that stands still: the drop's deadline never passes.
+fn still() -> Monotonic {
+    std::sync::Arc::new(|| Duration::from_secs(100))
+}
+
 /// Plenty of time, as a caller's budget that never runs out.
 fn plenty() -> Duration {
     Duration::from_secs(2)
@@ -103,7 +108,7 @@ fn dropping_the_folder_ends_its_daemon_first() {
     let mut dir = BrowserSocketDir::create_in(tmp.path()).unwrap();
     let path = dir.path().to_owned();
     let mut daemon = start_daemon(&path.join("s.sock"));
-    dir.reap_on_drop(this_program());
+    dir.reap_on_drop(this_program(), still());
     drop(dir);
     assert!(exits(&mut daemon), "the daemon outlived the folder's drop");
     assert!(
@@ -128,7 +133,7 @@ fn a_listener_of_another_program_is_left_alone() {
             ..Reaped::default()
         }
     );
-    dir.reap_on_drop(other);
+    dir.reap_on_drop(other, still());
     drop(dir);
     pause(Duration::from_millis(200));
     assert!(
@@ -237,4 +242,95 @@ fn a_live_hosts_folder_is_not_reaped_by_a_sweep() {
     assert!(daemon.try_wait().unwrap().is_none());
     end(daemon);
     drop(live);
+}
+
+#[test]
+fn the_drops_reap_stops_at_its_deadline() {
+    let tmp = TempDir::short("rp-dead");
+    let mut dir = BrowserSocketDir::create_in(tmp.path()).unwrap();
+    let mut daemon = start_daemon(&dir.path().join("s.sock"));
+    // Each reading is 3 s after the last: the 2 s deadline has passed at the first socket.
+    let ticks = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let clock: Monotonic = std::sync::Arc::new(move || {
+        let tick = ticks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Duration::from_secs(3 * tick)
+    });
+    dir.reap_on_drop(this_program(), clock);
+    drop(dir);
+    pause(Duration::from_millis(200));
+    assert!(
+        daemon.try_wait().unwrap().is_none(),
+        "a socket past the deadline was reaped"
+    );
+    end(daemon);
+}
+
+#[test]
+fn a_link_named_like_a_socket_is_passed_over_and_refused_if_connected_through() {
+    let tmp = TempDir::short("rp-link");
+    let elsewhere = tmp.dir("elsewhere");
+    let mut daemon = start_daemon(&elsewhere.join("live.sock"));
+    let dir = BrowserSocketDir::create_in(tmp.path()).unwrap();
+    let link = tmp.symlink(
+        &format!("{PREFIX}{}/l.sock", dir.id()),
+        &elsewhere.join("live.sock"),
+    );
+    let program = this_program();
+    let left = plenty;
+    let reap = Reap::new(&program, &left);
+    assert_eq!(reap_folder(dir.path(), &reap), Reaped::default());
+    // Swapped in after the listing: the connection reaches another socket, so it is refused.
+    assert!(matches!(reap_socket(&link, &reap), Outcome::Refused));
+    pause(Duration::from_millis(200));
+    assert!(
+        daemon.try_wait().unwrap().is_none(),
+        "a linked listener was ended"
+    );
+    end(daemon);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_fifo_named_like_a_socket_is_passed_over() {
+    let tmp = TempDir::short("rp-fifo");
+    let dir = BrowserSocketDir::create_in(tmp.path()).unwrap();
+    crate::test_support::fifo(&dir.path().join("f.sock"));
+    let program = this_program();
+    let left = plenty;
+    assert_eq!(
+        reap_folder(dir.path(), &Reap::new(&program, &left)),
+        Reaped::default()
+    );
+}
+
+/// A listener that never accepts, its backlog full, does not hold the sweep: the connect does not
+/// wait, and the listener is refused (Linux) or met as nobody (macOS refuses the connection).
+#[test]
+fn a_listener_that_never_accepts_with_a_full_backlog_does_not_hold_the_sweep() {
+    let tmp = TempDir::short("rp-full");
+    let folder = stale_folder(&tmp, "cccccccccccccccc");
+    let socket = folder.join("s.sock");
+    let _listener = bind_with_backlog(&socket, 1);
+    let mut queued = Vec::new();
+    for _ in 0..64 {
+        match connect(&socket) {
+            Ok(Some(stream)) => queued.push(stream),
+            Ok(None) | Err(_) => break,
+        }
+    }
+    assert!(queued.len() < 64, "the backlog never filled");
+    let program = this_program();
+    let left = plenty;
+    let swept = BrowserSocketDir::sweep_stale_reaping_in(
+        tmp.path(),
+        |_| false,
+        &Reap::new(&program, &left),
+    )
+    .unwrap();
+    assert_eq!(swept.daemons.ended, 0);
+    assert_eq!(swept.daemons.left, 0);
+    if cfg!(target_os = "linux") {
+        assert_eq!(swept.daemons.refused, 1);
+    }
+    assert_eq!(swept.folders, 1);
 }

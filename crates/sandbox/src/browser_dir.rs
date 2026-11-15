@@ -38,13 +38,30 @@ const LOCK_SUFFIX: &str = ".lock";
 const ID_LEN: usize = 16;
 /// The id's letters.
 const ALPHABET: &[u8; 36] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-/// The time the drop's reap has: each wait is still capped on its own (`reap.rs`), and a folder
-/// holds one socket per launch.
+/// The most the drop's reap takes, in all, on the clock [`BrowserSocketDir::reap_on_drop`] got.
 const DROP_REAP_TIME: Duration = Duration::from_secs(2);
 /// How many ids [`BrowserSocketDir::create`] draws before it gives up.
 const TRIES: usize = 32;
 /// The folder's mode.
 const MODE: u32 = 0o700;
+
+/// A monotonic clock's reading as time since some fixed start: the host's clock, for the drop's
+/// reap ([`BrowserSocketDir::reap_on_drop`]).
+pub type Monotonic = std::sync::Arc<dyn Fn() -> Duration + Send + Sync>;
+
+/// What the drop's reap needs: the program and the clock.
+struct DropReap {
+    program: DaemonProgram,
+    now: Monotonic,
+}
+
+impl std::fmt::Debug for DropReap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DropReap")
+            .field("program", &self.program)
+            .finish_non_exhaustive()
+    }
+}
 
 /// One launch's browser socket folder, `/tmp/clauseo-ab-<16 letters of a-z and 0-9>`, mode
 /// 0700, owned by this process's effective user, with its lock file
@@ -68,8 +85,8 @@ pub struct BrowserSocketDir {
     canonical: PathBuf,
     id: String,
     lock_path: PathBuf,
-    /// The program whose daemon the drop ends ([`BrowserSocketDir::reap_on_drop`]).
-    daemon: Option<DaemonProgram>,
+    /// The program whose daemon the drop ends, and its clock ([`BrowserSocketDir::reap_on_drop`]).
+    daemon: Option<DropReap>,
     /// Held with `flock(LOCK_EX)` until the value drops; closing it releases the lock.
     _lock: File,
 }
@@ -172,9 +189,11 @@ impl BrowserSocketDir {
     }
 
     /// Makes the drop end the daemon of `program` (Clauseo's agent-browser) listening on a
-    /// socket in the folder, before the folder goes; see [`reap`] for the checks.
-    pub fn reap_on_drop(&mut self, program: DaemonProgram) {
-        self.daemon = Some(program);
+    /// socket in the folder, before the folder goes; see [`reap`] for the checks. `now` reads
+    /// the caller's monotonic clock: the drop's reap takes at most [`DROP_REAP_TIME`] on it, in
+    /// all.
+    pub fn reap_on_drop(&mut self, program: DaemonProgram, now: Monotonic) {
+        self.daemon = Some(DropReap { program, now });
     }
 
     /// The id, 16 letters of `a-z` and `0-9`.
@@ -281,8 +300,9 @@ impl Drop for BrowserSocketDir {
     /// closes, after this body. Drop only after the launch's process tree has exited (see the
     /// type's documentation).
     fn drop(&mut self) {
-        if let Some(program) = &self.daemon {
-            let left = || DROP_REAP_TIME;
+        if let Some(DropReap { program, now }) = &self.daemon {
+            let at = now().saturating_add(DROP_REAP_TIME);
+            let left = || at.saturating_sub(now());
             let reaped = reap::reap_folder(&self.path, &Reap::new(program, &left));
             if reaped != Reaped::default() {
                 tracing::debug!(id = %self.id, ?reaped, "browser daemon reap at drop");
