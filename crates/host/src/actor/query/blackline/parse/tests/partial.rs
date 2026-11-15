@@ -532,7 +532,8 @@ fn every_change_stetdoc_counts_is_shown_or_noted() {
     for entry in std::fs::read_dir(dir.join("partial")).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        if name.starts_with("view-") && name.ends_with(".json") {
+        let json = path.extension().is_some_and(|ext| ext == "json");
+        if name.starts_with("view-") && json {
             views.push(path);
         }
     }
