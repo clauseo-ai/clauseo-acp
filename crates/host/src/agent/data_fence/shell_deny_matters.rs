@@ -90,10 +90,13 @@ fn bounded(
         return;
     }
     let after = JUNCTIONS.into_iter().chain(AFTER).filter(|after| {
-        !after
-            .chars()
-            .next()
-            .is_some_and(|c| goes_on.contains(&c.to_ascii_lowercase()))
+        !after.chars().next().is_some_and(|c| {
+            // Claude Code reads a run of spaces and tabs in a rule as one, so a tab
+            // stands for a space too.
+            goes_on
+                .iter()
+                .any(|g| *g == c.to_ascii_lowercase() || (g.is_whitespace() && c.is_whitespace()))
+        })
     });
     for after in after {
         contents.push(join(&[path, &text(after), &[Piece::Any]]));

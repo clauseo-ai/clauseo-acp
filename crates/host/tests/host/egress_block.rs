@@ -256,9 +256,14 @@ pub(crate) fn start_host(
 /// A new matter `name` with a Claude session, after one turn, so its proxy is open.
 pub(crate) fn open_session(dir: &Dir, host: &Running, name: &str) -> MatterId {
     let matter = host.create_matter(name, &dir.folder(name, &[]));
+    session_in(host, matter);
+    matter
+}
+
+/// A Claude session in `matter`, after one turn, so its proxy is open.
+pub(crate) fn session_in(host: &Running, matter: MatterId) {
     let thread = host.create_thread(matter, BROWSING);
     turn(host, thread);
-    matter
 }
 
 /// The next `SiteBlocked` notice on `sub` (id, host, count), waited for up to the watchdog;
