@@ -3,9 +3,11 @@
 //! It answers: what one Word document's text looks like between two versions, paragraph by
 //! paragraph, as runs of text kept, inserted and deleted ([`WordBlackline`]); how each paragraph
 //! changed as a whole ([`ParagraphChange`]); what each run is ([`RunKind`]); and what the
-//! lawyer should know about the blackline as a whole ([`BlacklineNotice`]): a part not shown, or
-//! text shown that Word hides. The host makes it with stetdoc (`stetdoc compare`, then `stetdoc
-//! view`); nothing in it is a guess, and nothing is stored.
+//! lawyer should know about the blackline as a whole ([`BlacklineNotice`], and the links whose
+//! address changed, [`WordBlackline::changed_links`]): a part not shown, text shown that Word
+//! hides, a change stetdoc's compare does not mark. The host makes it with stetdoc (`stetdoc
+//! compare`, then `stetdoc view`, `stetdoc check`, and a view of each version); nothing in it is
+//! a guess, and nothing is stored.
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +32,12 @@ pub struct WordBlackline {
     /// still decodes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notices: Vec<BlacklineNotice>,
+    /// The text of each link whose web address differs between the two versions while its text
+    /// does not (stetdoc 0.9.3's compare marks no change for it), each once, in the newer
+    /// version's order: the app names each. Empty when none; missing reads as empty, and empty is
+    /// left out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_links: Vec<String>,
 }
 
 /// One paragraph of a blackline.
@@ -109,9 +117,18 @@ open_unit_enum! {
         HiddenText,
         /// Some list or clause numbers may not match the ones Word shows.
         NumbersMayDiffer,
-        /// stetdoc counted more tracked changes than the blackline shows: the others are outside
-        /// the main text (headers, footers, footnotes, endnotes, comments), which it does not show.
+        /// stetdoc lists tracked changes (by id, `stetdoc check`) or counts more (its summary)
+        /// than the blackline's body names: the others are outside the main text (headers,
+        /// footers, footnotes, endnotes), which it does not show.
         ChangesOutsideText,
+        /// The text of a comment differs between the two versions; the blackline does not show
+        /// comments, and stetdoc 0.9.3's compare marks no change for it.
+        CommentChanged,
+        /// The text in a text box changed; the blackline does not show the old text.
+        TextBoxChanged,
+        /// The formatting of some table cells changed (a tracked cell change), which the
+        /// blackline does not mark.
+        CellFormatChanged,
         /// stetdoc warned about something else this version does not know: some of the
         /// blackline may not match the document in Word exactly.
         MayDiffer,
