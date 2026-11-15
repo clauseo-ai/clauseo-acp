@@ -371,8 +371,12 @@ Two workflows, so no workflow that holds the Cloudflare token runs for a pull re
   `main`. It is skipped until the repository variable `COUNTS_DEPLOY_ENABLED` is `true`, and on
   any other ref. It runs in the environment `counts-deploy`. That environment's branch rule
   allows `main` only, and Rohan is its required reviewer. Its steps:
-  1. with no secret: the schema snapshot test, `cargo test`, `pnpm test`, `check-deploy.mjs` on
-     `wrangler.toml`, and the wasm build (`worker-build --release`);
+  1. in the job `bundle`, with no secret and no environment: the schema snapshot test,
+     `cargo test`, `pnpm test`, `check-deploy.mjs` on `wrangler.toml`, and the wasm build
+     (`worker-build --release`). Then one sha256 (`scripts/bundle-hash.mjs`) over what the
+     deploy ships: `build/`, `wrangler.toml`, `migrations/`, the deploy scripts and the
+     lockfile that pins wrangler. Those files are the job's artifact; the deploy job downloads
+     them, checks the hash and builds nothing, so the bytes approved are the bytes hashed;
   2. the R2 bucket `clauseo-crash`, found or created in the EU jurisdiction, with a lifecycle
      rule that deletes objects after 90 days (other rules are kept). If the token lacks Workers
      R2 Storage Edit (the API answers `401` or `403`), the step says so in one line and goes on:
@@ -387,6 +391,19 @@ Two workflows, so no workflow that holds the Cloudflare token runs for a pull re
   4. `wrangler d1 migrations apply --remote`, then the Access step ([below](#access)), then
      `wrangler deploy` with the Access values as `--var`. The deploy attaches `t.clauseo.chat`
      as a custom domain; Cloudflare makes its DNS record and certificate.
+     A successful deploy uploads its hash as the artifact `counts-worker-deployed` (kept 90
+     days).
+
+A push that would ship the same Worker skips the deploy, and so the approval. Most
+`crates/protocol` changes don't touch what the Worker compiles: the job `bundle` finds the hash
+of the last deploy on `main` (the newest run whose deploy job ran, if it succeeded) and, when
+it equals this bundle's, ends green with the deploy job skipped and the line "same Worker as
+deployed (<hash>), no deploy" in the run's summary. Any doubt deploys: no hash found, an expired
+one, a failed last deploy or a build that is not byte for byte the same. The hash cannot see a
+change on Cloudflare's side, such as the R2 bucket appearing (the deploy copy then gains its
+binding), or a change to `ACCESS_TEAM` or `ACCESS_DASH_EMAIL`. To force a deploy, run the
+workflow by hand from `main` with `deploy` (`gh workflow run counts-deploy.yml -f action=deploy`);
+it deploys whatever the hash says.
 
 Only the steps from 2 on get the secret `CLOUDFLARE_API_TOKEN`, and the optional secret
 `CLOUDFLARE_ACCOUNT_ID`. Without the account ID, wrangler uses the one account the token can see,
