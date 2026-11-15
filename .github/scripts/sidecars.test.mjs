@@ -40,12 +40,24 @@ const BODY = Buffer.from("#!fake agent-browser\n");
 const SHA = createHash("sha256").update(BODY).digest("hex");
 const STETDOC_BODY = Buffer.from("#!fake stetdoc\n");
 const ASSET = `https://github.com/vercel-labs/agent-browser/releases/download/v${VERSION}/agent-browser-fake`;
+const PATCHED_TAG = `agent-browser-v${VERSION}-clauseo.1`;
+/** macOS and Windows take our build, from our release under the pin's patched_tag, one asset per
+ * triple; Linux keeps upstream's. */
+const OUR_ASSET = (triple) =>
+  `https://github.com/clauseo-ai/clauseo-acp/releases/download/${PATCHED_TAG}/agent-browser-${triple}${triple.includes("-windows-") ? ".exe" : ""}`;
 
 /** A pin with each triple an asset, except those in `none` (none = true) and `missing` (absent). */
 async function pin(dir, { none = [], missing = [] } = {}) {
-  let text = `version = "${VERSION}"\n`;
+  let text = [
+    `version = "${VERSION}"`,
+    `patched_tag = "${PATCHED_TAG}"`,
+    `upstream_commit = "${"a".repeat(40)}"`,
+    `upstream_tarball_sha256 = "${"b".repeat(64)}"`,
+    "",
+  ].join("\n");
   for (const triple of RELEASE_TARGETS.filter((t) => !missing.includes(t))) {
-    text += none.includes(triple) ? `\n[${triple}]\nnone = true\n` : `\n[${triple}]\nurl = "${ASSET}"\nsha256 = "${SHA}"\n`;
+    const url = triple.endsWith("-unknown-linux-gnu") ? ASSET : OUR_ASSET(triple);
+    text += none.includes(triple) ? `\n[${triple}]\nnone = true\n` : `\n[${triple}]\nurl = "${url}"\nsha256 = "${SHA}"\n`;
   }
   const path = join(dir, "agent-browser.toml");
   await writeFile(path, text);
@@ -265,7 +277,8 @@ for (const triple of RELEASE_TARGETS) {
       ...(win ? [GUARD_CARGO(triple), SETUP_CARGO(triple)] : []),
       ...pdf.map((name) => ["build", "--release", "--locked", "-p", "clauseo-pdf", "--bin", OWN_FOLDERS[name][1], "--target", triple]),
     ]);
-    assert.deepEqual(env.fetchCalls, [ASSET]);
+    // macOS and Windows fetch our build (each triple its own asset), Linux upstream's.
+    assert.deepEqual(env.fetchCalls, [triple.endsWith("-unknown-linux-gnu") ? ASSET : OUR_ASSET(triple)]);
     assert.deepEqual(env.stetdocCalls, [triple]);
     const bin = join(env.root, "crates", "desktop", "binaries");
     assert.equal(await readFile(join(bin, `clauseo-mcp-${triple}${ext}`), "utf8"), "fake clauseo-mcp\n");
