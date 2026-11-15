@@ -41,7 +41,7 @@ pub(super) use start_failure::launch_failed;
 pub(crate) use start_timer::START_TIMED_OUT;
 #[cfg(test)]
 pub(super) use start_timer::START_WAIT;
-pub(super) use start_timer::on_timer as start_timer;
+pub(super) use start_timer::{heard as start_heard, on_timer as start_timer};
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -149,6 +149,8 @@ pub(super) struct Agent {
     pub(super) denied_data_folder: u32,
     /// Its launch's failure code (`launch_failed`); its end then logs its start's stderr summary.
     pub(super) start_failure: Option<ErrorCode>,
+    /// While it starts, when it was last heard from (`agents/start_timer.rs`).
+    start: start_timer::Bound,
     /// Its matter folder's spellings, read at the launch (`start_failure::matter_spellings`).
     pub(super) matter_spellings: Vec<String>,
     /// Its idle clock and config calls in flight (`idle.rs`).
@@ -261,7 +263,7 @@ pub(super) fn launch_now(
             }
         };
     let id = next_agent_id();
-    start_timer::arm(actor, thread, id);
+    let start = start_timer::arm(actor, thread, id);
     let client = link.client.clone();
     call(actor, thread, id, async move {
         AgentReply::Initialized(client.initialize().await)
@@ -311,6 +313,7 @@ pub(super) fn launch_now(
         fence_vars,
         denied_data_folder: 0,
         start_failure: None,
+        start,
         matter_spellings,
         idle: super::idle::Mark::on_profile(profile),
         guard_blocks: super::updates::guard_blocks::Reads::default(),

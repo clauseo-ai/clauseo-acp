@@ -20,15 +20,39 @@ use super::{Stage, launch_failed};
 use crate::actor::Actor;
 use crate::error::Error;
 
-/// How long an agent may take from its launch to its attached session.
+/// How long a starting agent may stay silent: each update or answer it sends while it starts
+/// counts the wait from then, so a long replay is never cut off, only an agent gone quiet.
 pub(crate) const START_WAIT: Duration = Duration::from_secs(120);
 
-/// The detail of a start that ran out of [`START_WAIT`], for logs; `offline/start.rs` reads it
-/// to ask the probe.
-pub(crate) const START_TIMED_OUT: &str = "the agent did not finish starting within 120 s";
+/// The detail of a start whose agent was silent for [`START_WAIT`], for logs;
+/// `offline/start.rs` reads it to ask the probe.
+pub(crate) const START_TIMED_OUT: &str = "the agent said nothing for 120 s while it was starting";
+
+/// A timer that fires more than this late was held up by the computer's sleep (Windows timers
+/// may count time asleep), not by the agent: the bound starts again instead of failing a start
+/// the lawyer's closed lid interrupted.
+const SLEPT: Duration = START_WAIT;
+
+/// A starting agent's bound: when it was last heard from and when its timer is due, on the
+/// host's monotonic clock.
+#[derive(Debug, Clone, Copy)]
+pub(in super::super) struct Bound {
+    heard: Duration,
+    due: Duration,
+}
 
 /// Arms the bound for `thread`'s agent `id`, just launched.
-pub(super) fn arm(actor: &Actor, thread: ThreadId, id: u64) {
+pub(super) fn arm(actor: &Actor, thread: ThreadId, id: u64) -> Bound {
+    let now = actor.now().mono;
+    arm_for(actor, thread, id, START_WAIT);
+    Bound {
+        heard: now,
+        due: now.saturating_add(START_WAIT),
+    }
+}
+
+/// Arms `thread`'s agent `id`'s timer `delay` from now.
+fn arm_for(actor: &Actor, thread: ThreadId, id: u64, delay: Duration) {
     #[cfg(test)]
     if actor.turn_path.no_start_bound {
         return;
@@ -37,18 +61,49 @@ pub(super) fn arm(actor: &Actor, thread: ThreadId, id: u64) {
         thread,
         kind: TimerKind::Start(id),
     };
-    let _handle = actor.arm_timer(START_WAIT, timer);
+    let _handle = actor.arm_timer(delay, timer);
 }
 
-/// The bound of `thread`'s agent `id` ran out: when that agent is still starting, its launch
-/// fails. An agent attached, stopping or gone meanwhile is left as it is.
+/// `thread`'s agent said something (an update, a call's answer; `id` the agent a call went to):
+/// while it is starting, the bound counts from now. A long `session/load` replay keeps it alive.
+pub(in super::super) fn heard(actor: &mut Actor, thread: ThreadId, id: Option<u64>) {
+    let now = actor.now().mono;
+    if let Some(agent) = starting(actor, thread)
+        && id.is_none_or(|id| id == agent.id)
+    {
+        agent.start.heard = now;
+    }
+}
+
+/// `thread`'s agent while it is starting.
+fn starting(actor: &mut Actor, thread: ThreadId) -> Option<&mut super::Agent> {
+    state(actor, thread)
+        .and_then(|state| state.agent.as_deref_mut())
+        .filter(|agent| matches!(agent.stage, Stage::Initializing | Stage::Loading))
+}
+
+/// The timer of `thread`'s agent `id` fired. An agent attached, stopping or gone meanwhile is
+/// left as it is; one heard from within [`START_WAIT`] gets the rest of its wait; a timer held
+/// up by sleep starts the wait again; an agent silent for the whole wait has failed to start.
 pub(in super::super) fn on_timer(actor: &mut Actor, thread: ThreadId, id: u64) {
-    let starting = state(actor, thread)
-        .and_then(|state| state.agent.as_deref())
-        .is_some_and(|agent| {
-            agent.id == id && matches!(agent.stage, Stage::Initializing | Stage::Loading)
-        });
-    if !starting {
+    let now = actor.now().mono;
+    let Some(agent) = starting(actor, thread).filter(|agent| agent.id == id) else {
+        return;
+    };
+    let silent = now.saturating_sub(agent.start.heard);
+    let late = now.saturating_sub(agent.start.due);
+    let wait = if late > SLEPT {
+        tracing::info!(%thread, late_s = late.as_secs(), "the start's bound waits again after sleep");
+        agent.start.heard = now;
+        START_WAIT
+    } else if silent < START_WAIT {
+        START_WAIT.saturating_sub(silent)
+    } else {
+        Duration::ZERO
+    };
+    if !wait.is_zero() {
+        agent.start.due = now.saturating_add(wait);
+        arm_for(actor, thread, id, wait);
         return;
     }
     tracing::warn!(%thread, wait_s = START_WAIT.as_secs(), "the agent did not finish starting");

@@ -354,7 +354,10 @@ enum JobKind {
 /// An agent's event or its end, in the order its tasks posted them, for `thread`.
 pub(crate) fn agent_input(actor: &mut Actor, thread: ThreadId, input: AgentInput) {
     match input {
-        AgentInput::Event(event) => updates::on_event(actor, thread, event),
+        AgentInput::Event(event) => {
+            agents::start_heard(actor, thread, None);
+            updates::on_event(actor, thread, event);
+        }
         AgentInput::Ended(ended) => agents::on_ended(actor, thread, ended),
     }
 }
@@ -366,7 +369,10 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             thread,
             agent,
             reply,
-        } => agents::on_reply(actor, thread, agent, reply),
+        } => {
+            agents::start_heard(actor, thread, Some(agent));
+            agents::on_reply(actor, thread, agent, reply);
+        }
         TurnInput::Prepared { thread, id, result } => {
             launch_checks::on_prepared(actor, thread, id, result);
         }
