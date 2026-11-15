@@ -17,10 +17,14 @@
 //!   is `SignedOut { found: NoLogin }`. On macOS (`config.platform`, decided at run time),
 //!   where Claude Code keeps the login in the Keychain, the login is also found when
 //!   `/usr/bin/security find-generic-password -s "Claude Code-credentials"` exits 0
-//!   (`reuse::claude_keychain_present`: attributes only, output discarded, killed past 3 s; any
-//!   other end is not found). With `CLAUDE_CONFIG_DIR` set in the lawyer's environment nothing
-//!   is found and no query runs: their Claude Code keeps its login elsewhere, and "Use it" reads
-//!   the default store only (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""`).
+//!   (`reuse::claude_keychain`: attributes only, output discarded, killed past 3 s). 44 is no
+//!   login; any other end could not tell, which is no login at first detection and keeps a
+//!   recorded reuse (`found.rs`). Its answer is kept for 10 minutes ([`KeychainMemo`]), since a
+//!   locked keychain may show its unlock dialog for the query: so at most one dialog per 10
+//!   minutes, and "Look for my Claude Code login" asks afresh. When the lawyer's environment
+//!   moves Claude's store ([`claude_store_moved`]) nothing is found and no query runs: their
+//!   Claude Code keeps its login elsewhere (a folder of its own, a suffixed Keychain item), and
+//!   "Use it" reads the default store only (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""`).
 //! - Codex: `~/.codex/auth.json` a regular file is `LoginFound { from: Codex, email: None }`, else
 //!   `SignedOut { found: NoLogin }`. With `CODEX_HOME` set in the lawyer's environment nothing is
 //!   found: "Use it", the split check and the guard address `~/.codex` only.
@@ -34,8 +38,10 @@
 //! status check and again at each Sign in press ([`at_press`]), so nothing it saw is kept.
 
 use std::collections::BTreeMap;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
+use std::sync::{Mutex, PoisonError};
+use std::time::Duration;
 
 use clauseo_process::Timer;
 
@@ -43,6 +49,7 @@ use crate::cancel::Cancel;
 use crate::platform::Os;
 use crate::signin::env::Vendor;
 use crate::signin::job::{SigninJob, Task};
+use crate::signin::reuse::KeychainSeen;
 use crate::signin::{Method, SigninState, marker, reuse};
 use crate::status::{Identity, claude_detection, codex_detection};
 
@@ -54,54 +61,112 @@ pub(crate) struct Detected {
     pub(crate) state: SigninState,
     /// Always empty: detection reads no email or plan.
     pub(crate) identity: Identity,
+    /// Claude on macOS: no login file, and the Keychain query could not tell (`state` is then
+    /// no login). A recorded reuse is kept rather than stopped (`found::check`).
+    pub(crate) could_not_tell: bool,
 }
 
-/// The variable that moves Claude Code's config folder, and with it its login.
-const CLAUDE_MOVED: &str = "CLAUDE_CONFIG_DIR";
+/// Claude Code's config folder, which also suffixes its Keychain item unless the next is set.
+const CLAUDE_CONFIG: &str = "CLAUDE_CONFIG_DIR";
+
+/// Claude Code's secure-storage folder: set, it decides the store alone; `""` is the default.
+const CLAUDE_STORAGE: &str = "CLAUDE_SECURESTORAGE_CONFIG_DIR";
+
+/// How long a Keychain answer is kept: re-checks within it ask no second time.
+pub(crate) const KEYCHAIN_RECHECK: Duration = Duration::from_mins(10);
 
 /// Claude's detection, a stat, and on macOS the Keychain query when the stat finds nothing: see
 /// the module docs. `None` only when cancelled.
 pub(crate) async fn claude<T: Timer>(job: &SigninJob<T>, cancel: &Cancel) -> Option<Detected> {
-    let file = detected(job, cancel, CLAUDE_MOVED, reuse::claude_login_present)?;
-    let present = file || in_keychain(job).await;
-    Some(found(claude_detection(present)))
+    let moved = claude_store_moved(&job.config.signin.base_env, cfg!(windows));
+    let file = detected(job, cancel, moved, reuse::claude_login_present)?;
+    let seen = if file || moved || job.config.platform.os != Os::Darwin {
+        None
+    } else {
+        Some(in_keychain(job).await)
+    };
+    let present = file || seen == Some(KeychainSeen::Found);
+    Some(Detected {
+        state: claude_detection(present),
+        identity: Identity::default(),
+        could_not_tell: seen == Some(KeychainSeen::Unknown),
+    })
 }
 
-/// Whether Claude Code's default Keychain item exists: only when the config's platform is macOS
-/// and the lawyer's environment does not move Claude's folder (else no query runs at all).
-async fn in_keychain<T: Timer>(job: &SigninJob<T>) -> bool {
+/// Whether Claude Code keeps the lawyer's login somewhere other than the default store
+/// (`~/.claude` and the unsuffixed Keychain item), by Claude Code 0.3.293's rule: with
+/// `CLAUDE_SECURESTORAGE_CONFIG_DIR` set, a folder moves it (`""` is the default store,
+/// whatever `CLAUDE_CONFIG_DIR` says); unset, a non-empty `CLAUDE_CONFIG_DIR` moves it.
+pub(crate) fn claude_store_moved(env: &BTreeMap<OsString, OsString>, windows: bool) -> bool {
+    match value(env, CLAUDE_STORAGE, windows) {
+        Some(storage) => !storage.is_empty(),
+        None => folder_moved(env, CLAUDE_CONFIG, windows),
+    }
+}
+
+/// Claude Code's default Keychain item, by the query or by an answer kept from the last
+/// [`KEYCHAIN_RECHECK`]; "Look for my … login" always asks afresh.
+async fn in_keychain<T: Timer>(job: &SigninJob<T>) -> KeychainSeen {
+    let now = job.config.clock.monotonic();
+    let memo = &job.shared.keychain;
+    if job.task != Task::FindLogin
+        && let Some(seen) = memo.fresh(now)
+    {
+        return seen;
+    }
     let signin = &job.config.signin;
-    job.config.platform.os == Os::Darwin
-        && !folder_moved(&signin.base_env, CLAUDE_MOVED, false)
-        && reuse::claude_keychain_present(
-            &*job.launcher,
-            &*job.timer,
-            &signin.security_program(),
-            &signin.base_env,
-        )
-        .await
+    let seen = reuse::claude_keychain(
+        &*job.launcher,
+        &*job.timer,
+        &signin.security_program(),
+        &signin.base_env,
+    )
+    .await;
+    memo.keep(now, seen);
+    seen
+}
+
+/// The last Keychain answer and when it came (the clock's monotonic reading), one per `Agents`.
+#[derive(Debug, Default)]
+pub(crate) struct KeychainMemo(Mutex<Option<(Duration, KeychainSeen)>>);
+
+impl KeychainMemo {
+    /// The kept answer while it is younger than [`KEYCHAIN_RECHECK`] at `now`.
+    pub(crate) fn fresh(&self, now: Duration) -> Option<KeychainSeen> {
+        let kept = *self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        kept.filter(|(at, _)| {
+            now.checked_sub(*at)
+                .is_some_and(|age| age < KEYCHAIN_RECHECK)
+        })
+        .map(|(_, seen)| seen)
+    }
+
+    /// Keeps `seen`, asked at `now`.
+    pub(crate) fn keep(&self, now: Duration, seen: KeychainSeen) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some((now, seen));
+    }
 }
 
 /// Codex's detection, a stat alone: see the module docs. `None` only when cancelled.
 pub(crate) fn codex<T>(job: &SigninJob<T>, cancel: &Cancel) -> Option<Detected> {
-    detected(job, cancel, "CODEX_HOME", reuse::lawyer_login_present)
+    let moved = folder_moved(&job.config.signin.base_env, "CODEX_HOME", cfg!(windows));
+    detected(job, cancel, moved, reuse::lawyer_login_present)
         .map(|present| found(codex_detection(present)))
 }
 
 /// Whether the agent's login file is there by `stat` (in the lawyer's home), unless the
-/// lawyer's environment moves the agent's folder with `moved_by`; `None` when cancelled.
+/// lawyer's environment `moved` the agent's folder; `None` when cancelled.
 fn detected<T>(
     job: &SigninJob<T>,
     cancel: &Cancel,
-    moved_by: &str,
+    moved: bool,
     stat: fn(&Path) -> bool,
 ) -> Option<bool> {
     if cancel.is_cancelled() {
         return None;
     }
-    let env = &job.config.signin.base_env;
     Some(
-        !folder_moved(env, moved_by, cfg!(windows))
+        !moved
             && job
                 .config
                 .signin
@@ -141,7 +206,26 @@ fn found(state: SigninState) -> Detected {
     Detected {
         state,
         identity: Identity::default(),
+        could_not_tell: false,
     }
+}
+
+/// `name`'s value in `env`, set even when empty (any case on Windows, as Windows reads it).
+fn value<'a>(
+    env: &'a BTreeMap<OsString, OsString>,
+    name: &str,
+    windows: bool,
+) -> Option<&'a OsStr> {
+    env.iter()
+        .find(|(key, _)| {
+            let key = key.to_string_lossy();
+            if windows {
+                key.eq_ignore_ascii_case(name)
+            } else {
+                key == name
+            }
+        })
+        .map(|(_, value)| value.as_os_str())
 }
 
 /// Whether the lawyer's environment `env` sets `name` (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) to a

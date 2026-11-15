@@ -367,3 +367,62 @@ fn a_blocked_agent_with_a_stored_key_never_reads() {
     ));
     assert_eq!(lock(&launcher.0).len(), 1, "nothing read while blocked");
 }
+
+/// The login keychain locked: Claude's read fails at once with no launch (its Claude Code would
+/// ask the keychain and show the unlock dialog), so the last numbers stay as stale; Codex's
+/// read is not held; unlocked again, Claude's next read goes out.
+#[test]
+fn a_locked_keychain_holds_claude_s_read_and_the_next_read_goes_out() {
+    let scratch = Scratch::folder("setup-readers-locked", &["data"]);
+    let script = fake_file(scratch.path(), SCRIPT, "");
+    fake_file(
+        scratch.path(),
+        SDK,
+        r#"{"name":"@anthropic-ai/claude-agent-sdk"}"#,
+    );
+    let locations = Locations::under_root(&scratch.path().join("data"));
+    let effective = Effective::load(&locations, &SystemFiles, &[]);
+    let slot = Arc::new(OnceLock::new());
+    let _set = slot.set(Arc::new(KeyCache::load_all(
+        Keychain::memory(),
+        std::iter::empty(),
+    )));
+    let launcher = Arc::new(Recording::default());
+    let locked = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let seen = Arc::clone(&locked);
+    let readers = SwappableReaders::new(
+        &effective,
+        Arc::clone(&launcher) as Arc<dyn Launcher>,
+        slot,
+        Arc::default(),
+        Arc::default(),
+    )
+    .with_keychain_locked(move || seen.load(std::sync::atomic::Ordering::SeqCst));
+    let entry = AgentLaunch {
+        command: if cfg!(windows) {
+            r"C:\node\node.exe".to_owned()
+        } else {
+            "/usr/local/bin/node".to_owned()
+        },
+        args: vec![script],
+        env: std::collections::BTreeMap::new(),
+    };
+    readers.set_entry(AgentKind::Claude, Some(entry));
+    let ReadOutcome::Failed(ReadFailure::LaunchFailed(why)) =
+        block_on(readers.read(AgentKind::Claude))
+    else {
+        panic!("a read with the keychain locked must fail without a launch");
+    };
+    assert_eq!(why, "the login keychain is locked");
+    assert!(
+        lock(&launcher.0).is_empty(),
+        "a Claude read went out while locked"
+    );
+    locked.store(false, std::sync::atomic::Ordering::SeqCst);
+    block_on(readers.read(AgentKind::Claude));
+    assert_eq!(
+        lock(&launcher.0).len(),
+        1,
+        "the read after the unlock did not go out"
+    );
+}

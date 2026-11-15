@@ -88,6 +88,8 @@ pub(crate) struct Shared {
     events: async_channel::Sender<AgentsEvent>,
     /// Every agent's sign-in state and running sign-in job.
     pub(crate) signin: SigninHub,
+    /// Claude's last macOS Keychain answer, so detection asks at most once per 10 minutes.
+    pub(crate) keychain: crate::signin::detect::KeychainMemo,
 }
 
 #[derive(Debug)]
@@ -199,6 +201,7 @@ impl Agents {
             job_ended: Condvar::new(),
             space: Mutex::new(()),
             signin: SigninHub::new(&config, events.clone()),
+            keychain: crate::signin::detect::KeychainMemo::default(),
             events,
         });
         let (commands, inbox) = mpsc::channel();

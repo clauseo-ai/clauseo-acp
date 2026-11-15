@@ -20,11 +20,14 @@
 //! "Claude needs no link anywhere".
 //!
 //! On macOS Claude Code keeps its login in the Keychain, so detection adds one query of Claude's
-//! default item ([`claude_keychain_present`]): `/usr/bin/security find-generic-password -s
+//! default item ([`claude_keychain`]): `/usr/bin/security find-generic-password -s
 //! "Claude Code-credentials"` (`-a <USER>` when that is Claude's account), attributes only. It
 //! never passes `-w`, `-g` or `-d`, so the secret is never read or printed, and it needs no
 //! Keychain approval; only the exit status counts, and its output is thrown away (it names the
 //! account). `tests/credential_names.rs` keeps the service name and the query in this file.
+//! A locked login keychain may show its unlock dialog even for this query (`security` searches
+//! the file-based keychain through `SecKeychainSearchCopyNext`, which unlocks on demand), so
+//! detection asks at most once per 10 minutes (`super::detect`).
 //!
 //! **Guard for the next person.** Reuse on macOS works only because a reused Claude reaches the
 //! lawyer's real item: `CLAUDE_SECURESTORAGE_CONFIG_DIR=""` (no suffix) through Apple's
@@ -120,26 +123,38 @@ pub(crate) fn claude_account(env: &BTreeMap<OsString, OsString>) -> Option<&OsSt
     valid.then_some(user.as_os_str())
 }
 
-/// What the query's end means: exit 0 is found; anything else is not, and every end but 44
-/// ("could not be found") is logged once, with the code or a fixed word only.
-pub(crate) fn keychain_found(probe: KeychainProbe) -> bool {
+/// What the Keychain query could tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeychainSeen {
+    /// Exit 0: the item is there.
+    Found,
+    /// Exit 44, "could not be found": a definite no.
+    Absent,
+    /// Any other end (another code, a signal, a timeout, a failed start): it could not tell.
+    Unknown,
+}
+
+/// What the query's end means: exit 0 is found, 44 ("could not be found") absent, and anything
+/// else could not tell, logged once with the code or a fixed word only. First-time detection
+/// takes both of the last two as no login; a recorded reuse is kept on `Unknown` (`found.rs`).
+pub(crate) fn keychain_seen(probe: KeychainProbe) -> KeychainSeen {
     match probe {
-        KeychainProbe::Exited(Some(0)) => true,
-        KeychainProbe::Exited(Some(44)) => false,
+        KeychainProbe::Exited(Some(0)) => KeychainSeen::Found,
+        KeychainProbe::Exited(Some(44)) => KeychainSeen::Absent,
         KeychainProbe::Exited(code) => {
             tracing::warn!(
                 ?code,
-                "claude keychain query: unexpected exit; no login found"
+                "claude keychain query: unexpected exit; could not tell"
             );
-            false
+            KeychainSeen::Unknown
         }
         KeychainProbe::TimedOut => {
-            tracing::warn!("claude keychain query: timed out and killed; no login found");
-            false
+            tracing::warn!("claude keychain query: timed out and killed; could not tell");
+            KeychainSeen::Unknown
         }
         KeychainProbe::NotStarted => {
-            tracing::warn!("claude keychain query: did not start; no login found");
-            false
+            tracing::warn!("claude keychain query: did not start; could not tell");
+            KeychainSeen::Unknown
         }
     }
 }
@@ -147,14 +162,14 @@ pub(crate) fn keychain_found(probe: KeychainProbe) -> bool {
 /// Detection's Keychain check on macOS: whether Claude Code's default item exists, by
 /// `program` (`/usr/bin/security` outside tests) with [`CLAUDE_KEYCHAIN_SERVICE`] and the
 /// lawyer's account from `env` ([`claude_account`]). See the module docs.
-pub(crate) async fn claude_keychain_present<T: Timer>(
+pub(crate) async fn claude_keychain<T: Timer>(
     launcher: &dyn Launcher,
     timer: &T,
     program: &Path,
     env: &BTreeMap<OsString, OsString>,
-) -> bool {
+) -> KeychainSeen {
     let args = keychain_args(CLAUDE_KEYCHAIN_SERVICE, claude_account(env));
-    keychain_found(query::run(launcher, timer, program, args, env, KEYCHAIN_LIMIT).await)
+    keychain_seen(query::run(launcher, timer, program, args, env, KEYCHAIN_LIMIT).await)
 }
 
 /// The login file in a Codex home (Clauseo's, or a matter's state folder in stage C).

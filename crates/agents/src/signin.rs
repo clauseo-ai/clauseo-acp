@@ -38,6 +38,7 @@ pub(crate) mod detect;
 pub(crate) mod env;
 pub(crate) mod found;
 pub(crate) mod job;
+pub(crate) mod keychain_lock;
 pub(crate) mod marker;
 pub(crate) mod queue;
 pub(crate) mod reuse;
