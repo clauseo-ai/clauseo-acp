@@ -376,7 +376,8 @@ fn the_main_document_is_where_the_package_says() {
     assert_eq!(zip_has_marks(docx(&parts)), Some(true));
 }
 
-/// Clean parts past the scan's total stop it: a change in the sixth header, after five of 16 MiB, is never read.
+/// Clean parts past the scan's total stop it: a change in the sixth header, after five of 16 MiB,
+/// is never read.
 #[test]
 fn the_scan_stops_after_its_total_read() {
     let filler = "<w:p/>".repeat(usize::try_from(MAX_XML_BYTES).unwrap() / 6);
