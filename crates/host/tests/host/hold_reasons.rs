@@ -50,13 +50,15 @@ fn an_install_shows_over_a_paused_queue_and_paused_shows_again_once_it_is_taken_
     );
     let fake = crate::update::FakeUpdater::offering(&dir);
     let host = crate::update::start_updating(&dir, 0, &fake);
+    // Made first: a matter made while the paused thread's agent lives would change its fence
+    // between matters, and its queue's next turn would relaunch it (`agents::ensure`).
+    let (_, running, _) = matter_with_thread(&dir, &host, "running", &[], FAKE);
     let (matter, thread, mut events, second) = paused(&dir, &host);
     // A view kept open keeps the stream loaded, so each fresh view `hold_reason` opens shows the
     // header as the host last published it, which must agree with the row.
     let _open = host.view(StreamId::Thread(thread), None);
 
     // A turn that never answers its cancel keeps the install's hold up.
-    let (_, running, _) = matter_with_thread(&dir, &host, "running", &[], FAKE);
     host.prompt(running, "Draft clause 4.");
     host.wait_armed(DURABLE);
     host.ok(HostCommand::CheckForUpdate {});
