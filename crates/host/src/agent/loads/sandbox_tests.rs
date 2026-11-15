@@ -163,7 +163,8 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
                 "deniedDomains": [
                     "localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "[::]",
                     "::ffff:7f00:1", "[::ffff:7f00:1]", "::ffff:0:0", "[::ffff:0:0]",
-                    "::ffff:127.0.0.1", "[::ffff:127.0.0.1]",
+                    "::ffff:127.0.0.1", "[::ffff:127.0.0.1]", "::ffff:0.0.0.0",
+                    "[::ffff:0.0.0.0]",
                 ],
             },
             "filesystem": {
