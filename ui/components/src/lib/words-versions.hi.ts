@@ -97,6 +97,11 @@ const OWN = {
   "Some numbers here may not match the ones Word shows.":
     "यहाँ कुछ संख्याएँ Word में दिखने वाली संख्याओं से अलग हो सकती हैं।",
   "Some of this may look different in Word.": "इसका कुछ हिस्सा Word में अलग दिख सकता है।",
+  "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.":
+    "कुछ बदलाव मुख्य पाठ के बाहर हैं, जैसे हेडर या फ़ुटनोट में। वे यहाँ नहीं दिखाए गए हैं।",
+  // over a blackline paragraph: the place couldn't be shown, or it holds text Word hides; provisional
+  "This part couldn't be shown.": "यह हिस्सा दिखाया नहीं जा सका।",
+  "Hidden in Word": "Word में छिपा हुआ",
   // why the Word tool refused to mark a document up, each said over the sheet with no Try again; provisional
   "Clauseo couldn't compare these two versions because of a table inside a table. Open both in Word to compare them.":
     "तालिका के अंदर एक तालिका होने के कारण Clauseo इन दो संस्करणों की तुलना नहीं कर सका। तुलना के लिए दोनों को Word में खोलें।",

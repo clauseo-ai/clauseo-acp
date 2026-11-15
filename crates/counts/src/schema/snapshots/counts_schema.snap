@@ -1549,6 +1549,11 @@ expression: counts_schema()
         "mcp.import_too_large",
         "matter.folder_backslash",
         "agent.folder_inaccessible"
+        "blackline.nested_table",
+        "blackline.cannot_compare",
+        "blackline.not_readable",
+        "blackline.too_large",
+        "blackline.format_unknown"
       ],
       "type": "string"
     },

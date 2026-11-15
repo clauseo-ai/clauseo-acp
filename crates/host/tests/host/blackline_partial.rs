@@ -79,7 +79,22 @@ fn a_line_that_does_not_read_is_left_out_with_a_notice() {
     let (host, matter, old, _folder) = lease_matter(&dir, Some(&stetdoc));
     let answer = blackline(host.query(query(matter, DOC, old, None)));
     assert_eq!(answer.notices, [BlacklineNotice::PartNotShown]);
-    assert_eq!(answer.paragraphs.len(), 5);
+    // The paragraph left out has a place of its own, where it stood.
+    assert_eq!(answer.paragraphs.len(), 6);
+    assert_eq!(answer.paragraphs[4].change, ParagraphChange::NotShown);
+    host.shutdown();
+}
+
+/// A footnote and a header changed with the body: the blackline shows the body and says the
+/// other changes are not shown.
+#[test]
+fn changes_outside_the_main_text_are_noted() {
+    let dir = dir("blackline_outside");
+    let stetdoc = fake_with_view(&dir, "view-notes.json");
+    let (host, matter, old, _folder) = lease_matter(&dir, Some(&stetdoc));
+    let answer = blackline(host.query(query(matter, DOC, old, None)));
+    assert_eq!(answer.notices, [BlacklineNotice::ChangesOutsideText]);
+    assert_eq!(answer.paragraphs.len(), 1);
     host.shutdown();
 }
 

@@ -7,8 +7,9 @@
 //!   rest kept, with the escapes `\{`, `\}`, `\\`, `\t` (a tab), `\n` (a line break) and
 //!   `\u{hex}`;
 //! - what the tags at the start are, each dropped: the style (`{style "heading 1"}`), a format
-//!   change (`{rev run #13 C}`), the paragraph-mark change (`{¶+ #5 C}`, `{¶- #3 C}`), which says
-//!   the paragraph was inserted or deleted, a bullet (`{•}`), `{joins-next}`, a table cell's tags
+//!   change (`{rev run #13 C}`, which makes the paragraph `formatted`), the paragraph-mark
+//!   change (`{¶+ #5 C}`, `{¶- #3 C}`), which says the paragraph was inserted or deleted,
+//!   a bullet (`{•}`), `{joins-next}`, a table cell's tags
 //!   (`{+}` for a later block of the same cell, `{span 2}`, `{vmerge restart}`, `{vmerge}`,
 //!   `{cell inserted …}`) and `{hidden-para}` (a paragraph Word hides, shown as any other); a
 //!   list number (`{§"1."}`, `{§"1." ghost}` for a deleted one) reads as its text first;
@@ -19,8 +20,10 @@
 //!   break a line break, hidden text (`{hidden "…"}`, `{looks-hidden white "…"}`) its text, as
 //!   stetdoc's view shows it;
 //! - how a paragraph changed: `added` when it has `{¶+ …}` and all its text is inserted,
-//!   `removed` when it has `{¶- …}` and all of it is deleted, `same` when nothing in it is
-//!   inserted or deleted, and `changed` otherwise.
+//!   `removed` when it has `{¶- …}` and all of it is deleted, `formatted` when nothing in it is
+//!   inserted or deleted but it has a format change (`{rev …}`, which stetdoc prints for a
+//!   tracked bold, strike-through or hide), `same` when it has neither, and `changed`
+//!   otherwise; and whether it holds hidden text.
 //!
 //! A newer stetdoc may add words: words after the ones a known marker needs are ignored, and a
 //! marker whose first word is not known is left out and noted ([`Seen::unknown`]). What does
@@ -99,6 +102,9 @@ pub(super) fn paragraph(
     content: &str,
     seen: &mut Seen,
 ) -> Result<BlacklineParagraph, &'static str> {
+    // What this paragraph holds, added to `seen` once it reads.
+    let mut own = Seen::default();
+    let mut formatted = false;
     let mut rest = content;
     let mut mark = Mark::None;
     let mut label: Option<(String, bool)> = None;
@@ -112,25 +118,32 @@ pub(super) fn paragraph(
         } else if let Some(number) = body.strip_prefix('§') {
             label = Some(list_number(number)?);
         } else if first == "hidden-para" {
-            seen.hidden = true;
-        } else if !matches!(first, "style" | "rev" | "•" | "joins-next") && !cell_tag(body) {
+            own.hidden = true;
+        } else if first == "rev" {
+            formatted = true;
+        } else if !matches!(first, "style" | "•" | "joins-next") && !cell_tag(body) {
             break;
         }
         rest = after.strip_prefix(' ').unwrap_or(after);
     }
     let mut runs: Vec<BlacklineRun> = Vec::new();
-    inline(&mut rest, RunKind::Same, None, &mut runs, seen)?;
+    inline(&mut rest, RunKind::Same, None, &mut runs, &mut own)?;
     let all = |kind: RunKind| runs.iter().all(|run| run.kind == kind);
     let change = match mark {
         Mark::Inserted if all(RunKind::Ins) => ParagraphChange::Added,
         Mark::Deleted if all(RunKind::Del) => ParagraphChange::Removed,
+        Mark::None if all(RunKind::Same) && formatted => ParagraphChange::Formatted,
         Mark::None if all(RunKind::Same) => ParagraphChange::Same,
         Mark::None | Mark::Inserted | Mark::Deleted => ParagraphChange::Changed,
     };
     if let Some((number, ghost)) = label {
         let kind = match change {
             ParagraphChange::Added if !ghost => RunKind::Ins,
-            ParagraphChange::Same | ParagraphChange::Changed | ParagraphChange::Unknown
+            ParagraphChange::Same
+            | ParagraphChange::Changed
+            | ParagraphChange::Formatted
+            | ParagraphChange::NotShown
+            | ParagraphChange::Unknown
                 if !ghost =>
             {
                 RunKind::Same
@@ -139,6 +152,8 @@ pub(super) fn paragraph(
             | ParagraphChange::Removed
             | ParagraphChange::Same
             | ParagraphChange::Changed
+            | ParagraphChange::Formatted
+            | ParagraphChange::NotShown
             | ParagraphChange::Unknown => RunKind::Del,
         };
         let mut numbered = Vec::with_capacity(runs.len() + 1);
@@ -148,7 +163,13 @@ pub(super) fn paragraph(
         }
         runs = numbered;
     }
-    Ok(BlacklineParagraph { change, runs })
+    seen.hidden |= own.hidden;
+    seen.unknown |= own.unknown;
+    Ok(BlacklineParagraph {
+        change,
+        runs,
+        hidden: own.hidden,
+    })
 }
 
 /// A list number's text from the marker body after `§`: `"1."`, or `"1." ghost` for one that

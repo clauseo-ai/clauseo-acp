@@ -136,12 +136,13 @@ export type Matter = {
   openable?: boolean;
   /** preview_restore names these as locked, and the restore is refused with matter.file_locked (U9). */
   locked?: string[];
-  /** word_blackline's answer for a Word document compared with now: marked up (by default, whole), with notices, left
-   * unanswered, or refused with a code. */
+  /** word_blackline's answer for a Word document compared with now: marked up (by default, whole), with notices or
+   * paragraphs of its own, left unanswered, or refused with a code. */
   mark?:
     | "hold"
     | { truncated: boolean }
     | { notices: BlacklineNotice[] }
+    | { paragraphs: BlacklineParagraph[] }
     | { refused: string; retryable: boolean };
   /** The lawyer accepted or rejected tracked changes in these files after the next turn: version cp6 (UC). */
   revisions?: FileChange[];
@@ -187,7 +188,8 @@ function marking(mark: Matter["mark"]): QueryResult | Promise<QueryResult> {
     return Promise.reject({ code: mark.refused, message: "", retryable: mark.retryable });
   const truncated = mark !== undefined && "truncated" in mark && mark.truncated;
   const notices = mark !== undefined && "notices" in mark ? mark.notices : [];
-  return { word_blackline: { paragraphs: MARKED_NOTICE, truncated, notices } };
+  const paragraphs = mark !== undefined && "paragraphs" in mark ? mark.paragraphs : MARKED_NOTICE;
+  return { word_blackline: { paragraphs, truncated, notices } };
 }
 
 /** The matter's history: its papers brought in three days ago, a turn of the conversation's that morning, the

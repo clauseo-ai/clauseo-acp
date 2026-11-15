@@ -29,7 +29,11 @@ fn query_result_word_blackline() {
         kind,
         text: text.to_owned(),
     };
-    let paragraph = |change, runs| BlacklineParagraph { change, runs };
+    let paragraph = |change, runs| BlacklineParagraph {
+        change,
+        runs,
+        hidden: false,
+    };
     let answer = QueryResult::WordBlackline(WordBlackline {
         paragraphs: vec![
             paragraph(

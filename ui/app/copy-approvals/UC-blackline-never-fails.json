@@ -97,5 +97,38 @@
     "at": "2026-11-15",
     "by": "blackline-never-fails (en provisional, for the orchestrator)",
     "note": "blackline.format_unknown: stetdoc's view is in a format other than stet 1; no Try again"
+  },
+  "UC-368": {
+    "en": "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.",
+    "hi": "कुछ बदलाव मुख्य पाठ के बाहर हैं, जैसे हेडर या फ़ुटनोट में। वे यहाँ नहीं दिखाए गए हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "over the blackline sheet when stetdoc counts more tracked changes than the body shows: the rest are in headers, footers, notes or comments (BlacklineNotice changes_outside_text)"
+  },
+  "UC-369": {
+    "en": "This part couldn't be shown.",
+    "hi": "यह हिस्सा दिखाया नहीं जा सका।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "on the blackline sheet where a paragraph stood that Clauseo couldn't read from stetdoc's view (ParagraphChange not_shown)"
+  },
+  "UC-370": {
+    "en": "Hidden in Word",
+    "hi": "Word में छिपा हुआ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "above a blackline paragraph that holds text Word hides, shown as ordinary text (BlacklineParagraph hidden)"
   }
 }

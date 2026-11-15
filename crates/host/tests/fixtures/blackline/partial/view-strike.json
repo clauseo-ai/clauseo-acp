@@ -1,0 +1,35 @@
+{
+  "base": "b1d05184a8907f2b:0:b1d05184a8907f2b",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Clauseo",
+        "count": 1
+      }
+    ],
+    "count": 1,
+    "first": [
+      {
+        "author": "Clauseo",
+        "block": "p2",
+        "change": 0,
+        "deleted": null,
+        "inserted": null,
+        "kind": "run format"
+      }
+    ]
+  },
+  "position": {
+    "first": "p1",
+    "last": "p2",
+    "remaining_tokens": 0,
+    "scope": "p1..p2",
+    "shown": 2,
+    "total": 2
+  },
+  "text": "{stet 1 view=body base=b1d05184a8907f2b:0:b1d05184a8907f2b mode=redline common-style=\"Normal\" range=p1..p2}\n{authors: C \"Clauseo\"}\n{summary: 1 tracked change (C 1) · 1 section}\np1 Intro.\np2 {rev run #0 C} Keep this. Strike this sentence.\n{position: p1..p2 of p1..p2 (2 of 2 blocks)}\n",
+  "tokens": 72,
+  "warnings": []
+}

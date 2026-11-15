@@ -39,8 +39,12 @@ pub struct BlacklineParagraph {
     /// How the paragraph changed as a whole.
     pub change: ParagraphChange,
     /// Its text as runs, in order; two runs next to each other never have the same kind, and
-    /// no run is empty. An empty paragraph has none.
+    /// no run is empty. An empty paragraph has none, and so does one `not_shown`.
     pub runs: Vec<BlacklineRun>,
+    /// Whether it holds text that Word hides (or that is hard to see), which its runs show as
+    /// ordinary text. False is left out, and missing reads as false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 /// A stretch of a paragraph's text with one kind.
@@ -64,6 +68,12 @@ open_unit_enum! {
         Added,
         /// Only in the older version: the whole paragraph was deleted.
         Removed,
+        /// In both with the same text, but its formatting changed (a tracked format change,
+        /// such as bold, struck through or hidden): every run is `same`.
+        Formatted,
+        /// A place Clauseo could not show: a line of stetdoc's view it could not read stands
+        /// here, as a paragraph with no runs.
+        NotShown,
     }
     test mod paragraph_change;
 }
@@ -92,6 +102,9 @@ open_unit_enum! {
         HiddenText,
         /// Some list or clause numbers may not match the ones Word shows.
         NumbersMayDiffer,
+        /// stetdoc counted more tracked changes than the blackline shows: the others are outside
+        /// the main text (headers, footers, footnotes, endnotes, comments), which it does not show.
+        ChangesOutsideText,
         /// stetdoc warned about something else this version does not know: some of the
         /// blackline may not match the document in Word exactly.
         MayDiffer,

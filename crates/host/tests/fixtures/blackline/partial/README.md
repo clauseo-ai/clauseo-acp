@@ -16,6 +16,12 @@ unit tests (`src/actor/query/blackline/parse/tests/partial.rs`) and the host tes
 - `view-deep3.json`: tables three deep, the change in the deepest (`deep3-*.docx`).
 - `view-long.json`: a paragraph of about 4,500 characters, which stetdoc wraps over four lines
   with a trailing `\` (`long-*.docx`).
+- `strike-old.docx`, `strike-new.docx` and `hide-old.docx`, `hide-new.docx`: a sentence struck through,
+  and one hidden, as tracked format changes only. `view-strike.json`, `view-hide.json`: stetdoc
+  prints each paragraph's change as `{rev run #0 C}` and nothing else.
+- `notes-old.docx`, `notes-new.docx`: the body, a footnote and a header each change. `view-notes.json`:
+  the summary counts 6 tracked changes, the body's line names 2, and the footnote follows
+  `{appendix}` in its final text, unmarked.
 - `inner-last-old.docx`, `inner-last-new.docx`: an inner table that is the last thing in its
   cell, removed in the new version. `compare-inner-last.json` is what `stetdoc compare --json`
   printed for them: `validation_failed`, exit 5 (stetdoc's fix comes after its PR #22).
