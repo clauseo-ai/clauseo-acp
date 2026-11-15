@@ -154,6 +154,7 @@ mod error_code;
 mod event;
 mod excluded;
 mod ids;
+mod last_exit;
 mod limits;
 mod lists;
 mod matter;
@@ -241,6 +242,7 @@ wire_types! {
         ElicitationId, EnvName, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
         PermissionRequestId, ThreadId, ToolCallId, TurnId, ViewEpoch,
     },
+    last_exit::{InterruptedAction, InterruptedKind, LastExit},
     limits::{
         AccountLimits, AccountRef, AgentKind, AgentLimitsView, AtLimitBehaviour, Billing,
         BillingKind, BillingProvider, Freshness, LimitMeter, LimitSource, LimitStopReason,
