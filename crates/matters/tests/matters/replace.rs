@@ -263,3 +263,36 @@ fn read_local_refuses_a_cloud_only_file() {
         "{error}"
     );
 }
+
+/// Unix: the replace and the restore that undoes it keep the file's permission bits; a file
+/// the restore brings back after a delete gets the defaults (checkpoints record no mode).
+#[cfg(unix)]
+#[test]
+fn replace_and_restore_keep_the_files_mode() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode =
+        |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    let (fx, mut matter, expected, new) = replacing("replace-keeps-mode", b"old");
+    let default = mode(&fx.file("Lease.docx"));
+    support::set_mode(fx.file("Lease.docx"), 0o640);
+    let file = path("Lease.docx");
+    matter
+        .replace_file(&request(&file, &expected, &new))
+        .unwrap();
+    assert_eq!(fx.read("Lease.docx"), b"new");
+    assert_eq!(mode(&fx.file("Lease.docx")), 0o640);
+
+    let paths = [file.clone()];
+    matter
+        .restore(&restore_request(1, RestoreFiles::Only(&paths), 4, 5))
+        .unwrap();
+    assert_eq!(fx.read("Lease.docx"), b"old");
+    assert_eq!(mode(&fx.file("Lease.docx")), 0o640);
+
+    support::remove_file(fx.file("Lease.docx"));
+    matter
+        .restore(&restore_request(1, RestoreFiles::Only(&paths), 6, 7))
+        .unwrap();
+    assert_eq!(fx.read("Lease.docx"), b"old");
+    assert_eq!(mode(&fx.file("Lease.docx")), default);
+}
