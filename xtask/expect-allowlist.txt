@@ -459,6 +459,7 @@ crates/mcp/src/browser_guard/devtools/peer.rs os unsafe_code
 crates/mcp/src/browser_guard/devtools/peer_tests.rs a_child_of_agent_browser_is_let_in_and_another_process_is_not clippy::disallowed_methods
 crates/mcp/src/browser_guard/harden.rs windows_impl unsafe_code
 crates/mcp/src/browser_guard/job/harden_tests.rs - unsafe_code
+crates/mcp/src/browser_guard/job/harden_tests/probe.rs - unsafe_code
 crates/mcp/src/browser_guard/session/browser.rs candidates clippy::unnecessary_wraps
 crates/mcp/src/browser_guard/reaper.rs Reaper::start clippy::disallowed_methods
 crates/mcp/src/browser_guard/parent/windows.rs - unsafe_code
