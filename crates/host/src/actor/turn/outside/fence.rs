@@ -13,8 +13,8 @@ use clauseo_protocol::{
 };
 use serde_json::Value;
 
-use super::super::Actor;
-use super::launch_checks::RunFolders;
+use super::super::super::Actor;
+use super::super::launch_checks::RunFolders;
 use crate::agent::matter_fence::{FenceKey, MatterFence, Other};
 use crate::log_file::Cause;
 
@@ -147,10 +147,10 @@ pub(crate) fn tell_unfenced(actor: &mut Actor, thread: ThreadId, unfenced: Vec<M
     let Some(state) = actor.threads.get_mut(&thread).map(|entry| &mut entry.turn) else {
         return;
     };
-    if state.unfenced_told == unfenced {
+    if state.told_once.unfenced == unfenced {
         return;
     }
-    state.unfenced_told.clone_from(&unfenced);
+    state.told_once.unfenced.clone_from(&unfenced);
     if unfenced.is_empty() {
         return;
     }
@@ -164,7 +164,7 @@ pub(crate) fn tell_unfenced(actor: &mut Actor, thread: ThreadId, unfenced: Vec<M
             more,
         }),
     };
-    if let Err(error) = super::updates::commit(actor, thread, [notice.into()], Vec::new()) {
+    if let Err(error) = super::super::updates::commit(actor, thread, [notice.into()], Vec::new()) {
         tracing::warn!(%thread, error = %Cause(&error), "the unfenced notice was not logged");
     }
 }
