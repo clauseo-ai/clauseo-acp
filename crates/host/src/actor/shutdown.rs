@@ -45,7 +45,6 @@ pub(super) async fn close(actor: Actor) -> Result<(), Error> {
         matters,
         forgotten,
         feeder,
-        last_exit,
         ..
     } = actor;
     // Before the store closes: the search thread reads it.
@@ -63,8 +62,6 @@ pub(super) async fn close(actor: Actor) -> Result<(), Error> {
         }
     }
     drop(feeder);
-    // The last run's unfinished actions are answered for: the next start names none of them.
-    super::last_exit::at_close(&store, &last_exit).await;
     let closed = store.close().await.map_err(Error::Store);
     tracing::info!(target: LIFECYCLE, ok = closed.is_ok(), "host stopped");
     closed

@@ -8,8 +8,10 @@
 //! is durable; when the writer passes on (`end::pass_writer`), [`finished`] deletes it. A put for
 //! a matter whose delete is still on its way waits for that delete, so the two never cross.
 //! Start-up reads what is left ([`at_start`]), which are the actions the last run did not finish,
-//! and keeps them for this run's answer. They stay in the store until this run's clean stop
-//! ([`at_close`]), so a second crash before then still names them. Logs carry ids and counts.
+//! keeps them for this run's answer, and deletes them: many clean quits never stop the host (an
+//! idle quit, a logoff, a wait that ran out), so no later point is sure to come. A second crash
+//! before the notice is seen loses the names; the desktop's flag still shows the notice. Logs
+//! carry ids and counts only.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -43,14 +45,19 @@ pub(crate) struct Recorded {
     put: bool,
 }
 
-/// Start-up, before the loop: the actions the last run left unfinished, kept in the store until
-/// [`at_close`]. `unclean` is the desktop's word on the last run; an unfinished action makes it
-/// unclean too. A store that does not answer leaves the list empty.
+/// Start-up, before the loop: the actions the last run left unfinished, then deleted, so the next
+/// start does not name them again. `unclean` is the desktop's word on the last run; an unfinished
+/// action makes it unclean too. A store that does not answer leaves the list empty.
 pub(super) async fn at_start(store: &Store, unclean: bool, now: Timestamp) -> LastExitHost {
     let left = store.pending_actions().await.unwrap_or_else(|error| {
         tracing::warn!(error = %Cause(&error), "the unfinished file actions were not read");
         Vec::new()
     });
+    for action in &left {
+        if let Err(error) = store.clear_pending_action(action.matter).await {
+            tracing::warn!(error = %Cause(&error), "an unfinished file action was not cleared");
+        }
+    }
     if unclean || !left.is_empty() {
         tracing::info!(
             target: LIFECYCLE,
@@ -78,23 +85,6 @@ pub(super) async fn at_start(store: &Store, unclean: bool, now: Timestamp) -> La
         waiting: BTreeMap::new(),
         clearing: BTreeSet::new(),
         held: BTreeMap::new(),
-    }
-}
-
-/// A clean stop, before the store closes: deletes the last run's rows, which this run has
-/// answered with, except where this run recorded an action of its own that has not finished (a
-/// stop that did not wait for it): that row is this run's, and the next start names it.
-pub(super) async fn at_close(store: &Store, host: &LastExitHost) {
-    let stale = host
-        .view
-        .interrupted
-        .iter()
-        .map(|action| action.matter)
-        .filter(|matter| !host.recorded.contains(matter));
-    for matter in stale {
-        if let Err(error) = store.clear_pending_action(matter).await {
-            tracing::warn!(%matter, error = %Cause(&error), "an old file action was not cleared");
-        }
     }
 }
 
