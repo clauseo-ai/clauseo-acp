@@ -59,6 +59,10 @@ fn main() {
          zip_has_marks(std::io::Cursor::new(bytes))\n}\n",
     );
     let dest = Path::new(&std::env::var("OUT_DIR").expect("cargo sets OUT_DIR")).join("marks.rs");
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a build script writes its own OUT_DIR file"
+    )]
     std::fs::write(dest, out).expect("write OUT_DIR/marks.rs");
 }
 

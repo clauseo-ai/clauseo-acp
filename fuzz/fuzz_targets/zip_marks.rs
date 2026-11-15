@@ -31,11 +31,16 @@
 //!     `Some(false)`.
 //!   - a generated file with an odd SVG (typed `image/svg+xml`) answers as its twin with a plain
 //!     SVG does: an image never decides the answer.
+//!
 //! Counted, never asserted (printed every 2^15 inputs): "clean" answered `Some(true)` (offered
 //! without a change, allowed; most are `must_offer` files), `None` (a read error, which a zip
 //! in memory should not have), and a mark only in `[Content_Types].xml` answered `Some(false)`
 //! (the design reads that part for content types, never for marks; Word never shows it).
 #![no_main]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "fuzz harness, not app code: fuzz_target! writes its debug file with std::fs"
+)]
 
 use std::io::Read as _;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -58,7 +63,10 @@ mod write {
     }
 }
 
-#[allow(dead_code, unused_imports, clippy::all)]
+#[expect(
+    dead_code,
+    reason = "the copied scan keeps the host's helpers this target never calls"
+)]
 mod marks {
     include!(concat!(env!("OUT_DIR"), "/marks.rs"));
 }
@@ -279,7 +287,7 @@ fuzz_target!(|data: &[u8]| {
         }
     }
     let runs = RUNS.fetch_add(1, Ordering::Relaxed) + 1;
-    if runs % (1 << 15) == 0 {
+    if runs.is_multiple_of(1 << 15) {
         eprintln!(
             "zip_marks: {runs} runs, {} clean, {} clean but Some(true), {} None, \
              {} a mark only in the content types but Some(false)",
