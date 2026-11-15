@@ -149,6 +149,9 @@ semver = "1.0.28"
 # clauseo-host: the pre-write guard compares a held file's name with a shell command's words in one
 # Unicode form on macOS, as APFS does (gix already builds it for clauseo-matters).
 unicode-normalization = "0.1.26"
+# clauseo-host: the Tools confirm writes out every invisible, blank or line-breaking character by
+# its Unicode general category and Default_Ignorable_Code_Point (2.3.0 is in the lock through url).
+icu_properties = "2.3.0"
 # clauseo-sandbox: Unicode full case folding (CaseFolding.txt C and F) for the policy's path keys on
 # macOS, as a case-insensitive APFS volume folds names.
 caseless = "0.2.2"

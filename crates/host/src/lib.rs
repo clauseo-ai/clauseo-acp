@@ -264,6 +264,7 @@ mod revisions;
 mod search;
 mod sent;
 mod shell_writes;
+pub mod shown;
 mod snapshot;
 mod sources;
 mod stetdoc_args;

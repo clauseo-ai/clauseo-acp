@@ -148,22 +148,7 @@ fn mcp_import_with_nothing_to_import_never_asks() {
 fn mcp_import_too_long_for_one_confirm_keeps_a_whole_prefix_and_names_the_rest() {
     let dir = Dir::new("mcp_import_too_large", &[]);
     let long = "x".repeat(150);
-    let mut servers: serde_json::Map<String, Value> = (0..20)
-        .map(|n| {
-            (
-                format!("tool{n:02}"),
-                json!({"command": program(), "args": [long]}),
-            )
-        })
-        .collect();
-    servers.insert(
-        "huge".to_owned(),
-        json!({"command": program(), "args": ["y".repeat(2_100)]}),
-    );
-    let fs = FakeFs::default().file(&program(), "").file(
-        &desktop_config(),
-        &json!({ "mcpServers": servers }).to_string(),
-    );
+    let fs = too_many_apps(&long);
     let (store, answers) = (
         Arc::new(MemoryStore::new()),
         Arc::new(Answers::allowing(true)),
@@ -200,6 +185,21 @@ fn mcp_import_too_long_for_one_confirm_keeps_a_whole_prefix_and_names_the_rest()
     skipped.insert(0, skip("huge", McpSkipReason::Unreadable, None));
     assert_eq!(first.skipped, skipped);
     assert_eq!(first.others, 0);
+    // Only the kept servers' values reached the keychain; a left-out one wrote nothing.
+    for name in &all[..kept] {
+        assert!(
+            store.peek(&format!("{name}/env/TOOL_TOKEN")).is_some(),
+            "{name}"
+        );
+    }
+    for name in all[kept..].iter().chain([&"huge".to_owned()]) {
+        assert_eq!(
+            store.peek(&format!("{name}/env/TOOL_TOKEN")),
+            None,
+            "{name}"
+        );
+    }
+    assert_eq!(store.writes(), kept);
     // The next import takes the next whole servers.
     host.ok(import(ClaudeDesktop));
     let view = view_until(&mut sub, |view| {
@@ -211,5 +211,47 @@ fn mcp_import_too_long_for_one_confirm_keeps_a_whole_prefix_and_names_the_rest()
     let next = answers.imports()[1].len();
     assert!(next > 0);
     assert_eq!(second.imported, all[kept..kept + next]);
+    host.shutdown();
+}
+
+/// Twenty servers with a 150-character argument and a value each, and `huge`, too long to show.
+fn too_many_apps(long: &str) -> FakeFs {
+    let mut servers: serde_json::Map<String, Value> = (0..20)
+        .map(|n| {
+            let server = json!({"command": program(), "args": [long],
+                "env": {"TOOL_TOKEN": ENV_VALUE}});
+            (format!("tool{n:02}"), server)
+        })
+        .collect();
+    servers.insert(
+        "huge".to_owned(),
+        json!({"command": program(), "args": ["y".repeat(2_100)], "env": {"TOOL_TOKEN": ENV_VALUE}}),
+    );
+    FakeFs::default().file(&program(), "").file(
+        &desktop_config(),
+        &json!({ "mcpServers": servers }).to_string(),
+    )
+}
+
+/// Cancel on a partial import: nothing at all is imported, kept or left out, and the keychain and
+/// settings are untouched; the confirm still named the ones left out.
+#[test]
+fn mcp_import_declined_partial_import_writes_nothing() {
+    let dir = Dir::new("mcp_import_partial_declined", &[]);
+    let fs = too_many_apps(&"x".repeat(150));
+    let (store, answers) = (
+        Arc::new(MemoryStore::new()),
+        Arc::new(Answers::allowing(false)),
+    );
+    let answered = Arc::clone(&answers);
+    let host = dir.start_with(0, |config| {
+        wired(config, &store, fs).with_mcp_confirm(answered)
+    });
+    let before = dir.settings_json();
+    host.refused(import(ClaudeDesktop), ErrorCode::McpSaveDeclined);
+    assert_eq!(answers.imports().len(), 1);
+    assert!(!answers.left_out()[0].is_empty(), "nothing was left out");
+    assert_eq!(store.writes(), 0);
+    assert_eq!(dir.settings_json(), before);
     host.shutdown();
 }

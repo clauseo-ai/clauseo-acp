@@ -196,3 +196,84 @@ fn an_import_keeps_a_whole_prefix_that_fits() {
     assert_eq!(fitting(&asks), 1);
     assert_eq!(fitting(&[]), 0);
 }
+
+/// A store whose every `set` from the second on fails; reads and deletes go to `inner`.
+struct FailFromSecond {
+    inner: std::sync::Arc<clauseo_connectors::MemoryStore>,
+    sets: std::sync::atomic::AtomicUsize,
+}
+
+impl clauseo_connectors::SecretStore for FailFromSecond {
+    fn get(&self, account: &str) -> Result<Option<Vec<u8>>, clauseo_connectors::StoreError> {
+        self.inner.get(account)
+    }
+
+    fn set(&self, account: &str, secret: &[u8]) -> Result<(), clauseo_connectors::StoreError> {
+        if self.sets.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1 {
+            return Err(clauseo_connectors::StoreError::Platform(
+                "refused".to_owned(),
+            ));
+        }
+        self.inner.set(account, secret)
+    }
+
+    fn delete(&self, account: &str) -> Result<(), clauseo_connectors::StoreError> {
+        self.inner.delete(account)
+    }
+}
+
+fn ready(name: &str, accounts: &[&str]) -> super::Ready {
+    super::Ready {
+        name: name.to_owned(),
+        server: clauseo_settings::McpServerLaunch::local(
+            "npx".to_owned(),
+            Vec::new(),
+            std::collections::BTreeMap::new(),
+            false,
+        ),
+        steps: accounts
+            .iter()
+            .map(|account| super::Step::Set {
+                account: (*account).to_owned(),
+                value: zeroize::Zeroizing::new("new".to_owned()),
+            })
+            .collect(),
+    }
+}
+
+/// The second server's write fails, and so does the put-back's restore of the first server's
+/// earlier item: the import still answers the store's error, and the put-back goes on to delete
+/// the item the first server added, so only the one item the keychain refused twice is left.
+#[test]
+fn a_rollback_whose_own_writes_fail_still_answers_and_puts_back_the_rest() {
+    let inner = std::sync::Arc::new(clauseo_connectors::MemoryStore::new());
+    inner.put("a/env/OLD", b"earlier");
+    let store = FailFromSecond {
+        inner: std::sync::Arc::clone(&inner),
+        sets: std::sync::atomic::AtomicUsize::new(0),
+    };
+    // `a/env/NEW` lands (the first set); `a/env/OLD` is refused, so `a` fails on its own.
+    let result = super::write(Some(&store), vec![ready("a", &["a/env/NEW", "a/env/OLD"])]);
+    assert!(matches!(result, Err(Some(_))));
+    assert_eq!(
+        inner.peek("a/env/NEW"),
+        None,
+        "the added item was not deleted"
+    );
+    assert_eq!(inner.peek("a/env/OLD").as_deref(), Some(&b"earlier"[..]));
+    // Across servers: `b` lands, `c` is refused, and `b`'s restore is refused too.
+    let inner = std::sync::Arc::new(clauseo_connectors::MemoryStore::new());
+    inner.put("b/env/B", b"earlier");
+    let store = FailFromSecond {
+        inner: std::sync::Arc::clone(&inner),
+        sets: std::sync::atomic::AtomicUsize::new(0),
+    };
+    let result = super::write(
+        Some(&store),
+        vec![ready("b", &["b/env/B"]), ready("c", &["c/env/C"])],
+    );
+    assert!(matches!(result, Err(Some(_))));
+    assert_eq!(inner.peek("c/env/C"), None);
+    // The keychain refused the restore: the item keeps the import's value, and the count is logged.
+    assert_eq!(inner.peek("b/env/B").as_deref(), Some(&b"new"[..]));
+}

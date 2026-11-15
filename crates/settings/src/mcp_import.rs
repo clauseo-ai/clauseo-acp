@@ -379,14 +379,37 @@ pub fn find_candidates_counted(
     env: &Env<'_>,
     existing_names: &[String],
 ) -> (Vec<ImportCandidate>, usize) {
-    let mut entries = Entries::default();
-    claude_desktop::read(env, &mut entries);
-    claude_code::read(env, &mut entries);
-    codex::read(env, &mut entries);
-    (
-        name::assemble(entries.list, existing_names),
-        entries.left_out,
-    )
+    let mut apps = [Entries::default(), Entries::default(), Entries::default()];
+    claude_desktop::read(env, &mut apps[0]);
+    claude_code::read(env, &mut apps[1]);
+    codex::read(env, &mut apps[2]);
+    let (list, left_out) = in_turn(apps);
+    (name::assemble(list, existing_names), left_out)
+}
+
+/// The apps' entries shared under [`MAX_ENTRIES_TOTAL`] one from each app in turn, so a full app
+/// never leaves another with nothing; the rest are counted with what the reads left out.
+fn in_turn(apps: [Entries; 3]) -> (Vec<Entry>, usize) {
+    let mut left_out: usize = apps.iter().map(|app| app.left_out).sum();
+    let mut lists: Vec<std::vec::IntoIter<Entry>> =
+        apps.into_iter().map(|app| app.list.into_iter()).collect();
+    let mut list = Vec::new();
+    loop {
+        let mut took = false;
+        for app in &mut lists {
+            if let Some(entry) = app.next() {
+                took = true;
+                if list.len() < MAX_ENTRIES_TOTAL {
+                    list.push(entry);
+                } else {
+                    left_out += 1;
+                }
+            }
+        }
+        if !took {
+            return (list, left_out);
+        }
+    }
 }
 
 /// The most servers read from one source (one file's `mcpServers`, a `.claude.json` project's,
@@ -394,12 +417,13 @@ pub fn find_candidates_counted(
 /// never turned into entries.
 pub const MAX_ENTRIES_PER_SOURCE: usize = 500;
 
-/// The most servers read across every source together, in reading order (Claude Desktop, then
-/// Claude Code's user scope and projects, then Codex); the rest are counted with the per-source
-/// cap's. Twice [`MAX_ENTRIES_PER_SOURCE`]: two full sources still read whole, while Claude
-/// Code's up to 500 projects can no longer hold 250,000 entries in memory at once. It never
-/// limits one import: an import's one confirm shows at most about 285 servers (2,000 characters,
-/// at least 7 a server), and the rest go to the next import.
+/// The most servers kept across every app together, and the most one app's read keeps (Claude
+/// Code's user scope and projects are one app); the rest are counted with the per-source cap's.
+/// The apps share it one entry each in turn ([`in_turn`]). Twice [`MAX_ENTRIES_PER_SOURCE`]:
+/// two full sources still read whole, while Claude Code's up to 500 projects can no longer hold
+/// 250,000 entries in memory at once (three apps hold at most 3,000 before they are shared). It
+/// never limits one import: an import's one confirm shows at most about 285 servers (2,000
+/// characters, at least 7 a server), and the rest go to the next import.
 pub const MAX_ENTRIES_TOTAL: usize = 2 * MAX_ENTRIES_PER_SOURCE;
 
 /// The entries read so far, and how many a cap left unread.
