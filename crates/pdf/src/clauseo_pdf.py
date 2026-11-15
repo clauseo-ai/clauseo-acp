@@ -3,13 +3,19 @@
 # Claude Code's Read renders long PDFs with `pdftoppm -jpeg -r 100 [-f N] [-l M] <pdf> <prefix>`
 # and counts pages with `pdfinfo`'s `Pages:` line; Codex is told to run pdftoppm itself. Names,
 # padding, messages and exit codes follow poppler's (utils/pdftoppm.cc, pdfinfo.cc), so Claude
-# Code's error matching reads them. A run renders at most MAX_PAGES pages and MAX_PIXELS pixels
-# a page, so a 2,000-page bundle or a huge -r fails fast instead of filling the disk.
+# Code's error matching reads them. Caps, each checked before the work it bounds: a run covers
+# at most MAX_PAGES pages (pdftoppm renders them, pdfinfo -f/-l lists them); a page renders to at
+# most MAX_PIXELS pixels and MAX_SIDE a side, as PDFium will size it; a run writes at most
+# MAX_BYTES of images. A run refused part way removes the pages it wrote. So a 2,000-page bundle,
+# a huge -r or a sliver page fails fast instead of filling the memory or the disk.
+import math
 import os
 import sys
 
 MAX_PAGES = 200
 MAX_PIXELS = 100_000_000
+MAX_SIDE = 65_500
+MAX_BYTES = 1_000_000_000
 OPEN_ERROR, OUTPUT_ERROR, OTHER_ERROR = 1, 2, 99
 
 
@@ -60,6 +66,8 @@ def parse(tool, table, args):
             try:
                 kind = {"int": int, "float": float, "str": str}[table[arg]]
                 opts[arg] = kind(args[i])
+                if kind is float and not math.isfinite(opts[arg]):
+                    raise ValueError(args[i])
             except ValueError:
                 raise Fail(OTHER_ERROR, f"{version(tool)}\n{USAGE[tool]}") from None
         i += 1
@@ -160,15 +168,20 @@ def pdftoppm(args):
     width = len(str(count))
     sep = opts.get("-sep", "-")
     quality = jpeg_quality(opts.get("-jpegopt", ""))
-    for pg in pages:
-        image = render(doc, pg, opts)
-        if root is None:
-            path = None
-        elif single and not opts.get("-forcenum"):
-            path = f"{root}.{ext}"
-        else:
-            path = f"{root}{sep}{pg:0{width}d}.{ext}"
-        save(image, path, ext, quality)
+    out = Output()
+    try:
+        for pg in pages:
+            image = render(doc, pg, opts)
+            if root is None:
+                path = None
+            elif single and not opts.get("-forcenum"):
+                path = f"{root}.{ext}"
+            else:
+                path = f"{root}{sep}{pg:0{width}d}.{ext}"
+            out.save(image, path, ext, quality)
+    except Exception:
+        out.remove()
+        raise
     doc.close()
     return 0
 
@@ -183,6 +196,24 @@ def jpeg_quality(text):
     return 75
 
 
+def bitmap_size(pg, w, h, scale):
+    """The bitmap PDFium makes for a w x h pt page at `scale` (pypdfium2's PdfPage.render: each
+    side rounded up), or Fail when it is empty, not finite, or over a cap."""
+    sw, sh = w * scale, h * scale
+    if not all(math.isfinite(v) for v in (w, h, sw, sh)) or sw > MAX_SIDE or sh > MAX_SIDE:
+        size = "too large"
+    else:
+        cw, ch = math.ceil(sw), math.ceil(sh)
+        if cw >= 1 and ch >= 1 and cw * ch <= MAX_PIXELS:
+            return cw, ch
+        size = f"{cw} x {ch} pixels"
+    raise Fail(
+        OTHER_ERROR,
+        f"Command Line Error: page {pg} ({w:g} x {h:g} pts) would render {size}; this pdftoppm "
+        f"renders 1 to {MAX_PIXELS} pixels a page, at most {MAX_SIDE} a side; give a lower -r.",
+    )
+
+
 def render(doc, pg, opts):
     page = doc[pg - 1]
     try:
@@ -191,16 +222,13 @@ def render(doc, pg, opts):
         ry = opts.get("-ry", opts.get("-r", 150.0))
         if "-scale-to" in opts and w > 0 and h > 0:
             rx = ry = 72.0 * opts["-scale-to"] / max(w, h)
-        if rx <= 0 or ry <= 0:
+        if not rx > 0 or not ry > 0:
             raise Fail(OTHER_ERROR, "Command Line Error: the resolution must be above 0")
+        # The one scale the render uses, for both sides; -rx/-ry differ only by the resize.
+        scale = max(rx, ry) / 72
+        bitmap_size(pg, w, h, scale)
         px, py = round(w * rx / 72), round(h * ry / 72)
-        if px * py > MAX_PIXELS:
-            raise Fail(
-                OTHER_ERROR,
-                f"Command Line Error: page {pg} would be {px} x {py} pixels, over this "
-                f"pdftoppm's {MAX_PIXELS} a page; give a lower -r.",
-            )
-        bitmap = page.render(scale=max(rx, ry) / 72, grayscale=bool(opts.get("-gray")))
+        bitmap = page.render(scale=scale, grayscale=bool(opts.get("-gray")))
         image = bitmap.to_pil()
         bitmap.close()
     finally:
@@ -210,18 +238,49 @@ def render(doc, pg, opts):
     return image.convert("L") if opts.get("-gray") else image.convert("RGB")
 
 
-def save(image, path, ext, quality):
-    fmt = {"png": "PNG", "jpg": "JPEG", "pgm": "PPM", "ppm": "PPM"}[ext]
-    extra = {"quality": quality} if fmt == "JPEG" else {}
-    try:
-        if path is None:
-            image.save(sys.stdout.buffer, fmt, **extra)
-            sys.stdout.buffer.flush()
-        else:
-            image.save(path, fmt, **extra)
-    except OSError as err:
-        reason = err.strerror or str(err)
-        raise Fail(OUTPUT_ERROR, f"I/O Error: Couldn't write file '{path}': {reason}.") from None
+class Output:
+    """A run's image writes: at most MAX_BYTES in all, counted as written (a write that would
+    pass the cap fails before it lands), and the files it opened, for `remove`."""
+
+    def __init__(self):
+        self.written, self.paths, self.file = 0, [], None
+
+    def write(self, data):
+        self.written += len(data)
+        if self.written > MAX_BYTES:
+            raise Fail(
+                OTHER_ERROR,
+                f"Command Line Error: this pdftoppm writes at most {MAX_BYTES} bytes a run; "
+                "give a smaller range with -f and -l, or a lower -r.",
+            )
+        return self.file.write(data)
+
+    def flush(self):
+        self.file.flush()
+
+    def save(self, image, path, ext, quality):
+        fmt = {"png": "PNG", "jpg": "JPEG", "pgm": "PPM", "ppm": "PPM"}[ext]
+        extra = {"quality": quality} if fmt == "JPEG" else {}
+        try:
+            if path is None:
+                self.file = sys.stdout.buffer
+                image.save(self, fmt, **extra)
+                self.flush()
+                return
+            self.paths.append(path)
+            with open(path, "wb") as self.file:
+                image.save(self, fmt, **extra)
+        except OSError as err:
+            reason = err.strerror or str(err)
+            message = f"I/O Error: Couldn't write file '{path}': {reason}."
+            raise Fail(OUTPUT_ERROR, message) from None
+
+    def remove(self):
+        for path in self.paths:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 
 def size_name(w, h):
@@ -282,6 +341,12 @@ def pdfinfo(args):
         first, last = page_range(opts, count)
     else:
         first, last = 1, 0
+    if last + 1 - first > MAX_PAGES:
+        raise Fail(
+            OTHER_ERROR,
+            f"Command Line Error: this pdfinfo lists at most {MAX_PAGES} pages a run, and pages "
+            f"{first}-{last} are {last + 1 - first}; give a smaller range with -f and -l.",
+        )
     for pg in range(first, last + 1):
         page = doc[pg - 1]
         w, h = page.get_size()
@@ -303,7 +368,28 @@ def pdfinfo(args):
     return 0
 
 
+def failures():
+    """The errors main reports as one line: PDFium's, memory, and bad numbers."""
+    kinds = [MemoryError, ValueError, OverflowError]
+    try:
+        from pypdfium2 import PdfiumError
+        kinds.append(PdfiumError)
+    except ImportError:
+        pass
+    return tuple(kinds)
+
+
+def utf8_text():
+    """UTF-8 on stdout and stderr whatever the console's code page: `-I` ignores PYTHONUTF8 and
+    PYTHONIOENCODING, and a Windows console's cp1252 cannot write a Hindi title or file name.
+    Claude Code and Codex read both as UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 def main(argv):
+    utf8_text()
     tool = argv[0] if argv else ""
     run = {"pdftoppm": pdftoppm, "pdfinfo": pdfinfo}.get(tool)
     if run is None:
@@ -316,6 +402,11 @@ def main(argv):
         return fail.code
     except ImportError as err:
         print(f"Internal Error: {tool} needs Clauseo's Python runtime ({err})", file=sys.stderr)
+        return OTHER_ERROR
+    except failures() as err:
+        # A page that will not load, a bitmap that cannot be made, memory run out: one line.
+        print(f"Internal Error: {tool} could not read or render the document: "
+              f"{type(err).__name__}: {err}".rstrip(": "), file=sys.stderr)
         return OTHER_ERROR
     except KeyboardInterrupt:
         return 130

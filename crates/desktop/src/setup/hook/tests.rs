@@ -1,5 +1,6 @@
 //! The hook's env with no profile: only the key variable and the plan's variables, per kind;
-//! and its session `PATH` folders: the Python slot's, for Claude and Codex only.
+//! and its session `PATH` folders: the Python slot's, for Claude and Codex only; and Codex's PDF
+//! line, only with the PDF tools on its `PATH`.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -153,4 +154,81 @@ fn the_pdf_tools_folder_follows_the_python_folders_for_claude_and_codex() {
         .with_pdf_tools(None);
     python.write().unwrap().push(bin.clone());
     assert_eq!(without.agent_path(&agents[0]), [bin]);
+}
+
+/// A launch profile whose Codex instructions are `Base.`, and whose env is empty.
+struct Base;
+
+impl ProfileHook for Base {
+    fn session_meta(
+        &self,
+        _agent: &AgentId,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> Option<serde_json::Map<String, serde_json::Value>> {
+        None
+    }
+
+    fn launch_env(&self, _agent: &AgentId) -> BTreeMap<OsString, OsString> {
+        BTreeMap::new()
+    }
+
+    fn codex_config(
+        &self,
+        _agent: &AgentId,
+        _written: Option<&clauseo_profile::SkillsWritten>,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        serde_json::json!({ "developer_instructions": "Base." })
+            .as_object()
+            .unwrap()
+            .clone()
+    }
+}
+
+/// Codex is told to render PDF pages with pdftoppm only where the tools are on its PATH: the
+/// Python runtime ready and the PDF tools' folder found; and no launch carries a variable that
+/// points the tools at another interpreter (they find it on PATH only).
+#[test]
+fn codex_gets_the_pdf_line_only_with_the_pdf_tools_on_its_path() {
+    let line = clauseo_profile::instructions::codex_pdf();
+    let instructions = |hook: &SetupHook| {
+        let keys = hook.codex_config(&id("codex-acp"), None, None);
+        keys["developer_instructions"].as_str().unwrap().to_owned()
+    };
+    let python = PythonSlot::default();
+    let hook = |pdf: Option<PathBuf>| {
+        SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), Arc::default())
+            .with_python(Arc::clone(&python))
+            .with_pdf_tools(pdf)
+            .over(Box::new(Base))
+    };
+    let pdf = PathBuf::from("/Applications/Clauseo.app/Contents/Helpers/pdf");
+    let (found, missing) = (hook(Some(pdf)), hook(None));
+    // The runtime not ready: no line, found or not.
+    assert_eq!(instructions(&found), "Base.");
+    assert_eq!(instructions(&missing), "Base.");
+    python
+        .write()
+        .unwrap()
+        .push(PathBuf::from("/data/agents/runtime/clauseo-python/bin"));
+    assert_eq!(instructions(&found), format!("Base.\n\n{line}"));
+    assert_eq!(instructions(&missing), "Base.");
+    assert!(
+        found.codex_config(&id("claude-acp"), None, None).is_empty() || {
+            let keys = found.codex_config(&id("claude-acp"), None, None);
+            !keys["developer_instructions"]
+                .as_str()
+                .unwrap()
+                .contains(line)
+        }
+    );
+    for agent in [id("claude-acp"), id("codex-acp")] {
+        let env = found.launch_env(&agent);
+        assert!(
+            env.keys()
+                .all(|name| !name.to_string_lossy().contains("PDF")),
+            "{agent}: {:?}",
+            env.keys().collect::<Vec<_>>()
+        );
+    }
 }

@@ -20,7 +20,8 @@
 //! runtime folders from the [`PythonSlot`] (`setup/python_path.rs`), which the setup thread
 //! fills once Python is `Ready` and empties otherwise, then, while there are any, the bundled
 //! PDF tools' folder (`setup/pdf_tools.rs`: `pdftoppm` and `pdfinfo` run that runtime); the
-//! host puts them after stetdoc's.
+//! host puts them after stetdoc's. On the same condition, Codex's instructions end with the line
+//! that tells it to render PDF pages with them (`clauseo_profile::instructions::codex_pdf`).
 //!
 //! Both snapshots are refreshed on each `SettingsChanged` (`setup/refresh.rs`). [`setup_vars`] is
 //! the one function that makes these variables: the limits readers take the same ones
@@ -97,6 +98,20 @@ impl SetupHook {
             pdf_tools: folder,
             ..self
         }
+    }
+
+    /// The Python runtime's folders, as the setup thread last put them in the slot.
+    fn python_dirs(&self) -> Vec<PathBuf> {
+        self.python
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The PDF tools' folder when it was found and `python` (the runtime's folders) has any:
+    /// the tools run that runtime, so they are on an agent's `PATH` only with it.
+    fn pdf_folder(&self, python: &[PathBuf]) -> Option<PathBuf> {
+        self.pdf_tools.clone().filter(|_| !python.is_empty())
     }
 
     /// This hook over `profile`, whose calls it hands through.
@@ -236,13 +251,23 @@ impl ProfileHook for SetupHook {
         self.profile.mcp_servers(agent)
     }
 
+    /// The profile's Codex keys, a Codex agent's `developer_instructions` ending with the PDF
+    /// line when the PDF tools are on its `PATH` ([`Self::pdf_folder`]).
     fn codex_config(
         &self,
         agent: &AgentId,
         written: Option<&SkillsWritten>,
         packs: Option<&PacksWritten>,
     ) -> Map<String, Value> {
-        self.profile.codex_config(agent, written, packs)
+        let mut keys = self.profile.codex_config(agent, written, packs);
+        if AgentKind::of(agent) == Some(AgentKind::Codex)
+            && let Some(Value::String(text)) = keys.get_mut("developer_instructions")
+            && self.pdf_folder(&self.python_dirs()).is_some()
+        {
+            text.push_str("\n\n");
+            text.push_str(clauseo_profile::instructions::codex_pdf());
+        }
+        keys
     }
 
     fn launch_writes(&self, agent: &AgentId) -> Vec<SkillWrite> {
@@ -260,13 +285,9 @@ impl ProfileHook for SetupHook {
         if AgentKind::of(agent).is_none() {
             return Vec::new();
         }
-        let mut dirs = self
-            .python
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        if let Some(folder) = self.pdf_tools.as_ref().filter(|_| !dirs.is_empty()) {
-            dirs.push(folder.clone());
+        let mut dirs = self.python_dirs();
+        if let Some(folder) = self.pdf_folder(&dirs) {
+            dirs.push(folder);
         }
         dirs
     }

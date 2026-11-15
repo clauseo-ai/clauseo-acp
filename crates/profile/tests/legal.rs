@@ -210,10 +210,9 @@ fn only_codex_on_macos_is_told_which_commands_never_run() {
     let mac = profile.codex_instructions_for(true);
     // Every Codex session's offline line comes first, macOS or not.
     let shared = format!(
-        "{}\n\n{}\n\n{}",
+        "{}\n\n{}",
         profile.instructions_for(AgentKind::Codex),
-        CODEX_SHELL_OFFLINE.trim(),
-        clauseo_profile::instructions::codex_pdf()
+        CODEX_SHELL_OFFLINE.trim()
     );
     assert_eq!(mac, format!("{shared}\n\n{line}"));
     assert_eq!(profile.codex_instructions_for(false), shared);

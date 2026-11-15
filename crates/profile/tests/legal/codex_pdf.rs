@@ -1,10 +1,10 @@
 //! The line Codex gets about scanned and long PDFs.
 
-/// Codex has no PDF input, so every Codex session, on every OS, is told to render pages with
-/// Clauseo's `pdftoppm` into its work folder and view them; Claude, whose Read runs `pdftoppm`
-/// itself, never is.
+/// Codex has no PDF input, so where Clauseo's `pdftoppm` is on its `PATH` the desktop tells it
+/// to render pages into its work folder and view them (`setup/hook.rs`). The profile's own
+/// instructions never say so, for either agent: the tools are not everywhere.
 #[test]
-fn only_codex_is_told_to_render_pdf_pages_into_its_work_folder() {
+fn the_pdf_line_is_one_short_sentence_the_profile_never_adds_itself() {
     use clauseo_profile::instructions::{codex_pdf, word_count};
     use clauseo_protocol::AgentKind;
     let line = codex_pdf();
@@ -16,29 +16,12 @@ fn only_codex_is_told_to_render_pdf_pages_into_its_work_folder() {
     );
     assert!(line.contains("\"{work_folder}/<name>\""), "{line}");
     let profile = super::launch_profile(&std::env::temp_dir().join("codex-pdf-line"));
-    let offline = clauseo_profile::instructions::CODEX_SHELL_OFFLINE.trim();
-    let shared = format!(
-        "{}\n\n{offline}",
-        profile.instructions_for(AgentKind::Codex)
-    );
-    assert_eq!(
-        profile.codex_instructions_for(false),
-        format!("{shared}\n\n{line}")
-    );
-    assert!(
-        profile
-            .codex_instructions_for(true)
-            .starts_with(&format!("{shared}\n\n{line}"))
-    );
-    let codex = profile.codex_keys_without_index(Some(AgentKind::Codex));
-    assert!(
-        codex["developer_instructions"]
-            .as_str()
-            .unwrap()
-            .contains(line)
-    );
-    assert!(!profile.instructions().contains("pdftoppm"));
     for macos in [true, false] {
+        assert!(!profile.codex_instructions_for(macos).contains("pdftoppm"));
         assert!(!profile.claude_instructions_for(macos).contains("pdftoppm"));
     }
+    let codex = profile.codex_keys_without_index(Some(AgentKind::Codex));
+    let text = codex["developer_instructions"].as_str().unwrap();
+    assert!(!text.contains("pdftoppm"));
+    assert!(!profile.instructions().contains("pdftoppm"));
 }
