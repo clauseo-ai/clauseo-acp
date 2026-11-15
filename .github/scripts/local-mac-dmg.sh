@@ -341,7 +341,7 @@ bundle() {
   TAURI_SIGNING_PRIVATE_KEY=$(cat "$TMP/dry-updater.key")
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$(cat "$TMP/dry-updater.password")
   export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-  for key in Helpers/clauseo-agent-browser Helpers/stetdoc/stetdoc; do
+  for key in Helpers/clauseo-agent-browser Helpers/stetdoc/stetdoc Helpers/pdf/pdftoppm Helpers/pdf/pdfinfo; do
     rel=$(jq -er --arg key "$key" '.bundle.macOS.files[$key]' crates/desktop/release/sidecars.generated.json) ||
       die "sidecars.generated.json puts nothing at Contents/$key"
     helper=crates/desktop/$rel
@@ -360,7 +360,7 @@ bundle() {
   pnpm -C ui tauri signer sign --app-version "$VERSION" "$macos/$tarball"
 }
 step "bundle the .app and DMG ad hoc (APPLE_SIGNING_IDENTITY=-), sign the updater archive"
-note "codesign --force -s - --options runtime on Contents/Helpers' two files first"
+note "codesign --force -s - --options runtime on Contents/Helpers' four files first"
 run bundle
 
 check_app() {
@@ -374,15 +374,18 @@ check_app() {
   [ "$have" = "$want" ] || die "$app/Contents/MacOS holds $have; it may hold only $want"
   [ -d "$app/Contents/Helpers" ] || die "$app has no Contents/Helpers"
   helpers=$(ls -A "$app/Contents/Helpers" | LC_ALL=C sort | tr '\n' ' ')
-  [ "$helpers" = "clauseo-agent-browser stetdoc " ] || die "$app/Contents/Helpers holds $helpers"
+  [ "$helpers" = "clauseo-agent-browser pdf stetdoc " ] || die "$app/Contents/Helpers holds $helpers"
   [ "$(ls -A "$app/Contents/Helpers/stetdoc")" = stetdoc ] ||
     die "$app/Contents/Helpers/stetdoc must hold only stetdoc"
-  for helper in "$app/Contents/Helpers/clauseo-agent-browser" "$app/Contents/Helpers/stetdoc/stetdoc"; do
+  [ "$(ls -A "$app/Contents/Helpers/pdf" | LC_ALL=C sort | tr '\n' ' ')" = "pdfinfo pdftoppm " ] ||
+    die "$app/Contents/Helpers/pdf must hold only pdfinfo and pdftoppm"
+  for helper in "$app/Contents/Helpers/clauseo-agent-browser" "$app/Contents/Helpers/stetdoc/stetdoc" \
+    "$app/Contents/Helpers/pdf/pdftoppm" "$app/Contents/Helpers/pdf/pdfinfo"; do
     [ -f "$helper" ] && [ -x "$helper" ] || die "$helper is not an executable file"
     codesign --verify --strict --verbose=2 "$helper" || die "codesign --verify --strict fails on $helper"
   done
   codesign --verify --deep --strict --verbose=2 "$app" || die "codesign --verify --deep --strict fails on $app"
-  echo "Contents/MacOS holds $have; Contents/Helpers holds $helpers(stetdoc/stetdoc; signed);" \
+  echo "Contents/MacOS holds $have; Contents/Helpers holds $helpers(stetdoc/stetdoc, pdf/*; signed);" \
     "the .app verifies --deep --strict"
 }
 step "the .app keeps the browser helper in Contents/Helpers, and verifies"

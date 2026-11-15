@@ -1,0 +1,201 @@
+//! Clauseo's own `pdftoppm` and `pdfinfo` (scanned PDFs, PR-P1): two small programs that run
+//! Clauseo's Python runtime on [`SCRIPT`], which renders pages and reads page counts with the
+//! runtime's `pypdfium2` (`PDFium`, BSD/Apache) and Pillow. No poppler (GPL) code ships.
+//!
+//! Claude Code's Read renders a long PDF by running `pdftoppm -v` (it runs: the tool is there),
+//! then `pdftoppm -jpeg -r 100 [-f N] [-l M] <pdf> <prefix>`, and counts pages with
+//! `pdfinfo <pdf>`'s `Pages:` line, each by name on its `PATH`, with no shell; on Windows that
+//! needs a real `.exe`, hence these programs rather than a script. Codex has no PDF input and is
+//! told to run `pdftoppm -png` itself, then view the images.
+//!
+//! Each program finds the interpreter ([`find_python`]): [`PYTHON_VAR`] when set, else the
+//! first folder on `PATH` that is, or is inside, a Clauseo Python runtime folder (it holds
+//! [`RECEIPT`]): the desktop puts the runtime's folders on the agents' `PATH` with this tool's
+//! folder, and only once the runtime is installed. It runs it isolated (`-I`: no `PYTHON*`
+//! variable, no user site, no current folder on the module path), in UTF-8 mode, with the script
+//! as `-c` (so the bundle holds no loose file beside the programs), the tool's name and the
+//! arguments as given. With no runtime it exits [`NOT_FOUND`], as a shell does for a missing
+//! command, so Claude Code's check finds no `pdftoppm` and says so.
+//!
+//! On Unix the program becomes the interpreter (`exec`); on Windows it waits for it and exits
+//! with its code.
+
+use std::ffi::{OsStr, OsString};
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode};
+
+/// The Python script both programs run: `pdftoppm` and `pdfinfo` over `pypdfium2` and Pillow.
+pub const SCRIPT: &str = include_str!("clauseo_pdf.py");
+
+/// The variable naming the interpreter, over the `PATH` search (tests, and a support override).
+pub const PYTHON_VAR: &str = "CLAUSEO_PDF_PYTHON";
+
+/// The receipt every installed Clauseo Python runtime folder holds (`clauseo_agents`'
+/// `python.rs`, `PYTHON_RECEIPT`).
+pub const RECEIPT: &str = "clauseo-python.json";
+
+/// The exit code with no interpreter, or one that would not start: a shell's "not found".
+pub const NOT_FOUND: u8 = 127;
+
+/// The variables taken out of the interpreter's environment (`-I` ignores them too).
+const DROPPED: [&str; 2] = ["PYTHONHOME", "PYTHONPATH"];
+
+/// The poppler tool a program stands in for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tool {
+    /// `pdftoppm`: pages to images.
+    Pdftoppm,
+    /// `pdfinfo`: the page count and the document's details.
+    Pdfinfo,
+}
+
+impl Tool {
+    /// The tool's command name, which the script dispatches on.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Pdftoppm => "pdftoppm",
+            Self::Pdfinfo => "pdfinfo",
+        }
+    }
+}
+
+/// How a runtime folder lays out its interpreter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Os {
+    /// `python.exe` in the runtime's root.
+    Windows,
+    /// `bin/python3`.
+    Unix,
+}
+
+impl Os {
+    /// This program's OS.
+    pub const fn host() -> Self {
+        if cfg!(windows) {
+            Self::Windows
+        } else {
+            Self::Unix
+        }
+    }
+}
+
+/// The interpreter inside the runtime folder `root` on `os`.
+pub fn runtime_program(root: &Path, os: Os) -> PathBuf {
+    match os {
+        Os::Windows => root.join("python.exe"),
+        Os::Unix => root.join("bin").join("python3"),
+    }
+}
+
+/// The interpreter to run: `var` ([`PYTHON_VAR`]'s value) when it is set and absolute; else,
+/// along `path` (the `PATH` value) in order, the first absolute folder that holds [`RECEIPT`]
+/// or whose parent does (macOS `<rt>/bin`, Windows `<rt>` and `<rt>\clauseo-bin`), and whose
+/// runtime has its interpreter. `None` when there is none: a relative `var` counts as unset.
+pub fn find_python(var: Option<&OsStr>, path: Option<&OsStr>, os: Os) -> Option<PathBuf> {
+    find_python_with(var, path, os, &|file| file.is_file())
+}
+
+/// [`find_python`], with `is_file` saying whether a file is there (the tests' file system).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the launcher walks PATH once to find the Clauseo Python runtime the desktop put on it"
+)]
+pub fn find_python_with(
+    var: Option<&OsStr>,
+    path: Option<&OsStr>,
+    os: Os,
+    is_file: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    if let Some(var) = var.filter(|var| !var.is_empty()) {
+        let program = PathBuf::from(var);
+        return program.is_absolute().then_some(program);
+    }
+    std::env::split_paths(path?)
+        .filter(|dir| dir.is_absolute())
+        .find_map(|dir| {
+            let roots = [Some(dir.as_path()), dir.parent()];
+            roots.into_iter().flatten().find_map(|root| {
+                let program = runtime_program(root, os);
+                (is_file(&root.join(RECEIPT)) && is_file(&program)).then_some(program)
+            })
+        })
+}
+
+/// The interpreter's command for `tool` with `args`: `python -I -X utf8 -c <SCRIPT> <tool>
+/// <args…>`, without [`DROPPED`] in its environment.
+pub fn command(python: &Path, tool: Tool, args: &[OsString]) -> Command {
+    let mut command = Command::new(python);
+    command
+        .args(["-I", "-X", "utf8", "-c", SCRIPT, tool.name()])
+        .args(args);
+    for var in DROPPED {
+        command.env_remove(var);
+    }
+    command
+}
+
+/// A program's whole run: finds the interpreter from this process's environment and runs
+/// [`command`] with its own arguments, or says why not and exits [`NOT_FOUND`].
+pub fn run(tool: Tool) -> ExitCode {
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let var = std::env::var_os(PYTHON_VAR);
+    let path = std::env::var_os("PATH");
+    let Some(python) = find_python(var.as_deref(), path.as_deref(), Os::host()) else {
+        say(&format!(
+            "{}: Clauseo's Python runtime was not found; it is set up from Clauseo's settings",
+            tool.name()
+        ));
+        return ExitCode::from(NOT_FOUND);
+    };
+    start(tool, &mut command(&python, tool, &args))
+}
+
+/// Becomes the interpreter; returns only when it could not start.
+#[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the launcher's one job is to become the interpreter; the process crate is async"
+)]
+fn start(tool: Tool, command: &mut Command) -> ExitCode {
+    use std::os::unix::process::CommandExt as _;
+    let error = command.exec();
+    say(&format!(
+        "{}: Clauseo's Python runtime did not start: {error}",
+        tool.name()
+    ));
+    ExitCode::from(NOT_FOUND)
+}
+
+/// Runs the interpreter and exits with its code ([`exit_byte`]).
+#[cfg(not(unix))]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the launcher's one job is to run the interpreter and pass on its code"
+)]
+fn start(tool: Tool, command: &mut Command) -> ExitCode {
+    match command.status() {
+        Ok(status) => ExitCode::from(exit_byte(status.code())),
+        Err(error) => {
+            say(&format!(
+                "{}: Clauseo's Python runtime did not start: {error}",
+                tool.name()
+            ));
+            ExitCode::from(NOT_FOUND)
+        }
+    }
+}
+
+/// The program's exit code for the interpreter's `code`: the same when it fits in a byte, else
+/// 99, poppler's "other error".
+pub fn exit_byte(code: Option<i32>) -> u8 {
+    code.and_then(|code| u8::try_from(code).ok()).unwrap_or(99)
+}
+
+/// One line on stderr; a failed write is dropped (there is nowhere else to say it).
+fn say(text: &str) {
+    writeln!(std::io::stderr().lock(), "{text}").unwrap_or_default();
+}
+
+#[cfg(test)]
+mod tests;

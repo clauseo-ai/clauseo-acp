@@ -130,6 +130,7 @@ mod menu;
 mod native_mark;
 mod navigation;
 mod open;
+mod pdf_tools;
 mod picked;
 mod pre_write_guard;
 mod profile;
@@ -380,7 +381,7 @@ fn start_host<R: Runtime>(
     setup_parts: setup::SetupParts,
     proxies: Arc<egress::DesktopProxies>,
 ) -> std::io::Result<()> {
-    // Tauri's resource folder, where a Windows or Linux release bundles stetdoc (profile.rs).
+    // Tauri's resource folder, where a Windows or Linux release bundles stetdoc and pdf/.
     let resource_dir = app.path().resource_dir().ok();
     let started = host_start::start_on_thread(start, move || {
         let began = open::now();
@@ -464,6 +465,7 @@ fn start_host<R: Runtime>(
             HostConfig::with_machine_memory,
         );
         let hook = setup::SetupHook::new(keys, plans, network).with_python(python);
+        let hook = hook.with_pdf_tools(pdf_tools::find(resource_dir.as_deref()));
         // The updater, and a watch on the host that exits the app to install (update.rs).
         let config = egress::with_proxies(update::with_updater(&app, config, &locations), &proxies);
         update::start_host(&app, with_profile(config, profile, hook))

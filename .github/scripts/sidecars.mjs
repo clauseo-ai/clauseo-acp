@@ -22,7 +22,10 @@
 //     as Helpers/stetdoc/stetdoc (signed with the browser helper), elsewhere in bundle.resources
 //     as stetdoc/stetdoc[.exe] (on Windows in the install folder, which is the resource folder,
 //     and signed with the other files of binaries/). The pin is crates/desktop/stetdoc.toml; a
-//     target it marks pending fails here, loudly.
+//     target it marks pending fails here, loudly;
+//   - places Clauseo's own pdftoppm and pdfinfo (crates/pdf, built here) together in a folder of
+//     their own the same way (PDF_TOOLS below): Helpers/pdf/<tool> on macOS, pdf/<tool>[.exe] in
+//     bundle.resources on Windows. Linux has no Python runtime for them to run, so no copy.
 // The legs pass that file last with --config to every `tauri build` and `tauri bundle`. A JSON
 // merge patch replaces arrays, so this one list is the target's whole externalBin. Both outputs
 // are gitignored. The base tauri.conf.json has no externalBin: tauri-build checks that every
@@ -150,6 +153,9 @@ const pinnedAgentBrowser = async (triple, ctx, dest) =>
  */
 const pinnedStetdoc = async (triple, ctx, dest) => ctx.fetchStetdoc(triple, dest, ctx.stetdocOptions);
 
+/** The targets Clauseo's Python runtime ships on, and so the PDF tools that run it. */
+export const PDF_TARGETS = RELEASE_TARGETS.filter((triple) => isDarwin(triple) || isWindows(triple));
+
 /**
  * Every sidecar, in bundle order. `targets` is the triples it ships on; `macosHelper`, that on a
  * darwin target it goes to Contents/Helpers/<name> (bundle.macOS.files) instead of
@@ -179,6 +185,10 @@ export const SIDECARS = [
   // clauseo-sandbox-run comes later (S15 PR5), Windows targets only, with safeWorkspace: true.
   // stetdoc, in its own folder (STETDOC): never in externalBin, so never beside the app.
   { name: "clauseo-stetdoc", targets: RELEASE_TARGETS, ownFolder: true, place: pinnedStetdoc },
+  // Clauseo's pdftoppm and pdfinfo (PDF_TOOLS), together in the pdf/ folder, where the Python
+  // runtime they run exists: macOS and Windows.
+  { name: "clauseo-pdftoppm", targets: PDF_TARGETS, ownFolder: true, place: cargoPackageBin("clauseo-pdf", "pdftoppm") },
+  { name: "clauseo-pdfinfo", targets: PDF_TARGETS, ownFolder: true, place: cargoPackageBin("clauseo-pdf", "pdfinfo") },
 ];
 
 /** Every sidecar's name starts with this (ADR 0035, "Sidecars"). */
@@ -198,18 +208,35 @@ export const MACOS_HELPER = "clauseo-agent-browser";
  * crates/desktop/src/profile.rs looks for it at the same paths.
  */
 export const STETDOC = "clauseo-stetdoc";
-const stetdocHelper = "Helpers/stetdoc/stetdoc";
-const stetdocResource = (triple) => `stetdoc/stetdoc${exe(triple)}`;
+
+/**
+ * Clauseo's own pdftoppm and pdfinfo (crates/pdf: launchers that run the Python runtime's
+ * pypdfium2, no poppler), staged as binaries/clauseo-pdftoppm-<triple>[.exe] and
+ * binaries/clauseo-pdfinfo-<triple>[.exe] and bundled together in a folder of their own:
+ * Contents/Helpers/pdf/<tool> on macOS (signed with the browser helper and stetdoc), <resources>/pdf/
+ * <tool>.exe on Windows. crates/desktop/src/pdf_tools.rs looks for them at the same paths.
+ */
+export const PDF_TOOLS = ["clauseo-pdftoppm", "clauseo-pdfinfo"];
+
+/** Each sidecar with a folder of its own: its folder and its file name there (without .exe). */
+export const OWN_FOLDERS = {
+  [STETDOC]: ["stetdoc", "stetdoc"],
+  "clauseo-pdftoppm": ["pdf", "pdftoppm"],
+  "clauseo-pdfinfo": ["pdf", "pdfinfo"],
+};
+const ownHelper = (name) => `Helpers/${OWN_FOLDERS[name].join("/")}`;
+const ownResource = (name, triple) => `${OWN_FOLDERS[name].join("/")}${exe(triple)}`;
 const staged = (name, triple) => `binaries/${name}-${triple}${exe(triple)}`;
 
 /** The bundle.macOS.files entries a darwin overlay may hold for `triple`. */
 const macosFiles = (triple) => ({
   [`Helpers/${MACOS_HELPER}`]: staged(MACOS_HELPER, triple),
-  [stetdocHelper]: staged(STETDOC, triple),
+  ...Object.fromEntries(Object.keys(OWN_FOLDERS).map((name) => [ownHelper(name), staged(name, triple)])),
 });
 
 /** The bundle.resources entries any other overlay may hold for `triple`. */
-const resourceFiles = (triple) => ({ [staged(STETDOC, triple)]: stetdocResource(triple) });
+const resourceFiles = (triple) =>
+  Object.fromEntries(Object.keys(OWN_FOLDERS).map((name) => [staged(name, triple), ownResource(name, triple)]));
 
 const OVERLAY = join(ROOT, "crates", "desktop", "release", "sidecars.generated.json");
 
@@ -245,7 +272,7 @@ export function overlayProblem(overlay, triple) {
     Object.entries(entries).every(([key, value]) => Object.hasOwn(allowed, key) && allowed[key] === value);
   if (!ok) return `${what} may hold only entries of ${JSON.stringify(allowed)}: ${JSON.stringify(held)}`;
   const paths = new Set([...Object.keys(entries), ...Object.values(entries)]);
-  const moved = [MACOS_HELPER, STETDOC].filter(
+  const moved = [MACOS_HELPER, ...Object.keys(OWN_FOLDERS)].filter(
     (name) => paths.has(staged(name, triple)) && overlay.bundle.externalBin.includes(`binaries/${name}`),
   );
   if (moved.length > 0) return `binaries/${moved[0]} is in ${what}, so it may not be in externalBin`;
@@ -284,7 +311,9 @@ export async function placeSidecars(triple, options = {}) {
     if (macosHelper && name !== MACOS_HELPER) throw new Error(`sidecars: only ${MACOS_HELPER} may be a macOS helper, not ${name}`);
   }
   for (const { name, ownFolder } of sidecars) {
-    if (ownFolder && name !== STETDOC) throw new Error(`sidecars: only ${STETDOC} has a folder of its own, not ${name}`);
+    if (ownFolder && !Object.hasOwn(OWN_FOLDERS, name)) {
+      throw new Error(`sidecars: only ${Object.keys(OWN_FOLDERS).join(", ")} have a folder of their own, not ${name}`);
+    }
   }
   const root = options.root ?? ROOT;
   const ctx = {
@@ -331,9 +360,9 @@ export async function placeSidecars(triple, options = {}) {
     }
     console.log(`${sidecar.name}: ${dest} (${(await stat(dest)).size} bytes)`);
     if (sidecar.ownFolder && isDarwin(triple)) {
-      files[stetdocHelper] = staged(sidecar.name, triple);
+      files[ownHelper(sidecar.name)] = staged(sidecar.name, triple);
     } else if (sidecar.ownFolder) {
-      resources[staged(sidecar.name, triple)] = stetdocResource(triple);
+      resources[staged(sidecar.name, triple)] = ownResource(sidecar.name, triple);
     } else if (sidecar.macosHelper && isDarwin(triple)) {
       files[`Helpers/${sidecar.name}`] = `binaries/${sidecar.name}-${triple}`;
     } else {
