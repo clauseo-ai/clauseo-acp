@@ -238,6 +238,30 @@ class PdfTools(unittest.TestCase):
         self.assertIn(b"page 3 ", done.stderr)
         self.assertEqual(self.names(prefix), [])
 
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root writes read-only files")
+    def test_a_read_only_file_in_the_way_fails_the_run_and_survives(self):
+        prefix = os.path.join(self.dir, "keep")
+        with open(prefix + "-1.png", "wb") as file:
+            file.write(b"mine")
+        os.chmod(prefix + "-1.png", 0o444)
+        done = run("pdftoppm", "-png", "-r", "10", self.pdf(1), prefix)
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn(b"Permission denied", done.stderr)
+        with open(prefix + "-1.png", "rb") as file:
+            self.assertEqual(file.read(), b"mine")
+
+    def test_a_failed_run_leaves_the_files_it_overwrote_and_removes_the_ones_it_made(self):
+        prefix = self.out()
+        with open(prefix + "-1.png", "wb") as file:
+            file.write(b"old")
+        done = run("pdftoppm", "-png", "-r", "10", self.pdf(2, sizes=[(36_000_000, 0.3)]),
+                   prefix)
+        self.assertEqual(done.returncode, 99, done.stderr)
+        self.assertIn(b"page 3 ", done.stderr)
+        self.assertEqual(self.names(prefix), ["page-1.png"])
+        with open(prefix + "-1.png", "rb") as file:
+            self.assertEqual(file.read(8), b"\x89PNG\r\n\x1a\n")
+
     def test_the_byte_cap_stops_the_run_and_removes_its_pages(self):
         module = script()
         self.assertEqual(module.MAX_BYTES, 1_000_000_000)
