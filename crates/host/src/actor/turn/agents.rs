@@ -276,6 +276,7 @@ pub(super) fn launch_now(
         pid = link.pid(),
         "agent launched"
     );
+    let always = always.in_matter(&folder, &matter_spellings);
     let agent = Agent {
         id,
         link,

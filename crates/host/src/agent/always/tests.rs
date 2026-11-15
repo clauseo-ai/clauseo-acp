@@ -5,7 +5,10 @@ use serde_json::{Value, json};
 
 use crate::pipeline::tests::support::TempDir;
 
-use super::{FILE, MAX_RULES, allow_in_meta, file_beside, read, rule, store_now, well_formed};
+use super::{
+    FILE, MAX_RULES, allow_in_meta, file_beside, matter_roots, read, rule, store_now, well_formed,
+    within,
+};
 
 fn of(tool: &str, input: &Value) -> Option<String> {
     rule(tool, Some(input), false)
@@ -229,4 +232,37 @@ fn rules_go_after_the_allow_rules_already_in_the_settings() {
         odd["claudeCode"]["options"]["settings"]["permissions"]["allow"],
         json!(["mcp__s__t"])
     );
+}
+
+/// A path rule stays within the matter folder, so it never widens past the data fence: not the
+/// data folder, not a sibling folder that only starts with the matter's name, not the matter's
+/// `.clauseo` or a `.claude`; a rule that names no path passes.
+#[test]
+fn a_path_rule_outside_the_matter_is_never_within() {
+    let roots = matter_roots(["/cases/m/", "/cases/m", "~/cases/m", "relative"], false);
+    assert_eq!(roots, ["//cases/m"]);
+    let cases = [
+        ("Edit(//cases/m/brief.txt)", true),
+        ("Read(//cases/m/sub/a.pdf)", true),
+        ("Bash(npm test)", true),
+        ("WebFetch(domain:example.com)", true),
+        ("mcp__case_law__search", true),
+        ("Edit(//cases/m)", false),
+        ("Edit(//cases/m-other/a.txt)", false),
+        ("Edit(//cases/other/a.txt)", false),
+        ("Read(//data/agent-state/x/notes/a.md)", false),
+        ("Edit(//data/agent-state/x/claude-allow.json)", false),
+        ("Edit(//cases/m/.clauseo/matter.json)", false),
+        ("Edit(//cases/m/.Claude/settings.local.json)", false),
+        ("Edit(//cases/m/sub/.claude/settings.json)", false),
+        ("Edit(//cases/M/brief.txt)", false),
+    ];
+    for (rule, want) in cases {
+        assert_eq!(within(rule, &roots, false), want, "{rule}");
+    }
+    assert!(!within("Edit(//cases/m/a.txt)", &[], false));
+    let windows = matter_roots([r"C:\Cases\M"], true);
+    assert_eq!(windows, ["//c/Cases/M"]);
+    assert!(within("Edit(//c/cases/m/brief.txt)", &windows, true));
+    assert!(!within("Edit(//c/cases/m2/brief.txt)", &windows, true));
 }

@@ -16,8 +16,11 @@ use crate::support::{Dir, Scenario, matter_with_thread};
 
 const CLAUDE: &str = "claude-acp";
 
-/// The guard program the forced-ask host names; the fake agent never runs it.
-const GUARD: &str = "/opt/clauseo/clauseo-desktop";
+/// The guard program the forced-ask host names, absolute on every system; the fake agent never
+/// runs it.
+fn guard() -> std::path::PathBuf {
+    std::env::temp_dir().join("clauseo-desktop")
+}
 
 /// What the lawyer's own `.claude` folder in the matter holds; it must stay as it is.
 const OWN_SETTINGS: &str = "{\"permissions\": {\"allow\": [\"Read\"]}}\n";
@@ -141,7 +144,7 @@ fn forced_ask_keeps_and_applies_nothing() {
     let host = dir.start_with(0, |config| {
         config
             .with_folder_support(Some(FolderSupportKind::Network))
-            .with_pre_write_guard(std::path::PathBuf::from(GUARD))
+            .with_pre_write_guard(guard())
     });
     let (matter, thread, folder) =
         matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CLAUDE);
@@ -171,6 +174,80 @@ fn forced_ask_keeps_and_applies_nothing() {
     events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
     assert_eq!(std::fs::read_to_string(&file).unwrap(), kept);
+    assert!(!folder.join(".claude").exists());
+    host.shutdown();
+}
+
+/// A kept rule never reaches outside the matter folder, so it never widens past the data fence
+/// (`agent::always::within`): a path rule the file holds for a sibling folder, or for the
+/// matter's `.clauseo`, is dropped at the launch, and the lawyer's "Always" on a file outside the
+/// matter keeps nothing. A file inside the matter is kept and answers its next request.
+#[cfg(unix)]
+#[test]
+fn a_rule_outside_the_matter_is_neither_kept_nor_applied() {
+    let dir = Dir::new(
+        "always_fence",
+        &[(CLAUDE, Scenario::Local("claude-always-fence"))],
+    );
+    let host = dir.start(0);
+    let files = [("brief.txt", "x\n")];
+    let (matter, thread, folder) = matter_with_thread(&dir, &host, "m", &files, CLAUDE);
+    let root = folder.to_str().unwrap();
+    let outside = [
+        format!("Edit(/{root}-b/a.txt)"),
+        format!("Edit(/{root}/.clauseo/matter.json)"),
+    ];
+    let file = rules_file(&dir, matter);
+    let kept =
+        serde_json::json!({"version": 1, "allow": ["Bash(npm test)", outside[0], outside[1]]});
+    crate::write::write(&file, kept.to_string().as_bytes());
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Edit the files.");
+    let answers = ["allow-with-updates", "allow-with-updates", "reject"];
+    let asked = |events: &mut Events, n: usize| {
+        events.until(&format!("permission request {n}"), |e| {
+            e.permission_requests().len() >= n
+        });
+    };
+    for (n, option) in [(1, answers[0]), (2, answers[1]), (4, answers[2])] {
+        asked(&mut events, n);
+        let request = events.permission_requests()[n - 1];
+        let answer = HostCommand::AnswerPermission {
+            thread,
+            request,
+            option_id: AgentChoiceId::new(option).unwrap(),
+        };
+        assert_eq!(host.ok(answer), CommandOutcome::Done, "{}", events.dump());
+    }
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let chosen: Vec<_> = resolutions(&events)
+        .into_iter()
+        .map(|(_, chosen)| chosen.map(|(option, _)| option))
+        .collect();
+    let want = [
+        "allow-with-updates",
+        "allow-with-updates",
+        "allow-once",
+        "reject",
+    ];
+    assert_eq!(
+        chosen,
+        want.map(|o| Some(o.to_owned())),
+        "{}",
+        events.dump()
+    );
+    let inside = format!("Edit(/{root}/brief.txt)");
+    let has = |rule: &str| std::fs::read_to_string(&file).is_ok_and(|text| text.contains(rule));
+    crate::support::wait("the kept rule", async {
+        while !has(&inside) {
+            async_io::Timer::after(std::time::Duration::from_millis(20)).await;
+        }
+    });
+    // The rules read from the file stay in it; nothing outside the matter was added.
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(text.matches("-b/a.txt").count(), 1, "{text}");
     assert!(!folder.join(".claude").exists());
     host.shutdown();
 }

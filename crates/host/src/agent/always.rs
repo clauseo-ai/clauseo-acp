@@ -159,6 +159,61 @@ fn path(path: &str, windows: bool) -> Option<String> {
     rest.split('/').all(literal).then(|| format!("//{rest}"))
 }
 
+/// The path rule form (`//<path>`) of each of a matter folder's `spellings`, for [`within`];
+/// a spelling that has no such form (relative, or a root) gives none.
+pub(crate) fn matter_roots<'a>(
+    spellings: impl IntoIterator<Item = &'a str>,
+    windows: bool,
+) -> Vec<String> {
+    let mut roots: Vec<String> = Vec::new();
+    for spelling in spellings {
+        let root = path(spelling.trim_end_matches(['/', '\\']), windows);
+        if let Some(root) = root.filter(|root| !roots.contains(root)) {
+            roots.push(root);
+        }
+    }
+    roots
+}
+
+/// Whether `rule` stays within its matter, so it can never widen past the data fence: a path
+/// rule (`Edit`, `Read`) only for a file strictly inside the matter folder (one of `roots`,
+/// [`matter_roots`]) and in neither its `.clauseo` folder nor a `.claude` one (Claude's own
+/// settings). So none names `<data>` (Clauseo's data folder, other matters' notes and runs),
+/// another matter's folder or anything else outside. Those two names match in any case (a Mac's
+/// disk folds case); `windows`: the whole path is compared in any case. Any
+/// other rule names no path and passes; a kept command still runs in the sandbox, which has no
+/// way out (`loads::sandbox`, `allowUnsandboxedCommands: false`).
+pub(crate) fn within(rule: &str, roots: &[String], windows: bool) -> bool {
+    let content = ["Edit(", "Read("]
+        .iter()
+        .find_map(|tool| rule.strip_prefix(tool))
+        .and_then(|rest| rest.strip_suffix(')'));
+    let Some(content) = content else {
+        return true;
+    };
+    let fold = |text: &str| {
+        if windows {
+            text.to_lowercase()
+        } else {
+            text.to_owned()
+        }
+    };
+    let content = fold(content);
+    roots.iter().any(|root| {
+        let rest = content
+            .strip_prefix(&fold(root))
+            .and_then(|rest| rest.strip_prefix('/'));
+        rest.is_some_and(|rest| {
+            !rest.is_empty()
+                && rest.split('/').all(|name| {
+                    ![".clauseo", ".claude"]
+                        .iter()
+                        .any(|own| own.eq_ignore_ascii_case(name))
+                })
+        })
+    })
+}
+
 /// `<notes>/../claude-allow.json`: `<data>/agent-state/<matter>/claude-allow.json`.
 pub(crate) fn file_beside(notes: &Path) -> Option<PathBuf> {
     notes.parent().map(|matter| matter.join(FILE))
