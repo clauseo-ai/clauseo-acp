@@ -48,8 +48,25 @@
 //! allow rule lets through: Claude Code's sandbox choice (`xy`) reads the input and the settings,
 //! never the permission result, and `loads::sandbox` sets no `excludedCommands` and no
 //! unsandboxed commands.
+//!
+//! A glob: Claude Code resolves links before it checks a literal path, but for a path with a
+//! glob it checks only the folder before the glob, never what the glob expands to. The agent
+//! can write into the own folders, so a link it makes there to a denied place, read through
+//! `cat "<notes>"/*/x`, would match an allow rule and run unjudged. The same goes for a glob
+//! anywhere else in an allowed command (`cat <matter>/*/x <notes>`), since the rule's `*`
+//! takes it. So beside the allow rules, deny rules ([`own_shell_glob_deny_rules`], in
+//! `permissions.deny` on every OS that has the allow) refuse each allowed command and path with
+//! a literal `*`, `?` or `[` before or after the path: `cat *\**<notes>*`, `cat *<notes>*\**`.
+//! A deny beats the allow, and Claude retries without the glob. Each rule names its command
+//! (matched through `z_` like the allow), so no other command that names an own folder with a
+//! glob (`find <notes> -name '*.md'`, `cp <work>/*.docx <matter>`) is refused: those were never
+//! allowed and still go to a classifier. A brace (`<notes>/{a,b}/x`) needs no deny: no allow
+//! rule let one through (checked with `scripts/claude-rule-probe`, which sent it to a
+//! classifier). PowerShell's wildcards are the same three characters. Not covered: a recursive
+//! listing that follows links (`ls -RL <notes>`, Windows PowerShell 5.1's `Get-ChildItem
+//! -Recurse` through a junction) can list the names in a linked target, though not its contents.
 
-use super::{Piece, join, parse, render, text};
+use super::{GLOBS, Piece, join, parse, render, text};
 use crate::agent::data_fence::LaunchDeny;
 
 /// The commands that list or read, in Bash: each in Claude Code's table of the commands whose
@@ -81,10 +98,11 @@ struct Lead {
     powershell: bool,
 }
 
-/// The allow rules (see the module doc) for `deny`'s own work and notes folders
-/// ([`LaunchDeny::own_reads`]) under each of its spellings of `<data>`, the PowerShell ones and
-/// Windows' spellings when `windows`. A spelling that is not UTF-8 gets none.
-pub(crate) fn own_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
+/// The own folders' paths (`deny`'s [`LaunchDeny::own_reads`]) under each of its spellings of
+/// `<data>`, as rule pieces, each with whether PowerShell writes it too: Windows' spellings
+/// (`C:\…`, `C:/…`, Bash's `C:\\…` and `/c/…`) when `windows`, else the path with `/`. A
+/// spelling that is not UTF-8 gets none.
+fn own_paths(deny: &LaunchDeny, windows: bool) -> Vec<(Vec<Piece>, bool)> {
     let mut leads: Vec<Lead> = Vec::new();
     let mut push = |text: String, sep: &'static str, powershell: bool| {
         if !text.is_empty() && !leads.iter().any(|known| known.text == text) {
@@ -122,12 +140,7 @@ pub(crate) fn own_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<Str
             );
         }
     }
-    let mut rules = Vec::new();
-    let mut add = |rule: String| {
-        if !rules.contains(&rule) {
-            rules.push(rule);
-        }
-    };
+    let mut paths = Vec::new();
     for place in &deny.own_reads {
         let (names, _) = parse(place);
         for lead in &leads {
@@ -135,18 +148,67 @@ pub(crate) fn own_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<Str
             for name in &names {
                 path = join(&[&path, &text(lead.sep), name]);
             }
-            let tools: &[(&str, &[&str])] = if windows && lead.powershell {
-                &[("Bash", &BASH), ("PowerShell", &POWERSHELL)]
-            } else {
-                &[("Bash", &BASH)]
-            };
-            for (tool, commands) in tools {
-                for command in *commands {
-                    let head = join(&[&text(&format!("{command} ")), &[Piece::Any], &path]);
-                    add(format!("{tool}({})", render(&head, true)));
-                    for after in BOUNDARY {
-                        let pieces = join(&[&head, &text(after), &[Piece::Any]]);
-                        add(format!("{tool}({})", render(&pieces, false)));
+            paths.push((path, windows && lead.powershell));
+        }
+    }
+    paths
+}
+
+/// The tools and commands a path's rules are for: Bash's, and PowerShell's when it writes it.
+fn tools(powershell: bool) -> &'static [(&'static str, &'static [&'static str])] {
+    if powershell {
+        &[("Bash", &BASH), ("PowerShell", &POWERSHELL)]
+    } else {
+        &[("Bash", &BASH)]
+    }
+}
+
+/// The allow rules (see the module doc) for `deny`'s own work and notes folders
+/// ([`LaunchDeny::own_reads`]) under each of its spellings of `<data>`, the PowerShell ones and
+/// Windows' spellings when `windows`. A spelling that is not UTF-8 gets none.
+pub(crate) fn own_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
+    let mut rules = Vec::new();
+    let mut add = |rule: String| {
+        if !rules.contains(&rule) {
+            rules.push(rule);
+        }
+    };
+    for (path, powershell) in own_paths(deny, windows) {
+        for (tool, commands) in tools(powershell) {
+            for command in *commands {
+                let head = join(&[&text(&format!("{command} ")), &[Piece::Any], &path]);
+                add(format!("{tool}({})", render(&head, true)));
+                for after in BOUNDARY {
+                    let pieces = join(&[&head, &text(after), &[Piece::Any]]);
+                    add(format!("{tool}({})", render(&pieces, false)));
+                }
+            }
+        }
+    }
+    rules
+}
+
+/// The deny rules (the module doc, "A glob") that refuse each allowed command naming an own
+/// folder's path with a glob character ([`GLOBS`]: `*`, `?`, `[`) anywhere before or after
+/// it: for each path and command of [`own_shell_allow_rules`], `<command> *<glob>*<path>*` and
+/// `<command> *<path>*<glob>*`, the glob a literal (`cat *C:\…\notes*\**`). A spelling that is
+/// not UTF-8 gets none.
+pub(crate) fn own_shell_glob_deny_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
+    let mut rules = Vec::new();
+    for (path, powershell) in own_paths(deny, windows) {
+        for (tool, commands) in tools(powershell) {
+            for command in *commands {
+                let head = join(&[&text(&format!("{command} ")), &[Piece::Any]]);
+                for glob in GLOBS {
+                    let glob = text(glob);
+                    for pieces in [
+                        join(&[&head, &glob, &[Piece::Any], &path]),
+                        join(&[&head, &path, &[Piece::Any], &glob]),
+                    ] {
+                        let rule = format!("{tool}({})", render(&pieces, false));
+                        if !rules.contains(&rule) {
+                            rules.push(rule);
+                        }
                     }
                 }
             }

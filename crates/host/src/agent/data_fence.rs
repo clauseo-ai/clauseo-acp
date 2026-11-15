@@ -57,7 +57,8 @@ pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
 pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
 pub(crate) use shell_deny::{
-    own_shell_allow_rules, windows_shell_deny_rules, windows_shell_deny_rules_without_variables,
+    own_shell_allow_rules, own_shell_glob_deny_rules, windows_shell_deny_rules,
+    windows_shell_deny_rules_without_variables,
 };
 pub(crate) use variables::launch_vars;
 
@@ -154,7 +155,9 @@ pub(crate) fn is_python_runtime(name: &str) -> bool {
 /// Claude's `permissions.deny` rules for a launch: for the data folder spelled each way in
 /// `deny.spellings` (its canonical path first, then the path as configured when that differs),
 /// `Read` and `Edit` for each of `deny.targets`, then `Edit` alone for each of [`READ_ONLY`]
-/// and all under it. A spelling that is not UTF-8 gets none (no rule could name it).
+/// and all under it; then the own folders' glob denies ([`own_shell_glob_deny_rules`]), which
+/// refuse an allowed listing or read of an own folder that holds a glob. A spelling that is not
+/// UTF-8 gets none (no rule could name it).
 pub(crate) fn claude_deny_rules(deny: &LaunchDeny) -> Vec<String> {
     claude_deny_rules_on(deny, cfg!(windows))
 }
@@ -179,6 +182,9 @@ pub(crate) fn claude_deny_rules_on(deny: &LaunchDeny, windows: bool) -> Vec<Stri
         for place in READ_ONLY {
             push(format!("Edit({base}/{place}/**)"));
         }
+    }
+    for rule in own_shell_glob_deny_rules(deny, windows) {
+        push(rule);
     }
     rules
 }

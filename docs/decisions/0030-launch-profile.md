@@ -632,6 +632,28 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     does an own path written another way (a variable, `~`, a mixed separator, a `.\` step, an
     unquoted trailing `\` in Bash). The PowerShell side is read from the code (no Windows
     host ran it); Bash's was run on Linux.
+  - **2026-11-15: a glob in an allowed command is denied.** Claude Code 2.1.293 resolves links
+    before it checks a literal path, but for a path with a glob it checks only the folder before
+    the glob, never what the glob expands to. The agent can write into the own folders, so a
+    link it makes in `<notes>` to a denied part of `<data>`, read as `cat "<notes>"/*/x`,
+    matched an allow rule and ran with no classifier and no deny (run on Linux against the
+    pinned binary with `scripts/claude-rule-probe`: `*`, `?` and `[` each read through the
+    link). The same went for a glob anywhere else in the command, since a rule's leading `*`
+    takes it (`cat <matter>/*/x <notes>`). Now `permissions.deny` holds, on every OS that has
+    the allow, for each allowed command (`ls`, `cat`, `head`; `Get-ChildItem`, `Get-Content`)
+    and each own path in each spelling the allow writes, `<command> *<glob>*<path>*` and
+    `<command> *<path>*<glob>*` with `<glob>` a literal `*` (written `\*`), `?` or `[`
+    (`data_fence/own_allow.rs` `own_shell_glob_deny_rules`): 192 rules for the default folder.
+    A deny beats the allow; Claude sees "Permission to use Bash with command … has been
+    denied." (the app's line for a deny rule) and retries without the glob. Each rule names
+    its command (PowerShell's aliases match through `z_`), not `*` alone: a command no allow
+    rule names (`find <notes> -name '*.md'`, `cp <work>/*.docx <matter>`) was never allowed and
+    still goes to a classifier, and #1098's pinned PowerShell line, which holds `[` before
+    the path it reads, stays clear. A brace (`<notes>/{a,b}/x`) needs none: no allow rule let
+    one through. Not covered: a recursive listing that follows links (`ls -RL <notes>`,
+    Windows PowerShell 5.1's `Get-ChildItem -Recurse` through a junction) can list the names
+    in a linked target, not its contents; dropping the own-folder shell rules on Windows once
+    #1098's per-call hook is in closes it there, and the sandbox wraps it on macOS.
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the
