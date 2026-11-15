@@ -402,6 +402,7 @@ fn a_locked_keychain_holds_claude_s_read_and_the_next_read_goes_out() {
         command: if cfg!(windows) {
             r"C:\node\node.exe".to_owned()
         } else {
+            // unix-paths-ok: the cfg!(windows) branch above uses a Windows path there
             "/usr/local/bin/node".to_owned()
         },
         args: vec![script],
