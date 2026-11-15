@@ -10,32 +10,46 @@ import { sharedStart } from "./composer-diff.ts";
  * undo (placedUndo), since the engine's undo can't take back a value set in place. */
 export const UNDOABLE_MAX = 64 * 1024;
 
-/** A text over UNDOABLE_MAX set in place, per field: what the field held before and the text set. Cmd/Ctrl+Z puts the
- * words before back while the field still holds that text, as the engine's undo would have (#978). One step, the
+/** A text over UNDOABLE_MAX set in place, per field: what the field held before, the text set, and whether it is
+ * undone. Cmd/Ctrl+Z puts the words before back while the field still holds that text, as the engine's undo would
+ * have (#978), and Cmd/Ctrl+Shift+Z puts the text back while the field still holds the words before. One step, the
  * last; any other replaceAll forgets it. */
-const placed = new WeakMap<HTMLTextAreaElement, { before: string; text: string }>();
+const placed = new WeakMap<
+  HTMLTextAreaElement,
+  { before: string; text: string; undone: boolean }
+>();
 /** The fields placedUndo listens on. */
 const listening = new WeakSet<HTMLTextAreaElement>();
 
 /** Cmd/Ctrl+Z on a field whose last replaceAll set a long text in place, and that still holds it: the words before
- * back, told to the field as the engine's undo tells it (an input event of historyUndo). */
+ * back; Cmd/Ctrl+Shift+Z after it: the text again. Told to the field as the engine's undo and redo tell it (an input
+ * event of historyUndo or historyRedo). Once the field holds anything else, the step is forgotten. */
 function placedUndo(e: KeyboardEvent) {
   const a = e.currentTarget;
   if (!(a instanceof HTMLTextAreaElement)) return;
   const step = placed.get(a);
-  if (step === undefined || e.isComposing || e.shiftKey || e.altKey) return;
+  if (step === undefined || e.isComposing || e.altKey) return;
   // either modifier, never both: on a Mac Ctrl+Z does nothing of its own in a field
   if (e.metaKey === e.ctrlKey || e.key.toLowerCase() !== "z") return;
-  placed.delete(a);
-  if (a.value !== step.text) return;
+  const redo = e.shiftKey;
+  if (a.value !== (step.undone ? step.before : step.text)) {
+    placed.delete(a);
+    return;
+  }
+  // a redo with nothing undone, or a second undo, is the engine's
+  if (redo !== step.undone) return;
   e.preventDefault();
-  a.value = step.before;
-  a.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "historyUndo" }));
+  step.undone = !redo;
+  a.value = redo ? step.text : step.before;
+  a.dispatchEvent(
+    new InputEvent("input", { bubbles: true, inputType: redo ? "historyRedo" : "historyUndo" }),
+  );
 }
 
 /** Replaces all the field holds with `text` through the engine's editing, so undo takes it back; where the engine
  * refuses (a disabled field, or no execCommand, as in happy-dom), or the text is over UNDOABLE_MAX, the value is set
- * in place, a text over UNDOABLE_MAX with its own undo step (placedUndo). True when the engine did it, in which case its own input event has already told the field. */
+ * in place, a text over UNDOABLE_MAX with its own undo step (placedUndo). True when the engine did it, in which case
+ * its own input event has already told the field. */
 export function replaceAll(a: HTMLTextAreaElement, text: string, focus: boolean): boolean {
   placed.delete(a);
   if (a.value === text) return true;
@@ -56,7 +70,7 @@ export function replaceAll(a: HTMLTextAreaElement, text: string, focus: boolean)
   const before = a.value;
   a.value = text;
   if (text.length > UNDOABLE_MAX) {
-    placed.set(a, { before, text });
+    placed.set(a, { before, text, undone: false });
     if (!listening.has(a)) {
       listening.add(a);
       a.addEventListener("keydown", placedUndo);

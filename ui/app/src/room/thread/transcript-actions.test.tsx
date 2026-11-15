@@ -175,3 +175,21 @@ test("a chained command's row and prompt count its tasks, not name the first; th
     'New-Item -ItemType Directory "drafts"; Copy-Item notice.docx drafts',
   );
 });
+
+test.each([
+  ["Get-ChildItem C:\\m\\; Remove-Item papers", "Run 2 tasks."],
+  ["cd C:\\matter\\; Remove-Item -Recurse papers", "Run Remove-Item."],
+  ["cd C:\\matter", null],
+])(
+  "a Windows command's permission prompt keeps its fold, a program found or not: %s",
+  async (line, plain) => {
+    h = await mount();
+    const raw = { inline: JSON.stringify({ command: ["powershell", "-c", line] }) };
+    h.deliver([reset([ASKED, python("pending", { raw_input: raw }), permission(8, 201)])]);
+    await h.settle();
+    const prompt = h.one("permission")!;
+    if (plain !== null) expect(prompt.querySelector(".perm-title bdi")?.textContent).toBe(plain);
+    await h.click(prompt.querySelector("[data-testid=task-command-press]"));
+    expect(prompt.querySelector("[data-testid=task-command]")?.textContent).toBe(line);
+  },
+);

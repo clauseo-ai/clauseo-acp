@@ -81,7 +81,8 @@ function Permission({
             : task.paper === null
               ? w.th("Run {program}.", { program: task.program })
               : w.th("Run {program} on {name}.", { program: task.program, name: task.paper })));
-  const command = plain !== null ? (task?.command ?? null) : null;
+  // the fold whenever there is a command, whether or not a program was found in it: never less of it than before
+  const command = task?.command ?? null;
   const onAnswer = useCallback(
     (a: PermissionAnswer) => {
       const offer = m.offers.find((o) => o.answer === a);

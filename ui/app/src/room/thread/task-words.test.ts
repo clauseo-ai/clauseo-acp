@@ -88,6 +88,14 @@ test("a chained command is counted, not named by its first program; its command 
   );
   expect(doneOf("en", task({ command: `python3 -c "a = 1; print(a)" 2>&1` }))).toBe("Ran python3.");
   expect(taskOf(task({ command: "find . -name '*.tmp' -exec rm {} \\;" })).count).toBe(1);
+  expect(taskOf(task({ command: "find . -name x -exec rm {} \\;" })).count).toBe(1);
+  // a backslash is a Windows path's: it escapes nothing
+  expect(doneOf("en", task({ command: "Get-ChildItem C:\\m\\; Remove-Item papers" }))).toBe(
+    "Ran 2 tasks.",
+  );
+  expect(doneOf("en", task({ command: "cd C:\\matter\\; Remove-Item -Recurse papers" }))).toBe(
+    "Ran Remove-Item.",
+  );
   expect(taskOf(task({ command: "grep -c 'a|b' notes.txt || true" })).count).toBe(2);
   // the agent's own words still lead
   expect(doneOf("en", task({ ...ps, description: "Copy the notice into drafts" }))).toBe(

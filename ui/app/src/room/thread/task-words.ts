@@ -89,7 +89,9 @@ function words(command: string): string[] {
 }
 
 /** A command line's parts, chained with `&&`, `||`, `;` or `|` as sh and PowerShell chain them: split outside
- * quotes, past a backslash's escape (`find … -exec rm {} \;` is one part), never at `2>&1`'s lone `&`. */
+ * quotes, never at `2>&1`'s lone `&`. A backslash is a path's in PowerShell and cmd (`cd C:\matter\; ls` is two
+ * parts), so it escapes nothing, but for `\;` as a word of its own, find's (`find … -exec rm {} \;` is one part). A
+ * sh line with an escaped quote may count one part too many; never one too few. */
 function partsOf(command: string): string[] {
   const parts: string[] = [];
   let quote: string | null = null;
@@ -98,9 +100,9 @@ function partsOf(command: string): string[] {
     const c = command[i]!;
     if (quote !== null) {
       if (c === quote) quote = null;
-      else if (c === "\\" && quote === '"') i += 1;
     } else if (c === '"' || c === "'") quote = c;
-    else if (c === "\\") i += 1;
+    else if (c === "\\" && command[i + 1] === ";" && (i === 0 || /\s/.test(command[i - 1]!)))
+      i += 1;
     else if (c === ";" || c === "|" || (c === "&" && command[i + 1] === "&")) {
       parts.push(command.slice(from, i));
       if (c !== ";" && command[i + 1] === c) i += 1;
