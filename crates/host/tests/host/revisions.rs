@@ -22,6 +22,8 @@ use crate::write;
 
 #[path = "revisions_all.rs"]
 mod all;
+#[path = "revisions_parts.rs"]
+mod parts;
 
 /// How long stetdoc's edit may take (the host's `EDIT_LIMIT`).
 const EDIT_LIMIT: Duration = Duration::from_secs(30);

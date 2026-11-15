@@ -3,7 +3,7 @@
 
 use clauseo_protocol::{
     CommandOutcome, DecideRevisions, DocVersion, HostCommand, HostQuery, MAX_REVISIONS,
-    QueryResult, Revision, RevisionDecision, RevisionKind, RevisionList, Timestamp,
+    QueryResult, Revision, RevisionDecision, RevisionKind, RevisionList, RevisionPlace, Timestamp,
 };
 
 use super::fixtures::{checkpoint_id, matter_id, path, round_trips};
@@ -62,6 +62,7 @@ fn list_revisions_and_its_answer_on_the_wire() {
                 author: "C".to_owned(),
                 at: Some(Timestamp::new(1_794_242_630_000).unwrap()),
                 block: "p4".to_owned(),
+                place: None,
                 text: Some("New para.".to_owned()),
             },
             Revision {
@@ -70,6 +71,7 @@ fn list_revisions_and_its_answer_on_the_wire() {
                 author: "C".to_owned(),
                 at: None,
                 block: "p5".to_owned(),
+                place: Some(RevisionPlace::HeaderFooter),
                 text: None,
             },
         ],
@@ -84,20 +86,22 @@ fn list_revisions_and_its_answer_on_the_wire() {
             "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
             r#"","revisions":[{"ids":[2,3],"kind":"insert","author":"C","at":1794242630000,"#,
             r#""block":"p4","text":"New para."},{"ids":[7],"kind":"format","author":"C","#,
-            r#""block":"p5"}],"truncated":false,"total":2}}"#
+            r#""block":"p5","place":"header_footer"}],"truncated":false,"total":2}}"#
         )
     );
     // A later field still decodes here, and a kind from a newer Clauseo reads as unknown.
     let later = concat!(
         r#"{"revisions":{"path":"a.docx","version":""#,
         "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
-        r#"","revisions":[{"ids":[1],"kind":"comment","author":"","block":"p1","x":1}],"#,
+        r#"","revisions":[{"ids":[1],"kind":"comment","author":"","block":"p1","x":1,"#,
+        r#""place":"text_box"}],"#,
         r#""truncated":true,"total":600,"more":1}}"#
     );
     let QueryResult::Revisions(list) = serde_json::from_str::<QueryResult>(later).unwrap() else {
         panic!("not revisions");
     };
     assert_eq!(list.revisions[0].kind, RevisionKind::Unknown);
+    assert_eq!(list.revisions[0].place, Some(RevisionPlace::Unknown));
     assert!(list.truncated);
     assert_eq!(list.total, 600);
 }
