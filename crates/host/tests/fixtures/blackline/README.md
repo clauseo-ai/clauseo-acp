@@ -24,5 +24,6 @@ python3 crates/host/tests/fixtures/blackline/generate.py
 
 The view's format was read from this output and from stetdoc 0.9.0's output for other
 documents (links, comments, fields, content controls, images, deleted list items, inserted and
-deleted table rows). Its markup is listed in the parser's module doc. A stetdoc that prints
-anything else makes the blackline fail (`blackline.failed`), and does not show a guess.
+deleted table rows). Its markup is listed in the parser's module docs (`parse.rs`, `parse/line.rs`). A
+line the parser can't read is left out and the blackline says part of it is not shown; it never shows a
+guess. stetdoc 0.9.3's tables inside tables, hidden text and long lines are in `partial/`.
