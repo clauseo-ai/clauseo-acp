@@ -217,7 +217,13 @@ pub fn agent_browser_denied() -> impl Iterator<Item = String> {
 /// host forces (`strictMcpConfig`, `settingSources`, `mcpServers`, `env`, `extraArgs`) and the
 /// guard's `settings.hooks` and `settings.disableAllHooks` stay out, so the host's merge never
 /// meets a profile value for them.
-pub const OPTION_KEYS: [&str; 4] = ["allowedTools", "disallowedTools", "plugins", "settings"];
+pub const OPTION_KEYS: [&str; 5] = [
+    "agents",
+    "allowedTools",
+    "disallowedTools",
+    "plugins",
+    "settings",
+];
 
 /// The keys the profile sets in `options.settings`.
 pub const SETTINGS_KEYS: [&str; 1] = ["disableSkillShellExecution"];
@@ -246,6 +252,8 @@ pub struct ClaudeOptions {
     pack_plugin: Option<PathBuf>,
     /// `{"disableSkillShellExecution": true}`: no skill runs a shell command on load.
     settings: Map<String, Value>,
+    /// The agents Claude may launch (`crate::subagents::subagents`).
+    agents: Map<String, Value>,
 }
 
 impl ClaudeOptions {
@@ -264,6 +272,7 @@ impl ClaudeOptions {
             plugin_dir,
             pack_plugin: None,
             settings,
+            agents: crate::subagents::subagents(),
         }
     }
 
@@ -309,15 +318,23 @@ impl ClaudeOptions {
         self.plugin_dir.as_ref()
     }
 
+    /// The agents Claude may launch (`crate::subagents::subagents`).
+    pub fn agents(&self) -> &Map<String, Value> {
+        &self.agents
+    }
+
     /// The `_meta` object: `systemPrompt.append`, and under `claudeCode.options` only
-    /// [`OPTION_KEYS`] (`disallowedTools` when it is not empty, `plugins` when there is a
-    /// plugin, as one `{"type": "local", "path": …}` each, the built-in plugin first and the
-    /// launch's pack plugin second, and `settings` holding only
+    /// [`OPTION_KEYS`] (`agents` when there are any, `disallowedTools` when it is not empty,
+    /// `plugins` when there is a plugin, as one `{"type": "local", "path": …}` each, the
+    /// built-in plugin first and the launch's pack plugin second, and `settings` holding only
     /// [`SETTINGS_KEYS`]). So `hooks`, `disableAllHooks` or any other settings key never
     /// reaches the host's merge; each is dropped with a warning. A plugin path that is no UTF-8
     /// is left out with a warning: a lossy copy could name another folder.
     pub fn meta_fragment(&self) -> Map<String, Value> {
         let mut options = Map::new();
+        if !self.agents.is_empty() {
+            options.insert("agents".to_owned(), Value::Object(self.agents.clone()));
+        }
         options.insert(
             "allowedTools".to_owned(),
             Value::from(self.allowed_tools.clone()),

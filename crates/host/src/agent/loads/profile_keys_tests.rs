@@ -216,6 +216,63 @@ fn the_instructions_are_filled_and_escaped_for_json() {
     assert!(!text.contains("{work_folder}") && !text.contains("{matter_notes}"));
 }
 
+/// Each subagent's prompt gets the session's folders, as the instructions do.
+#[test]
+fn each_subagent_prompt_is_filled_like_the_instructions() {
+    let mut meta = json!({
+        "claudeCode": {"options": {"agents": {
+            "paper-reader": {"description": "d", "prompt": "Write {work_folder}/digests/x.md."},
+            "researcher": {"description": "d", "prompt": "Write {work_folder}/research/y.md."},
+        }}},
+        "systemPrompt": {"append": "Work in {work_folder}."},
+    })
+    .as_object()
+    .cloned()
+    .unwrap();
+    fill_meta(&mut meta, folders()).unwrap();
+    let work = folders().work;
+    let agents = &meta["claudeCode"]["options"]["agents"];
+    assert_eq!(
+        agents["paper-reader"]["prompt"],
+        json!(format!("Write {work}/digests/x.md."))
+    );
+    assert_eq!(
+        agents["researcher"]["prompt"],
+        json!(format!("Write {work}/research/y.md."))
+    );
+    assert!(!Value::Object(meta).to_string().contains("{work_folder}"));
+}
+
+/// The researcher's tools gain agent-browser's allow rules only in a session with the browser,
+/// and lose any the hook put there; the paper reader's never change.
+#[test]
+fn the_researcher_gets_the_browser_rules_only_with_the_browser() {
+    let hook = json!({"agents": {
+        "paper-reader": {"tools": ["Read"]},
+        "researcher": {"tools": ["WebFetch", "Bash(agent-browser eval:*)"]},
+    }});
+    let without = options(&hook, &keys(ON, Login::FirstParty));
+    assert_eq!(
+        strings(&without["agents"]["researcher"]["tools"]),
+        ["WebFetch"]
+    );
+    let with = options(
+        &hook,
+        &ClaudeKeys {
+            browser: true,
+            ..keys(ON, Login::FirstParty)
+        },
+    );
+    let tools = strings(&with["agents"]["researcher"]["tools"]);
+    let browser: Vec<String> = clauseo_profile::claude::agent_browser_allowed().collect();
+    assert_eq!(tools[0], "WebFetch");
+    assert_eq!(
+        tools[1..],
+        browser.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+    assert_eq!(strings(&with["agents"]["paper-reader"]["tools"]), ["Read"]);
+}
+
 #[test]
 fn the_login_follows_the_merged_launch_env() {
     let none = BTreeMap::<OsString, OsString>::new();

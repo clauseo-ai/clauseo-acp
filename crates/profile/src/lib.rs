@@ -27,6 +27,7 @@ pub mod paths;
 pub mod placeholders;
 pub mod servers;
 pub mod skills;
+pub mod subagents;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 pub mod tools;
@@ -224,11 +225,16 @@ impl ClauseoProfile {
     }
 
     /// Claude's instructions: [`Self::instructions_for`] Claude, then on macOS (`macos`) a blank
-    /// line and [`instructions::claude_shell`]'s line, which Codex never gets.
+    /// line and [`instructions::claude_shell`]'s line, which Codex never gets, then a blank line
+    /// and [`instructions::claude_scale`], last, as the timing harness appended it.
     pub fn claude_instructions_for(&self, macos: bool) -> String {
-        let text = self.instructions_for(AgentKind::Claude);
-        match instructions::claude_shell(macos) {
-            Some(line) => format!("{text}\n\n{line}"),
+        let mut text = self.instructions_for(AgentKind::Claude);
+        if let Some(line) = instructions::claude_shell(macos) {
+            text = format!("{text}\n\n{line}");
+        }
+        let research = instructions::SHIP_RESEARCH_TEXT && subagents::RESEARCHER_ARM.is_some();
+        match instructions::claude_scale(research) {
+            Some(scale) => format!("{text}\n\n{scale}"),
             None => text,
         }
     }
@@ -244,14 +250,16 @@ impl ClauseoProfile {
         self.codex_instructions_for(cfg!(target_os = "macos"))
     }
 
-    /// Codex's instructions: [`Self::instructions_for`] Codex, a blank line,
-    /// [`instructions::CODEX_SHELL_OFFLINE`], then on macOS (`macos`) a blank line and
-    /// [`instructions::codex_shell`]'s line; Claude gets neither.
+    /// Codex's instructions: [`Self::instructions_for`] Codex, a blank line and
+    /// [`instructions::CODEX_SHELL_OFFLINE`], a blank line and [`instructions::CODEX_REFUSAL`],
+    /// then on macOS (`macos`) a blank line and [`instructions::codex_shell`]'s line; Claude
+    /// gets none of them.
     pub fn codex_instructions_for(&self, macos: bool) -> String {
         let text = format!(
-            "{}\n\n{}",
+            "{}\n\n{}\n\n{}",
             self.instructions_for(AgentKind::Codex),
-            instructions::CODEX_SHELL_OFFLINE.trim()
+            instructions::CODEX_SHELL_OFFLINE.trim(),
+            instructions::CODEX_REFUSAL.trim()
         );
         match instructions::codex_shell(macos) {
             Some(line) => format!("{text}\n\n{line}"),

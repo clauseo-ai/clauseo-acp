@@ -232,6 +232,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         allowed.extend(clauseo_profile::claude::agent_browser_allowed().map(Value::String));
         disallowed.extend(clauseo_profile::claude::agent_browser_denied().map(Value::String));
     }
+    researcher_browser_tools(options, keys.browser);
     if !disallowed.is_empty() {
         options.insert("disallowedTools".to_owned(), Value::Array(disallowed));
     }
@@ -265,6 +266,24 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         forced_ask_settings(&mut settings);
     }
     options.insert("settings".to_owned(), Value::Object(settings));
+}
+
+/// The researcher subagent's `tools` (`clauseo_profile::subagents::RESEARCHER`, under
+/// `options.agents`) lose any rule naming agent-browser, then gain agent-browser's allow rules
+/// when the session has the browser (`browser`). Without the agent or its `tools` list, nothing
+/// changes.
+fn researcher_browser_tools(options: &mut Map<String, Value>, browser: bool) {
+    let Some(Value::Array(tools)) = options
+        .get_mut("agents")
+        .and_then(|agents| agents.get_mut(clauseo_profile::subagents::RESEARCHER))
+        .and_then(|agent| agent.get_mut("tools"))
+    else {
+        return;
+    };
+    tools.retain(|rule| !rule.as_str().is_some_and(|r| r.contains("agent-browser")));
+    if browser {
+        tools.extend(clauseo_profile::claude::agent_browser_allowed().map(Value::String));
+    }
 }
 
 /// The size past which a launch's settings shed the data folder's variable forms from its shell
@@ -448,7 +467,8 @@ pub(crate) fn codex_keys(
     Ok(keys)
 }
 
-/// `_meta.systemPrompt.append` with its tokens filled, when it is a string.
+/// `_meta.systemPrompt.append` with its tokens filled, when it is a string, and so each
+/// subagent's `prompt` under `claudeCode.options.agents`.
 pub(crate) fn fill_meta(meta: &mut Map<String, Value>, folders: Folders<'_>) -> Result<(), Error> {
     if let Some(Value::String(text)) = meta
         .get_mut("systemPrompt")
@@ -456,6 +476,17 @@ pub(crate) fn fill_meta(meta: &mut Map<String, Value>, folders: Folders<'_>) -> 
         .and_then(|prompt| prompt.get_mut("append"))
     {
         *text = fill_instructions(text, folders)?;
+    }
+    if let Some(Value::Object(agents)) = meta
+        .get_mut("claudeCode")
+        .and_then(|claude| claude.get_mut("options"))
+        .and_then(|options| options.get_mut("agents"))
+    {
+        for agent in agents.values_mut() {
+            if let Some(Value::String(text)) = agent.get_mut("prompt") {
+                *text = fill_instructions(text, folders)?;
+            }
+        }
     }
     Ok(())
 }

@@ -97,6 +97,13 @@ pub fn codex_shell_offline(web_search: bool) -> &'static str {
         .map_or(line, str::trim_end)
 }
 
+/// The line every Codex session gets after [`CODEX_SHELL_OFFLINE`]: Codex's refusals reach the
+/// lawyer only through its answer. A command its sandbox refuses at once, or a write the
+/// pre-write guard blocks, sends Clauseo no step at all (codex 0.162.1 and codex-acp 2.2.2), so
+/// unless the answer says so, the lawyer never learns it. Copy id UC-710. Claude never gets it:
+/// its refused steps reach the window as steps.
+pub const CODEX_REFUSAL: &str = include_str!("../assets/instructions/codex-refusal.txt");
+
 /// The line a Codex session gets after the instructions on macOS (`macos`), and none elsewhere:
 /// the commands it names are macOS's own.
 pub fn codex_shell(macos: bool) -> Option<&'static str> {
@@ -127,6 +134,40 @@ pub const CLAUDE_SHELL_MACOS: &str = include_str!("../assets/instructions/claude
 /// elsewhere: Windows has no sandbox for Claude, and the commands it names are macOS's own.
 pub fn claude_shell(macos: bool) -> Option<&'static str> {
     macos.then(|| CLAUDE_SHELL_MACOS.trim())
+}
+
+/// Whether Claude's instructions end with the "Working at scale" part ([`claude_scale`]).
+/// Measured setting: arm C2f ran with it.
+pub const SHIP_WORKING_AT_SCALE: bool = true;
+
+/// The "Working at scale" part a Claude session gets at the very end of its instructions (arm
+/// C2f's text, verbatim): when to convert documents to text, batch steps into one script, and
+/// launch `paper-reader` agents (`crate::subagents`). It holds `{work_folder}`, which the host
+/// fills. Codex gets no such part.
+pub const SCALE_CLAUDE: &str = include_str!("../assets/instructions/scale-claude.txt");
+
+/// Whether [`SCALE_CLAUDE`] gains [`SCALE_RESEARCH`] when Claude has the `researcher` agent
+/// (`crate::subagents::RESEARCHER_ARM`). Measured setting: off, so the researcher is defined
+/// and available but no text tells Claude to delegate research first.
+pub const SHIP_RESEARCH_TEXT: bool = false;
+
+/// The research bullets [`SCALE_CLAUDE`] gains with [`SHIP_RESEARCH_TEXT`] and a researcher:
+/// arm RH2's text (`R2.txt`), without its heading, its opening line and its batching bullet,
+/// which [`SCALE_CLAUDE`] already holds.
+pub const SCALE_RESEARCH: &str = include_str!("../assets/instructions/scale-research.txt");
+
+/// Claude's "Working at scale" part: [`SCALE_CLAUDE`], then a newline and [`SCALE_RESEARCH`]
+/// when `research`; `None` when [`SHIP_WORKING_AT_SCALE`] is false.
+pub fn claude_scale(research: bool) -> Option<String> {
+    if !SHIP_WORKING_AT_SCALE {
+        return None;
+    }
+    let text = SCALE_CLAUDE.trim();
+    Some(if research {
+        format!("{text}\n{}", SCALE_RESEARCH.trim())
+    } else {
+        text.to_owned()
+    })
 }
 
 /// Which browser part a session gets in place of `{browser}`.
