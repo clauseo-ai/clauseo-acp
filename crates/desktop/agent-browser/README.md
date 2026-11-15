@@ -74,7 +74,7 @@ tests run with `node --test 'crates/desktop/sidecars/*.test.mjs'`.
 
 ## Building and publishing
 
-`.github/workflows/agent-browser-build.yml`, by hand:
+The workflow `agent-browser-build.yml` (it lands with PR #1089), by hand:
 
 ```sh
 gh workflow run agent-browser-build.yml --ref <branch>                  # build only
@@ -101,9 +101,9 @@ placeholder the fetch refuses.
 
 The build aims to be reproducible, but a runner image with a newer linker can still change the
 bytes. The release trusts the pinned sha256 of the published binary, not a rebuild. Signing
-needs nothing here, and nothing is notarised here: the release's sidecar fetch puts the binary in
-`crates/desktop/binaries/` as `clauseo-agent-browser-<triple>[.exe]`, where release.yml signs
-it as today. On Windows `sign-windows` signs every PE there; on macOS the build leg codesigns
+needs nothing here, and nothing is notarised here: the release's sidecar fetch puts the binary at
+`crates/desktop/binaries/clauseo-agent-browser-<triple>[.exe]`, where release.yml signs it as
+today. On Windows `sign-windows` signs every PE there; on macOS the build leg codesigns
 `Contents/Helpers/clauseo-agent-browser` with the app's identity and the hardened runtime
 before bundling, and the app is notarised as a whole.
 
