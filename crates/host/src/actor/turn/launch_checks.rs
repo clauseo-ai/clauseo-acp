@@ -566,7 +566,7 @@ mod straggler;
 pub(crate) use straggler::HeldRuns;
 mod removal;
 use removal::discard;
-pub(super) use removal::on_run_removed;
+pub(crate) use removal::{Removed, on_run_removed, queued_at_start};
 mod sweep;
 pub(crate) use sweep::RunSweep;
 mod packs;

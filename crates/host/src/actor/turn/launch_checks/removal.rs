@@ -1,6 +1,7 @@
 //! A session's run folder removal ([`discard`]): off the actor, it waits for the session's
 //! processes ([`super::straggler`]), then frees the run's claims, relay and proxy and removes
-//! its folder, or holds them until the host stops.
+//! its folder, or holds them until the host stops. Before the folder goes, the matter's
+//! fallback folder's queue of downloads no agent line told is read ([`saved`]).
 
 use clauseo_process::TreeWatch;
 use clauseo_protocol::ThreadId;
@@ -70,9 +71,11 @@ pub(super) fn discard(
                 );
                 // The lease is not done: dropping the run holds its parts.
                 drop(run);
-                return Ok(false);
+                return Ok((false, Vec::new()));
             }
             run.lease.wait_done();
+            // What the guard queued is read, off the actor (`saved.rs`).
+            let saved = saved::take(&run.notes);
             // The token is revoked before its file goes with the folder.
             relay::end(&run);
             if let Some(hook) = &hook {
@@ -83,7 +86,7 @@ pub(super) fn discard(
             // once the agent's tree and Chrome are gone: the socket folder is removed, the relay
             // stops listening, the proxy closes and the ports are free for the next session.
             drop(run);
-            Ok(true)
+            Ok((true, saved))
         };
         let removed = if thread_fails {
             // As `off_actor` does when its thread does not start: the work drops here.
@@ -95,26 +98,37 @@ pub(super) fn discard(
         } else {
             codex::prepare::off_actor(clock, job, work).await
         };
-        let freed = match removed {
-            Ok(freed) => freed,
+        let (freed, saved) = match removed {
+            Ok(done) => done,
             Err(error) => {
                 tracing::warn!(
                     %thread,
                     error = %Cause(&error),
                     "a session's run folder was not removed; its parts are held until the host stops"
                 );
-                false
+                (false, Vec::new())
             }
         };
-        Input::Turn(TurnInput::RunRemoved { key, freed })
+        Input::Turn(TurnInput::RunRemoved(Removed { key, freed, saved }))
     });
+}
+
+/// What a run folder's removal found: the session, whether its run was freed (its slot goes
+/// back) or held, and the fallback deliveries its guard queued, checked off the actor.
+#[derive(Debug)]
+pub(crate) struct Removed {
+    key: SessionKey,
+    freed: bool,
+    saved: Vec<crate::sources::browser::fallback_queue::Queued>,
 }
 
 /// A run folder's removal ended: shutdown no longer waits for it, and a session whose run was
 /// freed (`freed`) gives back its browser slot. A held run keeps its slot until the host stops.
 /// A removal of a slot's holder wakes the launch preps waiting for a slot
 /// (`browser::slot_wait`), telling them whether a slot is now free.
-pub(in super::super) fn on_run_removed(actor: &mut Actor, key: SessionKey, freed: bool) {
+pub(crate) fn on_run_removed(actor: &mut Actor, removed: Removed) {
+    let Removed { key, freed, saved } = removed;
+    saved::tell(actor, key.matter, Some(key.thread), saved);
     actor.work.run_removals = actor.work.run_removals.saturating_sub(1);
     let slots = &mut actor.wiring.browser_slots;
     let was_releasing = slots.end_release(key);
@@ -128,3 +142,6 @@ pub(in super::super) fn on_run_removed(actor: &mut Actor, key: SessionKey, freed
         }
     }
 }
+
+mod saved;
+pub(crate) use saved::queued_at_start;

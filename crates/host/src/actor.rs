@@ -567,6 +567,7 @@ impl Actor {
                 scratch::serving(self);
                 update::serving(self);
                 counting::app_opened(self);
+                turn::queued_at_start(self);
                 None
             }
             HostPhase::Serving => None,

@@ -32,12 +32,7 @@ pub(crate) enum TurnInput {
         result: Result<Vec<Envelope>, clauseo_store::Error>,
     },
     /// A run folder's removal off the actor (`launch_checks::discard`) ended.
-    RunRemoved {
-        /// The session.
-        key: crate::config::SessionKey,
-        /// Whether the run was freed (its slot goes back), or held.
-        freed: bool,
-    },
+    RunRemoved(super::launch_checks::Removed),
     /// A check for papers an undo removed that came back is due (`came_back.rs`).
     CameBack(super::came_back::Check),
     /// A read of Claude's transcript for unconfirmed steers answered (`queue/confirm.rs`).
