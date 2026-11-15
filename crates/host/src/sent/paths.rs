@@ -232,6 +232,12 @@ impl TurnPaths {
             .collect()
     }
 
+    /// The tool name (ACP's `name`) the call `key` was last sent with, if any: the data
+    /// fence reads a `PowerShell` call's command as PowerShell's.
+    pub(crate) fn tool_name(&self, key: &str) -> Option<&str> {
+        self.calls.get(key)?.tool_name.as_deref()
+    }
+
     /// Sets where the turn's shell calls start: by the session's launch (`Agent::shell_carries`)
     /// live, [`ShellStart::Policy`] for the restart repair.
     pub(crate) fn set_start(&mut self, start: ShellStart) {

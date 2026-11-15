@@ -5,7 +5,8 @@
 
 use serde_json::json;
 
-use super::tests::{check, layout, text};
+use super::ShellKind;
+use super::tests::{check, check_as, layout, text};
 
 /// Requests that should be refused (`deny`) and ones that should pass (`pass`), each listed
 /// when it does not.
@@ -128,4 +129,39 @@ fn powershell_short_recurse_spellings_walk() {
         format!("gci -d {parent}"),
     ];
     judged(root, &deny, &pass);
+}
+
+/// The tool that sent the line decides how `ls -r` and `dir -r` are read: from PowerShell's
+/// tool `ls -r` of the data folder's parent walks it and is denied; from Bash's, `ls -r` and
+/// GNU's `dir -r` only sort in reverse and pass, while `dir -R` walks and is denied.
+#[test]
+fn the_tools_shell_decides_whether_ls_r_walks() {
+    let dir = layout("cmd-tool-shell");
+    let root = dir.path();
+    let parent = text(root);
+    let matter = text(&root.join("matter"));
+    let judge = |shell, line: String| {
+        let input = json!({ "command": line });
+        check_as(root, &[], Some(&input), shell).touches_data()
+    };
+    for line in [
+        format!("ls -r {parent}"),
+        format!("dir -r {parent}"),
+        format!("rm -s {parent}"),
+        format!("cp -Rec {parent} {matter}"),
+    ] {
+        assert!(
+            judge(ShellKind::PowerShell, line.clone()),
+            "PowerShell passed: {line}"
+        );
+    }
+    assert!(!judge(ShellKind::PowerShell, format!("ls -r {matter}")));
+    for line in [format!("ls -r {parent}"), format!("dir -r {parent}")] {
+        assert!(
+            !judge(ShellKind::Posix, line.clone()),
+            "Bash denied: {line}"
+        );
+    }
+    assert!(judge(ShellKind::Posix, format!("dir -R {parent}")));
+    assert!(judge(ShellKind::Posix, format!("ls -R {parent}")));
 }

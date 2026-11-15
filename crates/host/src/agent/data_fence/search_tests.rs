@@ -8,7 +8,13 @@ use std::path::PathBuf;
 
 use serde_json::json;
 
-use super::command::recursive_roots;
+use super::ShellKind;
+use super::command;
+
+/// [`command::recursive_roots`] of a line from a tool whose shell is not known.
+fn recursive_roots(line: &str, windows: bool) -> Vec<PathBuf> {
+    command::recursive_roots(line, windows, ShellKind::Unknown)
+}
 use super::search::{literal_root, pattern_roots};
 
 use super::tests::{check, layout, text};
@@ -321,4 +327,62 @@ fn powershell_short_spellings_apply_only_to_powershell() {
     ] {
         assert_eq!(recursive_roots(line, false), paths(&[".", "/p"]), "{line}");
     }
+}
+
+/// Told the tool, the fence reads its line as that shell does: from PowerShell's tool `ls`,
+/// `cp`, `rm`, `rmdir` and `dir` take PowerShell's spellings with no cmdlet beside them; from
+/// Bash's, `ls -r` and GNU's `dir -r` sort in reverse and `dir -R` walks, while a script
+/// given to `pwsh -Command` is still PowerShell's, and from PowerShell's a `bash -c` script
+/// is Bash's.
+#[test]
+fn the_tools_shell_decides_how_its_line_is_read() {
+    let roots = |line: &str, shell| command::recursive_roots(line, false, shell);
+    let walks = |line: &str, shell| roots(line, shell).contains(&PathBuf::from("/p"));
+    for line in [
+        "ls -r /p",
+        "dir -r /p",
+        "cp -Recurse:$true /p /q",
+        "rm -s /p",
+        "rmdir \u{2013}r /p",
+        "gci -de 2 /p",
+        "ls -r /q; pwsh -c 'x'; ls -r /p",
+        "bash -c 'ls -R /p'",
+    ] {
+        assert!(walks(line, ShellKind::PowerShell), "PowerShell: {line}");
+    }
+    for line in [
+        "ls -r /p",
+        "dir -r /p",
+        "gci -r /p",
+        "rm -s /p",
+        "bash -c 'ls -r /p'",
+    ] {
+        assert!(!walks(line, ShellKind::Posix), "Bash: {line}");
+    }
+    for line in [
+        "dir -R /p",
+        "ls -lR /p",
+        r#"pwsh -NoProfile -Command "ls -r /p""#,
+        "find /p",
+        "x -Recurse /p",
+    ] {
+        assert!(walks(line, ShellKind::Posix), "Bash: {line}");
+    }
+    assert!(!walks(
+        "pwsh -c 'Write-Output x'; bash -c 'ls -r /p'",
+        ShellKind::PowerShell
+    ));
+    assert!(walks("dir -r /p", ShellKind::Unknown));
+    assert!(!walks("ls -r /p", ShellKind::Unknown));
+    assert_eq!(
+        ShellKind::of_tool(Some("PowerShell")),
+        ShellKind::PowerShell
+    );
+    assert_eq!(
+        ShellKind::of_tool(Some("powershell")),
+        ShellKind::PowerShell
+    );
+    assert_eq!(ShellKind::of_tool(Some("Bash")), ShellKind::Posix);
+    assert_eq!(ShellKind::of_tool(Some("exec_command")), ShellKind::Unknown);
+    assert_eq!(ShellKind::of_tool(None), ShellKind::Unknown);
 }

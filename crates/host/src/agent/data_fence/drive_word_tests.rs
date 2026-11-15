@@ -27,7 +27,7 @@ fn shell(command: &str) -> FenceCheck {
         cwd: PathBuf::from("/t/matter"),
         home: None,
         paths: candidates(&[], Some(&raw), true),
-        roots: candidates_roots(Some(&raw), true),
+        roots: candidates_roots(Some(&raw), true, super::ShellKind::Unknown),
         words: candidates_words(Some(&raw), true),
         health: DataFenceHealth::default(),
         vars: Vec::new(),

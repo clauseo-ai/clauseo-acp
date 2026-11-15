@@ -111,7 +111,13 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     if super::shell_network::refused(actor, thread, &ask, raw_input.as_ref()) {
         return;
     }
-    let fence = fence_check(actor, thread, &paths, raw_input.as_ref());
+    // The shell the request's tool call runs (Claude Code's `Bash` or `PowerShell`), as its
+    // start or updates named it; unknown when none did.
+    let tool_name = current(actor, thread)
+        .and_then(|current| current.tool_paths.tool_name(&ask.acp_tool_call_id))
+        .map(str::to_owned);
+    let shell = data_fence::ShellKind::of_tool(tool_name.as_deref());
+    let fence = fence_check(actor, thread, &paths, raw_input.as_ref(), shell);
     if paths.is_empty() {
         paths = tool_call_paths(actor, thread, &ask);
     }
@@ -152,16 +158,18 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
 /// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), for
 /// the thread's agent: its own folders are its run folder, this matter's notes, a Claude agent's
 /// plans folder in Clauseo's Claude home, and its working folder. None when the request names no
-/// path and no command, or the thread has no agent.
+/// path and no command, or the thread has no agent. Its command's search folders are read as
+/// `shell`, the shell of the request's tool, would read them.
 fn fence_check(
     actor: &Actor,
     thread: ThreadId,
     paths: &[PathBuf],
     raw_input: Option<&serde_json::Value>,
+    shell: data_fence::ShellKind,
 ) -> Option<Box<FenceCheck>> {
     let paths = data_fence::candidates(paths, raw_input, cfg!(windows));
     let words = data_fence::candidates_words(raw_input, cfg!(windows));
-    let roots = data_fence::candidates_roots(raw_input, cfg!(windows));
+    let roots = data_fence::candidates_roots(raw_input, cfg!(windows), shell);
     if paths.is_empty() && words.is_empty() && roots.is_empty() {
         return None;
     }
