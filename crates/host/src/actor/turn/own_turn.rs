@@ -72,6 +72,19 @@ pub(super) use late::{QUIET as LATE_QUIET, dropped as late_dropped};
 pub(super) use late::{holds_starts, on_timer as on_late_timer};
 pub(super) use restart::{end_unstarted as end_unstarted_at_start, may_wait as may_wait_at_start};
 
+/// Whether updates or requests wait in `held` for a turn: the idle stop counts them as one.
+pub(super) fn output_waits(held: &Held) -> bool {
+    !held.updates.is_empty()
+}
+
+/// Puts `event` in `thread`'s held output, as if it waited for a turn (tests).
+#[cfg(test)]
+pub(super) fn hold_for_test(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
+    if let Some(state) = state(actor, thread) {
+        state.own_held.updates.push(event);
+    }
+}
+
 /// How many updates and requests of `thread` wait for a turn.
 #[cfg(test)]
 pub(super) fn waiting(actor: &mut Actor, thread: ThreadId) -> usize {
