@@ -348,7 +348,6 @@ function linkerVersions(env) {
   return { msvc_tools: tools, link: null };
 }
 
-/** `build`: see the header. Returns the record it wrote. */
 /** Throws unless `status`, `git status --porcelain` for the patches folder, is empty. */
 export function checkCommitted(status, dir) {
   if (status.trim() !== '') {
@@ -361,10 +360,13 @@ export function rustcCommit(verbose) {
   return /^commit-hash: ([0-9a-f]{40})\s*$/m.exec(verbose)?.[1] ?? null;
 }
 
+/** `build`: see the header. Returns the record it wrote. */
 async function build({ target, out }, { pin, patchDir, log, fetch }) {
   const channel = toolchainChannel(await readFile(TOOLCHAIN, 'utf8'));
-  // Only committed patches: a build from a working tree with edits there is refused.
-  const status = spawnSync('git', ['status', '--porcelain', '--', patchDir], { cwd: REPO, encoding: 'utf8' });
+  // Only committed patches: a build from a working tree with edits there is refused. Untracked
+  // files are listed whatever status.showUntrackedFiles says.
+  const statusArgs = ['status', '--porcelain', '--untracked-files=all', '--', patchDir];
+  const status = spawnSync('git', statusArgs, { cwd: REPO, encoding: 'utf8' });
   if (status.error || status.status !== 0) {
     throw new Error(`agent-browser: git status failed for ${patchDir}; build only from a git checkout`);
   }
