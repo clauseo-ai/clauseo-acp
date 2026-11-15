@@ -63,7 +63,7 @@ pub(crate) const EMAIL: &str = "e2e@example.invalid";
 const STATUS_VAR: &str = "E2E_FAKE_STATUS";
 /// The status check's first run's limit, in ms, that `slow` and `hang` count from.
 const STATUS_LIMIT_VAR: &str = "E2E_FAKE_STATUS_LIMIT_MS";
-/// S18's first start-up status limit (`found::FIRST_LIMIT`).
+/// S18's first start-up status limit (`found::status_job::FIRST_LIMIT`).
 const STATUS_LIMIT: Duration = Duration::from_secs(15);
 /// The page the script "opens": logged only.
 pub(crate) const TEST_URL: &str = "https://example.invalid/e2e-signin";
