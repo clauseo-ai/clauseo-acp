@@ -3,21 +3,32 @@
 //! own spawning and its batching text were slower and cost more.
 //!
 //! Each definition is the one measured (stage C's timing harness, arms C2f for the paper reader
-//! and RH2 for the researcher). The choices the measurements decide are each one constant:
-//! [`PAPER_READER_MODEL`] and [`RESEARCHER_ARM`].
+//! and RH2 for the researcher), except that neither writes files: each returns its work in its
+//! final reply, so neither has a tool that writes, edits or runs a command (review of #1123). The
+//! choices the measurements decide are each one constant: [`PAPER_READER_MODEL`] and
+//! [`RESEARCHER_ARM`].
+//!
+//! The model is Claude Code's alias `haiku`, which Claude Code 2.1.293 resolves for the login
+//! (its catalog's newest Haiku on Anthropic's own login). Where Haiku is not known to be served,
+//! the host sends `inherit` instead, so a helper runs on the conversation's model
+//! (`agent::loads::subagents` in the host). `effort` is read by 2.1.293 for an agent it is given
+//! (its agent schema takes it, and a helper's effort is the agent's own) and applies only on a
+//! model that takes an effort level; on one that does not, Claude Code drops it without a word.
 
 use serde_json::{Map, Value};
 
-/// The subagent that reads a batch of long matter documents and writes one digest.
+/// The subagent that reads a batch of long matter documents and returns one digest.
 pub const PAPER_READER: &str = "paper-reader";
 
 /// The subagent that researches one line on the open web.
 pub const RESEARCHER: &str = "researcher";
 
-/// The paper reader's model: `haiku` (arm C2f) or `sonnet` (exp-armb). Measured setting.
+/// The paper reader's model: `haiku` (arm C2f) or `sonnet` (exp-armb). Measured setting. The
+/// host swaps it for `inherit` on a login where Haiku is not known to be served.
 pub const PAPER_READER_MODEL: &str = "haiku";
 
-/// The paper reader's reasoning effort, as arm C2f ran it.
+/// The paper reader's reasoning effort, as arm C2f ran it. Claude Code applies it only on a model
+/// that takes an effort level (see the module doc).
 pub const PAPER_READER_EFFORT: &str = "low";
 
 /// The most turns the paper reader takes, as arm C2f ran it.
@@ -75,34 +86,87 @@ impl ResearcherArm {
 
 /// [`PAPER_READER`]'s description: when the lead launches it.
 const PAPER_READER_DESCRIPTION: &str = "Reads a batch of long matter documents from their text \
-    copies and writes one short digest. Use 4 to 6 at once, launched in one message, when a task \
+    copies and returns one short digest. Use 4 to 6 at once, launched in one message, when a task \
     needs more than eight documents read.";
 
 /// [`PAPER_READER`]'s system prompt. Subagents never get `systemPrompt.append`, so it carries its
 /// own rules on evidence and untrusted content. It holds `{work_folder}`, which the host fills.
 const PAPER_READER_PROMPT: &str = include_str!("../assets/agents/paper-reader.md");
 
-/// [`RESEARCHER`]'s description: when the lead launches it.
+/// [`RESEARCHER`]'s description: what it does, and nothing that urges the lead to launch it;
+/// only the research part of "Working at scale" does that (`instructions::SHIP_RESEARCH_TEXT`).
 const RESEARCHER_DESCRIPTION: &str = "Researches one legal sub-question or one family of \
-    sources (one court, one regulator, one statute) on the open web and writes findings with \
-    primary-source citations. Launch several in one message for independent lines of research.";
+    sources (one court, one regulator, one statute) on the open web and returns findings with \
+    primary-source citations.";
 
 /// What [`RESEARCHER`]'s prompt holds after the legal part's Evidence and Citations sections
 /// ([`legal_evidence_and_citations`]): research rules read only when research is delegated
 /// (contrary authority, later history, who in a judgment says what, a provision's provisos, a
 /// second route before "nothing found"; legal.md carries the first three in short), then arm
-/// RH2's own rules. It holds `{work_folder}`.
+/// RH2's own rules, which say whose names may go into a search.
 const RESEARCHER_RULES: &str = include_str!("../assets/agents/researcher.md");
 
 /// The researcher prompt's last sentence.
 const WORK_FAST: &str = " Work fast: run your first searches together in one message, then \
     fetch the most promising primary pages together in one message, not one after another.";
 
-/// The paper reader's tools: it reads and writes files, with no shell and no web.
-const PAPER_READER_TOOLS: [&str; 4] = ["Read", "Grep", "Glob", "Write"];
+/// The paper reader's tools: it reads files, with no shell, no web and no way to write.
+pub const PAPER_READER_TOOLS: [&str; 3] = ["Read", "Grep", "Glob"];
 
-/// The researcher's tools before the host adds agent-browser's in a session with the browser.
-const RESEARCHER_TOOLS: [&str; 6] = ["WebSearch", "WebFetch", "Read", "Grep", "Glob", "Write"];
+/// The researcher's own tools: the web's, with no shell, no file tool and no way to write. It
+/// also gets the browser guard's tools ([`researcher_tools`]).
+const RESEARCHER_WEB_TOOLS: [&str; 2] = ["WebSearch", "WebFetch"];
+
+/// The tools of the browser guard's MCP server, `clauseo-mcp browser-guard` under the reserved
+/// name `crate::servers::BROWSER`: its `ALLOWED_TOOLS` (`crates/mcp/src/browser_guard/filter.rs`,
+/// kept equal by a test), each named for Claude as `mcp__browser__<tool>`. A session without the
+/// `browser` server has none of them, and Claude Code 2.1.293 leaves a name that matches no tool
+/// out of a helper's tools; it refuses a helper only when none of its names match.
+pub const BROWSER_GUARD_TOOLS: [&str; 28] = [
+    "agent_browser_tools_profiles",
+    "agent_browser_open",
+    "agent_browser_read",
+    "agent_browser_snapshot",
+    "agent_browser_back",
+    "agent_browser_forward",
+    "agent_browser_reload",
+    "agent_browser_click",
+    "agent_browser_fill",
+    "agent_browser_type",
+    "agent_browser_press",
+    "agent_browser_check",
+    "agent_browser_uncheck",
+    "agent_browser_select",
+    "agent_browser_scroll",
+    "agent_browser_wait_ms",
+    "agent_browser_wait_for_selector",
+    "agent_browser_wait_for_text",
+    "agent_browser_wait_for_load",
+    "agent_browser_screenshot",
+    "agent_browser_get_text",
+    "agent_browser_get_url",
+    "agent_browser_get_title",
+    "agent_browser_tab_new",
+    "agent_browser_tab_list",
+    "agent_browser_tab_switch",
+    "agent_browser_tab_close",
+    "agent_browser_close",
+];
+
+/// The researcher's tools, by exact name: [`RESEARCHER_WEB_TOOLS`], then each of
+/// [`BROWSER_GUARD_TOOLS`] as `mcp__browser__<tool>`. No `Bash` form, in any session.
+pub fn researcher_tools() -> Vec<String> {
+    let server = crate::servers::BROWSER;
+    RESEARCHER_WEB_TOOLS
+        .iter()
+        .map(|tool| (*tool).to_owned())
+        .chain(
+            BROWSER_GUARD_TOOLS
+                .iter()
+                .map(|tool| format!("mcp__{server}__{tool}")),
+        )
+        .collect()
+}
 
 /// The legal part's (`instructions::LEGAL`) `## Evidence` and `## Citations` sections, headings
 /// included, verbatim: from `## Evidence` up to the next section after `## Citations`.
@@ -131,8 +195,8 @@ pub fn researcher_prompt(arm: ResearcherArm) -> String {
 
 /// The agents Claude may launch, as `options.agents`: [`PAPER_READER`], then [`RESEARCHER`] when
 /// [`RESEARCHER_ARM`] names one. The instructions' "Working at scale" part says when to launch
-/// them. Their prompts hold `{work_folder}`; the host fills it, and adds agent-browser's allow
-/// rules to the researcher's `tools` in a session with the browser.
+/// them. The paper reader's prompt holds `{work_folder}`, which the host fills; the host also
+/// picks each one's model for the login, and leaves the researcher out without web search.
 pub fn subagents() -> Map<String, Value> {
     let mut agents = Map::new();
     agents.insert(
@@ -155,7 +219,7 @@ pub fn subagents() -> Map<String, Value> {
                 "maxTurns": arm.max_turns(),
                 "model": arm.model(),
                 "prompt": researcher_prompt(arm),
-                "tools": RESEARCHER_TOOLS,
+                "tools": researcher_tools(),
             }),
         );
     }

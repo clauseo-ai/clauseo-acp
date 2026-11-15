@@ -2,6 +2,8 @@
 //! skills' source files, their budgets, the words they must never hold, the version lock, and
 //! the skills index Codex gets. Nothing is written; the lock test reads `assets/skills/`.
 
+#[path = "legal/budgets.rs"]
+mod budgets;
 #[path = "legal/claude_shell.rs"]
 mod claude_shell;
 #[path = "legal/codex_pdf.rs"]
@@ -17,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use clauseo_profile::RenderedSkill;
-use clauseo_profile::instructions::{LEGAL, TOOLS, word_count};
+use clauseo_profile::instructions::{LEGAL, word_count};
 use clauseo_profile::placeholders::{
     BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
 };
@@ -25,7 +27,7 @@ use clauseo_profile::skills::builtin::{ASSETS, BUILTIN, RETIRED_BUILTINS, source
 use clauseo_profile::skills::frontmatter::{self, MetaValue};
 use clauseo_profile::skills::stetdoc::STETDOC;
 use clauseo_profile::skills::{SKILL_MD, is_skill_name, render};
-use clauseo_profile::{BrowserSidecars, ClauseoProfile, Instructions, ProfilePaths};
+use clauseo_profile::{BrowserSidecars, ClauseoProfile, ProfilePaths};
 use clauseo_settings::Locations;
 use sha2::{Digest as _, Sha256};
 
@@ -135,38 +137,6 @@ fn skill_mds() -> Vec<(&'static str, &'static str)> {
         .filter(|(_, path, _)| *path == SKILL_MD)
         .map(|(skill, _, text)| (*skill, *text))
         .collect()
-}
-
-#[test]
-fn legal_word_budget() {
-    let legal = word_count(LEGAL);
-    assert!(legal <= 1360, "the legal part has {legal} words");
-    let whole = ClauseoProfile::new(paths_under(Path::new("/data")), None).instructions();
-    assert_eq!(
-        whole,
-        Instructions::tools()
-            .with_connectors()
-            .with_part(LEGAL)
-            .compose("")
-    );
-    assert!(whole.ends_with(&format!("\n\n{}", LEGAL.trim())));
-    assert_eq!(
-        word_count(&whole),
-        word_count(TOOLS) + word_count(LEGAL),
-        "only {{author}} is filled, with one word"
-    );
-    assert!(word_count(&whole) <= 1800, "{} words", word_count(&whole));
-    // With a working stetdoc, as the app launches: the stetdoc line joins the tools part.
-    let stetdoc = ClauseoProfile::new(paths_under(Path::new("/data")), None)
-        .with_stetdoc_cli(true)
-        .instructions();
-    let line = clauseo_profile::instructions::STETDOC_CLI;
-    assert_eq!(word_count(&stetdoc), word_count(&whole) + word_count(line));
-    assert!(
-        word_count(&stetdoc) <= 1800,
-        "{} words",
-        word_count(&stetdoc)
-    );
 }
 
 #[test]

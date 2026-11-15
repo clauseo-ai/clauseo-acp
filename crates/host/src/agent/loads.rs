@@ -31,6 +31,9 @@ mod profile_tests;
 pub(crate) mod sandbox;
 #[cfg(test)]
 mod sandbox_tests;
+pub(crate) mod subagents;
+#[cfg(test)]
+mod subagents_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) mod tls_roots;

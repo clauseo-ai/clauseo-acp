@@ -141,9 +141,14 @@ pub fn claude_shell(macos: bool) -> Option<&'static str> {
 pub const SHIP_WORKING_AT_SCALE: bool = true;
 
 /// The "Working at scale" part a Claude session gets at the very end of its instructions (arm
-/// C2f's text, verbatim): when to convert documents to text, batch steps into one script, and
-/// launch `paper-reader` agents (`crate::subagents`). It holds `{work_folder}`, which the host
-/// fills. Codex gets no such part.
+/// C2f's text, with the readers' digests in their replies rather than in files): when to convert
+/// documents to text, batch steps into one script, and launch `paper-reader` agents
+/// (`crate::subagents`). It holds `{work_folder}`, which the host fills. Codex gets no such part.
+///
+/// Its conversion script names `pypdf` and `python-docx`: Clauseo's Python runtime bundles both
+/// (`python-runtime/lock.toml`'s requirements, imported by its smoke test at every build; a
+/// profile test reads the lock). Linux has no runtime, and on macOS and Windows it installs after
+/// the agent, so a session can start before it is there.
 pub const SCALE_CLAUDE: &str = include_str!("../assets/instructions/scale-claude.txt");
 
 /// Whether [`SCALE_CLAUDE`] gains [`SCALE_RESEARCH`] when Claude has the `researcher` agent
