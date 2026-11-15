@@ -17,17 +17,23 @@ import { Say } from "./say.tsx";
 /** What a tracked change does, as the host lists it; unknown for a kind from a newer Clauseo. */
 export type TrackedKind = "insert" | "delete" | "move" | "format" | "unknown";
 
+/** Where a tracked change is when it is not in the document's main text, as the host lists it; unknown for a place
+ * from a newer Clauseo. */
+export type TrackedPlace = "header_footer" | "note" | "comment" | "unknown";
+
 /** Accept or reject. */
 export type TrackedDecision = "accept" | "reject";
 
 /** One tracked change as the panel shows it: its ids (what a decision names), its author as Word recorded it, when, in
- * the language ("" where the file records no time), and its words, or null for a change with none (formatting). */
+ * the language ("" where the file records no time), where it is (null in the main text), and its words, or null for a
+ * change with none (formatting). */
 export type TrackedChange = {
   key: string;
   ids: readonly number[];
   kind: TrackedKind;
   author: string;
   when: string;
+  place: TrackedPlace | null;
   text: string | null;
 };
 
@@ -41,13 +47,31 @@ const LABEL: Readonly<Record<TrackedKind, ReaderKey | null>> = {
   unknown: null,
 };
 
+/** Where a change outside the main text is, beside its kind's label, so a change in a header or a note isn't looked for
+ * in the body. A place this version doesn't know says nothing: no words here would be true of it. */
+const PLACE: Readonly<Record<TrackedPlace, ReaderKey | null>> = {
+  header_footer: "In a header or footer",
+  note: "In a footnote or endnote",
+  comment: "In a comment",
+  unknown: null,
+};
+
 /** Content as Word holds it: lang="en" where it is Latin only, Hindi where it reads as Hindi. */
 const langOf = (text: string) => (isLatinOnly(text) ? "en" : langOfText(text));
 
-function ChangeWords({ kind, text }: { kind: TrackedKind; text: string | null }) {
+function ChangeWords({
+  kind,
+  place,
+  text,
+}: {
+  kind: TrackedKind;
+  place: TrackedPlace | null;
+  text: string | null;
+}) {
   const w = useReaderWords();
   const label = LABEL[kind] ?? null;
-  if (label === null && text === null) return null;
+  const where = place === null ? null : (PLACE[place] ?? null);
+  if (label === null && where === null && text === null) return null;
   const words =
     text === null ? null : kind === "insert" ? (
       <ins className="rd-ins" lang={langOf(text)}>
@@ -63,7 +87,12 @@ function ChangeWords({ kind, text }: { kind: TrackedKind; text: string | null })
   return (
     <div className="rd-change-words">
       <p className="rd-change-run" data-kind={kind}>
-        {label !== null && <span className="rd-change-kind">{w.r(label)}</span>}
+        {(label !== null || where !== null) && (
+          <span className="rd-change-kind">
+            {label !== null && <span>{w.r(label)}</span>}
+            {where !== null && <span className="rd-change-place">{w.r(where)}</span>}
+          </span>
+        )}
         {words}
       </p>
     </div>
@@ -239,7 +268,7 @@ export function WordChanges({
                     <b lang={langOf(c.author)}>{c.author}</b>
                     {c.when !== "" && <span className="rd-change-when">{c.when}</span>}
                   </p>
-                  <ChangeWords kind={c.kind} text={c.text} />
+                  <ChangeWords kind={c.kind} place={c.place} text={c.text} />
                   <div className="rd-change-foot">
                     <span className="rd-change-state">{w.r("Not yet accepted")}</span>
                     <span className="rd-change-acts">

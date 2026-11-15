@@ -62,6 +62,18 @@ const LIST: RevisionList = {
   total: 4,
 };
 
+/** A list whose changes are outside the main text: in the header, in a footnote, in a comment, one of them formatting. */
+const OUTSIDE: RevisionList = {
+  ...LIST,
+  revisions: [
+    { ...change(5, "insert", "Without prejudice"), place: "header_footer" },
+    { ...change(6, "format"), place: "header_footer" },
+    { ...change(7, "delete", "See the bank's letter of 2 March."), place: "note" },
+    { ...change(8, "insert", "Check the date"), place: "comment" },
+  ],
+  total: 4,
+};
+
 /** The room over a matter whose wall lists one .docx; list_revisions gives `list`, or is refused with that code, and
  * decide_revisions is refused with `decide`. */
 const wordHost =
@@ -126,6 +138,10 @@ export const UC_WORD: Entry[] = [
   ),
   panel("UC-122", readerWords("Formatting changed"), wordHost(LIST)),
   panel("UC-123", readerWords("Moved"), wordHost(LIST)),
+  // where a change outside the main text is, beside its kind's label
+  panel("UC-261", readerWords("In a header or footer"), wordHost(OUTSIDE)),
+  panel("UC-262", readerWords("In a footnote or endnote"), wordHost(OUTSIDE)),
+  panel("UC-263", readerWords("In a comment"), wordHost(OUTSIDE)),
   panel(
     "UC-124",
     errorWords(
