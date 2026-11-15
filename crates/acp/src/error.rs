@@ -156,6 +156,9 @@ pub(crate) const START_METHODS: [&str; 5] = [
     "session/resume",
 ];
 
+/// The JSON-RPC method of a question: an error answer to it is `agent.answer_failed`.
+pub(crate) const PROMPT_METHOD: &str = "session/prompt";
+
 /// The most of an RPC error's `data` kept.
 pub(crate) const MAX_DATA_BYTES: usize = 4096;
 
@@ -208,7 +211,9 @@ impl Error {
     /// The code a client sees. An error the agent answered a start request with
     /// ([`START_METHODS`]: `initialize`, `authenticate`, `session/new`, `session/load`,
     /// `session/resume`) is `agent.launch_failed`: the agent did not start, and its answer read
-    /// fine. Only an answer that broke the protocol is `agent.protocol_error`.
+    /// fine. An error the agent answered `session/prompt` with is `agent.answer_failed` (the
+    /// host may read it as offline, a sign-in, a limit or too long first). An error to any other
+    /// request, and an answer that broke the protocol, is `agent.protocol_error`.
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::Closed => ErrorCode::AgentExited,
@@ -217,6 +222,7 @@ impl Error {
             Self::Rpc { method, .. } if START_METHODS.contains(&method.as_str()) => {
                 ErrorCode::AgentLaunchFailed
             }
+            Self::Rpc { method, .. } if method == PROMPT_METHOD => ErrorCode::AgentAnswerFailed,
             Self::Rpc { .. } | Self::Protocol(_) => ErrorCode::AgentProtocolError,
             Self::TurnRunning => ErrorCode::ThreadTurnRunning,
             Self::PermissionNotPending => ErrorCode::PermissionNotPending,

@@ -111,10 +111,10 @@ fn connection_ended_offline(
 
 /// The code a prompt that ended on a `connection` failure the agent gave up on, and that is not
 /// offline, fails with: the one the same failure as a JSON-RPC error gets
-/// (`agent.protocol_error`), so the cut-off answer is never shown as complete and Try again
+/// (`agent.answer_failed`), so the cut-off answer is never shown as complete and Try again
 /// stands. Not `agent.exited`: the adapter is still there.
 fn gave_up_code(lost: &ConnectionLost) -> Option<ErrorCode> {
-    lost.gave_up.then_some(ErrorCode::AgentProtocolError)
+    lost.gave_up.then_some(ErrorCode::AgentAnswerFailed)
 }
 
 /// A failure's code and its detail.

@@ -214,10 +214,7 @@ fn a_prompt_failing_on_a_server_error_keeps_its_own_code() {
     let log = rig.log(thread);
     assert_eq!(
         ended(&log, turn),
-        (
-            Some(StopReason::Failed),
-            Some(ErrorCode::AgentProtocolError)
-        )
+        (Some(StopReason::Failed), Some(ErrorCode::AgentAnswerFailed))
     );
     rig.finish();
 }

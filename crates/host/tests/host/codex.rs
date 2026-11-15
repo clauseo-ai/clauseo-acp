@@ -270,7 +270,7 @@ fn codex_without_workspace_write_fails_before_any_prompt() {
     let dir = codex_dir("codex_no_workspace_write", "codex-no-workspace-write");
     let host = dir.start(0);
     let (_, events, turn) = one_turn(&dir, &host, CODEX);
-    assert_failed_before_prompt(&events, turn, ErrorCode::AgentProtocolError);
+    assert_failed_before_prompt(&events, turn, ErrorCode::AgentModeMissing);
     host.shutdown();
 }
 

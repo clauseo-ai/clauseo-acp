@@ -395,6 +395,13 @@ error_codes! {
         start: it answered a start request (`initialize`, `session/new`, `session/load`) with \
         an error that names a connection failure, and the host's probe of the agent's service \
         did not get through. Asking again can work once the computer is back online.";
+    AgentAnswerFailed = "agent.answer_failed", retryable: true, meaning: "The agent answered \
+        the question (`session/prompt`) with an error that no other code reads: not offline, a \
+        sign-in, a limit or a question too long. Codex giving up on a lost connection the host \
+        does not read as offline gets it too. The answer so far is kept; asking again can work.";
+    AgentModeMissing = "agent.mode_missing", retryable: false, meaning: "The agent's session \
+        offered no mode Clauseo runs it in (Codex's `workspace-write`, Claude's mode or its \
+        fallback), so no message was sent: a version of the agent Clauseo does not support.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

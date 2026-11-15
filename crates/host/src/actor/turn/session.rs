@@ -320,7 +320,7 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
         });
         if !offered {
             return Err(Error::refused(
-                ErrorCode::AgentProtocolError,
+                ErrorCode::AgentModeMissing,
                 format!(
                     "Codex offered no \"{}\" mode, which Clauseo runs it in, so no message was \
                      sent",

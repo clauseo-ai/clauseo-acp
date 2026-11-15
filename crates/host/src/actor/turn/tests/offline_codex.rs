@@ -246,10 +246,7 @@ fn codex_s_app_server_lost_is_not_offline_but_fails() {
     until_ended(&mut rig, thread);
     assert_eq!(
         ended(&rig.log(thread), turn),
-        (
-            Some(StopReason::Failed),
-            Some(ErrorCode::AgentProtocolError)
-        )
+        (Some(StopReason::Failed), Some(ErrorCode::AgentAnswerFailed))
     );
     rig.finish();
 }
@@ -268,10 +265,7 @@ fn codex_giving_up_on_a_server_s_answer_is_not_offline_but_fails() {
     until_ended(&mut rig, thread);
     assert_eq!(
         ended(&rig.log(thread), turn),
-        (
-            Some(StopReason::Failed),
-            Some(ErrorCode::AgentProtocolError)
-        )
+        (Some(StopReason::Failed), Some(ErrorCode::AgentAnswerFailed))
     );
     rig.finish();
 }
@@ -351,10 +345,7 @@ fn codex_giving_up_after_a_probe_that_got_through_is_not_offline() {
     let log = rig.log(thread);
     assert_eq!(
         ended(&log, turn),
-        (
-            Some(StopReason::Failed),
-            Some(ErrorCode::AgentProtocolError)
-        )
+        (Some(StopReason::Failed), Some(ErrorCode::AgentAnswerFailed))
     );
     assert_eq!(answer(&log, turn), "Clause five says");
     rig.finish();
