@@ -176,6 +176,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentSettingRefused,
             "the agent answered session/set_mode with error -32603",
         ),
+        failed(
+            ErrorCode::AgentProgramBlocked,
+            "could not start claude-agent-acp: No such file or directory (os error 2)",
+        ),
     ]
 }
 

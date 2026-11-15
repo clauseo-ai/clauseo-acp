@@ -405,6 +405,10 @@ error_codes! {
     AgentSettingRefused = "agent.setting_refused", retryable: true, meaning: "The agent \
         answered the lawyer's own change on a running session (a mode or a setting) with an \
         error, so the change was not made; nothing else changed.";
+    AgentProgramBlocked = "agent.program_blocked", retryable: false, meaning: "The OS would \
+        not run the agent's program: it is not there, or the computer does not allow it to run \
+        (permission denied; on Windows, a policy or security software blocking it). Asking \
+        again does not help.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

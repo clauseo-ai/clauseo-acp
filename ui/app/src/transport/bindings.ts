@@ -1997,6 +1997,8 @@ export type ErrorCode =
 "agent.mode_missing" | 
 /** The agent answered the lawyer's own change on a running session (a mode or a setting) with an error, so the change was not made; nothing else changed. */
 "agent.setting_refused" | 
+/** The OS would not run the agent's program: it is not there, or the computer does not allow it to run (permission denied; on Windows, a policy or security software blocking it). Asking again does not help. */
+"agent.program_blocked" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
