@@ -23,6 +23,9 @@ export const HI = {
   "Your conversations are kept.": "आपकी बातचीत सुरक्षित है।",
   "{action} may not have finished.": "{action} शायद पूरा नहीं हुआ।",
   "{action} in {matter} may not have finished.": "{matter} में {action} शायद पूरा नहीं हुआ।",
+  // a restore's own sentences: बहाली is feminine, so its verb agrees (the English reads the same)
+  "{restore} may not have finished.": "{restore} शायद पूरी नहीं हुई।",
+  "{restore} in {matter} may not have finished.": "{matter} में {restore} शायद पूरी नहीं हुई।",
   "Undo of 1 file": "1 फ़ाइल का अनडू",
   "Undo of {count} files": "{count} फ़ाइलों का अनडू",
   "Restore of 1 file": "1 फ़ाइल की बहाली",

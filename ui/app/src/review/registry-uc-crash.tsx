@@ -1,4 +1,4 @@
-// UC-326 to UC-335 and UC-365 to UC-367: the notice after Clauseo closed unexpectedly (room/crash-notice.tsx), in the
+// UC-326 to UC-335, UC-365 to UC-367, UC-372 and UC-373: the notice after Clauseo closed unexpectedly (room/crash-notice.tsx), in the
 // real room over a host whose `last_exit` says the last run ended without its quit: with nothing unfinished, with an
 // undo and a counted restore in a matter, with one file each and a whole-matter restore, with tracked changes, and
 // with an undo in the Scratch matter, which is never named. Every entry is provisional, its Hindi too, until Rohan's
@@ -47,7 +47,7 @@ const STATES = {
   counted: [at(MATTER, "undo", 3), at(MATTER, "restore", 2)],
   single: [at(MATTER, "undo", 1), at(MATTER, "restore", 1), at(MATTER, "restore")],
   tracked: [at(MATTER, "accept_changes", 1), at(MATTER, "reject_changes", 1)],
-  scratch: [at(SCRATCH, "undo", 2)],
+  scratch: [at(SCRATCH, "undo", 2), at(SCRATCH, "restore", 1)],
 } satisfies Record<string, InterruptedAction[]>;
 
 type State = keyof typeof STATES;
@@ -96,4 +96,7 @@ export const UC_CRASH: readonly Entry[] = [
   notice("UC-365", "Accepting tracked changes", "tracked"),
   notice("UC-366", "Rejecting tracked changes", "tracked"),
   notice("UC-367", "Versions has the earlier copies.", "counted"),
+  // a restore's own sentences, for the Hindi's agreement
+  notice("UC-372", "{restore} in {matter} may not have finished.", "counted"),
+  notice("UC-373", "{restore} may not have finished.", "scratch"),
 ];
