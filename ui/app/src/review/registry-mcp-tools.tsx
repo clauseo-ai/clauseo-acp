@@ -76,4 +76,10 @@ export const MCP_TOOLS: Entry[] = [
   // A4, import over the real host: the button while in flight, and the left-out ones the host doesn't name
   entry("UC-250", "Importing…", "importing"),
   entry("UC-251", "{count} more couldn't be imported.", "import-result"),
+  // a tool one import's approval box had no room for; the next import adds it
+  entry(
+    "UC-256",
+    "{name}: there were too many tools to import at once. Import again to add it.",
+    "import-reasons",
+  ),
 ];

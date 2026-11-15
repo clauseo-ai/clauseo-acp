@@ -2,12 +2,13 @@
 //! (`super::LaunchConfirm`), in English and Hindi by the app's language (`ui.language`). Their
 //! review home is `ui/app/src/review/registry-uc-mcp-confirm.tsx` (UC-214 to UC-221), where the
 //! Hindi is provisional; a test fails when the two disagree. `{program}` is a local server's
-//! command and arguments ([`shown_program`]), `{address}` a remote server's URL
-//! ([`shown_address`]), and `{names}` the new or changed variables or headers ([`shown_names`]):
-//! the only parts of the dialog that come from the settings window. Nothing is ever cut: the host
-//! refuses an ask too long to show whole (`MAX_ASK_CHARS`) before it reaches here.
+//! command and arguments (`mcp_shown::program`), `{address}` a remote server's URL
+//! (`mcp_shown::address`), and `{names}` the new or changed variables or headers
+//! (`mcp_shown::names`): the only parts of the dialog that come from the settings window. They
+//! are the host's own strings, the ones it measured: nothing is ever cut, since the host refuses an
+//! ask whose shown text passes `MAX_ASK_CHARS` before it reaches here.
 
-use clauseo_host::McpLaunchAsk;
+use clauseo_host::{McpLaunchAsk, mcp_shown};
 use clauseo_protocol::Language;
 
 use crate::dialogs::words::fill;
@@ -90,21 +91,27 @@ impl LaunchWords {
         let (title, mut message, names_line) = match &ask.url {
             Some(url) => (
                 table.remote_title,
-                fill(table.remote_message, &[("address", &shown_address(url))]),
+                fill(
+                    table.remote_message,
+                    &[("address", &mcp_shown::address(url))],
+                ),
                 table.remote_names,
             ),
             None => (
                 table.local_title,
                 fill(
                     table.local_message,
-                    &[("program", &shown_program(&ask.program))],
+                    &[("program", &mcp_shown::program(&ask.program))],
                 ),
                 table.local_names,
             ),
         };
         if !ask.names.is_empty() {
             message.push_str("\n\n");
-            message.push_str(&fill(names_line, &[("names", &shown_names(&ask.names))]));
+            message.push_str(&fill(
+                names_line,
+                &[("names", &mcp_shown::names(&ask.names))],
+            ));
         }
         Self {
             title: title.to_owned(),
@@ -113,70 +120,6 @@ impl LaunchWords {
             cancel: table.cancel.to_owned(),
         }
     }
-}
-
-/// A local server's command and arguments, verbatim and whole, joined by spaces, each quoted as
-/// a shell would when it is empty or holds a space or a quote ([`quoted`]).
-pub(super) fn shown_program(program: &[String]) -> String {
-    program
-        .iter()
-        .map(|part| quoted(part))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// A remote server's URL, whole, its invisible characters written out.
-pub(super) fn shown_address(url: &str) -> String {
-    visible(url)
-}
-
-/// The new or changed names, verbatim and whole, joined by ", ", their invisible characters
-/// written out.
-pub(super) fn shown_names(names: &[String]) -> String {
-    names
-        .iter()
-        .map(|name| visible(name))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// `part` as a shell reads it back: as it is, or in single quotes when it is empty or holds
-/// whitespace or a quote; in double quotes, `"` and `\` escaped, when it holds a single quote.
-/// Its invisible characters are written out ([`visible`]).
-fn quoted(part: &str) -> String {
-    let part = visible(part);
-    let plain = !part.is_empty()
-        && !part
-            .chars()
-            .any(|c| c.is_whitespace() || c == '\'' || c == '"');
-    if plain {
-        part
-    } else if !part.contains('\'') {
-        format!("'{part}'")
-    } else {
-        let escaped = part.replace('\\', "\\\\").replace('"', "\\\"");
-        format!("\"{escaped}\"")
-    }
-}
-
-/// `text` with each control character, and each that turns or hides text (bidirectional
-/// overrides and isolates, zero-width marks), written as its escape (`\n`, `\u{202e}`): a
-/// program can't add a line to the dialog, or show its words in another order.
-fn visible(text: &str) -> String {
-    text.chars()
-        .map(|c| {
-            if c.is_control() || hides(c) {
-                c.escape_default().to_string()
-            } else {
-                c.to_string()
-            }
-        })
-        .collect()
-}
-
-/// Whether `c` turns or hides the text around it.
-fn hides(c: char) -> bool {
-    matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}')
 }
 
 #[cfg(test)]

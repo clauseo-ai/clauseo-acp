@@ -124,8 +124,8 @@ pub struct McpImportResult {
     /// The app's servers left out, in name order, each with why; at most
     /// [`MCP_SKIPPED_MAX`].
     pub skipped: Vec<McpSkipped>,
-    /// The servers left out past [`MCP_SKIPPED_MAX`], and those the app's config held past
-    /// the per-source read cap (counted, never read); 0 when `skipped` names them all.
+    /// The servers left out past [`MCP_SKIPPED_MAX`], and those the apps' config held past
+    /// the per-source or total read cap (counted, never read); 0 when `skipped` names them all.
     #[serde(default)]
     pub others: u32,
 }
@@ -163,19 +163,24 @@ pub enum McpSkipReason {
     CommandNotFound,
     /// Its config names a variable that is not set.
     UnresolvedVariable,
-    /// Part of its entry could not be read, or Clauseo's rules refuse it.
+    /// Part of its entry could not be read, or Clauseo's rules refuse it (such as one too long
+    /// to show whole in the import's confirm).
     Unreadable,
+    /// It would import, but did not fit in this import's one confirm after the servers before
+    /// it; the next import of the same app adds it.
+    TooMany,
 }
 
 impl McpSkipReason {
     /// Every value, in declaration order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::AlreadyAdded,
         Self::NotApproved,
         Self::UnsupportedTransport,
         Self::CommandNotFound,
         Self::UnresolvedVariable,
         Self::Unreadable,
+        Self::TooMany,
     ];
 }
 

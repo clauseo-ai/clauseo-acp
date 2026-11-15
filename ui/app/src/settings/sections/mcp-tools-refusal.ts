@@ -87,6 +87,14 @@ export function skippedLine(lang: Lang, s: Skipped): string {
       return mw(lang, "{name}: it comes from a project you haven't approved in Claude Code.", {
         name,
       });
+    case "too_many":
+      return mw(
+        lang,
+        "{name}: there were too many tools to import at once. Import again to add it.",
+        {
+          name,
+        },
+      );
   }
 }
 
