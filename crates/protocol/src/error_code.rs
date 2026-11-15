@@ -391,6 +391,10 @@ error_codes! {
         matters' size cap (512,000,000 bytes) or one of stetdoc's limits (its `limit_exceeded`: \
         the package's size, entry count or compression ratio, an XML part's size, depth or node \
         count), so its tracked changes were not read or decided.";
+    AgentStartOffline = "agent.start_offline", retryable: true, meaning: "The agent did not \
+        start: it answered a start request (`initialize`, `session/new`, `session/load`) with \
+        an error that names a connection failure, and the host's probe of the agent's service \
+        did not get through. Asking again can work once the computer is back online.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

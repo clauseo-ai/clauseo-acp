@@ -155,6 +155,8 @@ fn agent_failures() -> Vec<DomainEvent> {
         failed(
             ErrorCode::AgentFolderInaccessible,
             "the agent could not open the matter folder as its working folder",
+            ErrorCode::AgentStartOffline,
+            "a start request failed on its connection; the probe did not get through",
         ),
         failed(
             ErrorCode::AgentUnreachable,

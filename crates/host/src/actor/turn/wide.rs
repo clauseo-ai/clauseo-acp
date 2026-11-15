@@ -21,6 +21,9 @@ pub(crate) struct TurnPath {
     /// Whether the agent's service answers, asked before a watch only the window armed ends
     /// a turn (`offline/probe.rs`); tests set a fixed answer.
     pub(super) probe: super::offline::probe::ReachProbe,
+    /// The failed starts waiting for that probe, by thread (`offline/start.rs`).
+    pub(super) start_probes:
+        std::collections::HashMap<clauseo_protocol::ThreadId, super::offline::start::StartProbe>,
     /// Whether a live turn of a Claude or Codex agent is watched for silence
     /// (`offline/quiet.rs`): on, but off in unit tests unless a test turns it on.
     pub(super) quiet_watch: bool,

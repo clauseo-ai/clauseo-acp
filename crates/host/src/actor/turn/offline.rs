@@ -62,6 +62,7 @@ mod ended;
 mod hold;
 pub(crate) mod probe;
 pub(super) mod quiet;
+pub(super) mod start;
 
 pub(super) use ended::{failed_with, prompt_ended};
 pub(super) use hold::{Hold, hold_for_probe, release_cancelled};
@@ -491,6 +492,9 @@ pub(super) fn at_work(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> (boo
 /// A watch that went ignores it. The line goes to host.log (the lifecycle target).
 pub(super) fn on_probed(actor: &mut Actor, thread: ThreadId, turn: TurnId, reach: Reach) {
     if hold::on_probed(actor, thread, turn, reach) {
+        return;
+    }
+    if start::on_probed(actor, thread, turn, reach) {
         return;
     }
     let now = actor.now().mono;

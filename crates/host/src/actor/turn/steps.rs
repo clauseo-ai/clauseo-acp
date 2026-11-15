@@ -245,17 +245,29 @@ pub(super) fn on_launch_failed(actor: &mut Actor, thread: ThreadId, turn: TurnId
     if current(actor, thread).is_none_or(|current| current.turn != turn) {
         return;
     }
+    let code = super::sign_in::code_of(actor, error.code(), &error.to_string(), error.rpc_data());
+    let detail = Some(super::close::detail_of(actor, error.detail()));
+    // A start that failed on its connection waits for the host's probe (`offline/start.rs`).
+    if code == ErrorCode::AgentLaunchFailed
+        && !host_stopping(actor)
+        && super::offline::start::probe_first(actor, thread, turn, error, detail.clone())
+    {
+        return;
+    }
+    end_launch_failed(actor, thread, turn, code, detail);
+}
+
+/// Ends `thread`'s unstarted `turn` failed with `code`: `TurnFailed`, `TurnEnded { Failed }`.
+/// During shutdown the turn stays queued for the next start instead.
+pub(super) fn end_launch_failed(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    code: ErrorCode,
+    detail: Option<String>,
+) {
     if !host_stopping(actor) {
-        let failed = TurnFailed {
-            turn,
-            code: super::sign_in::code_of(
-                actor,
-                error.code(),
-                &error.to_string(),
-                error.rpc_data(),
-            ),
-            detail: Some(super::close::detail_of(actor, error.detail())),
-        };
+        let failed = TurnFailed { turn, code, detail };
         end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
         return;
     }

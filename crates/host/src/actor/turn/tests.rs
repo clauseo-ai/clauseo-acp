@@ -38,6 +38,7 @@ mod repair;
 mod restore;
 mod rig;
 mod skipped;
+mod start_offline;
 mod sweep;
 mod title_window;
 mod tools_live;

@@ -1989,6 +1989,8 @@ export type ErrorCode =
 "agent.unreachable" | 
 /** The Word file is over the matters' size cap (512,000,000 bytes) or one of stetdoc's limits (its `limit_exceeded`: the package's size, entry count or compression ratio, an XML part's size, depth or node count), so its tracked changes were not read or decided. */
 "word.too_large" | 
+/** The agent did not start: it answered a start request (`initialize`, `session/new`, `session/load`) with an error that names a connection failure, and the host's probe of the agent's service did not get through. Asking again can work once the computer is back online. */
+"agent.start_offline" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
