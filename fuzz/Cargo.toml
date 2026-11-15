@@ -48,6 +48,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "acp_skipped_update"
+path = "fuzz_targets/acp_skipped_update.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "protocol_decode"
 path = "fuzz_targets/protocol_decode.rs"
 test = false

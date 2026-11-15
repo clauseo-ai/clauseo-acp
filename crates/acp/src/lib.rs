@@ -79,6 +79,8 @@ mod diagnose;
 mod driver;
 mod error;
 mod event;
+#[doc(hidden)]
+pub mod fuzzing;
 mod inbound;
 mod line;
 mod map;

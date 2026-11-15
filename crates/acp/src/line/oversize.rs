@@ -17,7 +17,8 @@
 //!
 //! What the skipped line says ([`SkippedUpdate`]) is read from the same start, after
 //! `"params"`: its `sessionId`, and in its `update` the `sessionUpdate`, `toolCallId` and
-//! `status`, each a plain string, the last of a repeated key winning. Any other value is walked
+//! `status`, each a plain string, the last of a repeated key winning (a repeated `update`
+//! replaces all three). Any other value is walked
 //! over, counting brackets outside strings, without being decoded or checked. The read stops at
 //! the update's `content`, at a key written with an escape, at anything it cannot walk, and
 //! where the start ends: a field not read by then stays unknown. Both adapters write `status`
@@ -26,6 +27,13 @@
 //! (`tool-calls/renderer.js`, `result`); codex-acp 2.2.2 writes `sessionUpdate`, `toolCallId`,
 //! `name`, `kind`, `title`, `status`, then `content` (`AcpToolCallRenderer.render`), but a
 //! status it adds to a rendered update with no status goes after the content.
+//!
+//! A copied `sessionId` or `toolCallId` is at most [`MAX_ID_BYTES`]; a longer one stays unknown,
+//! so what the host keeps per skipped line is small.
+
+/// The longest `sessionId` or `toolCallId` copied from a skipped line, in bytes. Both adapters
+/// write ids of a few dozen bytes.
+pub(crate) const MAX_ID_BYTES: usize = 256;
 
 /// The method a skippable line names.
 pub(super) const UPDATE_METHOD: &str = "session/update";
@@ -57,7 +65,7 @@ impl SkippedUpdate {
     /// The [`SKIPPED_UPDATE_METHOD`] notification for this update of `bytes` bytes. Its params
     /// hold `bytes`, then `sessionId`, `kind` (`tool_call_update` or `other`), `toolCallId` and
     /// `status`, each `null` when unknown.
-    pub(super) fn marker(&self, bytes: usize) -> String {
+    pub(crate) fn marker(&self, bytes: usize) -> String {
         let kind = self
             .tool_call_update
             .map(|tool| if tool { TOOL_CALL_UPDATE } else { "other" });
@@ -78,7 +86,7 @@ impl SkippedUpdate {
 
 /// What `head`, the start of a line, says when it shows a `session/update` notification (see
 /// the module doc); `None` when it does not, and the line is not skippable.
-pub(super) fn skipped_update(head: &[u8]) -> Option<SkippedUpdate> {
+pub(crate) fn skipped_update(head: &[u8]) -> Option<SkippedUpdate> {
     let mut cursor = Cursor { head, at: 0 };
     if cursor.update_notification() != Some(true) {
         return None;
@@ -138,6 +146,10 @@ impl<'a> Cursor<'a> {
     /// Reads the update's `sessionUpdate`, `toolCallId` and `status` into `out`, up to its
     /// `content`. `None` where the read stops.
     fn update(&mut self, out: &mut SkippedUpdate) -> Option<()> {
+        // A repeated `update` replaces the one before it, as the SDK reads it.
+        out.tool_call_update = None;
+        out.tool_call = None;
+        out.status = None;
         self.expect(b'{')?;
         loop {
             let key = self.plain_string()?;
@@ -204,10 +216,11 @@ impl<'a> Cursor<'a> {
         rest.get(..end)
     }
 
-    /// A plain string that is UTF-8 with no control character, as JSON allows, copied.
+    /// A plain string of at most [`MAX_ID_BYTES`] that is UTF-8 with no control character, as
+    /// JSON allows, copied.
     fn text(&mut self) -> Option<String> {
         let bytes = self.plain_string()?;
-        if bytes.iter().any(|byte| *byte < 0x20) {
+        if bytes.len() > MAX_ID_BYTES || bytes.iter().any(|byte| *byte < 0x20) {
             return None;
         }
         std::str::from_utf8(bytes).ok().map(str::to_owned)

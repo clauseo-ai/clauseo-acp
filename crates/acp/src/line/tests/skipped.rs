@@ -3,6 +3,7 @@
 
 use super::{MAX_LINE_BYTES, SplitError, Trickle};
 use crate::line::LineSplitter;
+use crate::line::MAX_ID_BYTES;
 use crate::line::oversize::{SkippedUpdate, skipped_update};
 
 const ENVELOPE: &str = r#"{"jsonrpc":"2.0","method":"session/update","params":"#;
@@ -168,4 +169,36 @@ fn the_splitter_carries_what_the_start_said() {
             said(Some("s-1"), Some(true), Some("t-1"), Some("failed"))
         );
     }
+}
+
+#[test]
+fn an_id_over_256_bytes_is_not_copied() {
+    assert_eq!(MAX_ID_BYTES, 256);
+    for (length, copied) in [(MAX_ID_BYTES, true), (MAX_ID_BYTES + 1, false)] {
+        let id = "t".repeat(length);
+        let params = format!(
+            r#"{{"sessionId":"{id}","update":{{"sessionUpdate":"tool_call_update","toolCallId":"{id}","status":"failed","content":"#
+        );
+        let got = read(&params);
+        assert_eq!(got.session.is_some(), copied, "session id of {length}");
+        if copied {
+            let expected = said(Some(&id), Some(true), Some(&id), Some("failed"));
+            assert_eq!(got, expected);
+        } else {
+            // The session id stops the read where it stands: nothing after it is read.
+            assert_eq!(got, SkippedUpdate::default());
+            let tool_only = format!(
+                r#"{{"sessionId":"s","update":{{"sessionUpdate":"tool_call_update","toolCallId":"{id}","status":"failed","content":"#
+            );
+            assert_eq!(read(&tool_only), said(Some("s"), Some(true), None, None));
+        }
+    }
+}
+
+#[test]
+fn a_repeated_update_replaces_the_one_before() {
+    let twice = r#"{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"t-1","status":"failed"},"update":{"sessionUpdate":"agent_message_chunk","content":"#;
+    assert_eq!(read(twice), said(Some("s"), Some(false), None, None));
+    let not_an_object = r#"{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"t-1","status":"failed"},"update":5}"#;
+    assert_eq!(read(not_an_object), said(Some("s"), None, None, None));
 }

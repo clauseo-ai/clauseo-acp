@@ -24,8 +24,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-ALL=(acp_stdout protocol_decode matters_objects matters_read store_read settings_parse
-  reducer_snapshot zip_marks)
+ALL=(acp_stdout acp_skipped_update protocol_decode matters_objects matters_read store_read
+  settings_parse reducer_snapshot zip_marks)
 BIN_DIR=target/x86_64-unknown-linux-gnu/release
 OUT=out
 MINIMISE_SECONDS=300
@@ -50,6 +50,7 @@ fi
 flags() {
   case $1 in
     acp_stdout) echo "-max_len=65536 -timeout=30 -dict=dict/json.dict" ;;
+    acp_skipped_update) echo "-max_len=65536 -timeout=30 -dict=dict/json.dict" ;;
     protocol_decode) echo "-max_len=16384 -timeout=30 -dict=dict/json.dict" ;;
     matters_objects) echo "-max_len=65536 -timeout=60" ;;
     matters_read) echo "-max_len=8192 -timeout=30" ;;
