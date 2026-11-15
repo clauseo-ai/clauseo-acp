@@ -1,0 +1,157 @@
+# agent-browser-build: our build of agent-browser, upstream's source at the commit
+# crates/desktop/agent-browser.toml pins plus the patches in crates/desktop/agent-browser/patches/
+# (crates/desktop/agent-browser/README.md), for the four release targets that take it: both
+# Windows triples, each native on its own runner (ARM64 included), and both macOS triples on
+# macos-15 (x86_64 cross-compiled, as release.yml builds the app). Linux keeps upstream's binary
+# for now, so there is no Linux leg. Each leg runs crates/desktop/sidecars/agent-browser-build.mjs,
+# which checks the source archive's SHA-256 against the pin, applies the patches, runs the patched
+# source's own `cargo test --locked`, then `cargo build --release --locked` with the
+# reproducibility settings its header lists (and crt-static on Windows). A Windows leg checks the
+# exe for VC++ runtime imports (pe-crt-imports.mjs). Each leg uploads the binary with its build
+# record (agent-browser-<triple>.json).
+#
+# With `publish`, a last job makes this repository's GitHub release named by the pin's
+# patched_tag, as a pre-release that is never marked latest (the updater reads releases/latest),
+# holding the four binaries, SHA256SUMS and the records. The release's sidecar fetch
+# (crates/desktop/sidecars/agent-browser.mjs) downloads from it; the pin's sha256 lines are pasted
+# from the build logs or SHA256SUMS in a follow-up commit. Nothing is signed or notarised here:
+# release.yml signs the sidecars as before (sign-windows signs every PE in
+# crates/desktop/binaries/; the macOS build leg codesigns Contents/Helpers/clauseo-agent-browser
+# with the app's identity and the hardened runtime before bundling).
+#
+# Manual only, dispatched from main with the ref whose pin and patches to build:
+#   gh workflow run agent-browser-build.yml --ref main -f ref=<branch or commit> -f publish=true
+# Run it when the pin or a patch changes, with patched_tag counted up first; publishing an
+# existing tag fails. Every action is pinned by commit SHA, with its tag in a comment, copied
+# from release.yml; every job has its own `permissions:`.
+
+name: agent-browser-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The commit, branch or tag of this repository whose pin and patches to build (default, the run's ref).
+        type: string
+        default: ""
+      publish:
+        description: Publish the four builds as the pre-release named by the pin's patched_tag.
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: agent-browser-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, ext: .exe }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, ext: .exe }
+          - { target: aarch64-apple-darwin, runner: macos-15, ext: "" }
+          - { target: x86_64-apple-darwin, runner: macos-15, ext: "" }
+    env:
+      TARGET: ${{ matrix.target }}
+      OUT: ${{ github.workspace }}/agent-browser-out
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      # rust-toolchain.toml's channel, minimal, with the target; the script builds with it by
+      # RUSTUP_TOOLCHAIN, as the source it builds sits outside this checkout.
+      - name: Install the pinned Rust toolchain and the target
+        run: |
+          channel=$(node crates/desktop/sidecars/agent-browser-build.mjs toolchain)
+          rustup toolchain install "$channel" --profile minimal --target "$TARGET"
+
+      - name: Build agent-browser from the pinned source and the patches
+        run: node crates/desktop/sidecars/agent-browser-build.mjs build --target "$TARGET" --out "$OUT"
+
+      - name: The exe imports no VC++ runtime DLL (crt-static)
+        if: runner.os == 'Windows'
+        run: node .github/scripts/pe-crt-imports.mjs "$OUT/agent-browser-$TARGET.exe"
+
+      - name: Summary
+        run: |
+          {
+            echo "### agent-browser ($TARGET)"
+            echo '```json'
+            cat "$OUT/agent-browser-$TARGET.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-browser-${{ matrix.target }}
+          path: |
+            ${{ env.OUT }}/agent-browser-${{ matrix.target }}${{ matrix.ext }}
+            ${{ env.OUT }}/agent-browser-${{ matrix.target }}.json
+          if-no-files-found: error
+
+  # A pre-release, never latest: a latest release would become the updater's releases/latest.
+  publish:
+    name: publish
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: agent-browser-*
+          path: ${{ runner.temp }}/dist
+          merge-multiple: true
+
+      - name: Create the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIST: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          # The pin's macOS and Windows urls name this repository's releases; a fork's run
+          # publishes nothing.
+          if [ "$GITHUB_REPOSITORY" != clauseo-ai/clauseo-acp ]; then
+            echo "::error::the pin downloads from clauseo-ai/clauseo-acp, not $GITHUB_REPOSITORY"
+            exit 1
+          fi
+          tag=$(node crates/desktop/sidecars/agent-browser-build.mjs tag)
+          commit=$(git rev-parse HEAD)
+          cd "$DIST"
+          binaries=(agent-browser-x86_64-pc-windows-msvc.exe agent-browser-aarch64-pc-windows-msvc.exe
+            agent-browser-aarch64-apple-darwin agent-browser-x86_64-apple-darwin)
+          for binary in "${binaries[@]}"; do
+            test -f "$binary" && test -f "${binary%.exe}.json"
+          done
+          sha256sum "${binaries[@]}" > SHA256SUMS
+          cat SHA256SUMS
+          gh release create "$tag" --repo clauseo-ai/clauseo-acp --target "$commit" \
+            --prerelease --latest=false --title "$tag" \
+            --notes "agent-browser for macOS and Windows: upstream vercel-labs/agent-browser plus our patches, built by agent-browser-build.yml from $commit. See crates/desktop/agent-browser/README.md." \
+            "${binaries[@]}" agent-browser-*.json SHA256SUMS
