@@ -1,0 +1,101 @@
+{
+  "UC-307": {
+    "en": "Part of this document couldn't be marked up. The rest is below.",
+    "hi": "इस दस्तावेज़ का एक हिस्सा चिह्नित नहीं किया जा सका। बाकी नीचे है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "over the blackline sheet when a line of stetdoc's view couldn't be read, or stetdoc left content out (BlacklineNotice part_not_shown); the rest is shown"
+  },
+  "UC-308": {
+    "en": "This document has text that Word hides. It's shown here like the rest.",
+    "hi": "इस दस्तावेज़ में ऐसा पाठ है जिसे Word छिपाता है। यहाँ वह बाकी पाठ की तरह दिखाया गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "over the blackline sheet when the document holds hidden or hard-to-see text, which the blackline shows as ordinary text (BlacklineNotice hidden_text)"
+  },
+  "UC-309": {
+    "en": "Some numbers here may not match the ones Word shows.",
+    "hi": "यहाँ कुछ संख्याएँ Word में दिखने वाली संख्याओं से अलग हो सकती हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "over the blackline sheet when stetdoc warns list or clause numbers may differ from Word's (BlacklineNotice numbers_may_differ)"
+  },
+  "UC-310": {
+    "en": "Some of this may look different in Word.",
+    "hi": "इसका कुछ हिस्सा Word में अलग दिख सकता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "over the blackline sheet for any other stetdoc warning, a marker this version doesn't know, or a notice from a newer Clauseo (BlacklineNotice may_differ, unknown)"
+  },
+  "UC-311": {
+    "en": "Clauseo couldn't compare these two versions because of a table inside a table. Open both in Word to compare them.",
+    "hi": "तालिका के अंदर एक तालिका होने के कारण Clauseo इन दो संस्करणों की तुलना नहीं कर सका। तुलना के लिए दोनों को Word में खोलें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "blackline.nested_table: stetdoc 0.9.3's compare refuses (validation_failed, exit 5) when an inner table that ends its cell is removed; no Try again"
+  },
+  "UC-312": {
+    "en": "Clauseo couldn't compare these two versions. Open both in Word to compare them.",
+    "hi": "Clauseo इन दो संस्करणों की तुलना नहीं कर सका। तुलना के लिए दोनों को Word में खोलें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "blackline.cannot_compare: stetdoc refused the compare for another reason (validation_failed, unsupported); no Try again"
+  },
+  "UC-313": {
+    "en": "Clauseo couldn't read one of these versions. It may be damaged, or it may not be a Word document.",
+    "hi": "Clauseo इनमें से एक संस्करण नहीं पढ़ सका। हो सकता है वह खराब हो, या Word दस्तावेज़ न हो।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "blackline.not_readable: stetdoc can't read a version (malformed_input, corrupt_complement, unsupported_version); no Try again"
+  },
+  "UC-314": {
+    "en": "This document is too large to mark up. Open both versions in Word to compare them.",
+    "hi": "यह दस्तावेज़ चिह्नित करने के लिए बहुत बड़ा है। तुलना के लिए दोनों संस्करण Word में खोलें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "blackline.too_large: a version is past a stetdoc size limit (limit_exceeded); no Try again"
+  },
+  "UC-315": {
+    "en": "This version of Clauseo can't mark up these changes. Update Clauseo to see them.",
+    "hi": "Clauseo का यह संस्करण इन बदलावों को चिह्नित नहीं कर सकता। इन्हें देखने के लिए Clauseo अपडेट करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "note": "blackline.format_unknown: stetdoc's view is in a format other than stet 1; no Try again"
+  }
+}
