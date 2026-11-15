@@ -1,7 +1,9 @@
 //! The `agent_browser_pin` test: `crates/desktop/agent-browser.toml`, the agent-browser sidecar a
 //! release build bundles (ADR 0029, "Bundling (desktop)"), is well formed. Its header says what
 //! the format is; `sidecars/agent-browser.mjs` reads the same file, and its tests run under
-//! node, not here.
+//! node, not here. macOS and Windows take our build of upstream plus our patches
+//! (`crates/desktop/agent-browser/README.md`), from our release under `patched_tag`; Linux keeps
+//! upstream's release binary for now (development and CI only).
 
 #[cfg(test)]
 mod tests {
@@ -10,22 +12,58 @@ mod tests {
     /// The pin, read at build time; it sits next to this crate's manifest.
     const PIN: &str = include_str!("../agent-browser.toml");
 
-    /// The download folder every pinned url starts with, before `v<version>/`.
-    const RELEASE: &str = "https://github.com/vercel-labs/agent-browser/releases/download/";
+    /// Upstream's download folder, before `v<version>/`.
+    const UPSTREAM: &str = "https://github.com/vercel-labs/agent-browser/releases/download/";
 
-    /// Each Rust target triple the pin names, and the release asset it must download. Windows ARM64
-    /// takes the x64 build (upstream ships no ARM64 build).
-    const ASSETS: [(&str, &str); 6] = [
-        ("aarch64-apple-darwin", "agent-browser-darwin-arm64"),
-        ("x86_64-apple-darwin", "agent-browser-darwin-x64"),
-        ("x86_64-unknown-linux-gnu", "agent-browser-linux-x64"),
-        ("aarch64-unknown-linux-gnu", "agent-browser-linux-arm64"),
-        ("x86_64-pc-windows-msvc", "agent-browser-win32-x64.exe"),
-        ("aarch64-pc-windows-msvc", "agent-browser-win32-x64.exe"),
+    /// Our download folder, before `<patched_tag>/`.
+    const OURS: &str = "https://github.com/clauseo-ai/clauseo-acp/releases/download/";
+
+    /// The keys before the first table.
+    const TOP_KEYS: [&str; 4] = [
+        "version",
+        "patched_tag",
+        "upstream_commit",
+        "upstream_tarball_sha256",
     ];
 
-    /// The two Windows triples, which must carry one build between them.
-    const WINDOWS: [&str; 2] = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"];
+    /// Each Rust target triple the pin names, and upstream's release asset it must download, or
+    /// `None` for a triple that takes our build (`agent-browser-<triple>`, `.exe` on Windows,
+    /// under `patched_tag`). Each of ours is its own build: Windows ARM64 is native, not the x64
+    /// build under emulation.
+    const ASSETS: [(&str, Option<&str>); 6] = [
+        ("aarch64-apple-darwin", None),
+        ("x86_64-apple-darwin", None),
+        ("x86_64-unknown-linux-gnu", Some("agent-browser-linux-x64")),
+        (
+            "aarch64-unknown-linux-gnu",
+            Some("agent-browser-linux-arm64"),
+        ),
+        ("x86_64-pc-windows-msvc", None),
+        ("aarch64-pc-windows-msvc", None),
+    ];
+
+    /// The sha256 a table of ours holds until the build workflow has run.
+    const PLACEHOLDER: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    /// Whether `text` is `len` lowercase hex characters.
+    fn is_hex(text: &str, len: usize) -> bool {
+        text.len() == len
+            && text
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    }
+
+    /// Whether `tag` is `agent-browser-v<version>-clauseo.<n>`, n a number from 1 up.
+    fn is_patched_tag(tag: &str, version: &str) -> bool {
+        let Some(n) = tag
+            .strip_prefix("agent-browser-v")
+            .and_then(|rest| rest.strip_prefix(version))
+            .and_then(|rest| rest.strip_prefix("-clauseo."))
+        else {
+            return false;
+        };
+        !n.is_empty() && !n.starts_with('0') && n.bytes().all(|b| b.is_ascii_digit())
+    }
 
     /// Everything wrong with `text` as the pin, one message each. Empty when it is well formed.
     /// Today no triple may hold `none = true`: a triple with no build is a deliberate change to
@@ -36,17 +74,30 @@ mod tests {
             Ok(table) => table,
             Err(err) => return vec![format!("not TOML: {err}")],
         };
-        let Some(version) = table.get("version").and_then(toml::Value::as_str) else {
+        let top = |key: &str| table.get(key).and_then(toml::Value::as_str);
+        let Some(version) = top("version") else {
             return vec!["no version = \"...\"".to_owned()];
         };
         if semver::Version::parse(version).is_err() {
             out.push(format!("version {version} is not semver"));
         }
+        let patched_tag = top("patched_tag").unwrap_or_default();
+        if !is_patched_tag(patched_tag, version) {
+            out.push(format!(
+                "patched_tag {patched_tag:?} is not agent-browser-v{version}-clauseo.<n>"
+            ));
+        }
+        if !is_hex(top("upstream_commit").unwrap_or_default(), 40) {
+            out.push("upstream_commit is not 40 lowercase hex characters".to_owned());
+        }
+        if !is_hex(top("upstream_tarball_sha256").unwrap_or_default(), 64) {
+            out.push("upstream_tarball_sha256 is not 64 lowercase hex characters".to_owned());
+        }
 
         let triples: BTreeSet<&str> = table
             .keys()
             .map(String::as_str)
-            .filter(|key| *key != "version")
+            .filter(|key| !TOP_KEYS.contains(key))
             .collect();
         let expected: BTreeSet<&str> = ASSETS.iter().map(|(triple, _)| *triple).collect();
         if triples != expected {
@@ -73,7 +124,13 @@ mod tests {
                 .get("url")
                 .and_then(toml::Value::as_str)
                 .unwrap_or_default();
-            let want = format!("{RELEASE}v{version}/{asset}");
+            let want = match asset {
+                Some(asset) => format!("{UPSTREAM}v{version}/{asset}"),
+                None if triple.ends_with("-pc-windows-msvc") => {
+                    format!("{OURS}{patched_tag}/agent-browser-{triple}.exe")
+                }
+                None => format!("{OURS}{patched_tag}/agent-browser-{triple}"),
+            };
             if url != want {
                 out.push(format!("[{triple}] url is {url}, expected {want}"));
             }
@@ -81,31 +138,35 @@ mod tests {
                 .get("sha256")
                 .and_then(toml::Value::as_str)
                 .unwrap_or_default();
-            if sha.len() != 64
-                || !sha
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            {
+            if !is_hex(sha, 64) {
                 out.push(format!(
                     "[{triple}] sha256 is not 64 lowercase hex characters: {sha}"
                 ));
             }
         }
 
-        let field = |triple: &str, key: &str| {
-            table
-                .get(triple)
-                .and_then(toml::Value::as_table)
-                .and_then(|entry| entry.get(key))
-                .and_then(toml::Value::as_str)
-        };
-        let [first, second] = WINDOWS;
-        if field(first, "url") != field(second, "url")
-            || field(first, "sha256") != field(second, "sha256")
-        {
-            out.push(format!(
-                "[{first}] and [{second}] must carry the same url and sha256"
-            ));
+        // Our builds are distinct: no two of our tables share a url, or a sha256 other than the
+        // placeholder.
+        let ours: Vec<(&str, &str, &str)> = ASSETS
+            .iter()
+            .filter(|(_, asset)| asset.is_none())
+            .filter_map(|(triple, _)| {
+                let entry = table.get(*triple)?.as_table()?;
+                let url = entry.get("url")?.as_str()?;
+                Some((*triple, url, entry.get("sha256")?.as_str()?))
+            })
+            .collect();
+        for (i, (first, url_a, sha_a)) in ours.iter().enumerate() {
+            for (second, url_b, sha_b) in &ours[i + 1..] {
+                if url_a == url_b {
+                    out.push(format!("[{first}] and [{second}] must carry distinct urls"));
+                }
+                if sha_a == sha_b && *sha_a != PLACEHOLDER {
+                    out.push(format!(
+                        "[{first}] and [{second}] must carry distinct sha256s"
+                    ));
+                }
+            }
         }
         out
     }
@@ -132,26 +193,86 @@ mod tests {
         );
     }
 
+    /// The old arrangement, both Windows triples on upstream's x64 asset, is refused.
     #[test]
-    fn the_two_windows_triples_must_share_one_sha256() {
-        const X64_SHA: &str = "ddab45e8bae84e5bc6aa1b084bceca9b579aff2e8272474d7d26953cf10965ee";
-        let (head, tail) = PIN
-            .split_once("[aarch64-pc-windows-msvc]")
-            .expect("the ARM64 Windows table is in the pin");
-        assert!(
-            tail.contains(X64_SHA),
-            "the ARM64 table holds the x64 sha256"
-        );
-        let text = format!(
-            "{head}[aarch64-pc-windows-msvc]{}",
-            tail.replacen(X64_SHA, &"0".repeat(64), 1)
-        );
-        let problems = problems(&text);
+    fn windows_on_upstreams_x64_asset_is_refused() {
+        let ours = "https://github.com/clauseo-ai/clauseo-acp/releases/download/\
+                    agent-browser-v0.41.1-clauseo.1/agent-browser-aarch64-pc-windows-msvc.exe";
+        let upstream = "https://github.com/vercel-labs/agent-browser/releases/download/\
+                        v0.41.1/agent-browser-win32-x64.exe";
+        assert!(PIN.contains(ours), "the ARM64 table holds our url");
+        let problems = problems(&PIN.replacen(ours, upstream, 1));
         assert!(
             problems
                 .iter()
-                .any(|p| p.contains("must carry the same url and sha256")),
+                .any(|p| p.starts_with("[aarch64-pc-windows-msvc] url is")),
             "{problems:#?}"
+        );
+    }
+
+    /// macOS takes our build today; upstream's binary there is refused.
+    #[test]
+    fn macos_on_upstreams_asset_is_refused() {
+        let ours = "https://github.com/clauseo-ai/clauseo-acp/releases/download/\
+                    agent-browser-v0.41.1-clauseo.1/agent-browser-aarch64-apple-darwin\"";
+        let upstream = "https://github.com/vercel-labs/agent-browser/releases/download/\
+                        v0.41.1/agent-browser-darwin-arm64\"";
+        assert!(PIN.contains(ours), "the ARM64 macOS table holds our url");
+        let found = problems(&PIN.replacen(ours, upstream, 1));
+        assert!(
+            found
+                .iter()
+                .any(|p| p.starts_with("[aarch64-apple-darwin] url is")),
+            "{found:#?}"
+        );
+    }
+
+    #[test]
+    fn our_builds_must_not_share_one_build() {
+        let x64 = "agent-browser-x86_64-pc-windows-msvc.exe";
+        let arm64 = "agent-browser-aarch64-pc-windows-msvc.exe";
+        let found = problems(&PIN.replacen(arm64, x64, 1));
+        assert!(
+            found.iter().any(|p| p.contains("must carry distinct urls")),
+            "{found:#?}"
+        );
+
+        let sha = format!("sha256 = \"{}\"", "0".repeat(64));
+        let real = format!("sha256 = \"{}\"", "1".repeat(64));
+        let found = problems(&PIN.replace(&sha, &real));
+        assert!(
+            found
+                .iter()
+                .any(|p| p.contains("must carry distinct sha256s")),
+            "{found:#?}"
+        );
+    }
+
+    #[test]
+    fn the_top_keys_are_checked() {
+        let cases = [
+            ("-clauseo.1\"", "-clauseo.0\""),
+            (
+                "patched_tag = \"agent-browser-v0.41.1",
+                "patched_tag = \"agent-browser-v0.41.2",
+            ),
+            ("upstream_commit = \"5", "upstream_commit = \""),
+            (
+                "upstream_tarball_sha256 = \"c",
+                "upstream_tarball_sha256 = \"C",
+            ),
+        ];
+        for (from, to) in cases {
+            assert!(PIN.contains(from), "the pin holds {from}");
+            let problems = problems(&PIN.replacen(from, to, 1));
+            assert!(!problems.is_empty(), "{from} -> {to} passed");
+        }
+        let extra = PIN.replacen("version = ", "upstream = \"x\"\nversion = ", 1);
+        assert!(
+            problems(&extra)
+                .iter()
+                .any(|p| p.starts_with("the tables are")),
+            "an unknown top key passed"
         );
     }
 }

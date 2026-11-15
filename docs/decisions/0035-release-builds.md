@@ -393,8 +393,8 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
     own `RUSTFLAGS` and profile variables, so it gets the app's release flags; its `.pdb`, `.dSYM`
     or `.dwp` goes into `debug-files-<target>` with the app's.
   - `clauseo-agent-browser`: `fetchAgentBrowser` from `crates/desktop/sidecars/agent-browser.mjs`,
-    checked against `crates/desktop/agent-browser.toml` (upstream's asset names; only the
-    installed name has the prefix). A triple the pin marks `none = true` leaves it out of that target's list; a
+    checked against `crates/desktop/agent-browser.toml` (our own build's asset names on macOS and
+    Windows, upstream's on Linux; only the installed name has the prefix). A triple the pin marks `none = true` leaves it out of that target's list; a
     triple missing from the pin fails the job. agent-browser's image-name check
     (`connection.rs:198`, `is_agent_browser_process`, which wants a name starting with
     `agent-browser`) then skips its stale-daemon kill: on Windows the guard's Job Object (#329)
