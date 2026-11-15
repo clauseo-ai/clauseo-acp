@@ -1995,6 +1995,8 @@ export type ErrorCode =
 "agent.answer_failed" | 
 /** The agent's session offered no mode Clauseo runs it in (Codex's `workspace-write`, Claude's mode or its fallback), so no message was sent: a version of the agent Clauseo does not support. */
 "agent.mode_missing" | 
+/** The agent answered the lawyer's own change on a running session (a mode or a setting) with an error, so the change was not made; nothing else changed. */
+"agent.setting_refused" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

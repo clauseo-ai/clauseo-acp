@@ -196,6 +196,14 @@ export const HI = {
   "ChatGPT stopped with an error. Try again.": "ChatGPT एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
   "{name} stopped with an error. Try again.": "{name} एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
   "The AI stopped with an error. Try again.": "AI एक त्रुटि के साथ रुक गया। फिर से प्रयास करें।",
+  // agent.setting_refused: the agent didn't accept the lawyer's mode or setting change (provisional Hindi)
+  "Claude didn't accept that change. Try again.":
+    "Claude ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+  "ChatGPT didn't accept that change. Try again.":
+    "ChatGPT ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+  "{name} didn't accept that change. Try again.":
+    "{name} ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+  "The AI didn't accept that change. Try again.": "AI ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
   // agent.start_offline: the start failed on its connection, confirmed by the host's probe (provisional Hindi)
   "You're offline, so Claude didn't start. Try again when you're back online. Your question is kept.":
     "आप ऑफ़लाइन हैं, इसलिए Claude शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",

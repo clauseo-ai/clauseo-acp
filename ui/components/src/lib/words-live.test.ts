@@ -191,6 +191,15 @@ const PLANNED_LINES = [
     "AI का यह संस्करण Clauseo के साथ काम नहीं करता।",
   ],
   [
+    "agent.setting_refused",
+    "ChatGPT didn't accept that change. Try again.",
+    "ChatGPT ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+    "gemini didn't accept that change. Try again.",
+    "gemini ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+    "The AI didn't accept that change. Try again.",
+    "AI ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
+  ],
+  [
     "agent.start_offline",
     "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.",
     "आप ऑफ़लाइन हैं, इसलिए ChatGPT शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
