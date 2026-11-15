@@ -9,6 +9,7 @@ use super::{
 mod proxy;
 mod secret;
 mod secret_links;
+mod session_key;
 
 /// The socket folder the tests' host made.
 const SOCKET: &str = "/tmp/clauseo-ab-0123456789abcdef";
