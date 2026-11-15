@@ -101,3 +101,31 @@ fn grep_told_to_recurse_by_directories_walks() {
     ];
     judged(root, &deny, &pass);
 }
+
+/// PowerShell's short spellings of `-Recurse` walk as `-Recurse` does: `gci -r` from the data
+/// folder's parent is denied, from the matter folder it passes, and Bash's `ls -r` (reverse
+/// order) of the parent passes.
+#[test]
+fn powershell_short_recurse_spellings_walk() {
+    let dir = layout("cmd-ps-recurse");
+    let root = dir.path();
+    let parent = text(root);
+    let matter = text(&root.join("matter"));
+    let deny = [
+        format!("Get-ChildItem -Recurse {parent}"),
+        format!("gci -r {parent}"),
+        format!("Get-ChildItem -s {parent}"),
+        format!("dir -Depth 5 {parent}"),
+        format!("gci -Rec:$true {parent}"),
+        format!("gci \u{2013}r {parent}"),
+        format!("Remove-Item -r -Force {parent}"),
+        format!(r#"pwsh -NoProfile -Command "ls -r '{parent}'""#),
+    ];
+    let pass = [
+        format!("gci -r {matter}"),
+        format!("ls -r {parent}"),
+        format!("sort -r {matter}/sub/a.txt"),
+        format!("gci -d {parent}"),
+    ];
+    judged(root, &deny, &pass);
+}
