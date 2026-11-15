@@ -4,6 +4,7 @@
 // repeats do not; on the Mac and on Linux the page leaves the key alone.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import type { Display } from "@clauseo/components/lib/display.ts";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import { connectDisplay } from "../display/connect.ts";
@@ -82,10 +83,11 @@ const NOT_QUIT: Init[] = [
   { key: "Process", code: "KeyQ", ctrlKey: true, keyCode: 229 },
   { key: "q", code: "KeyQ", ctrlKey: true, repeat: true },
   { key: "q", code: "KeyQ" },
-  { key: "q", code: "KeyW", ctrlKey: true },
+  // AZERTY's Ctrl+A: the key at the Q place types "a", so it is not a quit
+  { key: "a", code: "KeyQ", ctrlKey: true },
 ];
 
-test("isQuitKey takes plain Ctrl+Q on Windows only, by the key's place", () => {
+test("isQuitKey takes plain Ctrl+Q on Windows only", () => {
   expect(isQuitKey(keydown(CTRL_Q), "windows")).toBe(true);
   // a layout with no Latin Q on the key still quits
   expect(isQuitKey(keydown({ key: "ौ", code: "KeyQ", ctrlKey: true }), "windows")).toBe(true);
@@ -93,6 +95,31 @@ test("isQuitKey takes plain Ctrl+Q on Windows only, by the key's place", () => {
   expect(isQuitKey(keydown(CTRL_Q), "mac")).toBe(false);
   expect(isQuitKey(keydown({ key: "q", code: "KeyQ", metaKey: true }), "mac")).toBe(false);
   expect(isQuitKey(keydown(CTRL_Q), "linux")).toBe(false);
+});
+
+/** Each case: the layout, what Ctrl+the key types, and whether it quits on Windows. */
+const LAYOUT_CASES: [string, Init, Display["platform"], boolean][] = [
+  ["QWERTY Ctrl+Q", { key: "q", code: "KeyQ", ctrlKey: true }, "windows", true],
+  ["Caps Lock Ctrl+Q", { key: "Q", code: "KeyQ", ctrlKey: true }, "windows", true],
+  ["AZERTY Ctrl+Q", { key: "q", code: "KeyA", ctrlKey: true }, "windows", true],
+  ["AZERTY Ctrl+A", { key: "a", code: "KeyQ", ctrlKey: true }, "windows", false],
+  ["QWERTZ Ctrl+Q", { key: "q", code: "KeyQ", ctrlKey: true }, "windows", true],
+  ["Dvorak Ctrl+' at the Q place", { key: "'", code: "KeyQ", ctrlKey: true }, "windows", false],
+  ["Russian Ctrl+й at the Q place", { key: "й", code: "KeyQ", ctrlKey: true }, "windows", true],
+  ["Hindi Ctrl+ौ at the Q place", { key: "ौ", code: "KeyQ", ctrlKey: true }, "windows", true],
+  ["no scan code, Ctrl+q", { key: "q", code: "", ctrlKey: true }, "windows", true],
+  ["Ctrl+Alt+Q", { key: "q", code: "KeyQ", ctrlKey: true, altKey: true }, "windows", false],
+  [
+    "AltGr+Q (types @)",
+    { key: "@", code: "KeyQ", ctrlKey: true, altGraph: true },
+    "windows",
+    false,
+  ],
+  ["macOS Ctrl+Q", { key: "q", code: "KeyQ", ctrlKey: true }, "mac", false],
+];
+
+test.each(LAYOUT_CASES)("isQuitKey by the letter typed: %s", (_name, init, platform, quits) => {
+  expect(isQuitKey(keydown(init), platform)).toBe(quits);
 });
 
 /** A host with no matters on `platform`, counting its quits. */
