@@ -38,7 +38,9 @@ fn env_report() -> ExitCode {
     }
     for name in ESSENTIALS {
         if std::env::var_os(name).is_some() {
-            lines.push_str(&format!("var {name}\n"));
+            lines.push_str("var ");
+            lines.push_str(name);
+            lines.push('\n');
         }
     }
     if std::io::stdout().write_all(lines.as_bytes()).is_err() {

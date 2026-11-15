@@ -2,6 +2,10 @@
 //! killed at its limit with nothing of it left running, and a run is given this process's
 //! environment and a stdin that ends at once (no console to wait on, Windows' session 0
 //! included).
+#![expect(
+    clippy::disallowed_methods,
+    reason = "a real child on the real clock: the test times it and polls for its end"
+)]
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -19,11 +23,13 @@ use super::{Scratch, stub};
 const GONE_WITHIN: Duration = Duration::from_secs(10);
 
 /// The real launcher, keeping the pid of each run it starts.
+#[cfg(test)]
 struct Pids {
     inner: PassthroughLauncher,
     pids: Mutex<Vec<u32>>,
 }
 
+#[cfg(test)]
 impl Pids {
     fn new() -> Self {
         Self {
@@ -37,6 +43,7 @@ impl Pids {
     }
 }
 
+#[cfg(test)]
 impl Launcher for Pids {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, Error> {
         let launched = self.inner.launch(spec)?;
