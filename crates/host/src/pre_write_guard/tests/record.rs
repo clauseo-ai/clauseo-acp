@@ -10,6 +10,7 @@ use super::{Fixture, deny, guard_with};
 use clauseo_protocol::MatterPath;
 
 use crate::pre_write_guard::record::{Agent, Reason, Record};
+#[cfg(unix)]
 use crate::write;
 
 /// The lines of the record file `file`, parsed; none when it is not there.
@@ -121,16 +122,18 @@ fn a_record_file_it_cannot_write_never_changes_the_refusal() {
     let hook = fx.hook("apply_patch", &patch("Contract.docx")).to_string();
     let missing = PathBuf::from(fx.path("no-such-folder")).join("blocks.jsonl");
     let folder = PathBuf::from(fx.path("out"));
-    let mut files = vec![missing.clone(), folder];
+    let files = vec![missing.clone(), folder];
     #[cfg(unix)]
-    {
+    let files = {
         // A link at the record's place is never followed, and the file it names stays empty.
+        let mut files = files;
         let target = PathBuf::from(fx.path("target.jsonl"));
         write::write_file(&target, b"").unwrap();
         let link = PathBuf::from(fx.path("link.jsonl"));
         write::symlink(&target, &link).unwrap();
         files.push(link);
-    }
+        files
+    };
     for file in &files {
         let args = ["--record", file.to_str().unwrap()];
         assert_eq!(
