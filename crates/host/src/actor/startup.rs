@@ -4,6 +4,7 @@
 //! every thread.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 
@@ -13,6 +14,7 @@ use futures::executor::LocalSpawner;
 
 use super::input::Input;
 use super::{Actor, HostPhase, MatterEntry, ThreadEntry, Work, turn};
+use crate::agent::matter_fence::key;
 use crate::config::{ConfigParts, HostConfig};
 use crate::encode::Encoder;
 use crate::error::Error;
@@ -195,6 +197,25 @@ fn start_services(actor: &mut Actor, cached: Vec<AccountLimits>) {
     super::mcp::start(actor);
     super::protection::start(actor);
     super::settings::log_lock_causes(&mut actor.lock_causes, &actor.effective);
+    // No way through Clauseo nests one matter in another; a registry that holds one anyway
+    // (folders moved while Clauseo was quit, an older registry) is not repaired: each launch
+    // treats it as a matter it is not invited into (`agent::matter_fence::MatterFence::own_shut`).
+    let folders: Vec<_> = actor
+        .matters
+        .values()
+        .map(|e| key(Path::new(&e.row.folder_path)))
+        .collect();
+    let nested = folders
+        .iter()
+        .filter(|a| {
+            folders
+                .iter()
+                .any(|b| a.len() > b.len() && a.starts_with(b))
+        })
+        .count();
+    if nested > 0 {
+        tracing::warn!(target: crate::log_file::LIFECYCLE, nested, "matters on the list sit inside others");
+    }
     tracing::info!(
         target: crate::log_file::LIFECYCLE,
         matters = actor.matters.len(),

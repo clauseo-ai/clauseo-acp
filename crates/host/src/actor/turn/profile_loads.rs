@@ -265,7 +265,8 @@ pub(super) fn session_loads(
         claude.as_ref(),
     );
     profile::fill_meta(&mut meta, folders)?;
-    super::outside::fence::after_meta(actor, thread, &run, &mut meta);
+    let limited = run.claude_tmp.is_some() && sandbox::sandbox_denies(&run).limited;
+    super::outside::fence::after_meta(actor, thread, &run, &mut meta, limited);
     super::offline::probe::session_meta(actor, thread, &meta);
     if run.browser_policy_read {
         // What the app heard from a "Try again" follows this newer read.
