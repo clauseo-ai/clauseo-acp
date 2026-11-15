@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-// D-061: under 1000 px Matters opens the list as a panel over the work (responsive.css; its rules are
-// components/clauseo/rail-overlay.test.ts's). Here, in a window 760 px wide: Matters opens and closes it, Escape in it
-// folds it and gives focus back to Matters, and opening it changes nothing in the work: the same composer, the same
-// thread, no attribute on the window or the work, so nothing under the panel moves.
+// D-061: under 1000 px the sidebar's toggle (Matters, until the toggle took its place) opens the list as a panel over
+// the work (responsive.css; its rules are components/clauseo/rail-overlay.test.ts's). Here, in a window 760 px wide:
+// the toggle opens and closes it, Escape in it folds it and gives focus back to the toggle, and opening it changes
+// nothing in the work: the same composer, the same thread, no attribute on the window or the work, so nothing under
+// the panel moves.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -67,7 +68,7 @@ async function mount() {
 const toggle = () => host?.querySelector<HTMLButtonElement>("[data-testid=rail-toggle]") ?? null;
 const rail = () => host?.querySelector<HTMLElement>("nav.room-rail") ?? null;
 
-test("under 1000 px Matters opens the list over the work and closes it again, and the work stays as it was", async () => {
+test("under 1000 px the sidebar's toggle opens the list over the work and closes it again, and the work stays as it was", async () => {
   await mount();
   const composer = host?.querySelector(".room-composer");
   const thread = host?.querySelector(".room-thread");
@@ -88,13 +89,13 @@ test("under 1000 px Matters opens the list over the work and closes it again, an
   expect(host?.querySelector(".room-thread")).toBe(thread);
   watch.disconnect();
   expect(changed.filter((c) => !c.endsWith(" style"))).toEqual([]);
-  // Matters again closes it
+  // the toggle again closes it
   await act(async () => toggle()?.click());
   expect(rail()?.hasAttribute("data-open")).toBe(false);
   expect(toggle()?.getAttribute("aria-expanded")).toBe("false");
 });
 
-test("under 1000 px Escape in the open list folds it, and focus goes back to Matters", async () => {
+test("under 1000 px Escape in the open list folds it, and focus goes back to the sidebar's toggle", async () => {
   await mount();
   await act(async () => toggle()?.click());
   const row = rail()?.querySelector<HTMLButtonElement>("[data-testid=matter-row]");

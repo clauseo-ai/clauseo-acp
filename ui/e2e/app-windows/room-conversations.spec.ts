@@ -30,7 +30,7 @@ async function ask(w: Window, question: string): Promise<void> {
 }
 
 /** Presses the row titled `title`; the transcript then holds `shown` and not `hidden`. Below 1200 px the rail is
- * folded behind Matters (a conversation started or pressed folds it), so it is raised first. */
+ * folded behind the sidebar's toggle (a conversation started or pressed folds it), so it is raised first. */
 async function openRow(w: Window, title: string, shown: string, hidden: string): Promise<void> {
   const row = w.conversationRow(title);
   await showRail(w);

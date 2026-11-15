@@ -1,7 +1,7 @@
 //! The words of the Mac's menu bar (`menu.rs`), and of Quit Clauseo in Windows' system menu
 //! (MN-07, `window_frame/quit_item.rs`), in English and Hindi by the app's language
 //! (`ui.language`), as the native dialogs' (`dialogs/words.rs`). Their review home is
-//! `ui/app/src/review/registry-mn.tsx` (MN-01 to MN-25), where the Hindi is provisional; a test
+//! `ui/app/src/review/registry-mn.tsx` (MN-01 to MN-29), where the Hindi is provisional; a test
 //! fails when the two disagree. The items macOS adds itself (autofill, Start Dictation, Emoji &
 //! Symbols, the Services list, Help's search) and the full-screen item's retitle while in full
 //! screen are the system's, in the computer's language.
@@ -62,13 +62,21 @@ pub(crate) enum Key {
     Zoom,
     /// MN-25: the Help menu.
     Help,
+    /// MN-26: the sidebar's toggle while the sidebar is shown.
+    HideSidebar,
+    /// MN-27: the sidebar's toggle while the sidebar is hidden.
+    ShowSidebar,
+    /// MN-28: the papers panel's toggle while the panel is shown.
+    HidePapers,
+    /// MN-29: the papers panel's toggle while the panel is hidden.
+    ShowPapers,
 }
 
 #[cfg(any(test, target_os = "macos"))]
 impl Key {
     /// Every key, in review order (MN-01 first).
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 25] = [
+    pub(crate) const ALL: [Self; 29] = [
         Self::About,
         Self::Settings,
         Self::Services,
@@ -94,6 +102,10 @@ impl Key {
         Self::Minimize,
         Self::Zoom,
         Self::Help,
+        Self::HideSidebar,
+        Self::ShowSidebar,
+        Self::HidePapers,
+        Self::ShowPapers,
     ];
 }
 
@@ -143,11 +155,15 @@ fn en(key: Key) -> &'static str {
         Key::Minimize => "Minimize",
         Key::Zoom => "Zoom",
         Key::Help => "Help",
+        Key::HideSidebar => "Hide the sidebar",
+        Key::ShowSidebar => "Show the sidebar",
+        Key::HidePapers => "Hide the papers",
+        Key::ShowPapers => "Show the papers",
     }
 }
 
 /// Provisional Hindi, for the copy review (module docs). The room's own words where it has
-/// them: नई बातचीत, नया मामला, खोजें, सेटिंग्स, पूर्ववत करें.
+/// them: नई बातचीत, नया मामला, खोजें, सेटिंग्स, पूर्ववत करें, and दस्तावेज़ for the papers.
 #[cfg(any(test, target_os = "macos"))]
 fn hi(key: Key) -> &'static str {
     match key {
@@ -176,6 +192,10 @@ fn hi(key: Key) -> &'static str {
         Key::Minimize => "छोटा करें",
         Key::Zoom => "ज़ूम करें",
         Key::Help => "सहायता",
+        Key::HideSidebar => "साइडबार छिपाएँ",
+        Key::ShowSidebar => "साइडबार दिखाएँ",
+        Key::HidePapers => "दस्तावेज़ छिपाएँ",
+        Key::ShowPapers => "दस्तावेज़ दिखाएँ",
     }
 }
 

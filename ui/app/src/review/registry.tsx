@@ -85,6 +85,7 @@ import { UC_MCP_IMPORT } from "./registry-uc-mcp-import.tsx";
 import { MCP_TOOLS } from "./registry-mcp-tools.tsx";
 import { UC_AGENTS } from "./registry-uc-agents.tsx";
 import { RELEASE_NOTES } from "./registry-release-notes.tsx";
+import { UC_PANELS } from "./registry-uc-panels.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -567,4 +568,5 @@ export const REGISTRY: readonly Entry[] = [
   ...MCP_TOOLS,
   ...UC_AGENTS,
   ...RELEASE_NOTES,
+  ...UC_PANELS,
 ];

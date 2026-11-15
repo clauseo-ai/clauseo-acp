@@ -14,6 +14,7 @@ use uuid::Uuid;
 use super::*;
 use crate::test_support::{Scratch, envelope};
 
+mod layout_menu;
 mod open_settings;
 mod privacy;
 mod release_mode;
@@ -49,6 +50,7 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             quit_app,
             open_privacy_settings,
             page_marks,
+            set_layout_menu,
             #[cfg(feature = "e2e")]
             crate::e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]

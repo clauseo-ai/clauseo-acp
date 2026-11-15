@@ -121,7 +121,7 @@ test("the dialog opens the first time New matter is pressed, once its chunk has 
   expect(byId<HTMLInputElement>("matter-name")).not.toBeNull();
 });
 
-test("a matter made from the folded rail folds it, and focus goes back to Matters", async () => {
+test("a matter made from the folded rail folds it, and focus goes back to the sidebar's toggle", async () => {
   await mount({
     ...today(),
     pickFolder: () => ({ folder: "ref-existing", display: "Documents/Mehta" }),

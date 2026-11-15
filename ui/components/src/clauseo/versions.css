@@ -217,10 +217,9 @@
   }
 
   /* ---------- the timeline, in the rail's place: a column of the room's window, which still fills the view ---------- */
+  /* the work's width and gutters follow from --rail-col on the window itself (shell.css) */
   .room-window[data-panel] {
     --rail-col: var(--ver-panel-w);
-    --work-w: calc(var(--view-w) - var(--rail-col) - var(--pane-w) + var(--overlap));
-    --gutter: max(var(--thread-pad), calc((var(--work-w) - var(--measure)) / 2));
     grid-template-columns: var(--ver-panel-w) minmax(0, 1fr) var(--pane-w);
   }
   .room-window[data-panel] .room-lead {

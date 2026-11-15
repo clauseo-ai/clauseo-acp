@@ -57,6 +57,7 @@ import { firstReadProbe } from "./first-read/probe-state.ts";
 import { installsProbe } from "./first-run/probe-installs.ts";
 import { fakeFullScreen } from "./probe-full-screen.ts";
 import { fakeNotched } from "./probe-notched.ts";
+import { probeLayout } from "./probe-layout.ts";
 import {
   batch,
   chosen,
@@ -504,6 +505,7 @@ installDevHooks(connectRoom(transport, queryPatch(location.search)));
 
 fakeFullScreen(page.get("fullscreen"));
 fakeNotched(page.get("notched"), transport);
+probeLayout(page.get("layout"), page.get("overlay"));
 
 const container = document.getElementById("root");
 if (container === null) throw new Error("index.html has no #root element");

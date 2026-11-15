@@ -30,7 +30,7 @@ use crate::smart_app_control::SmartAppControl;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 25] = [
+pub(crate) const COMMANDS: [&str; 26] = [
     "dispatch",
     "query",
     "open_stream",
@@ -56,6 +56,7 @@ pub(crate) const COMMANDS: [&str; 25] = [
     "quit_app",
     "open_privacy_settings",
     "page_marks",
+    "set_layout_menu",
 ];
 
 /// The commands the `e2e` build adds (`e2e.rs`), as `build.rs`'s `E2E` and

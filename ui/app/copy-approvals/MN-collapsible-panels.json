@@ -1,0 +1,46 @@
+{
+  "MN-26": {
+    "en": "Hide the sidebar",
+    "hi": "साइडबार छिपाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; collapsible panels)",
+    "note": "macOS View menu, first group, on ⌃⌘S: the sidebar's toggle while the room's sidebar is shown; the label flips with the panel's state, as the page reports it"
+  },
+  "MN-27": {
+    "en": "Show the sidebar",
+    "hi": "साइडबार दिखाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; collapsible panels)",
+    "note": "macOS View menu, first group, on ⌃⌘S: the sidebar's toggle while the room's sidebar is hidden; the label flips with the panel's state, as the page reports it"
+  },
+  "MN-28": {
+    "en": "Hide the papers",
+    "hi": "दस्तावेज़ छिपाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; collapsible panels)",
+    "note": "macOS View menu, first group, on ⌥⌘I: the papers panel's toggle while the room's papers panel is shown; the label flips with the panel's state, as the page reports it"
+  },
+  "MN-29": {
+    "en": "Show the papers",
+    "hi": "दस्तावेज़ दिखाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; collapsible panels)",
+    "note": "macOS View menu, first group, on ⌥⌘I: the papers panel's toggle while the room's papers panel is hidden; the label flips with the panel's state, as the page reports it"
+  }
+}

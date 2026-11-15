@@ -11,7 +11,7 @@
 // reuse a shape already here (IconToolEdit, IconToolSearch, IconToolFetch) stay in this file. The web tools'
 // IconBrowser and IconDownload are in web-tools.tsx, cut from Lucide 1.66.0 on 3 Nov 2026 the same way and re-exported
 // here; IconInfo, at the end of this file, reuses the shape IconAbout draws. IconCopy is in copy.tsx, cut from Lucide
-// 1.66.0 on 11 Nov 2026 the same way and re-exported here.
+// 1.66.0 on 11 Nov 2026 the same way and re-exported here; the panel toggles' two are in panels.tsx, the same way.
 // IconFailed was cut from Lucide 1.66.0 (triangle-alert, the same commit) on 4 Nov 2026 for U16a, the same way: its
 // rounded corners drawn square, its triangle drawn in from the edge so the miter joins stay inside the 20 px box.
 // IconSettings, the rail's Settings, was cut from Lucide 1.66.0's settings (lucide-static@1.66.0) on 10 Nov 2026: its
@@ -45,6 +45,7 @@ export {
 export { IconArrowDown, IconArrowUp } from "./arrows.tsx";
 export { IconBrowser, IconDownload } from "./web-tools.tsx";
 export { IconCopy } from "./copy.tsx";
+export { IconSidebarLeft, IconSidebarRight } from "./panels.tsx";
 
 /** A fold (source: chevron) */
 export function IconFold(props: IconProps) {

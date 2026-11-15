@@ -6,7 +6,8 @@ import { Button } from "../ui/button.tsx";
 import { SearchField } from "../ui/field.tsx";
 import { PlanMeter, type PlanState } from "../ui/meter.tsx";
 import { Toolbar, ToolbarPair, ToolbarPairButton } from "../ui/toolbar.tsx";
-import { IconHistory, IconMatters, IconUndo } from "../icons/icons.tsx";
+import { IconHistory, IconSidebarLeft, IconSidebarRight, IconUndo } from "../icons/icons.tsx";
+import { Tooltip } from "../ui/tooltip.tsx";
 import { cn } from "../lib/cn.ts";
 import { useDisplay, type Lang, type Platform } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
@@ -68,8 +69,23 @@ export type RoomToolbarProps = {
   /** Clauseo is writing: Undo waits, faint, until it's done. */
   writing?: boolean;
   onUndo: () => void;
+  /** Whether the sidebar stands shown: the rail beside the work from 1200 px, its panel open over the work below. The
+   * sidebar's toggle says what a press does, "Hide the sidebar" or "Show the sidebar", and is aria-expanded with it. */
   railOpen: boolean;
   onRail: () => void;
+  /** Optional: false where the rail isn't in the page, as while Versions' timeline stands in its place, so the toggle
+   * names nothing for aria-controls. */
+  railInPage?: boolean;
+  /** Optional: the papers' toggle, at the toolbar's right end (left of the caption buttons off the Mac): whether the
+   * wall stands shown, the press, the wall's id for aria-controls, and the button, so focus can come to it when the
+   * wall it held hides. Left out, no toggle. */
+  papers?: {
+    shown: boolean;
+    onToggle: () => void;
+    controls: string;
+    ref?: Ref<HTMLButtonElement>;
+    testId?: string;
+  };
   /** The window's chrome, where it isn't the computer's own. Defaults to the computer's platform. */
   platform?: Platform;
   /** Words under the title, such as the scratch matter's "Quick questions"; none, an empty line holds its place. */
@@ -78,8 +94,9 @@ export type RoomToolbarProps = {
   unprotected?: boolean;
   /** Optional: a press on the Not protected mark explains it (UC's note); without it the mark isn't pressable. */
   onUnprotected?: (() => void) | undefined;
-  /** Optional: a matter on the rail waits on the lawyer, with a question or for permission. While the rail is
-   * folded behind Matters, the button carries one 8 px court-yellow dot, so the wait is seen without opening it. */
+  /** Optional: a matter on the rail waits on the lawyer, with a question or for permission. While the rail is out of
+   * sight, folded or hidden, the sidebar's toggle carries one 8 px court-yellow dot, so the wait is seen without
+   * opening it. */
   railWaits?: boolean;
   /** Optional: the search field's name where the room isn't a matter's, such as "Search quick questions". */
   searchLabel?: string;
@@ -112,9 +129,9 @@ export type RoomToolbarProps = {
   /** Optional: the title's language where it isn't a matter's name as filed, which is English in both languages; such
    * as words of the interface standing in the title's place. "en" by default. */
   titleLang?: Lang;
-  /** Optional: test ids for the e2e specs. title: on the title's heading; rail: on Matters. */
+  /** Optional: test ids for the e2e specs. title: on the title's heading; rail: on the sidebar's toggle. */
   testIds?: { title?: string; rail?: string };
-  /** Optional: Matters' button, so focus can go back to it when the folded rail closes. */
+  /** Optional: the sidebar's toggle, so focus can go back to it when the folded rail closes or the rail it held hides. */
   railRef?: Ref<HTMLButtonElement>;
   /** Optional: the plan in its own part, in `plan`'s place, so what changes the plan renders the plan alone (it draws
    * ToolbarPlan itself). */
@@ -145,6 +162,9 @@ export function RoomToolbar(p: RoomToolbarProps) {
   const versions = p.versions !== false;
   const titleLang = p.titleLang ?? "en";
   const room = useRoom();
+  const papers = p.papers;
+  const railLabel = vw.v(p.railOpen ? "Hide the sidebar" : "Show the sidebar");
+  const papersLabel = vw.v(papers?.shown === false ? "Show the papers" : "Hide the papers");
   const undo = useRef<HTMLButtonElement>(null);
   // Versions opens under the pair, its right edge on the pair's: Undo's own group
   const pairOf = () => undo.current?.parentElement ?? null;
@@ -199,25 +219,30 @@ export function RoomToolbar(p: RoomToolbarProps) {
           <CornerLights native={p.nativeLights === true} />
         )}
         {p.brand === true && <RailBrand at="lead" platform={platform} />}
-        <Button
-          kind="tone"
-          size="small"
-          className={cn("room-rail-toggle", p.railWaits === true && "room-rail-waits")}
-          aria-expanded={p.railOpen}
-          aria-controls={room.id("rail")}
-          onClick={p.onRail}
-          {...(p.railRef === undefined ? {} : { ref: p.railRef })}
-          {...(p.testIds?.rail === undefined ? {} : { "data-testid": p.testIds.rail })}
-        >
-          <IconMatters size={16} />
-          {w.t("Matters")}
-          {p.railWaits === true && (
-            <>
-              <i className="room-rail-wait" aria-hidden="true" />
-              <span className="sr-only">{mt(w.lang, "A matter waits for you")}</span>
-            </>
-          )}
-        </Button>
+        {/* the sidebar's toggle, at every width: the rail's column from 1200 px, its panel over the work below. Named by
+            what a press does, and, while a matter waits out of sight, by that too */}
+        <Tooltip content={railLabel} side="bottom">
+          <Button
+            kind="quiet"
+            size="small"
+            shape="icon"
+            className={cn("room-rail-toggle", p.railWaits === true && "room-rail-waits")}
+            aria-expanded={p.railOpen}
+            aria-controls={p.railInPage === false ? undefined : room.id("rail")}
+            onClick={p.onRail}
+            {...(p.railRef === undefined ? {} : { ref: p.railRef })}
+            {...(p.testIds?.rail === undefined ? {} : { "data-testid": p.testIds.rail })}
+          >
+            <IconSidebarLeft size={16} />
+            <span className="sr-only">{railLabel}</span>
+            {p.railWaits === true && (
+              <>
+                <i className="room-rail-wait" aria-hidden="true" />
+                <span className="sr-only">{mt(w.lang, "A matter waits for you")}</span>
+              </>
+            )}
+          </Button>
+        </Tooltip>
       </div>
       <div className="room-matter" data-tauri-drag-region>
         {p.title !== "" && (
@@ -296,6 +321,24 @@ export function RoomToolbar(p: RoomToolbarProps) {
           </Toolbar>
         )}
         {p.planSlot ?? (p.plan !== null && <ToolbarPlan plan={p.plan} />)}
+        {papers !== undefined && (
+          <Tooltip content={papersLabel} side="bottom">
+            <Button
+              kind="quiet"
+              size="small"
+              shape="icon"
+              className="room-wall-toggle"
+              aria-label={papersLabel}
+              aria-expanded={papers.shown}
+              aria-controls={papers.controls}
+              onClick={papers.onToggle}
+              {...(papers.ref === undefined ? {} : { ref: papers.ref })}
+              {...(papers.testId === undefined ? {} : { "data-testid": papers.testId })}
+            >
+              <IconSidebarRight size={16} />
+            </Button>
+          </Tooltip>
+        )}
       </div>
       {captions && (
         // flush with the window's top right: beside the plan on a wide window, on the first row of tools on a narrow

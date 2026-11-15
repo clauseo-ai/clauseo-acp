@@ -1,5 +1,5 @@
 // MN's copy review entries: the Mac's menu bar, which Rust draws (crates/desktop/src/menu.rs) and the webview never
-// shows. Its words live in crates/desktop/src/menu/words.rs (MN-01 to MN-25), in both languages by Clauseo's own
+// shows. Its words live in crates/desktop/src/menu/words.rs (MN-01 to MN-29), in both languages by Clauseo's own
 // (`ui.language`); a Rust test there fails unless its strings are in this file verbatim. Each state is a mock of the one
 // menu that holds the item, opened under its title, with the item's key where it has one. The items macOS adds itself
 // (AutoFill, Dictation, Emoji & Symbols, the Services list, Help's search) are the computer's, and left out.
@@ -41,6 +41,10 @@ const WINDOW = word("Window", "विंडो");
 const MINIMIZE = word("Minimize", "छोटा करें");
 const ZOOM = word("Zoom", "ज़ूम करें");
 const HELP = word("Help", "सहायता");
+const HIDE_SIDEBAR = word("Hide the sidebar", "साइडबार छिपाएँ");
+const SHOW_SIDEBAR = word("Show the sidebar", "साइडबार दिखाएँ");
+const HIDE_PAPERS = word("Hide the papers", "दस्तावेज़ छिपाएँ");
+const SHOW_PAPERS = word("Show the papers", "दस्तावेज़ दिखाएँ");
 
 /** A menu's row: its words and its key, or a separator. */
 type Row = readonly [WordsRef, string?] | "-";
@@ -98,7 +102,20 @@ const editMenu = menu(EDIT, [
   "-",
   [FIND, "⌘K"],
 ]);
-const viewMenu = menu(VIEW, [[FULL_SCREEN, "⌃⌘F"]]);
+// The toggles say what a press does: the Hide words while both panels are shown (as the room opens), the Show words
+// while both are hidden.
+const viewMenu = menu(VIEW, [
+  [HIDE_SIDEBAR, "⌃⌘S"],
+  [HIDE_PAPERS, "⌥⌘I"],
+  "-",
+  [FULL_SCREEN, "⌃⌘F"],
+]);
+const viewOff = menu(VIEW, [
+  [SHOW_SIDEBAR, "⌃⌘S"],
+  [SHOW_PAPERS, "⌥⌘I"],
+  "-",
+  [FULL_SCREEN, "⌃⌘F"],
+]);
 const windowMenu = menu(WINDOW, [[MINIMIZE, "⌘M"], [ZOOM], "-", [CLOSE_WINDOW, "⌘W"]]);
 const helpMenu = menu(HELP, []);
 
@@ -132,6 +149,10 @@ export const MN: Entry[] = [
   { id: "MN-23", words: MINIMIZE, screen: "native/menu-window", ...MENU, render: windowMenu },
   { id: "MN-24", words: ZOOM, screen: "native/menu-window", ...MENU, render: windowMenu },
   { id: "MN-25", words: HELP, screen: "native/menu-help", ...MENU, render: helpMenu },
+  { id: "MN-26", words: HIDE_SIDEBAR, screen: "native/menu-view", ...MENU, render: viewMenu },
+  { id: "MN-27", words: SHOW_SIDEBAR, screen: "native/menu-view-off", ...MENU, render: viewOff },
+  { id: "MN-28", words: HIDE_PAPERS, screen: "native/menu-view", ...MENU, render: viewMenu },
+  { id: "MN-29", words: SHOW_PAPERS, screen: "native/menu-view-off", ...MENU, render: viewOff },
 ];
 
 /** What Rust draws natively, for registry.tsx: the dialogs (ND), then the menu bar (MN). */

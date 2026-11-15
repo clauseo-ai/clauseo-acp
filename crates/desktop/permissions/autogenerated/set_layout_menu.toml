@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-layout-menu"
+description = "Enables the set_layout_menu command without any pre-configured scope."
+commands.allow = ["set_layout_menu"]
+
+[[permission]]
+identifier = "deny-set-layout-menu"
+description = "Denies the set_layout_menu command without any pre-configured scope."
+commands.deny = ["set_layout_menu"]

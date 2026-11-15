@@ -60,7 +60,7 @@ test("Undo from Versions puts back the files a turn changed", async ({ app, scra
   await expect(w.version("undo")).toHaveCount(1);
   await expect.poll(() => readTree(scratch.matterDir)).toEqual(BEFORE);
 
-  // Closing the panel puts the rail back: open, or folded behind Matters below 1200 px.
+  // Closing the panel puts the rail back: open, or folded behind the sidebar's toggle below 1200 px.
   await w.versionsClose.click();
   await expect(w.versionsPanel).toBeHidden();
   await showRail(w);

@@ -194,6 +194,14 @@ export const commands = {
 	 *  a run only. Always answers ok; carries only milliseconds.
 	 */
 	pageMarks: (marks: PageMarks) => typedError<null, HostError>(__TAURI_INVOKE("page_marks", { marks })),
+	/**
+	 *  Which of the room's panels are shown, sent by the page on start and on each change, so the
+	 *  Mac menu's View toggles say what a press does ("Hide the sidebar" or "Show the sidebar", and
+	 *  the same for the papers; `menu.rs`). Granted to `main` only. Always answers ok: a menu that
+	 *  can't take the words keeps the ones it shows, and off macOS, which has no menu, it does
+	 *  nothing.
+	 */
+	setLayoutMenu: (sidebar: boolean, papers: boolean) => typedError<null, HostError>(__TAURI_INVOKE("set_layout_menu", { sidebar, papers })),
 };
 
 /* Constants */

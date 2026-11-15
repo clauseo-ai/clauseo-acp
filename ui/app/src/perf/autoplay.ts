@@ -258,8 +258,12 @@ async function play(d: AutoplayDeps, state: { step: string; expired: boolean; se
   const idleMemoryMb = await d.memory();
 
   step("open matter");
-  // The rail folds behind Matters below 1200 px; the marks build's window is 1280 px wide, so it stands open.
-  if (!shown(doc, need(doc, "new-matter"))) need(doc, "rail-toggle").click();
+  // The rail folds behind the sidebar's toggle below 1200 px, and hides on it from 1200 px; the marks build's window
+  // is 1280 px wide, so it stands shown unless the window was left with it hidden. The toggle's aria-expanded says
+  // which, so a rail still loading its rows is waited on, never hidden by a press.
+  const toggle = need(doc, "rail-toggle");
+  if (!shown(doc, need(doc, "new-matter")) && toggle.getAttribute("aria-expanded") !== "true")
+    toggle.click();
   await until("New matter", () => shown(doc, need(doc, "new-matter")));
   need(doc, "new-matter").click();
   await until("the new matter form", () => byId(doc, "matter-name") !== null);

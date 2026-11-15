@@ -1,15 +1,15 @@
 // The room's frame, as the approved room composes it (design/03-system/src/pages/room/room.tsx): one RoomScopeProvider
 // with Base UI's CSP mode inside, then the window: the toolbar, the rail, the work and the wall, laid out by shell.css
-// and responsive.css. Three columns from 1200 px, the rail folded behind Matters as a floating panel from 1000 px, one
-// column below. The rail is U2's (rail.tsx over matters.ts); the work is the live thread (thread/work.tsx). The window
+// and responsive.css. Three columns from 1200 px, the rail folded behind the sidebar's toggle as a floating panel from
+// 1000 px, one column below; the sidebar and the papers each hide on their toggle (room-layout.ts). The rail is U2's (rail.tsx over matters.ts); the work is the live thread (thread/work.tsx). The window
 // draws its own frame (H19): the toolbar is the title bar, with the caption buttons wired to the window off the Mac and macOS's own traffic
 // lights over the corner lights' place on it, inside the desktop app; elsewhere (tests, the probe, a browser) the
 // buttons log their presses and the lights are painted. The plan is the open conversation's agent's (limits/live-plan.tsx, U12); until a host query no search, and
 // until H5 nothing under a matter's title (the scratch matter's line stands). The wall
 // lists H8's papers (host-next.ts's papers part, which the desktop gives through host-wire.ts). Folded, the rail closes
-// on Escape and on opening a matter or making one, and focus goes back to Matters; opening a conversation or starting
-// one closes it too, and the field takes the focus. Matters carries the court-yellow dot while another matter waits on
-// the lawyer. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new conversation in the open matter, and Shift with it opens
+// on Escape and on opening a matter or making one, and focus goes back to the sidebar's toggle; opening a conversation
+// or starting one closes it too, and the field takes the focus. The toggle carries the court-yellow dot while another
+// matter waits on the lawyer out of sight. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new conversation in the open matter, and Shift with it opens
 // New matter, as the Mac's native menu does too (room-commands.ts); until its first
 // question, the reading column's top says what it reads, once the matter's papers are counted. A link or paper in an
 // answer opens through the host (open.ts, H11), and so does a matter row's Show in Finder; a Word document's tile, and a
@@ -38,11 +38,7 @@ import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import {
-  MarkdownHostContext,
-  PaperLinksContext,
-  type MarkdownHost,
-} from "@clauseo/components/markdown/host.ts";
+import { MarkdownHostContext, PaperLinksContext } from "@clauseo/components/markdown/host.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { frameBatch } from "../store/batch.ts";
 import { blockedSitesOf } from "../store/blocked-sites.ts";
@@ -64,11 +60,12 @@ import { useHostFullScreen } from "./host-full-screen.ts";
 import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
-import type { PapersHost } from "./host-next.ts";
-import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
+import { quietly } from "./open.ts";
+import { useAnswerHost, useTransportStandIns } from "./room-hosts.ts";
+import { useRoomLayout } from "./room-layout.ts";
 import { usePaperLinks } from "./paper-links.ts";
 import { useMatterMoves, usePapers } from "./use-papers.ts";
-import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
+import { LocateFolderContext } from "./act-refusals.ts";
 import { LocateGate, LocateWarningHost, LocatedFolder } from "./moved.tsx";
 import { usePickWait } from "./picker-wait.ts";
 import { useDraftMenus } from "./config-menus.ts";
@@ -118,36 +115,8 @@ const loadNewMatter = () => late(import("./new-matter.tsx"));
 const NewMatter = lazy(() => loadNewMatter().then((m) => ({ default: m.NewMatter })));
 const preloadNewMatter = () => void loadNewMatter();
 
-/** The answers' MarkdownHost (open.ts): one object per transport and matter, so a new papers list or a streaming row
- * never makes a new one; the wall's papers reach it as they arrive. */
-function useAnswerHost(
-  transport: HostTransport,
-  matter: MatterId | null,
-  listed: ListedPapers,
-  refusals: ActRefusals,
-  papers: PapersHost | null,
-): MarkdownHost {
-  const host = useMemo(
-    () => new AnswerHost(transport, matter, refusals, papers),
-    [transport, matter, refusals, papers],
-  );
-  useEffect(() => host.show(listed), [host, listed]);
-  return host;
-}
-
-/** What Versions opens and shows files with in the desktop app: the transport's own (H11). */
-function useTransportStandIns(transport: HostTransport): StandIns {
-  return useMemo(
-    () => ({
-      openFile: (file) => transport.openFile(file),
-      reveal: (target) => transport.reveal(target),
-    }),
-    [transport],
-  );
-}
-
-/** Whether a matter the lawyer isn't looking at waits on them, with a question or for permission: Matters' dot. The
- * limit stays muted (QU.6 (ii)): nothing to choose, only a time to wait for. A snoozed or done conversation's wait
+/** Whether a matter the lawyer isn't looking at waits on them, with a question or for permission: the sidebar toggle's
+ * dot. The limit stays muted (QU.6 (ii)): nothing to choose, only a time to wait for. A snoozed or done conversation's wait
  * doesn't count (U16b, triage.ts's handWaits). */
 const railWaits = (view: MattersView, threads: AllThreads): boolean =>
   handWaits(
@@ -156,8 +125,6 @@ const railWaits = (view: MattersView, threads: AllThreads): boolean =>
     threads.view().lists,
     Math.max(view.now, threads.view().now),
   );
-
-/** A file's name, the last part of its path in the matter folder. */
 
 /** The room: its own scope, and Base UI's CSP mode for everything inside it, so no part writes a style element. */
 export function Room({
@@ -206,7 +173,8 @@ function RoomFrame({
   const [newMounted, setNewMounted] = useState(false);
   const newMatter = useRef<HTMLButtonElement>(null);
   const railToggle = useRef<HTMLButtonElement>(null);
-  // a matter made from the folded rail folds it, so focus goes back to Matters, not to New matter's hidden button
+  // a matter made from the folded rail folds it, so focus goes back to the sidebar's toggle, not to New matter's hidden
+  // button
   const madeFolded = useRef(false);
   const [newFocus] = useState(() => ({
     get current(): HTMLElement | null {
@@ -302,19 +270,30 @@ function RoomFrame({
     platform,
     standIns: standIns ?? ownStandIns,
   });
-  /** The folded rail closes, and focus goes back to Matters, which opened it. */
+  // the sidebar and the papers, each shown or hidden on its toggle, kept for the window (room-layout.ts)
+  const mac = platform === "mac";
+  const layout = useRoomLayout({
+    transport,
+    room,
+    mac,
+    railOpen,
+    setRailOpen,
+    railToggle,
+    versions,
+  });
+  /** The folded rail closes, and focus goes back to the sidebar's toggle, which opened it. */
   const fold = () => {
     if (!railOpen) return;
     setRailOpen(false);
     railToggle.current?.focus();
   };
-  // a matter made or opened from New matter folds the rail, and the dialog's focus goes back to Matters if it was open
+  // a matter made or opened from New matter folds the rail, and the dialog's focus goes back to the sidebar's toggle if
+  // it was open
   const foldForNew = () => {
     madeFolded.current = railOpen;
     setRailOpen(false);
   };
   // New conversation's key, while a matter's conversations are in and no dialog holds the keys
-  const mac = platform === "mac";
   const endVersions = versions.close;
   const canStart =
     open !== null &&
@@ -354,13 +333,19 @@ function RoomFrame({
   useState(() => blockedSitesOf(transport));
   // Find's key focuses the rail's Find from anywhere in the room, a folded rail opened first
   const [findField] = useState(() => () => document.getElementById(room.id("find")));
-  const [openRail] = useState(() => () => setRailOpen(true));
+  const openRail = layout.openRail;
   useFindKey(findField, openRail, mac);
   // ⌘N, ⇧⌘N and the native menu's New conversation, New matter and Find (room-commands.ts)
   const newMatterNow = versions.rail == null && !newOpen ? openNewMatter : null;
   const find = () => void focusFind(findField, openRail);
   useRoomCommands(
-    { newConversation: canStart ? startNew : null, newMatter: newMatterNow, find },
+    {
+      newConversation: canStart ? startNew : null,
+      newMatter: newMatterNow,
+      find,
+      toggleSidebar: layout.rail.toggle,
+      togglePapers: layout.papers.onToggle,
+    },
     mac,
   );
   // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
@@ -404,7 +389,9 @@ function RoomFrame({
   // the caption buttons' commands, off the Mac: frame.json grants the Mac none, so asking would be refused each resize
   const wired = useMemo(() => (platform === "mac" ? null : controls), [platform, controls]);
   const caption = useWindowFrame(wired);
-  const place = useNoticePlace(versions.rail == null, welcome);
+  // the rail stands beside the work (wide, the sidebar shown) and Versions doesn't hold its place
+  const atRail = layout.railBeside && versions.rail == null;
+  const place = useNoticePlace(atRail, welcome);
   // the desktop's own word on macOS's full screen: a notched Mac's full-screen window is shorter than its screen
   const hostFullScreen = useHostFullScreen(transport);
   const notice = <RoomNotices transport={transport} threads={threads} matters={view.matters} />;
@@ -422,6 +409,7 @@ function RoomFrame({
       className="room-window"
       data-panel={versions.open ? "" : undefined}
       data-deciding={deciding ? "" : undefined}
+      {...layout.attrs}
       ref={nodes.slot("window")}
     >
       {/* index.html's own #first-mark style keeps it seen in the unseen window: visibility: visible, fixed */}
@@ -451,18 +439,16 @@ function RoomFrame({
         subtitle={scratch ? mt(w.lang, "Quick questions, kept like any matter") : ""}
         history={[]}
         canUndo={false}
-        railOpen={railOpen}
-        onRail={() => {
-          // the rail's place holds Versions' timeline: Matters closes it, and the rail comes back; with the panel put
-          // away on a mid window the rail stands already, and Versions stays on the version in view
-          if (versions.open) versions.close();
-          setRailOpen((open) => !open);
-        }}
-        railWaits={waits}
+        railOpen={layout.rail.shown}
+        onRail={layout.rail.toggle}
+        railInPage={versions.rail == null}
+        papers={{ ...layout.papers, testId: "wall-toggle" }}
+        // the dot while the rail is out of sight: folded, hidden, or Versions in its place
+        railWaits={waits && !(atRail && !versions.open)}
         railRef={railToggle}
         testIds={{ title: "matter", rail: "rail-toggle" }}
       />
-      {/* Matters opens and folds it below 1200 px; opening a matter, making one or Escape folds it again */}
+      {/* the sidebar's toggle opens and folds it below 1200 px; opening a matter, making one or Escape folds it again */}
       {versions.rail ?? (
         <RoomRail
           transport={transport}
@@ -585,7 +571,7 @@ function RoomFrame({
             </StoreContext>
           )}
         </main>
-        <aside className="room-pane" ref={nodes.slot("pane")}>
+        <aside className="room-pane" id={room.id("pane")} ref={nodes.slot("pane")}>
           {place === "wall" && notice}
           {papers !== null &&
             (wallEmpty(papers) ? (

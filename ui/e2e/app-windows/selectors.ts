@@ -49,7 +49,7 @@ export const ids = {
   /** Recent's list, and each of its rows: a conversation of any matter, with `data-conversation`. */
   railRecent: "rail-recent",
   recentRow: "recent-row",
-  /** Matters on the toolbar, which opens and folds the rail below 1200 px. */
+  /** The sidebar's toggle on the toolbar: hides or shows the rail from 1200 px, opens and folds it below. */
   railToggle: "rail-toggle",
   /** The toolbar's title: the open matter's name. */
   matter: "matter",
@@ -283,8 +283,9 @@ export function window(page: Page) {
     /** The rail's find field. */
     findMatter: id(ids.find),
     /**
-     * Matters on the toolbar, which unfolds the rail below 1200 px (the e2e window opens at
-     * 1280 x 800, crates/desktop's e2e.rs, so the rail starts open).
+     * The sidebar's toggle on the toolbar, which hides or shows the rail from 1200 px and unfolds
+     * it below (the e2e window opens at 1280 x 800, crates/desktop's e2e.rs, so the rail starts
+     * shown unless the window was left with it hidden). aria-expanded says which.
      */
     railToggle: id(ids.railToggle),
     matter: id(ids.matter),

@@ -22,6 +22,79 @@ fn each_command_has_its_own_id_and_is_found_by_it() {
     assert_eq!(PageCommand::of_id("settings"), None);
     assert_eq!(PageCommand::of_id(""), None);
     assert_eq!(PageCommand::of_id("New_matter"), None);
+    assert_eq!(
+        PageCommand::of_id("toggle_sidebar"),
+        Some(PageCommand::ToggleSidebar)
+    );
+    assert_eq!(
+        PageCommand::of_id("toggle_papers"),
+        Some(PageCommand::TogglePapers)
+    );
+    assert_eq!(PageCommand::of_id("toggle"), None);
+}
+
+#[test]
+fn only_the_panel_toggles_leave_the_window_where_it_is() {
+    for command in PageCommand::ALL {
+        let toggle = matches!(
+            command,
+            PageCommand::ToggleSidebar | PageCommand::TogglePapers
+        );
+        assert_eq!(command.raises(), !toggle, "{command:?}");
+    }
+}
+
+#[test]
+fn the_toggles_say_what_a_press_does_in_both_languages() {
+    use clauseo_protocol::Language::{En, Hi};
+    let layout = |sidebar, papers| LayoutShown { sidebar, papers };
+    let cases = [
+        (
+            PageCommand::ToggleSidebar,
+            true,
+            "Hide the sidebar",
+            "साइडबार छिपाएँ",
+        ),
+        (
+            PageCommand::ToggleSidebar,
+            false,
+            "Show the sidebar",
+            "साइडबार दिखाएँ",
+        ),
+        (
+            PageCommand::TogglePapers,
+            true,
+            "Hide the papers",
+            "दस्तावेज़ छिपाएँ",
+        ),
+        (
+            PageCommand::TogglePapers,
+            false,
+            "Show the papers",
+            "दस्तावेज़ दिखाएँ",
+        ),
+    ];
+    for (command, shown, en, hi) in cases {
+        // each toggle reads its own flag, whatever the other's
+        for other in [true, false] {
+            let flags = if command == PageCommand::ToggleSidebar {
+                layout(shown, other)
+            } else {
+                layout(other, shown)
+            };
+            assert_eq!(toggle_text(En, command, flags), Some(en), "{flags:?}");
+            assert_eq!(toggle_text(Hi, command, flags), Some(hi), "{flags:?}");
+        }
+    }
+    for command in [
+        PageCommand::NewConversation,
+        PageCommand::NewMatter,
+        PageCommand::Find,
+    ] {
+        assert_eq!(toggle_text(En, command, LayoutShown::BOTH), None);
+    }
+    // the bar opens with both shown: the Hide words
+    assert_eq!(LayoutShown::BOTH, layout(true, true));
 }
 
 #[test]
@@ -35,6 +108,14 @@ fn the_script_sends_the_pages_event_with_the_command_and_nothing_else() {
         assert_eq!(script.matches("dispatchEvent").count(), 1, "{script}");
         assert!(script.ends_with(&format!("{{ detail: \"{}\" }}));", command.id())));
     }
+    assert_eq!(
+        script(PageCommand::ToggleSidebar),
+        "window.dispatchEvent(new CustomEvent(\"clauseo-menu\", { detail: \"toggle_sidebar\" }));"
+    );
+    assert_eq!(
+        script(PageCommand::TogglePapers),
+        "window.dispatchEvent(new CustomEvent(\"clauseo-menu\", { detail: \"toggle_papers\" }));"
+    );
 }
 
 #[test]
