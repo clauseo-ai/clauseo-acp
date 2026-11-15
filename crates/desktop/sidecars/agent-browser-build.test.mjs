@@ -26,6 +26,7 @@ import {
   pinLines,
   rustcCommit,
   tarInfo,
+  testEnv,
   toolchainChannel,
   workParent,
 } from "./agent-browser-build.mjs";
@@ -343,6 +344,31 @@ describe("check", () => {
     const server = serve(gz);
     await assert.rejects(main(["check"], { pinPath, patchDir, fetch: server.fetch, log: quiet }), /NNNN/);
     assert.equal(server.calls.length, 0);
+  });
+});
+
+describe("testEnv", () => {
+  const mac = (arch) => ({ platform: "darwin", arch });
+  test("x86_64 macOS tested on an ARM64 Mac (Rosetta) gets 60 s per CLI subprocess test", () => {
+    const env = testEnv({ PATH: "/bin" }, "x86_64-apple-darwin", mac("arm64"));
+    assert.deepEqual(env, { PATH: "/bin", AB_TEST_SUBPROCESS_TIMEOUT_SECS: "60" });
+  });
+
+  test("a value already set is kept", () => {
+    const env = { AB_TEST_SUBPROCESS_TIMEOUT_SECS: "120" };
+    assert.equal(testEnv(env, "x86_64-apple-darwin", mac("arm64")).AB_TEST_SUBPROCESS_TIMEOUT_SECS, "120");
+  });
+
+  test("native builds keep the tests' own 10 s", () => {
+    for (const [triple, host] of [
+      ["x86_64-apple-darwin", mac("x64")],
+      ["aarch64-apple-darwin", mac("arm64")],
+      ["x86_64-pc-windows-msvc", { platform: "win32", arch: "x64" }],
+      ["aarch64-pc-windows-msvc", { platform: "win32", arch: "arm64" }],
+    ]) {
+      const env = { PATH: "/bin" };
+      assert.equal(testEnv(env, triple, host), env, triple);
+    }
   });
 });
 
