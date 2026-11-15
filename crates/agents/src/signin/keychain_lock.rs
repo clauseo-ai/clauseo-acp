@@ -8,18 +8,29 @@
 //! are the lawyer's own acts and are not guarded here.
 //!
 //! The lock state comes from `SecKeychainGetStatus` on the default keychain and on the login
-//! keychain opened by path (the default can be another, unlocked keychain), which reads the
-//! state and never unlocks or prompts (Apple: "Retrieves status information about a keychain";
-//! `kSecUnlockStateStatus` is bit 0). A failed call counts as locked: could not tell, so the
-//! background run is skipped. (`security show-keychain-info` cannot stand in: in the lawyer's
-//! session it exits 0 locked or unlocked, VM 2026-11-15.)
+//! keychain opened by path under the home folder of the user record (`getpwuid_r`, never
+//! `$HOME`), since the default can be another, unlocked keychain. The call reads the state and
+//! never unlocks or prompts (Apple: "Retrieves status information about a keychain";
+//! `kSecUnlockStateStatus` is bit 0). A failed call, no user record or no login keychain file
+//! counts as locked: could not tell, so the background run is skipped. Other keychains in the
+//! search list are not read: `/Library/Keychains/System.keychain` reads locked (0x2) to every
+//! user (K0, 2026-11-15), and a locked extra keychain raised no dialog (VM row M-c).
+//! (`security show-keychain-info` cannot stand in: in the lawyer's session it exits 0 locked or
+//! unlocked, VM 2026-11-15.)
+
+#[cfg(any(target_os = "macos", all(test, unix)))]
+use std::path::Path;
 
 use crate::config::AgentsConfig;
 use crate::platform::Os;
 
 /// `kSecUnlockStateStatus`: the keychain is unlocked.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 const UNLOCKED: u32 = 1;
+
+/// The login keychain's file names in `<home>/Library/Keychains`, the current one first.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+const LOGIN_NAMES: [&str; 2] = ["login.keychain-db", "login.keychain"];
 
 /// Whether the background status check must skip Claude's runs: `config`'s platform is macOS
 /// and the default or login keychain is locked. A test sets the answer with
@@ -35,14 +46,59 @@ pub(crate) fn locked(config: &AgentsConfig) -> bool {
     login_keychain_locked()
 }
 
+/// Whether a `SecKeychainStatus` (`None`: the call failed) reads unlocked.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn unlocked(status: Option<u32>) -> bool {
+    status.is_some_and(|status| status & UNLOCKED != 0)
+}
+
+/// The decision, with the macOS reads passed in: `default` is the default keychain's status,
+/// `home` the user record's home folder (`None`: the lookup failed), `is_file` whether a file
+/// exists, and `status_at` the status of the keychain opened at a path. Locked unless the
+/// default reads unlocked and so does the first login keychain file found.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn decide(
+    default: Option<u32>,
+    home: Option<&Path>,
+    is_file: impl Fn(&Path) -> bool,
+    status_at: impl FnOnce(&Path) -> Option<u32>,
+) -> bool {
+    if !unlocked(default) {
+        return true;
+    }
+    let Some(home) = home else {
+        return true;
+    };
+    let folder = home.join("Library").join("Keychains");
+    let Some(login) = LOGIN_NAMES
+        .into_iter()
+        .map(|name| folder.join(name))
+        .find(|path| is_file(path))
+    else {
+        return true;
+    };
+    !unlocked(status_at(&login))
+}
+
+/// The home folder of the user record of the real user id (`getpwuid_r`), never `$HOME`,
+/// which the environment sets: `None` when the lookup fails, finds no user or an empty folder.
+#[cfg(target_os = "macos")]
+fn user_home() -> Option<std::path::PathBuf> {
+    use nix::unistd::{User, getuid};
+    User::from_uid(getuid())
+        .ok()
+        .flatten()
+        .map(|user| user.dir)
+        .filter(|dir| !dir.as_os_str().is_empty())
+}
+
 /// Whether the default keychain or the user's login keychain is locked, by
-/// `SecKeychainGetStatus`, which never prompts: first on the default keychain (`NULL`), then on
-/// `~/Library/Keychains/login.keychain-db` (else the older `login.keychain`) opened by path with
-/// `SecKeychainOpen`, since the default keychain can be another, unlocked one while the login
-/// keychain, where Claude's item lives, is locked (VM 2026-11-15). True (could not tell) when a
-/// call fails, there is no home folder or neither login keychain file exists. Always false
-/// outside macOS. Public for desktop's limits readers, which skip Claude's background read while
-/// it is locked.
+/// `SecKeychainGetStatus`, which never prompts: on the default keychain (`NULL`), then on
+/// `<home>/Library/Keychains/login.keychain-db` (else the older `login.keychain`) opened by path
+/// with `SecKeychainOpen`, `<home>` from the user record ([`decide`]). True (could not tell)
+/// when a call fails, there is no user record or neither login keychain file exists. Always
+/// false outside macOS. Public for desktop's limits readers, which skip Claude's background read
+/// while it is locked.
 #[cfg(target_os = "macos")]
 #[expect(
     unsafe_code,
@@ -50,7 +106,7 @@ pub(crate) fn locked(config: &AgentsConfig) -> bool {
 )]
 pub fn login_keychain_locked() -> bool {
     use std::ffi::{CString, c_char, c_void};
-    use std::os::unix::ffi::OsStringExt;
+    use std::os::unix::ffi::OsStrExt;
 
     #[link(name = "Security", kind = "framework")]
     unsafe extern "C" {
@@ -62,43 +118,34 @@ pub fn login_keychain_locked() -> bool {
         fn CFRelease(cf: *const c_void);
     }
 
-    let unlocked = |keychain: *const c_void| {
+    let read = |keychain: *const c_void| {
         let mut status: u32 = 0;
         // SAFETY: `keychain` is null (the default keychain) or one `SecKeychainOpen` returned and
         // not yet released; `status` is a valid u32 the call writes.
         let code = unsafe { SecKeychainGetStatus(keychain, &raw mut status) };
-        code == 0 && status & UNLOCKED != 0
+        (code == 0).then_some(status)
     };
-
-    if !unlocked(std::ptr::null()) {
-        return true;
-    }
-    let Some(home) = std::env::home_dir() else {
-        return true;
+    let status_at = |path: &Path| {
+        let path = CString::new(path.as_os_str().as_bytes()).ok()?;
+        let mut keychain: *const c_void = std::ptr::null();
+        // SAFETY: `path` is a NUL-terminated string that outlives the call; `keychain` is a
+        // valid `SecKeychainRef` slot the call writes.
+        let code = unsafe { SecKeychainOpen(path.as_ptr(), &raw mut keychain) };
+        if keychain.is_null() {
+            return None;
+        }
+        let status = if code == 0 { read(keychain) } else { None };
+        // SAFETY: `keychain` is the one `SecKeychainOpen` returned, which the caller must
+        // release; it is released once here and not used after.
+        unsafe { CFRelease(keychain) };
+        status
     };
-    let folder = home.join("Library").join("Keychains");
-    let Some(path) = ["login.keychain-db", "login.keychain"]
-        .into_iter()
-        .map(|name| folder.join(name))
-        .find(|path| path.is_file())
-    else {
-        return true;
-    };
-    let Ok(path) = CString::new(path.into_os_string().into_vec()) else {
-        return true;
-    };
-    let mut login: *const c_void = std::ptr::null();
-    // SAFETY: `path` is a NUL-terminated string that outlives the call; `login` is a valid
-    // `SecKeychainRef` slot the call writes.
-    let code = unsafe { SecKeychainOpen(path.as_ptr(), &raw mut login) };
-    if code != 0 || login.is_null() {
-        return true;
-    }
-    let login_unlocked = unlocked(login);
-    // SAFETY: `login` is the keychain `SecKeychainOpen` returned, which the caller must release;
-    // it is released once here and not used after.
-    unsafe { CFRelease(login) };
-    !login_unlocked
+    decide(
+        read(std::ptr::null()),
+        user_home().as_deref(),
+        Path::is_file,
+        status_at,
+    )
 }
 
 /// No keychain to lock outside macOS (a config saying macOS on another OS is a test's).
@@ -106,3 +153,8 @@ pub fn login_keychain_locked() -> bool {
 pub fn login_keychain_locked() -> bool {
     false
 }
+
+// Unix only: the tests hold the user's home as a Unix path (`/Users/…`), which Windows does not
+// take as absolute (xtask's unix-paths check); the code they test is macOS's.
+#[cfg(all(test, unix))]
+mod tests;

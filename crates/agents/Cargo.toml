@@ -61,7 +61,8 @@ rcgen = { version = "0.14.10", optional = true, default-features = false, featur
 keyring = { workspace = true, features = ["v1"] }
 
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["fs"] }
+# `user`: `signin::keychain_lock` reads the home folder from the user record (`getpwuid_r`).
+nix = { workspace = true, features = ["fs", "user"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
