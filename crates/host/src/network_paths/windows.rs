@@ -57,7 +57,7 @@ fn wide(path: &Path) -> Vec<u16> {
 
 /// The reparse tag of the reparse point at `path`, from its folder's listing: `FindFirstFileW`
 /// reads the entry, never opens it. `None` when it can't be read.
-pub(super) fn reparse_tag(path: &Path) -> Option<u32> {
+pub(crate) fn reparse_tag(path: &Path) -> Option<u32> {
     let path = wide(path);
     let mut data = WIN32_FIND_DATAW::default();
     // SAFETY: `path` is NUL-terminated and outlives the call; `data` is written in place.

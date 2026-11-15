@@ -2,7 +2,7 @@
 //! past its cap or a matter that can't be listed leave the matter without read allow rules; a
 //! link that stays inside, or none, keeps them.
 
-use super::{links_out, readable_matter};
+use super::{counts_as_link, links_out, readable_matter};
 use crate::pipeline::tests::support::TempDir;
 
 /// A matter under `dir` with a file and a sub-folder, and a folder beside it.
@@ -83,4 +83,24 @@ fn a_junction_out_of_the_matter_leaves_it_without_rules() {
         readable_matter(&real, &real),
         Vec::<std::path::PathBuf>::new()
     );
+}
+
+/// The tag decision, on every system: a symbolic link, a junction (mount point) and a kind not
+/// known to be local count as links; `OneDrive`'s cloud files (every variant), dedup, WOF and
+/// WCI are data, so a matter in `OneDrive` keeps its rules.
+#[test]
+fn only_links_and_unknown_reparse_points_count_as_links() {
+    for tag in [0xA000_000C, 0xA000_0003, 0x8000_000A, 0x8000_001E, 0x1234] {
+        assert!(counts_as_link(tag), "{tag:#x}");
+    }
+    for tag in [
+        0x9000_001A,
+        0x9000_101A,
+        0x9000_F01A,
+        0x8000_0013,
+        0x8000_0017,
+        0x8000_0018,
+    ] {
+        assert!(!counts_as_link(tag), "{tag:#x}");
+    }
 }

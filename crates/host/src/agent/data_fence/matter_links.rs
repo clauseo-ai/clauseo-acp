@@ -5,10 +5,15 @@
 //! with no classifier (the security review of #1065, H2). The check here walks the matter once
 //! at the launch, never following a link, and finds every symbolic link, junction and folder
 //! symbolic link (std's `is_symlink`, a name-surrogate reparse point on Windows) whose target,
-//! resolved, is not in the matter; a broken one counts as outside. A walk past [`SCAN_CAP`]
-//! entries, or a matter that can't be listed, gives no rules too: the classifier judges, as
-//! before. A sub-folder that can't be listed is skipped, as `clauseo_sandbox::scan_matter` does:
-//! the agent runs as the same user and can't list it either.
+//! resolved, is not in the matter; a broken one counts as outside. On Windows any other reparse
+//! point counts as a link out too, unless its tag is a known local kind of data
+//! (`network_paths::local_reparse_tag`: `OneDrive`'s cloud files, dedup, WOF, WCI, an app
+//! execution alias, `ProjFS`, an `AF_UNIX` socket; `counts_as_link`), so a matter in `OneDrive`
+//! keeps its rules while one holding a DFS or Azure File Sync point does not. A `.lnk` shortcut
+//! is a plain file to the file system and to Claude Code's tools: not a link. A walk past
+//! [`SCAN_CAP`] entries, or a matter that can't be listed, gives no rules too: the classifier
+//! judges, as before. A sub-folder that can't be listed is skipped, as
+//! `clauseo_sandbox::scan_matter` does: the agent runs as the same user and can't list it either.
 //!
 //! The residual: a link made after the launch. Making one is a write (`ln -s`, `mklink /J`,
 //! `New-Item -ItemType Junction`) that no allow rule matches, so it needs a classifier's pass
@@ -67,6 +72,9 @@ pub(crate) fn links_out(matter: &Path, cap: usize) -> Option<bool> {
                 continue;
             };
             let path = entry.path();
+            if !kind.is_symlink() && unknown_reparse_point(&entry, &path) {
+                return Some(true);
+            }
             if kind.is_symlink() {
                 let inside =
                     dunce::canonicalize(&path).is_ok_and(|target| target.starts_with(&root));
@@ -79,6 +87,34 @@ pub(crate) fn links_out(matter: &Path, cap: usize) -> Option<bool> {
         }
     }
     Some(false)
+}
+
+/// Whether a reparse point with `tag` counts as a link that may lead out of the matter: a
+/// symbolic link, a junction or mount point, or any kind not known to be local data. Pure, so
+/// it is tested on every system.
+#[cfg(any(windows, test))]
+fn counts_as_link(tag: u32) -> bool {
+    !crate::network_paths::local_reparse_tag(tag)
+}
+
+/// Whether `entry` (at `path`, not a name-surrogate link) is a reparse point that
+/// [`counts_as_link`]; one whose tag can't be read counts too. Never on other systems.
+#[cfg(windows)]
+fn unknown_reparse_point(entry: &std::fs::DirEntry, path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+    /// `FILE_ATTRIBUTE_REPARSE_POINT`.
+    const REPARSE_POINT: u32 = 0x400;
+    let Ok(meta) = entry.metadata() else {
+        return true;
+    };
+    meta.file_attributes() & REPARSE_POINT != 0
+        && crate::network_paths::reparse_tag(path).is_none_or(counts_as_link)
+}
+
+/// Never on systems without reparse points.
+#[cfg(not(windows))]
+fn unknown_reparse_point(_entry: &std::fs::DirEntry, _path: &Path) -> bool {
+    false
 }
 
 #[cfg(test)]
