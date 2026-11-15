@@ -7,7 +7,7 @@ use std::path::Path;
 use clauseo_profile::ClauseoProfile;
 use clauseo_profile::instructions::LEGAL;
 use clauseo_profile::placeholders::{
-    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, OTHER_MATTERS, WORK_FOLDER,
 };
 
 use super::{launch_profile, paths_under};
@@ -30,6 +30,7 @@ fn the_launch_instructions_hold_only_tokens_the_host_fills() {
                 (MATTER_NOTES, "M"),
                 (CONNECTORS, ""),
                 (BROWSER, ""),
+                (OTHER_MATTERS, ""),
             ],
         )
         .unwrap();

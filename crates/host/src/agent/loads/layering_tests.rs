@@ -27,6 +27,7 @@ fn folders() -> Folders<'static> {
         notes: "/data/agent-state/m/notes",
         connectors: "",
         browser: "",
+        other_matters: "",
     }
 }
 

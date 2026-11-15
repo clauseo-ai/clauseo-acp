@@ -104,6 +104,7 @@ fn claude_gets_allow_rules_unless_forced_ask() {
                 notes: "/n",
                 connectors: "",
                 browser: "",
+                other_matters: "",
             },
             seed_sites: &[],
             forced_ask,

@@ -212,14 +212,22 @@ anything the agent starts.
   session's agent: Claude's Read and Edit deny rules on every OS, Claude's sandbox read deny and
   Codex's profile deny on macOS and Linux, the host's auto-deny of permission requests, and Claude's
   Bash and PowerShell deny rules on Windows (text-matching, capped, the lawyer told which matters
-  did not fit). A matter inside the session's own matter stays shut on macOS and Linux even to a
-  command that never names it (`rg x .`): the sandbox re-opens the own matter's entries one by one
-  down to it, never the whole folder. Not on Windows: there is no OS fence there, so a command in
-  the own matter (`rg x .`, `dir /s`) reads a matter nested inside it, and Codex on Windows has
-  no fence between matters at all (its standing instruction only). A lawyer's per-conversation
-  read invite is read-only: Claude reads through its Read tool, writes stay denied. Gaps: an agent
-  can fake a refused tool call to make the invite's offer appear (the lawyer's click is still
-  required); what is made in a parent matter after a launch is in no rule until the next one
+  did not fit). A matter the conversation is not invited into inside the session's own matter
+  stays shut on macOS and Linux even to a command that never names it (`rg x .`): Claude's sandbox
+  then re-opens none of the own matter to its commands (its file tools still read and edit it,
+  and the lawyer is told, `ShellLimited`); a deny the sandbox can't spell is widened to a folder
+  above it, never dropped. Not on Windows: there is no OS fence there, so a command in the own
+  matter (`rg x .`, `dir /s`) reads a matter nested inside it, and Codex on Windows has no fence
+  between matters at all: its instructions name the matters closed to it and tell it never to
+  open them (`instructions::other_matters_closed`). On Windows each fenced folder and the data
+  folder are also named by their full 8.3 short form (`agent::short_forms`); a path with
+  only some names short is in no rule, a known gap until the file tools' hook. The invite's offer names only a matter a
+  refused call's own arguments targeted, never one its output printed. A lawyer's
+  per-conversation read invite is read-only: Claude reads through its Read tool, writes stay
+  denied. Gaps: an agent can fake a refused tool call to make the invite's offer appear (the
+  lawyer's click is still required); renaming a folder above a nested matter gets past the path
+  rules (follow-up); what is made in a parent matter after a launch is in no rule until the next
+  one
 
 ## Egress proxy
 

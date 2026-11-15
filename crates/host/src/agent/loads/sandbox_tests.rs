@@ -104,6 +104,7 @@ fn folders(session: &Session) -> Folders<'_> {
         notes: session.notes.to_str().unwrap(),
         connectors: "",
         browser: "",
+        other_matters: "",
     }
 }
 

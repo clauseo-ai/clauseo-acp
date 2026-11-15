@@ -6,7 +6,7 @@ use std::path::Path;
 use clauseo_profile::ClauseoProfile;
 use clauseo_profile::instructions::word_count;
 use clauseo_profile::placeholders::{
-    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, OTHER_MATTERS, WORK_FOLDER,
 };
 use clauseo_profile::skills::builtin::{BUILTIN, code_span, codex_index, sources};
 use clauseo_profile::skills::stetdoc::STETDOC;
@@ -130,7 +130,7 @@ fn the_budgets_hold_for_a_long_macos_path_with_the_folders_filled() {
     assert!(word_count(&index) <= 150, "{} words", word_count(&index));
     let work = format!("{data}/run/0b7e3c1a-5d2f-4e8a-9c61-2f4d8e7a1b30/work");
     let notes = format!("{data}/agent-state/matter-4821/notes");
-    let fill = |text: &str| {
+    let fill = |text: &str, rule: &str| {
         clauseo_profile::placeholders::fill(
             text,
             &IN_INSTRUCTIONS,
@@ -139,18 +139,29 @@ fn the_budgets_hold_for_a_long_macos_path_with_the_folders_filled() {
                 (MATTER_NOTES, &notes),
                 (CONNECTORS, ""),
                 (BROWSER, ""),
+                (OTHER_MATTERS, rule),
             ],
         )
         .unwrap()
     };
-    let shared = fill(&profile.instructions_for(AgentKind::Claude));
+    let fenced = clauseo_profile::instructions::OTHER_MATTERS.trim();
+    let shared = fill(&profile.instructions_for(AgentKind::Claude), fenced);
     assert!(word_count(&shared) <= 1800, "{} words", word_count(&shared));
-    // What `codex_keys` sends after a successful write (checked on disk in `tests/skills`).
-    let codex = fill(&format!(
-        "{}\n\n{index}",
-        profile.instructions_for(AgentKind::Codex)
-    ));
-    assert!(word_count(&codex) <= 1800, "{} words", word_count(&codex));
+    // What `codex_keys` sends after a successful write (checked on disk in `tests/skills`), with
+    // the other matters' rule as Codex on Windows gets it, past its listed folders, each with
+    // spaces: the project's count of Codex's whole text (`instructions::word_count`).
+    let folders: Vec<String> = (0..20)
+        .map(|n| format!(r"C:\Users\Ann Mary\Clients\Sharma v State {n}"))
+        .collect();
+    let closed: Vec<&str> = folders.iter().map(String::as_str).collect();
+    let windows = clauseo_profile::instructions::other_matters_closed(&closed);
+    let codex_text = format!("{}\n\n{index}", profile.instructions_for(AgentKind::Codex));
+    let words: Vec<usize> = [fenced, windows.as_str()]
+        .iter()
+        .map(|rule| word_count(&fill(&codex_text, rule)))
+        .collect();
+    let most = words.iter().copied().max().unwrap_or_default();
+    assert!(most <= 1800, "{words:?} words");
 }
 
 #[test]

@@ -4343,18 +4343,16 @@ export type NoticeKind =
  */
 "shell_network_blocked" | 
 /**
+ *  As `shell_network_blocked`, in a session without web search (the firm or the lawyer
+ *  turned it off), so the words offer no web search instead. Once a turn.
+ */
+"shell_network_blocked_no_web_search" | 
+/**
  *  Clauseo kept the agent out of another matter's files: a refused permission request,
  *  or a tool call that failed as refused on a path in that matter (the innermost, when
  *  matters nest). The app offers to let this conversation read that matter's files.
  *  Once a turn for each matter.
  */
-"shell_network_blocked" | 
-/**
- *  As `shell_network_blocked`, in a session without web search (the firm or the lawyer
- *  turned it off), so the words offer no web search instead. Once a turn.
- */
-"shell_network_blocked_no_web_search" | 
-/** (regenerated below) */
 ({ other_matter_refused: {
 	/**  The other matter. */
 	matter: MatterId,

@@ -16,6 +16,8 @@ use super::{windows_matter_shell_rules, windows_shell_deny_rules};
 use crate::agent::matter_fence::{MatterFence, Other};
 
 const MATTERS: &str = r"C:\Users\clauseo-lawyer\Matters";
+/// `MATTERS` in its full 8.3 short form.
+const SHORT_MATTERS: &str = r"C:\Users\CLAUSE~1\Matters";
 const SNAP: &str = "src/agent/data_fence/windows_rules.snap";
 
 fn id(n: u128) -> MatterId {
@@ -34,6 +36,8 @@ fn env(name: &str) -> Option<OsString> {
 
 /// The launch: this matter `Acme\Deal`, other matters `Smith` (sibling), `Acme` (parent, fenced
 /// by `Acme\Old` and `Acme\notes.txt`), `Zed` (invited), `Acme\Deal\Child` (inside this one).
+/// The profile folder has an 8.3 short name (`CLAUSE~1`), so `Smith` and the data folder also
+/// go by their full short forms, as the launch adds them (`agent::short_forms`).
 fn launch() -> LaunchDeny {
     let at = |name: &str| PathBuf::from(format!(r"{MATTERS}\{name}"));
     let others: [(&str, &[&str], bool); 4] = [
@@ -49,14 +53,20 @@ fn launch() -> LaunchDeny {
             let mut other = Other::new(id(n), (*name).to_owned(), at(name), *invited);
             other.spellings = vec![at(name)];
             other.paths = paths.iter().map(|path| at(path)).collect();
+            if *name == "Smith" {
+                let short = PathBuf::from(format!(r"{SHORT_MATTERS}\SMITH~1"));
+                other.spellings.push(short.clone());
+                other.paths.push(short);
+            }
             other
         })
         .collect();
     let mut fence = MatterFence::asked(others);
     fence.own = vec![at(r"Acme\Deal")];
-    let mut deny = LaunchDeny::fixed(vec![PathBuf::from(
-        r"C:\Users\clauseo-lawyer\AppData\Local\ai.clauseo.desktop",
-    )]);
+    let mut deny = LaunchDeny::fixed(vec![
+        PathBuf::from(r"C:\Users\clauseo-lawyer\AppData\Local\ai.clauseo.desktop"),
+        PathBuf::from(r"C:\Users\CLAUSE~1\AppData\Local\AICLAU~1.DES"),
+    ]);
     deny.own_reads = vec!["run/s1/work".to_owned(), "agent-state/m1/notes".to_owned()];
     deny.matters = fence;
     deny
@@ -99,6 +109,7 @@ fn rendered() -> String {
         r"C:\Users\clauseo-lawyer\Matters\Acme\Deal\memo.docx",
         r"C:\Users\clauseo-lawyer\Matters\Acme\Deal\Child\deed.pdf",
         r"C:\Users\clauseo-lawyer\Matters\Zed\a.txt",
+        r"C:\Users\CLAUSE~1\Matters\SMITH~1\lease.pdf",
     ];
     let named = words
         .iter()

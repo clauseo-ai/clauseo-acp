@@ -74,9 +74,11 @@ pub(super) fn launch_keys(
         let kind = AgentKind::of(&agent_id);
         let none_here = browser::no_browser(kind, cfg!(windows)).then_some(BrowserPart::Off);
         let browser = session_part(shell.as_ref(), entry.as_ref(), &prepared.run, none_here);
+        let rule = super::outside::fence::codex_rule(&prepared.run, cfg!(windows));
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?
             .with_connectors(part)
-            .with_browser(browser_part(browser, shell.is_none()));
+            .with_browser(browser_part(browser, shell.is_none()))
+            .with_other_matters(&rule);
         let (web_search, _) = switches(actor);
         let packs = prepared.run.packs_written.as_deref();
         let keys = actor

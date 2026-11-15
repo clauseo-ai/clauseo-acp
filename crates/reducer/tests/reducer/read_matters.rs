@@ -61,7 +61,7 @@ fn neither_event_wakes_and_a_turn_leaves_them() {
 
 #[test]
 fn allowed_matters_survive_a_snapshot_at_this_schema() {
-    assert_eq!(REDUCER_SCHEMA_VERSION, 13);
+    assert_eq!(REDUCER_SCHEMA_VERSION, 14);
     let b = matter_id(24).unwrap();
     let mut log = Log::thread(33).unwrap();
     log.push(thread_created().unwrap()).unwrap();

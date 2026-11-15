@@ -174,8 +174,8 @@ fn remote_handle(handle: HANDLE) -> bool {
     .is_ok()
 }
 
-/// The 8.3 short form of the local path `path` (`GetShortPathNameW`), asked only of the data
-/// folder once it is proven local. `None` when it can't be read.
+/// The 8.3 short form of the local path `path` (`GetShortPathNameW`), asked only of a local
+/// path (the data folder, a fenced matter's, `agent::short_forms`). `None` when it can't be read.
 pub(crate) fn short_path(path: &Path) -> Option<std::path::PathBuf> {
     use std::os::windows::ffi::OsStringExt as _;
     let path = wide(path);

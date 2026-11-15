@@ -8,6 +8,8 @@ mod claude_shell;
 mod codex_pdf;
 #[path = "legal/index.rs"]
 mod index;
+#[path = "legal/other_matters.rs"]
+mod other_matters;
 #[path = "legal/rules.rs"]
 mod rules;
 
@@ -17,7 +19,7 @@ use std::path::{Path, PathBuf};
 use clauseo_profile::RenderedSkill;
 use clauseo_profile::instructions::{LEGAL, TOOLS, word_count};
 use clauseo_profile::placeholders::{
-    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, OTHER_MATTERS, WORK_FOLDER,
 };
 use clauseo_profile::skills::builtin::{ASSETS, BUILTIN, RETIRED_BUILTINS, sources};
 use clauseo_profile::skills::frontmatter::{self, MetaValue};
@@ -267,6 +269,7 @@ fn the_connectors_paragraph_goes_only_where_the_host_puts_it() {
                 (MATTER_NOTES, "M"),
                 (CONNECTORS, part),
                 (BROWSER, ""),
+                (OTHER_MATTERS, ""),
             ],
         )
         .unwrap()
