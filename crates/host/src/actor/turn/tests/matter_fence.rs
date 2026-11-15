@@ -248,3 +248,78 @@ fn a_busy_agent_with_a_queued_prompt_is_stopped_at_its_turns_end() {
     );
     rig.finish();
 }
+
+/// A withdrawal followed at once by a prompt: the prompt's command arrives before the next
+/// tick, so the idle agent is not stopped there (`idle::pending`); the prompt finds the stale
+/// fence when it reaches the agent, stops it, and runs on the relaunch with the matter fenced
+/// again.
+#[test]
+fn a_prompt_sent_right_after_a_withdrawal_runs_on_the_new_rules() {
+    let mut rig = rig("mfence-withdraw-send", TWO_ANSWERS, "exit");
+    let papers = TempDir::new("mfence-withdraw-send-papers");
+    let thread = rig.thread();
+    let other = other_matter(&mut rig, papers.path(), "Smith", 5);
+    let allow = HostCommand::AllowMatterRead {
+        thread,
+        matter: other,
+    };
+    rig.dispatch(6, allow).unwrap();
+    turn(&mut rig, thread, 10);
+    until_idle(&mut rig, thread);
+    assert_eq!(
+        rules_for(&rig, thread, other),
+        (false, true, true),
+        "invited"
+    );
+    let before = idle_stops(&mut rig, thread);
+    let send = |n: u128, command: HostCommand| {
+        let (reply, answer) = futures::channel::oneshot::channel();
+        let command = clauseo_protocol::CommandEnvelope {
+            command_id: super::rig::command_id(n),
+            command,
+        };
+        (
+            crate::actor::input::Request::Dispatch { command, reply },
+            answer,
+        )
+    };
+    let withdraw = HostCommand::WithdrawMatterRead {
+        thread,
+        matter: other,
+    };
+    let prompt = HostCommand::SendPrompt {
+        thread,
+        content: vec![clauseo_protocol::PromptBlock::Text {
+            text: "Now the lease.".to_owned(),
+        }],
+        delivery: clauseo_protocol::DeliveryRequest::Queue,
+    };
+    let (first, mut withdrawn) = send(11, withdraw);
+    let (second, mut sent) = send(12, prompt);
+    rig.actor.on_request(first);
+    rig.actor.on_request(second);
+    rig.run_until("both answered and the turn ended on a relaunch", |actor| {
+        let answered = matches!(withdrawn.try_recv(), Ok(Some(_)) | Err(_))
+            && matches!(sent.try_recv(), Ok(Some(_)) | Err(_));
+        let state = &actor.threads[&thread].turn;
+        answered
+            && state.current.is_none()
+            && state.queue.is_empty()
+            && state
+                .agent
+                .as_deref()
+                .is_some_and(|agent| agent.stage == Stage::Attached)
+            && actor.work.commits == 0
+    });
+    assert_eq!(
+        idle_stops(&mut rig, thread),
+        before + 1,
+        "stopped once, before the prompt"
+    );
+    assert_eq!(
+        rules_for(&rig, thread, other),
+        (true, true, false),
+        "fenced again"
+    );
+    rig.finish();
+}

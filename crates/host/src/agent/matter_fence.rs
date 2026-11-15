@@ -93,7 +93,8 @@ pub(crate) struct MatterFence {
     /// When another matter the session is not invited into lies inside its own matter: what
     /// of the own matter Claude's sandbox re-opens for reading instead of the whole folder, its
     /// entries down to each such matter ([`down_to`]), so the fence holds for a command that
-    /// never names the path (`rg x .`). `None` when no such matter lies inside it.
+    /// never names the path (`rg x .`). Links among those entries are left out (re-opened, a link
+    /// would re-open where it leads). `None` when no such matter lies inside it.
     pub(crate) own_open: Option<Vec<PathBuf>>,
     /// Whether [`Self::own_open`] was needed but a folder on the way could not be listed, is on
     /// a network share, or holds more than [`MAX_PATHS`] entries: the sandbox is then off
@@ -155,7 +156,6 @@ impl MatterFence {
             .filter(|other| other.invited)
             .flat_map(|other| other.spellings.iter().cloned())
             .collect();
-        let mut total = 0_usize;
         for other in &mut self.others {
             let mut keep: Vec<&Path> = own.iter().chain(data).copied().collect();
             if !other.invited {
@@ -171,16 +171,12 @@ impl MatterFence {
             }
             let mut seen = std::collections::HashSet::new();
             paths.retain(|path| seen.insert(path.clone()));
-            if total + paths.len() > MAX_PATHS {
-                paths.clear();
-                whole = false;
-            }
-            total += paths.len();
             if !whole {
                 self.unfenced.push(other.id);
             }
             other.paths = paths;
         }
+        self.spend_budget();
         if !self.unfenced.is_empty() {
             let unfenced = self.unfenced.len();
             tracing::warn!(
@@ -190,6 +186,33 @@ impl MatterFence {
         }
         self.split_own(&net);
         self
+    }
+
+    /// Keeps the launch's fence paths within [`MAX_PATHS`]: the matters with the fewest paths
+    /// first (a plain sibling has one or two), so one parent with thousands of entries can't push
+    /// every other matter out; a matter that does not fit loses its paths and joins
+    /// [`Self::unfenced`]. Ties go by id.
+    fn spend_budget(&mut self) {
+        let mut order: Vec<usize> = (0..self.others.len()).collect();
+        order.sort_by_key(|at| {
+            self.others
+                .get(*at)
+                .map(|other| (other.paths.len(), other.id))
+        });
+        let mut total = 0_usize;
+        for at in order {
+            let Some(other) = self.others.get_mut(at) else {
+                continue;
+            };
+            if total + other.paths.len() > MAX_PATHS {
+                other.paths.clear();
+                if !self.unfenced.contains(&other.id) {
+                    self.unfenced.push(other.id);
+                }
+            }
+            total += other.paths.len();
+        }
+        self.unfenced.sort();
     }
 
     /// Fills [`Self::inside_own`], [`Self::own_open`] and [`Self::own_unlisted`].
@@ -225,7 +248,8 @@ impl MatterFence {
             if ways.is_empty() {
                 continue;
             }
-            listed &= !net.is_network(own) && down_to(own, &ways, &mut open).is_some();
+            // Links are left out: a link re-opened would re-open where it leads.
+            listed &= !net.is_network(own) && down_to(own, &ways, true, &mut open).is_some();
         }
         if listed && open.len() <= MAX_PATHS {
             self.own_open = Some(open);
@@ -354,7 +378,7 @@ fn fence_paths(spelling: &Path, keep: &[&Path], net: &NetEnv) -> Result<Vec<Path
         return Err(());
     }
     let mut out = Vec::new();
-    down_to(spelling, &inside, &mut out).ok_or(())?;
+    down_to(spelling, &inside, false, &mut out).ok_or(())?;
     Ok(out)
 }
 
@@ -369,7 +393,19 @@ fn below(place: &Path, depth: usize) -> Vec<OsString> {
 
 /// Every entry of `parent`, and of each folder on the way to each of `ways` (names below
 /// `parent`), that is not on a way, into `out`; `None` when a folder on the way can't be listed.
-fn down_to(parent: &Path, ways: &[Vec<OsString>], out: &mut Vec<PathBuf>) -> Option<()> {
+/// With `no_links` (what Claude's sandbox re-opens, [`MatterFence::own_open`]) a link is never
+/// put in `out`, and a link on the way is `None`: re-opening a link would re-open where it
+/// leads, another matter perhaps. A deny takes links as they are.
+fn down_to(
+    parent: &Path,
+    ways: &[Vec<OsString>],
+    no_links: bool,
+    out: &mut Vec<PathBuf>,
+) -> Option<()> {
+    let link = |path: &Path| {
+        // One that can't be read counts as a link: it is never re-opened.
+        !std::fs::symlink_metadata(path).is_ok_and(|meta| !meta.file_type().is_symlink())
+    };
     let fold = |name: &OsString| key(Path::new(name));
     let mut names: Vec<OsString> = std::fs::read_dir(parent)
         .ok()?
@@ -383,7 +419,10 @@ fn down_to(parent: &Path, ways: &[Vec<OsString>], out: &mut Vec<PathBuf>) -> Opt
             .filter(|way| way.first().is_some_and(|first| fold(first) == fold(&name)))
             .collect();
         if on_way.is_empty() {
-            out.push(parent.join(&name));
+            let entry = parent.join(&name);
+            if !(no_links && link(&entry)) {
+                out.push(entry);
+            }
             continue;
         }
         // A kept place itself is left whole; a folder on the way is walked into.
@@ -394,7 +433,11 @@ fn down_to(parent: &Path, ways: &[Vec<OsString>], out: &mut Vec<PathBuf>) -> Opt
             .iter()
             .map(|way| way.iter().skip(1).cloned().collect())
             .collect();
-        down_to(&parent.join(&name), &tails, out)?;
+        let next = parent.join(&name);
+        if no_links && link(&next) {
+            return None;
+        }
+        down_to(&next, &tails, no_links, out)?;
     }
     Some(())
 }

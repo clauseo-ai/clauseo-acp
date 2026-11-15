@@ -344,3 +344,26 @@ fn denies_inside_folds_the_drive_and_verbatim_forms() {
     };
     assert!(deny.denies_inside(&[Path::new(r"C:\Clients\Acme")]));
 }
+
+/// A fenced matter inside this one counts even when the fence dropped its paths (past the
+/// launch's budget, or under a folder it could not list): `denies_inside` reads the matters'
+/// folders, not the paths kept.
+#[test]
+fn denies_inside_counts_a_matter_whose_paths_were_dropped() {
+    let dir = layout("matters-denies-dropped");
+    let root = dir.path();
+    let matter = dunce::canonicalize(root.join("matter")).unwrap();
+    crate::write::create_dir_all(&matter.join("child")).unwrap();
+    let own = [matter.as_path()];
+    let mut deny = LaunchDeny {
+        spellings: vec![root.join("data")],
+        matters: matters(&[(matter.join("child"), false)], &own, &[]),
+        ..LaunchDeny::default()
+    };
+    // Dropped by the budget or unlisted: no paths, named unfenced.
+    let child = deny.matters.others[0].id;
+    deny.matters.others[0].paths.clear();
+    deny.matters.unfenced.push(child);
+    assert!(deny.denies_inside(&own));
+    assert!(!deny.denies_inside(&[]), "no spelling, no answer");
+}
