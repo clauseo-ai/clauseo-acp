@@ -32,7 +32,9 @@ import { firstReadMarks, isFirstReadTurn, subscribeMarks } from "../first-read/m
 import { stamp } from "./clock.ts";
 import { useAgentPlan } from "./agent-plan.ts";
 import { isolated, shownOf } from "./content.ts";
-import { noticeLine } from "./notice-words.ts";
+import { noticeLine, refusedMatterOf } from "./notice-words.ts";
+import { ReadOffer } from "./read-offer.tsx";
+import { useRoomMatterNames } from "../read-matters.ts";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
 import { askedAs, backgroundOf, outcomeOf } from "./steer.ts";
 import {
@@ -256,9 +258,13 @@ function AgentContent({ id, entry }: { id: EntryId; entry: AgentContentEntry }) 
  * and the key's masked ending, and the lawyer reads the app's own line for what went wrong instead. */
 function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   const w = useThreadWords();
-  if (entry.kind === undefined || entry.kind === null) return null;
   const agent = useAgentPlan();
-  return (
+  const names = useRoomMatterNames();
+  if (entry.kind === undefined || entry.kind === null) return null;
+  const nameOf = (matter: string) => names.get(matter);
+  // another matter's files refused: the line, and the offer to let this conversation read them (read-offer.tsx)
+  const refused = refusedMatterOf(entry.kind, nameOf);
+  const line = (
     <p
       data-testid="notice"
       data-entry-id={id}
@@ -266,8 +272,15 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
       className={`${ROW} ${QUIET}`}
       dir="auto"
     >
-      {noticeLine(entry.kind, w, agent) ?? entry.text}
+      {noticeLine(entry.kind, w, agent, nameOf) ?? entry.text}
     </p>
+  );
+  if (refused === undefined || refused.name === "") return line;
+  return (
+    <>
+      {line}
+      <ReadOffer matter={refused.matter} name={refused.name} />
+    </>
   );
 }
 
