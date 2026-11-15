@@ -405,7 +405,12 @@ fn resumed_expecting_the_note(dir: &Dir) -> Scenario {
     let cut = bundled
         .find("{\"expect\":{\"method\":\"session/prompt\"")
         .expect("codex-resume prompts");
-    let mut text = bundled[..cut].to_owned();
+    // The scenario's name is its file's stem.
+    let mut text = bundled[..cut].replacen(
+        "\"scenario\":\"codex-resume\"",
+        "\"scenario\":\"undo-note-resumed\"",
+        1,
+    );
     for step in [
         json!({"expect": {"method": "session/prompt", "as": "p1", "params": {
             "sessionId": "sess-1", "prompt": [{"type": "text", "text": BRIEF_NOTE},
