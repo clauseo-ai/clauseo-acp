@@ -18,7 +18,7 @@ static NO_DENY: LaunchDeny = LaunchDeny {
 
 /// The paths of session `id` of the matter at `/Users/l/Clients/A`, with `<data>` under the
 /// lawyer's home as on a Mac.
-struct Session {
+pub(super) struct Session {
     matter: PathBuf,
     run: PathBuf,
     tmp: PathBuf,
@@ -41,7 +41,7 @@ const SHORT: &str = "/tmp/clsb-abcd1234";
 const PROJECT: &str = "/Users/l/Library/Application Support/Clauseo/agents/claude-acp/home/projects/-Users-l-Clients-A";
 
 impl Session {
-    fn new(id: &str) -> Self {
+    pub(super) fn new(id: &str) -> Self {
         let data = Path::new(DATA);
         let run = data.join("run").join(id);
         Self {
@@ -66,7 +66,7 @@ impl Session {
         }
     }
 
-    fn paths(&self) -> SandboxPaths<'_> {
+    pub(super) fn paths(&self) -> SandboxPaths<'_> {
         SandboxPaths {
             matter: &self.matter,
             work: &self.work,
@@ -87,7 +87,7 @@ impl Session {
 }
 
 /// The sandbox for `paths` on macOS.
-fn mac(paths: &SandboxPaths<'_>) -> Result<ClaudeSandbox, Off> {
+pub(super) fn mac(paths: &SandboxPaths<'_>) -> Result<ClaudeSandbox, Off> {
     ClaudeSandbox::for_os(SandboxOs::Mac, paths)
 }
 
@@ -162,6 +162,8 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
                 "allowedDomains": ["*"],
                 "deniedDomains": [
                     "localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "[::]",
+                    "::ffff:7f00:1", "[::ffff:7f00:1]", "::ffff:0:0", "[::ffff:0:0]",
+                    "::ffff:127.0.0.1", "[::ffff:127.0.0.1]",
                 ],
             },
             "filesystem": {
@@ -366,29 +368,6 @@ fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
     // Without a bracket nothing changes and nothing doubles.
     let plain = mac(&Session::new("s-1").paths()).unwrap();
     assert!(!plain.allow_write.iter().any(|p| p.ends_with("/**")));
-}
-
-/// agent-browser's socket folders, every session's, are denied for reading and, where the write
-/// lists read globs (macOS), for writing; the globs never turn the sandbox off as a `*` in a
-/// session path does.
-#[test]
-fn the_browser_socket_folders_are_denied() {
-    let session = Session::new("s-1");
-    let on_mac = mac(&session.paths()).unwrap();
-    for dir in super::sandbox::SOCKET_DIRS {
-        assert!(on_mac.deny_read.iter().any(|p| p == dir), "{dir}");
-        assert!(on_mac.deny_write.iter().any(|p| p == dir), "{dir}");
-    }
-    let settings = on_mac.settings();
-    let filesystem = &settings["filesystem"];
-    for key in ["denyRead", "denyWrite"] {
-        let list = filesystem[key].as_array().unwrap();
-        assert!(list.iter().any(|p| p == "/tmp/clauseo-ab-*"), "{key}");
-    }
-    let linux = ClaudeSandbox::for_os(SandboxOs::Linux, &session.paths()).unwrap();
-    assert!(linux.deny_read.iter().any(|p| p == "/tmp/clauseo-ab-*"));
-    assert!(!linux.deny_read.iter().any(|p| p.starts_with("/private/")));
-    assert!(!linux.deny_write.iter().any(|p| p.contains("clauseo-ab")));
 }
 
 /// Of Claude's project folder only the tool results of its sessions open, never the transcripts

@@ -93,9 +93,26 @@ use serde_json::{Map, Value, json};
 /// The hosts a sandboxed command may not reach even through Claude Code's proxy: loopback, where
 /// the browser's debugging port and agent-browser's daemon listen, and the any-address
 /// `0.0.0.0` and `[::]`, which reach loopback too (stage C on a Mac, 2026-11-11). `127.1`, the
-/// decimal forms and `[::ffff:127.0.0.1]` come out as `127.0.0.1` once the proxy reads them.
-pub(crate) const DENIED_DOMAINS: [&str; 6] =
-    ["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "[::]"];
+/// decimal forms and `[::ffff:127.0.0.1]` come out as `127.0.0.1` once the proxy reads them;
+/// loopback names are refused after the lookup (sandbox-runtime 0.0.83). An IP literal off this
+/// list passes, and the URL parser keeps an IPv4-mapped IPv6 address mapped (`[::ffff:127.0.0.1]`
+/// is `[::ffff:7f00:1]`, `[::ffff:0.0.0.0]` is `[::ffff:0:0]`), where a dual-stack connect lands
+/// on loopback, so the mapped forms are listed, with and without brackets, and the dotted ones
+/// verbatim in case a path skips the parser (security re-check of PR-1).
+pub(crate) const DENIED_DOMAINS: [&str; 12] = [
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "[::1]",
+    "0.0.0.0",
+    "[::]",
+    "::ffff:7f00:1",
+    "[::ffff:7f00:1]",
+    "::ffff:0:0",
+    "[::ffff:0:0]",
+    "::ffff:127.0.0.1",
+    "[::ffff:127.0.0.1]",
+];
 
 /// What sandboxed commands may not read beside `<data>` and the other matters: the home, as
 /// Claude Code expands it, and macOS's shared places where matters may be kept.
