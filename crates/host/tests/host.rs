@@ -475,6 +475,9 @@ mod skill_packs_cap;
 #[path = "host/skill_wait.rs"]
 mod skill_wait;
 #[cfg(test)]
+#[path = "host/start_failure.rs"]
+mod start_failure;
+#[cfg(test)]
 #[path = "host/steer.rs"]
 mod steer;
 #[cfg(test)]

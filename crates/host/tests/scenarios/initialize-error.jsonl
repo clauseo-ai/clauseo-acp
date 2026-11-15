@@ -1,0 +1,3 @@
+{"scenario":"initialize-error","description":"An agent that answers initialize with -32603 internal error; the start failed, its answer read fine","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","error":{"code":-32603,"message":"Internal error"}}}
