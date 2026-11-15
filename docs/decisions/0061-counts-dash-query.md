@@ -11,22 +11,30 @@ Access's JWT again in the Worker, and guards queries with `sqlparser`.
 ## Decision
 
 - **Routes.** `GET /dash` and `POST /v1/query`, each behind its own Access application. Each
-  answers `404` to everything (any method) unless the Worker has `ACCESS_TEAM` and that route's
-  AUD (`DASH_AUD`, `QUERY_AUD`): it fails closed. Wrong method: `405`. Bad or missing token:
-  `403`. All with an empty body.
+  answers `404` to everything (any method) unless the Worker has `ACCESS_TEAM`, that route's
+  AUD (`DASH_AUD`, `QUERY_AUD`) and its caller (`DASH_EMAIL`, `QUERY_CLIENT_ID`): it fails
+  closed. Wrong method: `405`. Bad or missing token, or another caller: `403`. All with an
+  empty body. Both routes are for Rohan and his agents only.
 - **Values at deploy, not in `wrangler.toml`.** `scripts/access.mjs`, run by the deploy step,
   finds or creates the two applications by name (`clauseo-counts-dash` on
   `t.clauseo.chat/dash` with an Allow policy for `ACCESS_DASH_EMAIL`; `clauseo-counts-query` on
   `t.clauseo.chat/v1/query` with a Service Auth policy for the token `clauseo-counts-agent`, or
-  no policy while it does not exist), reads their AUD tags and passes them with `ACCESS_TEAM` as
-  `wrangler deploy --var`. They are masked in the log like the database id, and nothing prints
-  an id, AUD, team or email. Without `ACCESS_TEAM`, or on a `401`/`403` from the API (the token
-  lacks the Access scopes), it skips with one line and deploys anyway. It uses the API's
-  per-application policies and leaves policies it did not make alone. This replaces S23's
+  no policy while it does not exist), reads their AUD tags and the token's client id, and passes
+  them with `ACCESS_TEAM` and `ACCESS_DASH_EMAIL` as `wrangler deploy --var` (`DASH_AUD`,
+  `QUERY_AUD`, `DASH_EMAIL`, `QUERY_CLIENT_ID`). They are masked in the log like the database
+  id, and nothing prints an id, AUD, team, client id or email. Without `ACCESS_TEAM`, or on a
+  `401`/`403` from the API (the token lacks the Access scopes), it skips with one line and
+  deploys anyway. It uses the API's per-application policies and deletes any other policy on
+  its two applications at every deploy (review of #1092), so a policy added by hand does not
+  last; deleting rather than refusing keeps the deploy self-healing. A reusable policy is shared
+  with other applications, so it is not deleted from here: the deploy fails and says so. This replaces S23's
   `wrangler.toml` vars: `check-deploy.mjs` keeps refusing any var there.
 - **The JWT check** (`src/access.rs`). RS256 only: `none`, `HS*` and every other `alg` are
   refused before anything else. Then `exp` (and `nbf`, with 60 s of skew), `iss` =
-  `https://<team>.cloudflareaccess.com`, `aud` containing the route's own AUD, and a `kid` from
+  `https://<team>.cloudflareaccess.com`, `aud` containing the route's own AUD, the caller (review
+  of #1092: `/dash` takes only an `email` equal to `DASH_EMAIL`, ignoring case, and
+  `/v1/query` only a `common_name` equal to `QUERY_CLIENT_ID`, so neither a policy added by hand
+  nor the other route's caller gets in), and a `kid` from
   the team's `/cdn-cgi/access/certs`. Claims come before the signature, so a refused token costs
   no WebCrypto call. The keys are kept an hour in the isolate and refetched sooner only for an
   unknown `kid`, at most once a minute. The signature sits behind a `Verifier` trait: WebCrypto
@@ -36,7 +44,7 @@ Access's JWT again in the Worker, and guards queries with `sqlparser`.
   `wrangler dev`. The Worker takes it only as `http://127.0.0.1:<port>/…` or
   `http://localhost:<port>/…`, which the edge cannot reach, so even if it were set in production
   the check would fail closed. `check-deploy.mjs` refuses any config that names it, the deploy
-  copy included, and the deploy passes only the three variables above.
+  copy included, and the deploy passes only the five variables above.
 - **Headers.** The source test's allowlist gains `Cf-Access-Jwt-Assertion` and nothing else; it
   is read in `glue.rs`'s one `header` function, on the read routes only.
 - **The query guard** (`src/query.rs`). One statement, a `Statement::Query` whose bodies are
@@ -46,7 +54,12 @@ Access's JWT again in the Worker, and guards queries with `sqlparser`.
   `v_daily`, but refusing every schema name means `temp.` can never shadow a view, and the rule
   stays one line. So `sqlite_master`, `sqlite_schema`, `temp.sqlite_master`, `main.report`,
   `"report"`, `[report]`, `` `report` `` and `REPORT` are all refused (`src/query/tests.rs`).
-  A CTE may not take a base table's name, or a `sqlite_`, `_cf_` or `d1_` one. `FROM` takes tables,
+  A CTE may not take a base table's name, or a `sqlite_`, `_cf_` or `d1_` one. No CTE may be
+  recursive (review of #1092): `WITH RECURSIVE` is refused, and so is a CTE that names itself
+  or a later CTE, which SQLite runs as recursive without the keyword; an unbounded one kept D1
+  running and blocked the counts writes. A query has at most 8 `FROM`/`JOIN` items over the
+  whole statement (views, CTE references and parenthesised subqueries each count one), so
+  a join cannot multiply rows past what D1 does in its time. `FROM` takes tables,
   subqueries and joins, never a table-valued function. Functions: `count`, `sum`, `total`,
   `avg`, `min`, `max`, `group_concat`, `date`, `strftime`, `coalesce`, `round`,
   `json_extract`. The Worker runs `SELECT * FROM (<query>) LIMIT 1000`, written from the parsed
@@ -109,8 +122,12 @@ Access's JWT again in the Worker, and guards queries with `sqlparser`.
 
 - Each migration gets a decision record: this one covers `0003_summaries.sql`.
 
-- An agent can read only what the views show. A query can still subtract one view from another
-  (0059, "Consequences").
+- An agent can read only what the views show. The under-5 rule holds for each view, not for a
+  query that combines views: one can subtract one view from another, or a total from its
+  visible groups, and get a hidden group's size (0059, "Consequences"). Accepted because
+  `/v1/query` and `/dash` are for Rohan and his agents only, enforced by the caller check.
+- No recursive CTE, so an agent cannot generate a series in a query; it reads the views' own
+  rows.
 - At 1,000 rows a query must aggregate; an agent wanting more pages with `WHERE`.
 - Rotating Access's key costs at most a minute of `403` per isolate.
 - The deploy token needs two more permissions (Access: Apps and Policies Edit, Access: Service

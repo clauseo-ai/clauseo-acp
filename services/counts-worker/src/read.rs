@@ -12,7 +12,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use worker::{D1Database, Delay, Env, Fetch, Headers, Response, Url};
 
-use crate::access::{Access, DEV_CERTS_VAR, KeyCache, Token, check, dev_certs_url, parse_keys};
+use crate::access::{
+    Access, Caller, DEV_CERTS_VAR, KeyCache, Token, check, dev_certs_url, parse_keys,
+};
 use crate::dash::{CSP, Data, page, statements};
 use crate::query::guard;
 use crate::route::{Refusal, Route};
@@ -32,15 +34,20 @@ fn var(env: &Env, name: &str) -> String {
         .unwrap_or_default()
 }
 
-/// The route's Access settings, or `None` (and then `404`) when `ACCESS_TEAM` or its AUD is
-/// unset or empty.
+/// The route's Access settings, or `None` (and then `404`) when `ACCESS_TEAM`, its AUD or its
+/// caller (`DASH_EMAIL`, `QUERY_CLIENT_ID`) is unset or empty.
 pub(crate) fn access(env: &Env, route: Route) -> Option<Access> {
-    let aud = match route {
-        Route::Dash => "DASH_AUD",
-        Route::Query => "QUERY_AUD",
+    let (aud, caller, who) = match route {
+        Route::Dash => ("DASH_AUD", Caller::Owner, "DASH_EMAIL"),
+        Route::Query => ("QUERY_AUD", Caller::Agent, "QUERY_CLIENT_ID"),
         Route::Counts | Route::Tally | Route::Crash => return None,
     };
-    Access::new(&var(env, "ACCESS_TEAM"), &var(env, aud))
+    Access::new(
+        &var(env, "ACCESS_TEAM"),
+        &var(env, aud),
+        caller,
+        &var(env, who),
+    )
 }
 
 /// Refuses with [`Refusal::Forbidden`] unless `jwt` passes the route's Access check at `now`.

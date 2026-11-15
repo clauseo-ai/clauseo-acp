@@ -12,6 +12,10 @@ use super::*;
 const TEAM: &str = "clauseo";
 const AUD: &str = "query-aud";
 const NOW: u64 = 1_800_000_000;
+/// The agents' service token's client id, as `QUERY_CLIENT_ID` holds it.
+const CLIENT: &str = "client-test.access";
+/// The owner's email, as `DASH_EMAIL` holds it.
+const OWNER: &str = "Owner@Example.org";
 
 struct Stand;
 
@@ -46,7 +50,18 @@ fn claims() -> Value {
         "iss": "https://clauseo.cloudflareaccess.com",
         "type": "app",
         "sub": "",
+        "common_name": CLIENT,
     })
+}
+
+/// A person's claims for the dashboard: an `email` and a `sub`, no `common_name`.
+fn person() -> Value {
+    let mut body = claims();
+    body["aud"] = json!(["dash-aud"]);
+    body["email"] = json!("owner@example.org");
+    body["sub"] = json!("user-test");
+    body.as_object_mut().unwrap().remove("common_name");
+    body
 }
 
 /// A token with this header and claims, signed the way [`Stand`] accepts.
@@ -73,7 +88,16 @@ fn keys() -> Vec<Key> {
 }
 
 fn access() -> Access {
-    Access::new(TEAM, AUD).unwrap()
+    Access::new(TEAM, AUD, Caller::Agent, CLIENT).unwrap()
+}
+
+fn dash() -> Access {
+    Access::new(TEAM, "dash-aud", Caller::Owner, OWNER).unwrap()
+}
+
+/// The claim check alone, for `access`, of a token with `body`.
+fn claims_for(access: &Access, body: &Value) -> Result<(), Denied> {
+    Token::parse(&token(&rs256(), body))?.check_claims(access, NOW)
 }
 
 fn run(jwt: Option<&str>) -> Result<(), Denied> {
@@ -153,6 +177,84 @@ fn the_claims_are_checked() {
 }
 
 #[test]
+fn only_the_routes_one_caller_passes() {
+    // The owner on /dash: his email, in any case.
+    assert_eq!(claims_for(&dash(), &person()), Ok(()));
+    let mut upper = person();
+    upper["email"] = json!("OWNER@EXAMPLE.ORG");
+    assert_eq!(claims_for(&dash(), &upper), Ok(()));
+    // The agents' service token on /v1/query.
+    assert_eq!(claims_for(&access(), &claims()), Ok(()));
+
+    let edited = |base: Value, edit: &dyn Fn(&mut Value)| {
+        let mut body = base;
+        edit(&mut body);
+        body
+    };
+    let refused = [
+        (
+            "another email on /dash",
+            dash(),
+            edited(person(), &|c| c["email"] = json!("someone@example.org")),
+        ),
+        (
+            "a longer email on /dash",
+            dash(),
+            edited(person(), &|c| c["email"] = json!("owner@example.org.evil")),
+        ),
+        (
+            "no email on /dash",
+            dash(),
+            edited(person(), &|c| {
+                c.as_object_mut().unwrap().remove("email");
+            }),
+        ),
+        (
+            "an empty email on /dash",
+            dash(),
+            edited(person(), &|c| c["email"] = json!("")),
+        ),
+        (
+            "the service token on /dash",
+            dash(),
+            edited(claims(), &|c| c["aud"] = json!(["dash-aud"])),
+        ),
+        (
+            "another service token on /v1/query",
+            access(),
+            edited(claims(), &|c| c["common_name"] = json!("other.access")),
+        ),
+        (
+            "the client id in another case on /v1/query",
+            access(),
+            edited(claims(), &|c| {
+                c["common_name"] = json!("CLIENT-TEST.access");
+            }),
+        ),
+        (
+            "no common_name on /v1/query",
+            access(),
+            edited(claims(), &|c| {
+                c.as_object_mut().unwrap().remove("common_name");
+            }),
+        ),
+        (
+            "the owner on /v1/query",
+            access(),
+            edited(person(), &|c| c["aud"] = json!([AUD])),
+        ),
+    ];
+    for (name, access, body) in refused {
+        assert_eq!(claims_for(&access, &body), Err(Denied::Identity), "{name}");
+    }
+    // The whole check refuses it too, before any signature check.
+    assert_eq!(
+        with(|c| c["common_name"] = json!("other.access")),
+        Err(Denied::Identity)
+    );
+}
+
+#[test]
 fn the_kid_must_be_the_teams() {
     let header = json!({ "alg": "RS256", "kid": "k2" });
     assert_eq!(run(Some(&token(&header, &claims()))), Err(Denied::Kid));
@@ -183,10 +285,15 @@ fn a_bad_signature_or_shape_is_refused() {
 
 #[test]
 fn settings_fail_closed() {
-    assert_eq!(Access::new("", AUD), None);
-    assert_eq!(Access::new(TEAM, ""), None);
-    assert_eq!(Access::new("evil.example/x", AUD), None);
-    assert_eq!(Access::new("Clauseo", AUD), None);
+    let agent = |team, aud, who| Access::new(team, aud, Caller::Agent, who);
+    assert_eq!(agent("", AUD, CLIENT), None);
+    assert_eq!(agent(TEAM, "", CLIENT), None);
+    assert_eq!(agent("evil.example/x", AUD, CLIENT), None);
+    assert_eq!(agent("Clauseo", AUD, CLIENT), None);
+    // No caller set: QUERY_CLIENT_ID before the service token exists, or no DASH_EMAIL.
+    assert_eq!(agent(TEAM, AUD, ""), None);
+    assert_eq!(agent(TEAM, AUD, "  "), None);
+    assert_eq!(Access::new(TEAM, AUD, Caller::Owner, ""), None);
     assert_eq!(
         access().certs_url(),
         "https://clauseo.cloudflareaccess.com/cdn-cgi/access/certs"

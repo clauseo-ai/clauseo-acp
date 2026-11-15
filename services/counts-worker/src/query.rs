@@ -1,7 +1,10 @@
 //! `/v1/query`'s guard (decision 0061): one `SELECT` or `WITH`, parsed with `sqlparser` in
 //! SQLite's dialect, that reads only the `v_*` views. Names resolve by scope: every table a
 //! query names must be one of [`VIEWS`] or a CTE of an enclosing query, a CTE may not take a
-//! base table's name or a `sqlite_` one, and functions come from a short allowlist. The query
+//! base table's name or a `sqlite_` one, and functions come from a short allowlist. No CTE may
+//! be recursive (`WITH RECURSIVE`, or one that names itself or a later CTE, which SQLite runs
+//! as recursive without the keyword): an unbounded one would keep D1 busy and block the counts
+//! writes. And a query names at most [`MAX_TABLES`] tables, so joins stay small. The query
 //! runs as `SELECT * FROM (<query>) LIMIT 1000`, written from the parsed statement, so a
 //! trailing comment cannot cut the wrapper off.
 
@@ -9,7 +12,7 @@ use std::ops::ControlFlow;
 
 use sqlparser::ast::{
     Expr, InTarget, ObjectName, ObjectNamePart, Query, Select, SetExpr, Statement, TableFactor,
-    Visit, Visitor,
+    Visit, Visitor, visit_relations,
 };
 use sqlparser::dialect::SQLiteDialect;
 use sqlparser::parser::Parser;
@@ -18,6 +21,9 @@ use sqlparser::parser::Parser;
 pub(crate) const ROW_CAP: usize = 1_000;
 /// The longest query text taken.
 pub(crate) const MAX_SQL: usize = 8_000;
+/// The most `FROM` and `JOIN` items a query may have, counted over the whole statement:
+/// views, CTE references and subqueries in parentheses each count one.
+pub(crate) const MAX_TABLES: usize = 8;
 
 /// The views a query may read (`migrations/0002_rollup.sql`, `0003_summaries.sql` and
 /// `0004_crash.sql`).
@@ -82,6 +88,10 @@ pub(crate) enum Refused {
     From,
     /// A clause SQLite does not have (`INTO`, locks, pipes, …).
     Clause,
+    /// A recursive CTE.
+    Recursive,
+    /// More than [`MAX_TABLES`] `FROM` and `JOIN` items.
+    Tables,
 }
 
 /// The query to run for `sql`: the parsed statement, written out and wrapped in the row cap.
@@ -103,10 +113,12 @@ pub(crate) fn guard(sql: &str) -> Result<String, Refused> {
     Ok(format!("SELECT * FROM ({query}) LIMIT {ROW_CAP}"))
 }
 
-/// The CTE names of each enclosing query, innermost last, while the statement is walked.
+/// The CTE names of each enclosing query, innermost last, while the statement is walked, and
+/// the `FROM` items seen so far.
 #[derive(Default)]
 struct Scope {
     ctes: Vec<Vec<String>>,
+    tables: usize,
 }
 
 /// A single plain name, lowercased (SQLite compares names without case).
@@ -151,13 +163,32 @@ impl Visitor for Scope {
         if foreign {
             return ControlFlow::Break(Refused::Clause);
         }
+        if query.with.as_ref().is_some_and(|with| with.recursive) {
+            return ControlFlow::Break(Refused::Recursive);
+        }
+        let ctes: Vec<_> = query
+            .with
+            .iter()
+            .flat_map(|with| &with.cte_tables)
+            .collect();
         let mut names = Vec::new();
-        for cte in query.with.iter().flat_map(|with| &with.cte_tables) {
+        for cte in &ctes {
             let name = cte.alias.name.value.to_ascii_lowercase();
             if reserved(&name) || cte.from.is_some() {
                 return ControlFlow::Break(Refused::CteName);
             }
             names.push(name);
+        }
+        // A CTE that names itself or a later one: SQLite reads it as recursive.
+        for (at, cte) in ctes.iter().enumerate() {
+            let later = &names[at..];
+            let cycle = visit_relations(*cte, |relation| match plain_name(relation) {
+                Some(name) if later.contains(&name) => ControlFlow::Break(()),
+                _ => ControlFlow::Continue(()),
+            });
+            if cycle.is_break() {
+                return ControlFlow::Break(Refused::Recursive);
+            }
         }
         self.ctes.push(names);
         ControlFlow::Continue(())
@@ -189,9 +220,14 @@ impl Visitor for Scope {
 
     fn pre_visit_table_factor(&mut self, factor: &TableFactor) -> ControlFlow<Refused> {
         match factor {
-            TableFactor::Table { args: None, .. }
-            | TableFactor::Derived { .. }
-            | TableFactor::NestedJoin { .. } => ControlFlow::Continue(()),
+            TableFactor::Table { args: None, .. } | TableFactor::Derived { .. } => {
+                self.tables += 1;
+                if self.tables > MAX_TABLES {
+                    return ControlFlow::Break(Refused::Tables);
+                }
+                ControlFlow::Continue(())
+            }
+            TableFactor::NestedJoin { .. } => ControlFlow::Continue(()),
             _ => ControlFlow::Break(Refused::From),
         }
     }
