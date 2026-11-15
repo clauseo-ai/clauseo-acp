@@ -7,7 +7,7 @@ import { ShelfRows, type ShelfRow } from "@clauseo/components/clauseo/rail-shelf
 import { RailShelf } from "@clauseo/components/clauseo/rail-shelf.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { t } from "@clauseo/components/lib/words.ts";
-import { TriageItems } from "@clauseo/components/clauseo/rail-triage-items.tsx";
+import { TriageItems, type ReadPick } from "@clauseo/components/clauseo/rail-triage-items.tsx";
 import { RowTriage } from "@clauseo/components/clauseo/rail-triage.tsx";
 import { PointMenu } from "@clauseo/components/clauseo/rail-point-menu.tsx";
 import { RailLine } from "@clauseo/components/clauseo/rail-line.tsx";
@@ -128,4 +128,10 @@ function ShelfOpen({ c, shelved, lists, open }: ShelfOpenProps) {
 }
 
 export { DoneRows, PointMenu, RailLine, RowTriage, TriageItems };
-export type ItemsProps = { times: ReactNode; onDone: () => void; matter: boolean; done: boolean };
+export type ItemsProps = {
+  times: ReactNode;
+  onDone: () => void;
+  matter: boolean;
+  done: boolean;
+  reads?: ReadPick | undefined;
+};

@@ -257,7 +257,12 @@ test("the open conversation's chevron holds Snooze and Mark as done; once done, 
   const transport = await mount({ lists: withA([T_A, T_LIST]) });
   const li = await arm("List of dates");
   await press(li?.querySelector(`[aria-label="Actions for List of dates"]`));
-  expect(menuItems().map((i) => i.textContent)).toEqual(["Snooze", "Mark as done"]);
+  expect(menuItems().map((i) => i.textContent)).toEqual([
+    "Snooze",
+    "Mark as done",
+    // the open conversation's own (rail-read-matter.test.tsx)
+    "Let this conversation read",
+  ]);
   await press(item("Mark as done"));
   expect(sent(transport, "mark_thread_done")).toEqual([{ thread: T_LIST.thread, done: true }]);
   await unmount();
@@ -302,7 +307,12 @@ test("the open conversation's chevron is drawn from the first render, its menu l
   expect(chevron?.closest(".room-conv-item")?.hasAttribute("data-triage")).toBe(false);
   expect(chevron?.closest(".room-conv-item")?.querySelector(".room-conv-more")).toBe(chevron);
   await press(chevron);
-  expect(menuItems().map((i) => i.textContent)).toEqual(["Snooze", "Mark as done"]);
+  expect(menuItems().map((i) => i.textContent)).toEqual([
+    "Snooze",
+    "Mark as done",
+    // the open conversation's own (rail-read-matter.test.tsx)
+    "Let this conversation read",
+  ]);
 });
 
 test("a row's two buttons mount with the focus on it, and Tab reaches them next, Snooze then Mark as done", async () => {

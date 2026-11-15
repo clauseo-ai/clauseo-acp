@@ -39,7 +39,12 @@ import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { isolate } from "@clauseo/components/lib/bidi.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
-import type { MatterId } from "../transport/protocol.ts";
+import type { MatterId, ThreadId } from "../transport/protocol.ts";
+import type { ReadPick } from "@clauseo/components/clauseo/rail-triage-items.tsx";
+import type { ViewStore } from "../store/store.ts";
+import { streamOf } from "../store/view.ts";
+import { quietly } from "./open.ts";
+import { allowRead, matterNamesOf, readableOthers, useReadMatters } from "./read-matters.ts";
 import type { AllThreads } from "./all-threads.ts";
 import type { MatterInfo, MatterStatus } from "./host-next.ts";
 import { openConversation } from "./open-conversation.ts";
@@ -124,6 +129,7 @@ const RECENT = 5;
 
 export function RoomRail({
   transport,
+  store,
   matters,
   view,
   conversations,
@@ -142,6 +148,8 @@ export function RoomRail({
 }: {
   /** For Find's search inside the matters, and opening a paper it finds. */
   transport: HostTransport;
+  /** The room's view store: the open conversation's header, for the other matters it may read. */
+  store: ViewStore;
   matters: Matters;
   view: MattersView;
   conversations: Conversations;
@@ -196,6 +204,18 @@ export function RoomRail({
     return () => cancelIdleCallback(idle);
   }, [matterOpen]);
   const sc = { snooze, now, zone, lang: w.lang };
+  // the open conversation's Let this conversation read: every other matter in the list it may not read yet
+  const allowed = useReadMatters(store, talks.thread === null ? null : streamOf(talks.thread));
+  const reads = (thread: ThreadId): ReadPick | undefined => {
+    if (thread !== talks.thread || talks.matter === null) return undefined;
+    // the scratch matter holds quick questions, not a matter's papers: never offered
+    const folders = view.matters.filter((m) => m.kind !== "scratch");
+    const others = readableOthers(matterNamesOf(folders, w.lang), talks.matter, allowed);
+    return {
+      matters: others,
+      onPick: (matter) => void quietly("allow_matter_read", allowRead(transport, thread, matter)),
+    };
+  };
   const detailed = view.detailed;
   const [triager] = useState(() => new RailTriage());
   const [ordering] = useState(() => new ConversationOrder());
@@ -231,6 +251,7 @@ export function RoomRail({
             sc,
             ordered.rows,
             conversationRows(ordered, conversations, onConversation, now, zone, w.lang, m.status),
+            reads,
           );
     // a refused Show in Finder says why on the row's note line until the next try (act-refusals.ts)
     const said = refused.get(m.matter);
