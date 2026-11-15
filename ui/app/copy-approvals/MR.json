@@ -1,0 +1,46 @@
+{
+  "MR-01": {
+    "en": "Let this conversation read",
+    "hi": "इस बातचीत को पढ़ने दें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "The open conversation's menu (chevron and context menu): a submenu row, its chevron saying it opens (no '…', as Snooze); it lists the other folder matters by name, not this conversation's own, not the scratch matter, not those already allowed; a press sends allow_matter_read"
+  },
+  "MR-02": {
+    "en": "Can read {matter}'s files",
+    "hi": "{matter} की फ़ाइलें पढ़ सकती है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "A pill over the composer for each matter in the header's read_matters (PaperChips' look); {matter} bidi-isolated"
+  },
+  "MR-03": {
+    "en": "Stop letting this conversation read {matter}'s files",
+    "hi": "इस बातचीत को {matter} की फ़ाइलें पढ़ने देना बंद करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "The pill's ×, for assistive technology: sends withdraw_matter_read"
+  },
+  "MR-04": {
+    "en": "Other matters this conversation can read",
+    "hi": "दूसरे मामले जिन्हें यह बातचीत पढ़ सकती है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "The pills' list, for assistive technology"
+  }
+}
