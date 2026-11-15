@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
@@ -33,6 +34,16 @@ static LOCK: Mutex<Applied> = Mutex::new(BTreeMap::new());
 
 /// For each rules file and rule, the sequence number of the last add or removal applied to it.
 type Applied = BTreeMap<(PathBuf, String), u64>;
+
+/// The last sequence number given, process-wide like [`LOCK`]'s map: a second host in the
+/// process (a test harness, a restart in process) numbers above the first, so none of its
+/// operations is skipped for one the first host applied.
+static SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// A new sequence number, above every one given before in this process.
+pub(crate) fn next_seq() -> u64 {
+    SEQ.fetch_add(1, Ordering::Relaxed).saturating_add(1)
+}
 
 /// What a rules file holds.
 enum Kept {
