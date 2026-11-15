@@ -4,21 +4,22 @@
 //!
 //! A mark is any tracked change stetdoc 0.9.3 lists, accepts and rejects ([`CHANGE_MARKS`]:
 //! text inserted, deleted or moved, and formatting, section, table, row, cell and numbering
-//! changes), or a comment (`<w:comment `). It is looked for in every part stetdoc reads them
-//! from: the main document and the headers, footers, footnotes, endnotes and comments its
-//! relationships name ([`parts`]), or every XML part under `word/` when those relationships
-//! are too large or not UTF-8. Each part is read as XML, as it streams (quick-xml's `NsReader`): a
-//! mark is an element in Word's main namespace, whatever prefix the part binds to it, with one
-//! of the marks' names, so comments, CDATA, processing instructions and nested declarations are
-//! read as XML reads them. The scan never answers "no changes" for a part it does not model: a
-//! part that is not well-formed, that uses a prefix it never declares, that holds a doctype (whose
-//! entities could hold markup), or that is not UTF-8 (a UTF-16 byte order mark, a NUL in its first
-//! bytes, or another declared encoding) answers "may have changes", which offers Tracked changes
-//! as a change does. The read stops at the first mark, after [`MAX_XML_BYTES`] of a part and after
-//! [`MAX_SCAN_BYTES`] in all, so a zip bomb or a huge
-//! document costs a bounded read; a part or a file the scan could not read whole answers "may
-//! have changes" too. A file that does not read as a zip, or has no such part, has
-//! none. The file is opened without following a link at its last component.
+//! changes), or a comment (`<w:comment `). The package's relationships decide nothing about
+//! what is read: every XML part of the zip is ([`parts`]), so a change in any part Word reads is
+//! found whatever names it. Each part is read as XML, as it streams (quick-xml's `NsReader`): a
+//! mark is an element in Word's main namespace, Transitional or Strict, whatever prefix the part
+//! binds to it, with one of the marks' names.
+//!
+//! The scan answers "no changes" (`Some(false)`) only for a file it read whole as it models it:
+//! the zip opened, its content types and every relationships part read as XML, no part they name
+//! missing, and every XML part read to its end, within [`MAX_XML_BYTES`] a part and
+//! [`MAX_SCAN_BYTES`] in all, with no mark. Anything else may have changes and answers
+//! `Some(true)`, as a change does: a zip that does not open, a part that is not well-formed,
+//! uses a prefix it never declares, binds a namespace with a reference in its value, holds a
+//! doctype or is not UTF-8, a part cut by a cap or left unread, a missing part. Offering Tracked
+//! changes on such a file costs an empty list at worst; stetdoc decides then. `None` is a read
+//! of the file that failed and is tried again. The file is opened without following a link at
+//! its last component.
 //!
 //! [`Kept`] holds each matter's answers by path, with the size and modified time the listing
 //! gave, so a listing answers at once and only files that changed are read again. A read that
@@ -43,12 +44,11 @@ pub(crate) const MAX_XML_BYTES: u64 = 16 * 1024 * 1024;
 /// file with parts left unread past it may have changes, as a part past [`MAX_XML_BYTES`] may.
 pub(crate) const MAX_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 
-/// The most bytes of a relationships part: about 300 bytes a relationship, so a brief with
-/// thousands of links and images fits. Over it, every XML part under `word/` is scanned instead.
-const MAX_RELS_BYTES: u64 = 1024 * 1024;
-
-/// Word's main XML namespace: a mark is an element in it.
-const W_NAMESPACE: &[u8] = b"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+/// Word's main XML namespaces, Transitional and Strict: a mark is an element in either.
+const W_NAMESPACES: &[&str] = &[
+    "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    "http://purl.oclc.org/ooxml/wordprocessingml/main",
+];
 
 /// The local names of the tracked changes stetdoc 0.9.3 lists, accepts and
 /// rejects in every part it reads (each checked with the release binary): text and paragraph
@@ -165,10 +165,9 @@ fn windows_file(path: &Path, file: std::fs::File) -> Option<std::fs::File> {
     }
 }
 
-/// Whether the zip `file` reads as a Word file that holds a tracked change or a comment in any
-/// part stetdoc reads them from (the main document first); `None` when a read failed. A part
-/// the scan does not model, or could not read whole, answers `Some(true)`: it may have changes,
-/// so the tile offers Tracked changes, as for a change, and stetdoc decides when they are listed.
+/// Whether the zip `file` may hold a tracked change or a comment: `Some(false)` only when it was
+/// read whole as the scan models it and holds none; `None` when a read failed and is worth
+/// trying again.
 fn zip_has_marks(file: impl Read + Seek) -> Option<bool> {
     zip_marks(file, MAX_XML_BYTES, MAX_SCAN_BYTES)
 }
@@ -177,46 +176,70 @@ fn zip_has_marks(file: impl Read + Seek) -> Option<bool> {
 fn zip_marks(file: impl Read + Seek, part_cap: u64, total_cap: u64) -> Option<bool> {
     let mut zip = match zip::ZipArchive::new(file) {
         Ok(zip) => zip,
-        Err(zip::result::ZipError::Io(_)) => return None,
-        Err(_) => return Some(false),
+        Err(zip::result::ZipError::Io(error)) => return failed(&error),
+        Err(_) => return Some(true),
     };
+    let Some(entries) = parts::entries(&zip) else {
+        return Some(true);
+    };
+    let names = &entries.names;
     let mut left = total_cap;
-    let main = match read_rels(&mut zip, "_rels/.rels", &mut left)? {
-        Rels::Read(rels) => parts::main_part(&rels),
-        Rels::Unread => parts::main_part(b""),
+    // the content types: the parts that are XML under another name, and the parts they name
+    let Some(types_name) = names.iter().find(|name| parts::is_content_types(name)) else {
+        return Some(true);
     };
-    let story = match read_rels(&mut zip, &parts::rels_of(&main), &mut left)? {
-        Rels::Read(rels) => parts::story_parts(&main, &rels),
-        Rels::Unread => {
-            let names: Vec<String> = zip
-                .file_names()
-                .filter_map(Result::ok)
-                .map(std::borrow::Cow::into_owned)
-                .collect();
-            parts::word_parts(&main, names.iter().map(String::as_str))
-        }
+    let types = match read_whole(&mut zip, types_name, part_cap, &mut left)? {
+        Whole::Read(bytes) => parts::content_types(&bytes),
+        Whole::Not => None,
     };
-    // more story parts than the scan reads: it cannot answer that they hold none
-    if story.len() > parts::MAX_PARTS {
+    let Some(types) = types else {
+        return Some(true);
+    };
+    if !types.all_present(&entries) {
         return Some(true);
     }
-    for name in std::iter::once(&main).chain(&story) {
+    // the relationships: read only so that a part they name and the zip lacks is noticed
+    let rels: Vec<&String> = names.iter().filter(|name| types.is_rels(name)).collect();
+    if rels.len() > parts::MAX_PARTS {
+        return Some(true);
+    }
+    for name in rels {
+        let targets = match read_whole(&mut zip, name, part_cap, &mut left)? {
+            Whole::Read(bytes) => parts::targets(name, &bytes),
+            Whole::Not => None,
+        };
+        if !targets.is_some_and(|targets| parts::present(&targets, &entries)) {
+            return Some(true);
+        }
+    }
+    let xml: Vec<&String> = names
+        .iter()
+        .filter(|name| !parts::is_content_types(name) && !types.is_rels(name))
+        .filter(|name| types.is_xml(name))
+        .collect();
+    if xml.len() > parts::MAX_PARTS {
+        return Some(true);
+    }
+    for name in xml {
         if left == 0 {
             // past the total cap with parts left unread: they may have changes
             return Some(true);
         }
         let part = match zip.by_name(name) {
             Ok(part) => part,
-            Err(zip::result::ZipError::Io(_)) => return None,
-            Err(_) => continue,
+            Err(zip::result::ZipError::Io(error)) => return failed(&error),
+            Err(_) => return Some(true),
         };
         let mut part = part.take(part_cap.min(left));
         let limit = part.limit();
         let found = holds_any(&mut part, &[CHANGE_MARKS, COMMENT_MARKS])?;
         left -= limit - part.limit();
-        // cut by a cap: the scan read to the cap and the part goes on past it, so what is past
-        // the cap may have changes; a read that fails there is a failed read
-        let cut = part.limit() == 0 && part.get_mut().read(&mut [0_u8]).ok()? == 1;
+        // cut by a cap: the scan read to the cap and the part goes on past it
+        let cut = part.limit() == 0
+            && match part.get_mut().read(&mut [0_u8]) {
+                Ok(more) => more == 1,
+                Err(error) => return failed(&error),
+            };
         if cut || found != Found::Clean {
             return Some(true);
         }
@@ -224,39 +247,54 @@ fn zip_marks(file: impl Read + Seek, part_cap: u64, total_cap: u64) -> Option<bo
     Some(false)
 }
 
-/// A relationships part as the scan takes it.
-enum Rels {
-    /// Its bytes, empty when the file has no such part.
-    Read(Vec<u8>),
-    /// Over [`MAX_RELS_BYTES`] or not UTF-8: not read for its relationships.
-    Unread,
+/// What a read error answers: a damaged file (its data cut short or not what it should be) may
+/// have changes; any other failure (a locked file, a sharing violation) is tried again.
+fn failed(error: &std::io::Error) -> Option<bool> {
+    damaged(error).then_some(true)
 }
 
-/// The relationships part `name` (at most `left`, which the read takes from); `None` when a read
-/// failed.
-fn read_rels<R: Read + Seek>(
+/// Whether a read failed on the file's data rather than on reaching it.
+fn damaged(error: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    matches!(
+        error.kind(),
+        ErrorKind::UnexpectedEof | ErrorKind::InvalidData | ErrorKind::InvalidInput
+    )
+}
+
+/// A part read for what it says, not for marks.
+enum Whole {
+    /// All its bytes.
+    Read(Vec<u8>),
+    /// Missing, damaged or past a cap: not read whole.
+    Not,
+}
+
+/// The part `name` whole (at most `part_cap` bytes and `left`, which the read takes from);
+/// `None` when a read failed and is worth trying again.
+fn read_whole<R: Read + Seek>(
     zip: &mut zip::ZipArchive<R>,
     name: &str,
+    part_cap: u64,
     left: &mut u64,
-) -> Option<Rels> {
+) -> Option<Whole> {
     let part = match zip.by_name(name) {
         Ok(part) => part,
-        Err(zip::result::ZipError::Io(_)) => return None,
-        Err(_) => return Some(Rels::Read(Vec::new())),
+        Err(zip::result::ZipError::Io(error)) => return failed(&error).map(|_| Whole::Not),
+        Err(_) => return Some(Whole::Not),
     };
-    if part.size() > MAX_RELS_BYTES {
-        return Some(Rels::Unread);
-    }
-    let limit = MAX_RELS_BYTES.min(*left);
+    let limit = part_cap.min(*left);
     let mut bytes = Vec::new();
     // one byte past the limit, to tell a part over it: its stated size may be wrong
-    part.take(limit + 1).read_to_end(&mut bytes).ok()?;
+    if let Err(error) = part.take(limit + 1).read_to_end(&mut bytes) {
+        return failed(&error).map(|_| Whole::Not);
+    }
     let read = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     *left -= read.min(*left);
-    if read > limit || !utf8(&bytes) {
-        return Some(Rels::Unread);
+    if read > limit {
+        return Some(Whole::Not);
     }
-    Some(Rels::Read(bytes))
+    Some(Whole::Read(bytes))
 }
 
 /// Whether a part's first bytes read as UTF-8 to the scan: no UTF-16 byte order mark and no NUL
@@ -267,6 +305,15 @@ fn utf8(head: &[u8]) -> bool {
         && !head.iter().take(4).any(|&byte| byte == 0)
 }
 
+/// Whether an XML declaration leaves the part UTF-8: it names no encoding, or UTF-8.
+fn declared_utf8(declaration: &quick_xml::events::BytesDecl<'_>) -> bool {
+    declaration.encoding().is_none_or(|encoding| {
+        encoding.is_ok_and(|encoding| {
+            encoding.eq_ignore_ascii_case("utf-8") || encoding.eq_ignore_ascii_case("utf8")
+        })
+    })
+}
+
 /// What the scan of a part found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Found {
@@ -274,19 +321,23 @@ enum Found {
     Mark,
     /// None, in a part read to its end as the scan models it.
     Clean,
-    /// Something the scan does not model, or a part cut short: it may have changes.
+    /// Something the scan does not model, or a damaged part: it may have changes.
     Unmodelled,
 }
 
-/// What `bytes`, one XML part, hold: an element in [`W_NAMESPACE`] with any of `marks`' local
-/// names, read as it streams; `None` when a read failed before a mark was found.
+/// What `bytes`, one XML part, hold: an element in one of [`W_NAMESPACES`] with any of `marks`'
+/// local names, read as it streams; `None` when a read failed and is worth trying again.
 fn holds_any(bytes: impl Read, marks: &[&[&[u8]]]) -> Option<Found> {
     let marks: Vec<&[u8]> = marks
         .iter()
         .flat_map(|names| names.iter().copied())
         .collect();
     let mut bytes = BufReader::with_capacity(64 * 1024, bytes);
-    if !utf8(bytes.fill_buf().ok()?) {
+    let head = match bytes.fill_buf() {
+        Ok(head) => head,
+        Err(error) => return damaged(&error).then_some(Found::Unmodelled),
+    };
+    if !utf8(head) {
         return Some(Found::Unmodelled);
     }
     let mut reader = quick_xml::NsReader::from_reader(bytes);
@@ -295,28 +346,29 @@ fn holds_any(bytes: impl Read, marks: &[&[&[u8]]]) -> Option<Found> {
         buffer.clear();
         let (resolved, event) = match reader.read_resolved_event_into(&mut buffer) {
             Ok(read) => read,
-            Err(quick_xml::Error::Io(_)) => return None,
+            Err(quick_xml::Error::Io(error)) => {
+                return damaged(&error).then_some(Found::Unmodelled);
+            }
             Err(_) => return Some(Found::Unmodelled),
         };
         match event {
-            Event::Start(element) | Event::Empty(element) => match resolved {
-                ResolveResult::Bound(Namespace(namespace))
-                    if namespace.as_bytes() == W_NAMESPACE
-                        && marks.contains(&element.local_name().as_ref().as_bytes()) =>
-                {
-                    return Some(Found::Mark);
+            Event::Start(element) | Event::Empty(element) => {
+                if !plain_bindings(&element) {
+                    return Some(Found::Unmodelled);
                 }
-                ResolveResult::Unknown(_) => return Some(Found::Unmodelled),
-                ResolveResult::Bound(_) | ResolveResult::Unbound => {}
-            },
+                match resolved {
+                    ResolveResult::Bound(Namespace(namespace))
+                        if W_NAMESPACES.contains(&namespace)
+                            && marks.contains(&element.local_name().as_ref().as_bytes()) =>
+                    {
+                        return Some(Found::Mark);
+                    }
+                    ResolveResult::Unknown(_) => return Some(Found::Unmodelled),
+                    ResolveResult::Bound(_) | ResolveResult::Unbound => {}
+                }
+            }
             Event::Decl(declaration) => {
-                let other = declaration.encoding().is_some_and(|encoding| {
-                    !encoding.is_ok_and(|encoding| {
-                        encoding.eq_ignore_ascii_case("utf-8")
-                            || encoding.eq_ignore_ascii_case("utf8")
-                    })
-                });
-                if other {
+                if !declared_utf8(&declaration) {
                     return Some(Found::Unmodelled);
                 }
             }
@@ -330,6 +382,17 @@ fn holds_any(bytes: impl Read, marks: &[&[&[u8]]]) -> Option<Found> {
             | Event::GeneralRef(_) => {}
         }
     }
+}
+
+/// Whether `element`'s attributes read, and its namespace declarations hold no reference (`&`):
+/// quick-xml binds a prefix to the raw value, where Word reads the value decoded.
+fn plain_bindings(element: &quick_xml::events::BytesStart<'_>) -> bool {
+    element.attributes().all(|attribute| {
+        attribute.is_ok_and(|attribute| {
+            let key = attribute.key.as_ref();
+            !(key == "xmlns" || key.starts_with("xmlns:")) || !attribute.value.contains('&')
+        })
+    })
 }
 
 /// Tests' stand-ins for [`check`], by folder: a test registers one for its own folder, so tests
@@ -360,6 +423,8 @@ pub(crate) mod hooks {
     }
 }
 
+#[cfg(test)]
+mod package_tests;
 mod parts;
 #[cfg(any(windows, test))]
 mod reparse;

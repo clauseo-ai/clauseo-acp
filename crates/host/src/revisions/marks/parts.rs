@@ -1,109 +1,241 @@
-//! Which parts of a Word file the marks scan reads: the parts stetdoc reads tracked changes from,
-//! found the way stetdoc finds them. The main document is the package's `officeDocument`
-//! relationship (`_rels/.rels`; `word/document.xml` when it names none), and its own
-//! relationships (`word/_rels/document.xml.rels`) name its headers, footers, footnotes, endnotes
-//! and comments. A relationship to outside the package (`TargetMode="External"`) is not a part.
-//!
-//! The relationship parts are matched as bytes, never parsed as XML, like the rest of the scan:
-//! each `<Relationship` element's `Type`, `Target` and `TargetMode` attributes are read, with the
-//! XML entities in a value decoded, and a target is resolved against its source part's folder.
-//! The read is one pass: after each element it goes on from the element's end, so a hostile part
-//! with `<Relationship` repeated inside one long value costs its length, not its length squared.
-//!
-//! A target may name any part inside the zip, `/[Content_Types].xml` or a relationships part
-//! among them: the scan then reads that part as XML too, within the same caps. It never leaves
-//! the zip, so such a target costs a read and nothing more.
+//! What the marks scan reads of a Word file's package. Every entry that is XML is read for marks:
+//! every name ending in `.xml`, and every part `[Content_Types].xml` gives an XML content type
+//! under another name, but the content types themselves and the relationships parts. The
+//! relationships decide nothing about what is read; they are read, with the content types, only
+//! so that a part either names and the zip lacks is noticed: the scan cannot say such a file
+//! holds no changes. Both are read as XML (quick-xml), so a value's references are decoded, a
+//! prefixed element is read by its local name, and a part name matches without case, as OPC
+//! says.
 
-/// Where the main document is when the package names none.
-const MAIN_FALLBACK: &str = "word/document.xml";
+use std::collections::{HashMap, HashSet};
+use std::io::{Read, Seek};
 
-/// The end of the relationship type that names the main document.
-const MAIN_TYPE: &str = "/officeDocument";
+use quick_xml::events::{BytesStart, Event};
 
-/// The ends of the relationship types of the parts besides the main document that stetdoc reads
-/// tracked changes from (0.9.3 calls them the `headers`, `notes` and `comments` stories).
-const STORY_TYPES: &[&str] = &["/header", "/footer", "/footnotes", "/endnotes", "/comments"];
+use super::{declared_utf8, utf8};
 
-/// The most story parts one file's scan reads: Word writes at most six headers and footers a
-/// section. A file naming more may have changes in those it does not read.
+/// The most parts of each kind (XML parts, relationships parts) one file's scan reads: Word
+/// writes a few dozen. A file with more may have changes in those it does not read.
 pub(super) const MAX_PARTS: usize = 1_024;
 
-/// One `<Relationship>`: its type, its target and whether that target is outside the package.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) struct Relationship {
-    pub(super) kind: String,
-    pub(super) target: String,
-    pub(super) external: bool,
+/// The content types part's name, matched without case.
+const CONTENT_TYPES: &str = "[Content_Types].xml";
+
+/// A relationships part's content type.
+const RELS_TYPE: &str = "application/vnd.openxmlformats-package.relationships+xml";
+
+/// The zip's entries: their names as written, and lowered, for a match without case.
+pub(super) struct Entries {
+    pub(super) names: Vec<String>,
+    lower: HashSet<String>,
 }
 
-/// The main document's name, from the package's relationships `rels` (empty: no such part).
-pub(super) fn main_part(rels: &[u8]) -> String {
-    relationships(rels)
-        .find(|rel| !rel.external && rel.kind.ends_with(MAIN_TYPE))
-        .and_then(|rel| resolve("", &rel.target))
-        .unwrap_or_else(|| MAIN_FALLBACK.to_owned())
-}
-
-/// The name of the relationships part of the part `name`: `word/document.xml`'s is
-/// `word/_rels/document.xml.rels`.
-pub(super) fn rels_of(name: &str) -> String {
-    let (folder, file) = split(name);
-    format!("{folder}_rels/{file}.rels")
-}
-
-/// The story parts the main document `main`'s relationships `rels` name, in their order, each
-/// once, `main` itself not among them; at most one past [`MAX_PARTS`], which tells the caller
-/// there were more than it reads.
-pub(super) fn story_parts(main: &str, rels: &[u8]) -> Vec<String> {
-    let (folder, _) = split(main);
-    let mut parts: Vec<String> = Vec::new();
-    for rel in relationships(rels) {
-        if rel.external || !STORY_TYPES.iter().any(|end| rel.kind.ends_with(end)) {
+/// The zip's entries that are files (not folders); `None` when a name does not read or two
+/// names are one part name (they match without case), so one would go unread.
+pub(super) fn entries<R: Read + Seek>(zip: &zip::ZipArchive<R>) -> Option<Entries> {
+    let mut names = Vec::new();
+    let mut lower = HashSet::new();
+    for name in zip.file_names() {
+        let name = name.ok()?;
+        if name.ends_with('/') {
             continue;
         }
-        let Some(name) = resolve(folder, &rel.target) else {
-            continue;
+        if !lower.insert(name.to_lowercase()) {
+            return None;
+        }
+        names.push(name.into_owned());
+    }
+    Some(Entries { names, lower })
+}
+
+impl Entries {
+    /// Whether the zip holds the part `name` (a zip entry name), matched without case.
+    fn holds(&self, name: &str) -> bool {
+        self.lower.contains(&name.to_lowercase())
+    }
+}
+
+/// Whether `name` is the content types part.
+pub(super) fn is_content_types(name: &str) -> bool {
+    name.eq_ignore_ascii_case(CONTENT_TYPES)
+}
+
+/// `[Content_Types].xml` as read: content types by extension and by part name, both lowered.
+#[derive(Debug, Default)]
+pub(super) struct ContentTypes {
+    defaults: HashMap<String, String>,
+    overrides: HashMap<String, String>,
+}
+
+impl ContentTypes {
+    /// The content type of the part `name`, if the content types give one.
+    fn of(&self, name: &str) -> Option<&str> {
+        let lower = name.to_lowercase();
+        if let Some(kind) = self.overrides.get(&lower) {
+            return Some(kind.as_str());
+        }
+        let file = lower.rsplit('/').next().unwrap_or_default();
+        let (_, extension) = file.rsplit_once('.')?;
+        self.defaults.get(extension).map(String::as_str)
+    }
+
+    /// Whether the part `name` is a relationships part: named `.rels`, or typed so.
+    pub(super) fn is_rels(&self, name: &str) -> bool {
+        ends_with(name, ".rels") || self.of(name).is_some_and(|kind| kind == RELS_TYPE)
+    }
+
+    /// Whether the part `name` is XML: named `.xml`, or given an XML content type.
+    pub(super) fn is_xml(&self, name: &str) -> bool {
+        ends_with(name, ".xml") || self.of(name).is_some_and(|kind| kind.ends_with("xml"))
+    }
+
+    /// Whether every part the content types name by name is in the zip.
+    pub(super) fn all_present(&self, entries: &Entries) -> bool {
+        self.overrides.keys().all(|name| entries.holds(name))
+    }
+}
+
+/// Whether `name` ends with `end` (lowercase), without case.
+fn ends_with(name: &str, end: &str) -> bool {
+    name.len() >= end.len()
+        && name
+            .get(name.len() - end.len()..)
+            .is_some_and(|tail| tail.eq_ignore_ascii_case(end))
+}
+
+/// The content types in `xml`; `None` when it does not read as the scan models it.
+pub(super) fn content_types(xml: &[u8]) -> Option<ContentTypes> {
+    let mut types = ContentTypes::default();
+    elements(xml, |name, element| {
+        match name {
+            "Default" => {
+                let extension = attribute(element, "Extension").ok()?;
+                let kind = attribute(element, "ContentType").ok()?;
+                if let (Some(extension), Some(kind)) = (extension, kind) {
+                    types
+                        .defaults
+                        .insert(extension.to_lowercase(), kind.to_lowercase());
+                }
+            }
+            "Override" => {
+                let part = attribute(element, "PartName").ok()?;
+                let kind = attribute(element, "ContentType").ok()?;
+                if let (Some(part), Some(kind)) = (part, kind) {
+                    let part = part_name(part.strip_prefix('/').unwrap_or(&part))?;
+                    types
+                        .overrides
+                        .insert(part.to_lowercase(), kind.to_lowercase());
+                }
+            }
+            _ => {}
+        }
+        Some(())
+    })?;
+    Some(types)
+}
+
+/// The parts inside the package that the relationships part `rels` (its zip name) names in
+/// `xml`, resolved against their source's folder; `None` when it does not read as the scan
+/// models it or a target is not a part name inside the package.
+pub(super) fn targets(rels: &str, xml: &[u8]) -> Option<Vec<String>> {
+    // `word/_rels/document.xml.rels` holds `word/document.xml`'s: its targets are in `word/`
+    let folder = match rels.to_ascii_lowercase().rfind("_rels/") {
+        Some(at) => rels.get(..at)?,
+        None => rels.get(..rels.rfind('/').map_or(0, |at| at + 1))?,
+    };
+    let mut targets = Vec::new();
+    elements(xml, |name, element| {
+        if name != "Relationship" {
+            return Some(());
+        }
+        let external = attribute(element, "TargetMode")
+            .ok()?
+            .is_some_and(|mode| mode.eq_ignore_ascii_case("External"));
+        if external {
+            return Some(());
+        }
+        let target = attribute(element, "Target").ok()??;
+        // a fragment names a place in a part, not a part
+        let target = target.split('#').next().unwrap_or_default();
+        if target.is_empty() {
+            return Some(());
+        }
+        targets.push(resolve(folder, &part_name(target)?)?);
+        Some(())
+    })?;
+    Some(targets)
+}
+
+/// Whether every one of `targets` is in the zip.
+pub(super) fn present(targets: &[String], entries: &Entries) -> bool {
+    targets.iter().all(|target| entries.holds(target))
+}
+
+/// Each element of `xml` by its local name, to `each`; `None` when `xml` does not read as the
+/// scan models it (not well-formed, a doctype, not UTF-8) or `each` answers `None`.
+fn elements(xml: &[u8], mut each: impl FnMut(&str, &BytesStart<'_>) -> Option<()>) -> Option<()> {
+    if !utf8(xml) {
+        return None;
+    }
+    let mut reader = quick_xml::Reader::from_reader(xml);
+    loop {
+        match reader.read_event().ok()? {
+            Event::Start(element) | Event::Empty(element) => {
+                each(element.local_name().as_ref(), &element)?;
+            }
+            Event::Decl(declaration) => {
+                if !declared_utf8(&declaration) {
+                    return None;
+                }
+            }
+            Event::DocType(_) => return None,
+            Event::Eof => return Some(()),
+            Event::End(_)
+            | Event::Text(_)
+            | Event::CData(_)
+            | Event::Comment(_)
+            | Event::PI(_)
+            | Event::GeneralRef(_) => {}
+        }
+    }
+}
+
+/// An attribute that does not read: the part is not one the scan models.
+struct Unread;
+
+/// The value of `element`'s attribute whose local name is `name`, its references decoded, if it
+/// has one.
+fn attribute(element: &BytesStart<'_>, name: &str) -> Result<Option<String>, Unread> {
+    for attribute in element.attributes() {
+        let Ok(attribute) = attribute else {
+            return Err(Unread);
         };
-        if name != main && !parts.contains(&name) {
-            parts.push(name);
-        }
-        if parts.len() > MAX_PARTS {
-            break;
+        if attribute.key.local_name().as_ref() == name {
+            let Ok(value) = attribute.normalized_value(quick_xml::XmlVersion::Implicit1_0) else {
+                return Err(Unread);
+            };
+            return Ok(Some(value.into_owned()));
         }
     }
-    parts
+    Ok(None)
 }
 
-/// Every XML part under `word/` among the zip's entry `names`, in their order, but `main` and
-/// relationships parts (`_rels/`), each once, at most one past [`MAX_PARTS`] as [`story_parts`]
-/// gives them: what the scan reads for a main document whose relationships it could not read (too
-/// large, or not UTF-8), since any of them could be a story part those relationships name.
-pub(super) fn word_parts<'a>(main: &str, names: impl Iterator<Item = &'a str>) -> Vec<String> {
-    let mut parts: Vec<String> = Vec::new();
-    for name in names {
-        let Some(file) = name.strip_prefix("word/") else {
-            continue;
-        };
-        let xml = std::path::Path::new(file)
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("xml"));
-        let rels = file.split('/').any(|folder| folder == "_rels");
-        if xml && !rels && name != main && !parts.iter().any(|part| part == name) {
-            parts.push(name.to_owned());
-        }
-        if parts.len() > MAX_PARTS {
-            break;
+/// A part name or a target as a zip entry name: its `%XX` escapes decoded; `None` when one is
+/// not an escape or the result is not UTF-8.
+fn part_name(uri: &str) -> Option<String> {
+    let mut bytes = Vec::with_capacity(uri.len());
+    let mut rest = uri.as_bytes();
+    while let Some((&byte, after)) = rest.split_first() {
+        if byte == b'%' {
+            let hex = std::str::from_utf8(after.get(..2)?).ok()?;
+            bytes.push(u8::from_str_radix(hex, 16).ok()?);
+            rest = after.get(2..)?;
+        } else {
+            bytes.push(byte);
+            rest = after;
         }
     }
-    parts
-}
-
-/// A part name's folder, with its trailing `/` (`""` at the top), and its file name.
-fn split(name: &str) -> (&str, &str) {
-    match name.rfind('/') {
-        Some(at) => name.split_at(at + 1),
-        None => ("", name),
-    }
+    String::from_utf8(bytes).ok()
 }
 
 /// `target` resolved against the folder `folder` (`""` or ending in `/`) as a zip entry name,
@@ -129,216 +261,87 @@ fn resolve(folder: &str, target: &str) -> Option<String> {
     Some(segments.join("/"))
 }
 
-/// Every `<Relationship` element of `xml` as a [`Relationship`]; one without a `Type` or a
-/// `Target` is left out.
-pub(super) fn relationships(xml: &[u8]) -> impl Iterator<Item = Relationship> + '_ {
-    const OPEN: &[u8] = b"<Relationship";
-    let finder = memchr::memmem::Finder::new(OPEN);
-    let mut rest = xml;
-    std::iter::from_fn(move || {
-        loop {
-            let at = finder.find(rest)?;
-            let after = rest.get(at + OPEN.len()..)?;
-            // the element ends at its first `>` (`/>` included); the next search starts there, so
-            // no byte is searched twice
-            let end = memchr::memchr(b'>', after);
-            rest = end.and_then(|end| after.get(end + 1..)).unwrap_or_default();
-            // `<Relationships`, the root, is another element
-            if !after.first().is_some_and(u8::is_ascii_whitespace) {
-                continue;
-            }
-            if let Some(rel) = relationship(after.get(..end?)?) {
-                return Some(rel);
-            }
-        }
-    })
-}
-
-/// The relationship whose tag after `<Relationship` is `tag`; `None` without a `Type` or a
-/// `Target`. Only those two values are decoded; every other attribute is passed over.
-fn relationship(tag: &[u8]) -> Option<Relationship> {
-    let mut kind = None;
-    let mut target = None;
-    let mut external = false;
-    for (name, value) in attributes(tag) {
-        match name {
-            b"Type" => kind = Some(text(value)),
-            b"Target" => target = Some(text(value)),
-            b"TargetMode" => external = value.eq_ignore_ascii_case(b"External"),
-            _ => {}
-        }
-    }
-    Some(Relationship {
-        kind: kind?,
-        target: target?,
-        external,
-    })
-}
-
-/// The `name="value"` (or `name='value'`) pairs of an element's tag after its name, in one pass,
-/// until one does not read.
-fn attributes(mut tag: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])> {
-    std::iter::from_fn(move || {
-        let eq = memchr::memchr(b'=', tag)?;
-        let name = tag.get(..eq)?.trim_ascii();
-        let value = tag.get(eq + 1..)?.trim_ascii_start();
-        let (&quote, value) = value.split_first()?;
-        if quote != b'"' && quote != b'\'' {
-            return None;
-        }
-        let close = memchr::memchr(quote, value)?;
-        tag = value.get(close + 1..)?;
-        Some((name, value.get(..close)?))
-    })
-}
-
-/// An attribute's value as text, its five predefined XML entities decoded (one copy when it has
-/// none).
-fn text(value: &[u8]) -> String {
-    let value = String::from_utf8_lossy(value);
-    if !value.contains('&') {
-        return value.into_owned();
-    }
-    value
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
-}
-
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use super::{
-        Relationship, main_part, relationships, rels_of, resolve, story_parts, word_parts,
-    };
-    use crate::clock::{Clock as _, SystemClock};
-
-    const DOC_RELS: &str = concat!(
-        r#"<?xml version="1.0"?><Relationships xmlns="http://x/rel">"#,
-        r#"<Relationship Id="rId1" Type="http://x/officeDocument/2006/relationships/styles" "#,
-        r#"Target="styles.xml"/>"#,
-        r#"<Relationship Target='header1.xml' Id="rId2" "#,
-        "\n  Type=\"http://x/officeDocument/2006/relationships/header\"/>",
-        r#"<Relationship Id="rId3" Type="http://x/relationships/footer" Target="/word/f&amp;1.xml"/>"#,
-        r#"<Relationship Id="rId4" Type="http://x/relationships/footnotes" Target="notes/fn.xml"/>"#,
-        r#"<Relationship Id="rId5" Type="http://x/relationships/endnotes" Target="../en.xml"/>"#,
-        r#"<Relationship Id="rId6" Type="http://x/relationships/comments" Target="comments.xml"/>"#,
-        r#"<Relationship Id="rId7" Type="http://x/relationships/header" Target="header1.xml"/>"#,
-        r#"<Relationship Id="rId8" Type="http://x/relationships/header" Target="http://a/h.xml" "#,
-        r#"TargetMode="External"/>"#,
-        r#"<Relationship Id="rId9" Type="http://x/relationships/footer" Target="../../out.xml"/>"#,
-        r#"</Relationships>"#,
-    );
+    use super::{content_types, part_name, resolve, targets};
 
     #[test]
-    fn the_story_parts_are_the_ones_the_document_s_relationships_name() {
-        assert_eq!(
-            story_parts("word/document.xml", DOC_RELS.as_bytes()),
-            [
-                "word/header1.xml",
-                "word/f&1.xml",
-                "word/notes/fn.xml",
-                "en.xml",
-                "word/comments.xml",
-            ]
-        );
-        assert_eq!(rels_of("word/document.xml"), "word/_rels/document.xml.rels");
-        assert_eq!(rels_of("doc.xml"), "_rels/doc.xml.rels");
-    }
-
-    #[test]
-    fn the_main_document_is_the_package_s_office_document() {
-        let rels = concat!(
-            r#"<Relationships><Relationship Id="rId2" Type="http://x/relationships/core-properties" "#,
-            r#"Target="docProps/core.xml"/><Relationship Id="rId1" "#,
-            r#"Type="http://x/officeDocument/2006/relationships/officeDocument" "#,
-            r#"Target="/word/document2.xml"/></Relationships>"#,
-        );
-        assert_eq!(main_part(rels.as_bytes()), "word/document2.xml");
-        assert_eq!(main_part(b"<Relationships/>"), "word/document.xml");
-        assert_eq!(main_part(b""), "word/document.xml");
-    }
-
-    #[test]
-    fn a_relationship_reads_in_either_quote_and_a_broken_one_not_at_all() {
-        let xml = br#"<Relationship Type='t' Target="a.xml" TargetMode="external"/><Relationship Type="t"/><Relationship Type="t" Target=broken/>"#;
-        assert_eq!(
-            relationships(xml).collect::<Vec<_>>(),
-            [Relationship {
-                kind: "t".to_owned(),
-                target: "a.xml".to_owned(),
-                external: true,
-            }]
-        );
+    fn a_target_resolves_inside_the_package_or_not_at_all() {
         assert_eq!(
             resolve("word/", "./a/../b.xml").as_deref(),
             Some("word/b.xml")
         );
+        assert_eq!(
+            resolve("word/", "/x/main.xml").as_deref(),
+            Some("x/main.xml")
+        );
         assert_eq!(resolve("word/", "../../x.xml"), None);
         assert_eq!(resolve("word/", "a/"), None);
         assert_eq!(resolve("", "/"), None);
-    }
-
-    /// `<Relationship ` repeated inside one value, `size` bytes of it: each one is the start of
-    /// another element to a scan that reads ahead from every match.
-    fn hostile(size: usize) -> String {
-        let inside = "<Relationship ".repeat(size / "<Relationship ".len());
-        format!(
-            r#"<Relationships><Relationship Id="{inside}" Type="t/header" Target="h.xml"/></Relationships>"#
-        )
-    }
-
-    /// The shape that took 15 s at 256 KiB and over two minutes at 1 MiB reads in one pass: well
-    /// under a second, even in a debug build.
-    #[test]
-    fn a_relationships_part_with_elements_hidden_in_a_value_reads_in_one_pass() {
-        for size in [256 * 1024, 1024 * 1024] {
-            let xml = hostile(size);
-            let start = SystemClock.now().mono;
-            let found: Vec<Relationship> = relationships(xml.as_bytes()).collect();
-            let took = SystemClock.now().mono.saturating_sub(start);
-            assert_eq!(found.len(), 1, "{size}");
-            assert_eq!(found[0].target, "h.xml");
-            assert!(took < Duration::from_secs(1), "{size} bytes took {took:?}");
-        }
-    }
-
-    #[test]
-    fn without_relationships_every_xml_part_under_word_is_read() {
-        let names = [
-            "[Content_Types].xml",
-            "word/document.xml",
-            "word/header1.xml",
-            "word/footer12.xml",
-            "word/footnotes.xml",
-            "word/endnotes.xml",
-            "word/comments.xml",
-            "word/styles.xml",
-            "word/media/header.png",
-            "word/headers/a.xml",
-            "header1.xml",
-            "word/commentsExtended.xml",
-            "word/letterhead.XML",
-            "word/_rels/document.xml.rels",
-            "word/_rels/extra.xml",
-            "word/header1.xml",
-        ];
         assert_eq!(
-            word_parts("word/document.xml", names.into_iter()),
-            [
-                "word/header1.xml",
-                "word/footer12.xml",
-                "word/footnotes.xml",
-                "word/endnotes.xml",
-                "word/comments.xml",
-                "word/styles.xml",
-                "word/headers/a.xml",
-                "word/commentsExtended.xml",
-                "word/letterhead.XML",
-            ]
+            part_name("media/image%201.png").as_deref(),
+            Some("media/image 1.png")
         );
+        assert_eq!(part_name("a%2"), None);
+    }
+
+    /// Relationships read as XML: references decoded, a prefixed element by its local name, an
+    /// external target left out, a fragment cut, targets resolved against the source's folder.
+    #[test]
+    fn relationships_read_as_xml() {
+        let xml = concat!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>"#,
+            r#"<r:Relationships xmlns:r="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+            r#"<r:Relationship Id="rId1" Type="http://x/&#104;&#101;&#97;&#100;&#101;&#114;" Target="&#104;&#101;&#97;&#100;&#101;&#114;1.xml"/>"#,
+            r#"<Relationship Id="rId2" Type="t" Target='../custom/n.xml#p2'/>"#,
+            r#"<Relationship Id="rId3" Type="t" Target="https://a/b" TargetMode="External"/>"#,
+            r#"<Relationship Id="rId4" Type="t" Target="/Word/Footer%201.XML"/>"#,
+            r#"</r:Relationships>"#,
+        );
+        assert_eq!(
+            targets("word/_rels/document.xml.rels", xml.as_bytes()).unwrap(),
+            ["word/header1.xml", "custom/n.xml", "Word/Footer 1.XML"]
+        );
+        assert_eq!(
+            targets(
+                "_rels/.rels",
+                br#"<Relationships><Relationship Target="x/main.xml"/></Relationships>"#
+            )
+            .unwrap(),
+            ["x/main.xml"]
+        );
+        // not well-formed, or a target that climbs out of the package
+        assert_eq!(
+            targets("_rels/.rels", b"<Relationships><Relationship"),
+            None
+        );
+        assert_eq!(
+            targets(
+                "_rels/.rels",
+                br#"<Relationships><Relationship Target="../x.xml"/></Relationships>"#
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn content_types_say_which_parts_are_xml_and_which_are_relationships() {
+        let xml = concat!(
+            r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
+            r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#,
+            r#"<Default Extension="XML" ContentType="application/xml"/>"#,
+            r#"<Default Extension="bin" ContentType="application/octet-stream"/>"#,
+            r#"<Override PartName="/custom/head.bin" "#,
+            r#"ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>"#,
+            r#"</Types>"#,
+        );
+        let types = content_types(xml.as_bytes()).unwrap();
+        assert!(types.is_xml("custom/head.bin"));
+        assert!(types.is_xml("Custom/Head.BIN"));
+        assert!(!types.is_xml("word/media/image1.bin"));
+        assert!(types.is_xml("word/letterhead.XML"));
+        assert!(types.is_rels("word/_rels/document.xml.rels"));
+        assert!(!types.is_rels("word/document.xml"));
+        assert!(content_types(b"<Types><Default").is_none());
     }
 }
