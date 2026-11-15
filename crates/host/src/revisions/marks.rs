@@ -1,12 +1,16 @@
 //! Whether a listed `.docx` holds tracked changes or comments (`PaperSummary::tracked`), so its
 //! tile offers Tracked changes only when there are some. Read from the file itself, off the
-//! actor and the matter's worker (`actor/papers/scan.rs` runs [`check`] on a thread of its own):
-//! its `word/document.xml` holds an insertion, a deletion or a move (`<w:ins `, `<w:del `,
-//! `<w:moveFrom `, `<w:moveTo `), or its `word/comments.xml` a comment (`<w:comment `). Only
-//! bytes are matched, never parsed, in one pass over each part (`memchr::memmem` finds each
-//! `<w:`), and the read stops at the first mark and after [`MAX_XML_BYTES`] of a part, so a zip
-//! bomb or a huge document costs a bounded read. A file that does not read as a zip, or has no
-//! such part, has none. The file is opened without following a link at its last component.
+//! actor and the matter's worker (`actor/papers/scan.rs` runs [`check`] on a thread of its own).
+//!
+//! A mark is any tracked change stetdoc 0.9.3 lists, accepts and rejects ([`CHANGE_MARKS`]:
+//! text inserted, deleted or moved, and formatting, section, table, row, cell and numbering
+//! changes), or a comment (`<w:comment `). It is looked for in every part stetdoc reads them
+//! from: the main document and the headers, footers, footnotes, endnotes and comments its
+//! relationships name ([`parts`]). Only bytes are matched, never parsed, in one pass over each
+//! part (`memchr::memmem` finds each `<w:`). The read stops at the first mark, after
+//! [`MAX_XML_BYTES`] of a part and after [`MAX_SCAN_BYTES`] in all, so a zip bomb or a huge
+//! document costs a bounded read. A file that does not read as a zip, or has no such part, has
+//! none. The file is opened without following a link at its last component.
 //!
 //! [`Kept`] holds each matter's answers by path, with the size and modified time the listing
 //! gave, so a listing answers at once and only files that changed are read again. A read that
@@ -25,14 +29,43 @@ use super::is_docx;
 /// of pages; a mark past it is missed and the tile offers no Tracked changes.
 pub(crate) const MAX_XML_BYTES: u64 = 16 * 1024 * 1024;
 
+/// The most bytes one file's scan reads, decompressed, over all its parts and relationships.
+pub(crate) const MAX_SCAN_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The most bytes of a relationships part read: a few hundred bytes a relationship.
+const MAX_RELS_BYTES: u64 = 1024 * 1024;
+
 /// What every mark starts with: what `memmem` looks for.
 const PREFIX: &[u8] = b"<w:";
 
-/// What follows [`PREFIX`] for a tracked change in `word/document.xml`.
-const CHANGE_MARKS: &[&[u8]] = &[b"ins ", b"del ", b"moveFrom ", b"moveTo "];
+/// The element names after [`PREFIX`] of the tracked changes stetdoc 0.9.3 lists, accepts and
+/// rejects in every part it reads (each checked with the release binary): text and paragraph
+/// marks, rows and custom XML inserted, deleted or moved, cells inserted, deleted or merged,
+/// and run, paragraph, section, table, table exception, grid, row, cell and numbering changes.
+/// A move's range markers (`w:moveFromRangeStart`) alone are not a change it lists.
+const CHANGE_MARKS: &[&[u8]] = &[
+    b"ins",
+    b"del",
+    b"moveFrom",
+    b"moveTo",
+    b"rPrChange",
+    b"pPrChange",
+    b"sectPrChange",
+    b"tblPrChange",
+    b"tblPrExChange",
+    b"tblGridChange",
+    b"trPrChange",
+    b"tcPrChange",
+    b"numberingChange",
+    b"cellIns",
+    b"cellDel",
+    b"cellMerge",
+    b"customXmlInsRangeStart",
+    b"customXmlDelRangeStart",
+];
 
-/// What follows [`PREFIX`] for a comment in `word/comments.xml`.
-const COMMENT_MARKS: &[&[u8]] = &[b"comment "];
+/// The element name after [`PREFIX`] of a comment.
+const COMMENT_MARKS: &[&[u8]] = &[b"comment"];
 
 /// One matter's answers: by path, the size and modified time listed when it was read, and
 /// whether it holds marks.
@@ -120,30 +153,68 @@ fn windows_file(path: &Path, file: std::fs::File) -> Option<std::fs::File> {
     }
 }
 
-/// Whether the zip `file` reads as a Word file that holds a tracked change or a comment; `None`
-/// when a read failed.
+/// Whether the zip `file` reads as a Word file that holds a tracked change or a comment in any
+/// part stetdoc reads them from (the main document first); `None` when a read failed.
 fn zip_has_marks(file: impl Read + Seek) -> Option<bool> {
     let mut zip = match zip::ZipArchive::new(file) {
         Ok(zip) => zip,
         Err(zip::result::ZipError::Io(_)) => return None,
         Err(_) => return Some(false),
     };
-    let mut holds = |name: &str, marks: &[&[u8]]| match zip.by_name(name) {
-        Ok(part) => holds_any(part.take(MAX_XML_BYTES), marks),
-        Err(zip::result::ZipError::Io(_)) => None,
-        Err(_) => Some(false),
-    };
-    if holds("word/document.xml", CHANGE_MARKS)? {
-        return Some(true);
+    let mut left = MAX_SCAN_BYTES;
+    let main = parts::main_part(&read_rels(&mut zip, "_rels/.rels", &mut left)?);
+    let rels = read_rels(&mut zip, &parts::rels_of(&main), &mut left)?;
+    let story = parts::story_parts(&main, &rels);
+    for name in std::iter::once(&main).chain(&story) {
+        if left == 0 {
+            break;
+        }
+        let part = match zip.by_name(name) {
+            Ok(part) => part,
+            Err(zip::result::ZipError::Io(_)) => return None,
+            Err(_) => continue,
+        };
+        let mut part = part.take(MAX_XML_BYTES.min(left));
+        let limit = part.limit();
+        let holds = holds_any(&mut part, &[CHANGE_MARKS, COMMENT_MARKS])?;
+        left -= limit - part.limit();
+        if holds {
+            return Some(true);
+        }
     }
-    holds("word/comments.xml", COMMENT_MARKS)
+    Some(false)
 }
 
-/// Whether `bytes` hold [`PREFIX`] followed by any of `marks`, read a block at a time in one
-/// pass; `None` when a read failed.
-fn holds_any(mut bytes: impl Read, marks: &[&[u8]]) -> Option<bool> {
+/// The first [`MAX_RELS_BYTES`] of the relationships part `name` (at most `left`, which the
+/// read takes from), none when the file has no such part; `None` when a read failed.
+fn read_rels<R: Read + Seek>(
+    zip: &mut zip::ZipArchive<R>,
+    name: &str,
+    left: &mut u64,
+) -> Option<Vec<u8>> {
+    let part = match zip.by_name(name) {
+        Ok(part) => part,
+        Err(zip::result::ZipError::Io(_)) => return None,
+        Err(_) => return Some(Vec::new()),
+    };
+    let mut bytes = Vec::new();
+    part.take(MAX_RELS_BYTES.min(*left))
+        .read_to_end(&mut bytes)
+        .ok()?;
+    *left -= u64::try_from(bytes.len()).unwrap_or(*left).min(*left);
+    Some(bytes)
+}
+
+/// Whether `bytes` hold [`PREFIX`] followed by any of `marks`' names and then white space,
+/// read a block at a time in one pass; `None` when a read failed.
+fn holds_any(mut bytes: impl Read, marks: &[&[&[u8]]]) -> Option<bool> {
     let finder = memchr::memmem::Finder::new(PREFIX);
-    let longest = marks.iter().map(|mark| mark.len()).max().unwrap_or(0) + PREFIX.len();
+    let marks: Vec<&[u8]> = marks
+        .iter()
+        .flat_map(|names| names.iter().copied())
+        .collect();
+    // the name and the white space after it
+    let longest = marks.iter().map(|mark| mark.len()).max().unwrap_or(0) + PREFIX.len() + 1;
     let mut buffer = vec![0_u8; 64 * 1024];
     // the block's first `carried` bytes are the last block's end: a mark may span the two
     let mut carried = 0;
@@ -154,7 +225,13 @@ fn holds_any(mut bytes: impl Read, marks: &[&[u8]]) -> Option<bool> {
         let block = buffer.get(..filled)?;
         for at in finder.find_iter(block) {
             let after = block.get(at + PREFIX.len()..).unwrap_or_default();
-            if marks.iter().any(|mark| after.starts_with(mark)) {
+            let named = |mark: &&[u8]| {
+                after
+                    .strip_prefix(*mark)
+                    .and_then(|rest| rest.first())
+                    .is_some_and(u8::is_ascii_whitespace)
+            };
+            if marks.iter().any(named) {
                 return Some(true);
             }
         }
@@ -194,6 +271,7 @@ pub(crate) mod hooks {
     }
 }
 
+mod parts;
 #[cfg(any(windows, test))]
 mod reparse;
 #[cfg(test)]
