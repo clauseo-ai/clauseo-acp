@@ -183,11 +183,13 @@ impl Matter {
     /// `matter.folder_not_a_matter` if its `matter.json` is missing, does not read or names another
     /// matter. Points the history's
     /// work tree (`core.worktree`) at `folder` if it named another, rebuilds the timeline from
-    /// the trailers, loads the stat cache (rebuilt if it does not match) and, on Windows, hides
+    /// the trailers, loads the stat cache (rebuilt if it does not match), puts back the files a
+    /// crashed rewrite left under a backup name ([`crate::backups`]) and, on Windows, hides
     /// `.clauseo` again if it lost the attribute.
     pub fn open(settings: Settings, id: MatterId, folder: &Path) -> Result<Self, Error> {
         json::check(folder, id)?;
-        let matter = Self::open_history(settings, id, folder)?;
+        let mut matter = Self::open_history(settings, id, folder)?;
+        crate::backups::recover(&mut matter.core, folder, matter.settings.probe.as_ref());
         json::hide(folder);
         Ok(matter)
     }

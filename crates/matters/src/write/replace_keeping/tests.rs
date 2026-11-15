@@ -4,7 +4,7 @@
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
-use super::{Failed, Step, next_step, replace_keeping};
+use super::{Failed, Step, after_failed_put_back, next_step, replace_keeping};
 use crate::test_dir::TestDir;
 use crate::write::{Lost, create_new, remove_file, rename};
 
@@ -141,6 +141,76 @@ fn a_staged_rewrite_keeps_its_temp_file_when_the_target_is_gone() {
         assert_eq!(read(&target), b"old");
         return;
     }
+    let message = failed.error.to_string();
+    assert!(
+        message.contains("Lease.docx.clauseo-0.orig.tmp"),
+        "{message}"
+    );
+    assert!(message.contains(".clauseo-0.tmp"), "{message}");
+    assert_eq!(
+        read(&dir.path().join("Lease.docx.clauseo-0.orig.tmp")),
+        b"old"
+    );
     assert!(!target.exists());
     assert_eq!(read(&temp), b"new");
+}
+
+/// A restore of a deleted file: no `ReplaceFileW`, and a failed rename leaves the folder as it
+/// was, so the temp file may go.
+#[test]
+fn a_target_missing_before_gets_the_plain_rename_alone() {
+    let dir = TestDir::new("replace-keeping-missing");
+    let target = dir.path().join("Lease.docx");
+    let missing = dir.path().join("missing.tmp");
+    let failed = replace_keeping(&missing, &target, |_, _, _| panic!("called")).unwrap_err();
+    assert!(matches!(failed, Failed::Unchanged(_)), "{failed:?}");
+
+    let temp = file(&dir, "new.tmp", b"new");
+    let lost = replace_keeping(&temp, &target, |_, _, _| panic!("called")).unwrap();
+    assert_eq!(lost, Lost::default());
+    assert_eq!(read(&target), b"new");
+}
+
+/// The backup is named for its file, so the next open can put it back.
+#[test]
+fn the_backup_is_named_for_its_file() {
+    let dir = TestDir::new("replace-keeping-name");
+    let target = file(&dir, "Lease.docx", b"old");
+    let temp = file(&dir, "new.tmp", b"new");
+    replace_keeping(&temp, &target, |replaced, replacement, backup| {
+        assert_eq!(backup, dir.path().join("Lease.docx.clauseo-0.orig.tmp"));
+        rename(replaced, backup)?;
+        rename(replacement, replaced)
+    })
+    .unwrap();
+}
+
+/// After 1177 and a put-back that failed: the new content goes in place; the backup stays.
+#[test]
+fn a_failed_put_back_puts_the_new_content_in_place() {
+    let dir = TestDir::new("replace-keeping-second-try");
+    let backup = file(&dir, "Lease.docx.clauseo-0.orig.tmp", b"old");
+    let temp = file(&dir, "new.tmp", b"new");
+    let target = dir.path().join("Lease.docx");
+    let denied = code(5);
+    let lost = after_failed_put_back(&temp, &target, &backup, &denied, Some(1177)).unwrap();
+    assert_eq!(lost, Lost::one(Some(1177)));
+    assert_eq!(read(&target), b"new");
+    assert_eq!(read(&backup), b"old");
+
+    // Both failing: the error names the two files.
+    let gone = dir.path().join("gone.tmp");
+    let failed = after_failed_put_back(
+        &gone,
+        &target.with_file_name("B.docx"),
+        &backup,
+        &denied,
+        None,
+    )
+    .unwrap_err();
+    let Failed::TargetGone(err) = failed else {
+        panic!("{failed:?}");
+    };
+    let message = err.to_string();
+    assert!(message.contains("Lease.docx.clauseo-0.orig.tmp") && message.contains("gone.tmp"));
 }

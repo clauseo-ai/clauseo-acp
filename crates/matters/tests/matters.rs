@@ -72,6 +72,10 @@ mod compare;
 mod reopen;
 
 #[cfg(test)]
+#[path = "matters/backups.rs"]
+mod backups;
+
+#[cfg(test)]
 #[path = "matters/held_open_at.rs"]
 mod held_open_at;
 #[cfg(test)]

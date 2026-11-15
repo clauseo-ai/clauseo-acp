@@ -3,8 +3,9 @@
 //! when it fails. The call is passed in, so the steps after each failure are tested on every OS
 //! with the failure simulated.
 //!
-//! The call is given a backup name in the `.clauseo-` temp namespace (excluded from every
-//! checkpoint). By its documentation, after a failure:
+//! The call is given the backup name `<name>.clauseo-<n>.orig.tmp` ([`crate::backups`]: never
+//! versioned, never swept, and put back when the matter next opens if a crash left the target
+//! missing). By the call's documentation, after a failure:
 //! - 1175 `ERROR_UNABLE_TO_REMOVE_REPLACED`: nothing moved; the target is as it was.
 //! - 1176 `ERROR_UNABLE_TO_MOVE_REPLACEMENT`: with a backup name, both files keep their names.
 //! - 1177 `ERROR_UNABLE_TO_MOVE_REPLACEMENT_2`: the old file is under the backup name and the
@@ -13,8 +14,14 @@
 //! The steps go by what is on disk after the call, not by the code alone: a target still there
 //! gets the plain rename (whose error, such as a sharing violation, is the one returned); a target
 //! under the backup name is put back; a target gone with no backup gets the plain rename. When the
-//! target is not there at the end, the temp file (the new content) is never removed: the caller
-//! keeps it and reports that the folder changed.
+//! put-back that fails is followed by a rename of the temp file to the free name, so the new
+//! content is in place. When the target, there before the call, is not there at the end, the temp
+//! file (the new content) is never removed: the caller keeps it and reports that the folder
+//! changed, and the error names both files.
+//!
+//! A target missing before the call (a restore of a deleted file) gets the plain rename alone; so
+//! does a target with the read-only attribute, which stays refused as a rename refuses it (the
+//! attribute is kept, not overridden).
 //!
 //! A symlink or junction never reaches this: `writeback::writable` writes only a regular file or
 //! a missing one, and the stat check before the renames fails a target replaced by one since.
@@ -23,6 +30,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::{Lost, TEMP_TRIES, remove_file, rename};
+use crate::backups::backup_name;
 
 /// What [`next_step`] chose after the call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,8 +80,14 @@ pub(super) fn replace_keeping(
     target: &Path,
     replace: impl FnOnce(&Path, &Path, &Path) -> io::Result<()>,
 ) -> Result<Lost, Failed> {
-    let dir = target.parent().unwrap_or(target);
-    let backup = free_name(dir).map_err(Failed::Unchanged)?;
+    if !there(target) || read_only(target) {
+        // Nothing to keep, or a file a rename refuses: the plain rename, whose failure leaves the
+        // folder as it was.
+        return rename(temp, target)
+            .map(|()| Lost::default())
+            .map_err(Failed::Unchanged);
+    }
+    let backup = free_backup(target).map_err(Failed::Unchanged)?;
     let result = replace(target, temp, &backup);
     let code = result.as_ref().err().and_then(io::Error::raw_os_error);
     let target_there = there(target);
@@ -96,8 +110,47 @@ pub(super) fn replace_keeping(
             Ok(()) => Err(Failed::Unchanged(
                 result.err().unwrap_or_else(|| io::ErrorKind::Other.into()),
             )),
-            Err(err) => Err(Failed::TargetGone(err)),
+            Err(err) => after_failed_put_back(temp, target, &backup, &err, code),
         },
+    }
+}
+
+/// The old file is under `backup` and could not go back (`put_back` says why): the temp file
+/// goes to the target's free name, so the new content is in place, with the metadata lost; the
+/// backup stays for the next open ([`crate::backups`]). If that fails too, the error names the
+/// two files, by their names in the target's folder.
+pub(super) fn after_failed_put_back(
+    temp: &Path,
+    target: &Path,
+    backup: &Path,
+    put_back: &io::Error,
+    code: Option<i32>,
+) -> Result<Lost, Failed> {
+    match rename(temp, target) {
+        Ok(()) => Ok(Lost::one(code)),
+        Err(err) => {
+            let name = |path: &Path| path.file_name().unwrap_or_default().display().to_string();
+            let message = format!(
+                "the file is missing: the old content is in {} and the new in {} ({put_back}; {err})",
+                name(backup),
+                name(temp),
+            );
+            Err(Failed::TargetGone(io::Error::new(err.kind(), message)))
+        }
+    }
+}
+
+/// Windows: whether `path` has the read-only attribute. Elsewhere never (the mode is no
+/// attribute a rename refuses).
+fn read_only(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.permissions().readonly())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        false
     }
 }
 
@@ -106,10 +159,11 @@ fn there(path: &Path) -> bool {
     !matches!(std::fs::symlink_metadata(path), Err(err) if err.kind() == io::ErrorKind::NotFound)
 }
 
-/// The first `.clauseo-<n>.tmp` name in `dir` with nothing at it, for the backup.
-fn free_name(dir: &Path) -> io::Result<PathBuf> {
+/// The first backup name of `target` (`<name>.clauseo-<n>.orig.tmp`) with nothing at it.
+fn free_backup(target: &Path) -> io::Result<PathBuf> {
+    let name = target.file_name().unwrap_or_default();
     for n in 0..TEMP_TRIES {
-        let path = dir.join(format!(".clauseo-{n}.tmp"));
+        let path = target.with_file_name(backup_name(name, n));
         match std::fs::symlink_metadata(&path) {
             Ok(_) => {}
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(path),

@@ -240,3 +240,27 @@ fn a_read_only_original_keeps_its_finder_tag_on_macos() {
     );
     assert_eq!(mode(&target), 0o444);
 }
+
+/// Windows: a target with the read-only attribute stays refused, as a rename refuses it; the old
+/// file is untouched and the temp file goes.
+#[cfg(windows)]
+#[test]
+fn a_read_only_target_stays_refused_on_windows() {
+    let dir = TestDir::new("keep-windows-ro");
+    let target = old_file(&dir, "Lease.docx");
+    let writable = std::fs::metadata(&target).unwrap().permissions();
+    let mut permissions = writable.clone();
+    permissions.set_readonly(true);
+    super::set_permissions(&target, permissions).unwrap();
+    let staged = super::stage(&target, &mut |file: &mut File| {
+        file.write_all(b"new")
+            .map_err(|err| crate::Error::io("write", "x", err))
+    })
+    .unwrap();
+    let failed = staged.rename().unwrap_err();
+    assert!(!failed.changed);
+    assert_eq!(std::fs::read(&target).unwrap(), b"old");
+    let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+    assert_eq!(left.len(), 1);
+    super::set_permissions(&target, writable).unwrap();
+}

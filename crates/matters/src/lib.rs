@@ -128,6 +128,7 @@
     clippy::wildcard_enum_match_arm
 )]
 
+mod backups;
 mod checkpoint;
 mod compare;
 mod diff;
