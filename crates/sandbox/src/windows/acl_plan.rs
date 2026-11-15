@@ -587,7 +587,7 @@ pub(super) fn in_folder(path: &Path, folder: &Path) -> bool {
 }
 
 mod verbatim;
-pub(crate) use verbatim::verbatim;
+pub(crate) use verbatim::{compared, local_share_as_drive, verbatim};
 
 pub(super) mod targets;
 
