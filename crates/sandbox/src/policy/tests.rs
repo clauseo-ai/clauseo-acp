@@ -456,3 +456,24 @@ fn classify_orders_link_hidden_read_only_outside() {
         PathClass::Outside
     );
 }
+
+/// A path of 260 characters or more, which `dunce` leaves in Windows' verbatim form, is under
+/// and the same as its plain form, either way round; a share's verbatim form is not under a
+/// drive path, nor a plain path under another.
+#[test]
+fn a_long_verbatim_path_is_under_its_plain_form() {
+    let mut matter = String::from(r"C:\Users\a\Documents\Matters\");
+    while matter.len() < 280 {
+        matter.push_str(r"A long folder name\");
+    }
+    let matter = matter.trim_end_matches('\\').to_owned();
+    let verbatim = format!(r"\\?\{matter}");
+    let (long, plain) = (Path::new(&verbatim), Path::new(&matter));
+    assert!(under(long, plain));
+    assert!(under(plain, long));
+    assert!(same(long, plain));
+    assert!(same(plain, long));
+    let share = format!(r"\\?\UNC\server\c$\{}", matter.get(3..).unwrap_or_default());
+    assert!(!under(Path::new(&share), plain));
+    assert!(!under(Path::new(r"D:\x"), Path::new(r"C:\x")));
+}

@@ -587,7 +587,7 @@ pub(super) fn in_folder(path: &Path, folder: &Path) -> bool {
 }
 
 mod verbatim;
-pub(in crate::windows) use verbatim::verbatim;
+pub(crate) use verbatim::verbatim;
 
 pub(super) mod targets;
 

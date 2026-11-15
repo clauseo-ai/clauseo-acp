@@ -338,7 +338,8 @@ fn inside(folder: &Path, path: &MatterPath) -> Inside {
     let (Ok(real), Ok(root)) = (dunce::canonicalize(&abs), dunce::canonicalize(folder)) else {
         return Inside::Missing;
     };
-    if !real.starts_with(&root) {
+    // Compared plain (`dunce` keeps `\\?\` past 260 characters); `real` opened as it is.
+    if !crate::file_link::within(&real, &root) {
         return Inside::Missing;
     }
     match std::fs::metadata(&real) {

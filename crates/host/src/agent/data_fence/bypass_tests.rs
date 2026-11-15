@@ -196,3 +196,25 @@ fn a_local_share_path_is_put_in_its_drive_form() {
     assert_eq!(rule_path(r"\\localhost\c$\Users\a", true), "//c/Users/a");
     assert_eq!(rule_path(r"\\?\C:\Users\a", true), "//c/Users/a");
 }
+
+/// A long path the walk gives in its verbatim form (`dunce` keeps `\\?\` past 260 characters)
+/// keys as its plain form, so it is compared with the data folder's and the own folders' keys.
+#[test]
+fn a_long_verbatim_path_keys_as_its_plain_form() {
+    let mut plain = String::from(r"C:\Users\a\AppData\Roaming\Clauseo\agents\");
+    while plain.len() < 280 {
+        plain.push_str(r"A long folder name\");
+    }
+    let verbatim = format!(r"\\?\{plain}");
+    for insensitive in [false, true] {
+        assert_eq!(
+            super::key(std::path::Path::new(&verbatim), insensitive),
+            super::key(std::path::Path::new(&plain), insensitive)
+        );
+    }
+    let share = format!(r"\\?\UNC\server\c$\{}", plain.get(3..).unwrap_or_default());
+    assert_ne!(
+        super::key(std::path::Path::new(&share), true),
+        super::key(std::path::Path::new(&plain), true)
+    );
+}
