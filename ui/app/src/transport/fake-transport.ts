@@ -165,6 +165,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly calls: FakeCall[] = [];
   /** The start-up marks' send (start-marks.ts): none unless a test sets it. */
   pageMarks: SendMarks | undefined = undefined;
+  /** The View menu's words' send (room-layout.ts): none unless a test sets it. */
+  layoutMenu: ((sidebar: boolean, papers: boolean) => Promise<void>) | undefined = undefined;
   /** Problems the channel reader reported. */
   readonly problems: string[] = [];
   /** Bytes of every channel message delivered, as serialized text. */

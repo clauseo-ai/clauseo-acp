@@ -49,6 +49,7 @@ fn with_commands(builder: tauri_specta::Builder<tauri::Wry>) -> tauri_specta::Bu
             quit_app::<tauri::Wry>,
             open_privacy_settings::<tauri::Wry>,
             page_marks,
+            set_layout_menu::<tauri::Wry>,
         ])
         .constant(
             "KNOWN_DOMAIN_EVENT_KINDS",

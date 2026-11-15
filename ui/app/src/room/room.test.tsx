@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// The room's frame over FakeTransport: the title from list_matters, the rail slot Matters opens, the wall with and
+// The room's frame over FakeTransport: the title from list_matters, the rail slot the sidebar's toggle opens, the wall with and
 // without H8, and the two promises it keeps off its screens: no workspace line, and no "reads them before your first
 // question".
 import { act } from "react";

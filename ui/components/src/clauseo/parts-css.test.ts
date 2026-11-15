@@ -51,9 +51,40 @@ test("Linux takes Windows' chrome: the toolbar's rules for the caption buttons k
   expect(keyed.length).toBeGreaterThan(0);
   for (const k of keyed) expect(k).toMatch(/\[data-platform="mac"\]$/);
   const shell = readFileSync(new URL("shell.css", here), "utf8");
-  expect(shell).toMatch(
-    /\.room-top:not\(\[data-platform="mac"\]\) \.room-lead \{[^}]*display: none;/,
+  // at full width the lead holds the sidebar's toggle alone, as wide as it, never gone: the toggle brings the rail back
+  const lead =
+    /\.room-top:not\(\[data-platform="mac"\]\) \.room-lead \{([^}]*)\}/.exec(shell)?.[1] ?? "";
+  expect(lead).toContain("width: auto;");
+  expect(lead).not.toContain("display: none");
+});
+
+test("a hidden sidebar or papers widen the work's margins, never the reading column's measure", () => {
+  const shell = readFileSync(new URL("shell.css", here), "utf8");
+  const responsive = readFileSync(new URL("responsive.css", here), "utf8");
+  const versions = readFileSync(new URL("versions.css", here), "utf8");
+  // the window works the gutters out from its own columns, the measure fixed
+  const win = /\.room-window \{([^}]*)\}/.exec(shell)?.[1] ?? "";
+  expect(win).toMatch(/--work-w: calc\(\s*var\(--view-w\) - var\(--rail-col\) - var\(--pane-w\)/);
+  expect(win).toContain(
+    "--gutter: max(var(--thread-pad), calc((var(--work-w) - var(--measure)) / 2));",
   );
+  // Versions sets only its column, and the window's own --work-w follows it
+  expect(versions).not.toMatch(/\[data-panel\] \{[^}]*--work-w/);
+  // hidden papers: gone at every width, outside any variant; their column nothing from 1000 px
+  const away = responsive.slice(responsive.indexOf("the sidebar and the papers, each hidden"));
+  expect(away).toMatch(/^\.room-window\[data-wall="hidden"\] \.room-pane \{\s*display: none;/m);
+  const mid = away.slice(away.indexOf("@variant mid"));
+  expect(mid).toMatch(/\.room-window\[data-wall="hidden"\] \{\s*--pane-w: 0px;/);
+  // the hidden sidebar, from 1200 px only, and never over Versions' timeline
+  const wide = away.slice(away.indexOf("@variant wide"));
+  expect(wide).toMatch(
+    /\.room-window\[data-rail="hidden"\]:not\(\[data-panel\]\) \{\s*--rail-col: 0px;[^}]*grid-template-columns: 0 minmax\(0, 1fr\) var\(--pane-w\);/,
+  );
+  expect(wide).toMatch(
+    /\[data-rail="hidden"\]:not\(\[data-panel\]\) \.room-rail \{\s*display: none;/,
+  );
+  // no animation on either: a panel goes at once
+  expect(away.slice(0, away.indexOf("@variant room-wide"))).not.toMatch(/transition|animation/);
 });
 
 test("a facade of files known by their names keeps no room for a numeral or a chip: its rows are title and padding", () => {

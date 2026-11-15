@@ -263,4 +263,6 @@ export const ICON_NAMES = [
   },
   { component: "IconInfo", source: "info", meaning: "More about it: an info tip" },
   { component: "IconSettings", source: "settings", meaning: "Settings, at the rail's foot" },
+  { component: "IconSidebarLeft", source: "panelLeft", meaning: "Show or hide the sidebar" },
+  { component: "IconSidebarRight", source: "panelRight", meaning: "Show or hide the papers" },
 ] as const;

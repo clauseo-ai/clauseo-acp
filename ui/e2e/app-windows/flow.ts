@@ -6,17 +6,16 @@ import { expect } from "@playwright/test";
 import type { StopReason, Window } from "./selectors.ts";
 
 /**
- * Unfolds the rail if it is folded behind Matters (below 1200 px; opening a matter folds it
- * again), so New matter, the find field and the rows can be pressed. From 1200 px the rail is a
- * column of its own and Matters isn't drawn at all.
+ * Shows the rail if the sidebar's toggle says it isn't shown: folded below 1200 px (opening a
+ * matter folds it again), or hidden from 1200 px, where the window keeps the choice. Then New
+ * matter, the find field and the rows can be pressed.
  */
 export async function showRail(w: Window): Promise<void> {
-  // The room is hidden while it starts (shell.css), so first wait until New matter or Matters
-  // shows: a check before then read every width as folded and pressed a Matters that a wide
-  // window never draws. Only a shown one counts: Matters comes first in the page, and from
-  // 1200 px it is there but not drawn.
-  await expect(w.newMatter.or(w.railToggle).filter({ visible: true }).first()).toBeVisible();
-  if (!(await w.newMatter.isVisible())) {
+  // The room is hidden while it starts (shell.css), so first wait until the toggle shows. It is
+  // drawn at every width and says whether the rail is shown (aria-expanded), so the check never
+  // waits on the rail's own rows, which may still be loading, and never hides a shown rail.
+  await expect(w.railToggle).toBeVisible();
+  if ((await w.railToggle.getAttribute("aria-expanded")) !== "true") {
     await w.railToggle.click();
   }
   await expect(w.newMatter).toBeVisible();

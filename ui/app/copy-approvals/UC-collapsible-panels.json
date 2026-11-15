@@ -1,0 +1,46 @@
+{
+  "UC-252": {
+    "en": "Hide the sidebar",
+    "hi": "साइडबार छिपाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; collapsible panels)",
+    "note": "Room toolbar: the sidebar toggle's name and tooltip while the rail stands shown (its column from 1200 px, its panel open over the work below); flips to Show the sidebar"
+  },
+  "UC-253": {
+    "en": "Show the sidebar",
+    "hi": "साइडबार दिखाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; collapsible panels)",
+    "note": "Room toolbar: the sidebar toggle's name and tooltip while the rail is hidden, or folded below 1200 px; replaces the old Matters button"
+  },
+  "UC-254": {
+    "en": "Hide the papers",
+    "hi": "दस्तावेज़ छिपाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; collapsible panels)",
+    "note": "Room toolbar, right end: the papers toggle's name and tooltip while the wall stands shown; दस्तावेज़ as the thread's Papers says it"
+  },
+  "UC-255": {
+    "en": "Show the papers",
+    "hi": "दस्तावेज़ दिखाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; collapsible panels)",
+    "note": "Room toolbar, right end: the papers toggle's name and tooltip while the wall is hidden"
+  }
+}

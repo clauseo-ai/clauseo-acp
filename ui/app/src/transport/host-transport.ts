@@ -76,6 +76,9 @@ export interface HostTransport {
   openSettings?: ((section?: SettingsSection | null) => Promise<void>) | undefined;
   /** Sends the room's start-up marks to host.log, once, in the background (start-marks.ts); only the desktop's. */
   pageMarks?: SendMarks | undefined;
+  /** Tells the desktop whether the room's sidebar and papers stand shown, so the Mac's View menu says Hide or Show for
+   * each (`set_layout_menu`; room-layout.ts); only the desktop's, and a no-op off the Mac. */
+  layoutMenu?: ((sidebar: boolean, papers: boolean) => Promise<void>) | undefined;
   /**
    * Starts receiving a stream's patches, `after` a position (the tail after it, or one `Reset`). Ref-counted per
    * stream: the host is subscribed once however many subscribers there are, and released a microtask after the last

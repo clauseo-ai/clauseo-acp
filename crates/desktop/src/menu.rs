@@ -10,7 +10,8 @@
 //! - The app menu: About, Settings… on Cmd+, (the settings window, `settings_window.rs`),
 //!   Services, Hide, Hide Others, Show All, Quit. File: New conversation on Cmd+N, New matter on
 //!   Shift+Cmd+N, Close Window. Edit: Undo, Redo, Cut, Copy, Paste, Select All (the system's
-//!   own, so the webview's fields keep them), then Find on Cmd+K. View: Enter Full Screen.
+//!   own, so the webview's fields keep them), then Find on Cmd+K. View: the sidebar's toggle on
+//!   Ctrl+Cmd+S and the papers panel's on Option+Cmd+I, then Enter Full Screen.
 //!   Window: Minimize, Zoom, Close Window. Help, which macOS fills.
 //! - New conversation, New matter and Find are the main window's page's: the menu raises that
 //!   window and sends its page a `clauseo-menu` event whose detail names the command
@@ -18,6 +19,14 @@
 //!   The page runs the same code as its keys and buttons, and does nothing where it can't (no
 //!   matter open, a dialog holding the keys). No capability is granted for it: the script runs
 //!   from Rust.
+//! - The two toggles, Toggle sidebar and Toggle papers, also go to the main window's page as
+//!   `clauseo-menu` events, but only while that window has the focus (never while the settings
+//!   window or a native dialog has it), and they don't raise it. Their words say what a press
+//!   does: "Hide the sidebar" while it is shown, "Show the sidebar" while it is hidden, and the
+//!   same for the papers. The page is the one source of that state: it sends both flags with
+//!   `set_layout_menu` (`commands/page.rs`) on start and on each change; the last flags are
+//!   kept here ([`LayoutShown`], both shown until the page says, `LayoutShown::BOTH`), so a
+//!   bar built again in another language draws them too.
 //! - The words follow `ui.language` ([`words`]): the bar is built in English, then
 //!   [`follow_language`] builds it again in the settings' language once the host has started,
 //!   and on each `SettingsChanged` whose language differs from the bar's.
@@ -37,13 +46,23 @@ pub(crate) enum PageCommand {
     NewMatter,
     /// The focus in the rail's Find.
     Find,
+    /// Hides or shows the room's sidebar.
+    ToggleSidebar,
+    /// Hides or shows the room's papers panel.
+    TogglePapers,
 }
 
 #[cfg(any(test, target_os = "macos"))]
 impl PageCommand {
     /// Every command.
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 3] = [Self::NewConversation, Self::NewMatter, Self::Find];
+    pub(crate) const ALL: [Self; 5] = [
+        Self::NewConversation,
+        Self::NewMatter,
+        Self::Find,
+        Self::ToggleSidebar,
+        Self::TogglePapers,
+    ];
 
     /// Its menu item's id, which is also the name the page reads.
     pub(crate) const fn id(self) -> &'static str {
@@ -51,15 +70,119 @@ impl PageCommand {
             Self::NewConversation => "new_conversation",
             Self::NewMatter => "new_matter",
             Self::Find => "find",
+            Self::ToggleSidebar => "toggle_sidebar",
+            Self::TogglePapers => "toggle_papers",
         }
     }
 
     /// The command whose item has the id `id`, `None` for any other item.
     pub(crate) fn of_id(id: &str) -> Option<Self> {
-        [Self::NewConversation, Self::NewMatter, Self::Find]
-            .into_iter()
-            .find(|command| command.id() == id)
+        [
+            Self::NewConversation,
+            Self::NewMatter,
+            Self::Find,
+            Self::ToggleSidebar,
+            Self::TogglePapers,
+        ]
+        .into_iter()
+        .find(|command| command.id() == id)
     }
+
+    /// Whether the menu raises the main window before sending it: not for the panel toggles,
+    /// which only act on a window that already has the focus.
+    pub(crate) const fn raises(self) -> bool {
+        !matches!(self, Self::ToggleSidebar | Self::TogglePapers)
+    }
+}
+
+/// Which of the room's two panels are shown, as the page last said (`set_layout_menu`).
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LayoutShown {
+    /// The sidebar (the rail).
+    pub(crate) sidebar: bool,
+    /// The papers panel.
+    pub(crate) papers: bool,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl LayoutShown {
+    /// Both shown, as the room opens: the bar's flags until the page sends its own.
+    pub(crate) const BOTH: Self = Self {
+        sidebar: true,
+        papers: true,
+    };
+}
+
+/// A toggle's words in `language` with the panels `layout`: what a press does. `None` for the
+/// other commands.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn toggle_text(
+    language: clauseo_protocol::Language,
+    command: PageCommand,
+    layout: LayoutShown,
+) -> Option<&'static str> {
+    use words::Key;
+    let key = match command {
+        PageCommand::ToggleSidebar if layout.sidebar => Key::HideSidebar,
+        PageCommand::ToggleSidebar => Key::ShowSidebar,
+        PageCommand::TogglePapers if layout.papers => Key::HidePapers,
+        PageCommand::TogglePapers => Key::ShowPapers,
+        PageCommand::NewConversation | PageCommand::NewMatter | PageCommand::Find => return None,
+    };
+    Some(words::text(language, key))
+}
+
+/// The bar's language and the page's last flags: what [`bar`] draws and [`retitle`] sets.
+#[cfg(target_os = "macos")]
+static SHOWN: std::sync::Mutex<(clauseo_protocol::Language, LayoutShown)> =
+    std::sync::Mutex::new((clauseo_protocol::Language::En, LayoutShown::BOTH));
+
+/// What [`SHOWN`] holds now (a poisoned lock still holds the last value set).
+#[cfg(target_os = "macos")]
+fn shown() -> (clauseo_protocol::Language, LayoutShown) {
+    *SHOWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Keeps the page's flags and sets the live toggles' words to them (`set_layout_menu`).
+#[cfg(target_os = "macos")]
+pub(crate) fn set_layout<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    layout: LayoutShown,
+) -> tauri::Result<()> {
+    SHOWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .1 = layout;
+    retitle(app)
+}
+
+/// Sets the words of the bar's two toggles to [`SHOWN`]'s; nothing without a bar.
+#[cfg(target_os = "macos")]
+fn retitle<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
+    let Some(bar) = app.menu() else {
+        return Ok(());
+    };
+    let (language, layout) = shown();
+    for kind in bar.items()? {
+        let Some(submenu) = kind.as_submenu() else {
+            continue;
+        };
+        for command in [PageCommand::ToggleSidebar, PageCommand::TogglePapers] {
+            let (Some(found), Some(text)) = (
+                submenu.get(command.id()),
+                toggle_text(language, command, layout),
+            ) else {
+                continue;
+            };
+            if let Some(item) = found.as_menuitem() {
+                item.set_text(text)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The page's event, `MENU_EVENT` in `room-commands.ts`.
@@ -99,6 +222,11 @@ pub(crate) fn bar<R: tauri::Runtime>(
         WINDOW_SUBMENU_ID,
     };
     use words::Key;
+    let layout = shown().1;
+    let toggle = |command: PageCommand, accelerator| {
+        let text = toggle_text(language, command, layout).unwrap_or_default();
+        MenuItem::with_id(app, command.id(), text, true, Some(accelerator))
+    };
     let w = |key| Some(words::text(language, key));
     let item = |id: &str, key, accelerator| {
         MenuItem::with_id(app, id, words::text(language, key), true, Some(accelerator))
@@ -169,7 +297,12 @@ pub(crate) fn bar<R: tauri::Runtime>(
         app,
         words::text(language, Key::View),
         true,
-        &[&P::fullscreen(app, w(Key::FullScreen))?],
+        &[
+            &toggle(PageCommand::ToggleSidebar, "Ctrl+Cmd+S")?,
+            &toggle(PageCommand::TogglePapers, "Alt+Cmd+I")?,
+            &P::separator(app)?,
+            &P::fullscreen(app, w(Key::FullScreen))?,
+        ],
     )?;
     let window = Submenu::with_id_and_items(
         app,
@@ -205,7 +338,8 @@ pub(crate) fn on_menu_event<R: tauri::Runtime>(app: &tauri::AppHandle<R>, id: &s
     }
 }
 
-/// Raises the main window and sends its page `command` ([`script`]); nothing without one.
+/// Raises the main window and sends its page `command` ([`script`]); nothing without one. A
+/// command that doesn't raise it ([`PageCommand::raises`]) goes only to a focused window.
 #[cfg(any(test, target_os = "macos"))]
 pub(crate) fn send<R: tauri::Runtime, M: tauri::Manager<R>>(
     manager: &M,
@@ -214,6 +348,13 @@ pub(crate) fn send<R: tauri::Runtime, M: tauri::Manager<R>>(
     let Some(main) = manager.get_webview_window(crate::MAIN_WINDOW) else {
         return Ok(());
     };
+    if !command.raises() {
+        return if main.is_focused()? {
+            main.eval(script(command))
+        } else {
+            Ok(())
+        };
+    }
     main.unminimize()?;
     main.show()?;
     main.set_focus()?;
@@ -261,7 +402,19 @@ fn show<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     language: clauseo_protocol::Language,
 ) -> bool {
-    bar(app, language).and_then(|bar| app.set_menu(bar)).is_ok()
+    if bar(app, language)
+        .and_then(|bar| app.set_menu(bar))
+        .is_err()
+    {
+        return false;
+    }
+    SHOWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .0 = language;
+    // Flags the page sent while the bar was building land on the new one.
+    let _retitled = retitle(app);
+    true
 }
 
 /// Renames the main window's system-menu Quit in `language`, on the main thread (the window's);

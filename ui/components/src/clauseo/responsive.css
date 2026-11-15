@@ -1,5 +1,5 @@
-/* The room at other widths. A mid window folds the rail behind Matters; under 1000 px the room is one column, the
-   composer docked to the bottom, and Matters opens the list over it. These rules stand outside
+/* The room at other widths. A mid window folds the rail behind the sidebar's toggle; under 1000 px the room is one
+   column, the composer docked to the bottom, and the toggle opens the list over it. These rules stand outside
    the cascade layers on purpose: at these widths they override the primitives' own classes, such as the search
    field's width and the Ask button's sides. */
 /* ---------- the frame contract: where the window draws its own frame (data-frame="own" on <html>, set by the room's
@@ -30,6 +30,8 @@
 @variant rail-folded {
   :root {
     --rail-col: 0px;
+    /* the work stands 12 px in from the window's left (.room-centre below), which its width counts */
+    --rail-reach: var(--s3);
     --pane-w: var(--pane-w-mid);
     --thread-pad: var(--thread-pad-mid);
   }
@@ -59,12 +61,12 @@
   .room-rail[data-open] {
     display: flex;
   }
-  /* out of the grid's rail area, so its top counts from the window's and it opens just under Matters, not a toolbar
-     lower */
+  /* out of the grid's rail area, so its top counts from the window's and it opens just under the sidebar's toggle, not
+     a toolbar lower */
   .room-rail {
     grid-area: auto;
   }
-  /* an empty rail (until U2 fills it) keeps its place and its id for Matters' aria-controls, but draws no panel */
+  /* an empty rail (until U2 fills it) keeps its place and its id for the toggle's aria-controls, but draws no panel */
   .room-rail:empty {
     background: transparent;
     box-shadow: none;
@@ -84,8 +86,8 @@
   .room-centre {
     margin-left: var(--s3);
   }
-  /* Windows and Linux have no corner lights, so the lead holds Matters alone and is only as wide as it: the plan keeps clear of
-       Undo with the caption buttons at the right */
+  /* Windows and Linux have no corner lights, so the lead holds the toggle alone and is only as wide as it: the plan
+       keeps clear of Undo with the caption buttons at the right */
   .room-top:not([data-platform="mac"]) .room-lead {
     width: auto;
     padding-right: var(--s3);
@@ -118,6 +120,45 @@
   }
 }
 
+/* ---------- the sidebar and the papers, each hidden on its toggle (room-layout.ts): data-rail and data-wall on the
+   window. The reading column keeps its measure, centred in the work, which takes the hidden panel's width as margin
+   (shell.css's --gutter). ---------- */
+/* hidden papers are gone at every width, in their column or stacked under the conversation */
+.room-window[data-wall="hidden"] .room-pane {
+  display: none;
+}
+/* from 1000 px their column goes to nothing, and the work stands 12 px in from the window's right, as from its left
+   on a mid window */
+@variant mid {
+  .room-window[data-wall="hidden"] {
+    --pane-w: 0px;
+    --wall-reach: calc(-1 * var(--s3));
+  }
+  .room-window[data-wall="hidden"] .room-centre {
+    margin-right: var(--s3);
+  }
+}
+/* the hidden sidebar, from 1200 px, where the rail has a column: the column goes to nothing and the work stands 12 px
+   in from the window's left, as on a mid window. Below 1200 px the rail is folded already and the toggle opens its panel,
+   so the attribute does nothing there. Versions' timeline, in the rail's place, keeps its column while open */
+@variant wide {
+  .room-window[data-rail="hidden"]:not([data-panel]) {
+    --rail-col: 0px;
+    --rail-reach: var(--s3);
+    grid-template-columns: 0 minmax(0, 1fr) var(--pane-w);
+  }
+  .room-window[data-rail="hidden"]:not([data-panel]) .room-rail {
+    display: none;
+  }
+  .room-window[data-rail="hidden"]:not([data-panel]) .room-centre {
+    margin-left: var(--s3);
+  }
+  /* the title keeps over the reading column, past the lead, which keeps its width for the lights and the lockup */
+  .room-window[data-rail="hidden"]:not([data-panel]) .room-top[data-platform="mac"] .room-matter {
+    padding-left: max(var(--s2), calc(var(--gutter) + var(--s3) - var(--rail-w)));
+  }
+}
+
 /* a wide window, from 1600 px, full screen among them (D-074): the wall takes more of the width, with as many columns of
    tiles as it holds, and the reading column keeps its measure, centred in the work that's left (shell.css's --gutter) */
 @variant room-wide {
@@ -137,6 +178,13 @@
     display: flex;
     flex-direction: column;
     overflow: visible;
+  }
+  /* the papers hidden (room-layout.ts), the page ends at the composer: the window keeps the view's height, so the
+     thread (flex: 1) runs down to the composer at the window's foot rather than leave it halfway up a short page.
+     :root for the weight of the frame contract's min-height: 0 above */
+  :root .room-window[data-wall="hidden"] {
+    min-height: var(--view-h);
+    min-height: var(--view-dh);
   }
   /* on a phone the page runs under the status bar and the home indicator: the header and the composer keep clear of
        both, and of the notch's sides when it lies on its side */
@@ -181,6 +229,10 @@
     display: inline-flex;
     order: 3;
   }
+  /* the papers' toggle follows the sidebar's on the first row, before the caption buttons */
+  .room-wall-toggle {
+    order: 3;
+  }
   .room-matter {
     order: 6;
     flex: 1 1 100%;
@@ -197,8 +249,8 @@
     align-items: center;
     column-gap: var(--s3);
   }
-  /* Matters opens the list as a panel over the work, as the folded rail does from 1000 px: nothing under it moves and
-     the page grows by nothing (D-061; at 960 px the list once ran inline and pushed the work below the fold). It stands
+  /* The sidebar's toggle opens the list as a panel over the work, as the folded rail does from 1000 px: nothing under
+     it moves and the page grows by nothing (D-061; at 960 px the list once ran inline and pushed the work below the fold). It stands
      fixed under the toolbar, which keeps the window's top where the window draws its own frame, and its list scrolls
      inside it. Escape in it folds it, as in the folded rail */
   .room-rail {
@@ -219,7 +271,7 @@
   .room-rail[data-open] {
     display: flex;
   }
-  /* an empty rail keeps its place and its id for Matters' aria-controls, but draws no panel */
+  /* an empty rail keeps its place and its id for the toggle's aria-controls, but draws no panel */
   .room-rail:empty {
     background: transparent;
     box-shadow: none;
@@ -452,8 +504,8 @@
   :root[data-frame="own"] .room-window :is(a[href], button, textarea, [tabindex]) {
     scroll-margin-top: calc(var(--top-h, var(--toolbar)) + var(--pin-space));
   }
-  /* the caption buttons end the first row at the window's right: where no search field pushes the tools right, Matters
-     does, as it does at a phone's width */
+  /* the caption buttons end the first row at the window's right: where no search field pushes the tools right, the
+     sidebar's toggle does, as it does at a phone's width */
   :root[data-frame="own"] .room-top:not(:has(.room-search)) .room-rail-toggle {
     margin-left: auto;
   }

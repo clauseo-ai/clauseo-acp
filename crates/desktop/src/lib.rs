@@ -287,6 +287,7 @@ pub fn run() -> tauri::Result<()> {
             commands::quit_app,
             commands::open_privacy_settings,
             commands::page_marks,
+            commands::set_layout_menu,
             #[cfg(feature = "e2e")]
             e2e::perf_channel_bytes,
             #[cfg(feature = "marks")]

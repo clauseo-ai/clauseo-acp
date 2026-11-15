@@ -509,6 +509,11 @@ export class TauriTransport
   async pageMarks(read: () => PageMarks): Promise<void> {
     await this.#inBackground(() => call(commands.pageMarks(read())));
   }
+  /** Tells the desktop the room's sidebar and papers shown or hidden, for the Mac's View menu (`set_layout_menu`), on
+   * the background lane. */
+  async layoutMenu(sidebar: boolean, papers: boolean): Promise<void> {
+    await this.#inBackground(() => call(commands.setLayoutMenu(sidebar, papers)));
+  }
   /** Counts one event only the webview sees (S21's `count_ui`). */
   async countUi(event: UiCount): Promise<void> {
     await this.#inBackground(() => call(commands.countUi(event)));

@@ -28,7 +28,7 @@ test("Versions stands in the rail's place while open, and closing it brings the 
   expect(h.host.querySelector("nav.room-rail")).not.toBeNull();
 });
 
-test("Matters, while Versions stands in the rail's place, closes Versions and brings the rail back", async () => {
+test("the sidebar's toggle, while Versions stands in the rail's place on a mid window, closes Versions and brings the rail back", async () => {
   h = await mountVersions([version(1, "import")]);
   await h.openVersions();
   expect(h.one("versions")).not.toBeNull();

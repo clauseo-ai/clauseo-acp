@@ -12,4 +12,10 @@ export const HI = {
   // UC-04: ChatGPT's, which reads any file the lawyer can open and asks only before changing files outside the matter
   "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.":
     "Clauseo हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले की फ़ाइलें बिना पूछे बदलता है। इसके बाहर की फ़ाइलें बदलने से पहले यह पूछता है।",
+  // UC-252 to UC-255, provisional: the toolbar's two panel toggles, named and tipped by what a press does, so each
+  // flips with its panel. The papers are the wall's दस्तावेज़, as the thread's "Papers" says them
+  "Hide the sidebar": "साइडबार छिपाएँ",
+  "Show the sidebar": "साइडबार दिखाएँ",
+  "Hide the papers": "दस्तावेज़ छिपाएँ",
+  "Show the papers": "दस्तावेज़ दिखाएँ",
 } as const;

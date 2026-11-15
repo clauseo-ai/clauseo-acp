@@ -18,7 +18,16 @@
 }
 
 @layer components {
+  /* the work's width and the reading column's sides, worked out again on the window, where a hidden panel (data-rail,
+     data-wall: responsive.css) or Versions' timeline (versions.css) sets the columns: the measure never grows, the
+     gutters take what a hidden panel gives. --rail-reach is how far the work stands in from a hidden rail's edge;
+     --wall-reach how far it reaches over the wall, or, negative, stands in from a hidden wall's edge */
   .room-window {
+    --work-w: calc(
+      var(--view-w) - var(--rail-col) - var(--pane-w) + var(--wall-reach, var(--overlap)) -
+        var(--rail-reach, 0px)
+    );
+    --gutter: max(var(--thread-pad), calc((var(--work-w) - var(--measure)) / 2));
     width: 100%;
     height: var(--view-h);
     height: var(--view-dh);
@@ -163,14 +172,15 @@
   .room-tools > .room-plan {
     min-width: var(--size-plan);
   }
-  /* Windows and Linux have no corner lights: at full width the lead gives up its place, and the title stands at the
-     window's edge padding, as a Windows title bar's does */
+  /* Windows and Linux have no corner lights: at full width the lead holds the sidebar's toggle alone and is only as wide
+     as it, at the window's edge padding, as a Windows title bar's first control stands, and the title follows it */
   @variant wide {
     .room-top:not([data-platform="mac"]) .room-lead {
-      display: none;
+      width: auto;
+      padding-right: var(--s3);
     }
     .room-top:not([data-platform="mac"]) .room-matter {
-      padding-left: var(--s5);
+      padding-left: 0;
     }
   }
 
@@ -415,10 +425,4 @@
     margin-left: var(--s1-5);
     color: var(--primary);
   }
-}
-
-/* Matters folds the rail away only on a mid or narrow window (responsive.css); on the full room it isn't there.
-   Outside the layers, so it overrides the button's own display. */
-.room-rail-toggle {
-  display: none;
 }
