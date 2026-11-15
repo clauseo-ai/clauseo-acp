@@ -89,7 +89,7 @@ pub(super) enum Relaunch {
 
 impl Relaunch {
     /// For the log.
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::ToolsChanged => "tools_changed",
         }
@@ -208,6 +208,11 @@ fn stoppable(actor: &Actor, thread: ThreadId) -> Option<bool> {
     let agent = actor.threads.get(&thread)?.turn.agent.as_deref()?;
     let up = !matches!(agent.stage, Stage::Stopping | Stage::Closed) && !agent.link.closed();
     Some(up && pending_in(actor, thread).is_none())
+}
+
+/// How many config, mode and relay calls of `agent` are in flight.
+pub(super) fn calls(agent: &agents::Agent) -> u32 {
+    agent.idle.calls
 }
 
 /// `thread`'s agent was launched: it is live.

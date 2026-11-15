@@ -337,6 +337,49 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
         return false;
     }
     tracing::info!(%thread, "the matter moved; its agent starts again in the new folder");
+    restart_for(actor, thread, turn);
+    true
+}
+
+/// Step 4 for a prompted turn (typed, or taken from the queue) whose agent is marked to relaunch
+/// (`idle::Relaunch`, a Tools change): with nothing else on that agent (no question or call
+/// open, no output held for a turn of its own) it stops and a new one starts for the turn, as
+/// [`restart_if_moved`] does, so the prompt goes with the new inputs. An agent-started turn
+/// (a background command's result) is never cut: it is the current turn then, not this one.
+/// `false` when nothing was restarted.
+pub(super) fn restart_if_marked(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
+    let Some(state) = state(actor, thread) else {
+        return false;
+    };
+    let prompted = state
+        .current
+        .as_ref()
+        .is_some_and(|current| current.turn == turn && current.own.is_none());
+    let held = super::own_turn::output_waits(&state.own_held);
+    let Some(agent) = state.agent.as_deref() else {
+        return false;
+    };
+    let open = !(agent.permissions.is_empty()
+        && agent.elicitations.is_empty()
+        && agent.url_elicitations.is_empty());
+    let up = agent.stage == Stage::Attached && !agent.link.closed();
+    let Some(why) = agent.idle.relaunch else {
+        return false;
+    };
+    if !prompted || held || open || !up || super::idle::calls(agent) > 0 {
+        return false;
+    }
+    tracing::info!(target: LIFECYCLE, %thread, why = why.as_str(), "agent relaunched for a prompt");
+    restart_for(actor, thread, turn);
+    true
+}
+
+/// Stops `thread`'s agent and starts a new one for `turn`, which goes back to step 2 and keeps
+/// the writer (`Restarting`).
+fn restart_for(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return;
+    };
     agent.link.stop();
     agent.stage = Stage::Stopping;
     agent.stop_cause = StopCause::Restarting;
@@ -346,7 +389,6 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
     if let Some(current) = current(actor, thread) {
         current.phase = TurnPhase::Launching;
     }
-    true
 }
 
 /// Runs an agent call as a task that posts its result.

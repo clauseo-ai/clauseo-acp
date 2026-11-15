@@ -14,6 +14,10 @@
 //!   pending, so a turn, a queued prompt or steer, a sign-in hold, a permission or elicitation,
 //!   a launch or a call keeps it until it ends. Quick edits make one stop: a stopping agent is
 //!   not stoppable, and the agent relaunched takes the newest key.
+//! - A prompt does not wait for the grace: a prompted turn (typed, or taken from the queue) for a
+//!   marked agent with nothing else open restarts it at step 4 (`agents::restart_if_marked`),
+//!   so the prompt goes with the new servers. A removed server or a changed key thus stays only
+//!   for the turn running at the edit and any agent-started turn after it.
 
 use clauseo_protocol::ThreadId;
 

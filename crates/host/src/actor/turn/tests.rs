@@ -34,4 +34,5 @@ mod rig;
 mod sweep;
 mod title_window;
 mod tools_live;
+mod tools_prompt;
 mod undo;

@@ -289,7 +289,9 @@ pub(super) fn end_unstarted(
 
 /// Step 4: the before-turn checkpoint on the matter's thread.
 pub(super) fn before_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    if agents::restart_if_moved(actor, thread, turn) {
+    if agents::restart_if_moved(actor, thread, turn)
+        || agents::restart_if_marked(actor, thread, turn)
+    {
         return;
     }
     if let Some(current) = current(actor, thread) {
