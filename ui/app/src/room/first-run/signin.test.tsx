@@ -4,7 +4,7 @@
 // before "Use it"; a Reused sign-in with no step and the through line; each `found` value's plan-found screen; the
 // device-code card and its refusal; no key field when keys_available is false; ChatGPT and back.
 // @vitest-environment happy-dom
-import { expect, test } from "vitest";
+import { beforeAll, expect, test } from "vitest";
 import { setupStoreOf, type SetupSource } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { FoundLogin, InstallProgress, SignIn } from "../../transport/protocol.ts";
@@ -30,6 +30,20 @@ import {
   typeInto,
 } from "./rig.tsx";
 
+// The first mount loads the room's lazy chunks (the first-run's read offer, the new-matter and locate-warning parts,
+// the thread list, the protection note, the expired-sign-in card), which takes seconds on a busy machine. They load
+// here, under the hook's own 30 s, so the first test's 5 s limit is not spent on them.
+beforeAll(async () => {
+  await Promise.all([
+    import("../first-read/first-read-offer.tsx"),
+    import("../new-matter.tsx"),
+    import("../locate-warning.tsx"),
+    import("../thread/list.tsx"),
+    import("../protection/note-load.ts").then((m) => m.loadProtectionNote()),
+    import("../signin-expired/expired-card.tsx"),
+  ]);
+}, 30_000);
+
 const OFFLINE: InstallProgress = { waiting: { code: "agent.install_offline", hosts: [], log: [] } };
 
 /** The room with matter A open, Claude installed, and this sign-in state. */
@@ -40,6 +54,12 @@ const gateState = () => byId("signin-state")?.dataset["state"];
 /** The gate's Sign in button: the act's, where Ask will stand. */
 const signButton = () => byId<HTMLButtonElement>("signin")?.querySelector("button") ?? null;
 const field = () => byId<HTMLTextAreaElement>("composer");
+
+// A mount that outlives its test (a 1 ms limit, so it always does): the next tests still get a room, because rig's
+// afterEach lets the mount finish before it unmounts (no act() overlaps the next test's).
+test.fails("a mount that times out leaves the next test its room", async () => {
+  await mountFirstRun({ first: [info(true), install(CLAUDE, READY)] });
+}, 1);
 
 test("plan: the composer offers Claude and ChatGPT, and Sign in with Claude sends StartSignIn; never a model's name", async () => {
   const t = await at({ signed_out: {} });

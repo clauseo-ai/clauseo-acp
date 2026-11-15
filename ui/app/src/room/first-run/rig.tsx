@@ -37,8 +37,24 @@ export const AT = Date.UTC(2026, 10, 5, 11, 2);
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
+/** The mount on its way, if one is. A test that times out mid-mount leaves it open: its act() scope stays open, and
+ * the next test's act() calls overlap it, so their renders never commit (an empty room for the rest of the file). */
+let mounting: Promise<unknown> | null = null;
+/** How long afterEach waits for such a mount before unmounting anyway: under the 10 s hook timeout, so a hung mount
+ * cannot hang the hook. */
+const MOUNT_WAIT_MS = 8_000;
+const noop = () => {};
 
 afterEach(async () => {
+  if (mounting !== null) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, MOUNT_WAIT_MS);
+    });
+    await Promise.race([mounting.then(noop, noop), bound]);
+    clearTimeout(timer);
+    mounting = null;
+  }
   await act(async () => root?.unmount());
   host?.remove();
   root = null;
@@ -119,6 +135,16 @@ export type RigOptions = {
 
 /** The room over a fake host with the setup wire. */
 export async function mountFirstRun(o: RigOptions = {}) {
+  const mount = mountRoom(o);
+  mounting = mount;
+  try {
+    return await mount;
+  } finally {
+    if (mounting === mount) mounting = null;
+  }
+}
+
+async function mountRoom(o: RigOptions) {
   let matters = o.matters ?? [A];
   const fake: FakeHost = {
     platform: o.platform ?? "mac",
