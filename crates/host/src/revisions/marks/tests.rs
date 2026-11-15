@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::io::{Cursor, Write as _};
 
 use super::{CHANGE_MARKS, COMMENT_MARKS, MAX_XML_BYTES, check, holds_any, zip_has_marks};
@@ -66,9 +67,11 @@ fn rels(targets: &[(&str, &str)]) -> String {
     for (n, (kind, target)) in targets.iter().enumerate() {
         let kind =
             format!("http://schemas.openxmlformats.org/officeDocument/2006/relationships/{kind}");
-        xml.push_str(&format!(
+        write!(
+            xml,
             r#"<Relationship Id="rId{n}" Type="{kind}" Target="{target}"/>"#
-        ));
+        )
+        .unwrap();
     }
     xml.push_str("</Relationships>");
     xml
