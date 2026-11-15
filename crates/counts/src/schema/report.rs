@@ -141,6 +141,9 @@ pub enum Invalid {
     Cells,
     /// A report with no cell.
     Empty,
+    /// A crash report whose kind and fields do not match: a panic with a code, a signal with
+    /// none, a renderer gone outside the webview, or a kind this schema does not send.
+    Detail,
 }
 
 impl DayReport {
