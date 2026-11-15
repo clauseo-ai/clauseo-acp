@@ -53,6 +53,30 @@ fn download_notices(rig: &mut Rig, thread: ThreadId) -> Vec<String> {
         .collect()
 }
 
+/// The launch makes the fallback folder before the fences list the matter's state, so both deny
+/// it from the first session on (a folder the guard made mid-session would be in neither).
+#[test]
+fn the_launch_makes_the_fallback_folder_and_the_fences_deny_it() {
+    let mut rig = Rig::start("turn-fallback-folder-fenced", EXIT_AFTER_ANSWER);
+    let thread = rig.thread();
+    let data = rig.actor.effective.data_dir().to_owned();
+    let folder = crate::agent::loads::browser::matter_fallback_downloads(&data, rig.matter());
+    assert!(!folder.exists());
+    let _turn = send_prompt(&mut rig, 10, thread);
+    rig.run_until("the launch", |actor| {
+        actor.threads[&thread].turn.run.is_some()
+    });
+    assert!(crate::write::is_real_dir(&folder));
+    let run = rig.actor.threads[&thread].turn.run.as_ref().unwrap();
+    let codex = run.codex_listed.agent_state.clone().unwrap_or_default();
+    assert!(codex.contains(&folder), "{codex:?}");
+    let pattern = format!("agent-state/{}/downloads/**", rig.matter());
+    let claude = &run.data_deny.targets;
+    assert!(claude.contains(&pattern), "{claude:?}");
+    until_settled(&mut rig, thread);
+    rig.finish();
+}
+
 #[test]
 fn a_download_the_dead_guard_queued_is_shown_when_the_session_ends() {
     let mut rig = Rig::start("turn-fallback-queue-end", EXIT_AFTER_ANSWER);

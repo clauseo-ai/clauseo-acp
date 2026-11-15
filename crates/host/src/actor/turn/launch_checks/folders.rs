@@ -38,6 +38,7 @@ pub(super) fn make(run: &RunFolders, data: &Path, sweep: &RunSweep) -> Result<()
             ),
         ));
     }
+    make_fallback_folder(data, &run.notes);
     Ok(())
 }
 
@@ -131,6 +132,20 @@ pub(super) fn browser_run_dir(data: &Path) -> PathBuf {
 /// `<data>/agent-state/<matter>/notes`.
 pub(super) fn notes_dir(data: &Path, matter: MatterId) -> PathBuf {
     crate::agent::matter_state_dir(data, matter).join("notes")
+}
+
+/// Makes the browser's fallback downloads folder beside `notes`
+/// (`agent::loads::browser::fallback_downloads`) at the launch, before the fences list the
+/// matter's state, so they always deny it; one the guard made mid-session would be in neither
+/// until the next launch. A failure is logged, and the launch goes on.
+fn make_fallback_folder(data: &Path, notes: &Path) {
+    let fallback = crate::agent::loads::browser::fallback_downloads(notes);
+    if let Err(error) = crate::write::create_private_dirs_under(data, &fallback) {
+        tracing::warn!(
+            error = %crate::log_file::Cause(&error),
+            "the browser's fallback downloads folder was not made"
+        );
+    }
 }
 
 /// Removes `folder` and all it holds, through no link; a failure is a warning.
