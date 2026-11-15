@@ -103,12 +103,15 @@ pub(crate) struct LaunchDeny {
 
 impl LaunchDeny {
     /// Whether the matter folder, spelled each of `matter` ways, holds a folder Clauseo denies
-    /// reading: a spelling of `<data>` (and so every target under it), the fence path of
-    /// another matter this conversation is not invited into (`MatterFence::denied_reads`), or
-    /// a matter inside it the launch could not list down to (`MatterFence::own_unlisted`). A
-    /// place equal to the matter counts. Names compare as the matter fence compares them
-    /// (`matter_fence::key`: folded where the file system folds, the drive too, `\\?\` forms
-    /// as plain ones). Paths only, after the launch prep resolved the fence.
+    /// reading: a spelling of `<data>` (and so every target under it), the folder (each
+    /// spelling) of any other matter this conversation is not invited into
+    /// (`MatterFence::fenced_folders`, so one the fence dropped, past its path budget or under a
+    /// folder it could not list, counts too), or a matter inside it the launch could not list
+    /// down to (`MatterFence::own_unlisted`). A place equal to the matter counts. Names compare
+    /// as the matter fence compares them (`matter_fence::key`: folded where the file system
+    /// folds, the drive too, `\\?\` forms as plain ones). Paths only, after the launch prep
+    /// resolved the fence. An empty `matter` answers false: the caller passes the matter
+    /// folder's real spellings (as stored, and where it leads).
     ///
     /// The one shared answer to "does this matter contain a denied folder?": Claude's allow
     /// rules for the matter (stage D, #1065) are left out when it is true, as an allow there
@@ -126,7 +129,7 @@ impl LaunchDeny {
             let path = key(path);
             matter.iter().any(|place| path.starts_with(place))
         };
-        self.spellings.iter().any(|data| holds(data)) || self.matters.denied_reads().any(holds)
+        self.spellings.iter().any(|data| holds(data)) || self.matters.fenced_folders().any(holds)
     }
 
     /// The rules for `spellings` of `<data>` before the launch prep enumerates it: [`DENIED`]
