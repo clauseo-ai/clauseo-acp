@@ -190,12 +190,13 @@ export const HI = {
   "Clauseo stopped a step: the AI tried to open {matter}'s files. That's another matter.":
     "Clauseo ने एक काम रोक दिया: AI ने {matter} की फ़ाइलें खोलने की कोशिश की। वह दूसरा मामला है।",
   "Let this conversation read {matter}'s files": "इस बातचीत को {matter} की फ़ाइलें पढ़ने दें",
-  // Claude on Windows: too many matters to keep out of its commands; {matters} lists them, with
-  // "{n} more" at the end (provisional, UC-349 and UC-350)
-  "Clauseo couldn't keep {name}'s commands out of these matters: {matters}.":
-    "Clauseo {name} की कमांड को इन मामलों से बाहर नहीं रख सका: {matters}।",
-  "Clauseo couldn't keep the AI's commands out of these matters: {matters}.":
-    "Clauseo AI की कमांड को इन मामलों से बाहर नहीं रख सका: {matters}।",
+  // matters Clauseo couldn't fully keep the agent out of (Claude on Windows: too many for its
+  // commands; or a parent folder on a network share, or one it couldn't list); {matters} lists
+  // them, with "{n} more" at the end (provisional, UC-349 and UC-350)
+  "Clauseo couldn't fully keep {name} out of these matters: {matters}.":
+    "Clauseo {name} को इन मामलों से पूरी तरह बाहर नहीं रख सका: {matters}।",
+  "Clauseo couldn't fully keep the AI out of these matters: {matters}.":
+    "Clauseo AI को इन मामलों से पूरी तरह बाहर नहीं रख सका: {matters}।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",
@@ -204,6 +205,10 @@ export const HI = {
   // over the composer: the other matters this conversation may read, each a pill with its × (provisional, UC-352)
   "Other matters this conversation can read": "दूसरे मामले जिन्हें यह बातचीत पढ़ सकती है",
   "Can read {matter}'s files": "{matter} की फ़ाइलें पढ़ सकती है",
+  // the pill once its × was pressed while a turn runs: it reads on until that answer ends, then goes (provisional,
+  // UC-355)
+  "Can read {matter}'s files until this answer ends":
+    "इस उत्तर के पूरा होने तक {matter} की फ़ाइलें पढ़ सकती है",
   "Stop letting this conversation read {matter}'s files":
     "इस बातचीत को {matter} की फ़ाइलें पढ़ने देना बंद करें",
   // the composer's `/` menu, the agent's commands, named for assistive technology

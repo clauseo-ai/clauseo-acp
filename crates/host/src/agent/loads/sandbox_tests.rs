@@ -35,6 +35,8 @@ struct Session {
     claude_tmp: Option<PathBuf>,
     data: Vec<PathBuf>,
     other_matters: Vec<PathBuf>,
+    matter_open: Option<Vec<PathBuf>>,
+    matter_inside: Vec<PathBuf>,
 }
 
 const DATA: &str = "/Users/l/Library/Application Support/Clauseo";
@@ -63,6 +65,8 @@ impl Session {
             claude_tmp: Some(PathBuf::from(SHORT)),
             data: vec![data.to_path_buf()],
             other_matters: vec![PathBuf::from("/Users/l/Clients/B")],
+            matter_open: None,
+            matter_inside: Vec::new(),
             run,
         }
     }
@@ -83,6 +87,9 @@ impl Session {
             claude_home: &self.home,
             data: &self.data,
             other_matters: &self.other_matters,
+            matter_open: self.matter_open.as_deref(),
+            matter_unlisted: false,
+            matter_inside: &self.matter_inside,
         }
     }
 }
@@ -523,4 +530,58 @@ fn only_the_trust_roots_file_opens() {
     session.ca_file = None;
     let sandbox = mac(&session.paths()).unwrap();
     assert!(!sandbox.allow_read.iter().any(|path| path.contains("/tls")));
+}
+
+/// A matter inside this one (`Sub`, then deeper down): the matter is not re-opened whole for
+/// reading, since Claude Code's `allowRead` beats `denyRead`; its entries down to the other
+/// matter are (`matter_fence::MatterFence::own_open`), and the other matter is denied writes.
+#[test]
+fn a_matter_inside_this_one_stays_shut_to_sandboxed_commands() {
+    for (inner, open) in [
+        ("Sub", vec!["Drafts", "lease.pdf"]),
+        ("p/q/Sub", vec!["Drafts", "p/other", "p/q/x.docx"]),
+    ] {
+        let mut session = Session::new("s-1");
+        let sub = session.matter.join(inner);
+        session.other_matters.push(sub.clone());
+        session.matter_inside = vec![sub.clone()];
+        session.matter_open = Some(open.iter().map(|name| session.matter.join(name)).collect());
+        let sandbox = mac(&session.paths()).unwrap();
+        let matter = session.matter.to_str().unwrap();
+        let sub = sub.to_str().unwrap();
+        assert!(
+            !sandbox.allow_read.iter().any(|path| path == matter),
+            "{inner}"
+        );
+        assert!(
+            !sandbox.allow_read.iter().any(|path| path.starts_with(sub)),
+            "{inner}"
+        );
+        for name in &open {
+            let entry = session.matter.join(name);
+            let entry = entry.to_str().unwrap();
+            assert!(
+                sandbox.allow_read.iter().any(|path| path == entry),
+                "{inner}: {entry}"
+            );
+        }
+        assert!(sandbox.deny_read.iter().any(|path| path == sub), "{inner}");
+        assert!(sandbox.deny_write.iter().any(|path| path == sub), "{inner}");
+        // Writes into the rest of the matter still go.
+        assert!(
+            sandbox.allow_write.iter().any(|path| path == matter),
+            "{inner}"
+        );
+    }
+}
+
+/// Where the folders down to a matter inside this one could not be listed, no sandbox: never
+/// the matter re-opened whole.
+#[test]
+fn an_unlisted_matter_inside_this_one_sends_no_sandbox() {
+    let session = Session::new("s-1");
+    let mut paths = session.paths();
+    paths.matter_unlisted = true;
+    assert_eq!(mac(&paths), Err(Off::NestedMatter));
+    assert!(Off::NestedMatter.holds_auto_back());
 }

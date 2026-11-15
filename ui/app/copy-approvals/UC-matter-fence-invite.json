@@ -33,19 +33,19 @@
     "note": "The offer under UC-346: sends allow_matter_read for this conversation and that matter; hidden once the header's read_matters lists it, or when the app's list no longer holds the matter"
   },
   "UC-349": {
-    "en": "Clauseo couldn't keep {name}'s commands out of these matters: {matters}.",
-    "hi": "Clauseo {name} की कमांड को इन मामलों से बाहर नहीं रख सका: {matters}।",
+    "en": "Clauseo couldn't fully keep {name} out of these matters: {matters}.",
+    "hi": "Clauseo {name} को इन मामलों से पूरी तरह बाहर नहीं रख सका: {matters}।",
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-15",
     "by": "mfence (provisional; Rohan batch review)",
-    "note": "Host notice NoticeKind::MattersUnfenced (Claude on Windows: too many matters for its settings file): at most five matters named, then the shared '{n} more' (listOf). No button. {matters} by the app's names; a matter the list doesn't hold is counted with the more"
+    "note": "Host notice NoticeKind::MattersUnfenced: matters Clauseo couldn't fully fence (Claude on Windows: too many matters for its settings file; or a matter whose parent folder is on a network share or couldn't be listed). Reworded 2026-11-15 from 'couldn't keep {name}'s commands out' as it now covers more than commands. At most five matters named, then the shared '{n} more' (listOf). No button. {matters} by the app's names; a matter the list doesn't hold is counted with the more"
   },
   "UC-350": {
-    "en": "Clauseo couldn't keep the AI's commands out of these matters: {matters}.",
-    "hi": "Clauseo AI की कमांड को इन मामलों से बाहर नहीं रख सका: {matters}।",
+    "en": "Clauseo couldn't fully keep the AI out of these matters: {matters}.",
+    "hi": "Clauseo AI को इन मामलों से पूरी तरह बाहर नहीं रख सका: {matters}।",
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
@@ -97,5 +97,16 @@
     "at": "2026-11-15",
     "by": "mfence (provisional; Rohan batch review)",
     "note": "The pills' list, for assistive technology"
+  },
+  "UC-355": {
+    "en": "Can read {matter}'s files until this answer ends",
+    "hi": "इस उत्तर के पूरा होने तक {matter} की फ़ाइलें पढ़ सकती है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "UC-352's pill once its × was pressed while a turn runs (status starting, running or needs_you): the host closes the read only as the agent relaunches at that turn's end, so the pill stays, with no ×, until the status leaves those; withdrawn while idle it goes at once. {matter} bidi-isolated"
   }
 }

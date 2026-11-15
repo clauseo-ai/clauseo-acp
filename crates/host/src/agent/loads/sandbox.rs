@@ -62,13 +62,20 @@
 //!   matter's notes and Claude's short temp folder (`CLAUDE_CODE_TMPDIR`, where sandboxed
 //!   commands' `TMPDIR` is made).
 //! - `filesystem.denyWrite`: the matter's `.clauseo` folder, which holds `matter.json`, the
-//!   marker that finds a moved matter folder again.
+//!   marker that finds a moved matter folder again, and every other matter's folder inside
+//!   this one (a matter nested in it, invited or not: an invite is read-only).
 //! - `filesystem.denyRead`: the lawyer's home (other clients' files, `~/.ssh`), each spelling of
 //!   `<data>` (it may lie outside the home), every other matter's folder the host knows at the
 //!   launch, `/Volumes` and `/Users/Shared`; the data fence's `Read(…)` deny rules become read
 //!   denies too. A matter registered after the launch is in no list: the accepted residual.
 //! - `filesystem.allowRead` ([`ClaudeSandbox::allow_read`]): re-opens, within those denies,
-//!   what a sandboxed command needs, with the `PATH` file Claude Code reads into each command
+//!   what a sandboxed command needs: the matter folder, or, when a matter the session is not
+//!   invited into lies inside it, the matter's entries one by one down to that matter
+//!   (`matter_fence::MatterFence::own_open`; Claude Code's `allowRead` beats `denyRead`, so a
+//!   whole matter re-opened would re-open the one inside it, even for `rg x .`). Then a
+//!   sandboxed command can't list the matter's top folder or the folders on the way, the
+//!   accepted cost; where those can't be listed at launch, no sandbox ([`Off::NestedMatter`]).
+//!   Also the `PATH` file Claude Code reads into each command
 //!   (`<run>/clauseo-env.sh`, `agent::shell_path`), the trust roots file on macOS
 //!   (`<data>/tls/roots.pem`, [`super::tls_roots`], the file alone) and each folder first on
 //!   `PATH`. Not the whole run folder: it holds the case-law relay's token and a browser's
@@ -135,6 +142,10 @@ pub(crate) enum Off {
     NotUtf8,
     /// A path holds `*` or `?`.
     Wildcard,
+    /// Another matter lies inside this one and the folders down to it could not be listed (or
+    /// hold too many entries): the matter can't be re-opened without it
+    /// (`matter_fence::MatterFence::own_unlisted`).
+    NestedMatter,
 }
 
 impl Off {
@@ -202,6 +213,15 @@ pub(crate) struct SandboxPaths<'a> {
     pub(crate) data: &'a [PathBuf],
     /// Every other matter's folder the host knows.
     pub(crate) other_matters: &'a [PathBuf],
+    /// When a fenced matter lies inside this one: what of the matter folder to re-open for
+    /// reading instead of the whole folder (its entries down to that matter,
+    /// `matter_fence::MatterFence::own_open`). Claude Code's `allowRead` beats its `denyRead`,
+    /// so a whole matter re-opened would re-open the matter inside it.
+    pub(crate) matter_open: Option<&'a [PathBuf]>,
+    /// Whether that list was needed and could not be made ([`Off::NestedMatter`]).
+    pub(crate) matter_unlisted: bool,
+    /// Every other matter's folder inside this one, invited or not: denied writes.
+    pub(crate) matter_inside: &'a [PathBuf],
 }
 
 /// The prefix of the Python runtime's folder name (`agents::python`).
@@ -225,10 +245,15 @@ impl ClaudeSandbox {
             return Err(Off::NotUtf8);
         };
         deny_read.splice(0..0, DENY_READ.iter().map(|path| (*path).to_owned()));
+        if paths.matter_unlisted {
+            tracing::info!("Claude's sandbox is off: a matter inside this one could not be listed");
+            return Err(Off::NestedMatter);
+        }
         let marker = paths.matter.join(MATTER_MARKER);
+        let inside = paths.matter_inside.iter().map(PathBuf::as_path);
         let sandbox = Self {
             allow_write: texts([paths.matter, paths.work, paths.tmp, paths.notes, claude_tmp]),
-            deny_write: texts([marker.as_path()]),
+            deny_write: texts(std::iter::once(marker.as_path()).chain(inside)),
             deny_read,
             allow_read: Self::allow_read(paths, claude_tmp),
             quiet: texts([paths.claude_home.join(SNAPSHOTS).as_path()]),
@@ -288,18 +313,22 @@ impl ClaudeSandbox {
     /// its standard library and site-packages beside it. Never a `PATH` folder's parent
     /// otherwise: it could be the home itself.
     fn allow_read(paths: &SandboxPaths<'_>, claude_tmp: &Path) -> Vec<String> {
-        let mut folders: Vec<PathBuf> = [
-            paths.matter,
-            paths.work,
-            paths.tmp,
-            claude_tmp,
-            paths.downloads,
-            paths.skill_packs,
-            paths.notes,
-        ]
-        .iter()
-        .map(|path| path.to_path_buf())
-        .collect();
+        let mut folders: Vec<PathBuf> = match paths.matter_open {
+            Some(entries) => entries.to_vec(),
+            None => vec![paths.matter.to_path_buf()],
+        };
+        folders.extend(
+            [
+                paths.work,
+                paths.tmp,
+                claude_tmp,
+                paths.downloads,
+                paths.skill_packs,
+                paths.notes,
+            ]
+            .iter()
+            .map(|path| path.to_path_buf()),
+        );
         folders.extend(paths.skills.iter().cloned());
         folders.extend(paths.env_file.map(Path::to_path_buf));
         folders.extend(paths.ca_file.map(Path::to_path_buf));

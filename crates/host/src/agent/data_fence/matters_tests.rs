@@ -308,3 +308,39 @@ fn a_child_matter_stays_denied_inside_the_matters_own_allow() {
     assert!(!decide("Read", &matter.join("child/deed.pdf")));
     assert!(decide("Read", &matter.join("sub/a.txt")), "{rules:#?}");
 }
+
+/// The shared answer to "does this matter contain a denied folder?" (`LaunchDeny::denies_inside`):
+/// a fenced child matter, the data folder, or an unlisted matter inside: yes; an invited child,
+/// or nothing inside: no. Compared in the drive's other case too.
+#[test]
+fn denies_inside_answers_for_a_child_the_data_folder_and_nothing() {
+    let dir = layout("matters-denies-inside");
+    let root = dir.path();
+    let matter = dunce::canonicalize(root.join("matter")).unwrap();
+    crate::write::create_dir_all(&matter.join("child")).unwrap();
+    let own = [matter.as_path()];
+    let with = |others: &[(PathBuf, bool)], data: PathBuf| LaunchDeny {
+        spellings: vec![data],
+        matters: matters(others, &own, &[]),
+        ..LaunchDeny::default()
+    };
+    let outside_data = root.join("data");
+    assert!(with(&[(matter.join("child"), false)], outside_data.clone()).denies_inside(&own));
+    assert!(!with(&[(matter.join("child"), true)], outside_data.clone()).denies_inside(&own));
+    assert!(with(&[], matter.join("data")).denies_inside(&own));
+    assert!(!with(&[(root.join("outside"), false)], outside_data.clone()).denies_inside(&own));
+    let mut unlisted = with(&[], outside_data);
+    unlisted.matters.own_unlisted = true;
+    assert!(unlisted.denies_inside(&own));
+}
+
+/// Drive letters and `\\?\` forms compare as one (Windows).
+#[cfg(windows)]
+#[test]
+fn denies_inside_folds_the_drive_and_verbatim_forms() {
+    let deny = LaunchDeny {
+        spellings: vec![PathBuf::from(r"\\?\c:\clients\acme\data")],
+        ..LaunchDeny::default()
+    };
+    assert!(deny.denies_inside(&[Path::new(r"C:\Clients\Acme")]));
+}

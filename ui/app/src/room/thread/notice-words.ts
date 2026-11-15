@@ -106,7 +106,7 @@ function otherRefused(matter: string, w: NoticeWords, agent: AgentName): string 
       );
 }
 
-/** "Clauseo couldn't keep Claude's commands out of these matters: A, B and 3 more.": each matter by its name now, a
+/** "Clauseo couldn't fully keep Claude out of these matters: A, B and 3 more.": each matter by its name now, a
  * matter the app's list doesn't hold counted with the more. Null when none can be named, so the host's text shows. */
 function unfenced(
   matters: readonly string[],
@@ -125,10 +125,10 @@ function unfenced(
   const list = listOf(w.lang, named);
   const name = agentNameOf(agent);
   return name === null
-    ? w.th("Clauseo couldn't keep the AI's commands out of these matters: {matters}.", {
+    ? w.th("Clauseo couldn't fully keep the AI out of these matters: {matters}.", {
         matters: list,
       })
-    : w.th("Clauseo couldn't keep {name}'s commands out of these matters: {matters}.", {
+    : w.th("Clauseo couldn't fully keep {name} out of these matters: {matters}.", {
         name,
         matters: list,
       });

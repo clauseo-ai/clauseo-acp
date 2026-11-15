@@ -208,6 +208,18 @@ anything the agent starts.
   included ([0030](decisions/0030-launch-profile.md)). Gaps: `run.old-*` when the data folder's
   path holds a glob character; none of it on Windows, where Codex's unelevated sandbox
   can't enforce a read deny (until S15)
+- `built` (tier C, matter fence, #1085): every other matter the host knows is fenced from a
+  session's agent: Claude's Read and Edit deny rules on every OS, Claude's sandbox read deny and
+  Codex's profile deny on macOS and Linux, the host's auto-deny of permission requests, and Claude's
+  Bash and PowerShell deny rules on Windows (text-matching, capped, the lawyer told which matters
+  did not fit). A matter inside the session's own matter stays shut on macOS and Linux even to a
+  command that never names it (`rg x .`): the sandbox re-opens the own matter's entries one by one
+  down to it, never the whole folder. Not on Windows: there is no OS fence there, so a command in
+  the own matter (`rg x .`, `dir /s`) reads a matter nested inside it, and Codex on Windows has
+  no fence between matters at all (its standing instruction only). A lawyer's per-conversation
+  read invite is read-only: Claude reads through its Read tool, writes stay denied. Gaps: an agent
+  can fake a refused tool call to make the invite's offer appear (the lawyer's click is still
+  required); what is made in a parent matter after a launch is in no rule until the next one
 
 ## Egress proxy
 

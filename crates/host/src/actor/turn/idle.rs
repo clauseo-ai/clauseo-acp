@@ -49,6 +49,7 @@ use crate::log_file::LIFECYCLE;
 
 mod fence;
 mod tools;
+pub(super) use fence::stop_stale_at_turn_end;
 
 /// What keeps an agent from idling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

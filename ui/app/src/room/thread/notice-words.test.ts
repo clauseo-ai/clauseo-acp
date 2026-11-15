@@ -242,25 +242,25 @@ test("a refusal with no name anywhere gives null, so the row shows its text", ()
   expect(noticeLine(kind, en, claude, names)).toBeNull();
 });
 
-test("matters Claude's commands may reach: each named, then how many more", () => {
+test("matters Clauseo couldn't fully keep Claude out of: each named, then how many more", () => {
   const kind: NoticeKind = { matters_unfenced: { matters: [SHARMA, JOSHI], more: 3 } };
   expect(noticeLine(kind, en, claude, names)).toBe(
-    `Clauseo couldn't keep Claude's commands out of these matters: ${iso("Sharma v. State")}, ${iso("Joshi v. Joshi")} and 3 more.`,
+    `Clauseo couldn't fully keep Claude out of these matters: ${iso("Sharma v. State")}, ${iso("Joshi v. Joshi")} and 3 more.`,
   );
   expect(noticeLine(kind, words("hi"), claude, names)).toBe(
-    `Clauseo Claude की कमांड को इन मामलों से बाहर नहीं रख सका: ${iso("Sharma v. State")}, ${iso("Joshi v. Joshi")} और 3 और।`,
+    `Clauseo Claude को इन मामलों से पूरी तरह बाहर नहीं रख सका: ${iso("Sharma v. State")}, ${iso("Joshi v. Joshi")} और 3 और।`,
   );
 });
 
 test("the unfenced line with no more, with no agent name, and with a matter the list doesn't hold", () => {
   const two: NoticeKind = { matters_unfenced: { matters: [SHARMA, JOSHI], more: 0 } };
   expect(noticeLine(two, en, undefined, names)).toBe(
-    `Clauseo couldn't keep the AI's commands out of these matters: ${iso("Sharma v. State")} and ${iso("Joshi v. Joshi")}.`,
+    `Clauseo couldn't fully keep the AI out of these matters: ${iso("Sharma v. State")} and ${iso("Joshi v. Joshi")}.`,
   );
   // Kapoor isn't in the list: counted with the more
   const unknown: NoticeKind = { matters_unfenced: { matters: [SHARMA, KAPOOR], more: 0 } };
   expect(noticeLine(unknown, en, claude, names)).toBe(
-    `Clauseo couldn't keep Claude's commands out of these matters: ${iso("Sharma v. State")} and 1 more.`,
+    `Clauseo couldn't fully keep Claude out of these matters: ${iso("Sharma v. State")} and 1 more.`,
   );
   // none named: the host's text shows
   const none: NoticeKind = { matters_unfenced: { matters: [KAPOOR], more: 2 } };
