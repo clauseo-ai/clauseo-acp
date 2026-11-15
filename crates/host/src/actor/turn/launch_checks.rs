@@ -299,7 +299,6 @@ pub(super) fn prepare(
     let LaunchPaths {
         stored,
         data,
-        others,
         home,
         claude,
         mut run,
@@ -379,7 +378,7 @@ pub(super) fn prepare(
                 make_guard(&mut run, &data, claude)?;
                 let short = run.claude_tmp.take();
                 run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
-                run.data_deny = launch_deny(&run, &stored, &data, &others, claude_home.as_deref());
+                run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
                 run.mcp_secrets = Arc::new(mcp.read());

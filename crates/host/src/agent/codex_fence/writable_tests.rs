@@ -75,6 +75,7 @@ impl Launch {
             codex_home: &self.home,
             listed: &listed,
             socket_dir: None,
+            other_matters: &[],
         };
         keys_now.extend(keys(&self.locations, session, windows));
         let program = self.root.join("app").join("clauseo");

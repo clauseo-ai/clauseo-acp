@@ -55,11 +55,10 @@ use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, refused_windows_name, t
 pub(crate) use command::ShellKind;
 pub(crate) use health::DataFenceHealth;
 pub(crate) use input::{candidates, candidates_roots, candidates_words, command_names};
-pub(crate) use launch::{
-    LaunchDeny, claude_project_key, claude_projects, launch_deny, other_matters, own_reads,
-};
+pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_deny, own_reads};
 pub(crate) use shell_deny::{
-    own_shell_allow_rules, own_shell_glob_deny_rules, windows_shell_deny_rules,
+    own_shell_allow_rules, own_shell_glob_deny_rules, windows_matter_shell_rules,
+    windows_shell_deny_rules,
     windows_shell_deny_rules_without_variables,
 };
 pub(crate) use variables::launch_vars;
@@ -160,8 +159,9 @@ pub(crate) fn is_python_runtime(name: &str) -> bool {
 /// Claude's `permissions.deny` rules for a launch: for the data folder spelled each way in
 /// `deny.spellings` (its canonical path first, then the path as configured when that differs),
 /// `Read` and `Edit` for each of `deny.targets`, then `Edit` alone for each of [`READ_ONLY`]
-/// and all under it; then `Read` and `Edit` of each of `deny.matters` (other matters' folders)
-/// and all under it; then, unless the launch has Claude's shell sandbox (`sandboxed`: macOS
+/// and all under it; then, of the other matters' fence (`agent::matter_fence`), `Read` of the
+/// fence paths of each matter the session is not invited into and `Edit` of every matter's, each
+/// path and all under it; then, unless the launch has Claude's shell sandbox (`sandboxed`: macOS
 /// or Linux with `agent::loads::sandbox` on; never Windows, nor a launch whose sandbox is
 /// `Off`), the own folders' glob denies ([`own_shell_glob_deny_rules`]), which refuse an
 /// allowed listing or read of an own folder that holds a glob. Under the sandbox they would buy
@@ -198,11 +198,10 @@ pub(crate) fn claude_deny_rules_on(
             push(format!("Edit({base}/{place}/**)"));
         }
     }
-    for folder in &deny.matters {
-        let Some(base) = folder.to_str().map(|text| rule_path(text, windows)) else {
-            continue;
-        };
-        for tool in ["Read", "Edit"] {
+    let reads = deny.matters.denied_reads().map(|path| ("Read", path));
+    let edits = deny.matters.denied_edits().map(|path| ("Edit", path));
+    for (tool, path) in reads.chain(edits) {
+        if let Some(base) = path.to_str().map(|text| rule_path(text, windows)) {
             push(format!("{tool}({base})"));
             push(format!("{tool}({base}/**)"));
         }
@@ -225,8 +224,10 @@ pub(crate) const BUILT_IN_SKILLS: [&str; 3] = ["profile", "claude-plugin", "skil
 /// each of [`READ_ONLY`] and all under it, for each spelling of `<data>`; then the session's
 /// own work and notes folders' (`LaunchDeny::own_reads`): `Read` of each and all under it, and
 /// a command that lists or reads one ([`own_shell_allow_rules`]), so the auto-mode classifiers
-/// never see those. Nothing wider; a deny rule (another session's, a link's) still beats each.
-/// A spelling that is not UTF-8 gets none.
+/// never see those; last, `Read` of each folder of a matter the lawyer let this conversation
+/// read (`agent::matter_fence`) and all under it. Nothing wider; a deny rule (another session's,
+/// a link's, a fenced matter's inside an invited one) still beats each. A spelling that is not
+/// UTF-8 gets none.
 pub(crate) fn claude_allow_rules(deny: &LaunchDeny) -> Vec<String> {
     claude_allow_rules_on(deny, cfg!(windows))
 }
@@ -250,6 +251,15 @@ pub(crate) fn claude_allow_rules_on(deny: &LaunchDeny, windows: bool) -> Vec<Str
         }
     }
     rules.extend(own_shell_allow_rules(deny, windows));
+    for folder in deny.matters.read_allowed() {
+        if let Some(base) = folder.to_str().map(|text| rule_path(text, windows)) {
+            for rule in [format!("Read({base})"), format!("Read({base}/**)")] {
+                if !rules.contains(&rule) {
+                    rules.push(rule);
+                }
+            }
+        }
+    }
     rules
 }
 

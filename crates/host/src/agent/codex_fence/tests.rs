@@ -65,6 +65,7 @@ pub(crate) fn fence_with(listed: &Listed) -> Map<String, Value> {
         codex_home: &codex_home,
         listed,
         socket_dir: Some(&socket_dir),
+        other_matters: &[],
     };
     keys(&locations(), session, false)
 }
@@ -515,6 +516,7 @@ fn windows_gets_no_fence() {
         codex_home: &codex_home,
         listed: &listed(),
         socket_dir: None,
+        other_matters: &[],
     };
     assert!(keys(&locations(), session, true).is_empty());
 }
@@ -534,6 +536,7 @@ fn a_data_folder_with_a_glob_character_is_named_literally_without_the_set_aside_
         codex_home: &codex_home,
         listed: &Listed::default(),
         socket_dir: None,
+        other_matters: &[],
     };
     let keys = keys(&locations, session, false);
     let scoped = keys["permissions"][PROFILE]["filesystem"][data.to_str().unwrap()]
