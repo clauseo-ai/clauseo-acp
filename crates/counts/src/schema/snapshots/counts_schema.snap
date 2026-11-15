@@ -1563,7 +1563,8 @@ expression: counts_schema()
         "agent.program_blocked",
         "agent.program_missing",
         "skill.no_skill_md",
-        "skill.invalid"
+        "skill.invalid",
+        "matter.file_folder_clash"
       ],
       "type": "string"
     },
