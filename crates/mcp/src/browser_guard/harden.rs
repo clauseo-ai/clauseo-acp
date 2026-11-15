@@ -32,9 +32,14 @@
 //! (`job::start_copy`, the marker [`HARDENED_COPY`] first among its arguments), waits for it
 //! and passes on its exit code, holding only a `SYNCHRONIZE` and query handle to it. Only the
 //! copy makes the relay's secret, starts the browser and agent-browser and serves the agent; it
-//! first checks that it is hardened ([`Hardened::verified`]), so a forged marker only makes a
-//! guard that refuses to start. Linux's `PR_SET_DUMPABLE` has the same gap: a
-//! `/proc/<guard>/mem` opened before it keeps working. It is the guard's first act, and Linux is
+//! first checks that it is hardened ([`Hardened::verified`]), so a copy started by mistake
+//! without the descriptors refuses to start. The check is no proof of origin: another process of
+//! the user can start `browser-guard --hardened-copy` with the same descriptor and pass it. That
+//! gains it nothing: it is the attacker's own guard, with its own secret, its own browser and no
+//! handle to any other guard.
+//!
+//! Linux's `PR_SET_DUMPABLE` has the gap the copy closes on Windows: a `/proc/<guard>/mem`
+//! opened before it keeps working. It is the guard's first act, and Linux is
 //! for development and CI only.
 //!
 //! The copy keeps the descriptors for `CreateProcessW` (`job/spawn.rs`): its

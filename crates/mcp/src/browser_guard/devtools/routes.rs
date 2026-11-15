@@ -5,13 +5,14 @@
 //!   reaches the browser; a message with no id, a non-numeric one, or that is no JSON object is
 //!   dropped. What goes to the browser is the message as parsed and written again, so a
 //!   duplicate `"id"` key cannot mean one thing here and another there. A root-session command
-//!   (no `sessionId`) in a domain the guard's clients take (`Fetch`, once PR-3's `ProxyAuth`
-//!   is one) is answered here with a CDP error too: the guard and agent-browser share the root
-//!   session, so agent-browser's `Fetch.enable`, `Fetch.disable` or `Fetch.continueWithAuth`
-//!   there would cancel or answer for the guard's own. Page-session commands are not judged by
-//!   domain. A forwarded `<Domain>.enable` or `.disable` is noted per session (when forwarded,
-//!   not when the browser confirms it: a refused enable brings no events anyway); a new client
-//!   starts with none noted ([`Routes::client_connected`]).
+//!   (no `sessionId`, or an empty or `null` one: Chromium takes an empty one for the root) in a
+//!   domain the guard's clients take (`Fetch`, once PR-3's `ProxyAuth` is one) is answered here
+//!   with a CDP error too: the guard and agent-browser share the root session, so
+//!   agent-browser's `Fetch.enable`, `Fetch.disable` or `Fetch.continueWithAuth` there would
+//!   cancel or answer for the guard's own. Page-session commands are not judged by domain. A
+//!   forwarded `<Domain>.enable` or `.disable` is noted per session (when forwarded, not when
+//!   the browser confirms it: a refused enable brings no events anyway); a new client starts
+//!   with none noted ([`Routes::client_connected`]).
 //! - **Replies** with a guard id go to the relay's own waiting call if it sent the command, else
 //!   to the guard's clients; never to agent-browser. Every other reply goes to agent-browser as
 //!   the browser wrote it.
@@ -133,13 +134,13 @@ impl Routes {
             return FromClient::Refuse(refusal(id, "the id is outside agent-browser's range"));
         }
         if let Some(method) = message.get("method").and_then(Value::as_str) {
-            if !message.contains_key("sessionId") && self.domains.contains(domain_of(method)) {
+            let session = session_of(message.get("sessionId"));
+            if session.is_empty() && self.domains.contains(domain_of(method)) {
                 return FromClient::Refuse(refusal(
                     id,
                     "the guard takes this domain on the root session",
                 ));
             }
-            let session = session_of(message.get("sessionId"));
             if let Some(domain) = method.strip_suffix(".enable") {
                 self.enabled.insert((session, domain.to_owned()));
             } else if let Some(domain) = method.strip_suffix(".disable") {
@@ -178,7 +179,7 @@ impl Routes {
         let Some(method) = message.get("method").and_then(Value::as_str) else {
             return FromBrowser::forward();
         };
-        if message.contains_key("sessionId") || !self.methods.contains(method) {
+        if !session_of(message.get("sessionId")).is_empty() || !self.methods.contains(method) {
             return FromBrowser::forward();
         }
         let forward = self
@@ -201,7 +202,9 @@ fn domain_of(method: &str) -> &str {
     method.split_once('.').map_or(method, |(domain, _)| domain)
 }
 
-/// A message's `sessionId`, or `""` for the root session.
+/// A message's `sessionId`, or `""` for the root session. Chromium takes a missing or empty one
+/// for the root session; a `null` or other non-string one, which it refuses, is judged as the
+/// root session here too, so it is refused where the root session's would be.
 fn session_of(value: Option<&Value>) -> String {
     value.and_then(Value::as_str).unwrap_or_default().to_owned()
 }

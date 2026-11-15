@@ -120,14 +120,20 @@ fn agent_browsers_root_commands_in_a_taken_domain_are_refused_and_its_page_ones_
     });
     devtools.attach(&[client]).unwrap();
     let (_, mut agent) = upgrade(&devtools, &right_path(&devtools));
-    for (id, method) in [(5, "Fetch.enable"), (6, "Fetch.continueWithAuth")] {
-        let command = json!({"id": id, "method": method, "params": {}}).to_string();
+    // No `sessionId`, an empty one or a null one: the root session's, each refused.
+    let root_sessions = [
+        json!({"id": 5, "method": "Fetch.enable"}),
+        json!({"id": 6, "method": "Fetch.continueWithAuth"}),
+        json!({"id": 8, "method": "Fetch.enable", "sessionId": ""}),
+        json!({"id": 9, "method": "Fetch.disable", "sessionId": null}),
+    ];
+    for command in root_sessions {
         agent
-            .write_all(&client_frame(true, 0x1, command.as_bytes()))
+            .write_all(&client_frame(true, 0x1, command.to_string().as_bytes()))
             .unwrap();
         let reply: Value = serde_json::from_slice(&read_frame(&mut agent)).unwrap();
-        assert_eq!(reply["id"], id, "{reply}");
-        assert_eq!(reply["error"]["code"], -32600, "{method}: {reply}");
+        assert_eq!(reply["id"], command["id"], "{reply}");
+        assert_eq!(reply["error"]["code"], -32600, "{command}: {reply}");
     }
     let page = json!({"id": 7, "method": "Fetch.enable", "sessionId": "S1", "params": {}});
     agent

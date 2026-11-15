@@ -119,20 +119,13 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
 /// What [`child_env`] puts in place of a relay endpoint of the right form.
 const RELAY: &str = "<the guard's relay>";
 
-/// Whether `value` is the guard's relay endpoint,
-/// `ws://127.0.0.1:<port>/devtools/browser/<64 lowercase hex>`.
+/// Whether `value` is the guard's relay endpoint. The stub's report reaches the test through the
+/// guard's stdout, which puts this mark in place of the whole relay URL agent-browser was given
+/// (`src/browser_guard/relay/redact.rs`), so the mark alone is that URL, character for character;
+/// its form, `ws://127.0.0.1:<port>/devtools/browser/<64 lowercase hex>`, is checked by the
+/// relay's own tests (`src/browser_guard/devtools/tests.rs`).
 fn is_relay(value: &str) -> bool {
-    let Some(rest) = value.strip_prefix("ws://127.0.0.1:") else {
-        return false;
-    };
-    let Some((port, token)) = rest.split_once("/devtools/browser/") else {
-        return false;
-    };
-    port.parse::<u16>().is_ok_and(|port| port > 0)
-        && token.len() == 64
-        && token
-            .bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    value == "[relay url redacted]"
 }
 
 /// Variables Windows itself puts in a new process's environment whatever block it is given:
