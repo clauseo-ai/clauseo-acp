@@ -1,13 +1,17 @@
 //! A cloud-only file the agent only read: the OS downloads it with the same content and
 //! mtime, so it is the file's baseline, not a change. The turn has no `FilesChanged`, so the
-//! room shows no "changed" line and offers no Undo, and the file stays.
+//! room shows no "changed" line and offers no Undo, and the file stays. And one the agent
+//! deleted: Clauseo kept no copy, so the turn's `FilesChanged` lists it as gone and a notice
+//! follows it.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use clauseo_host::WithPlaceholderProbe as _;
 use clauseo_matters::PlaceholderProbe;
-use clauseo_protocol::{CheckpointKind, DomainEvent, StopReason, StreamId};
+use clauseo_protocol::{
+    CheckpointKind, DomainEvent, NoticeKind, SkippedFile, SkippedFileReason, StopReason, StreamId,
+};
 
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread};
 
@@ -75,6 +79,59 @@ fn a_turn_that_only_read_a_cloud_only_file_has_no_files_changed() {
     assert_eq!(
         std::fs::read_to_string(folder.join("notes.txt")).unwrap(),
         "The lawyer's notes\n"
+    );
+    host.shutdown();
+}
+
+#[test]
+fn a_cloud_only_file_the_turn_deleted_is_gone_in_files_changed_and_a_notice() {
+    let dir = Dir::new(
+        "a_cloud_only_file_the_turn_deleted_is_gone_in_files_changed_and_a_notice",
+        &[(FAKE, Scenario::Local("delete-cloud-only"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_placeholder_probe(Arc::new(MarkerProbe))
+    });
+    let seed = [
+        ("brief.txt", "Clause 4 draft\n"),
+        ("notes.txt", "The lawyer's notes\n"),
+        ("notes.txt.cloud.tmp", ""),
+    ];
+    let (_, thread, folder) = matter_with_thread(&dir, &host, "m", &seed, FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Delete the notes.");
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn);
+    assert!(!folder.join("notes.txt").exists());
+    events.until_caught_up();
+    let notes = SkippedFile {
+        path: clauseo_protocol::MatterPath::new("notes.txt").unwrap(),
+        reason: SkippedFileReason::CloudOnly,
+    };
+    let changed = events.files_changed(turn);
+    let changed = changed.unwrap_or_else(|| panic!("no FilesChanged: {}", events.dump()));
+    assert_eq!(changed.files, [], "{changed:?}");
+    assert_eq!(changed.gone, std::slice::from_ref(&notes));
+    // The notice comes right after the FilesChanged, naming the file.
+    let all: Vec<&DomainEvent> = events.events().collect();
+    let at = all
+        .iter()
+        .position(|event| matches!(event, DomainEvent::FilesChanged(_)))
+        .unwrap();
+    let Some(DomainEvent::Notice(notice)) = all.get(at + 1) else {
+        panic!("no notice after FilesChanged: {}", events.dump());
+    };
+    assert_eq!(
+        notice.kind,
+        Some(NoticeKind::FilesGoneNoCopy {
+            files: vec![notes],
+            more: 0,
+        })
+    );
+    assert_eq!(
+        notice.text,
+        "notes.txt was deleted during this step. Clauseo had no copy of it to bring back."
     );
     host.shutdown();
 }

@@ -44,6 +44,7 @@ import { UC_CONVERSATION_SMALL_FIXES } from "./registry-uc-conversation-small-fi
 import { UC_GUARD_BLOCK } from "./registry-uc-guard-block.tsx";
 import { UC_OPEN_FOLDER_WARNING } from "./registry-uc-open-folder-warning.tsx";
 import { UC_ONLINE_READ } from "./registry-uc-online-read.tsx";
+import { UC_NO_COPY } from "./registry-uc-no-copy.tsx";
 import { SAC } from "./registry-sac.tsx";
 import { NM } from "./registry-nm.tsx";
 import { ownEntries, ownEntry } from "./registry-offline.tsx";
@@ -426,6 +427,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UC_GUARD_BLOCK,
   ...UC_OPEN_FOLDER_WARNING,
   ...UC_ONLINE_READ,
+  ...UC_NO_COPY,
   ...UC_MCP_CONFIRM,
   ...UC_MCP_IMPORT,
   ...UC_PASTE_CHIP,

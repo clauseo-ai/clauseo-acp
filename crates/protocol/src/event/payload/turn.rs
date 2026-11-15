@@ -198,6 +198,12 @@ pub struct FilesChanged {
     pub files: Vec<FileChange>,
     /// The files it changed that were not versioned.
     pub skipped: Vec<SkippedFile>,
+    /// The files that were in the folder when it began but not versioned (cloud-only, over the
+    /// size cap) and are gone now, with why each had not been versioned: Clauseo had no copy of
+    /// them to bring back. Missing reads as empty, and empty is left out, so an event from before
+    /// the field still decodes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gone: Vec<SkippedFile>,
 }
 
 /// Why a turn failed. Detail only: the turn's `TurnEnded` still follows.

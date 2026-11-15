@@ -4,7 +4,7 @@
 // while the conversation was open shows as a quiet line; other markers, versions and compaction show nothing yet. A queued or removed message shows nothing (the queue's strip holds it), a steer taken into the
 // answer shows as its mark, a steer not yet resolved as its words waiting, with Send now, and a steer never sent as its
 // words and that they were not sent (steer.ts, steer-rows.tsx).
-import { memo, useState, useSyncExternalStore } from "react";
+import { memo, use, useState, useSyncExternalStore } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
 import { FoldedQuestion } from "@clauseo/components/clauseo/question-fold.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
@@ -35,6 +35,8 @@ import { isolated, shownOf } from "./content.ts";
 import { noticeLine, refusedMatterOf } from "./notice-words.ts";
 import { ReadOffer } from "./read-offer.tsx";
 import { useRoomMatterNames } from "../read-matters.ts";
+import { FolderPlaceContext } from "../folder-place.ts";
+import { serviceName } from "../sync-services.ts";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
 import { askedAs, backgroundOf, outcomeOf } from "./steer.ts";
 import {
@@ -264,6 +266,8 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   const nameOf = (matter: string) => names.get(matter);
   // another matter's files refused: the line, and the offer to let this conversation read them (read-offer.tsx)
   const refused = refusedMatterOf(entry.kind, nameOf);
+  // a deleted file that was only online: its recycle bin, by the folder's sync service where the room knows one
+  const service = serviceName(use(FolderPlaceContext));
   const line = (
     <p
       data-testid="notice"
@@ -272,7 +276,7 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
       className={`${ROW} ${QUIET}`}
       dir="auto"
     >
-      {noticeLine(entry.kind, w, agent, nameOf) ?? entry.text}
+      {noticeLine(entry.kind, w, agent, nameOf, service) ?? entry.text}
     </p>
   );
   if (refused === undefined || refused.name === "") return line;

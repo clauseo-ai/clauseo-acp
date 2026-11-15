@@ -1,0 +1,68 @@
+{
+  "UC-720": {
+    "en": "{file} was deleted during this step. Clauseo had no copy of it to bring back. It was only in {service}, so {service}'s recycle bin may still have it.",
+    "hi": "{file} इस काम के दौरान हटा दी गई। Clauseo के पास इसकी कोई प्रति नहीं थी जिसे वापस लाया जा सके। यह केवल {service} में थी, इसलिए {service} के रीसायकल बिन में यह अब भी हो सकती है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "matters-no-copy-backstop (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "matters-no-copy-backstop (provisional; orchestrator to approve)",
+    "note": "Host notice NoticeKind::FilesGoneNoCopy (actor/turn/end/files.rs): a file the before-turn checkpoint skipped (cloud-only, or over the 512 MB cap) is gone at the after-turn checkpoint, so Clauseo holds no copy and no undo brings it back (matters gone.rs). The same line stands in Versions' band for that change (versions/words.ts goneNote). Says 'was deleted', never who deleted it: a sync client or the lawyer may have. {file} named as Versions names files (fileName); a file only online in a folder a named service syncs ({service}, sync-services.ts). Rendered alone"
+  },
+  "UC-721": {
+    "en": "{file} was deleted during this step. Clauseo had no copy of it to bring back. It was only online, so your cloud service's recycle bin may still have it.",
+    "hi": "{file} इस काम के दौरान हटा दी गई। Clauseo के पास इसकी कोई प्रति नहीं थी जिसे वापस लाया जा सके। यह केवल ऑनलाइन थी, इसलिए आपकी क्लाउड सेवा के रीसायकल बिन में यह अब भी हो सकती है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "matters-no-copy-backstop (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "matters-no-copy-backstop (provisional; orchestrator to approve)",
+    "note": "Host notice NoticeKind::FilesGoneNoCopy (actor/turn/end/files.rs): a file the before-turn checkpoint skipped (cloud-only, or over the 512 MB cap) is gone at the after-turn checkpoint, so Clauseo holds no copy and no undo brings it back (matters gone.rs). The same line stands in Versions' band for that change (versions/words.ts goneNote). Says 'was deleted', never who deleted it: a sync client or the lawyer may have. {file} named as Versions names files (fileName); a file only online where the room knows no service by name"
+  },
+  "UC-722": {
+    "en": "{file} was deleted during this step. Clauseo had no copy of it to bring back, because it was too large to keep versions of.",
+    "hi": "{file} इस काम के दौरान हटा दी गई। Clauseo के पास इसकी कोई प्रति नहीं थी जिसे वापस लाया जा सके, क्योंकि यह संस्करण रखने के लिए बहुत बड़ी थी।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "matters-no-copy-backstop (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "matters-no-copy-backstop (provisional; orchestrator to approve)",
+    "note": "Host notice NoticeKind::FilesGoneNoCopy (actor/turn/end/files.rs): a file the before-turn checkpoint skipped (cloud-only, or over the 512 MB cap) is gone at the after-turn checkpoint, so Clauseo holds no copy and no undo brings it back (matters gone.rs). The same line stands in Versions' band for that change (versions/words.ts goneNote). Says 'was deleted', never who deleted it: a sync client or the lawyer may have. {file} named as Versions names files (fileName); a file over the size cap: no recycle-bin clause"
+  },
+  "UC-723": {
+    "en": "{file} was deleted during this step. Clauseo had no copy of it to bring back.",
+    "hi": "{file} इस काम के दौरान हटा दी गई। Clauseo के पास इसकी कोई प्रति नहीं थी जिसे वापस लाया जा सके।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "matters-no-copy-backstop (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "matters-no-copy-backstop (provisional; orchestrator to approve)",
+    "note": "Host notice NoticeKind::FilesGoneNoCopy (actor/turn/end/files.rs): a file the before-turn checkpoint skipped (cloud-only, or over the 512 MB cap) is gone at the after-turn checkpoint, so Clauseo holds no copy and no undo brings it back (matters gone.rs). The same line stands in Versions' band for that change (versions/words.ts goneNote). Says 'was deleted', never who deleted it: a sync client or the lawyer may have. {file} named as Versions names files (fileName); a reason this version doesn't know. Rendered alone"
+  },
+  "UC-724": {
+    "en": "{n} more files that Clauseo had no copy of were deleted during this step.",
+    "hi": "ऐसी {n} और फ़ाइलें इस काम के दौरान हटा दी गईं जिनकी Clauseo के पास कोई प्रति नहीं थी।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "matters-no-copy-backstop (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "matters-no-copy-backstop (provisional; orchestrator to approve)",
+    "note": "After the five files the notice names (UC-720 to UC-723), the rest counted; the host names at most five"
+  },
+  "UC-725": {
+    "en": "{file} was deleted, with no copy to bring back",
+    "hi": "{file} हटा दी गई, वापस लाने के लिए कोई प्रति नहीं है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "matters-no-copy-backstop (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "matters-no-copy-backstop (provisional; orchestrator to approve)",
+    "note": "Versions' timeline: a short note on a change during which a file Clauseo kept no copy of was deleted (version-panel.tsx), beside the existing '{file} is too large to keep versions'; picking the change shows UC-720 to UC-723 in the band. Versions' words avoid 'step', so this note says none"
+  }
+}

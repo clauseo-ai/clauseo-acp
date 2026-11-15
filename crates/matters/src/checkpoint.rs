@@ -271,6 +271,7 @@ impl Core {
         let versioned =
             |path: &str| find_by_path(&old_tree, path, |file| file.path.as_str()).is_some();
         let mut reads = first_reads(&tip_record, &entries, &versioned);
+        let gone = crate::gone::gone(&tip_record, &entries, &record, &versioned);
         let mut changes = diff_reads(&old_tree, &new_tree, &over_cap, &reads)?;
         let head = self.timeline.head();
         let tip = self.timeline.tip();
@@ -299,6 +300,7 @@ impl Core {
                 commit: CommitId::of(last_commit),
                 changes,
                 skipped,
+                gone,
             });
         }
         if self.timeline.contains(spec.entry.id) {
@@ -359,6 +361,7 @@ impl Core {
             commit: CommitId::of(commit),
             changes,
             skipped,
+            gone,
         })
     }
 

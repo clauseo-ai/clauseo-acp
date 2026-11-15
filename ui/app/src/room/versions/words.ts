@@ -14,6 +14,7 @@ import { clock } from "@clauseo/components/lib/words.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { listOf, vt } from "@clauseo/components/lib/words-versions.ts";
+import { goneLines } from "@clauseo/components/lib/words-thread.ts";
 import type {
   BlacklineNotice,
   FileChange,
@@ -332,6 +333,18 @@ export function cantUndoWords(
         "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service} may still have an earlier version.",
         { file, service },
       );
+}
+
+/** The band's note on a version during which files Clauseo kept no copy of were deleted: the thread's notice's own
+ * lines (words-thread.ts goneLines), every file named, a file only online naming the folder's sync service where the room knows
+ * one. Null for none, or no version picked. */
+export function goneNote(
+  lang: Lang,
+  v: Version | undefined,
+  place: FolderPlace | undefined,
+): string | null {
+  const gone = v?.gone ?? [];
+  return gone.length === 0 ? null : goneLines(lang, gone, 0, serviceName(place));
 }
 
 /** A moment's clock time in the language: "4:31 pm", or "शाम 4:31". */

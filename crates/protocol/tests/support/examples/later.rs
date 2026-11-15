@@ -6,8 +6,8 @@
 
 use clauseo_protocol::{
     AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PackId,
-    PackSkipReason, PageVia, PageVisited, SearchSource, SteerOutcome, SteerResolved, StopReason,
-    TurnEnded, TurnFailed, WebResult, WebSearchRecorded,
+    PackSkipReason, PageVia, PageVisited, SearchSource, SkippedFile, SkippedFileReason,
+    SteerOutcome, SteerResolved, StopReason, TurnEnded, TurnFailed, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{checkpoint_id, matter_id, message_id, tool_call_id, turn_id};
@@ -343,6 +343,19 @@ pub(super) fn notices() -> Vec<DomainEvent> {
             text: "Clauseo stopped a step: ChatGPT tried to go online by running a command."
                 .to_owned(),
             kind: Some(NoticeKind::ShellNetworkBlockedNoWebSearch),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Drafts/Scan.pdf was deleted during this step. Clauseo had no copy of it to \
+                   bring back."
+                .to_owned(),
+            kind: Some(NoticeKind::FilesGoneNoCopy {
+                files: vec![SkippedFile {
+                    path: MatterPath::new("Drafts/Scan.pdf").unwrap(),
+                    reason: SkippedFileReason::CloudOnly,
+                }],
+                more: 0,
+            }),
         },
     ];
     notices.extend(guard_notices());

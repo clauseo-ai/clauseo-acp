@@ -224,13 +224,25 @@ pub(super) fn files_changed(state: &mut ThreadState, event: &FilesChanged, out: 
         .filter(|file| !is_excluded_path(file.path.as_str()))
         .cloned()
         .collect();
+    let gone: Vec<SkippedFile> = event
+        .gone
+        .iter()
+        .filter(|file| !is_excluded_path(file.path.as_str()))
+        .cloned()
+        .collect();
     if let Some(order) = state.index.steps.get(&event.turn).copied() {
         update_step(state, order, out, |step| {
-            set_vec(&mut step.files, &files) | set_vec(&mut step.skipped, &skipped)
+            set_vec(&mut step.files, &files)
+                | set_vec(&mut step.skipped, &skipped)
+                | set_vec(&mut step.gone, &gone)
         });
         return;
     }
-    let files = TurnFiles { files, skipped };
+    let files = TurnFiles {
+        files,
+        skipped,
+        gone,
+    };
     state.files.insert(event.turn, files);
 }
 
@@ -326,7 +338,8 @@ pub(super) fn turn_ended(
         settle_prompt(state, event.turn, UserMessageStatus::Sent, out);
     }
     let files = state.files.remove(&event.turn);
-    let (files, skipped) = files.map_or_else(Default::default, |f| (f.files, f.skipped));
+    let (files, skipped, gone) =
+        files.map_or_else(Default::default, |f| (f.files, f.skipped, f.gone));
     let entry = StepEntry {
         order: seq,
         turn: event.turn,
@@ -335,6 +348,7 @@ pub(super) fn turn_ended(
         checkpoint_before: state.before_checkpoints.remove(&event.turn),
         files,
         skipped,
+        gone,
         checkpoint_after: event.checkpoint_after,
         undone: false,
         usage: event.usage,

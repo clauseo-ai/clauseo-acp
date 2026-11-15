@@ -5,8 +5,8 @@
 // English legal names in Latin script. Clauseo never says मैं, and nothing says पेंसिल, स्याही, चरण or कदम.
 import { clock, t as roomWords, type Key } from "./words.ts";
 import { ui, type UiKey } from "./words-ui.ts";
-import { useDisplay } from "./display.ts";
-import { wordsOf, type Slots } from "./words-core.ts";
+import { useDisplay, type Lang } from "./display.ts";
+import { fileName, wordsOf, type Slots } from "./words-core.ts";
 import type { HI } from "./words-thread.hi.ts";
 
 /** Every new string of the live thread, in English. */
@@ -26,4 +26,57 @@ export function useThreadWords() {
     ui: (key: UiKey, slots?: Slots) => ui(lang, key, slots),
     clock: (time: string) => clock(lang, time),
   };
+}
+
+// Files deleted during a step that Clauseo kept no copy of (only online, or over the size cap), so no undo brings them
+// back: the host's files_gone_no_copy notice in the thread (app's room/thread/notice-words.ts) and the note on that
+// change in Versions' band (versions/words.ts goneNote) say the same lines, from here, which the first load holds.
+
+/** A file gone with no copy: its path in the matter and why Clauseo had not versioned it (SkippedFileReason). */
+export type GoneFile = { path: string; reason: string };
+
+/** The line for one gone file, named as Versions names files: a file that was only online says its cloud service's
+ * recycle bin may still have it, by the service's name where the room knows one; a file too large says so; any other
+ * reason (one this version doesn't know) says only that Clauseo had no copy. */
+export function goneLine(lang: Lang, f: GoneFile, service: string | null): string {
+  const file = fileName(f.path);
+  if (f.reason === "cloud_only")
+    return service === null
+      ? th(
+          lang,
+          "{file} was deleted during this step. Clauseo had no copy of it to bring back. It was only online, so your cloud service's recycle bin may still have it.",
+          { file },
+        )
+      : th(
+          lang,
+          "{file} was deleted during this step. Clauseo had no copy of it to bring back. It was only in {service}, so {service}'s recycle bin may still have it.",
+          { file, service },
+        );
+  if (f.reason === "over_size_cap")
+    return th(
+      lang,
+      "{file} was deleted during this step. Clauseo had no copy of it to bring back, because it was too large to keep versions of.",
+      { file },
+    );
+  return th(lang, "{file} was deleted during this step. Clauseo had no copy of it to bring back.", {
+    file,
+  });
+}
+
+/** Every gone file's line, then, when `more` were gone than are named, one line counting the rest; joined by a space,
+ * as one paragraph. Empty when none. */
+export function goneLines(
+  lang: Lang,
+  files: readonly GoneFile[],
+  more: number,
+  service: string | null,
+): string {
+  const lines = files.map((f) => goneLine(lang, f, service));
+  if (more > 0)
+    lines.push(
+      th(lang, "{n} more files that Clauseo had no copy of were deleted during this step.", {
+        n: more,
+      }),
+    );
+  return lines.join(" ");
 }

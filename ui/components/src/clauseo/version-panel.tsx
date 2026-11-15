@@ -24,6 +24,7 @@ import {
 } from "../icons/icons.tsx";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { cn } from "../lib/cn.ts";
+import { fileName } from "../lib/words-core.ts";
 import { Heading } from "./heading.tsx";
 import { useRoom } from "./room-scope.ts";
 import { useStuck } from "./stuck.ts";
@@ -224,6 +225,14 @@ export function VersionPanel({
               <Say>{w.v("{file} is too large to keep versions", { file: v.large.file })}</Say>
             </span>
           )}
+          {/* a file deleted with this version that Clauseo kept no copy of: the band names why, picked */}
+          {v.gone?.map((g) => (
+            <span key={g.path} className="ver-entry-note" data-testid="ver-gone">
+              <Say>
+                {w.v("{file} was deleted, with no copy to bring back", { file: fileName(g.path) })}
+              </Say>
+            </span>
+          ))}
         </button>
       </li>
     );

@@ -158,6 +158,7 @@ export function timelineOf(input: TimelineInput): Timeline {
     const files = step?.files ?? v.files;
     const who = whoOf(v, input, afterTurn);
     const large = step?.skipped.find((s) => s.reason === "over_size_cap");
+    const gone = step?.gone ?? [];
     const { time } = clockOf(v.ts, input.now, input.zone, "en");
     history.push({
       id: v.checkpoint,
@@ -169,6 +170,8 @@ export function timelineOf(input: TimelineInput): Timeline {
       state: { papers: [], docs: {} },
       // no size on a skipped file yet: the panel's line names the file alone
       ...(large === undefined ? {} : { large: { file: fileName(large.path), size: "" } }),
+      // a file the turn deleted that Clauseo kept no copy of: the panel's note and the band's line (words-thread.ts goneLines)
+      ...(gone.length === 0 ? {} : { gone }),
     });
     meta.set(v.checkpoint, {
       kind: v.kind,

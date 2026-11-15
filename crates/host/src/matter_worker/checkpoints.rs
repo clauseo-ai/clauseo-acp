@@ -120,6 +120,7 @@ fn reused(
             commit,
             changes: Vec::new(),
             skipped: Vec::new(),
+            gone: Vec::new(),
         },
         reused: Some(Reused {
             entry,

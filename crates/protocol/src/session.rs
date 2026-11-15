@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::open_enum::{open_data_enum, open_unit_enum};
-use crate::{CompactString, Count, Finite, MatterId, MatterPath, PackId};
+use crate::{CompactString, Count, Finite, MatterId, MatterPath, PackId, SkippedFile};
 
 /// The agent's stable ACP v1 capabilities, plus Clauseo's steering capability.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -373,6 +373,16 @@ open_data_enum! {
             /// Its name when the host gave the notice (display only; it may have changed).
             name: String,
         },
+        /// Files that were in the matter's folder when a step began but that Clauseo kept no copy
+        /// of (cloud-only, over the size cap) were deleted during it: no undo brings them back.
+        /// The step's `FilesChanged` lists them all as `gone`.
+        FilesGoneNoCopy = "files_gone_no_copy" {
+            /// The first of them, at most five, sorted by path bytes, each with why it had not
+            /// been versioned.
+            files: Vec<SkippedFile>,
+            /// How many more were deleted beyond `files`.
+            more: u32,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -412,6 +422,13 @@ open_data_enum! {
             matter: MatterId::new(uuid::Uuid::from_u128((0x0190_0000_0000 << 80) | (0x7 << 76) | (0b10 << 62) | 9))
                 .unwrap(),
             name: "Smith".to_owned(),
+        },
+        NoticeKind::FilesGoneNoCopy {
+            files: vec![SkippedFile {
+                path: MatterPath::new("Drafts/Scan.pdf").unwrap(),
+                reason: crate::SkippedFileReason::CloudOnly,
+            }],
+            more: 1,
         },
     ];
 }

@@ -92,6 +92,8 @@ impl StreamState {
 pub(crate) struct TurnFiles {
     pub(crate) files: Vec<FileChange>,
     pub(crate) skipped: Vec<SkippedFile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) gone: Vec<SkippedFile>,
 }
 
 /// A thread's folded state: its header, its transcript entries, and what the fold needs to

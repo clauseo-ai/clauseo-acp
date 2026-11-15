@@ -135,6 +135,7 @@ mod error;
 mod first_read;
 mod folder_scan;
 mod fsync;
+mod gone;
 mod history;
 mod locks;
 mod long_path;
