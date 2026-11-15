@@ -189,7 +189,7 @@ fn a_fenced_matter_inside_the_own_one_splits_what_the_sandbox_opens() {
         ]
     );
     assert!(!fence.own_unlisted);
-    let mut inside: Vec<(PathBuf, bool)> = fence.inside_own.clone();
+    let mut inside: Vec<(PathBuf, bool)> = fence.inside_own;
     inside.sort();
     assert_eq!(
         inside,
@@ -215,7 +215,7 @@ fn a_parent_past_the_limit_is_reported_unfenced() {
     }
     let fence = fence(&root, "big/own", &[("big", false), ("small", false)]);
     assert_eq!(fence.unfenced, [fence.others[0].id]);
-    assert!(fence.others[0].paths.is_empty());
+    assert_eq!(fence.others[0].paths, Vec::<PathBuf>::new());
     assert_eq!(fence.others[1].paths, [root.join("small")]);
 }
 
