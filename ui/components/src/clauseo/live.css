@@ -242,6 +242,15 @@
     white-space: nowrap;
     font-stretch: var(--wd-wide);
   }
+  /* a long paste's chip: "Pasted text" over its size in words */
+  .q-paste {
+    padding-block: var(--s0-5);
+  }
+  .q-paste-words {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
   .q-paper-remove {
     display: grid;
     place-items: center;

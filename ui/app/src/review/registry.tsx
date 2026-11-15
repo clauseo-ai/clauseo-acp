@@ -82,6 +82,7 @@ import { UC_CRASH } from "./registry-uc-crash.tsx";
 import { IT_ENTRIES } from "./registry-it.tsx";
 import { UC_MCP_CONFIRM } from "./registry-uc-mcp-confirm.tsx";
 import { UC_MCP_IMPORT } from "./registry-uc-mcp-import.tsx";
+import { UC_PASTE_CHIP } from "./registry-uc-paste-chip.tsx";
 import { MCP_TOOLS } from "./registry-mcp-tools.tsx";
 import { UC_AGENTS } from "./registry-uc-agents.tsx";
 import { RELEASE_NOTES } from "./registry-release-notes.tsx";
@@ -418,6 +419,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UC_GUARD_BLOCK,
   ...UC_MCP_CONFIRM,
   ...UC_MCP_IMPORT,
+  ...UC_PASTE_CHIP,
   ...SAC,
   {
     id: "U2-01",

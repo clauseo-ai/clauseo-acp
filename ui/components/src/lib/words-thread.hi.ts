@@ -204,6 +204,12 @@ export const HI = {
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",
   "Papers for this question": "इस प्रश्न के दस्तावेज़",
   "Remove {title}": "{title} हटाएँ",
+  // a long paste, as a chip on the composer's well: its name, its size in words under it, and its remove button
+  // (UC-256 to UC-259, Hindi provisional)
+  "Pasted text": "चिपकाया गया टेक्स्ट",
+  "1 word": "1 शब्द",
+  "{count} words": "{count} शब्द",
+  "Remove pasted text": "चिपकाया गया टेक्स्ट हटाएँ",
   // the composer's `/` menu, the agent's commands, named for assistive technology
   Commands: "कमांड",
   // and said politely as the menu opens, for a screen reader
