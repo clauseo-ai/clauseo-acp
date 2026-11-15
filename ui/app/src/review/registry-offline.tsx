@@ -129,7 +129,7 @@ const folderStop = (code: ErrorCode, key: Parameters<typeof errorWords>[0]): Ent
     id: `U3-err-${code}`,
     words: errorWords(key),
 /** agent.answer_failed is never a send's refusal either: Claude's stop line under the answer so far, with Try again
- * and never Restart. ChatGPT's, an agent's by its name and the nameless line are U6F-28 to U6F-30. */
+ * and never Restart. ChatGPT's, an agent's by its name and the nameless line are UC-359 to UC-361. */
 const ANSWER_FAILED: Entry[] = [
   {
     id: "U3-err-agent.answer_failed",
