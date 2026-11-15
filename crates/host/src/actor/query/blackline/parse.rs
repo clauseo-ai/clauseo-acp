@@ -15,10 +15,10 @@
 //!   starts with `{` is the view's own (`{stet ...}`, `{summary: ...}`, `{warning ...}`,
 //!   `{section 1 ends: ...}`, `{position: ...}`), and everything after `{appendix}` (the
 //!   notes and comments the page cites) is skipped;
-//! - what a tracked row or cell is: `{row inserted #11 R}` or `{row deleted …}` on a row, and
-//!   `{cell inserted …}` or `{cell deleted …}` on a cell's first block, whose paragraphs show no
-//!   change of their own: each of them is `added` (all its text inserted) or `removed` (all
-//!   deleted), in nested tables too; another row or cell word (`{cell merged …}`) gives
+//! - what a tracked row or cell is: `{row inserted #11 R}` or `{row deleted …}` on a row,
+//!   and `{cell inserted …}` or `{cell deleted …}` on a cell's first block, whose paragraphs
+//!   show no change of their own: each of them is `added` (all its text inserted) or `removed`
+//!   (all deleted), in nested tables too; another row or cell word (`{cell merged …}`) gives
 //!   [`BlacklineNotice::MayDiffer`];
 //! - how tables nest: a table inside a cell is a `t` line inside the outer table, tagged `{+}`
 //!   when it is not the cell's first block, with its own rows and its own `{/table}`. Each
