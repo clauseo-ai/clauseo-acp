@@ -218,6 +218,30 @@ pub(crate) fn writable(
     Ok(true)
 }
 
+/// Whether `path` meets the other kind of entry in the folder: a folder where the file goes, or
+/// a regular file where one of its folders goes. A link, or nothing, on the way is no clash
+/// ([`writable`] refuses a link).
+pub(crate) fn clash(folder: &Path, path: &MatterPath) -> Result<bool, Error> {
+    let mut at = folder.to_owned();
+    let mut parts = path.as_str().split('/').peekable();
+    while let Some(part) = parts.next() {
+        at.push(part);
+        let kind = match std::fs::symlink_metadata(&at) {
+            Ok(metadata) => metadata.file_type(),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(err) => return Err(Error::io("stat", &at, err)),
+        };
+        if kind.is_symlink() {
+            return Ok(false);
+        }
+        let last = parts.peek().is_none();
+        if (last && kind.is_dir()) || (!last && kind.is_file()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Carries out `ops` so that a failure while writing changes nothing, and a deletion never
 /// removes a file just written:
 ///

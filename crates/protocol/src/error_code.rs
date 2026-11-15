@@ -414,6 +414,9 @@ error_codes! {
         made a skill pack: it could not be read, it is over 5,000,000 bytes or 200 files, or it \
         breaks a skill pack rule (no name or description in its `SKILL.md`, a script while \
         scripts are off, and the like); nothing was added.";
+    MatterFileFolderClash = "matter.file_folder_clash", retryable: false, meaning: "A restore \
+        of chosen files names a file whose name is now a folder, or one of whose folders is now \
+        a file, so nothing was restored or written.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

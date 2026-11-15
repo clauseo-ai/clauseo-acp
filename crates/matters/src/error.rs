@@ -96,6 +96,14 @@ pub enum Error {
     /// A restore of chosen files names none (`command.invalid`).
     #[error("the restore names no file")]
     NoFilesChosen,
+    /// A restore of chosen files names a file whose name the folder now holds as a folder, or
+    /// one of whose folders the folder now holds as a file (`matter.file_folder_clash`). Nothing
+    /// was written. A whole-matter restore keeps such a file instead (its plan's `kept`).
+    #[error("{path} is now a folder, or one of its folders is now a file")]
+    FileFolderClash {
+        /// The chosen file.
+        path: MatterPath,
+    },
     /// [`Matter::create`](crate::Matter::create) was given a folder that already exists
     /// (`command.invalid`); an existing folder is imported instead.
     #[error("{} already exists; import it instead", folder.display())]
@@ -231,6 +239,7 @@ impl Error {
             Self::FileLocked { .. } => ErrorCode::MatterFileLocked,
             Self::ChangedSince { .. } => ErrorCode::WordRevisionsStale,
             Self::NotVersioned { .. } => ErrorCode::WordEditFailed,
+            Self::FileFolderClash { .. } => ErrorCode::MatterFileFolderClash,
             Self::UnknownCheckpoint { .. }
             | Self::DuplicateCheckpoint { .. }
             | Self::MissingDecision { .. }

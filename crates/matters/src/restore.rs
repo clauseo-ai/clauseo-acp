@@ -242,7 +242,8 @@ fn chosen(files: RestoreFiles<'_>) -> Result<Option<BTreeSet<&str>>, Error> {
 /// The plan: [`draft`], then each candidate checked against the file system. A candidate is
 /// kept, never written, when its name is excluded now, its version is larger than today's cap,
 /// [`writable`] refuses it, or the folder holds it only spelled otherwise (writing would
-/// replace that other file).
+/// replace that other file). A chosen candidate that meets a folder where the file goes, or a
+/// file where one of its folders goes, refuses the restore (`FileFolderClash`).
 fn plan(
     core: &Core,
     folder: &Path,
@@ -281,6 +282,13 @@ fn plan(
         }
     }
     for candidate in draft.candidates {
+        // A chosen file meeting a folder of its name, or a file where its folder goes, is
+        // refused: the lawyer named it, so keeping it silently would restore nothing.
+        if chosen.is_some() && writeback::clash(folder, &candidate.path)? {
+            return Err(Error::FileFolderClash {
+                path: candidate.path,
+            });
+        }
         let size = core.size_of(candidate.path.as_str(), candidate.blob)?;
         // A name the folder holds only spelled otherwise, by the rule undo and `apply` use
         // (a restore deletes nothing, so no write is let through as one it deletes).

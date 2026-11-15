@@ -252,6 +252,10 @@ fn mcp_failures() -> Vec<DomainEvent> {
             ErrorCode::BlacklineFormatUnknown,
             "the view is not in the stet 1 format",
         ),
+        failed(
+            ErrorCode::MatterFileFolderClash,
+            "a chosen file's name is now a folder",
+        ),
     ]
 }
 

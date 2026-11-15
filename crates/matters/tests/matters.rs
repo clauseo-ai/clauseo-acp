@@ -150,3 +150,7 @@ mod devanagari;
 #[cfg(windows)]
 #[path = "matters/word_no_owner.rs"]
 mod word_no_owner;
+
+#[cfg(test)]
+#[path = "matters/restore_one.rs"]
+mod restore_one;
