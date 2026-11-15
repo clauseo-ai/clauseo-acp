@@ -14,7 +14,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 TARGETS=(acp_stdout protocol_decode matters_objects matters_read store_read settings_parse
-  reducer_snapshot)
+  reducer_snapshot zip_marks)
 failures=0
 
 fail() {

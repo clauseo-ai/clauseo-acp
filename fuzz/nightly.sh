@@ -25,7 +25,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 ALL=(acp_stdout protocol_decode matters_objects matters_read store_read settings_parse
-  reducer_snapshot)
+  reducer_snapshot zip_marks)
 BIN_DIR=target/x86_64-unknown-linux-gnu/release
 OUT=out
 MINIMISE_SECONDS=300
@@ -56,6 +56,7 @@ flags() {
     store_read) echo "-max_len=65536 -timeout=30" ;;
     settings_parse) echo "-max_len=8192 -timeout=30 -dict=dict/json.dict" ;;
     reducer_snapshot) echo "-max_len=65536 -timeout=30" ;;
+    zip_marks) echo "-max_len=65536 -timeout=30" ;;
     *) return 1 ;;
   esac
 }
