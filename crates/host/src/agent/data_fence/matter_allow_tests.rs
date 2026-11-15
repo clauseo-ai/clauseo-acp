@@ -41,8 +41,11 @@ struct Mac {
     root: PathBuf,
 }
 
-/// The launch of [`Mac`] under `root`.
-fn mac(root: &Path) -> Mac {
+/// The launch of [`Mac`] under `root`, with the links out of the matter when `links`. The
+/// matter's spellings are set as if its link walk passed (`readable_matter` gives none for a
+/// matter with links out: `every_matter_rule_loads_and_names_a_path_checked_command`), so the
+/// port can show what the path check does to a link if one appears after the launch.
+fn mac(root: &Path, links: bool) -> Mac {
     let (mut deny, _, _) = laptop(root, 1, 60, "clauseo-lawyer");
     let real = root.join("Matters").join(MATTER);
     let outside = root.join("outside");
@@ -63,8 +66,10 @@ fn mac(root: &Path) -> Mac {
     }
     crate::write::create_dir_all(&outside).unwrap();
     crate::write::write_file(&outside.join("secret.txt"), b"outside secret\n").unwrap();
-    crate::write::symlink(&outside, &real.join("link-out")).unwrap();
-    crate::write::symlink(&outside.join("secret.txt"), &real.join("link-file")).unwrap();
+    if links {
+        crate::write::symlink(&outside, &real.join("link-out")).unwrap();
+        crate::write::symlink(&outside.join("secret.txt"), &real.join("link-file")).unwrap();
+    }
     crate::write::symlink(&root.join("Matters"), &root.join("Clients")).unwrap();
     let real = dunce::canonicalize(&real).unwrap();
     let stored = root.join("Clients").join(MATTER);
@@ -355,14 +360,15 @@ fn protected(mac: &Mac) -> Vec<String> {
 
 /// Every matter rule loads as Claude Code reads it, ends in no odd backslash run and starts
 /// with a command whose paths Claude Code checks (`W_r`); a pipe tail is the command and ` *`.
-/// None before the launch has the matter, and only the pipe tails when the matter holds
-/// `<data>`. And the growth.
+/// None at all, pipe tails included, before the launch has the matter, when the matter holds
+/// `<data>`, when a denied place lies in it (`LaunchDeny::denies_inside`), and when a link
+/// leads out of it (`readable_matter`). And the growth.
 #[test]
 fn every_matter_rule_loads_and_names_a_path_checked_command() {
     assert!(MATTER_BASH.iter().all(|c| PATH_CHECKED_BASH.contains(c)));
     assert!(PIPE_TAILS.iter().all(|c| MATTER_BASH.contains(c)));
     let dir = TempDir::new("matter-allow-load");
-    let mac = mac(dir.path());
+    let mac = mac(dir.path(), true);
     let rules = matter_shell_allow_rules(&mac.deny, false);
     for rule in &rules {
         let (tool, content) = parse(rule).unwrap_or_else(|why| panic!("{why}: {rule}"));
@@ -388,8 +394,28 @@ fn every_matter_rule_loads_and_names_a_path_checked_command() {
         matter: vec![mac.root.clone()],
         ..mac.deny.clone()
     };
-    let tails: Vec<String> = PIPE_TAILS.iter().map(|c| format!("Bash({c} *)")).collect();
-    assert_eq!(matter_shell_allow_rules(&holding, false), tails);
+    assert_eq!(
+        matter_shell_allow_rules(&holding, false),
+        Vec::<String>::new()
+    );
+    let real = PathBuf::from(&mac.matter);
+    assert!(holding.denies_inside(&[mac.root.as_path()]));
+    assert!(!mac.deny.denies_inside(&[real.as_path()]));
+    let inside = LaunchDeny {
+        spellings: vec![real.join("data")],
+        ..mac.deny.clone()
+    };
+    assert!(inside.denies_inside(&[real.as_path()]));
+    assert_eq!(
+        matter_shell_allow_rules(&inside, false),
+        Vec::<String>::new()
+    );
+    let readable = crate::agent::data_fence::readable_matter(&real, Path::new(&mac.stored));
+    assert_eq!(
+        readable,
+        Vec::<PathBuf>::new(),
+        "a link leads out of this matter"
+    );
     let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
     let before = claude_allow_rules_on(&none, false);
     eprintln!(
@@ -411,7 +437,7 @@ fn every_matter_rule_loads_and_names_a_path_checked_command() {
 #[test]
 fn reading_the_matter_skips_the_classifiers() {
     let dir = TempDir::new("matter-allow-reads");
-    let mac = mac(dir.path());
+    let mac = mac(dir.path(), true);
     let reads = reads(&mac);
     assert!(reads.len() > 100, "{}", reads.len());
     for command in &reads {
@@ -425,7 +451,7 @@ fn reading_the_matter_skips_the_classifiers() {
 #[test]
 fn outside_paths_siblings_and_writes_still_go_to_a_classifier() {
     let dir = TempDir::new("matter-allow-judged");
-    let mac = mac(dir.path());
+    let mac = mac(dir.path(), true);
     for command in judged(&mac).into_iter().chain(matter_writes(&mac)) {
         assert_eq!(
             mac_verdict(&mac, &command),
@@ -441,7 +467,7 @@ fn outside_paths_siblings_and_writes_still_go_to_a_classifier() {
 #[test]
 fn escapes_out_of_the_matter_are_caught_by_no_rule_or_the_path_check() {
     let dir = TempDir::new("matter-allow-escapes");
-    let mac = mac(dir.path());
+    let mac = mac(dir.path(), true);
     for (command, caught) in escapes(&mac) {
         let split = parts("Bash", &command).unwrap_or_default();
         let ruled = !split.is_empty() && split.iter().all(|part| mac.allow.denies("Bash", part));
@@ -460,7 +486,7 @@ fn escapes_out_of_the_matter_are_caught_by_no_rule_or_the_path_check() {
 #[test]
 fn every_deny_still_wins_beside_the_matter() {
     let dir = TempDir::new("matter-allow-deny");
-    let mac = mac(dir.path());
+    let mac = mac(dir.path(), true);
     for command in protected(&mac) {
         assert_eq!(mac_verdict(&mac, &command), Verdict::Denied, "{command}");
     }

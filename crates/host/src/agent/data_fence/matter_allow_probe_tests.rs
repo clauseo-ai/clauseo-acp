@@ -1,13 +1,16 @@
 //! The matter rules' cases files for `scripts/claude-rule-probe` (`matter_allow_tests.rs`):
 //! the pinned binary's verdicts on the port's cases, in Bash and in PowerShell 7.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
 use super::super::super::matter_shell_allow_rules;
 use super::{Mac, Verdict, escapes, judged, mac, mac_verdict, protected, reads};
-use crate::agent::data_fence::LaunchDeny;
+use crate::agent::data_fence::big_folder::laptop;
+use crate::agent::data_fence::{
+    LaunchDeny, claude_allow_rules_on, claude_deny_rules_on, rule_path,
+};
 
 /// What a case must show: whether it ran and whether it sent a local classifier request
 /// (`None`: reported only), and whether a deny rule refused it (`None`: not checked).
@@ -35,11 +38,17 @@ fn case(name: &str, tool: &str, command: &str, (ran, classifier, denied): Want) 
         "ran": ran, "classifier": classifier})
 }
 
-/// The Bash cases: the reads (a sample), what stays judged, the protected places, the escapes,
-/// and stetdoc named bare (Clauseo's runs, not the matter's planted one: `PROBE_VERBOSE`).
+/// The Bash cases: the reads (a sample), what stays judged, the protected places, the escapes
+/// (but those through a link), and stetdoc named bare (Clauseo's runs, not the matter's
+/// planted one: `PROBE_VERBOSE`).
 fn bash_cases(mac: &Mac) -> Vec<(String, String, Verdict)> {
     let mut cases = Vec::new();
+    // This matter has no links (a launch gives one with a link out no rules): the link cases
+    // are in the glob files.
     let mut push = |kind: &str, command: String| {
+        if command.contains("/link-") {
+            return;
+        }
         let verdict = mac_verdict(mac, &command);
         cases.push((format!("{kind} ({verdict:?})"), command, verdict));
     };
@@ -106,11 +115,6 @@ fn powershell_cases(mac: &Mac) -> Vec<(&'static str, String, Want)> {
             judged,
         ),
         (
-            "escape, link",
-            format!(r#"Get-ChildItem "{m}/link-out"; stetdoc --help"#),
-            judged,
-        ),
-        (
             "escape, outside",
             format!(r#"Get-Content "{m}/memo.txt" {o}/secret.txt; stetdoc --help"#),
             judged,
@@ -147,7 +151,9 @@ fn powershell_cases(mac: &Mac) -> Vec<(&'static str, String, Want)> {
 /// server verdict, so what no rule allows asks the local classifier), `baseline.json` (flagged,
 /// without the matter rules: the reads are refused), `grep.json` (flagged, with a `grep` rule of
 /// the matter's shape: `--context`'s escape) and `powershell.json` (flagged, PowerShell 7 with
-/// the matter's PowerShell rules for this path and the Windows stetdoc rules).
+/// the matter's PowerShell rules for this path and the Windows stetdoc rules). Its matter has no
+/// link out (the launch would give it no rules); the review's glob lines are in
+/// [`write_glob_files`]'s files.
 #[test]
 fn mac_probe_cases_for_the_pinned_binary() {
     let Some(out) = std::env::var_os("CLAUSEO_MAC_MATTER_PROBE_OUT").map(PathBuf::from) else {
@@ -156,7 +162,7 @@ fn mac_probe_cases_for_the_pinned_binary() {
     let root = out.join("root");
     crate::write::remove_dir_all(&root).unwrap();
     crate::write::create_dir_all(&root).unwrap();
-    let mac = mac(&root);
+    let mac = mac(&root, false);
     let bin = root.join("bin");
     crate::write::create_dir_all(&bin).unwrap();
     for (dir, says) in [
@@ -238,6 +244,7 @@ fn mac_probe_cases_for_the_pinned_binary() {
         .map(|(kind, command, want)| case(kind, "PowerShell", command, *want))
         .collect();
     files.push(("powershell.json", Some("flagged"), &powershell, ps_cases));
+    write_glob_files(&out);
     for (name, verdict, rules, list) in files {
         let mut env = json!({"PATH": path});
         if name == "powershell.json" {
@@ -249,5 +256,96 @@ fn mac_probe_cases_for_the_pinned_binary() {
         let spec = json!({"settings": settings, "expect_skipped": [], "server_verdict": verdict,
             "cwd": mac.matter, "env": env, "cases": list});
         crate::write::write_file(&out.join(name), spec.to_string().as_bytes()).unwrap();
+    }
+}
+
+/// The review's glob lines (#1065, H1 and H2), each in two files: `glob-<h>.json` with the
+/// launch's real rules (none for these matters: the classifier judges) and
+/// `glob-<h>-before.json` with the matter rules forced as f7adde050 wrote them (reported only).
+/// H1: the lawyer's home as the matter, `<data>` inside it. H2: a link in the matter to
+/// `<data>`, and a file the matter's `Read` deny names.
+fn write_glob_files(out: &Path) {
+    let h1 = out.join("root/h1");
+    let (h1_deny, _, _) = laptop(&h1, 2, 3, "clauseo-lawyer");
+    let h2 = out.join("root/h2");
+    let (h2_deny, _, _) = laptop(&h2, 3, 3, "clauseo-lawyer");
+    let linked = h2.join("Linked Matter");
+    crate::write::create_dir_all(&linked).unwrap();
+    crate::write::write_file(&linked.join("priv.txt"), b"PRIVATE").unwrap();
+    crate::write::symlink(&h2.join("data"), &linked.join("link")).unwrap();
+    for data in [h1.join("data"), h2.join("data")] {
+        crate::write::write_file(&data.join("settings.json"), b"{\"secret\":1}").unwrap();
+    }
+    let (h, l) = (h1.display().to_string(), linked.display().to_string());
+    let refused = (Some(false), Some(false), Some(false));
+    let denied = (Some(false), Some(false), Some(true));
+    let fixtures = [
+        (
+            "h1",
+            &h1,
+            h1_deny,
+            vec![
+                ("H1", "head data/set*.json".to_owned(), refused),
+                ("H1", format!(r#"tail -n 5 "{h}"/data/*.json"#), refused),
+                ("H1", format!(r#"head "{h}"/dat?/settings.json"#), refused),
+                (
+                    "H1 plain (denied)",
+                    format!(r#"head "{h}/data/settings.json""#),
+                    denied,
+                ),
+            ],
+        ),
+        (
+            "h2",
+            &linked,
+            h2_deny,
+            vec![
+                ("H2", format!(r#"cat "{l}"/*/settings.json"#), refused),
+                ("H2", format!(r#"tail "{l}"/li?k/settings.json"#), refused),
+                ("H2", "head */settings.json".to_owned(), refused),
+                ("H2", format!(r#"ls "{l}"/*/"#), refused),
+                ("H2", format!(r#"cat "{l}"/pri*.txt"#), refused),
+                (
+                    "H2 plain (denied)",
+                    format!(r#"cat "{l}/priv.txt""#),
+                    denied,
+                ),
+            ],
+        ),
+    ];
+    for (name, matter, mut deny, cases) in fixtures {
+        deny.matter = crate::agent::data_fence::readable_matter(matter, matter);
+        let after = claude_allow_rules_on(&deny, false);
+        let forced = LaunchDeny {
+            spellings: Vec::new(),
+            matter: vec![matter.clone()],
+            ..deny.clone()
+        };
+        let mut before = after.clone();
+        before.extend(matter_shell_allow_rules(&forced, false));
+        let mut denies = claude_deny_rules_on(&deny, false);
+        denies.push(format!("Read({}/priv.txt)", rule_path(&l, false)));
+        for (file, allow, forced_rules) in [
+            (name.to_owned(), after, false),
+            (format!("{name}-before"), before, true),
+        ] {
+            let list: Vec<Value> = cases
+                .iter()
+                .map(|(kind, command, want)| {
+                    let plain = kind.ends_with("(denied)");
+                    let want = if forced_rules && !plain {
+                        (None, None, None)
+                    } else {
+                        *want
+                    };
+                    case(kind, "Bash", command, want)
+                })
+                .collect();
+            let settings = json!({"permissions": {"deny": denies, "allow": allow}});
+            let spec = json!({"settings": settings, "expect_skipped": [],
+                "server_verdict": "flagged", "cwd": matter, "cases": list});
+            let path = out.join(format!("glob-{file}.json"));
+            crate::write::write_file(&path, spec.to_string().as_bytes()).unwrap();
+        }
     }
 }

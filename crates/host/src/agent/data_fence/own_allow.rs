@@ -66,13 +66,18 @@
 //! the Read tool, which reads the working folder with no classifier, and the same checks keep
 //! them narrow: a deny rule wins, every part of a line must be allowed, a redirection asks, and
 //! so does any path argument outside the working folders, a `..` step or a link out resolved.
-//! A command a rule allows still runs in the sandbox on macOS. A link out of the matter that
-//! `ls -L` walks is the residual the own rules share (after launch).
+//! A command a rule allows still runs in the sandbox on macOS. Claude Code checks only the folder
+//! before a glob (`head <matter>/*/x`), so the matter gets no rules at all when a glob in it could
+//! reach a place Claude may not read: when it holds `<data>` (or lies in it), when a denied place
+//! lies in it (`LaunchDeny::denies_inside`), or when a link in it leads out
+//! (`super::readable_matter`). The residual: a link made in the matter after the launch, which a
+//! classifier must pass first (making one is a write no rule allows).
 
 use std::path::{Path, PathBuf};
 
 use super::{Piece, join, parse, render, text};
 use crate::agent::data_fence::LaunchDeny;
+use crate::agent::data_fence::launch::path_holds;
 
 /// The commands that list or read, in Bash: each in Claude Code's table of the commands whose
 /// paths it checks. In 2.1.293 (read from `claude-agent-sdk-linux-x64` 0.3.293's
@@ -152,47 +157,35 @@ pub(crate) fn own_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<Str
 /// The allow rules for reading the session's matter folder (the module doc's last part):
 /// [`MATTER_BASH`] before each of [`LaunchDeny::matter`]'s spellings in Bash and, on Windows
 /// (`windows`), [`POWERSHELL`] before its `C:\…` and `C:/…` spellings, in the own rules'
-/// shape and spellings; and [`PIPE_TAILS`] with any arguments. None before the launch prep has
-/// the matter, and none but the pipe tails when the matter holds a spelling of `<data>` or lies
-/// in one.
+/// shape and spellings; and [`PIPE_TAILS`] with any arguments. None at all (the classifier
+/// judges, as before) when the launch has no matter spelling for them (before the launch prep,
+/// or a link leads out of the matter, `super::readable_matter`), when the matter holds a
+/// spelling of `<data>` or lies in one, or when a place Claude may not read lies in it
+/// ([`LaunchDeny::denies_inside`]): Claude Code checks only the folder before a glob, so
+/// `head <matter>/*/settings.json` would read it (the security review of #1065, H1, H2).
 pub(crate) fn matter_shell_allow_rules(deny: &LaunchDeny, windows: bool) -> Vec<String> {
     let mut rules = Vec::new();
-    if deny.matter.is_empty() {
-        return rules;
-    }
-    let near_data = deny.matter.iter().any(|matter| {
+    let matter: Vec<&Path> = deny.matter.iter().map(PathBuf::as_path).collect();
+    let near_data = matter.iter().any(|matter| {
         deny.spellings
             .iter()
-            .any(|data| holds(data, matter, windows) || holds(matter, data, windows))
+            .any(|data| path_holds(data, matter, windows) || path_holds(matter, data, windows))
     });
-    if !near_data {
-        let boundary: &[&str] = if windows { &BOUNDARY } else { &UNIX_BOUNDARY };
-        for lead in leads(&deny.matter, windows) {
-            let path = text(&lead.text);
-            path_rules("Bash", &MATTER_BASH, &path, boundary, &mut rules);
-            if windows && lead.powershell {
-                path_rules("PowerShell", &POWERSHELL, &path, boundary, &mut rules);
-            }
+    if matter.is_empty() || near_data || deny.denies_inside(&matter) {
+        return rules;
+    }
+    let boundary: &[&str] = if windows { &BOUNDARY } else { &UNIX_BOUNDARY };
+    for lead in leads(&deny.matter, windows) {
+        let path = text(&lead.text);
+        path_rules("Bash", &MATTER_BASH, &path, boundary, &mut rules);
+        if windows && lead.powershell {
+            path_rules("PowerShell", &POWERSHELL, &path, boundary, &mut rules);
         }
     }
     for command in PIPE_TAILS {
         push_rule(&mut rules, format!("Bash({command} *)"));
     }
     rules
-}
-
-/// Whether `outer` is `inner` or holds it; on Windows (`windows`) by text, ignoring case and
-/// which separator.
-fn holds(outer: &Path, inner: &Path, windows: bool) -> bool {
-    if !windows {
-        return inner.starts_with(outer);
-    }
-    let fold = |path: &Path| {
-        let text = path.to_string_lossy().to_lowercase().replace('/', "\\");
-        text.trim_end_matches('\\').to_owned()
-    };
-    let (outer, inner) = (fold(outer), fold(inner));
-    inner == outer || inner.starts_with(&format!("{outer}\\"))
 }
 
 /// The literal leads of `spellings`: off Windows each spelling with `/`, on Windows (`windows`)

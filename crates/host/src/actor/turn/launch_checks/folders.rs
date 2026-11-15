@@ -24,7 +24,8 @@ fn data_spellings(data: &Path) -> Vec<PathBuf> {
 /// session's own ([`own_folders`]), nor, for Claude, a `tool-results` folder in its project for
 /// the matter folder (`stored`, and the real path the agent works in); and the own work and
 /// notes folders, which its allow rules let it list and read (`data_fence::own_allow_rules`), and
-/// the matter folder's spellings, which they let it read too.
+/// the matter folder's spellings, which they let it read too unless a link leads out of it
+/// (`data_fence::readable_matter`).
 pub(super) fn launch_deny(
     run: &RunFolders,
     stored: &Path,
@@ -38,9 +39,7 @@ pub(super) fn launch_deny(
     });
     let mut deny = data_fence::launch_deny(data_spellings(data), data, &own, &projects);
     deny.own_reads = data_fence::own_reads(data, &[&run.work, &run.notes]);
-    deny.matter = std::iter::once(cwd.clone())
-        .chain((cwd != stored).then(|| stored.to_owned()))
-        .collect();
+    deny.matter = data_fence::readable_matter(&cwd, stored);
     deny
 }
 

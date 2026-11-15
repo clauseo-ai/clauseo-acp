@@ -95,7 +95,8 @@ pub(crate) struct LaunchDeny {
     pub(crate) own_reads: Vec<String>,
     /// The matter folder: the real path Claude works in (`agent::session_folder`), then the
     /// path as stored when that differs. Claude may list and read it with no classifier
-    /// (`super::matter_shell_allow_rules`). None before the launch prep has it.
+    /// (`super::matter_shell_allow_rules`). None before the launch prep has it, and none when a
+    /// link leads out of it (`super::readable_matter`).
     pub(crate) matter: Vec<PathBuf>,
 }
 
@@ -123,6 +124,33 @@ impl LaunchDeny {
             matter: Vec::new(),
         }
     }
+
+    /// Whether a place Claude may not read lies inside a spelling of `matter`. A stand-in until
+    /// #1085 lands its own `LaunchDeny::denies_inside` (with the fenced matters and the folders
+    /// its fence could not list, under `matter_fence`'s key folding), which replaces this one:
+    /// on main the only places Claude's `Read` rules deny are `<data>`'s spellings and the
+    /// targets under them, so this asks whether a spelling of `<data>` lies in the matter.
+    pub(crate) fn denies_inside(&self, matter: &[&Path]) -> bool {
+        matter.iter().any(|matter| {
+            self.spellings
+                .iter()
+                .any(|data| path_holds(matter, data, cfg!(windows)))
+        })
+    }
+}
+
+/// Whether `outer` is `inner` or holds it; on Windows (`windows`) by text, ignoring case and
+/// which separator.
+pub(crate) fn path_holds(outer: &Path, inner: &Path, windows: bool) -> bool {
+    if !windows {
+        return inner.starts_with(outer);
+    }
+    let fold = |path: &Path| {
+        let text = path.to_string_lossy().to_lowercase().replace('/', "\\");
+        text.trim_end_matches('\\').to_owned()
+    };
+    let (outer, inner) = (fold(outer), fold(inner));
+    inner == outer || inner.starts_with(&format!("{outer}\\"))
 }
 
 /// The deny rules of a launch with `spellings` of `<data>` at `data`, leaving out `own`, the

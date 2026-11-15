@@ -685,8 +685,24 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     sandbox's allows of those still go to the classifier. Another letter case is in no Bash rule
     (Claude Code matches Bash rules by case); a PowerShell rule matches it, and on Windows it is
     the same folder. Forced ask's `Bash` and `PowerShell` ask rules beat these allows.
-  - **Residual.** A link out of the matter walked by `ls -L` (as for the own folders); after
-    launch.
+  - **Globs (the security review of #1065).** Claude Code checks only the folder before a glob,
+    and a `Read` deny does not catch what the glob reaches. So with the rules, `head
+    data/ai.cl*/settings.json` in a home folder chosen as the matter (H1, through the bare
+    `head *`) and `cat <m>/*/settings.json` through a link in the matter to `<data>` (H2)
+    printed the file, and `cat <m>/pri*.txt` passed a deny of `<m>/priv.txt`. The matter now
+    gets no rules at all, the pipe tails included, when (i) it holds `<data>` or lies in it,
+    (ii) a place Claude may not read lies in it (`LaunchDeny::denies_inside`; #1085's, with the
+    fenced matters, replaces the stand-in that asks only about `<data>`), or (iii) a link,
+    junction or folder link in it leads outside it, or its walk passes 50,000 entries or fails
+    (`data_fence/matter_links.rs`, one walk at the launch that never follows a link). Then the
+    classifier judges, as before. No ask rules for glob characters: they would put a card in
+    front of the lawyer.
+    `permissions.blockReadsOutsideWorkingDirectories` was tried as a second layer and dropped:
+    with it on, the H2 lines still ran (4 of 4), and the Read tool was refused a folder outside
+    the working folders that a `Read` allow names (the browser's downloads).
+  - **Residual.** A link made in the matter after the launch, which a classifier must pass first
+    (making one is a write no rule allows); on macOS the sandbox's `denyRead` still holds behind
+    it. A hard link to a file outside, which the Read tool reads the same way.
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the

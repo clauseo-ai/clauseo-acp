@@ -121,6 +121,10 @@ reads"). The files' `PATH` is the one the test ran with, so put `pwsh` on it fir
 - `powershell.json`: flagged, PowerShell 7 with the matter's PowerShell rules for this path and
   the Windows stetdoc rules. A mixed line (`Get-ChildItem <matter>; stetdoc --help`) runs; a
   line read-only as a whole is still refused (the server's); `./stetdoc` matches no rule.
+- `glob-h1.json`, `glob-h2.json`: the security review's glob lines (#1065, H1: the home folder
+  as the matter, `<data>` inside it; H2: a link in the matter to `<data>`, and a glob past a
+  `Read` deny), with the launch's real rules: the matter gets none, so each is refused. The
+  `-before` files force the matter rules as f7adde050 wrote them (reported only).
 
 ```sh
 ulimit -f 1048576  # a case that writes where it reads must not fill the disk
