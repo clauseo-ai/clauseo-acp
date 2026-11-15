@@ -1,6 +1,7 @@
-//! The two stetdoc runs of a Word blackline, off the actor: `stetdoc compare` writes the
-//! redline of `old.docx` and `new.docx`, then `stetdoc view --all --json` prints it, which
-//! `parse.rs` reads.
+//! The stetdoc runs of a Word blackline, off the actor: `stetdoc compare` writes the redline of
+//! `old.docx` and `new.docx`, then `stetdoc view --all --json` prints it, which `parse.rs`
+//! reads; then the runs that check it (`cross.rs`: `stetdoc check` on the redline and a view of
+//! each version), whose failures leave the blackline with a notice, never fail it.
 //!
 //! It answers: how stetdoc is started (through the host's launcher, as every child is: the
 //! absolute program, no shell, an environment of its own (`stetdoc_env`: nothing off Windows;
@@ -114,29 +115,35 @@ pub(crate) async fn blackline<T: Timer>(
         (Ok(old), Ok(new)) => old != new,
         _ => true,
     };
+    cross::cross_check(launcher, timer, stetdoc, dir, &mut read, differ).await;
     note_a_silent_difference(&mut read.blackline, differ);
     Ok(read)
 }
 
 /// Adds [`BlacklineNotice::MayDiffer`] when the two files differ (`differ`) but the blackline
-/// shows no change and no notice says part of it may be missing: stetdoc marks no change for
-/// some differences (a link's address with the same text), and "no changes" must never stand
-/// for two different files.
+/// shows no change and no notice says part of it may be missing or names what changed: stetdoc
+/// 0.9.3's compare marks no change for some differences (a table cell's shading, a table's or a
+/// row's format), and "no changes" must never stand for two different files.
 pub(crate) fn note_a_silent_difference(blackline: &mut WordBlackline, differ: bool) {
     let shown = blackline
         .paragraphs
         .iter()
         .any(|paragraph| paragraph.change != ParagraphChange::Same);
-    // Only a notice that already says something may be missing makes it needless; one about
-    // something else (hidden text, numbers) does not say the versions differ.
-    let said = blackline.notices.iter().any(|notice| {
-        matches!(
-            notice,
-            BlacklineNotice::MayDiffer
-                | BlacklineNotice::PartNotShown
-                | BlacklineNotice::ChangesOutsideText
-        )
-    });
+    // Only a notice that already says something may be missing, or names what changed, makes
+    // it needless; one about something else (hidden text, numbers) does not say the versions
+    // differ.
+    let said = !blackline.changed_links.is_empty()
+        || blackline.notices.iter().any(|notice| {
+            matches!(
+                notice,
+                BlacklineNotice::MayDiffer
+                    | BlacklineNotice::PartNotShown
+                    | BlacklineNotice::ChangesOutsideText
+                    | BlacklineNotice::CommentChanged
+                    | BlacklineNotice::TextBoxChanged
+                    | BlacklineNotice::CellFormatChanged
+            )
+        });
     if differ && !shown && !said {
         blackline.notices.push(BlacklineNotice::MayDiffer);
     }
@@ -330,6 +337,8 @@ pub(crate) fn refusal_code(code: &str, message: &str) -> ErrorCode {
         _ => ErrorCode::BlacklineFailed,
     }
 }
+
+mod cross;
 
 #[cfg(test)]
 mod tests;

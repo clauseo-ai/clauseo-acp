@@ -35,9 +35,36 @@ unit tests (`src/actor/query/blackline/parse/tests/partial.rs`) and the host tes
   cell, removed in the new version. `compare-inner-last.json` is what `stetdoc compare --json`
   printed for them: `validation_failed`, exit 5 (stetdoc's fix comes after its PR #22).
 
+What stetdoc 0.9.3's compare does not mark, or its view does not show (`make_links.py`; read by
+`parse/ledger/tests.rs`, `parse/sides/tests.rs`, `parse/tests/forms.rs` and
+`tests/host/blackline_crossed.rs`):
+
+- `final-link-old.json`, `final-link-new.json`: `stetdoc view --all --json --mode final` of the
+  bank-details pair above; `check-link.json`: `stetdoc check --json` of its redline (no change).
+- `comment-old.docx`, `comment-new.docx`: a comment's text changes ("Check the fee with the
+  client." to "The client agreed the fee."). The compare marks nothing; `view-comment.json` lists
+  the new text after `{appendix}`. `final-comment-*.json`, `check-comment.json`.
+- `textbox-old.docx`, `textbox-new.docx`: a text box's text changes. `view-textbox.json`:
+  `{----}{#1 C}{++{textbox box "Cap of 2 million."}++}{#0 C}`, the old text not shown.
+  `final-textbox-*.json`, `check-textbox.json`.
+- `cellfmt-old.docx`, `cellfmt-new.docx`: a cell's shading changes. stetdoc 0.9.3's compare marks
+  nothing for it at all (nor for a cell's borders or alignment, a row's or a table's format), so
+  there is no view of it: the host's "may differ" for files that differ with nothing shown is all
+  that covers it.
+- `footnote-*.docx`, `header-*.docx`: only the footnote, or only the header, changes.
+  `view-footnote.json`, `view-header.json` (the body unchanged; the summary counts 2) and
+  `check-footnote.json`, `check-header.json` (ids 2 and 3, in `p3` and `p2` of their stories).
+- `props.docx`: a document that already holds tracked format changes of a table, its grid, a row,
+  a cell, a list paragraph and the last section, and a move, viewed as it is: `view-props.json`
+  (`{rev table #23 R}`, `{rev grid #24 R}`, `{rev row #22 R}`, `{rev para #25 R}`, `move to -`,
+  `move from -`; nothing for the cell's #21 or the section's #26) and `check-props.json` (all
+  eight ids, `cell_format` and `section_format` among the kinds).
+- `../check.json`: `stetdoc check --json` of the lease's redline (ids 2 to 17; 16 and 17 are its
+  footnote's).
+
 `make_docs.py` (from the stetdoc thread's repro, unchanged) made the first three pairs; it also
 writes two files for another blocker, so run it in a temporary folder. `make_more.py` makes the
-other pairs. Both are Python 3, standard library only. The views and the compare's answer came
+other pairs, and `make_links.py` (which reads both for their helpers) the ones above. Both are Python 3, standard library only. The views and the compare's answer came
 from:
 
 ```text

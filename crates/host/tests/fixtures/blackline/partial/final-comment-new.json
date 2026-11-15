@@ -1,0 +1,16 @@
+{
+  "base": "fee4d9d899fef3ac:0:fee4d9d899fef3ac",
+  "mode": "final",
+  "next": null,
+  "position": {
+    "first": "p1",
+    "last": "p2",
+    "remaining_tokens": 0,
+    "scope": "p1..p2",
+    "shown": 2,
+    "total": 2
+  },
+  "text": "{stet 1 view=body base=fee4d9d899fef3ac:0:fee4d9d899fef3ac mode=final common-style=\"Normal\" range=p1..p2}\n{summary: 1 comment · 1 section}\np1 Intro.\np2 {c0}The fee is due monthly.{/c0}\n{appendix}\n{c0 P 2026-11-01 on p2 \"The fee is due monthly.\"} The client agreed the fee.\n{position: p1..p2 of p1..p2 (2 of 2 blocks)}\n",
+  "tokens": 81,
+  "warnings": []
+}

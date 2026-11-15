@@ -1,0 +1,27 @@
+{
+  "existing": [],
+  "exit_status": 0,
+  "report": {
+    "by_code": [
+      [
+        "para_id_missing",
+        1
+      ]
+    ],
+    "findings": [
+      {
+        "block": null,
+        "class": "note",
+        "code": "para_id_missing",
+        "message": "The last paragraph of comment c0 has no paraId, so it cannot be threaded.",
+        "part": "word/comments.xml"
+      }
+    ],
+    "notes": 1,
+    "ok": true,
+    "parts": 2,
+    "unchecked": 0,
+    "violations": 0
+  },
+  "strict": false
+}

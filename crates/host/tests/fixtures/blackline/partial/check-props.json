@@ -1,0 +1,127 @@
+{
+  "existing": [
+    {
+      "author": "Reviewer",
+      "changes": [
+        {
+          "block": "t1",
+          "date": "2026-11-01T00:00:00Z",
+          "ids": [
+            23
+          ],
+          "kind": "table_format"
+        },
+        {
+          "block": "t1",
+          "date": "2026-11-01T00:00:00Z",
+          "ids": [
+            24
+          ],
+          "kind": "grid_change"
+        },
+        {
+          "block": "r1",
+          "date": "2026-11-01T00:00:00Z",
+          "ids": [
+            22
+          ],
+          "kind": "row_format"
+        },
+        {
+          "block": "r1",
+          "date": "2026-11-01T00:00:00Z",
+          "ids": [
+            21
+          ],
+          "kind": "cell_format"
+        },
+        {
+          "block": "p4",
+          "date": "2026-11-01T00:00:00Z",
+          "ids": [
+            25
+          ],
+          "kind": "paragraph_format"
+        },
+        {
+          "block": "p5",
+          "date": "2026-11-01T00:00:00Z",
+          "ids": [
+            31,
+            33
+          ],
+          "kind": "move"
+        },
+        {
+          "block": "p7",
+          "date": "2026-11-01T00:00:00Z",
+          "ids": [
+            26
+          ],
+          "kind": "section_format"
+        }
+      ],
+      "counts": [
+        [
+          "move",
+          1
+        ],
+        [
+          "paragraph_format",
+          1
+        ],
+        [
+          "section_format",
+          1
+        ],
+        [
+          "table_format",
+          1
+        ],
+        [
+          "row_format",
+          1
+        ],
+        [
+          "cell_format",
+          1
+        ],
+        [
+          "grid_change",
+          1
+        ]
+      ]
+    }
+  ],
+  "exit_status": 0,
+  "report": {
+    "by_code": [
+      [
+        "schema_unknown_attribute",
+        2
+      ]
+    ],
+    "findings": [
+      {
+        "block": "t1",
+        "class": "violation",
+        "code": "schema_unknown_attribute",
+        "message": "w:author is not an attribute of w:tblGridChange",
+        "part": "word/document.xml"
+      },
+      {
+        "block": "t1",
+        "class": "violation",
+        "code": "schema_unknown_attribute",
+        "message": "w:date is not an attribute of w:tblGridChange",
+        "part": "word/document.xml"
+      }
+    ],
+    "notes": 0,
+    "ok": false,
+    "parts": 2,
+    "unchecked": 0,
+    "violations": 2
+  },
+  "strict": false
+}

@@ -1,0 +1,16 @@
+{
+  "base": "aba4056e53af0597:0:aba4056e53af0597",
+  "mode": "final",
+  "next": null,
+  "position": {
+    "first": "p1",
+    "last": "p2",
+    "remaining_tokens": 0,
+    "scope": "p1..p2",
+    "shown": 2,
+    "total": 2
+  },
+  "text": "{stet 1 view=body base=aba4056e53af0597:0:aba4056e53af0597 mode=final common-style=\"Normal\" range=p1..p2}\n{summary: 1 section}\np1 Intro.\np2 See: {textbox box \"Cap of 1 million.\"}\n{position: p1..p2 of p1..p2 (2 of 2 blocks)}\n",
+  "tokens": 56,
+  "warnings": []
+}
