@@ -3,6 +3,7 @@
 // 0.89.1 sends them: the result in the raw output as a JSON string, and fenced in the content.
 import { expect, test } from "vitest";
 import { refusalWords } from "@clauseo/components/lib/words-refusals.hi.ts";
+import "@clauseo/components/lib/words-hi.ts";
 import { toolCall } from "../../testing/stream-script.ts";
 import type { ToolCallEntry, ToolCallStatus } from "../../transport/protocol.ts";
 import { lookedOf, refusalOf, refusalWhy, type Looked } from "./refusals.ts";
@@ -34,6 +35,10 @@ test("a safety check block reads its rule's name in plain words, never the raw t
   );
   expect(why).toBe(
     `${CHECK}: it looked like reaching files or systems Claude wasn't asked to use. ${CARRY}`,
+  );
+  // and in Hindi, once the Hindi chunk is in
+  expect(refusalWhy("hi", refused(blocked("[Unauthorized Access] x")))).toMatch(
+    /^Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया: /,
   );
   // what the row showed before: the raw text, cut at 120 characters
   expect(whyOf(refused(blocked("[Unauthorized Access] x")))).toMatch(
@@ -130,11 +135,14 @@ test("anything else is no refusal: another failure, a finished call, a task whos
   ).toBeNull();
 });
 
-test("no refusal line says I, a banned word or the agent's words for the check", () => {
+test("no refusal line says I, a banned word or the agent's words for the check; each has its Hindi", () => {
   for (const en of Object.keys(refusalWords)) {
     expect(en).not.toMatch(
       /\bI\b|[\u2013\u2014]|\b(step|git|token|session|terminal|command|safe|agent|classifier|auto mode|rule)\b/i,
     );
-    expect(refusalWords[en], en).toBeNull(); // hi: later
+    const hi = refusalWords[en]!;
+    expect(hi, en).toMatch(/।$/);
+    expect(hi, en).not.toMatch(/पेंसिल|स्याही|चरण|कदम|(^|\s)मैं(\s|$)|क्लॉड|क्लॉज़ियो/);
+    expect(hi, en).toMatch(en.startsWith("Claude") ? /^Claude / : /Clauseo/);
   }
 });
