@@ -160,6 +160,8 @@ impl Layer {
             | DomainEvent::AgentNamed(_)
             | DomainEvent::ThreadSnoozed(_)
             | DomainEvent::ThreadDone(_)
+            | DomainEvent::MatterReadAllowed(_)
+            | DomainEvent::MatterReadWithdrawn(_)
             | DomainEvent::MatterRelocated(_)
             | DomainEvent::TurnQueued(_)
             | DomainEvent::QueuedPromptEdited(_)
