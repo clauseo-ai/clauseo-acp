@@ -2309,8 +2309,9 @@ export type HostCommand =
  *  Refused while a turn or an undo holds the matter's writer (`matter.turn_running`); a
  *  folder that is not there is `matter.folder_missing`; one with no marker, an unreadable one
  *  or one naming another matter is `matter.folder_not_a_matter`; a folder import would
- *  refuse, or one that is, holds or sits inside another matter's folder, is
- *  `matter.folder_refused`. A refusal changes nothing.
+ *  refuse is `matter.folder_refused`, and one that is, holds or sits inside another
+ *  matter's folder is `matter.folder_is_matter`, `matter.folder_holds_matter` or
+ *  `matter.folder_inside_matter`, as for a new matter. A refusal changes nothing.
  */
 ({ relocate_matter: {
 	/**  The matter. */
