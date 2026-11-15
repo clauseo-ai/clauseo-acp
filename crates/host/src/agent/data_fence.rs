@@ -585,5 +585,7 @@ mod windows_names_only_tests;
 #[cfg(windows)]
 mod windows_real_tests;
 #[cfg(test)]
+mod windows_rules_tests;
+#[cfg(test)]
 mod windows_tests;
 mod words;

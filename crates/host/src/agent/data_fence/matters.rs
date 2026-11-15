@@ -89,7 +89,7 @@ pub(crate) fn other_matter_on(
 /// The innermost other matter one of `words` names by a fence path's text, `\` and `/` read
 /// alike, followed by the word's end, a separator or a quote (a word is split at spaces
 /// already, so a space in it is part of a name): a matter `Smith` is not named by `…\Smith 2\x`.
-fn named_in_words(
+pub(super) fn named_in_words(
     words: &[String],
     matters: &[(MatterId, Vec<PathBuf>)],
     insensitive: bool,
