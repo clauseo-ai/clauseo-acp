@@ -70,6 +70,8 @@ dunce = { workspace = true }
 sha2 = { workspace = true }
 # The pre-write guard's name check composes names (NFC) on macOS, as APFS compares them.
 unicode-normalization = { workspace = true }
+# The Tools confirm's shown text (config/mcp/shown.rs): which characters are written out.
+icu_properties = { workspace = true }
 # Elicitation values withheld from a turn's tool output, wiped when the turn lets them go
 # (actor/turn/withheld.rs).
 zeroize = { workspace = true }

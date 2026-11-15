@@ -81,6 +81,8 @@ export function skippedLine(lang: Lang, s: Skipped): string {
       return mw(lang, "{name}: it needs a value that isn't set on this computer.", { name });
     case "already_added":
       return mw(lang, "{name}: a tool with this name is already added.", { name });
+    // a reason from a newer Clauseo reads as the plainest one
+    case "unknown":
     case "unreadable":
       return mw(lang, "{name}: Clauseo couldn't read its settings.", { name });
     case "not_approved":

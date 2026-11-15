@@ -4066,7 +4066,7 @@ export type McpServerView = {
 
 /**
  *  Why an import left a server out. A server with more than one of these gets the first in
- *  declaration order.
+ *  declaration order. An older Clauseo reads a reason it does not know as `Unknown`.
  */
 export type McpSkipReason = 
 /**  Clauseo already has a server of this name. */
@@ -4091,7 +4091,9 @@ export type McpSkipReason =
  *  It would import, but did not fit in this import's one confirm after the servers before
  *  it; the next import of the same app adds it.
  */
-"too_many";
+"too_many" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**  A server an import left out. */
 export type McpSkipped = {

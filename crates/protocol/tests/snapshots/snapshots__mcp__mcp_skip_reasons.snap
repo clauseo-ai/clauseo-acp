@@ -9,5 +9,6 @@ expression: "McpSkipReason::ALL"
   "command_not_found",
   "unresolved_variable",
   "unreadable",
-  "too_many"
+  "too_many",
+  "unknown"
 ]

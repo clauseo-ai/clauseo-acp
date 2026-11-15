@@ -13,6 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::CommandId;
+use crate::open_enum::open_unit_enum;
 
 /// Who decides the list of MCP servers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -146,42 +147,29 @@ pub struct McpSkipped {
     pub program: Option<String>,
 }
 
-/// Why an import left a server out. A server with more than one of these gets the first in
-/// declaration order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-pub enum McpSkipReason {
-    /// Clauseo already has a server of this name.
-    AlreadyAdded,
-    /// A server in a project's `.mcp.json` that Claude Code has not approved.
-    NotApproved,
-    /// The app reaches it in a way Clauseo does not (such as `sse`), or at a URL Clauseo does
-    /// not allow (`http` to another computer).
-    UnsupportedTransport,
-    /// Its program is not on this computer (`program` names it).
-    CommandNotFound,
-    /// Its config names a variable that is not set.
-    UnresolvedVariable,
-    /// Part of its entry could not be read, or Clauseo's rules refuse it (such as one too long
-    /// to show whole in the import's confirm).
-    Unreadable,
-    /// It would import, but did not fit in this import's one confirm after the servers before
-    /// it; the next import of the same app adds it.
-    TooMany,
-}
-
-impl McpSkipReason {
-    /// Every value, in declaration order.
-    pub const ALL: [Self; 7] = [
-        Self::AlreadyAdded,
-        Self::NotApproved,
-        Self::UnsupportedTransport,
-        Self::CommandNotFound,
-        Self::UnresolvedVariable,
-        Self::Unreadable,
-        Self::TooMany,
-    ];
+open_unit_enum! {
+    /// Why an import left a server out. A server with more than one of these gets the first in
+    /// declaration order. An older Clauseo reads a reason it does not know as `Unknown`.
+    pub enum McpSkipReason {
+        /// Clauseo already has a server of this name.
+        AlreadyAdded,
+        /// A server in a project's `.mcp.json` that Claude Code has not approved.
+        NotApproved,
+        /// The app reaches it in a way Clauseo does not (such as `sse`), or at a URL Clauseo does
+        /// not allow (`http` to another computer).
+        UnsupportedTransport,
+        /// Its program is not on this computer (`program` names it).
+        CommandNotFound,
+        /// Its config names a variable that is not set.
+        UnresolvedVariable,
+        /// Part of its entry could not be read, or Clauseo's rules refuse it (such as one too long
+        /// to show whole in the import's confirm).
+        Unreadable,
+        /// It would import, but did not fit in this import's one confirm after the servers before
+        /// it; the next import of the same app adds it.
+        TooMany,
+    }
+    test mod mcp_skip_reason;
 }
 
 /// One server, without any secret value.
