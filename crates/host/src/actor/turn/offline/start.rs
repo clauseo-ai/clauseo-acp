@@ -1,6 +1,7 @@
 //! A launch that failed on its connection (`agent.start_offline`): the agent answered a start
 //! request (`initialize`, `session/new`, `session/load`) with an error whose text names a
-//! connection failure and no server's answer ([`classify`]). The text alone never says offline:
+//! connection failure and no server's answer ([`classify`]), or a start that ran out of its bound
+//! with no word at all (`agents/start_timer.rs`). The text alone never says offline:
 //! a model's words or an adapter's message can name a connection for another reason. So the
 //! turn waits for the host's own probe of the agent's service (`probe.rs`), and ends
 //! `agent.start_offline` only when that does not get through either; a probe that gets through,
@@ -23,9 +24,16 @@ pub(in crate::actor::turn) struct StartProbe {
     detail: Option<String>,
 }
 
-/// Whether `error`, a failed start's, names a connection failure and no server's answer: an
-/// error the agent answered with ([`clauseo_acp::Error::Rpc`]), its text or its `data` read.
+/// Whether `error`, a failed start's, may be offline: an error the agent answered with
+/// ([`clauseo_acp::Error::Rpc`]) whose text or `data` names a connection failure and no
+/// server's answer, or a start that ran out of its bound (`agents/start_timer.rs`).
 fn says_offline(error: &Error) -> bool {
+    // A start that ran out of its bound said nothing: only the probe can tell.
+    if let Error::Refused(refusal) = error
+        && refusal.message() == super::super::agents::START_TIMED_OUT
+    {
+        return true;
+    }
     let Error::Acp(acp @ clauseo_acp::Error::Rpc { .. }) = error else {
         return false;
     };

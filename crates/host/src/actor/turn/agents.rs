@@ -32,11 +32,16 @@ mod ended;
 mod launch;
 mod path;
 mod start_failure;
+mod start_timer;
 
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
 use launch::launch;
 pub(super) use start_failure::launch_failed;
+pub(crate) use start_timer::START_TIMED_OUT;
+#[cfg(test)]
+pub(super) use start_timer::START_WAIT;
+pub(super) use start_timer::on_timer as start_timer;
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -256,6 +261,7 @@ pub(super) fn launch_now(
             }
         };
     let id = next_agent_id();
+    start_timer::arm(actor, thread, id);
     let client = link.client.clone();
     call(actor, thread, id, async move {
         AgentReply::Initialized(client.initialize().await)
