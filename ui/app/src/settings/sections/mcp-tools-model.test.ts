@@ -69,16 +69,18 @@ test("the import's lines: the count, then each tool left out with its reason in 
         { name: "docket", reason: "already_added" },
         { name: "notes", reason: "unreadable" },
         { name: "matter-search", reason: "not_approved" },
+        { name: "billing", reason: "too_many" },
       ],
     }),
   ).toEqual([
-    "6 couldn't be imported.",
+    "7 couldn't be imported.",
     "filesystem: Clauseo couldn't find npx on this computer.",
     "github: it uses a setting Clauseo doesn't support yet.",
     "court-diary: it needs a value that isn't set on this computer.",
     "docket: a tool with this name is already added.",
     "notes: Clauseo couldn't read its settings.",
     "matter-search: it comes from a project you haven't approved in Claude Code.",
+    "billing: there were too many tools to import at once. Import again to add it.",
   ]);
 });
 
