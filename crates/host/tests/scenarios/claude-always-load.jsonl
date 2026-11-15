@@ -1,7 +1,7 @@
-{"scenario":"claude-always-load","description":"The start after claude-always: session/load must carry the kept rule Bash(npm test) in the flag settings' permissions.allow, and the same request is again answered allow-once by the host","on_stdin_close":"exit"}
+{"scenario":"claude-always-load","description":"The start after claude-always: session/load must not carry the kept rule Bash(npm test) in the flag settings' permissions.allow (only the host applies it), and the same request is again answered allow-once by the host","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
-{"expect":{"method":"session/load","as":"load","params":{"sessionId":"sess-1","cwd":"{{any}}","_meta":{"claudeCode":{"options":{"settings":{"permissions":{"allow":["{{includes}}","Bash(npm test)"]}}}}}}}}
+{"expect":{"method":"session/load","as":"load","params":{"sessionId":"sess-1","cwd":"{{any}}","_meta":{"claudeCode":{"options":{"settings":{"permissions":{"allow":["{{excludes}}","Bash(npm test)"]}}}}}}}}
 {"respond":{"to":"load","result":{"modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
 {"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
 {"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-3","title":"npm test","name":"Bash","kind":"execute","status":"pending","rawInput":{"command":"npm test","description":"Run the tests"}}}}

@@ -190,7 +190,7 @@ pub(crate) fn made(reply: MatterReply) -> Result<Made, Error> {
         | MatterReply::Compared(_)
         | MatterReply::Previewed(_)
         | MatterReply::EditedSince(_)
-        | MatterReply::HeldOpen(_)
+        | MatterReply::HeldOpen(..)
         | MatterReply::Papers(_)
         | MatterReply::StillGone(_)
         | MatterReply::SidesWritten(_)

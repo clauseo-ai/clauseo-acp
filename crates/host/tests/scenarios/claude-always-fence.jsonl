@@ -1,7 +1,7 @@
 {"scenario":"claude-always-fence","description":"Kept rules never reach outside the matter folder: a rule the file holds for a sibling folder ({{cwd}}-b) is dropped at the launch, so its request reaches the lawyer; the lawyer's Always on it keeps nothing, so it asks again; Always on a file in the matter is kept and answers its next request","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
-{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"settings":{"permissions":{"allow":["{{includes}}","Bash(npm test)"]}}}}}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"settings":{"permissions":{"allow":["{{excludes}}","Bash(npm test)"]}}}}}}}}
 {"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"Edit {{cwd}}-b/a.txt","name":"Edit","kind":"edit","status":"pending","rawInput":{"file_path":"{{cwd}}-b/a.txt","old_string":"x","new_string":"y"},"locations":[{"path":"{{cwd}}-b/a.txt"}]}}}

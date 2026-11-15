@@ -11,27 +11,38 @@
 //! request's `allow_once` option instead (`actor/turn/always.rs`) and keeps the rule here:
 //!
 //! - [`rule`]: the narrowest rule for the request, in Claude Code's permission rule syntax, from
-//!   the tool's name and `rawInput` alone: `Bash(<exact command>)`, `WebFetch(domain:<host>)`,
-//!   an MCP tool's exact name, `Edit(//<path>)` for `Edit`, `Write` and `MultiEdit`,
-//!   `Read(//<path>)`. Anything else, and any text that would not stay one exact rule (a `)`,
-//!   a glob character, a relative path), gives none: the request is still answered once, and
-//!   nothing is kept.
-//! - [`file_beside`]: `<data>/agent-state/<matter>/claude-allow.json`, beside the matter's notes
-//!   and not in them: Claude may write the notes folder (`additionalDirectories`), while this
-//!   file is in the data fence's fixed deny rules (`data_fence::DENIED`) and outside every folder
-//!   the auto-deny counts as the session's own. Nothing is ever written in the matter folder,
-//!   and a `.claude` folder the lawyer made there is left as it is.
-//! - [`read`] at each Claude launch (off the actor), [`store`] on its own thread, both under one
-//!   lock so two answers never lose a rule.
-//! - [`allow_in_meta`]: a launch outside forced ask adds the kept rules to
-//!   `permissions.allow` in the flag settings (`_meta.claudeCode.options.settings`); Claude Code
-//!   still takes a matching deny rule first.
+//!   the tool's name and `rawInput` alone: `Bash(<exact command>)`, `WebFetch(domain:<host>)`
+//!   (any page on that site), an MCP tool's exact name, `Edit(//<path>)` for `Edit`, `Write`
+//!   and `MultiEdit`, `Read(//<path>)`. Anything else, and any text that would not stay one
+//!   exact rule (a `)`, a glob character, a relative path), gives none, with why ([`NotKept`]):
+//!   the request is still answered once, and nothing is kept.
+//! - [`within`] and [`real_within`]: a path rule is kept and applied only for a file inside the
+//!   matter folder, by its text and by its real path (links resolved), never in `.clauseo` or a
+//!   `.claude` folder.
+//! - The file, `<data>/agent-state/<matter>/claude-allow.json` ([`file_beside`], [`store`]),
+//!   beside the matter's notes and not in them: Claude may write the notes folder
+//!   (`additionalDirectories`), while this file is in the data fence's fixed deny rules
+//!   (`data_fence::DENIED`) and outside every folder the auto-deny counts as the session's own.
+//!   Nothing is ever written in the matter folder, and a `.claude` folder the lawyer made there
+//!   is left as it is.
+//!
+//! The kept rules never reach Claude Code's own settings: Claude Code would then allow a matching
+//! call itself, past the host's data fence, its held-open check and its log. They answer only
+//! the requests Claude Code sends the host, after those checks, by exact match
+//! (`actor/turn/always.rs`).
 
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
-use serde_json::{Map, Value};
+use serde_json::Value;
+
+mod store;
+
+#[expect(
+    unused_imports,
+    reason = "the lawyer's list of kept rules uses them, in the next commit"
+)]
+pub(crate) use store::{list, remove_now};
+pub(crate) use store::{read_beside, store};
 
 /// The file's name, in `<data>/agent-state/<matter>`.
 pub(crate) const FILE: &str = "claude-allow.json";
@@ -42,25 +53,67 @@ pub(crate) const MAX_RULES: usize = 500;
 /// The longest rule kept, in bytes.
 const MAX_RULE_LEN: usize = 2_000;
 
-/// The largest file [`read`] takes.
-const MAX_FILE_LEN: u64 = 1 << 20;
-
-/// The one lock of every read and write of a rules file.
-static LOCK: Mutex<()> = Mutex::new(());
+/// Why "Always for this matter" kept nothing: the request was allowed this once only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NotKept {
+    /// The tool has no rule form Clauseo keeps (a shell other than Bash, a tool it does not know).
+    NoRule,
+    /// Its command, address or path would not stay one exact rule (a wildcard, a bracket, a line
+    /// break, a relative path).
+    Refused,
+    /// A file outside the matter folder, or in its `.clauseo` or a `.claude` folder.
+    OutsideMatter,
+    /// The matter keeps the most rules it may (`MAX_RULES`).
+    Full,
+}
 
 /// The rule a request keeps, from its tool's `name` (the tool call's, as the agent sent it) and
-/// its `rawInput`, or none (see the module doc). `windows`: a file path is a Windows one.
-pub(crate) fn rule(tool: &str, raw_input: Option<&Value>, windows: bool) -> Option<String> {
-    let text = |key: &str| raw_input?.get(key)?.as_str();
-    let rule = match tool {
-        "Bash" => format!("Bash({})", command(text("command")?)?),
-        "WebFetch" => format!("WebFetch(domain:{})", domain(text("url")?)?),
-        "Edit" | "Write" | "MultiEdit" => format!("Edit({})", path(text("file_path")?, windows)?),
-        "Read" => format!("Read({})", path(text("file_path")?, windows)?),
-        name if is_mcp_tool(name) => name.to_owned(),
-        _ => return None,
+/// its `rawInput`, or why none (see the module doc). `windows`: a file path is a Windows one.
+pub(crate) fn rule(
+    tool: &str,
+    raw_input: Option<&Value>,
+    windows: bool,
+) -> Result<String, NotKept> {
+    let text = |key: &str| {
+        raw_input
+            .and_then(|input| input.get(key)?.as_str())
+            .ok_or(NotKept::Refused)
     };
-    (rule.len() <= MAX_RULE_LEN).then_some(rule)
+    let exact = |made: Option<String>| made.ok_or(NotKept::Refused);
+    let rule = match tool {
+        "Bash" => format!(
+            "Bash({})",
+            exact(command(text("command")?).map(str::to_owned))?
+        ),
+        "WebFetch" => format!("WebFetch(domain:{})", exact(domain(text("url")?))?),
+        "Edit" | "Write" | "MultiEdit" => {
+            format!("Edit({})", exact(path(text("file_path")?, windows))?)
+        }
+        "Read" => format!("Read({})", exact(path(text("file_path")?, windows))?),
+        name if is_mcp_tool(name) => name.to_owned(),
+        _ => return Err(NotKept::NoRule),
+    };
+    if rule.len() <= MAX_RULE_LEN {
+        Ok(rule)
+    } else {
+        Err(NotKept::Refused)
+    }
+}
+
+/// The file a path rule names, as an absolute path of this system (`//c/a` is `c:/a` on
+/// Windows); none for any other rule.
+pub(crate) fn rule_path(rule: &str, windows: bool) -> Option<PathBuf> {
+    let content = ["Edit(", "Read("]
+        .iter()
+        .find_map(|tool| rule.strip_prefix(tool))
+        .and_then(|rest| rest.strip_suffix(')'))?;
+    let rest = content.strip_prefix("//")?;
+    if windows {
+        let (drive, rest) = rest.split_once('/')?;
+        Some(PathBuf::from(format!("{drive}:/{rest}")))
+    } else {
+        Some(PathBuf::from(format!("/{rest}")))
+    }
 }
 
 /// Whether `rule` is one [`rule`] could have made: a kept rule read back is checked again.
@@ -133,7 +186,9 @@ fn is_mcp_tool(name: &str) -> bool {
 /// Windows, `C:\a\b` is `//c/a/b`, as Claude Code turns Windows paths into POSIX ones before it
 /// matches. None for a relative path, a UNC path, an empty, `.` or `..` component, or a name
 /// with a character that is not literal in Claude Code's gitignore patterns (`*`, `?`, `[`, `]`,
-/// `{`, `}`, `!`, `\`), a parenthesis, a control character, or a space at either end.
+/// `{`, `}`, `!`, `\`), a parenthesis, a control character, or a space at either end; and on
+/// Windows a name that ends in `.` (Windows drops trailing dots and spaces, so `.claude.` opens
+/// `.claude`).
 fn path(path: &str, windows: bool) -> Option<String> {
     let rest = if windows {
         let mut chars = path.chars();
@@ -149,6 +204,7 @@ fn path(path: &str, windows: bool) -> Option<String> {
     let literal = |name: &str| {
         !matches!(name, "" | "." | "..")
             && name.trim() == name
+            && (!windows || !name.ends_with('.'))
             && !name.chars().any(|c| {
                 matches!(
                     c,
@@ -180,9 +236,9 @@ pub(crate) fn matter_roots<'a>(
 /// [`matter_roots`]) and in neither its `.clauseo` folder nor a `.claude` one (Claude's own
 /// settings). So none names `<data>` (Clauseo's data folder, other matters' notes and runs),
 /// another matter's folder or anything else outside. Those two names match in any case (a Mac's
-/// disk folds case); `windows`: the whole path is compared in any case. Any
-/// other rule names no path and passes; a kept command still runs in the sandbox, which has no
-/// way out (`loads::sandbox`, `allowUnsandboxedCommands: false`).
+/// disk folds case); `windows`: the whole path is compared in any case, each name without its
+/// trailing dots and spaces. By text only: [`real_within`] resolves links. Any other rule names
+/// no path and passes.
 pub(crate) fn within(rule: &str, roots: &[String], windows: bool) -> bool {
     let content = ["Edit(", "Read("]
         .iter()
@@ -205,11 +261,9 @@ pub(crate) fn within(rule: &str, roots: &[String], windows: bool) -> bool {
             .and_then(|rest| rest.strip_prefix('/'));
         rest.is_some_and(|rest| {
             !rest.is_empty()
-                && rest.split('/').all(|name| {
-                    ![".clauseo", ".claude"]
-                        .iter()
-                        .any(|own| own.eq_ignore_ascii_case(name))
-                })
+                && rest
+                    .split('/')
+                    .all(|name| !own_folder(&name_as_opened(name, windows)))
         })
     })
 }
@@ -219,122 +273,68 @@ pub(crate) fn file_beside(notes: &Path) -> Option<PathBuf> {
     notes.parent().map(|matter| matter.join(FILE))
 }
 
-/// A Claude launch's kept rules (`claude`), read from [`file_beside`] `notes`; none for any
-/// other agent. File system calls: off the actor.
-pub(crate) fn read_beside(notes: &Path, claude: bool) -> Vec<String> {
-    match file_beside(notes) {
-        Some(file) if claude => read(&file),
-        _ => Vec::new(),
+/// `<data>/agent-state/<matter>/claude-allow.json`, as [`file_beside`] the matter's notes.
+#[expect(
+    dead_code,
+    reason = "the lawyer's list of kept rules uses it, in the next commit"
+)]
+pub(crate) fn file_of(data: &Path, matter: clauseo_protocol::MatterId) -> PathBuf {
+    data.join("agent-state").join(matter.to_string()).join(FILE)
+}
+
+/// Whether `requested`, a file a kept path rule names, is inside the matter `folder` by its
+/// real path: both resolved through every link and junction (a file not made yet by its folder),
+/// the file strictly inside the folder and in neither its `.clauseo` nor a `.claude` folder
+/// (any case; on Windows each name without its trailing dots and spaces, as Windows opens it).
+/// A link the agent swapped in after the rule was kept is caught here. False when either does
+/// not resolve. File system calls: off the actor.
+pub(crate) fn real_within(requested: &Path, folder: &Path, windows: bool) -> bool {
+    if !requested.is_absolute() {
+        return false;
     }
-}
-
-/// The rules kept in `file`, each [`well_formed`], at most [`MAX_RULES`]; none when it is
-/// missing, a link, too large or unreadable. File system calls: off the actor.
-pub(crate) fn read(file: &Path) -> Vec<String> {
-    let _held = LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    read_unlocked(file)
-}
-
-fn read_unlocked(file: &Path) -> Vec<String> {
-    let Ok(opened) = crate::write::open_read_nofollow(file) else {
-        return Vec::new();
+    let Ok(root) = dunce::canonicalize(folder) else {
+        return false;
     };
-    let mut text = String::new();
-    if opened.take(MAX_FILE_LEN).read_to_string(&mut text).is_err() {
-        tracing::warn!("a matter's kept Claude rules are unreadable");
-        return Vec::new();
-    }
-    let parsed: Option<Vec<String>> = serde_json::from_str::<Value>(&text)
-        .ok()
-        .and_then(|value| serde_json::from_value(value.get("allow")?.clone()).ok());
-    let Some(rules) = parsed else {
-        tracing::warn!("a matter's kept Claude rules are not JSON this host reads");
-        return Vec::new();
-    };
-    let mut kept: Vec<String> = Vec::new();
-    for rule in rules {
-        if well_formed(&rule) && !kept.contains(&rule) && kept.len() < MAX_RULES {
-            kept.push(rule);
-        }
-    }
-    kept
-}
-
-/// Adds `rule` to `file` on a thread of its own: read, merged, then replaced atomically through
-/// no link. A failure is a warning that names no rule (a command may hold a client's name).
-pub(crate) fn store(file: PathBuf, rule: String) {
-    let spawned = std::thread::Builder::new()
-        .name("clauseo-always".to_owned())
-        .spawn(move || {
-            if let Err(error) = store_now(&file, rule) {
-                tracing::warn!(%error, "a matter's Claude rule was not kept");
+    let real = match dunce::canonicalize(requested) {
+        Ok(real) => real,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let (Some(parent), Some(name)) = (requested.parent(), requested.file_name()) else {
+                return false;
+            };
+            match dunce::canonicalize(parent) {
+                Ok(parent) => parent.join(name),
+                Err(_) => return false,
             }
-        });
-    if let Err(error) = spawned {
-        tracing::warn!(%error, "a matter's Claude rule was not kept");
-    }
-}
-
-/// [`store`]'s work, on the calling thread.
-pub(crate) fn store_now(file: &Path, rule: String) -> std::io::Result<()> {
-    let _held = LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut rules = read_unlocked(file);
-    if rules.contains(&rule) || rules.len() >= MAX_RULES || !well_formed(&rule) {
-        return Ok(());
-    }
-    rules.push(rule);
-    let text = serde_json::json!({ "version": 1, "allow": rules });
-    let mut bytes = serde_json::to_vec_pretty(&text).map_err(std::io::Error::other)?;
-    bytes.push(b'\n');
-    crate::write::replace_private_file(file, &bytes)?;
-    match file.parent() {
-        Some(folder) => crate::write::sync_dir(folder),
-        None => Ok(()),
-    }
-}
-
-/// Adds `rules` to `claudeCode.options.settings.permissions.allow` in a Claude session's
-/// `_meta`, after any already there and without repeats. A value on the way that is not an
-/// object (or, at `allow`, not an array) is replaced.
-pub(crate) fn allow_in_meta<'a>(
-    meta: &mut Map<String, Value>,
-    rules: impl IntoIterator<Item = &'a str>,
-) {
-    let mut rules = rules.into_iter().peekable();
-    if rules.peek().is_none() {
-        return;
-    }
-    let mut at = meta;
-    for key in ["claudeCode", "options", "settings", "permissions"] {
-        let slot = at
-            .entry(key.to_owned())
-            .or_insert_with(|| Value::Object(Map::new()));
-        if !slot.is_object() {
-            *slot = Value::Object(Map::new());
         }
-        let Value::Object(next) = slot else {
-            return;
-        };
-        at = next;
-    }
-    let allow = at
-        .entry("allow".to_owned())
-        .or_insert_with(|| Value::Array(Vec::new()));
-    if !allow.is_array() {
-        *allow = Value::Array(Vec::new());
-    }
-    let Value::Array(allow) = allow else {
-        return;
+        Err(_) => return false,
     };
-    for rule in rules {
-        if !allow.iter().any(|item| item.as_str() == Some(rule)) {
-            allow.push(Value::from(rule));
-        }
+    let names = |path: &Path| -> Vec<String> {
+        path.components()
+            .map(|part| name_as_opened(&part.as_os_str().to_string_lossy(), windows))
+            .collect()
+    };
+    let (root, real) = (names(&root), names(&real));
+    let Some(rest) = real.strip_prefix(root.as_slice()) else {
+        return false;
+    };
+    !rest.is_empty() && rest.iter().all(|name| !own_folder(name))
+}
+
+/// A file name as the system opens it, for comparing: on Windows lower case and without its
+/// trailing dots and spaces.
+fn name_as_opened(name: &str, windows: bool) -> String {
+    if windows {
+        name.trim_end_matches(['.', ' ']).to_lowercase()
+    } else {
+        name.to_owned()
     }
+}
+
+/// `.clauseo` or `.claude`, in any case.
+fn own_folder(name: &str) -> bool {
+    [".clauseo", ".claude"]
+        .iter()
+        .any(|own| own.eq_ignore_ascii_case(name))
 }
 
 #[cfg(test)]

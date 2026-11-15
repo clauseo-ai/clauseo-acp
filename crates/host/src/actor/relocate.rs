@@ -161,7 +161,7 @@ pub(super) fn located(
         | MatterReply::Compared(_)
         | MatterReply::Previewed(_)
         | MatterReply::EditedSince(_)
-        | MatterReply::HeldOpen(_)
+        | MatterReply::HeldOpen(..)
         | MatterReply::StillGone(_)
         | MatterReply::Papers(_)
         | MatterReply::SidesWritten(_)

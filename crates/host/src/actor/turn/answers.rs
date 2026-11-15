@@ -54,7 +54,10 @@ pub(super) fn answer_permission(
     let key = agent.permissions.remove(&request).ok_or_else(not_pending)?;
     // A Claude "Always for this matter" reaches the agent as allow once (`always.rs`); the log
     // keeps the lawyer's choice.
-    let sent = super::always::answer(agent, request, &option).unwrap_or(option_id);
+    let answered = super::always::answer(agent, request, &option);
+    let sent = answered
+        .as_ref()
+        .map_or(option_id, |answered| answered.once.clone());
     let refused = matches!(
         option.kind,
         PermissionKind::RejectOnce | PermissionKind::RejectAlways

@@ -467,8 +467,8 @@ pub(crate) fn matter_reply(actor: &mut Actor, _matter: MatterId, job: TurnJob, r
         (JobKind::Undo(ask), MatterReply::Undone(result)) => {
             undo::on_undone(actor, thread, *ask, result.map(|undone| *undone));
         }
-        (JobKind::Permission(ask), MatterReply::HeldOpen(held)) => {
-            asks::on_held_open(actor, thread, *ask, held);
+        (JobKind::Permission(ask), MatterReply::HeldOpen(held, real)) => {
+            asks::on_held_open(actor, thread, *ask, held, real);
         }
         (kind, reply) => {
             tracing::error!(

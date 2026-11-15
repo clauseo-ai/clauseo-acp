@@ -149,16 +149,18 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         paths = tool_call_paths(actor, thread, &ask);
     }
     if paths.is_empty() && fence.is_none() {
-        log_for_lawyer(actor, thread, ask);
+        log_for_lawyer(actor, thread, ask, None);
         return;
     }
     let sent = (|| -> Result<(), Error> {
         let matter = matter_of(actor, thread)?;
         let folder = PathBuf::from(&actor.check_matter(matter)?.row.folder_path);
+        let real = super::always::real_path(ask.always.as_ref());
         let job = MatterJob::HeldOpen {
             folder,
             paths,
             fence,
+            real,
         };
         let check = HeldOpenCheck {
             ask: ask.clone(),
@@ -178,7 +180,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
             error = %Cause(&error),
             "a permission request's paths were not checked"
         );
-        log_for_lawyer(actor, thread, ask);
+        log_for_lawyer(actor, thread, ask, None);
     }
 }
 
@@ -256,6 +258,7 @@ pub(super) fn on_held_open(
     thread: ThreadId,
     check: HeldOpenCheck,
     checked: PathsChecked,
+    real: Option<bool>,
 ) {
     let HeldOpenCheck { ask, turn } = check;
     if live_turn(actor, thread) != Some(turn) {
@@ -296,7 +299,7 @@ pub(super) fn on_held_open(
                 );
             }
         }
-        None => log_for_lawyer(actor, thread, ask),
+        None => log_for_lawyer(actor, thread, ask, real),
     }
 }
 
@@ -322,9 +325,10 @@ fn live_turn(actor: &mut Actor, thread: ThreadId) -> Option<TurnId> {
 }
 
 /// Logs the request `Live`; the lawyer's answer goes to the agent. One whose rule the host
-/// keeps is answered for the lawyer instead (`always.rs`).
-fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) {
-    let Some(ask) = super::always::auto_allow(actor, thread, ask) else {
+/// keeps is answered for the lawyer instead (`always.rs`): `real`, whether the real path of
+/// its rule's file is inside the matter, as the matter thread found it.
+fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk, real: Option<bool>) {
+    let Some(ask) = super::always::auto_allow(actor, thread, ask, real) else {
         return;
     };
     let PermissionAsk {
