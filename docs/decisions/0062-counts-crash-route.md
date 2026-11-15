@@ -19,17 +19,24 @@ depend on 0003 (the dashboard's pull request); D1 applies migrations by name.
   `parse_crash` with this week from the Worker's clock (`400` on anything it refuses, an
   `Invalid::Detail` too). Then:
   1. `503` while the R2 binding `CRASH` is missing.
-  2. The hourly cap: `crash_rate` holds only an hour (`YYYY-MM-DDTHH`, UTC) and its count. Each
-     report first deletes past hours, then adds one unless the hour is at 200
-     (`… DO UPDATE SET n = n + 1 WHERE n < 200 RETURNING n`); no row back is `429` and changes
-     nothing.
+  2. The hourly cap: `crash_rate` holds only an hour (`YYYY-MM-DDTHH`, UTC) and its count.
+     Each report first adds one unless the hour is at 200
+     (`… DO UPDATE SET n = n + 1 WHERE n < 200 RETURNING n`); no row back is `429`, and that
+     one statement, which changed nothing, is all an over-cap report costs. When the count
+     comes back as 1 (the hour's first report), the past hours are deleted.
   3. The object: `crash_body`'s bytes (the crate's canonical JSON, never the request's bytes)
-     at `reports/<report id>.json`.
+     at `reports/<report id>.json`, put only if no object has the key
+     (`onlyIf: { etagDoesNotMatch: "*" }`, workers-rs's `Conditional`).
   4. The row, `INSERT OR IGNORE`, keyed by the report id.
 
-  The object goes before the row, so a failed insert is retried by the app and rewrites the
-  same object. A report sent again counts against the hour, rewrites its object and leaves its
-  row.
+  The object goes before the row, so a failed insert is retried by the app, which skips the put
+  and writes the row. A report sent again counts against the hour, answers `204` and leaves its
+  object and its row as first stored.
+- **No edge rate limit.** `t.clauseo.chat` runs with WAF and rate-limiting rules off (Rohan's
+  decision); the hourly cap is the only limit. A flood of valid reports can hold real ones back
+  for that hour, but nothing is lost: the app keeps each report and retries on `429`, `503` or a
+  network error for up to 30 days. Forged reports can add a group to `v_crash`, which only the
+  owner and his agents read.
 - **Columns.** `crash` (`WITHOUT ROWID`): `report`, `week`, `version`, `os`, `arch`, `kind`,
   `area`, `signature`. The signature is made only from closed fields: a panic's `file:line`
   (or `panic` when the file fit neither form), a signal's `code:<number>`, a renderer's reason.
@@ -38,11 +45,12 @@ depend on 0003 (the dashboard's pull request); D1 applies migrations by name.
 - **`v_crash`.** Reports per week, version, OS, arch, kind, area and signature. A second set of
   rows, with signature `_all`, groups the same without the signature, so a kind spread over many
   small signatures still shows. Every group under 5 reports is hidden. There is no `report`
-  column.
+  column. A group's `_all` row minus its visible rows gives its hidden rows' total; that is
+  accepted, since only the owner and his agents read the views and no row names a report.
 - **Retention.** The daily cron deletes `crash` rows whose week is more than 365 days old (one
   statement; 37 a run now). An R2 lifecycle rule deletes objects 90 days after upload. R2 keeps
-  each object's upload time, which shows roughly when a report arrived; S22's random delay of 1
-  to 24 hours before sending is the guard.
+  each object's exact upload time for those 90 days, which shows to the second when a report
+  arrived; S22's random delay of 1 to 24 hours before sending is the guard.
 - **The deploy.** `scripts/r2.mjs`, run in the config step through Cloudflare's API:
   - It finds `clauseo-crash` with `cf-r2-jurisdiction: eu`, or creates it there.
   - It reads the lifecycle and, unless our rule (`clauseo-crash-90-days`, delete at 90 days,
@@ -53,9 +61,10 @@ depend on 0003 (the dashboard's pull request); D1 applies migrations by name.
   - `check-deploy.mjs` requires that exact table in the committed file and allows it, exact or
     absent, in the deploy copy.
   - Nothing printed holds an id.
-- **Free plan.** A 2 KB report costs well under 1 ms of CPU. A report is 4 D1 statements (2
-  writes and a delete in `crash_rate`, then 1 insert) and one R2 put. At 200 an hour that is at
-  most 4,800 puts a day, inside R2's free Class A operations.
+- **Free plan.** A 2 KB report costs well under 1 ms of CPU. A report is 2 D1 statements (the
+  count, then the insert; a third, the delete, at the hour's first report) and one R2 put, and
+  one over the cap is the count alone. At 200 an hour that is at most 4,800 puts a day, inside
+  R2's free Class A operations.
 
 ## Consequences
 

@@ -1,6 +1,7 @@
 // pnpm test (tests/crash.test.mjs): POST /v1/crash under `wrangler dev --local`, with local D1 and
 // R2. The crate's example report is kept once, in R2 as its canonical JSON and in D1 as one
-// row; anything outside the schema or its caps is 400; past 200 reports an hour is 429; and a
+// row, and a repeat of its id leaves both as first stored; anything outside the schema or its
+// caps is 400; past 200 reports an hour is 429, after one statement that changes nothing; and a
 // Worker without the bucket bound answers 503.
 
 import { after, before, test } from "node:test";
@@ -49,6 +50,35 @@ test("the crate's example report is kept once: its canonical JSON in R2, its row
   assert.equal(rows(report.report).length, 1);
 });
 
+test("a report id sent again with other fields: 204, and the object and the row stay the first", async () => {
+  const first = crashJson();
+  const second = crashJson({ report: first.report });
+  second.after_launch = false;
+  second.location.line = 213;
+  assert.equal((await worker.post("/v1/crash", first)).status, 204);
+  const row = rows(first.report);
+  assert.equal(row.length, 1);
+  assert.equal((await worker.post("/v1/crash", second)).status, 204);
+  assert.equal(await worker.object(`reports/${first.report}.json`), JSON.stringify(first));
+  assert.deepEqual(rows(first.report), row);
+  assert.equal(row[0].signature, "crates/store/src/writer.rs:212");
+});
+
+test("the first report of an hour deletes the past hours' counts; later ones leave them", async () => {
+  const hour = hourNow();
+  worker.sql("DELETE FROM crash_rate; INSERT INTO crash_rate VALUES ('2020-01-01T00', 7), ('2020-01-01T01', 3)");
+  const firstStatus = (await worker.post("/v1/crash", crashJson())).status;
+  const afterFirst = worker.sql("SELECT hour, n FROM crash_rate ORDER BY hour");
+  worker.sql("INSERT INTO crash_rate VALUES ('2020-01-01T00', 7)");
+  const secondStatus = (await worker.post("/v1/crash", crashJson())).status;
+  const afterSecond = worker.sql("SELECT hour, n FROM crash_rate ORDER BY hour");
+  if (hourNow() !== hour) return; // The hour turned mid-test, so the count started again.
+  assert.equal(firstStatus, 204);
+  assert.deepEqual(afterFirst, [{ hour, n: 1 }], "the first report of the hour");
+  assert.equal(secondStatus, 204);
+  assert.deepEqual(afterSecond, [{ hour: "2020-01-01T00", n: 7 }, { hour, n: 2 }], "the second");
+});
+
 test("a body with spaces and reordered keys is kept in the canonical form", async () => {
   const report = crashJson({ weeksAgo: 2 });
   const reversed = Object.fromEntries(Object.entries(report).reverse());
@@ -92,7 +122,7 @@ test("anything outside the schema or its 2 KB caps is 400, and is neither counte
   assert.equal((await worker.post("/v1/crash", fits)).status, 204, "inflates to exactly 2 KB");
 });
 
-test("past 200 reports in one UTC hour is 429, which keeps nothing; past hours are deleted", async () => {
+test("past 200 reports in one UTC hour is 429: only the count runs, nothing is kept", async () => {
   const hour = hourNow();
   worker.sql(`DELETE FROM crash_rate; INSERT INTO crash_rate VALUES ('2020-01-01T00', 7), ('${hour}', 199)`);
   const last = crashJson();
@@ -105,7 +135,10 @@ test("past 200 reports in one UTC hour is 429, which keeps nothing; past hours a
   assert.equal(await overResponse.text(), "");
   assert.deepEqual(rows(over.report), []);
   assert.equal(await worker.object(`reports/${over.report}.json`), null);
-  assert.deepEqual(worker.sql("SELECT hour, n FROM crash_rate"), [{ hour, n: 200 }]);
+  // The count is the only statement past the cap: no row, no object, no delete of the past hour
+  // (and the 200th was not the hour's first report, so it left the past hour too).
+  const counts = worker.sql("SELECT hour, n FROM crash_rate ORDER BY hour");
+  assert.deepEqual(counts, [{ hour: "2020-01-01T00", n: 7 }, { hour, n: 200 }]);
 });
 
 test("a Worker without the bucket bound answers 503 and keeps nothing", async () => {

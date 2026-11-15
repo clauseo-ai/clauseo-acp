@@ -26,7 +26,7 @@ pub(crate) const INSERT_CRASH: &str = "INSERT OR IGNORE INTO crash \
 pub(crate) const BUMP_CRASH_RATE: &str = "INSERT INTO crash_rate (hour, n) VALUES (?1, 1) \
      ON CONFLICT (hour) DO UPDATE SET n = n + 1 WHERE n < ?2 RETURNING n";
 
-/// Deletes the counts of hours before this one, each time a report is counted.
+/// Deletes the counts of hours before this one, when the first report of an hour is counted.
 pub(crate) const DELETE_PAST_HOURS: &str = "DELETE FROM crash_rate WHERE hour < ?1";
 
 /// A report that passed the schema: its object and its row.
