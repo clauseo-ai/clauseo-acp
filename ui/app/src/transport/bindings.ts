@@ -512,6 +512,28 @@ export type BillingProvider =
 /**  Anyone else. */
 "other";
 
+/**  Something the lawyer should know about a blackline as a whole, said over it. */
+export type BlacklineNotice = 
+/**
+ *  Part of the comparison could not be shown: a line of stetdoc's view Clauseo could not
+ *  read, or content stetdoc said it does not show. The rest is shown.
+ */
+"part_not_shown" | 
+/**
+ *  The document holds text that Word hides or that is hard to see (white or tiny); the
+ *  blackline shows it as ordinary text.
+ */
+"hidden_text" | 
+/**  Some list or clause numbers may not match the ones Word shows. */
+"numbers_may_differ" | 
+/**
+ *  stetdoc warned about something else this version does not know: some of the
+ *  blackline may not match the document in Word exactly.
+ */
+"may_differ" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
 /**  One paragraph of a blackline. */
 export type BlacklineParagraph = {
 	/**  How the paragraph changed as a whole. */
@@ -1905,6 +1927,11 @@ export type ErrorCode =
 "matter.folder_backslash" | 
 /** The agent could not open the matter folder as its working folder when it started (Claude Code's "Can't access working directory" in its answer to a startup request), though the host found the folder there just before. Asking again can work once the folder is back where the matter expects it. */
 "agent.folder_inaccessible" | 
+"blackline.nested_table" | 
+"blackline.cannot_compare" | 
+"blackline.not_readable" | 
+"blackline.too_large" | 
+"blackline.format_unknown" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -7414,6 +7441,14 @@ export type WordBlackline = {
 	 *  then the first part of it only.
 	 */
 	truncated: boolean,
+	/**
+	 *  What the lawyer should know about this blackline, each at most once, in the order of
+	 *  [`BlacklineNotice`]: a part of the document that could not be shown (the rest is), text
+	 *  shown that Word hides, numbers that may not match Word's. Empty when there is nothing to
+	 *  say; missing reads as empty, and empty is left out, so an answer from before the field
+	 *  still decodes.
+	 */
+	notices?: BlacklineNotice[],
 };
 
 /* Tauri Specta runtime */

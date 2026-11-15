@@ -286,6 +286,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Files Clauseo does not version | `QueryResult::Papers` `skipped` | path and `SkippedFileReason` (over the size cap, cloud-only) |
 | Folders that could not be read (no permission, or not downloaded) | `QueryResult::Papers` `unread` | folder paths; their files are kept in the history as they were |
 | More entries than the list holds | `QueryResult::Papers` with `truncated` | the first 2,000 entries by path (`MAX_PAPERS`): papers, skipped files and unread folders together |
+| Word blackline shown in part, or with something to know | `QueryResult::WordBlackline` `notices` (`BlacklineNotice`) | one line over the sheet per notice: a part not shown (the rest is), hidden text shown as ordinary text, numbers that may differ from Word's, anything else that may differ; `unknown` reads as the last |
 
 ## 8. Account limits
 
@@ -371,6 +372,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Safe workspace still cleaning up after an earlier session, its stop or sweep not done after 15 s (S15) | `ErrorCode::SandboxCleaningUp` | yes |
 | Word blackline: no Word tool, or not a Word document | `ErrorCode::BlacklineNoWordTool`, `ErrorCode::BlacklineNotWord` | no |
 | Word blackline failed (the compare or its view) | `ErrorCode::BlacklineFailed` | yes |
+| Word blackline refused by stetdoc: a table inside a table, a compare it refused, a version it can't read, one too large, or a view in a format Clauseo doesn't know | `ErrorCode::BlacklineNestedTable`, `ErrorCode::BlacklineCannotCompare`, `ErrorCode::BlacklineNotReadable`, `ErrorCode::BlacklineTooLarge`, `ErrorCode::BlacklineFormatUnknown` | no |
 | Tracked changes: no stetdoc, a file that is not a Word document, or a list that went stale | `ErrorCode::WordStetdocMissing`, `ErrorCode::WordNotDocx`, `ErrorCode::WordRevisionsStale` | no |
 | Tracked changes: stetdoc failed or timed out | `ErrorCode::WordEditFailed` | yes |
 | Offline mid-answer (D-050): the agent couldn't reach its service, or the window said offline (`HostCommand::SetNetwork`) and the agent then sent nothing for 30 s; the answer so far stays, the stop line says so and offers Try again | `ErrorCode::AgentOffline` | yes |
