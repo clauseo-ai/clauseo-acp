@@ -63,10 +63,10 @@ test("install lines: waiting says you're offline; with the window online, that t
     "You're offline. Setting up waits for the connection.",
   );
   expect(linesOf("en", { kind: "offline", online: true }).words).toBe(
-    "Setting up can't reach the download right now. It tries again by itself.",
+    "Clauseo can't reach the download right now. It tries again by itself.",
   );
   expect(linesOf("hi", { kind: "offline", online: true }).words).toBe(
-    "सेटअप अभी डाउनलोड तक नहीं पहुँच पा रहा। यह अपने-आप फिर से कोशिश करेगा।",
+    "Clauseo अभी डाउनलोड तक नहीं पहुँच पा रहा। यह अपने-आप फिर से कोशिश करेगा।",
   );
 });
 

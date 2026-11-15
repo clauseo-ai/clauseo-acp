@@ -7,7 +7,6 @@ use clauseo_protocol::{ErrorCode, ThreadId};
 
 use super::super::super::Actor;
 use super::super::{current, sign_in};
-use super::probe::Reach;
 use super::{Arm, classify, hold};
 
 /// Whether a prompt of `thread` that ended `result` failed for its connection, as
@@ -29,15 +28,18 @@ pub(super) fn candidate(
     }
 }
 
-/// The code a failed prompt of `thread` ends with when it failed for its connection: the
-/// verdict's (`hold.rs`), which the host's probe and the window decide.
+/// The code a failed prompt of `thread` ends with when it failed for its connection, and its
+/// detail: the verdict's (`hold.rs`), which the host's probe and the window decide, and the
+/// error's text, with the probe's fixed fields for an unreachable service.
 fn prompt_failed_offline(
     actor: &mut Actor,
     thread: ThreadId,
     error: &clauseo_acp::Error,
-) -> Option<ErrorCode> {
+) -> Option<(ErrorCode, String)> {
     let timed_out = failed_for_connection(actor, thread, error)?;
-    Some(hold::verdict(actor, thread, timed_out))
+    let code = hold::verdict(actor, thread, timed_out);
+    let detail = hold::detail_for(actor, thread, code, Some(error.to_string()));
+    Some((code, detail.unwrap_or_default()))
 }
 
 /// Whether a failed prompt of `thread` failed for its connection: `Some(timed_out)`. A sign-in
@@ -99,7 +101,9 @@ fn connection_ended_offline(
     let watch_reached = current(actor, thread)
         .and_then(|current| current.offline.as_ref())
         .is_some_and(|watch| watch.reached);
-    let reached = watch_reached || hold::fresh_reach(actor, thread).is_some_and(Reach::reached);
+    let window = actor.turn_path.offline;
+    let fresh = hold::fresh_reach(actor, thread);
+    let reached = watch_reached || fresh.is_some_and(|reach| hold::counts_reached(reach, window));
     let code = (!reached).then(|| hold::verdict(actor, thread, timed_out));
     tracing::info!(%thread, reached, ?code, "the prompt ended on a lost connection");
     code
@@ -113,16 +117,20 @@ fn gave_up_code(lost: &ConnectionLost) -> Option<ErrorCode> {
     lost.gave_up.then_some(ErrorCode::AgentProtocolError)
 }
 
-/// How a prompt of `thread` that ended `result` fails for its connection: `(offline, lost)`. An
-/// error is offline by [`prompt_failed_offline`]. An answer that carried a `connection` failure
-/// fails offline by [`connection_ended_offline`], else once the agent gave up by
-/// [`gave_up_code`], its title the detail. A turn that ends `TooLong` (`too_long`) does neither.
+/// A failure's code and its detail.
+type Failure = (ErrorCode, Option<String>);
+
+/// How a prompt of `thread` that ended `result` fails for its connection: `(offline, lost)`, each
+/// with its detail. An error is offline by [`prompt_failed_offline`]. An answer that carried a
+/// `connection` failure fails offline by [`connection_ended_offline`], else once the agent gave
+/// up by [`gave_up_code`], its title the detail. An unreachable service's detail carries the
+/// probe's fixed fields too. A turn that ends `TooLong` (`too_long`) does neither.
 pub(in crate::actor::turn) fn prompt_ended(
     actor: &mut Actor,
     thread: ThreadId,
     result: &Result<PromptEnd, clauseo_acp::Error>,
     too_long: bool,
-) -> (Option<ErrorCode>, Option<(ErrorCode, Option<String>)>) {
+) -> (Option<(ErrorCode, String)>, Option<Failure>) {
     match result {
         _ if too_long => (None, None),
         Err(error) => (prompt_failed_offline(actor, thread, error), None),
@@ -131,8 +139,31 @@ pub(in crate::actor::turn) fn prompt_ended(
             ..
         }) => {
             let code = connection_ended_offline(actor, thread, lost).or_else(|| gave_up_code(lost));
-            (None, code.map(|code| (code, lost.title.clone())))
+            let ended = code.map(|code| {
+                (
+                    code,
+                    hold::detail_for(actor, thread, code, lost.title.clone()),
+                )
+            });
+            (None, ended)
         }
         Ok(_) => (None, None),
     }
+}
+
+/// The code and detail a failed prompt ends with: `went_offline`'s (from [`prompt_ended`]) when
+/// it failed for its connection, else the error's own code (a sign-in it asks for, read by
+/// `sign_in::code_of`) and its text.
+pub(in crate::actor::turn) fn failed_with(
+    actor: &mut Actor,
+    went_offline: Option<(ErrorCode, String)>,
+    error: &clauseo_acp::Error,
+) -> (ErrorCode, String) {
+    went_offline.unwrap_or_else(|| {
+        let text = error.to_string();
+        (
+            sign_in::code_of(actor, error.code(), &text, error.rpc_data()),
+            text,
+        )
+    })
 }

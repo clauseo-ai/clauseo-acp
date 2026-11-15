@@ -150,7 +150,7 @@ test("install: dl-offline waits for the connection and resumes by itself", async
   expect(setups(t)).toEqual([]);
 });
 
-const UNREACHABLE = "Setting up can't reach the download right now. It tries again by itself.";
+const UNREACHABLE = "Clauseo can't reach the download right now. It tries again by itself.";
 const OFFLINE_WORDS = "You're offline. Setting up waits for the connection.";
 
 test("install: waiting with the window offline says you're offline; online, that the download can't be reached", async () => {

@@ -105,9 +105,10 @@ host added later reached the page without anyone deciding it should.
   probe misses (a launch with nothing to probe counts as a miss then). Any other connection
   failure (a watch whose probe missed while the window says online, a failed prompt naming a
   connection failure, Codex giving up on its connection) ends `agent.unreachable` ("Clauseo
-  couldn't reach Claude. Try again."): the service, a proxy, a firewall or TLS inspection in
-  front of it, or a LAN with no internet; one message, its detail carrying the probe's fixed
-  fields (`class`, `via`, `status`) for firm IT. A request that timed out (Claude's "Request
+  couldn't reach Claude. The answer so far is kept. Try again. If this keeps happening, ask
+  your firm's IT."): the service, a proxy, a firewall or TLS inspection in front of it, or a
+  LAN with no internet; one message, its detail carrying the probe's fixed fields (`class`,
+  `via`, `status`) for firm IT, on a failed prompt's end as on the watch's. A request that timed out (Claude's "Request
   timed out.") while the probe reached the service is a slow service: `agent.quiet`. A failed
   prompt reads the turn's last probe when it is under 30 s old, else its end waits for one fresh
   probe, at most 8 s (`offline/hold.rs`); one that does not answer by then is a miss. No second,

@@ -20,7 +20,8 @@ import {
   userMessage,
 } from "../../testing/stream-script.ts";
 import { FakeTransport, type FakeHost } from "../../transport/fake-transport.ts";
-import type { SetupEvent, SignIn, ViewEntry } from "../../transport/protocol.ts";
+import type { InstallProgress, SetupEvent, SignIn, ViewEntry } from "../../transport/protocol.ts";
+import { OnlineSource, fakeOnline } from "../../transport/online.ts";
 import { createSetupStore } from "../../store/setup.ts";
 import { Room } from "../room.tsx";
 import { stubFonts } from "../thread/testing.ts";
@@ -51,10 +52,18 @@ type Options = {
   reason?: string;
   entries?: ViewEntry[];
   refuse?: string;
+  /** Claude's install state; READY when left out. */
+  install?: InstallProgress;
+  /** The window's network, online or not (online.ts's source, a test's own). */
+  online?: boolean;
 };
+
+/** The window's network for the mounted card, set by mount. */
+let network = fakeOnline(false);
 
 /** Matter A open on its one thread, the question held after a failed turn, the Claude plan's sign-in as given. */
 async function mount(o: Options) {
+  network = fakeOnline(o.online ?? false);
   const fake: FakeHost = {
     platform: "mac",
     query: async (query) => {
@@ -67,7 +76,11 @@ async function mount(o: Options) {
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     setup: {
-      first: (): SetupEvent[] => [info(), install(CLAUDE, READY), signIn(CLAUDE, o.signIn)],
+      first: (): SetupEvent[] => [
+        info(),
+        install(CLAUDE, o.install ?? READY),
+        signIn(CLAUDE, o.signIn),
+      ],
       command: () => {
         if (o.refuse !== undefined) throw { code: o.refuse, message: "refused", retryable: false };
       },
@@ -87,7 +100,13 @@ async function mount(o: Options) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () => root?.render(<Room transport={transport} />));
+  await act(async () =>
+    root?.render(
+      <OnlineSource.Provider value={network}>
+        <Room transport={transport} />
+      </OnlineSource.Provider>,
+    ),
+  );
   await settle();
   return transport;
 }
@@ -286,6 +305,33 @@ test("queue_held_reason, when the host gives it, wins: sign_in shows the card, a
   host?.remove();
   await mount({ signIn: { failed: { code: "agent.auth_required", at: AT } }, reason: "update" });
   expect(card()).toBeNull();
+});
+
+// the install waits for the connection: the card's queued sign-in says its gate line in the window's words
+const WAITING: InstallProgress = { waiting: { code: "agent.install_offline", hosts: [], log: [] } };
+
+test("queued behind a waiting install: the card's gate line follows the window, offline and online", async () => {
+  const t = await mount({ signIn: "queued", install: WAITING, online: false });
+  expect(card()?.dataset["state"]).toBe("waiting");
+  expect(words()).toContain("Your browser opens when you reconnect.");
+  expect(words()).not.toContain("Your browser opens when setting up can continue.");
+  await act(async () => network.set(true));
+  await settle();
+  expect(card()?.dataset["state"]).toBe("waiting");
+  expect(words()).toContain("Your browser opens when setting up can continue.");
+  expect(words()).not.toContain("when you reconnect");
+  await act(async () => network.set(false));
+  await settle();
+  expect(words()).toContain("Your browser opens when you reconnect.");
+  expect(t.setups()).toEqual([]);
+});
+
+test("queued behind a waiting install, online from the start: the setting-up words, with the card's Cancel", async () => {
+  const t = await mount({ signIn: "queued", install: WAITING, online: true });
+  expect(words()).toContain("Your browser opens when setting up can continue.");
+  expect(words()).not.toContain("when you reconnect");
+  await press(byId("signin-cancel"));
+  expect(t.setups()).toEqual([{ cancel_sign_in: { agent: CLAUDE } }]);
 });
 
 test("the window split: the room's setup commands are only the six sign-in ones", async () => {

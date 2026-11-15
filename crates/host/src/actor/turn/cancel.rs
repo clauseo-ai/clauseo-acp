@@ -1,6 +1,7 @@
 //! Cancel: a turn that has not started is dequeued with `TurnEnded { Cancelled, None }`; a
 //! running one gets one commit closing its pending requests and unfinished tool calls, then
-//! `session/cancel` and the 5 s fallback, after which the agent is stopped. A turn that ends
+//! `session/cancel` and the 5 s fallback, after which the agent is stopped; one whose prompt
+//! already answered, its end waiting for the host's probe, ends at once instead. A turn that ends
 //! cancelled with its agent still attached has what it left running ended (`sweep_leftovers`).
 //! Shutdown cancels every running turn the same way and stops every agent.
 
@@ -186,6 +187,12 @@ pub(super) fn cancel_running(
         if let Some(ctx) = ctx {
             actor.finish_command(ctx.id, Err(error));
         }
+    }
+    // A prompt that already answered, its end waiting for the probe (`offline/hold.rs`), ends
+    // cancelled now: nothing to cancel and no fallback, so the agent is kept.
+    if super::offline::release_cancelled(actor, thread, turn) {
+        super::super::limits::asking_changed(actor);
+        return;
     }
     if let Some(agent) = state(actor, thread)
         .and_then(|state| state.agent.as_deref_mut())

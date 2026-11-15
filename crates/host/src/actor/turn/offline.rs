@@ -63,8 +63,8 @@ mod hold;
 pub(crate) mod probe;
 pub(super) mod quiet;
 
-pub(super) use ended::prompt_ended;
-pub(super) use hold::{Hold, hold_for_probe};
+pub(super) use ended::{failed_with, prompt_ended};
+pub(super) use hold::{Hold, hold_for_probe, release_cancelled};
 pub(super) use quiet::ask_ended;
 
 use probe::{Reach, ReachClass};

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { stubFonts } from "../../room/thread/testing.ts";
 import { setupStoreOf, type SetupSource } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { FoundLogin, SignIn } from "../../transport/protocol.ts";
+import type { FoundLogin, InstallProgress, SignIn } from "../../transport/protocol.ts";
 import {
   AT,
   CLAUDE,
@@ -37,7 +37,22 @@ beforeEach(() => localStorage.clear());
 afterEach(async () => {
   await unmount();
   vi.useRealTimers();
+  Reflect.deleteProperty(navigator, "onLine");
 });
+
+/** The window's network as online.ts reads it: the page's navigator.onLine, changed with its online / offline
+ * event. */
+const pageOnline = (online: boolean) =>
+  Object.defineProperty(navigator, "onLine", { configurable: true, get: () => online });
+const flip = async (online: boolean) => {
+  await act(async () => {
+    pageOnline(online);
+    window.dispatchEvent(new Event(online ? "online" : "offline"));
+  });
+  await settle();
+};
+const OFFLINE_WORDS = "You're offline. Setting up waits for the connection.";
+const UNREACHABLE = "Clauseo can't reach the download right now. It tries again by itself.";
 
 const both = (claude: SignIn, codex: SignIn = { signed_out: {} }) => [
   install(CLAUDE, READY),
@@ -454,4 +469,42 @@ test("keys: Sign out's confirm starts on Cancel, and Escape sends nothing and gi
   expect(document.body.textContent).not.toContain("Sign out of Claude?");
   expect(t.setups()).toEqual([]);
   expect(document.activeElement).toBe(opener);
+});
+
+test("an install waiting for the connection, both plans: the offline words offline, the can't-reach words online, flipping with the window's events", async () => {
+  const waiting: InstallProgress = {
+    waiting: { code: "agent.install_offline", hosts: [], log: [] },
+  };
+  pageOnline(false);
+  await mountPlans({
+    first: [install(CLAUDE, waiting), install(CODEX, waiting)],
+  });
+  for (const plan of ["claude", "chatgpt"] as const) {
+    expect(block(plan)?.dataset["state"]).toBe("install");
+    expect(words(plan)).toContain(OFFLINE_WORDS);
+  }
+  await flip(true);
+  for (const plan of ["claude", "chatgpt"] as const) {
+    expect(words(plan)).toContain(UNREACHABLE);
+    expect(words(plan)).not.toContain(OFFLINE_WORDS);
+  }
+  await flip(false);
+  expect(words("chatgpt")).toContain(OFFLINE_WORDS);
+  expect(words("chatgpt")).not.toContain(UNREACHABLE);
+});
+
+test("a sign-in queued behind a waiting install stays the install line in Plans, which follows the window", async () => {
+  const waiting: InstallProgress = {
+    waiting: { code: "agent.install_offline", hosts: [], log: [] },
+  };
+  pageOnline(true);
+  await mountPlans({
+    first: [install(CODEX, waiting), signIn(CODEX, "queued")],
+  });
+  expect(block("chatgpt")?.dataset["state"]).toBe("install");
+  expect(words("chatgpt")).toContain(UNREACHABLE);
+  expect(words("chatgpt")).not.toContain("Your browser opens");
+  await flip(false);
+  expect(words("chatgpt")).toContain(OFFLINE_WORDS);
+  expect(words("chatgpt")).not.toContain("Your browser opens");
 });

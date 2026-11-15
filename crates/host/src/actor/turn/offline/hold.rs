@@ -16,7 +16,7 @@ use clauseo_protocol::{ErrorCode, ThreadId, TurnId};
 use super::super::super::Actor;
 use super::super::{TurnPhase, current, end};
 use super::probe::{self, PROBE_CAP, Reach};
-use super::{OFFLINE_WAIT, arm_timer_for, ended};
+use super::{Arm, OFFLINE_WAIT, arm_timer_for, ended};
 
 /// A prompt's end held for the host's probe, and the probe's answer once it came.
 #[derive(Debug)]
@@ -70,9 +70,11 @@ pub(in crate::actor::turn) fn hold_for_probe(
 }
 
 /// The host's probe for `thread`'s `turn` answered: a held end takes it (the watch too, when
-/// one stands) and goes on. Whether there was a held end.
+/// one stands, by [`counts_reached`] as `offline.rs::on_probed` counts it) and goes on.
+/// Whether there was a held end.
 pub(super) fn on_probed(actor: &mut Actor, thread: ThreadId, turn: TurnId, reach: Reach) -> bool {
     let now = actor.now().mono;
+    let window = actor.turn_path.offline;
     let Some(current) = current(actor, thread).filter(|current| current.turn == turn) else {
         return false;
     };
@@ -87,7 +89,7 @@ pub(super) fn on_probed(actor: &mut Actor, thread: ThreadId, turn: TurnId, reach
     if let Some(watch) = current.offline.as_mut() {
         watch.probing = false;
         watch.probed = Some((now, reach));
-        watch.reached = reach.reached();
+        watch.reached = counts_reached(reach, window || watch.by == Arm::Window);
     }
     release(actor, thread, turn);
     true
@@ -114,6 +116,26 @@ pub(super) fn on_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> boo
         release(actor, thread, turn);
     }
     true
+}
+
+/// The turn of `thread` is cancelled (a Stop, a send now, shutdown, a failure of its own) while
+/// its end waits for the probe: the held result goes on to the prompt's end at once, which ends
+/// the turn cancelled, so the cancel's fallback never stops the agent, whose prompt already
+/// answered. Whether an end was held.
+pub(in crate::actor::turn) fn release_cancelled(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+) -> bool {
+    let held = current(actor, thread)
+        .filter(|current| current.turn == turn)
+        .and_then(|current| current.probe_hold.as_ref())
+        .is_some_and(|hold| hold.result.is_some());
+    if held {
+        tracing::info!(%thread, "the turn was cancelled while its end waited for a probe");
+        release(actor, thread, turn);
+    }
+    held
 }
 
 /// Hands `thread`'s held result on to the prompt's end.
@@ -149,7 +171,7 @@ pub(super) fn fresh_reach(actor: &mut Actor, thread: ThreadId) -> Option<Reach> 
 pub(super) fn verdict(actor: &mut Actor, thread: ThreadId, timed_out: bool) -> ErrorCode {
     let window = actor.turn_path.offline;
     let reach = fresh_reach(actor, thread);
-    let reached = reach.is_some_and(|reach| reach.reached() && !(window && reach.class.unknown()));
+    let reached = reach.is_some_and(|reach| counts_reached(reach, window));
     let code = if window && !reached {
         ErrorCode::AgentOffline
     } else if reached && timed_out {
@@ -162,15 +184,42 @@ pub(super) fn verdict(actor: &mut Actor, thread: ThreadId, timed_out: bool) -> E
     code
 }
 
+/// Whether `reach` counts as reaching the agent's service: a launch with nothing to probe
+/// (`unknown_service`, `unknown_route`) does not while the window says `offline`, since the
+/// OS says offline and nothing says otherwise.
+pub(super) fn counts_reached(reach: Reach, offline: bool) -> bool {
+    reach.reached() && !(offline && reach.class.unknown())
+}
+
 /// `detail` with the probe's fixed fields, for firm IT (never a host or bytes).
 pub(super) fn with_probe(detail: &str, reach: Option<Reach>) -> String {
-    match reach {
+    let fields = match reach {
         Some(reach) => format!(
-            "{detail}; probe class={} via={} status={}",
+            "probe class={} via={} status={}",
             reach.class.as_str(),
             reach.via.as_str(),
             reach.status
         ),
-        None => format!("{detail}; no probe answered"),
+        None => "no probe answered".to_owned(),
+    };
+    if detail.is_empty() {
+        fields
+    } else {
+        format!("{detail}; {fields}")
     }
+}
+
+/// The detail a connection failure of `thread`'s turn that ended `code` carries: `detail`,
+/// with the probe's fixed fields ([`with_probe`]) when it is `agent.unreachable`.
+pub(super) fn detail_for(
+    actor: &mut Actor,
+    thread: ThreadId,
+    code: ErrorCode,
+    detail: Option<String>,
+) -> Option<String> {
+    if code != ErrorCode::AgentUnreachable {
+        return detail;
+    }
+    let reach = fresh_reach(actor, thread);
+    Some(with_probe(detail.as_deref().unwrap_or_default(), reach))
 }

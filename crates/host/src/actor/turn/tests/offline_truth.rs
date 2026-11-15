@@ -21,13 +21,13 @@ use crate::actor::turn::offline::quiet::QUIET_WAIT;
 const CLAUDE: &str = "API Error: Unable to connect to API (ECONNREFUSED)";
 
 /// Claude's prompt failing on a connection error.
-const CONNECTION: &str = "Internal error: API Error: Connection error.";
+pub(super) const CONNECTION: &str = "Internal error: API Error: Connection error.";
 
 /// Claude's prompt failing on a slow service.
 const TIMED_OUT: &str = "Internal error: API Error: Request timed out.";
 
 /// A partial answer, then the prompt fails with `message`.
-fn failing(message: &str) -> Vec<String> {
+pub(super) fn failing(message: &str) -> Vec<String> {
     let error = serde_json::json!({"respond": {"to": "p1",
         "error": {"code": -32603, "message": message}}});
     vec![
@@ -38,13 +38,13 @@ fn failing(message: &str) -> Vec<String> {
 }
 
 /// Says the window is offline, as command `n`.
-fn window_offline(rig: &mut Rig, n: u128) {
+pub(super) fn window_offline(rig: &mut Rig, n: u128) {
     let answer = rig.dispatch(n, HostCommand::SetNetwork { online: false });
     assert_eq!(answer.unwrap(), CommandOutcome::Done);
 }
 
 /// The failure's detail of `turn`.
-fn detail(log: &[DomainEvent], turn: TurnId) -> Option<String> {
+pub(super) fn detail(log: &[DomainEvent], turn: TurnId) -> Option<String> {
     log.iter().find_map(|event| {
         if let DomainEvent::TurnFailed(failed) = event
             && failed.turn == turn
