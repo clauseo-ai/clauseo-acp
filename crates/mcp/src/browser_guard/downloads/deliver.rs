@@ -53,6 +53,10 @@ pub(crate) enum Failed {
     Copy(io::Error),
     /// Anything else (the folder is gone or a link, the file is held open): tried again.
     Retry(io::Error),
+    /// Every name the file could take is taken ([`free_name`] up to its last number, or
+    /// [`MOVE_TRIES`] names taken in turn between the look and the move): held for good, not
+    /// looked for again at every sweep.
+    NoFreeName,
 }
 
 /// Where a delivered file went, and the error when its staging file could not be deleted.
@@ -79,7 +83,7 @@ pub(crate) fn deliver(
     let mut copy = false;
     for _ in 0..MOVE_TRIES {
         let Some((n, given)) = free_name(&opened, name, first) else {
-            break;
+            return Err(Failed::NoFreeName);
         };
         let target = folder.join(&given);
         before(&target);
@@ -99,18 +103,18 @@ pub(crate) fn deliver(
         }
     }
     if !copy {
-        return Err(Failed::Retry(no_free_name()));
+        return Err(Failed::NoFreeName);
     }
     let mut incoming = opened
         .copy_in(from, how.mark)
         .map_err(|failed| match failed {
-            CopyFailed::Mark(error) => Failed::Unmarkable(error),
-            CopyFailed::Io(error) => Failed::Copy(error),
+            CopyFailed::Mark(error) if marks::cannot_keep(&error) => Failed::Unmarkable(error),
+            CopyFailed::Mark(error) | CopyFailed::Io(error) => Failed::Copy(error),
         })?;
     let mut first = 1;
     for _ in 0..MOVE_TRIES {
         let Some((n, given)) = free_name(&opened, name, first) else {
-            break;
+            return Err(Failed::NoFreeName);
         };
         let target = folder.join(&given);
         before(&target);
@@ -122,17 +126,15 @@ pub(crate) fn deliver(
                 });
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => first = n + 1,
-            Err(error) => return Err(Failed::Copy(error)),
+            Err(error) => {
+                super::super::note(&format!(
+                    "a copied download was not given its name, and is not told as saved: {error}"
+                ));
+                return Err(Failed::Copy(error));
+            }
         }
     }
-    Err(Failed::Copy(no_free_name()))
-}
-
-fn no_free_name() -> io::Error {
-    io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        "no free name in the downloads folder",
-    )
+    Err(Failed::NoFreeName)
 }
 
 /// Delivers `path`, a finished, marked file in staging Chrome named `name` (above). A file
@@ -147,6 +149,7 @@ pub(super) fn deliver_one(sweeper: &mut Sweeper, path: &Path, name: &str) {
     let error = match failed {
         Failed::Retry(error) => return retry_later(sweeper, path, &error),
         Failed::Copy(error) => return copy_failed(sweeper, path, &given, &error),
+        Failed::NoFreeName => return no_free_name(sweeper, path, &given),
         Failed::Unmarkable(error) => error,
     };
     super::super::note(&format!(
@@ -170,6 +173,7 @@ pub(super) fn deliver_one(sweeper: &mut Sweeper, path: &Path, name: &str) {
         Ok(delivered) => tell_delivered(sweeper, path, &delivered, true),
         Err(Failed::Retry(error)) => retry_later(sweeper, path, &error),
         Err(Failed::Copy(error)) => copy_failed(sweeper, path, &given, &error),
+        Err(Failed::NoFreeName) => no_free_name(sweeper, path, &given),
         Err(Failed::Unmarkable(error)) => hold(
             sweeper,
             path,
@@ -234,6 +238,27 @@ fn copy_failed(sweeper: &mut Sweeper, path: &Path, given: &str, error: &io::Erro
              downloads folder ({error}), so it was not saved. The file stayed in Clauseo's \
              browser folder, which is cleared when the browser closes. Tell your user it was \
              not saved, and that they can download it from the page in their own browser."
+        ),
+    );
+}
+
+/// Every name `path` could take as `given` is taken: held for good, noted and told once.
+fn no_free_name(sweeper: &mut Sweeper, path: &Path, given: &str) {
+    if !sweeper.given_up.contains(path) {
+        super::super::note(&format!(
+            "a download is held: every name it could take is taken ({given} and its numbered \
+             names up to ({}))",
+            super::MAX_NUMBER
+        ));
+    }
+    hold(
+        sweeper,
+        path,
+        format!(
+            "The browser downloaded {given}, but it was not saved: the downloads folder already \
+             has a file under every name it could take. The file stayed in Clauseo's browser \
+             folder, which is cleared when the browser closes. Tell your user, and that they \
+             can download it from the page in their own browser."
         ),
     );
 }

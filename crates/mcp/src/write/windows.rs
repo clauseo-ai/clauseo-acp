@@ -10,21 +10,24 @@
 //!   rename that never replaces);
 //! - the copy's mark: its `:Zone.Identifier` stream opened with `RootDirectory` the copy's own
 //!   handle;
-//! - a delete: `FileDispositionInfo` on the file's own handle.
+//! - a delete: `FileDispositionInfo` on the file's own handle;
+//! - a listing: `GetFileInformationByHandleEx(FileFullDirectoryInfo)` on the folder's handle;
+//! - a copy's temporary file is made hidden (`FILE_ATTRIBUTE_HIDDEN`), and shown again
+//!   (`FileBasicInfo`) just before it gets its name.
 //!
 //! And the proxy's secret file, checked and deleted through the one handle it was opened with
 //! (`write/secret.rs`): `GetFileInformationByHandle` and `delete_by_handle`.
 #![expect(
     unsafe_code,
-    reason = "NtCreateFile and SetFileInformationByHandle, relative to handles; std has neither; \
-              the secret file's GetFileInformationByHandle"
+    reason = "NtCreateFile, SetFileInformationByHandle and GetFileInformationByHandleEx, relative \
+              to handles; std has none of them; the secret file's GetFileInformationByHandle"
 )]
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io;
-use std::os::windows::ffi::OsStrExt;
-use std::os::windows::fs::OpenOptionsExt;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::path::Path;
 
@@ -38,11 +41,13 @@ use windows::Win32::Foundation::{
     STATUS_OBJECT_PATH_NOT_FOUND, UNICODE_STRING, WIN32_ERROR,
 };
 use windows::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_NORMAL, FILE_DISPOSITION_INFO,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
+    BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_HIDDEN,
+    FILE_ATTRIBUTE_NORMAL, FILE_BASIC_INFO, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_FULL_DIR_INFO, FILE_GENERIC_READ,
     FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO,
     FILE_SHARE_DELETE, FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
-    FileDispositionInfo, FileRenameInfo, GetFileInformationByHandle, SYNCHRONIZE,
+    FileBasicInfo, FileDispositionInfo, FileFullDirectoryInfo, FileFullDirectoryRestartInfo,
+    FileRenameInfo, GetFileInformationByHandle, GetFileInformationByHandleEx, SYNCHRONIZE,
     SetFileInformationByHandle,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
@@ -83,6 +88,7 @@ pub(super) fn exists_in(dir: &OwnedHandle, name: &OsStr) -> bool {
         FILE_READ_ATTRIBUTES | SYNCHRONIZE,
         FILE_OPEN,
         FILE_OPEN_REPARSE_POINT.0,
+        FILE_ATTRIBUTE_NORMAL,
     ) {
         Ok(_found) => true,
         Err(status) => {
@@ -94,15 +100,144 @@ pub(super) fn exists_in(dir: &OwnedHandle, name: &OsStr) -> bool {
 /// Makes the file `name` in the folder `dir` holds, new (`FILE_CREATE`), open to read, write
 /// and delete (the copy deletes its temporary file through this handle).
 pub(super) fn create_new_in(dir: &OwnedHandle, name: &OsStr) -> io::Result<File> {
+    create_in(dir, name, FILE_ATTRIBUTE_NORMAL)
+}
+
+/// [`create_new_in`], the file hidden (`FILE_ATTRIBUTE_HIDDEN`): a copy's temporary file, which
+/// a crash would leave behind. [`unhide`] shows it again before it gets its name.
+pub(super) fn create_hidden_in(dir: &OwnedHandle, name: &OsStr) -> io::Result<File> {
+    create_in(dir, name, FILE_ATTRIBUTE_HIDDEN)
+}
+
+fn create_in(
+    dir: &OwnedHandle,
+    name: &OsStr,
+    attributes: FILE_FLAGS_AND_ATTRIBUTES,
+) -> io::Result<File> {
     nt_open(
         dir,
         name,
         FILE_GENERIC_READ | FILE_GENERIC_WRITE | DELETE,
         FILE_CREATE,
         FILE_NON_DIRECTORY_FILE.0 | FILE_OPEN_REPARSE_POINT.0,
+        attributes,
     )
     .map(File::from)
     .map_err(nt_error)
+}
+
+/// Clears `FILE_ATTRIBUTE_HIDDEN` on the open `file` (`FileBasicInfo` through its handle; the
+/// times left as they are, which zero means).
+pub(super) fn unhide(file: &File) -> io::Result<()> {
+    let attributes = file.metadata()?.file_attributes() & !FILE_ATTRIBUTE_HIDDEN.0;
+    let info = FILE_BASIC_INFO {
+        // Zero would leave the attributes as they are.
+        FileAttributes: if attributes == 0 {
+            FILE_ATTRIBUTE_NORMAL.0
+        } else {
+            attributes
+        },
+        ..FILE_BASIC_INFO::default()
+    };
+    // SAFETY: `info` is a valid `FILE_BASIC_INFO` that outlives the call, and its size is the
+    // one passed; `file`'s handle is open for the call.
+    unsafe {
+        SetFileInformationByHandle(
+            handle(file.as_raw_handle()),
+            FileBasicInfo,
+            std::ptr::from_ref(&info).cast(),
+            size_u32(size_of::<FILE_BASIC_INFO>()),
+        )
+    }
+    .map_err(|error| io_error(&error))
+}
+
+/// Deletes `name` from the folder `dir` holds when it is a plain file: opened relative to the
+/// handle with `FILE_OPEN_REPARSE_POINT` (a link is opened itself, never followed) and
+/// `FILE_NON_DIRECTORY_FILE`, refused unless a plain file, then deleted through that handle.
+pub(super) fn remove_plain_in(dir: &OwnedHandle, name: &OsStr) -> io::Result<()> {
+    let file = nt_open(
+        dir,
+        name,
+        DELETE | FILE_READ_ATTRIBUTES,
+        FILE_OPEN,
+        FILE_NON_DIRECTORY_FILE.0 | FILE_OPEN_REPARSE_POINT.0,
+        FILE_ATTRIBUTE_NORMAL,
+    )
+    .map(File::from)
+    .map_err(nt_error)?;
+    let kind = file.metadata()?.file_type();
+    if kind.is_symlink() || !kind.is_file() {
+        return Err(io::Error::other("not a plain file"));
+    }
+    delete_by_handle(&file)
+}
+
+/// How many bytes one listing call reads.
+const LISTING_BYTES: usize = 64 * 1024;
+
+/// The names in the folder `dir` holds, `.` and `..` left out:
+/// `GetFileInformationByHandleEx(FileFullDirectoryInfo)` on its handle, never its path. What
+/// was read before a failure.
+pub(super) fn names_in(dir: &OwnedHandle) -> Vec<OsString> {
+    let mut names = Vec::new();
+    let mut buffer = vec![0_u64; LISTING_BYTES / size_of::<u64>()];
+    let mut class = FileFullDirectoryRestartInfo;
+    // SAFETY: `buffer` is writable for the size passed and `dir`'s handle is open for the call.
+    while unsafe {
+        GetFileInformationByHandleEx(
+            handle(dir.as_raw_handle()),
+            class,
+            buffer.as_mut_ptr().cast(),
+            size_u32(LISTING_BYTES),
+        )
+    }
+    .is_ok()
+    {
+        class = FileFullDirectoryInfo;
+        // SAFETY: `buffer` holds `LISTING_BYTES` initialised bytes, read as bytes (`u8` is
+        // aligned anywhere) while the slice lives, and nothing writes it meanwhile.
+        let bytes =
+            unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), LISTING_BYTES) };
+        listed(bytes, &mut names);
+    }
+    names
+}
+
+/// The names in `bytes`, a chain of `FILE_FULL_DIR_INFO` entries, read field by field with
+/// every offset checked against the buffer's end; pushed to `names` but `.` and `..`.
+fn listed(bytes: &[u8], names: &mut Vec<OsString>) {
+    let header = std::mem::offset_of!(FILE_FULL_DIR_INFO, FileName);
+    let length_at = std::mem::offset_of!(FILE_FULL_DIR_INFO, FileNameLength);
+    let next_at = std::mem::offset_of!(FILE_FULL_DIR_INFO, NextEntryOffset);
+    let u32_at = |at: usize| -> Option<usize> {
+        let field: [u8; 4] = bytes.get(at..at + 4)?.try_into().ok()?;
+        usize::try_from(u32::from_ne_bytes(field)).ok()
+    };
+    let mut offset = 0_usize;
+    loop {
+        let (Some(next), Some(length)) = (u32_at(offset + next_at), u32_at(offset + length_at))
+        else {
+            return;
+        };
+        let Some(name) = bytes.get(offset + header..offset + header + length) else {
+            return;
+        };
+        let wide: Vec<u16> = name
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_ne_bytes(*pair))
+            .collect();
+        let name = OsString::from_wide(&wide);
+        if name != "." && name != ".." {
+            names.push(name);
+        }
+        if next == 0 {
+            return;
+        }
+        offset += next;
+    }
 }
 
 /// Opens the file `from` (in staging, the guard's own folder) to copy it or move it: read,
@@ -209,19 +344,22 @@ pub(crate) fn open_stream(file: &File, stream: &str, create: bool) -> io::Result
         access,
         disposition,
         FILE_NON_DIRECTORY_FILE.0,
+        FILE_ATTRIBUTE_NORMAL,
     )
     .map(File::from)
     .map_err(nt_error)
 }
 
 /// `NtCreateFile` of `name` relative to `root`, case-insensitive as Win32 names are, for
-/// synchronous I/O (std's `File` needs it), sharing everything; the status on failure.
+/// synchronous I/O (std's `File` needs it), sharing everything, a new file made with
+/// `new_attributes`; the status on failure.
 fn nt_open(
     root: &OwnedHandle,
     name: &OsStr,
     access: FILE_ACCESS_RIGHTS,
     disposition: NTCREATEFILE_CREATE_DISPOSITION,
     options: u32,
+    new_attributes: FILE_FLAGS_AND_ATTRIBUTES,
 ) -> Result<OwnedHandle, NTSTATUS> {
     let mut wide: Vec<u16> = name.encode_wide().collect();
     let bytes = u16::try_from(wide.len() * size_of::<u16>())
@@ -250,7 +388,7 @@ fn nt_open(
             &raw const attributes,
             &raw mut status_block,
             None,
-            FILE_ATTRIBUTE_NORMAL,
+            new_attributes,
             SHARE_ALL,
             disposition,
             windows::Wdk::Storage::FileSystem::NTCREATEFILE_CREATE_OPTIONS(

@@ -314,7 +314,10 @@ fn clean_up(
     // goes only if it names no Chrome that may live (`record.rs`).
     record::forget(cwd, run);
     let profile = runs::profile_of(cwd, run);
-    downloads::sweep(&profile.join(STAGING), downloads, fallback);
+    // Told to the next guard under `cwd`: a file delivered to the fallback folder still reaches
+    // the host, which shows the lawyer where it is.
+    let untold = downloads::sweep(&profile.join(STAGING), downloads, fallback);
+    downloads::queue(cwd, &untold);
     chrome::remove_profile(&profile);
     runs::forget(cwd, run);
 }

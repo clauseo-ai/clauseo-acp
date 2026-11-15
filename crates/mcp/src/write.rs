@@ -182,6 +182,71 @@ impl Folder {
         }
     }
 
+    /// [`Folder::create_new`], hidden on Windows (`FILE_ATTRIBUTE_HIDDEN`; the leading dot hides
+    /// it elsewhere): a copy's temporary file.
+    pub(crate) fn create_hidden(&self, name: &OsStr) -> io::Result<std::fs::File> {
+        #[cfg(unix)]
+        {
+            unix::create_new_in(&self.dir, name)
+        }
+        #[cfg(windows)]
+        {
+            windows::create_hidden_in(&self.dir, name)
+        }
+    }
+
+    /// Removes `name` from the folder when it is a plain file, never following a link there and
+    /// never removing a folder; through the folder's handle.
+    pub(crate) fn remove_plain(&self, name: &OsStr) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            unix::remove_plain_in(&self.dir, name)
+        }
+        #[cfg(windows)]
+        {
+            windows::remove_plain_in(&self.dir, name)
+        }
+    }
+
+    /// The names in the folder, read through its handle, never its path.
+    pub(crate) fn names(&self) -> Vec<std::ffi::OsString> {
+        #[cfg(unix)]
+        {
+            unix::names_in(&self.dir)
+        }
+        #[cfg(windows)]
+        {
+            windows::names_in(&self.dir)
+        }
+    }
+
+    /// Renames `from`, a file this process made in the folder and holds open as `file`, to
+    /// `to` in the folder, never replacing anything there (`AlreadyExists`): on Unix by name
+    /// (`write/unix.rs` `rename_new_in`), on Windows through `file`'s handle.
+    pub(crate) fn rename_new(
+        &self,
+        file: &std::fs::File,
+        from: &OsStr,
+        to: &OsStr,
+    ) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            let _ = file;
+            unix::rename_new_in(&self.dir, from, to)
+        }
+        #[cfg(windows)]
+        {
+            let _ = from;
+            windows::rename_into(file, &self.dir, to)
+        }
+    }
+
+    /// Removes the temporary files a copy left in the folder when the guard died midway
+    /// (`write/copy.rs`): plain files named `.clauseo-dl-<16 hex digits>`, nothing else.
+    pub(crate) fn remove_copy_leftovers(&self) {
+        copy::remove_leftovers(self);
+    }
+
     /// Copies the file `from` into the folder under a new hidden temporary name, marked by
     /// `mark` before any content, and flushed to the disk (`write/copy.rs`).
     pub(crate) fn copy_in(&self, from: &Path, mark: Mark) -> Result<Incoming<'_>, CopyFailed> {

@@ -212,13 +212,31 @@ fn only_the_guards_line_and_the_text_after_its_last_marker_count() {
     );
     // Page text that does not begin as the guard's line.
     assert_eq!(saved_file(&format!("A page said: {good}"), &folder), None);
-    // A marker after the real path: the text after the last one is no path.
+    // A marker after the real path: no text after any marker is a file in the folder.
     assert_eq!(saved_file(&format!("{good} Its path: x"), &folder), None);
     // No marker at all.
     assert_eq!(
         saved_file("Saved judgment.pdf to downloads/ in the matter.", &folder),
         None
     );
+}
+
+/// A name that holds the marker itself puts it in the path too: the marker before the path
+/// still reads, and the notice names the whole name. Unix only: Windows names hold no `:`.
+#[cfg(unix)]
+#[test]
+fn a_name_holding_the_marker_still_reads() {
+    let dir = TempDir::new("fallback-marker-name");
+    let folder = folder(&dir);
+    for name in ["a Its path: b.pdf", "Its path: .pdf"] {
+        let path = folder.join(name);
+        write::write_file(&path, b"x").unwrap();
+        assert_eq!(
+            saved_file(&line(name, &path), &folder),
+            Some((path.clone(), name.to_owned())),
+            "{name:?}"
+        );
+    }
 }
 
 #[test]

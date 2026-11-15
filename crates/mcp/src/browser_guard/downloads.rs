@@ -61,7 +61,7 @@ mod saved;
 pub(crate) use deliver::{How, deliver};
 
 pub(crate) use held::Held;
-pub(crate) use saved::{OPEN_WAIT, Saved, open_reply};
+pub(crate) use saved::{OPEN_WAIT, Saved, open_reply, queue};
 
 /// Names no download may take, compared without ASCII case: the matter root's write-denied
 /// names, `clauseo_sandbox::policy::PROTECTED_NAMES` (this crate may not depend on the sandbox;
@@ -120,6 +120,7 @@ impl Mover {
         held: Arc<Held>,
         saved: Arc<Saved>,
     ) -> Mover {
+        remove_copy_leftovers(&downloads, fallback.as_deref());
         let (stop, stopped) = mpsc::channel::<()>();
         let mut sweeper = Sweeper::new(staging.clone(), downloads.clone(), MARK_WAIT);
         sweeper.fallback.clone_from(&fallback);
@@ -166,14 +167,29 @@ impl Mover {
     }
 }
 
+/// Removes the temporary files a copy left in `downloads` and `fallback` when a guard died
+/// midway (`write/copy.rs`), through each folder's handle; a folder that does not open (not
+/// made yet, or a link) is left alone.
+fn remove_copy_leftovers(downloads: &Path, fallback: Option<&Path>) {
+    for folder in std::iter::once(downloads).chain(fallback) {
+        if let Ok(opened) = write::Folder::open(folder) {
+            opened.remove_copy_leftovers();
+        }
+    }
+}
+
 /// One sweep after Chrome has stopped (the reaper's, on Unix): [`Sweeper::sweep`] with no wait,
-/// then the held downloads deleted.
+/// then the held downloads deleted. Returns what the agent would have been told, which the
+/// reaper queues for the next guard ([`queue`]).
 #[cfg(any(unix, test))]
-pub(crate) fn sweep(staging: &Path, downloads: &Path, fallback: Option<&Path>) {
+pub(crate) fn sweep(staging: &Path, downloads: &Path, fallback: Option<&Path>) -> Vec<String> {
+    let saved = Arc::new(Saved::default());
     let mut sweeper = Sweeper::new(staging.to_owned(), downloads.to_owned(), 0);
     sweeper.fallback = fallback.map(Path::to_owned);
+    sweeper.saved = Some(Arc::clone(&saved));
     sweeper.sweep();
     held::clear(staging);
+    saved.drain()
 }
 
 /// The mover's state from one sweep to the next.
@@ -350,6 +366,7 @@ pub(crate) fn place(
             | deliver::Failed::Copy(error)
             | deliver::Failed::Retry(error),
         ) => Err(error),
+        Err(deliver::Failed::NoFreeName) => Err(io::ErrorKind::AlreadyExists.into()),
     }
 }
 
