@@ -516,6 +516,8 @@ crates/agents/src/config.rs SigninConfig::callback_port clippy::unused_self
 crates/host/src/browser/install/windows.rs - unsafe_code
 # The case-law connector's env: GetWindowsDirectoryW, the fallback for SystemRoot and windir.
 crates/host/src/agent/loads/case_law.rs windows_directory unsafe_code
+# The offline probe's read of Claude Code's Windows policy tier: RegGetValueW, read-only.
+crates/host/src/actor/turn/offline/probe/settings/os_policy/registry.rs - unsafe_code
 crates/sandbox/src/windows/setup/accounts.rs - unsafe_code
 # The record's owner in Administrators, by SID (NetUserGetLocalGroups), for the removal.
 crates/sandbox/src/windows/setup/admin_member.rs - unsafe_code
