@@ -9,7 +9,11 @@
 //! `reuse.rs` calls `File::open`, any `fs::read*`, `OpenOptions`, the crate's own `open_read`
 //! or `read_small`, any `read_…(`, `options(`, `open(`, `copy(` or `rename(`, or names `File`
 //! at all. `reuse.rs` (the hard link, the stats and the markers) may name Codex's file to link
-//! it and stat it, and Claude's to stat it (detection), never to open either.
+//! it and stat it, and Claude's to stat it (detection), never to open either. On macOS it also
+//! names Claude Code's default Keychain item (`Claude Code-credentials`), which no other file may
+//! name: detection asks `security find-generic-password` whether the item exists, and any file
+//! that runs that command fails if it holds a `"-w"`, `"-g"` or `"-d"` literal anywhere: the
+//! first two print the secret, and the query needs none of them.
 //!
 //! The scan is defence in depth, not proof (decision 0046): it reads text, and code written to
 //! get around it can still pass. The file names are built with `concat!` below, so this file

@@ -5,7 +5,8 @@
 //! own home). The fake CLIs write what the real ones do on any run (`fake_agent`'s
 //! `first_meet`: Claude's global config and its backup, Codex's `tmp/arg0`), so a detection run
 //! on the lawyer's folders fails this. Each agent is checked signed out and with a stand-in
-//! login file (never a real credential).
+//! login file (never a real credential), and Claude as a Mac with a fake `security` (the
+//! Keychain query, attributes only: it never starts a CLI or writes either).
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -17,7 +18,7 @@ use clauseo_agents::{Found, LoginFrom, SigninState};
 use clauseo_protocol::AgentId;
 use sha2::{Digest, Sha256};
 
-use crate::support::{Fixture, claude, codex};
+use crate::support::{Fixture, Launch, claude, codex};
 
 /// Claude's stand-in credential file, under the lawyer's home.
 const CLAUDE_LOGIN: &str = concat!(".claude/.credentials", ".json");
@@ -61,9 +62,17 @@ fn snapshot(fx: &Fixture) -> BTreeMap<PathBuf, Entry> {
 }
 
 /// Runs the status check for `agent` (Clauseo signed in to nothing, so it detects), checks that
-/// the lawyer's config is as it was and that every run started had Clauseo's own home (so none
-/// was detection's), then gives the state.
+/// the lawyer's config is as it was, that every run started had Clauseo's own home (so none
+/// was detection's) and that no Keychain query ran, then gives the state.
 fn detect_unchanged(fx: &Fixture, agent: &AgentId) -> SigninState {
+    let (state, queries) = detect_with_queries(fx, agent);
+    assert_eq!(queries, Vec::<Launch>::new(), "a Keychain query ran");
+    state
+}
+
+/// [`detect_unchanged`] with the Keychain queries it ran (macOS's `security`, which the
+/// recording launcher sees by their first argument) given back rather than refused.
+fn detect_with_queries(fx: &Fixture, agent: &AgentId) -> (SigninState, Vec<Launch>) {
     let before = snapshot(fx);
     let (agents, events) = fx.start_for(agent.clone());
     agents.check_status(agent).unwrap();
@@ -84,7 +93,10 @@ fn detect_unchanged(fx: &Fixture, agent: &AgentId) -> SigninState {
     } else {
         "CODEX_HOME"
     };
-    let runs = fx.launches();
+    let (queries, runs): (Vec<Launch>, Vec<Launch>) = fx
+        .launches()
+        .into_iter()
+        .partition(|run| run.args.first().map(String::as_str) == Some("find-generic-password"));
     assert!(
         runs.iter()
             .all(|run| run.env.get(OsStr::new(var)) == Some(&home)),
@@ -92,7 +104,7 @@ fn detect_unchanged(fx: &Fixture, agent: &AgentId) -> SigninState {
     );
     // The one run is Clauseo's own status, signed out (a definite answer, so not asked again).
     assert_eq!(runs.len(), 1, "{runs:?}");
-    state
+    (state, queries)
 }
 
 fn found(from: LoginFrom) -> SigninState {
@@ -229,5 +241,116 @@ fn a_moved_agent_folder_finds_no_login() {
         let mut after = BTreeMap::new();
         walk(&moved, &moved, &mut after);
         assert_eq!(after, before, "{var}");
+    }
+}
+
+/// macOS's Keychain query (Unix: the fake `security` is a shell script). The fixture says the
+/// platform is macOS, and its fake `security` records each call and exits with `code`.
+#[cfg(unix)]
+mod keychain {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    use clauseo_agents::testing::write_file;
+    use clauseo_agents::{LoginFrom, Os};
+
+    use super::{CLAUDE_LOGIN, detect_with_queries, found, no_login};
+    use crate::support::{Fixture, claude};
+
+    /// The fixture as a Mac, with a fake `security` exiting `code`; gives its call record.
+    fn mac(label: &str, code: i32) -> (Fixture, PathBuf) {
+        let mut fx = Fixture::new(label, "ok-after:0");
+        fx.config.platform.os = Os::Darwin;
+        let record = fx.data.path().join("security-called");
+        let program = fx.data.path().join("fake-security");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\nexit {code}\n",
+            record.display()
+        );
+        write_file(&program, script.as_bytes()).unwrap();
+        clauseo_agents::testing::set_mode(&program, 0o755).unwrap();
+        fx.config.signin.security_program = Some(program);
+        fx.config
+            .signin
+            .base_env
+            .insert(OsString::from("USER"), OsString::from("lawyer"));
+        (fx, record)
+    }
+
+    /// The Keychain item there, no file: the login is found, by one attributes-only query with
+    /// exactly these arguments and only `HOME`, and the lawyer's config is unchanged.
+    #[test]
+    fn a_mac_keychain_item_is_found_by_one_attributes_only_query() {
+        let (fx, record) = mac("keychain-found", 0);
+        let (state, queries) = detect_with_queries(&fx, &claude());
+        assert_eq!(state, found(LoginFrom::ClaudeCode));
+        assert_eq!(queries.len(), 1, "{queries:?}");
+        assert_eq!(
+            queries[0].args,
+            [
+                "find-generic-password",
+                "-s",
+                "Claude Code-credentials",
+                "-a",
+                "lawyer"
+            ]
+        );
+        let home = fx.user_home().into_os_string();
+        assert_eq!(
+            queries[0].env.keys().collect::<Vec<_>>(),
+            [&OsString::from("HOME")]
+        );
+        assert_eq!(queries[0].env.get(&OsString::from("HOME")), Some(&home));
+        assert!(record.exists());
+        assert!(!fx.user_home().join(".claude").exists());
+    }
+
+    /// 44 ("could not be found") and any other exit are no login found.
+    #[test]
+    fn a_mac_query_that_does_not_exit_0_finds_no_login() {
+        for code in [44, 1] {
+            let (fx, record) = mac("keychain-absent", code);
+            let (state, queries) = detect_with_queries(&fx, &claude());
+            assert_eq!(state, no_login(), "exit {code}");
+            assert_eq!(queries.len(), 1, "exit {code}");
+            assert!(record.exists(), "exit {code}");
+        }
+    }
+
+    /// The lawyer's `CLAUDE_CONFIG_DIR` set: nothing is found and no query runs at all.
+    #[test]
+    fn a_moved_claude_folder_on_a_mac_runs_no_query() {
+        let (mut fx, record) = mac("keychain-moved", 0);
+        let moved = fx.data.path().join("lawyer-claude");
+        fx.config
+            .signin
+            .base_env
+            .insert("CLAUDE_CONFIG_DIR".into(), moved.into_os_string());
+        let (state, queries) = detect_with_queries(&fx, &claude());
+        assert_eq!(state, no_login());
+        assert!(queries.is_empty(), "{queries:?}");
+        assert!(!record.exists(), "the fake security was called");
+    }
+
+    /// The file there on a Mac: found by the stat, with no query.
+    #[test]
+    fn a_mac_login_file_is_found_with_no_query() {
+        let (fx, record) = mac("keychain-file", 44);
+        write_file(&fx.user_home().join(CLAUDE_LOGIN), b"{}").unwrap();
+        let (state, queries) = detect_with_queries(&fx, &claude());
+        assert_eq!(state, found(LoginFrom::ClaudeCode));
+        assert!(queries.is_empty(), "{queries:?}");
+        assert!(!record.exists());
+    }
+
+    /// Linux keeps the stat alone: a `security` that would say "found" is never asked.
+    #[test]
+    fn linux_runs_no_query() {
+        let (mut fx, record) = mac("keychain-linux", 0);
+        fx.config.platform.os = Os::Linux;
+        let (state, queries) = detect_with_queries(&fx, &claude());
+        assert_eq!(state, no_login());
+        assert!(queries.is_empty(), "{queries:?}");
+        assert!(!record.exists());
     }
 }

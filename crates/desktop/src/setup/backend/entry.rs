@@ -33,6 +33,10 @@ pub(crate) fn launch(
         Some(AgentKind::Claude) => {
             env.insert("ANTHROPIC_API_KEY".to_owned(), String::new());
             env.insert("CLAUDE_CONFIG_DIR".to_owned(), home.clone());
+            // The split between Clauseo's own login (the home's suffixed Keychain item or file)
+            // and the lawyer's (`""`: their unsuffixed item). Any Keychain shim or jail (draft
+            // #815, plan-c) applies to `Own` only: on macOS a `Reused` session must reach Apple's
+            // `security` and SecurityServer (decision 0046, "Guard"; agents' `signin/reuse.rs`).
             let storage = match source {
                 SignInSource::Reused => String::new(),
                 SignInSource::Own => home,
