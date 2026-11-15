@@ -294,13 +294,18 @@ pub enum Found {
     /// `no-reuse` is there, so nothing was looked for; `find_login` deletes it. Never a reason
     /// reuse stopped.
     ReuseOff,
+    /// The run-time fallback: the lawyer's Claude Code login is there, but Claude's status under
+    /// the reused session's environment says signed out (an expired login, say). `no-reuse` is
+    /// written as for `ReuseOff`; this says why, so the card can tell the lawyer. Never a reason
+    /// `stop_using_login` takes.
+    ReuseUnusable,
 }
 
 impl Found {
-    /// Whether it is a reason reuse stopped, which `stop_using_login` takes: not `NoLogin`
-    /// or `ReuseOff`, which say what the status check saw.
+    /// Whether it is a reason reuse stopped, which `stop_using_login` takes: not `NoLogin`,
+    /// `ReuseOff` or `ReuseUnusable`, which say what the status check saw.
     pub const fn is_stop_reason(self) -> bool {
-        !matches!(self, Self::NoLogin | Self::ReuseOff)
+        !matches!(self, Self::NoLogin | Self::ReuseOff | Self::ReuseUnusable)
     }
 }
 

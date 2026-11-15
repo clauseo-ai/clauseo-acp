@@ -33,4 +33,6 @@ export const FOUND: Record<Found, FirstLaunchKey> = {
     "{app} on this computer now uses another account, so Clauseo stopped using its sign-in.",
   codex_link_split: "Codex's sign-in on this computer changed, so Clauseo stopped using it.",
   reused_failed: "{app}'s sign-in stopped working here, so Clauseo stopped using it.",
+  reuse_unusable:
+    "Clauseo couldn't use your {app} sign-in. It may have expired, so sign in here instead.",
 };

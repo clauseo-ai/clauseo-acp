@@ -139,6 +139,9 @@ export const HI = {
     "इस कंप्यूटर पर Codex का साइन इन बदल गया, इसलिए Clauseo ने उसे इस्तेमाल करना बंद कर दिया।",
   "{app}'s sign-in stopped working here, so Clauseo stopped using it.":
     "{app} का साइन इन यहाँ काम नहीं कर रहा, इसलिए Clauseo ने उसे इस्तेमाल करना बंद कर दिया।",
+  // "Use it" (or a later start) found the login, but it didn't work here (FoundLogin reuse_unusable)
+  "Clauseo couldn't use your {app} sign-in. It may have expired, so sign in here instead.":
+    "Clauseo आपके {app} साइन इन का इस्तेमाल नहीं कर सका। हो सकता है वह समाप्त हो गया हो, इसलिए इसके बजाय यहाँ साइन इन करें।",
 
   // ChatGPT's device code, offered only after the browser didn't work (new)
   "Use a code instead": "इसके बजाय कोड इस्तेमाल करें",

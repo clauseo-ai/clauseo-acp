@@ -74,6 +74,7 @@ fn found_login(found: Found) -> Option<FoundLogin> {
         Found::CodexLinkSplit => FoundLogin::CodexLinkSplit,
         Found::NoLogin => FoundLogin::NoneFound,
         Found::ReuseOff => FoundLogin::ReuseOff,
+        Found::ReuseUnusable => FoundLogin::ReuseUnusable,
         _ => return None,
     })
 }

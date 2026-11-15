@@ -1,0 +1,12 @@
+{
+  "UC-647": {
+    "en": "Clauseo couldn't use your {app} sign-in. It may have expired, so sign in here instead.",
+    "hi": "Clauseo आपके {app} साइन इन का इस्तेमाल नहीं कर सका। हो सकता है वह समाप्त हो गया हो, इसलिए इसके बजाय यहाँ साइन इन करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; waiting for Rohan's OK on the screenshots)"
+  }
+}

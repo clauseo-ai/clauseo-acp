@@ -293,6 +293,25 @@ fn each_find_login_ends_in_one_sign_in_changed_even_when_unchanged() {
     assert_eq!(sent(&mut feed), [off.clone(), off]);
 }
 
+/// A "Use it" whose login Claude could not use here (S18's run-time fallback) says so on the
+/// wire, apart from a plain `reuse_off`, so the card can tell the lawyer why.
+#[test]
+fn a_failed_use_it_goes_out_as_reuse_unusable() {
+    let events = Arc::new(SetupEvents::default());
+    let mut feed = events.follow();
+    let compose = Compose::new(Arc::clone(&events), Arc::new(Fixed));
+    compose.signin(
+        &claude(),
+        SigninState::SignedOut {
+            found: Some(Found::ReuseUnusable),
+        },
+    );
+    let unusable = SignIn::SignedOut {
+        found: Some(FoundLogin::ReuseUnusable),
+    };
+    assert_eq!(sent(&mut feed), [unusable]);
+}
+
 #[test]
 fn a_search_waits_through_running_states_for_its_resting_answer() {
     let events = Arc::new(SetupEvents::default());

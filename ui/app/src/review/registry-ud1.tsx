@@ -453,6 +453,16 @@ const REFUSAL: Entry = {
   render: render(KEY_IN_USE),
 };
 
+/** "Use it" pressed, and Claude Code's sign-in didn't work here (it may have expired): stage D's UC block. */
+const REUSE_UNUSABLE: Entry = {
+  id: "UC-647",
+  words: firstLaunchWords(
+    "Clauseo couldn't use your {app} sign-in. It may have expired, so sign in here instead.",
+  ),
+  screen: "first-launch/plan-found",
+  render: render(found("reuse_unusable")),
+};
+
 /** The document tools offline: the plans' own offline sentence, in the null SCENES keeps for it. */
 const TOOLS_OFFLINE: Entry = {
   id: "UD1-102",
@@ -555,6 +565,7 @@ export const UD1: readonly Entry[] = [
   ),
   REFUSAL,
   TOOLS_OFFLINE,
+  REUSE_UNUSABLE,
   ...UC_KEY,
   AFTER_SIGN_IN,
   STILL_DOWNLOADING,

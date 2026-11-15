@@ -27,7 +27,8 @@ export type Found =
   | "reused_failed"
   | "reused_signed_out"
   | "reused_changed"
-  | "codex_link_split";
+  | "codex_link_split"
+  | "reuse_unusable";
 
 /** Which plan: Claude's (Claude Code underneath) or ChatGPT's (Codex). */
 export type Plan = "claude" | "chatgpt";
