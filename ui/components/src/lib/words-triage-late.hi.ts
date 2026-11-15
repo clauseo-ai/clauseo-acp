@@ -24,7 +24,7 @@ export const HI = {
   // UC-129: a matter's menu, under RO-15's "Snooze until"; it marks the matter's conversations (was "Mark all done";
   // new; provisional)
   "Mark all conversations done": "सभी बातचीत पूरी चिह्नित करें",
-  // MR-01: the open conversation's menu: opens the other matters' names, a press letting it read that matter's files
+  // UC-351: the open conversation's menu: opens the other matters' names, a press letting it read that matter's files
   // (new; provisional)
   "Let this conversation read": "इस बातचीत को पढ़ने दें",
   // RO-17: behind the open fold's info icon

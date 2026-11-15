@@ -1,0 +1,101 @@
+{
+  "UC-346": {
+    "en": "Clauseo stopped a step: {name} tried to open {matter}'s files. That's another matter.",
+    "hi": "Clauseo ने एक काम रोक दिया: {name} ने {matter} की फ़ाइलें खोलने की कोशिश की। वह दूसरा मामला है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "Host notice NoticeKind::OtherMatterRefused: Clauseo kept the agent out of another matter's files (a refused permission request, or a tool call refused on a path there), once a turn for each matter. {name} as TN-11; {matter} the matter's name as the app's list has it now (else the host's), bidi-isolated. UC-348's offer stands under it"
+  },
+  "UC-347": {
+    "en": "Clauseo stopped a step: the AI tried to open {matter}'s files. That's another matter.",
+    "hi": "Clauseo ने एक काम रोक दिया: AI ने {matter} की फ़ाइलें खोलने की कोशिश की। वह दूसरा मामला है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "UC-346 where the room knows no agent name, as TN-12; rendered alone"
+  },
+  "UC-348": {
+    "en": "Let this conversation read {matter}'s files",
+    "hi": "इस बातचीत को {matter} की फ़ाइलें पढ़ने दें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "The offer under UC-346: sends allow_matter_read for this conversation and that matter; hidden once the header's read_matters lists it, or when the app's list no longer holds the matter"
+  },
+  "UC-349": {
+    "en": "Clauseo couldn't keep {name}'s commands out of these matters: {matters}.",
+    "hi": "Clauseo {name} की कमांड को इन मामलों से बाहर नहीं रख सका: {matters}।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "Host notice NoticeKind::MattersUnfenced (Claude on Windows: too many matters for its settings file): at most five matters named, then the shared '{n} more' (listOf). No button. {matters} by the app's names; a matter the list doesn't hold is counted with the more"
+  },
+  "UC-350": {
+    "en": "Clauseo couldn't keep the AI's commands out of these matters: {matters}.",
+    "hi": "Clauseo AI की कमांड को इन मामलों से बाहर नहीं रख सका: {matters}।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "UC-349 where the room knows no agent name; rendered alone"
+  },
+  "UC-351": {
+    "en": "Let this conversation read",
+    "hi": "इस बातचीत को पढ़ने दें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "The open conversation's menu (chevron and context menu): a submenu row, its chevron saying it opens (no '…', as Snooze); it lists the other folder matters by name, not this conversation's own, not the scratch matter, not those already allowed; a press sends allow_matter_read"
+  },
+  "UC-352": {
+    "en": "Can read {matter}'s files",
+    "hi": "{matter} की फ़ाइलें पढ़ सकती है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "A pill over the composer for each matter in the header's read_matters (PaperChips' look); {matter} bidi-isolated"
+  },
+  "UC-353": {
+    "en": "Stop letting this conversation read {matter}'s files",
+    "hi": "इस बातचीत को {matter} की फ़ाइलें पढ़ने देना बंद करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "The pill's ×, for assistive technology: sends withdraw_matter_read"
+  },
+  "UC-354": {
+    "en": "Other matters this conversation can read",
+    "hi": "दूसरे मामले जिन्हें यह बातचीत पढ़ सकती है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "mfence (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "mfence (provisional; Rohan batch review)",
+    "note": "The pills' list, for assistive technology"
+  }
+}
