@@ -218,6 +218,14 @@ jobs:
             if [ "$mode" = dry ]; then echo "version_suffix=dev.${GITHUB_SHA:0:9}"; else echo "version_suffix="; fi
           } | tee -a "$GITHUB_OUTPUT"
 
+      # A v* release ships only words Rohan approved: every entry in ui/app/copy-approvals/*.json
+      # "approved", none with provisional Hindi ("hi_status": "later" passes). A test or dry run
+      # skips it, as a pull request's copy:check lets provisional words through. The ui job runs
+      # copy:check itself in a release, before it builds.
+      - name: Every word in a release is approved
+        if: steps.mode.outputs.mode == 'release'
+        run: node .github/scripts/copy-release-gate.mjs
+
       # The overlays may hold only what they are for. Every sidecar, S15's included, goes through
       # .github/scripts/sidecars.mjs and its generated overlay, which the seam checks.
       - name: The release overlays hold only their own keys
@@ -396,6 +404,12 @@ jobs:
 
       - name: Install the ui workspace
         run: pnpm -C ui install --frozen-lockfile
+
+      # In a release, every lawyer-facing string registered with an approval that matches its words
+      # (check's gate above holds them all to "approved"), before anything is built.
+      - name: copy:check (release)
+        if: needs.check.outputs.mode == 'release'
+        run: pnpm -C ui/app run copy:check
 
       - name: Build the ui with hidden source maps, then move the maps out
         env:
