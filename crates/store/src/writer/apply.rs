@@ -383,7 +383,9 @@ pub(super) fn put_pending_action(conn: &Connection, action: &PendingAction) -> R
     .execute(params![
         action.matter.to_string(),
         action.kind.name(),
-        action.files.map(|files| files.get()),
+        action
+            .files
+            .map(|files| i64::try_from(files.get()).unwrap_or(i64::MAX)),
         action.thread.map(|thread| thread.to_string()),
         action.at.as_millis(),
     ])?;
