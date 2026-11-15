@@ -293,26 +293,61 @@ fn joined(n: usize) -> String {
 }
 
 #[test]
-fn a_query_names_at_most_eight_tables() {
-    assert_eq!(MAX_TABLES, 8);
-    assert!(guard(&joined(8)).is_ok(), "eight passes");
-    assert_eq!(refused(&joined(9)), Refused::Tables);
-    // Every kind of item counts: joins, CTE references, subqueries and what they read.
+fn a_query_weighs_at_most_four_tables() {
+    assert_eq!(MAX_TABLES, 4);
+    assert!(guard(&joined(4)).is_ok(), "four passes");
+    assert_eq!(refused(&joined(5)), Refused::Tables);
+    // The review's case: each CTE joins the one before to itself, so c weighs 8.
+    assert_eq!(
+        refused(
+            "WITH a AS (SELECT * FROM v_daily x, v_daily y), b AS (SELECT * FROM a p, a q), \
+             c AS (SELECT * FROM b r, b s) SELECT count(*) FROM c"
+        ),
+        Refused::Tables
+    );
+    // A reference weighs its CTE's tables: 2 + 2 passes, 2 + 2 + 2 does not.
+    let pair = "WITH c AS (SELECT * FROM v_daily x, v_daily y)";
+    assert!(guard(&format!("{pair} SELECT * FROM c, c c2")).is_ok());
+    assert_eq!(
+        refused(&format!("{pair} SELECT * FROM c, c c2, c c3")),
+        Refused::Tables
+    );
+    assert_eq!(
+        refused(&format!(
+            "{pair}, d AS (SELECT * FROM c) SELECT * FROM d, d d2, v_daily"
+        )),
+        Refused::Tables
+    );
+    // At the cap, mixing a CTE, a join, a subquery in FROM and one in WHERE.
     let at_cap = "WITH c AS (SELECT * FROM v_daily) \
-                  SELECT * FROM c JOIN v_monthly ON 1 JOIN (SELECT * FROM v_paths) p ON 1, \
-                  v_tally, v_active WHERE os IN (SELECT os FROM v_cohort_week)";
+                  SELECT * FROM c JOIN (SELECT * FROM v_paths) p ON 1, v_tally \
+                  WHERE os IN (SELECT os FROM v_cohort_week)";
     assert!(guard(at_cap).is_ok(), "{at_cap}");
     for sql in [
-        "WITH c AS (SELECT * FROM v_daily) \
-         SELECT * FROM c, c c2, c c3, c c4, c c5, c c6, c c7, c c8",
-        "SELECT * FROM v_daily a JOIN v_daily b ON 1 JOIN v_daily c ON 1 JOIN v_daily d ON 1 \
-         JOIN v_daily e ON 1 JOIN v_daily f ON 1 JOIN v_daily g ON 1 JOIN v_daily h ON 1 \
-         JOIN v_daily i ON 1",
-        "SELECT (SELECT count(*) FROM v_daily, v_daily b, v_daily c, v_daily d), \
-         (SELECT count(*) FROM v_daily, v_daily b, v_daily c, v_daily d, v_daily e)",
+        // Subqueries in FROM weigh what they read.
+        "SELECT * FROM (SELECT * FROM v_daily a, v_daily b), \
+         (SELECT * FROM v_daily a, v_daily b, v_daily c)",
+        // Subqueries anywhere count.
+        "SELECT (SELECT count(*) FROM v_daily, v_daily b), \
+         (SELECT count(*) FROM v_daily, v_daily b, v_daily c)",
         "SELECT * FROM (((v_daily a JOIN v_daily b ON 1) JOIN v_daily c ON 1)), v_daily d, \
-         v_daily e, v_daily f, v_daily g, v_daily h, v_daily i",
+         v_daily e",
+        // A CTE or subquery that reads no table still weighs one.
+        "WITH t(x) AS (VALUES (1), (2)) SELECT * FROM t a, t b, t c, t d, t e",
+        "SELECT * FROM (VALUES (1)), (VALUES (1)), (VALUES (1)), (VALUES (1)), (VALUES (1))",
+        // An inner CTE of the same name shadows the outer one.
+        "WITH c AS (SELECT 1) SELECT * FROM (WITH c AS (SELECT * FROM v_daily a, v_daily b, \
+         v_daily d) SELECT * FROM c, c c2)",
     ] {
         assert_eq!(refused(sql), Refused::Tables, "{sql}");
     }
+    // Deep chains do not overflow the weight.
+    let chain: Vec<String> = (1..60)
+        .map(|i| format!("c{i} AS (SELECT * FROM c{} x, c{} y)", i - 1, i - 1))
+        .collect();
+    let deep = format!(
+        "WITH c0 AS (SELECT * FROM v_daily), {} SELECT * FROM c59",
+        chain.join(", ")
+    );
+    assert_eq!(refused(&deep), Refused::Tables);
 }

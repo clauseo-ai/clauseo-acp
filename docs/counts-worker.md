@@ -265,13 +265,16 @@ enclosing scope. A CTE may not take a base table's name or a `sqlite_` one, a na
 qualified (`main.report`, and `main.v_daily` too, so no `temp.` name can shadow a view), names
 compare without case as SQLite's do, `FROM` takes no table-valued function, no CTE is recursive
 (`WITH RECURSIVE`, or a CTE naming itself or a later one, which SQLite runs as recursive
-anyway: an unbounded one kept D1 busy and blocked the counts writes), a query has at most 8
-`FROM`/`JOIN` items in all (each view, CTE reference and parenthesised subquery counts one,
-wherever it sits), and functions come
+anyway: an unbounded one kept D1 busy and blocked the counts writes), a query weighs at most
+4 tables in all (a view counts one wherever it sits, a CTE reference counts every table its CTE
+reads, so a chain of CTEs that joins each one to itself is counted in full, and a subquery in
+`FROM` what it reads, at least one), and functions come
 from a short list: `count`, `sum`, `total`, `avg`, `min`, `max`, `group_concat`, `date`, `strftime`,
 `coalesce`, `round`, `json_extract`. The Worker runs it as
 `SELECT * FROM (<query>) LIMIT 1000`, written from the parsed statement, and answers `504` after
-10 seconds. A query D1 cannot run is `400` too.
+10 seconds. A query D1 cannot run is `400` too. The 4-table weight is a coarse limit, not a
+cost bound: a 4-way join can still be slow, and the Worker's 10-second answer does not cancel
+the query in D1. D1's own per-query time limit is what bounds a query's cost.
 
 ### Querying
 
@@ -289,6 +292,29 @@ curl -sS https://t.clauseo.chat/v1/query \
 
 Never echo, log or store either half, and never put them in a script or a commit. Access turns the
 pair into the JWT the Worker checks. To cut an agent off, revoke the token in Zero Trust.
+
+### Checking Access live
+
+After the one-time set-up, and before the deploy that turns Access on is approved, run on
+Rohan's Mac:
+
+```sh
+node services/counts-worker/scripts/check-access.mjs
+```
+
+It prints only yes/no lines, never a token, an email, an id or a JWT, and exits 1 if any says
+no:
+
+- `/dash` and `/v1/query` without credentials, and `/v1/query` with a made-up service token,
+  are stopped by Access: a redirect to the team's login, or Access's own `403` page (the
+  Worker's answers have empty bodies). Run before the service token exists, the last line shows
+  that an application with no policy refuses everyone.
+- With the service token from the Keychain (service `clauseo-counts-query`, read at call time),
+  `POST /v1/query` of `SELECT 1 AS one FROM v_active LIMIT 1` answers `200`, and the
+  `common_name` in the `CF_Authorization` JWT Access sets equals the token's client id, with
+  its `.access` suffix: that is what the Worker compares with `QUERY_CLIENT_ID`.
+- By hand: open https://t.clauseo.chat/dash and sign in. A page means the email matches
+  `DASH_EMAIL`; a `403` means it does not.
 
 ## No logs
 
@@ -383,10 +409,11 @@ deploys:
      policy of ours, so it lets no one in.
 
    It keeps that one policy up to date (a new email updates it) and deletes every other policy
-   on the two applications, one added by hand included, so each application's policies are
-   exactly the one it made, again at every deploy. A reusable policy (one shared between
-   applications) is not deleted from here: the job fails, naming the application, to be fixed
-   by hand. An application of that name on another path, or two of one name, fails the job.
+   on the two applications, one added by hand or a second of the same name included, so each
+   application ends every deploy with exactly one policy, the one it made (or none). A
+   reusable policy (one shared between applications) is not deleted from here: the job fails,
+   naming the application, to be fixed by hand. An application of that name on another path,
+   or two of one name, fails the job.
 2. It reads both applications' AUD tags, and the client id (not the secret) of the service
    token `clauseo-counts-agent` through the service tokens API, and passes them, with the
    repository variable `ACCESS_TEAM` and `ACCESS_DASH_EMAIL`, as `wrangler deploy
@@ -396,8 +423,13 @@ deploys:
 3. It prints none of them. They are masked like the database id, and errors name the API path
    without its ids.
 
+It reads everything before it changes anything, and checks the shape of what it reads: lists
+where it reads lists, each policy with a string `id`, `name` and `decision` and a boolean
+`reusable`, and each application's `policies` a list of the same.
+
 If `ACCESS_TEAM` is unset, or the API answers `401` or `403` because the token lacks the Access
-permissions, the step prints one line saying it skipped Access and the deploy goes on. `/dash`
+permissions, or an answer has another shape, the step prints one line saying it skipped Access
+and the deploy goes on. `/dash`
 and `/v1/query` then stay `404`.
 
 ### The live check

@@ -4,15 +4,17 @@
 //! base table's name or a `sqlite_` one, and functions come from a short allowlist. No CTE may
 //! be recursive (`WITH RECURSIVE`, or one that names itself or a later CTE, which SQLite runs
 //! as recursive without the keyword): an unbounded one would keep D1 busy and block the counts
-//! writes. And a query names at most [`MAX_TABLES`] tables, so joins stay small. The query
+//! writes. And a query weighs at most [`MAX_TABLES`] tables, a CTE reference weighing as many
+//! as its CTE reads, so a chain of CTEs cannot double a join inside the cap. That is a coarse
+//! limit only: D1's own per-query time limit is the real bound on what a query costs. The query
 //! runs as `SELECT * FROM (<query>) LIMIT 1000`, written from the parsed statement, so a
 //! trailing comment cannot cut the wrapper off.
 
 use std::ops::ControlFlow;
 
 use sqlparser::ast::{
-    Expr, InTarget, ObjectName, ObjectNamePart, Query, Select, SetExpr, Statement, TableFactor,
-    Visit, Visitor, visit_relations,
+    Cte, Expr, InTarget, ObjectName, ObjectNamePart, Query, Select, SetExpr, Statement,
+    TableFactor, Visit, Visitor, visit_relations,
 };
 use sqlparser::dialect::SQLiteDialect;
 use sqlparser::parser::Parser;
@@ -21,9 +23,10 @@ use sqlparser::parser::Parser;
 pub(crate) const ROW_CAP: usize = 1_000;
 /// The longest query text taken.
 pub(crate) const MAX_SQL: usize = 8_000;
-/// The most `FROM` and `JOIN` items a query may have, counted over the whole statement:
-/// views, CTE references and subqueries in parentheses each count one.
-pub(crate) const MAX_TABLES: usize = 8;
+/// The most tables a query may weigh, over the whole statement: a view counts one, a reference
+/// to a CTE counts what that CTE's body weighs (at least one), and a subquery in `FROM` what
+/// its body weighs (at least one). A CTE that is never referenced weighs nothing.
+pub(crate) const MAX_TABLES: usize = 4;
 
 /// The views a query may read (`migrations/0002_rollup.sql`, `0003_summaries.sql` and
 /// `0004_crash.sql`).
@@ -110,15 +113,66 @@ pub(crate) fn guard(sql: &str) -> Result<String, Refused> {
     if let ControlFlow::Break(refused) = statement.visit(&mut scope) {
         return Err(refused);
     }
+    if scope.weight() > MAX_TABLES {
+        return Err(Refused::Tables);
+    }
     Ok(format!("SELECT * FROM ({query}) LIMIT {ROW_CAP}"))
 }
 
-/// The CTE names of each enclosing query, innermost last, while the statement is walked, and
-/// the `FROM` items seen so far.
-#[derive(Default)]
+/// A query body whose weight is kept apart while it is walked.
+enum Body {
+    /// The body of CTE `.1` of the WITH scope at depth `.0`: its weight goes to that CTE.
+    Cte(usize, usize),
+    /// A subquery in `FROM`: its weight goes to the query around it.
+    Derived,
+}
+
+/// While the statement is walked: the CTEs of each enclosing query, innermost last, each with
+/// its name and weight; the bodies whose weight is kept apart, by address; and one running
+/// weight per body being walked, the statement's first.
 struct Scope {
-    ctes: Vec<Vec<String>>,
-    tables: usize,
+    ctes: Vec<Vec<(String, usize)>>,
+    bodies: Vec<(*const Query, Body)>,
+    weights: Vec<usize>,
+}
+
+impl Default for Scope {
+    fn default() -> Scope {
+        Scope {
+            ctes: Vec::new(),
+            bodies: Vec::new(),
+            weights: vec![0],
+        }
+    }
+}
+
+impl Scope {
+    /// The statement's weight, once walked.
+    fn weight(&self) -> usize {
+        self.weights.first().copied().unwrap_or(0)
+    }
+
+    fn add(&mut self, weight: usize) {
+        if let Some(last) = self.weights.last_mut() {
+            *last = last.saturating_add(weight);
+        }
+    }
+
+    /// What a table named `name` weighs here: its CTE's weight, innermost scope first, or one.
+    fn weight_of(&self, name: &str) -> usize {
+        self.ctes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.iter())
+            .find(|(cte, _)| cte == name)
+            .map_or(1, |(_, weight)| *weight)
+    }
+
+    fn body(&self, query: &Query) -> Option<usize> {
+        self.bodies
+            .iter()
+            .position(|(body, _)| std::ptr::eq(*body, query))
+    }
 }
 
 /// A single plain name, lowercased (SQLite compares names without case).
@@ -171,7 +225,7 @@ impl Visitor for Scope {
             .iter()
             .flat_map(|with| &with.cte_tables)
             .collect();
-        let mut names = Vec::new();
+        let mut names: Vec<String> = Vec::new();
         for cte in &ctes {
             let name = cte.alias.name.value.to_ascii_lowercase();
             if reserved(&name) || cte.from.is_some() {
@@ -190,12 +244,38 @@ impl Visitor for Scope {
                 return ControlFlow::Break(Refused::Recursive);
             }
         }
-        self.ctes.push(names);
+        let depth = self.ctes.len();
+        for (at, cte) in ctes.iter().enumerate() {
+            let Cte { query: body, .. } = cte;
+            let body: &Query = body;
+            self.bodies.push((body, Body::Cte(depth, at)));
+        }
+        self.ctes
+            .push(names.into_iter().map(|name| (name, 1)).collect());
+        if self.body(query).is_some() {
+            self.weights.push(0);
+        }
         ControlFlow::Continue(())
     }
 
-    fn post_visit_query(&mut self, _query: &Query) -> ControlFlow<Refused> {
+    fn post_visit_query(&mut self, query: &Query) -> ControlFlow<Refused> {
         self.ctes.pop();
+        if let Some(at) = self.body(query) {
+            let (_, body) = self.bodies.swap_remove(at);
+            let weight = self.weights.pop().unwrap_or(0).max(1);
+            match body {
+                Body::Cte(depth, index) => {
+                    if let Some(cte) = self
+                        .ctes
+                        .get_mut(depth)
+                        .and_then(|ctes| ctes.get_mut(index))
+                    {
+                        cte.1 = weight;
+                    }
+                }
+                Body::Derived => self.add(weight),
+            }
+        }
         ControlFlow::Continue(())
     }
 
@@ -210,7 +290,10 @@ impl Visitor for Scope {
         let Some(name) = plain_name(relation) else {
             return ControlFlow::Break(Refused::Table);
         };
-        let in_scope = self.ctes.iter().any(|names| names.contains(&name));
+        let in_scope = self
+            .ctes
+            .iter()
+            .any(|names| names.iter().any(|(cte, _)| *cte == name));
         if in_scope || VIEWS.contains(&name.as_str()) {
             ControlFlow::Continue(())
         } else {
@@ -220,11 +303,16 @@ impl Visitor for Scope {
 
     fn pre_visit_table_factor(&mut self, factor: &TableFactor) -> ControlFlow<Refused> {
         match factor {
-            TableFactor::Table { args: None, .. } | TableFactor::Derived { .. } => {
-                self.tables += 1;
-                if self.tables > MAX_TABLES {
-                    return ControlFlow::Break(Refused::Tables);
-                }
+            TableFactor::Table {
+                name, args: None, ..
+            } => {
+                let weight = plain_name(name).map_or(1, |name| self.weight_of(&name));
+                self.add(weight);
+                ControlFlow::Continue(())
+            }
+            TableFactor::Derived { subquery, .. } => {
+                let body: &Query = subquery;
+                self.bodies.push((body, Body::Derived));
                 ControlFlow::Continue(())
             }
             TableFactor::NestedJoin { .. } => ControlFlow::Continue(()),
