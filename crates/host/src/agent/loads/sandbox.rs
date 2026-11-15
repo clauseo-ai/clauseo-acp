@@ -99,7 +99,7 @@ use serde_json::{Map, Value, json};
 /// is `[::ffff:7f00:1]`, `[::ffff:0.0.0.0]` is `[::ffff:0:0]`), where a dual-stack connect lands
 /// on loopback, so the mapped forms are listed, with and without brackets, and the dotted ones
 /// verbatim in case a path skips the parser (security re-check of PR-1).
-pub(crate) const DENIED_DOMAINS: [&str; 12] = [
+pub(crate) const DENIED_DOMAINS: [&str; 14] = [
     "localhost",
     "127.0.0.1",
     "::1",
@@ -112,6 +112,8 @@ pub(crate) const DENIED_DOMAINS: [&str; 12] = [
     "[::ffff:0:0]",
     "::ffff:127.0.0.1",
     "[::ffff:127.0.0.1]",
+    "::ffff:0.0.0.0",
+    "[::ffff:0.0.0.0]",
 ];
 
 /// What sandboxed commands may not read beside `<data>` and the other matters: the home, as

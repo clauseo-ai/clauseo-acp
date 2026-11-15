@@ -1309,10 +1309,13 @@ stays without a browser until a later change.
   builds it for macOS and Linux too, and W1/W2 then drop the claimed stream port.
   **Remaining exposure until the patched Mac sidecar ships:** on macOS (and Linux) the stream
   server still starts on a port the OS picks, which the guard does not read (0060), and
-   Chrome on its debugging port. Every browser
+  Chrome on its debugging port. Every browser
   listener binds `127.0.0.1` or a Unix socket. What keeps Claude's sandboxed shell off them, from
-  the source of @anthropic-ai/sandbox-runtime 0.0.83, which Claude Code 2.1.293 bundles
-  (`scratch-e/pr1-sandbox-evidence.md`):
+  the source of @anthropic-ai/sandbox-runtime 0.0.83, which Claude Code 2.1.293 bundles: its
+  Seatbelt profile builder (`dist/sandbox/macos-sandbox-utils.js`), the switch that turns network
+  restriction on once `allowedDomains` is set (`sandbox-manager.js:2150-2152`), and Claude Code's
+  sandbox-config builder, which copies the Unix-socket and local-binding keys from the settings
+  with no defaults. The full evidence is in the pull request's description. It showed:
   - Seatbelt's profile is `(deny default)`; with `allowedDomains` set, the only outbound TCP it
     allows is to the HTTP and SOCKS proxy ports (`macos-sandbox-utils.js:756, 981-993`). No
     Unix-socket create or connect rule is emitted, since Clauseo sets neither `allowUnixSockets`
@@ -1324,7 +1327,8 @@ stays without a browser until a later change.
     a dual-stack connect lands on loopback, so `DENIED_DOMAINS` lists the mapped forms too
     (security re-check of PR-1).
   - W1 removes the debugging port on every system regardless (pipe plus relay, no DevTools TCP
-    port at launch). A Claude Code bump re-runs this check (`scratch-e/loopback-bypass-check.sh`).
+    port at launch). A Claude Code bump re-runs this check by hand from Claude's
+    shell (each loopback spelling over the proxy, CONNECT and SOCKS).
   - Once the patched agent-browser honours the switch, the guard refuses any stream port file
     on Windows (`port_file.rs`, `stream_off`) and reads none elsewhere (0060).
 - **Instructions.** Claude's part is `browser-claude-mcp.txt`: Codex's rules without "your shell

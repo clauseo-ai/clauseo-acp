@@ -26,6 +26,8 @@ fn every_loopback_spelling_is_denied() {
             "[::ffff:0:0]",
             "::ffff:127.0.0.1",
             "[::ffff:127.0.0.1]",
+            "::ffff:0.0.0.0",
+            "[::ffff:0.0.0.0]",
         ]
     );
     let sandbox = mac(&Session::new("s-1").paths()).unwrap();
