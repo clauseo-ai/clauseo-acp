@@ -8,9 +8,10 @@
 // `try_again`), and so for a state the toolbar hides while it waits on its words (missing_scope, live_only, or one from
 // a newer Clauseo). Billed by use: who bills, no figure. An agent of no kind is never in the view. The page is never
 // blank: the host gives every plan set up an entry, loading at least, so with none the one line asks to set one up.
-// Opening the section asks the host for a read (`shown`), which reads only figures older
-// than 5 minutes. No timers: times are said against the clock at each render, and the host sends a new view at each
-// shown reset. Not here until the host gives them: Manage plan and Manage billing (H11), the month's figure, the retry
+// Opening the section asks the host for a read (`shown`), and so does each minute while the page is in view
+// (REFRESH_EVERY_MS; paused while the window is hidden, gone when the section closes): the host reads only figures
+// older than 2 minutes (Claude) or 1 (ChatGPT), one read per plan at a time, and sends a new view after each read, at
+// each turn's end read and at each shown reset. Times are said against the clock at each render. Not here until the host gives them: Manage plan and Manage billing (H11), the month's figure, the retry
 // lines and what the plan does at its limit (H16), and preparing ahead (later). A plan the setup wire says isn't
 // signed in shows nothing, though the host reads it as billed by use (no subscription and no limits; D-060).
 import { IconTryAgain } from "@clauseo/components/icons/icons.tsx";
@@ -163,6 +164,10 @@ function AgentUsage({ kind, entry }: { kind: AgentKind; entry: AgentLimitsView }
   );
 }
 
+/** While the page is in view, `shown` for every plan this often; never faster, since each read the host lets
+ * through launches a reader that asks the plan's provider. */
+const REFRESH_EVERY_MS = 60_000;
+
 export function Usage({ ctx }: { ctx: SectionContext }) {
   const w = useSettingsWords();
   const store = useLimitsStore();
@@ -173,6 +178,25 @@ export function Usage({ ctx }: { ctx: SectionContext }) {
     if (asked.current || store === null) return;
     asked.current = true;
     store.refresh(undefined, "shown");
+  }, [store]);
+  // then each minute while the window is in view; a window shown again asks from Rust on its focus
+  useEffect(() => {
+    if (store === null) return;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const stop = () => {
+      clearInterval(timer);
+      timer = undefined;
+    };
+    const follow = () => {
+      if (document.visibilityState !== "visible") stop();
+      else timer ??= setInterval(() => store.refresh(undefined, "shown"), REFRESH_EVERY_MS);
+    };
+    follow();
+    document.addEventListener("visibilitychange", follow);
+    return () => {
+      document.removeEventListener("visibilitychange", follow);
+      stop();
+    };
   }, [store]);
   // a plan with no sign-in and no key reads as billed by use: it isn't set up, so it shows nothing (D-060)
   const kinds = KINDS.filter((kind) => {

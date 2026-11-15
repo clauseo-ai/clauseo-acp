@@ -198,7 +198,8 @@ impl Bridge {
     }
 
     /// A window got focus: `RefreshLimits { agent: None, why: Shown }`, from Rust. The host
-    /// reads only limits older than 5 minutes, so the bridge does not throttle it.
+    /// reads only limits older than the agent kind's `shown_after_ms` (2 minutes for Claude, 1
+    /// for Codex), so the bridge does not throttle it.
     pub(crate) async fn shown(&self) -> Result<CommandOutcome, HostError> {
         let shown = HostCommand::RefreshLimits {
             agent: None,
