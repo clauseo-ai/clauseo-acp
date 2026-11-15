@@ -98,10 +98,12 @@ pub(super) struct Recheck {
 /// so the app's shutdown does not wait on it, and the process's exit ends it. A stetdoc still
 /// running then goes with its Job Object on Windows; on macOS and Linux it is left to finish
 /// its one short run. On Windows an exit that lands between stetdoc's suspended start and its
-/// joining the job leaves it suspended for good, outside any job: the quit's wait for
-/// `clauseo_process::live_handles` (`quit.rs`) covers that moment, and a test must not end
-/// while this thread may run (no stetdoc on its `PATH`). A thread that does not start leaves
-/// stetdoc as the first check left it.
+/// joining the job leaves it suspended for good, outside any job, its program file held. The
+/// quit's stop closes `clauseo_process`'s gate once the host stopped and waits at most 2 s for
+/// its count to reach zero (`quit/settle.rs`); an exit with nothing running closes the gate and
+/// reads a zero first (`quit.rs`'s `nothing_runs`). A crash, or a logoff whose wait runs out,
+/// is not covered. A test must not end while this thread may run (no stetdoc on its `PATH`).
+/// A thread that does not start leaves stetdoc as the first check left it.
 pub(super) fn recheck_later(recheck: Recheck, live: Live) {
     let spawned = std::thread::Builder::new()
         .name("stetdoc-recheck".to_owned())

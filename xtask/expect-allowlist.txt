@@ -26,6 +26,7 @@ crates/desktop/src/frame.rs StreamMessage dead_code
 crates/desktop/src/open.rs check_document clippy::disallowed_methods
 crates/desktop/src/open.rs check_document clippy::disallowed_methods
 crates/desktop/src/open/gate.rs now clippy::disallowed_methods
+crates/desktop/src/quit/settle.rs sleep clippy::disallowed_methods
 # The uninstaller's --delete-app-data (S20): its only writes, and its tests' links, locks and modes.
 crates/desktop/src/delete_app_data/ops.rs - clippy::disallowed_methods
 # S20 follow-up: a linked `sandbox`'s reparse tag read and its delete done on one handle; the
