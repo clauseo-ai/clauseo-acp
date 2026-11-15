@@ -35,6 +35,8 @@ const CHECK = [
   "denied by the Claude Code auto mode classifier. Reason: ",
   "Permission for this action has been denied. Reason: ",
 ];
+/** Claude Code 2.1.293's built-in safety check on a command: it names no rule, so it reads as the general line. */
+const SAFETY_CHECK = "denied by a built-in Claude Code safety check";
 /** The check's own words when it gave no verdict: busy, refused, too long a transcript, nothing to judge. Its
  * phrases only, so a task whose output says "classifier" is never taken for one. */
 const NO_VERDICT =
@@ -106,6 +108,7 @@ export function refusalOf(entry: ToolCallEntry): Refusal | null {
     const rule = /^\[([^\]\n]{1,80})\]/.exec(sent.slice(at + lead.length));
     return { kind: "check", looked: rule === null ? "other" : lookedOf(rule[1]!) };
   }
+  if (sent.includes(SAFETY_CHECK)) return { kind: "check", looked: "other" };
   if (RULE.test(sent)) return { kind: "rule" };
   if (NO_VERDICT.test(sent)) return { kind: "no_verdict" };
   return null;
