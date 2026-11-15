@@ -102,6 +102,19 @@ open_unit_enum! {
     test mod revision_kind;
 }
 
+open_unit_enum! {
+    /// Where in a Word file a tracked change is, when it is not in the document's main text.
+    pub enum RevisionPlace {
+        /// A header or a footer: stetdoc reports the two as one place.
+        HeaderFooter,
+        /// A footnote or an endnote.
+        Note,
+        /// The text of a comment.
+        Comment,
+    }
+    test mod revision_place;
+}
+
 /// Accept or reject.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -129,6 +142,10 @@ pub struct Revision {
     pub at: Option<Timestamp>,
     /// The paragraph it is in, as stetdoc names blocks (`p3` is the third paragraph).
     pub block: String,
+    /// Where it is when that is not the main text: a header or footer, a note or a comment.
+    /// Missing for a change in the main text.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub place: Option<RevisionPlace>,
     /// The text inserted, deleted or moved, at most [`MAX_REVISION_TEXT_CHARS`] characters;
     /// missing for a change with no text (formatting).
     #[serde(skip_serializing_if = "Option::is_none", default)]

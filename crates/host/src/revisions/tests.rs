@@ -8,10 +8,11 @@ use std::path::Path;
 use clauseo_profile::skills::stetdoc::{Ran, RunFailure};
 use clauseo_protocol::{
     ErrorCode, MAX_REVISION_TEXT_CHARS, MAX_REVISIONS, MatterPath, RevisionDecision, RevisionKind,
+    RevisionPlace,
 };
 use serde_json::json;
 
-use super::parse::{all_chunks, batch, is_docx, revisions, timestamp};
+use super::parse::{all_chunks, batch, is_docx, kind, ledger, revisions, timestamp};
 use super::stetdoc::{answer, env};
 
 fn code(result: Result<serde_json::Value, crate::error::Error>) -> ErrorCode {
@@ -72,6 +73,111 @@ fn check_and_view_join_into_revisions_in_document_order() {
     assert_eq!(list[1].at, None, "a date that does not read is left out");
     assert_eq!(list[2].author, "Clauseo");
     assert_eq!(list[3].at.unwrap().as_millis(), 1_794_242_630_000);
+}
+
+/// stetdoc 0.9.3's answers for `tests/fixtures/revisions/tracked-nonbody-only.docx`, as the
+/// release binary printed them (`check --json`, and `view --revisions --full --all --json`'s
+/// ledger): Word's ids, not positions, in both, and each change's story in the ledger.
+fn nonbody_only() -> (serde_json::Value, serde_json::Value) {
+    let change = |block: &str, id: u32, kind: &str| json!({"block": block, "date": "2026-11-01T00:00:00Z", "ids": [id], "kind": kind});
+    let check = json!({"existing": [{"author": "Reviewer", "changes": [
+        change("p1", 2, "run_format"),
+        change("p2", 3, "paragraph_format"),
+        change("p3", 11, "insertion"),
+        change("p4", 12, "deletion"),
+        change("p5", 13, "insertion"),
+        change("p6", 14, "insertion"),
+    ]}], "exit_status": 0});
+    let ledger = concat!(
+        "{stet 1 view=ledger base=68e2aa511b059de7:0:68e2aa511b059de7 mode=redline ",
+        "common-style=\"Normal\" range=change:2..change:14}\n",
+        "{authors: R \"Reviewer\"}\n",
+        "{summary: 6 tracked changes (R 6) · 1 footnote · 1 endnote · 1 section}\n",
+        "{changes: 6 changes}\n",
+        "#2 format R 2026-11-01 p1\n",
+        "#3 format R 2026-11-01 p2\n",
+        "#11 insert R 2026-11-01 p3 in headers \"inserted\"\n",
+        "#12 delete R 2026-11-01 p4 in headers \"deleted\"\n",
+        "#13 insert R 2026-11-01 p5 in notes \"added\"\n",
+        "#14 insert R 2026-11-01 p6 in notes \"added\"\n",
+        "{position: change:2..change:14 of changes (6 of 6 changes)}\n",
+    );
+    (check, json!({"text": ledger, "next": null, "warnings": []}))
+}
+
+#[test]
+fn changes_outside_the_main_text_and_formatting_are_listed_with_their_place() {
+    let (check, view) = nonbody_only();
+    let (list, truncated, total) = revisions(&check, &view).unwrap();
+    assert!(!truncated);
+    assert_eq!(total, 6);
+    let shape: Vec<_> = list
+        .iter()
+        .map(|r| (r.ids.clone(), r.kind, r.place, r.text.as_deref()))
+        .collect();
+    let (header, note) = (Some(RevisionPlace::HeaderFooter), Some(RevisionPlace::Note));
+    assert_eq!(
+        shape,
+        [
+            (vec![2], RevisionKind::Format, None, None),
+            (vec![3], RevisionKind::Format, None, None),
+            (vec![11], RevisionKind::Insert, header, Some("inserted")),
+            (vec![12], RevisionKind::Delete, header, Some("deleted")),
+            (vec![13], RevisionKind::Insert, note, Some("added")),
+            (vec![14], RevisionKind::Insert, note, Some("added")),
+        ]
+    );
+    // Accept all names every one of them, by Word's ids.
+    assert_eq!(
+        all_chunks(&check, MAX_REVISIONS).unwrap(),
+        [vec![2, 3, 11, 12, 13, 14]]
+    );
+}
+
+#[test]
+fn the_ledger_s_places_and_every_kind_stetdoc_names() {
+    let lines = ledger(concat!(
+        "#4 format U t1 in comments\n",
+        "#5,6 insert A p2 in text_boxes \"x in y\"\n",
+        "#7 insert A p9 \"in headers\"\n",
+        "#8 format A 2026-11-01 r1\n",
+    ));
+    let place = |id: u32| lines[&id].place;
+    assert_eq!(place(4), Some(RevisionPlace::Comment));
+    assert_eq!(
+        place(5),
+        Some(RevisionPlace::Unknown),
+        "a story this host does not know"
+    );
+    assert_eq!(place(6), Some(RevisionPlace::Unknown));
+    assert_eq!(lines[&5].text.as_deref(), Some("x in y"));
+    assert_eq!(place(7), None, "the text is not the place");
+    assert_eq!(place(8), None);
+    for (name, expected) in [
+        ("insertion", RevisionKind::Insert),
+        ("paragraph_inserted", RevisionKind::Insert),
+        ("mark_inserted", RevisionKind::Insert),
+        ("row_inserted", RevisionKind::Insert),
+        ("cell_inserted", RevisionKind::Insert),
+        ("deletion", RevisionKind::Delete),
+        ("paragraph_deleted", RevisionKind::Delete),
+        ("mark_deleted", RevisionKind::Delete),
+        ("row_deleted", RevisionKind::Delete),
+        ("cell_deleted", RevisionKind::Delete),
+        ("move", RevisionKind::Move),
+        ("run_format", RevisionKind::Format),
+        ("paragraph_format", RevisionKind::Format),
+        ("section_format", RevisionKind::Format),
+        ("table_format", RevisionKind::Format),
+        ("row_format", RevisionKind::Format),
+        ("cell_format", RevisionKind::Format),
+        ("grid_change", RevisionKind::Format),
+        ("cell_merged", RevisionKind::Format),
+        ("numbering_change", RevisionKind::Format),
+        ("something_new", RevisionKind::Unknown),
+    ] {
+        assert_eq!(kind(name), expected, "{name}");
+    }
 }
 
 #[test]

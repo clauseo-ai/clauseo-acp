@@ -312,6 +312,7 @@ wire_types! {
     view::{QueueHoldReason},
     revisions::{
         DecideRevisions, DocVersion, Revision, RevisionDecision, RevisionKind, RevisionList,
+        RevisionPlace,
     },
 }
 
