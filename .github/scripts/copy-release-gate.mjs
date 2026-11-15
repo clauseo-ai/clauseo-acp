@@ -3,10 +3,12 @@
 //   node .github/scripts/copy-release-gate.mjs [<copy-approvals folder>]
 //
 // Reads every ui/app/copy-approvals/*.json (or the folder given) and fails, with one ::error::
-// line and every offending id grouped by reason, if any entry's `status` is not "approved" or any
-// entry's Hindi is `"hi_status": "provisional"`. `"hi_status": "later"` passes: the Hindi is
-// tracked, not a draft. copy:check (ui/app/src/review/copy-gate.check.ts) checks the entries'
-// shape and that they match the registered words; this checks only that none is a draft.
+// line and every offending id grouped by reason, if any entry's `status` is not "approved".
+// Provisional Hindi (`"hi_status": "provisional"`) only warns, with one ::warning:: line giving
+// the count and the first ids; it never changes the exit code. Rohan, 2026-11-15: hindi later;
+// provisional Hindi warns. `"hi_status": "later"` and missing Hindi pass silently, as before.
+// copy:check (ui/app/src/review/copy-gate.check.ts) checks the entries' shape and that they match
+// the registered words; this checks only that none is a draft.
 // release.yml runs it in release mode only; copy-release-gate.test.mjs tests it. Plain Node.
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -22,6 +24,10 @@ const DEFAULT_DIR = join(
   "copy-approvals",
 );
 
+const HINDI = `Hindi "hi_status": "provisional"`;
+/** How many Hindi ids the warning names before "…". */
+const HINDI_SHOWN = 5;
+
 /** Every offending id, by reason, in file order then id order: { "<reason>": ["<id> (<file>)", …] }. */
 export function offenders(files) {
   const groups = {};
@@ -35,8 +41,7 @@ export function offenders(files) {
       const status = e?.status;
       if (status !== "approved")
         add(`status ${JSON.stringify(status ?? null)}, not "approved"`, `${id} (${file})`);
-      if (e?.hi_status === "provisional")
-        add(`Hindi "hi_status": "provisional"`, `${id} (${file})`);
+      if (e?.hi_status === "provisional") add(HINDI, `${id} (${file})`);
     }
   }
   return groups;
@@ -53,30 +58,38 @@ export function readApprovals(dir) {
   return files;
 }
 
-/** The gate's output and exit code for the files. */
+/** The gate's output and exit code for the files: English not approved fails, provisional Hindi
+ * warns. */
 export function report(files) {
-  const groups = offenders(files);
-  // The English's status first, then the Hindi's.
-  const reasons = Object.keys(groups).sort(
-    (a, b) => b.startsWith("status") - a.startsWith("status"),
-  );
+  const { [HINDI]: hindi = [], ...english } = offenders(files);
+  const lines = [];
+  const reasons = Object.keys(english);
+  if (reasons.length > 0) {
+    const ids = new Set(Object.values(english).flat());
+    lines.push(
+      `::error::copy release gate: ${ids.size} ${ids.size === 1 ? "entry is" : "entries are"} not approved by Rohan; ` +
+        "a release ships only approved words (ui/app/copy-approvals)",
+    );
+    for (const reason of reasons) {
+      lines.push(`${reason}: ${english[reason].length}`);
+      for (const line of english[reason]) lines.push(`  ${line}`);
+    }
+  }
+  if (hindi.length > 0) {
+    const shown = hindi.slice(0, HINDI_SHOWN).map((line) => line.split(" ")[0]);
+    lines.push(
+      `::warning::copy release gate: ${hindi.length} Hindi ${hindi.length === 1 ? "line is" : "lines are"} provisional ` +
+        `(not blocking; Rohan, 2026-11-15: hindi later): ${shown.join(", ")}${hindi.length > HINDI_SHOWN ? ", …" : ""}`,
+    );
+  }
   if (reasons.length === 0) {
     const n = Object.values(files).reduce((sum, e) => sum + Object.keys(e).length, 0);
-    return {
-      code: 0,
-      text: `copy release gate: all ${n} entries in ${Object.keys(files).length} files are approved\n`,
-    };
+    lines.push(
+      `copy release gate: all ${n} entries in ${Object.keys(files).length} files are approved` +
+        (hindi.length > 0 ? " in English" : ""),
+    );
   }
-  const ids = new Set(Object.values(groups).flat());
-  const lines = [
-    `::error::copy release gate: ${ids.size} ${ids.size === 1 ? "entry is" : "entries are"} not approved by Rohan; ` +
-      "a release ships only approved words (ui/app/copy-approvals)",
-  ];
-  for (const reason of reasons) {
-    lines.push(`${reason}: ${groups[reason].length}`);
-    for (const line of groups[reason]) lines.push(`  ${line}`);
-  }
-  return { code: 1, text: `${lines.join("\n")}\n` };
+  return { code: reasons.length > 0 ? 1 : 0, text: `${lines.join("\n")}\n` };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
