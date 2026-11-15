@@ -1,7 +1,7 @@
 //! The native sides of [`super::LinkConfirm`] and [`super::Opener`]: the confirm drawn by
-//! Rust with the dialog plugin (`dialogs::confirm`: Cancel first and default, over the main
-//! window), and the OS's default apps and file manager through the opener plugin. The webview
-//! has no permission for either plugin.
+//! Rust with the dialog plugin (`dialogs::confirm`: the link's button first and default, so
+//! Return opens and Escape cancels, over the main window), and the OS's default apps and file
+//! manager through the opener plugin. The webview has no permission for either plugin.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,6 +31,7 @@ impl<R: Runtime> LinkConfirm for NativeLinkConfirm<R> {
         crate::dialogs::confirm(
             &self.app,
             Owner::Main,
+            crate::dialogs::DefaultButton::Ok,
             rfd::MessageLevel::Info,
             words.title,
             words.message,
