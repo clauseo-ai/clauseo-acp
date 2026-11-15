@@ -38,7 +38,7 @@ fn a_clean_quit_leaves_the_next_start_clean_and_lets_go_of_the_lock() {
     // No wait: the lock went with the close.
     let waits = Cell::new(0);
     let (last, mark) = begin(dir.path(), &SystemFiles, &mut |_| {
-        waits.set(waits.get() + 1)
+        waits.set(waits.get() + 1);
     });
     assert_eq!(last, LastRun::Clean);
     assert!(mark.is_some());
@@ -66,7 +66,7 @@ fn a_second_start_touches_nothing_and_does_not_trip_the_mark() {
     let first = first.unwrap();
     let waits = Cell::new(0);
     let (second, nothing) = begin(dir.path(), &SystemFiles, &mut |_| {
-        waits.set(waits.get() + 1)
+        waits.set(waits.get() + 1);
     });
     assert_eq!(second, LastRun::OtherInstance);
     assert!(nothing.is_none());
