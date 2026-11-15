@@ -98,6 +98,10 @@ const notice = (order: number, over: Partial<NoticeEntry>): ViewEntry => ({
 const CONTEXT_NOTICE = notice(6, { text: CONTEXT, kind: "context_not_restored" });
 /** Claude's auto mode isn't available, so the session runs in acceptEdits. */
 const AUTO_NOTICE = notice(6, { text: AUTO_UNAVAILABLE, kind: "auto_mode_unavailable" });
+const LIMITED =
+  "Claude's commands can't open this matter's files right now; it can still read and edit them.";
+/** Another matter inside this one, and its entries couldn't be re-opened safely: Claude's commands can't open it. */
+const LIMITED_NOTICE = notice(6, { level: "info", text: LIMITED, kind: "shell_limited" });
 const BLOCKED = "Clauseo stopped a step: {name} tried to reach outside this matter.";
 const BLOCKED_ALONE = "Clauseo stopped a step: the AI tried to reach outside this matter.";
 /** Clauseo's data fence refused, unasked, a request of the agent's (once a turn). */
@@ -206,6 +210,12 @@ export const TN: Entry[] = [
     words: threadWords(AUTO_UNAVAILABLE),
     screen: "room/thread",
     render: thread(AUTO_NOTICE),
+  },
+  {
+    id: "UC-382",
+    words: threadWords(LIMITED),
+    screen: "room/thread",
+    render: thread(LIMITED_NOTICE),
   },
   {
     id: "TN-11",

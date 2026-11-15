@@ -93,12 +93,17 @@ pub(crate) struct MatterFence {
     /// When another matter the session is not invited into lies inside its own matter: what
     /// of the own matter Claude's sandbox re-opens for reading instead of the whole folder, its
     /// entries down to each such matter ([`down_to`]), so the fence holds for a command that
-    /// never names the path (`rg x .`). Links among those entries are left out (re-opened, a link
-    /// would re-open where it leads). `None` when no such matter lies inside it.
+    /// never names the path (`rg x .`). Left out, as the agent controls them: links (re-opened,
+    /// a link would re-open where it leads), and names that hold `*` or `?` or no letter or
+    /// digit (the sandbox writes each entry as a pattern, [`reopen_safe`]). `None` when no such
+    /// matter lies inside it; empty when the list could not be made safely
+    /// ([`Self::own_unlisted`]).
     pub(crate) own_open: Option<Vec<PathBuf>>,
-    /// Whether [`Self::own_open`] was needed but a folder on the way could not be listed, is on
-    /// a network share, or holds more than [`MAX_PATHS`] entries: the sandbox is then off
-    /// (`agent::loads::sandbox::Off::NestedMatter`), never the matter re-opened whole.
+    /// Whether [`Self::own_open`] was needed but could not be made safely: a folder on the way
+    /// could not be listed, is a link or on a network share, or the entries pass
+    /// [`MAX_PATHS`]. Then the sandbox stays on and re-opens none of the own matter's entries
+    /// (less access, never none of the sandbox: nothing in the matter may turn it off), and the
+    /// lawyer is told (`NoticeKind::ShellLimited`).
     pub(crate) own_unlisted: bool,
     /// Every other matter's folder (each spelling, invited or not) inside the own matter:
     /// Claude's sandbox denies writes there, Codex's profile gives an invited one `read`.
@@ -251,10 +256,12 @@ impl MatterFence {
             // Links are left out: a link re-opened would re-open where it leads.
             listed &= !net.is_network(own) && down_to(own, &ways, true, &mut open).is_some();
         }
+        open.retain(|entry| reopen_safe(entry));
         if listed && open.len() <= MAX_PATHS {
             self.own_open = Some(open);
         } else {
-            tracing::warn!("a matter inside this one could not be fenced off for the sandbox");
+            tracing::warn!("a matter inside this one: the sandbox re-opens none of this matter");
+            self.own_open = Some(Vec::new());
             self.own_unlisted = true;
         }
     }
@@ -380,6 +387,21 @@ fn fence_paths(spelling: &Path, keep: &[&Path], net: &NetEnv) -> Result<Vec<Path
     let mut out = Vec::new();
     down_to(spelling, &inside, false, &mut out).ok_or(())?;
     Ok(out)
+}
+
+/// Whether an own matter's entry may be re-opened for Claude's sandbox: UTF-8, its name with no
+/// `*` or `?` (Claude Code reads them as a pattern with no escape, `agent::loads::sandbox`) and
+/// with a letter or digit, which the sandbox writes as a one-letter class so the entry is a
+/// pattern the runtime never resolves through a link swapped in later
+/// (`agent::loads::sandbox::reopen_pattern`).
+pub(crate) fn reopen_safe(entry: &Path) -> bool {
+    let Some(name) = entry.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    entry
+        .to_str()
+        .is_some_and(|text| !text.contains(['*', '?']))
+        && name.chars().any(|c| c.is_ascii_alphanumeric())
 }
 
 /// `place`'s names after its first `depth`, as it spells them.

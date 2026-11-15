@@ -262,3 +262,33 @@ fn a_link_in_the_own_matter_is_not_re_opened() {
     assert_eq!(open, [root.join("own/Drafts")]);
     assert!(!fence.own_unlisted);
 }
+
+/// Nothing the agent makes in its matter turns the sandbox off: a name with `?` is left out of
+/// what the sandbox re-opens; past the entries' limit, or with a link on the way down to the
+/// matter inside, the sandbox re-opens none of the matter (`own_unlisted`, the lawyer told).
+#[test]
+fn what_the_agent_makes_in_its_matter_never_widens_or_drops_the_sandbox() {
+    let (_dir, root) = tree("mfence-agent-made", &["own/Sub", "own/Drafts", "data"]);
+    write::write_file(&root.join("own/what?.txt"), b"x").unwrap();
+    let fence = fence(&root, "own", &[("own/Sub", false)]);
+    assert_eq!(fence.own_open, Some(vec![root.join("own/Drafts")]));
+    assert!(!fence.own_unlisted);
+
+    for n in 0..=super::MAX_PATHS {
+        write::write_file(&root.join(format!("own/f{n}")), b"").unwrap();
+    }
+    let crowded = self::fence(&root, "own", &[("own/Sub", false)]);
+    assert_eq!(crowded.own_open, Some(Vec::new()));
+    assert!(crowded.own_unlisted);
+}
+
+/// A link on the way down to the matter inside: none of the own matter is re-opened.
+#[cfg(unix)]
+#[test]
+fn a_link_on_the_way_down_re_opens_none_of_the_matter() {
+    let (_dir, root) = tree("mfence-link-way", &["own/Drafts", "elsewhere/Sub", "data"]);
+    write::symlink(&root.join("elsewhere"), &root.join("own/p")).unwrap();
+    let fence = fence(&root, "own", &[("own/p/Sub", false)]);
+    assert_eq!(fence.own_open, Some(Vec::new()));
+    assert!(fence.own_unlisted);
+}

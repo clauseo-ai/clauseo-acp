@@ -133,6 +133,37 @@ pub(crate) fn after_meta(
         .collect();
     unfenced.extend(new);
     tell_unfenced(actor, thread, unfenced);
+    // Claude on macOS and Linux alone has the sandbox (its short temp folder was made).
+    let sandboxed = run.claude_tmp.is_some();
+    tell_limited(
+        actor,
+        thread,
+        run.data_deny.matters.own_unlisted && sandboxed,
+    );
+}
+
+/// The words the limited notice falls back to, for a view that does not know its kind.
+const LIMITED_TEXT: &str =
+    "Claude's commands can't open this matter's files right now; it can still read and edit them.";
+
+/// Tells the lawyer, once while it lasts, that Claude's sandboxed commands can't open the
+/// matter (`MatterFence::own_unlisted`: the sandbox re-opens none of it).
+fn tell_limited(actor: &mut Actor, thread: ThreadId, limited: bool) {
+    let Some(state) = actor.threads.get_mut(&thread).map(|entry| &mut entry.turn) else {
+        return;
+    };
+    if std::mem::replace(&mut state.told_once.shell_limited, limited) || !limited {
+        return;
+    }
+    tracing::warn!(%thread, "Claude's commands can't open the matter this session");
+    let notice = Notice {
+        level: NoticeLevel::Info,
+        text: LIMITED_TEXT.to_owned(),
+        kind: Some(NoticeKind::ShellLimited),
+    };
+    if let Err(error) = super::super::updates::commit(actor, thread, [notice.into()], Vec::new()) {
+        tracing::warn!(%thread, error = %Cause(&error), "the limited notice was not logged");
+    }
 }
 
 /// The words the unfenced notice falls back to, for a view that does not know its kind.

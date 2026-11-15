@@ -55,15 +55,22 @@ fn claude_sandbox(
     // Every other matter's folder the launch knew (forgotten ones too), but those the lawyer
     // let this conversation read (`agent::matter_fence`); one registered later is the residual.
     let fence = &run.data_deny.matters;
+    // Each as registered, and where it leads when the sandbox can name it (`nameable`).
+    let stored: Vec<&Path> = fence
+        .others
+        .iter()
+        .map(|other| other.folder.as_path())
+        .collect();
+    let named = |path: &Path| crate::agent::loads::sandbox::nameable(path, &stored);
     let inside: Vec<PathBuf> = fence
         .inside_own
         .iter()
         .map(|(path, _)| path.clone())
+        .filter(|path| named(path))
         .collect();
-    let other_matters: Vec<PathBuf> = run
-        .data_deny
-        .matters
+    let other_matters: Vec<PathBuf> = fence
         .fenced_folders()
+        .filter(|path| named(path))
         .map(Path::to_path_buf)
         .collect();
     let paths = SandboxPaths {
@@ -82,7 +89,6 @@ fn claude_sandbox(
         data: &run.data_deny.spellings,
         other_matters: &other_matters,
         matter_open: fence.own_open.as_deref(),
-        matter_unlisted: fence.own_unlisted,
         matter_inside: &inside,
     };
     ClaudeSandbox::for_os(SandboxOs::CURRENT, &paths)

@@ -224,6 +224,11 @@ export function noticeLine(
       return w.th(
         "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
       );
+    // another matter inside this one, and its entries couldn't be re-opened safely for Claude's sandbox (UC-382)
+    if (kind === "shell_limited")
+      return w.th(
+        "Claude's commands can't open this matter's files right now; it can still read and edit them.",
+      );
     return null;
   }
   // read by shape: a value from a newer host, or none (null), that this version doesn't know gives null. The field
