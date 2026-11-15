@@ -68,6 +68,7 @@ import { holdLine, useHold } from "../first-run/hold.ts";
 import { useStopKey } from "./stop-key.ts";
 import type { AskHow, Drafts } from "./session.ts";
 import { ProtectionContext } from "../protection/context.ts";
+import { ReadChipsSlot } from "./read-chips-slot.tsx";
 
 export function WorkComposer({
   ref,
@@ -459,6 +460,10 @@ export function WorkComposer({
                 />
               )}
             </>
+          )}
+          {/* the other matters this conversation may read, each with its × (read-chips-slot.tsx) */}
+          {transport !== null && thread !== null && (
+            <ReadChipsSlot transport={transport} stream={stream} thread={thread} />
           )}
           {transport !== null && thread !== null && (
             <QueueSlot
