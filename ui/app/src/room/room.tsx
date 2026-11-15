@@ -58,8 +58,8 @@ import { planLine, useKeyInUse } from "./key-in-use.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
-import { useRailShown } from "@clauseo/components/clauseo/rail-shown.ts";
 import { RoomNotices } from "./notices.tsx";
+import { useNoticePlace } from "@clauseo/components/clauseo/rail-shown.ts";
 import { useHostFullScreen } from "./host-full-screen.ts";
 import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
@@ -404,8 +404,7 @@ function RoomFrame({
   // the caption buttons' commands, off the Mac: frame.json grants the Mac none, so asking would be refused each resize
   const wired = useMemo(() => (platform === "mac" ? null : controls), [platform, controls]);
   const caption = useWindowFrame(wired);
-  // Clauseo's own notices (notices.tsx): at the rail's foot where the rail stands beside the work, else at the wall's head
-  const atRail = useRailShown() && versions.rail == null;
+  const place = useNoticePlace(versions.rail == null, welcome);
   // the desktop's own word on macOS's full screen: a notched Mac's full-screen window is shorter than its screen
   const hostFullScreen = useHostFullScreen(transport);
   const notice = <RoomNotices transport={transport} threads={threads} matters={view.matters} />;
@@ -481,7 +480,7 @@ function RoomFrame({
           onEscape={fold}
           newMatterRef={newMatter}
           onSettings={openSettings}
-          {...(atRail ? { notice } : {})}
+          {...(place === "rail" ? { notice } : {})}
         />
       )}
       {newMounted && (
@@ -503,6 +502,7 @@ function RoomFrame({
         <main className="room-centre" ref={nodes.slot("centre")}>
           {/* UD1's first run, in the first load: a lazy one's Suspense fallback held the welcome back for React's
               300 ms reveal throttle (FALLBACK_THROTTLE_MS), however soon its chunk landed */}
+          {place === "work" && <div className="room-notices">{notice}</div>}
           {setup && (
             <FirstRun
               transport={transport}
@@ -586,7 +586,7 @@ function RoomFrame({
           )}
         </main>
         <aside className="room-pane" ref={nodes.slot("pane")}>
-          {!atRail && notice}
+          {place === "wall" && notice}
           {papers !== null &&
             (wallEmpty(papers) ? (
               <EmptyPapers body={false} />

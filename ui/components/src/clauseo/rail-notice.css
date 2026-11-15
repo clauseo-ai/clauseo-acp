@@ -54,6 +54,17 @@
   .room-rail-foot > .rail-notice + .room-scratch {
     margin-top: var(--s3);
   }
+  /* at the work's head (room.tsx's .room-notices): in one column, before the thread, so the docked composer never covers
+     it; over the welcome, which puts the wall away. Empty, it takes no room */
+  .room-notices {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+    padding: var(--s3) var(--s3) 0;
+  }
+  .room-notices:empty {
+    display: none;
+  }
   /* at the wall's head, before the papers, in flow: seen without a scroll, and it never stands over a tile */
   .rail-notice-top {
     margin-top: var(--s2);
