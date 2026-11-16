@@ -41,6 +41,7 @@ import { HI as triage } from "./words-triage.hi.ts";
 import { HI as ui } from "./words-ui.hi.ts";
 import { HI as update } from "./words-update.hi.ts";
 import { HI as versions } from "./words-versions.hi.ts";
+import { HI as windowsLine } from "./words-windows-line.hi.ts";
 import { HI as words } from "./words.hi.ts";
 
 /** Each words file's Hindi by its area, the file's name less "words-": wordsOf("errors") reads words-errors.hi.ts. */
@@ -84,6 +85,7 @@ export const HINDI = {
   ui,
   update,
   versions,
+  "windows-line": windowsLine,
   words,
 } as const;
 

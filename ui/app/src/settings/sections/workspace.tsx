@@ -203,9 +203,9 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
           {/* what the Safe workspace can't stop on Windows (UC-820), always while it's on */}
           {!off && platform === "windows" && (
             <p className="set-note" data-testid="protection-platform-line" data-platform="windows">
-              {w.say(pw(lang, WINDOWS_LINE))}
+              {w.say(wl(lang, WINDOWS_LINE))}
               {/* UC-850, Rohan's call: its own sentence, to go alone */}{" "}
-              {w.say(pw(lang, WINDOWS_STRICT))}
+              {w.say(wl(lang, WINDOWS_STRICT))}
             </p>
           )}
           {/* UC-821, the Mac's counterpart, goes here: words pending, shown on the Mac only once host PR #1085 (the

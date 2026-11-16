@@ -3,7 +3,7 @@
 // sentence, under What leaves this computer, whatever the Safe workspace; on the Mac neither.
 import { settled } from "@clauseo/components/lib/late.ts";
 import type { Platform } from "@clauseo/components/lib/display.ts";
-import { pw, WINDOWS_LINE, WINDOWS_STRICT } from "@clauseo/components/lib/words-protection.ts";
+import { wl, WINDOWS_LINE, WINDOWS_STRICT } from "@clauseo/components/lib/words-windows-line.ts";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -66,7 +66,7 @@ const line = (el: HTMLElement) =>
 test("on Windows, Privacy says UC-820 then UC-850, after What leaves this computer", async () => {
   const el = await mount("windows");
   expect(el.querySelector(".set-pane h2")?.textContent).toBe("Privacy");
-  expect(line(el)?.textContent).toBe(`${pw("en", WINDOWS_LINE)} ${pw("en", WINDOWS_STRICT)}`);
+  expect(line(el)?.textContent).toBe(`${wl("en", WINDOWS_LINE)} ${wl("en", WINDOWS_STRICT)}`);
   const groups = [...el.querySelectorAll(".set-pane .set-group")];
   const at = groups.findIndex((g) => g.contains(line(el)));
   expect(at).toBeGreaterThan(0);
@@ -79,7 +79,7 @@ test.each(["mac", "linux"] as const)(
     const el = await mount(platform);
     expect(el.querySelector(".set-pane h2")?.textContent).toBe("Privacy");
     expect(line(el)).toBeNull();
-    expect(el.textContent).not.toContain(pw("en", WINDOWS_LINE));
-    expect(el.textContent).not.toContain(pw("en", WINDOWS_STRICT));
+    expect(el.textContent).not.toContain(wl("en", WINDOWS_LINE));
+    expect(el.textContent).not.toContain(wl("en", WINDOWS_STRICT));
   },
 );

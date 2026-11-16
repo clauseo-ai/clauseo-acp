@@ -1,13 +1,26 @@
-// UC-820: what the Safe workspace can't stop on Windows, then UC-850's Mac advice (Rohan's call), in the real room over a Windows host listing two matters,
-// before "Got it" (room/windows-line/). Settings' Safe workspace on Windows says the same words, always while it's on.
-// Provisional, hi: later. UC-821, the Mac's counterpart, comes after host PRs #1085 and #1153.
-import { WINDOWS_LINE, WINDOWS_STRICT } from "@clauseo/components/lib/words-protection.ts";
+// UC-820: what Clauseo can't keep apart on Windows, then UC-850's Mac advice (Rohan's call), in the real room over a
+// Windows host listing two matters, before "Got it" (room/windows-line/). Settings › Privacy on Windows says the same
+// words for good. Provisional, hi: later. UC-821, the Mac's counterpart, comes after host PRs #1085 and #1153.
+import {
+  wl,
+  WINDOWS_LINE,
+  WINDOWS_STRICT,
+  type WindowsLineKey,
+} from "@clauseo/components/lib/words-windows-line.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { MatterSummary } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER } from "./hosts.ts";
 import { RoomOver } from "./states.tsx";
-import { protectionWords } from "./words.ts";
+import type { WordsRef } from "./words.ts";
+
+/** A string of the Windows line's words (words-windows-line.ts). */
+const words = (key: WindowsLineKey): WordsRef => ({
+  file: "lib/words-windows-line.ts",
+  key,
+  text: (lang) => wl(lang, key),
+  later: wl.hi[key] === null,
+});
 
 const SEEN = "clauseo.windows-line-seen";
 
@@ -37,13 +50,13 @@ const twoMatters = (): FakeTransport => {
 export const UC_WINDOWS_LINE: Entry[] = [
   {
     id: "UC-820",
-    words: protectionWords(WINDOWS_LINE),
+    words: words(WINDOWS_LINE),
     screen: "room/windows-line",
     render: () => <RoomOver host={twoMatters} />,
   },
   {
     id: "UC-850",
-    words: protectionWords(WINDOWS_STRICT),
+    words: words(WINDOWS_STRICT),
     screen: "room/windows-line",
     render: () => <RoomOver host={twoMatters} />,
   },
