@@ -63,6 +63,16 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(clauseo-sandbox) & binary(jail) & test(/twenty_thousand/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# host's Devanagari listing test writes 5,000 files before it times one guard call against 1 s
+# (the per-name listing bug took 15.9 s). The writes are the slow part and run at the disk's speed:
+# on the Mac mini under load (8 spinners and a dd writer, load 12 to 13) they took 5.9 to 12.0 s
+# and the test 6.6 to 17.4 s, while the guard call took 6 to 245 ms. Under the gate's load it
+# took 2.8 to 25.5 s on 11-16 and passed 30 s on #1093 and twice on #1156. 120 s still ends a
+# hung one; the 1 s assert on the guard call is unchanged.
+[[profile.default.overrides]]
+filter = 'package(clauseo-host) & test(/::many_devanagari_names_beside_an_owner_file_/)'
+slow-timeout = { period = "30s", terminate-after = 4 }
+
 # The sandbox's elevated set-up exe test makes a fresh pool, 8 users since the top-up (#609), and
 # each user's first logon makes its profile: 12 to 15 s each on the windows-2025 runner (CI run
 # 42339880668), so about 2 min with the removal after; 30 s killed it. 300 s still ends a hung one.
