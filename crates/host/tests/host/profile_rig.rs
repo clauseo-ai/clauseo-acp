@@ -31,11 +31,12 @@ pub(crate) const CODEX: &str = "codex-acp";
 pub(crate) const BROWSING: &str = "browsing-agent";
 
 /// One launch as [`Wired`] saw it: its session folder (`<data>/run/<session id>`, none for a
-/// launch whose prep made none), its environment, and the files its pack plugin
-/// (`<run>/skill-packs`) held, by path under it with `/`, sorted.
+/// launch whose prep made none), its conversation's work folder, its environment, and the files
+/// its pack plugin (`<run>/skill-packs`) held, by path under it with `/`, sorted.
 #[derive(Debug, Clone)]
 pub(crate) struct Seen {
     pub(crate) run: Option<PathBuf>,
+    pub(crate) work: Option<PathBuf>,
     pub(crate) env: BTreeMap<OsString, OsString>,
     pub(crate) packs: Vec<String>,
     /// The secrets the spec names for the stderr tail to hide (`LaunchSpec::redacted`).
@@ -49,10 +50,22 @@ impl Seen {
         serde_json::from_str(text.to_str()?).ok()
     }
 
-    /// `<run>/work`.
+    /// `<data>/agent-state/<matter>/work/<thread>`.
     pub(crate) fn work(&self) -> String {
-        path_text(&self.run.as_ref().expect("a run folder").join("work"))
+        path_text(self.work.as_ref().expect("a work folder"))
     }
+}
+
+/// The work folder of the conversation whose run folder is `run` (`<data>/run/<thread>-<n>`):
+/// `<data>/agent-state/<matter>/work/<thread>`, found by the thread, which the launch made.
+pub(crate) fn work_of(run: &Path) -> Option<PathBuf> {
+    let (thread, _) = run.file_name()?.to_str()?.rsplit_once('-')?;
+    let data = run.parent()?.parent()?;
+    std::fs::read_dir(data.join("agent-state"))
+        .ok()?
+        .flatten()
+        .map(|matter| matter.path().join("work").join(thread))
+        .find(|work| work.is_dir())
 }
 
 /// A launcher that fills each session's folders into the scenario the agent reads, then
@@ -92,6 +105,7 @@ impl Launcher for Wired {
         if let Some(run) = &run {
             known.insert(run.clone());
         }
+        let work = run.as_deref().and_then(work_of);
         let args: Vec<_> = spec
             .args()
             .iter()
@@ -110,7 +124,7 @@ impl Launcher for Wired {
                 let browser = data.join("browser").join("run").join(session);
                 let text = text
                     .replace("@RUN@", &escaped(&path_text(run)))
-                    .replace("@WORK@", &escaped(&path_text(&run.join("work"))))
+                    .replace("@WORK@", &escaped(&path_text(&work_of(run).unwrap())))
                     .replace("@BROWSER@", &escaped(&path_text(&browser)))
                     .replace("@SESSION@", &escaped(session))
                     .replace("@PACKS@", &escaped(&path_text(&run.join("skill-packs"))));
@@ -124,6 +138,7 @@ impl Launcher for Wired {
             .unwrap_or_default();
         self.seen.lock().unwrap().push(Seen {
             run,
+            work,
             env: spec.env().clone(),
             packs,
             redacted: spec.redacted().to_vec(),

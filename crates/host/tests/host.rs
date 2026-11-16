@@ -581,6 +581,9 @@ mod word_open;
 #[cfg(test)]
 #[path = "host/word_round_trip.rs"]
 mod word_round_trip;
+#[cfg(all(test, unix))]
+#[path = "host/work_folder.rs"]
+mod work_folder;
 #[cfg(test)]
 #[path = "host/writer.rs"]
 mod writer;

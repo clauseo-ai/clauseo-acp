@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 
 use super::tests::{
     NODE, PYTHON, Turn, access, access_in, codex_home, data, escalated_access, fence, fence_with,
-    listed, notes, readable, run_root, runtime,
+    listed, notes, readable, run_root, runtime, work,
 };
 use super::{Listed, PROFILE, PROXY_SECRET_FILE, SECRET_GLOB, list};
 
@@ -39,7 +39,7 @@ fn listed_own_folders_are_reachable_escalated_too_and_others_are_denied() {
         own.join("config.json"),
         own.join("profile").join("Default").join("Cookies"),
         own.join("downloads").join("judgment.pdf"),
-        run_root().join("work").join("a.md"),
+        work().join("a.md"),
         brief("m1"),
     ] {
         assert_eq!(access(&keys, &path), "write", "{}", path.display());
@@ -52,6 +52,7 @@ fn listed_own_folders_are_reachable_escalated_too_and_others_are_denied() {
         data.join("run/s3/agent-browser/downloads/judgment.pdf"),
         brief("m2"),
         data.join("agent-state/m1/scratch/x"),
+        data.join("agent-state/m1/work/t2/draft.md"),
         data.join("run.old-0/s9/work/a.txt"),
         data.join("browser"),
         data.join("browser/agent-browser.json"),
@@ -69,7 +70,8 @@ fn listed_own_folders_are_reachable_escalated_too_and_others_are_denied() {
     for (subpath, mode) in scoped {
         if mode != "deny" {
             assert!(
-                ["run/s1", "agent-state/m1/notes"].contains(&subpath.as_str()),
+                ["run/s1", "agent-state/m1/work/t1", "agent-state/m1/notes"]
+                    .contains(&subpath.as_str()),
                 "{subpath} is {mode}"
             );
         }
@@ -85,7 +87,7 @@ fn a_session_made_after_the_listed_launch_is_the_residual() {
     assert_eq!(access(&fence_with(&listed()), &later), "read");
     let unlisted = fence();
     assert_eq!(access(&unlisted, &later), "deny");
-    assert_eq!(escalated(&unlisted, &run_root().join("work/a.md")), "deny");
+    assert_eq!(escalated(&unlisted, &work().join("a.md")), "deny");
     assert_eq!(escalated(&unlisted, &brief("m1")), "deny");
 }
 
@@ -224,11 +226,14 @@ fn the_launch_list_names_siblings_only() {
     let dir = TempDir::new("codex-fence-list");
     let data = dir.path().join("data");
     let (run_root, notes) = (data.join("run/s1"), data.join("agent-state/m1/notes"));
+    let work = data.join("agent-state/m1/work/t1");
     let runtime = data.join("agents/runtime");
     for folder in [
         run_root.join("agent-browser"),
         data.join("run/s2"),
         notes.clone(),
+        work.clone(),
+        data.join("agent-state/m1/work/t2"),
         data.join("agent-state/m1/scratch"),
         data.join("agent-state/m2/notes"),
         data.join("run.old-7/s9"),
@@ -239,13 +244,14 @@ fn the_launch_list_names_siblings_only() {
         crate::write::create_dir_all(&folder).unwrap();
     }
     crate::write::write_file(&runtime.join("clauseo-python-file"), b"x").unwrap();
-    let got = list(&data, &run_root, &notes);
+    let got = list(&data, &run_root, &[&work, &notes]);
     assert_eq!(got.run, Some(vec![data.join("run/s2")]));
     assert_eq!(
         got.agent_state,
         Some(vec![
-            data.join("agent-state/m2"),
             data.join("agent-state/m1/scratch"),
+            data.join("agent-state/m1/work/t2"),
+            data.join("agent-state/m2"),
         ])
     );
     assert_eq!(got.set_aside, vec![data.join("run.old-7")]);
@@ -267,7 +273,7 @@ fn the_launch_list_names_siblings_only() {
         crate::write::symlink(&elsewhere, &data.join("run/s1/../s-link")).unwrap();
     }
     want.sort();
-    let got = list(&data, &run_root, &notes);
+    let got = list(&data, &run_root, &[&work, &notes]);
     assert_eq!(got.runtime, Some(want));
     #[cfg(unix)]
     {
@@ -283,7 +289,10 @@ fn the_launch_list_names_siblings_only() {
         let got = list(
             &linked,
             &linked.join("run/s1"),
-            &linked.join("agent-state/m1/notes"),
+            &[
+                &linked.join("agent-state/m1/work/t1"),
+                &linked.join("agent-state/m1/notes"),
+            ],
         );
         assert_eq!((got.run, got.agent_state, got.runtime), (None, None, None));
     }
@@ -299,7 +308,7 @@ fn the_own_proxy_secret_file_is_denied_in_a_writable_run_folder() {
     let secret = run_root().join(PROXY_SECRET_FILE);
     assert_eq!(access(&keys, &secret), "deny");
     assert_eq!(escalated_access(&keys, &secret), "deny");
-    let beside = run_root().join("work").join("a.md");
+    let beside = run_root().join("a.md");
     assert_eq!(access_in(&keys, Turn::Profile, &beside), "write");
     let scoped = &keys["permissions"][PROFILE]["filesystem"][data().to_str().unwrap()];
     assert_eq!(scoped[SECRET_GLOB], json!("deny"));

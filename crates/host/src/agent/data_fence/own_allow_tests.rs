@@ -11,7 +11,9 @@ use super::super::cross_tests::{Rules, default_leads, generated_over};
 use super::super::tests::parse;
 use super::super::windows_shell_deny_rules;
 use super::own_shell_allow_rules;
-use crate::agent::data_fence::big_folder::{LAPTOP_MATTER, LAPTOP_RUN, laptop};
+use crate::agent::data_fence::big_folder::{
+    LAPTOP_MATTER, LAPTOP_OTHER_THREAD, LAPTOP_RUN, LAPTOP_THREAD, laptop,
+};
 use crate::agent::data_fence::{LaunchDeny, claude_allow_rules_on};
 use crate::pipeline::tests::support::TempDir;
 
@@ -145,10 +147,10 @@ fn own_reads_commands(spelling: &str) -> Vec<(&'static str, String)> {
     let mut out = Vec::new();
     for (lead, sep, powershell) in leads(spelling) {
         for folder in [
-            ["run", LAPTOP_RUN, "work"],
-            ["agent-state", LAPTOP_MATTER, "notes"],
+            &["agent-state", LAPTOP_MATTER, "work", LAPTOP_THREAD][..],
+            &["agent-state", LAPTOP_MATTER, "notes"],
         ] {
-            let base = under(&lead, sep, &folder);
+            let base = under(&lead, sep, folder);
             for path in [
                 base.clone(),
                 format!("{base}{sep}"),
@@ -215,7 +217,7 @@ fn every_own_allow_rule_loads_and_starts_with_its_command() {
             };
             assert!(commands.iter().any(|c| content.starts_with(c)), "{rule}");
         }
-        for place in ["run/01a1d673-4d5a-776d-9061-201035c7d75e-1/work", "notes"] {
+        for place in ["work/01a1d673-4d5a-776d-9061-201035c7d75e", "notes"] {
             assert!(
                 rules
                     .iter()
@@ -242,7 +244,8 @@ fn listing_and_reading_the_own_folders_skips_the_classifiers() {
             commands.extend(own_reads_commands(spelling));
         }
         let notes = format!(r"{}\agent-state\{LAPTOP_MATTER}\notes", spellings[0]);
-        let work = format!("{}/run/{LAPTOP_RUN}/work", spellings[0].replace('\\', "/"));
+        let data = spellings[0].replace('\\', "/");
+        let work = format!("{data}/agent-state/{LAPTOP_MATTER}/work/{LAPTOP_THREAD}");
         commands.push(("Bash", format!(r#"ls "{notes}"; ls -la "{work}""#)));
         commands.push((
             "Bash",
@@ -272,7 +275,7 @@ fn anything_else_with_the_own_folders_still_goes_to_a_classifier() {
         shell: deny, allow, ..
     } = launch(&dir, &[DATA]);
     let n = format!(r"{DATA}\agent-state\{LAPTOP_MATTER}\notes");
-    let w = format!(r"{DATA}\run\{LAPTOP_RUN}\work");
+    let w = format!(r"{DATA}\agent-state\{LAPTOP_MATTER}\work\{LAPTOP_THREAD}");
     let bash = [
         format!(r#"python -c "print(1)" {n}\x"#),
         format!(r#"python3 "{w}\x.py""#),
@@ -333,6 +336,14 @@ fn siblings(ids: &[String]) -> Vec<Vec<String>> {
         names(format!(r"agent-state\{LAPTOP_MATTER}\notes2")),
         names(format!(r"agent-state\{LAPTOP_MATTER}\other")),
         names(format!(r"agent-state\{LAPTOP_MATTER}")),
+        names(format!(
+            r"agent-state\{LAPTOP_MATTER}\work\{LAPTOP_THREAD}0"
+        )),
+        names(format!(
+            r"agent-state\{LAPTOP_MATTER}\work\{LAPTOP_OTHER_THREAD}"
+        )),
+        names(format!(r"agent-state\{LAPTOP_MATTER}\work")),
+        names(format!(r"run\{LAPTOP_RUN}\work")),
         names(format!(r"run\{LAPTOP_RUN}0\work")),
         names(format!(r"run\{LAPTOP_RUN}\work2")),
         names(format!(r"run\{LAPTOP_RUN}\relay-token")),
@@ -410,13 +421,17 @@ fn every_deny_still_wins_beside_the_allow() {
         names(&format!(r"run\{LAPTOP_RUN}\relay-token")),
         names(r"run\01a1d672-1c0e-7d3b-8e11-5a2b9c0d4e6f-2\x"),
         names(r"run\01a1d673-4d5a-776d-9061-201035c7d75e-2\work"),
+        names(&format!(r"run\{LAPTOP_RUN}\work\x")),
+        names(&format!(
+            r"agent-state\{LAPTOP_MATTER}\work\{LAPTOP_OTHER_THREAD}\x"
+        )),
     ];
     // The other matters' notes that exist (the siblings made after the launch are in no rule).
     for id in [&ids[0], &ids[ids.len() - 1]] {
         protected.push(names(&format!(r"agent-state\{id}\notes")));
     }
     let n = format!(r#""{DATA}\agent-state\{LAPTOP_MATTER}\notes""#);
-    let w = format!(r"{DATA}\run\{LAPTOP_RUN}\work");
+    let w = format!(r"{DATA}\agent-state\{LAPTOP_MATTER}\work\{LAPTOP_THREAD}");
     let generated = generated_over(&default_leads(true), &protected, 2);
     let mut both = 0;
     let mut total = 0;

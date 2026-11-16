@@ -4,12 +4,12 @@
 //! the classifier alone; these rules refuse the plain spellings first, beside the `Read` and
 //! `Edit` rules of [`super::claude_deny_rules`], and name the same targets (`LaunchDeny`,
 //! `launch.rs`): [`super::DENIED`] and every entry of `<data>` the launch found that is not the
-//! session's own. So the session's run folder, this matter's notes, Claude's plans folder and its
-//! project's `tool-results` stay reachable by a command, and everything else under `<data>` is
-//! denied when a command names it, the data folder itself too. That includes what every session
-//! shares ([`super::SHARED`], [`super::READ_ONLY`]: the built-in plugin, the agents' commands,
-//! Clauseo's Python runtime), which Claude reads with its Read tool and runs by name on its
-//! `PATH` (`pandoc`, `stetdoc`, `python`, `agent-browser`); a command that names them could
+//! session's own. So the session's run and work folders, this matter's notes, Claude's plans
+//! folder and its project's `tool-results` stay reachable by a command, and everything else under
+//! `<data>` is denied when a command names it, the data folder itself too. That includes what every
+//! session shares ([`super::SHARED`], [`super::READ_ONLY`]: the built-in plugin, the agents'
+//! commands, Clauseo's Python runtime), which Claude reads with its Read tool and runs by name on
+//! its `PATH` (`pandoc`, `stetdoc`, `python`, `agent-browser`); a command that names them could
 //! write there, into every matter. A rule has no exceptions, so a rule for the whole folder would
 //! deny the own folders with it.
 //!

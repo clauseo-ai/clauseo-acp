@@ -1,7 +1,7 @@
 //! The Codex launch never lists Codex's home (`CODEX_HOME`) or the data folder as writable, on
 //! either OS's policy: built through the functions the launch uses (`profile::codex_keys`,
 //! [`keys`], `codex::config_on`, and the session's `additionalDirectories`, which
-//! `actor::turn::profile_loads::codex_directories` makes the run folder and the notes).
+//! `actor::turn::profile_loads::codex_directories` makes the run, work and notes folders).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -14,13 +14,14 @@ use crate::agent::loads::browser::Switch;
 use crate::agent::loads::profile::{Folders, codex_keys};
 use crate::write;
 
-/// A data folder laid out for one Codex launch: its run folder (with `work`), this matter's
-/// notes, another session's run folder and Codex's home with its `config.toml`.
+/// A data folder laid out for one Codex launch: its run folder, the conversation's work folder,
+/// this matter's notes, another session's run folder and Codex's home with its `config.toml`.
 struct Launch {
     root: PathBuf,
     data: PathBuf,
     locations: Locations,
     run_root: PathBuf,
+    work: PathBuf,
     notes: PathBuf,
     home: PathBuf,
 }
@@ -33,9 +34,11 @@ impl Launch {
         let data = root.join("data");
         let locations = Locations::under_root(&data);
         let run_root = data.join("run").join("t-2");
-        let notes = data.join("agent-state").join("m-1").join("notes");
+        let state = data.join("agent-state").join("m-1");
+        let (work, notes) = (state.join("work").join("t-2"), state.join("notes"));
         for folder in [
-            run_root.join("work"),
+            run_root.clone(),
+            work.clone(),
             notes.clone(),
             data.join("run").join("t-1"),
         ] {
@@ -49,6 +52,7 @@ impl Launch {
             data,
             locations,
             run_root,
+            work,
             notes,
             home,
         }
@@ -56,8 +60,7 @@ impl Launch {
 
     /// The launch's `CODEX_CONFIG` for Windows (`windows`) or macOS and Linux.
     fn config(&self, windows: bool) -> Map<String, Value> {
-        let work = self.run_root.join("work");
-        let folders = Folders::of(&work, &self.notes).unwrap();
+        let folders = Folders::of(&self.work, &self.notes).unwrap();
         let mut hook = Map::new();
         hook.insert(
             "developer_instructions".to_owned(),
@@ -68,9 +71,10 @@ impl Launch {
             locked: false,
         };
         let mut keys_now = codex_keys(hook, web_search, folders).unwrap();
-        let listed = list(&self.data, &self.run_root, &self.notes);
+        let listed = list(&self.data, &self.run_root, &[&self.work, &self.notes]);
         let session = Session {
             run_root: &self.run_root,
+            work: &self.work,
             notes: &self.notes,
             codex_home: &self.home,
             listed: &listed,
@@ -130,8 +134,8 @@ fn writable(config: &Map<String, Value>) -> Vec<PathBuf> {
     out
 }
 
-/// On macOS and Linux: the profile extends `:workspace` and writes only the run folder and the
-/// notes; nothing writable is the data folder, Codex's home, above either or in the home, and
+/// On macOS and Linux: the profile extends `:workspace` and writes only the run, work and notes
+/// folders; nothing writable is the data folder, Codex's home, above either or in the home, and
 /// neither is a `write` entry. The ask mode and ACP's `additionalDirectories` say the same.
 #[test]
 fn the_codex_launch_never_makes_codex_home_or_the_data_folder_writable_off_windows() {
@@ -147,16 +151,13 @@ fn the_codex_launch_never_makes_codex_home_or_the_data_folder_writable_off_windo
     for root in &roots {
         assert!(!launch.too_wide(root), "{root:?} in {config:?}");
     }
-    let mut writes: Vec<&PathBuf> = roots
-        .iter()
-        .filter(|root| !root.ends_with("work"))
-        .collect();
+    let mut writes: Vec<&PathBuf> = roots.iter().collect();
     writes.sort();
     writes.dedup();
-    assert_eq!(writes, vec![&launch.notes, &launch.run_root]);
+    assert_eq!(writes, vec![&launch.notes, &launch.work, &launch.run_root]);
     assert!(config.get("windows").is_none());
     assert_eq!(crate::agent::codex::ASK_MODE, "workspace-write");
-    for directory in [&launch.run_root, &launch.notes] {
+    for directory in [&launch.run_root, &launch.work, &launch.notes] {
         assert!(!launch.too_wide(directory));
     }
 }
@@ -175,7 +176,10 @@ fn the_codex_launch_never_makes_codex_home_or_the_data_folder_writable_on_window
     );
     let roots = writable(&config);
     assert_ne!(roots, Vec::<PathBuf>::new());
-    for root in roots.iter().chain([&launch.run_root, &launch.notes]) {
+    for root in roots
+        .iter()
+        .chain([&launch.run_root, &launch.work, &launch.notes])
+    {
         assert!(!launch.too_wide(root), "{root:?} in {config:?}");
     }
     assert!(config.get("sandbox_mode").is_none());

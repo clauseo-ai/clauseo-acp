@@ -184,7 +184,8 @@ fn codex_launch_variables_beat_the_settings_env() {
     let [run] = runs.as_slice() else {
         panic!("one run folder, not {runs:?}");
     };
-    let work = crate::profile_rig::path_text(&run.join("work"));
+    let work = crate::profile_rig::work_of(run).expect("the conversation's work folder");
+    let work = crate::profile_rig::path_text(&work);
     let notes = crate::profile_rig::path_text(&crate::profile_rig::notes(&dir, matter));
     let fake_thread = host.create_thread(matter, FAKE);
     let mut events = host.events(StreamId::Thread(fake_thread));

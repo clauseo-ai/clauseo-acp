@@ -93,6 +93,8 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         "Edit(//d/ata/blocklist/**)",
         "Edit(//d/ata/state.sqlite*)",
         "Read(//d/ata/search.sqlite*)",
+        "Read(//d/ata/run/*/work/**)",
+        "Edit(//d/ata/run/*/work/**)",
         "Edit(//d/ata/search.sqlite*)",
     ] {
         assert!(rules.iter().any(|r| r == rule), "{rule} in {rules:?}");
@@ -106,14 +108,15 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         "(//d/ata/agents/**)",
         "claude-acp/home/**",
     ] {
-        // The relay token files (R24), the proxy's password files (ADR 0053) and the shell
-        // browser's config files are the only things under `run` denied; the run folders
-        // themselves never are.
+        // The relay token files (R24), the proxy's password files (ADR 0053), the shell
+        // browser's config files and a work folder in a run folder (an earlier launch's path)
+        // are the only things under `run` denied; the run folders themselves never are.
         let named = |r: &&String| {
             r.contains(kept)
                 && !r.ends_with("/run/*/relay-token)")
                 && !r.ends_with("/run/*/proxy-secret)")
                 && !r.ends_with("/run/*/agent-browser/config.json)")
+                && !r.ends_with("/run/*/work/**)")
         };
         assert!(!rules.iter().any(|r| named(&r)), "{kept}: {rules:?}");
     }

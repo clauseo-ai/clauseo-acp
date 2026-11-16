@@ -5,8 +5,8 @@
 use super::super::super::windows_shell_deny_rules;
 use super::super::{BASH, POWERSHELL};
 use super::{
-    DATA, LAPTOP_MATTER, LAPTOP_RUN, Launch, Verdict, launch, own_reads_commands, parse, siblings,
-    verdict,
+    DATA, LAPTOP_MATTER, LAPTOP_THREAD, Launch, Verdict, launch, own_reads_commands, parse,
+    siblings, verdict,
 };
 use crate::agent::data_fence::{claude_allow_rules_on, claude_deny_rules_on};
 use crate::pipeline::tests::support::TempDir;
@@ -161,7 +161,7 @@ fn probe_cases_for_the_pinned_binary() {
     // A path outside the working folders beside the own one: absolute off Windows, as `C:\…`
     // is there. Each kept command checks it, so the rule's allow gives way to an ask. The port
     // has no path check, so it reads these as allowed.
-    let w = format!(r"{DATA}\run\{LAPTOP_RUN}\work");
+    let w = format!(r"{DATA}\agent-state\{LAPTOP_MATTER}\work\{LAPTOP_THREAD}");
     for command in [
         format!(r#"ls -la /etc "{n}""#),
         format!(r"ls {n} /etc"),

@@ -171,7 +171,7 @@ pub(crate) struct ClaudeSandbox {
 pub(crate) struct SandboxPaths<'a> {
     /// The matter folder (the agent's working folder).
     pub(crate) matter: &'a Path,
-    /// `<run>/work`.
+    /// The conversation's work folder, `<data>/agent-state/<matter id>/work/<thread>`.
     pub(crate) work: &'a Path,
     /// `<run>/tmp` (`agent::temp`).
     pub(crate) tmp: &'a Path,

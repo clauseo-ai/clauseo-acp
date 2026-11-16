@@ -114,7 +114,7 @@ impl Login {
 /// The session's two folders, as UTF-8 text for JSON, and what `{connectors}` becomes.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Folders<'a> {
-    /// `{work_folder}`, `<data>/run/<session id>/work`.
+    /// `{work_folder}`, `<data>/agent-state/<matter id>/work/<thread>`.
     pub(crate) work: &'a str,
     /// `{matter_notes}`, `<data>/agent-state/<matter id>/notes`.
     pub(crate) notes: &'a str,

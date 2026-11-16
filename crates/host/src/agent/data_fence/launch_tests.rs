@@ -277,6 +277,47 @@ fn the_sessions_own_tool_results_stay_readable_and_the_rest_of_projects_does_not
     }
 }
 
+/// The conversation's work folder (`agent-state/<matter>/work/<thread>`) is the session's own: no
+/// rule names it and Claude may read it; another conversation's beside it is denied, and so is a
+/// work folder in any run folder, an earlier launch's path that may not exist (a fixed rule).
+#[test]
+fn the_own_work_folder_is_open_and_other_work_folders_are_denied() {
+    use super::big_folder::{OTHER_THREAD, OWN_RUN, OWN_THREAD, big, matter_id};
+    let dir = crate::pipeline::tests::support::TempDir::new("launch-work-folder");
+    let big = big(dir.path());
+    let work = format!("agent-state/{}/work/{OWN_THREAD}", matter_id(0));
+    assert_eq!(big.work, big.data.join(&work));
+    let denied = |file: &str| big.deny.targets.iter().any(|target| covers(target, file));
+    assert!(
+        !denied(&format!("{work}/reply.md")),
+        "{:?}",
+        big.deny.targets
+    );
+    assert!(denied(&format!(
+        "agent-state/{}/work/{OTHER_THREAD}/draft.md",
+        matter_id(0)
+    )));
+    assert!(denied(&format!("run/{OWN_RUN}/work/reply.md")));
+    assert!(denied("run/01a1d5c4-later-1/work/reply.md"));
+    let base = super::rule_path(big.data.to_str().unwrap(), false);
+    // With Claude's shell sandbox or without (#1128's own-folder glob denies): the same rule.
+    for sandboxed in [true, false] {
+        let rules = super::claude_deny_rules_on(&big.deny, false, sandboxed);
+        for tool in ["Read", "Edit"] {
+            assert!(rules.contains(&format!("{tool}({base}/run/*/work/**)")));
+        }
+    }
+    let deny = LaunchDeny {
+        own_reads: super::own_reads(&big.data, &[&big.work, &big.notes]),
+        ..big.deny.clone()
+    };
+    let allow = super::claude_allow_rules_on(&deny, false);
+    assert!(
+        allow.contains(&format!("Read({base}/{work}/**)")),
+        "{allow:?}"
+    );
+}
+
 /// Whether the rule pattern `target` (`/`-separated, gitignore's `*` within a name and a
 /// trailing `**`, glob characters escaped by `\\`) covers the place `file` under `<data>`.
 fn covers(target: &str, file: &str) -> bool {

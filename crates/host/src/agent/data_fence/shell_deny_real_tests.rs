@@ -12,7 +12,9 @@ use super::cross_tests::{
 };
 use super::tests::parse;
 use super::{windows_shell_deny_rules, windows_shell_deny_rules_without_variables};
-use crate::agent::data_fence::big_folder::{LAPTOP_MATTER, LAPTOP_RUN, laptop};
+use crate::agent::data_fence::big_folder::{
+    LAPTOP_MATTER, LAPTOP_OTHER_THREAD, LAPTOP_RUN, LAPTOP_THREAD, laptop,
+};
 use crate::agent::data_fence::{LaunchDeny, claude_deny_rules_on};
 use crate::pipeline::tests::support::TempDir;
 
@@ -26,7 +28,7 @@ const MATTER: &str = r"C:\Users\clauseo-lawyer\Documents\Launch Matter";
 /// of the first VM run (`scratch-S18/win-deny-commands.txt`), with the laptop's ids.
 fn vm_commands() -> Vec<(&'static str, String)> {
     let notes = format!(r"{DATA}\agent-state\{LAPTOP_MATTER}\notes");
-    let work = format!(r"{DATA}\run\{LAPTOP_RUN}\work");
+    let work = format!(r"{DATA}\agent-state\{LAPTOP_MATTER}\work\{LAPTOP_THREAD}");
     let notes_fwd = notes.replace('\\', "/");
     let work_fwd = work.replace('\\', "/");
     let memo = format!(r"{MATTER}\Memo on Shortening Notice Period.docx");
@@ -148,6 +150,10 @@ fn a_laptop_like_folder_lets_the_own_folders_through_and_denies_the_rest() {
             names(&format!(r"agent-state\{}\notes\x", ids[ids.len() - 1])),
             names(r"run\01a1d672-1c0e-7d3b-8e11-5a2b9c0d4e6f-2\x"),
             names(r"run\01a1d673-4d5a-776d-9061-201035c7d75e-2\x"),
+            names(&format!(r"run\{LAPTOP_RUN}\work\x")),
+            names(&format!(
+                r"agent-state\{LAPTOP_MATTER}\work\{LAPTOP_OTHER_THREAD}\x"
+            )),
             names(clauseo_settings::SETTINGS_FILE),
             names(r"logs\host.log"),
         ];

@@ -1,8 +1,9 @@
 //! Claude's deny rules for one launch: [`DENIED`] (what may not exist yet), then every entry of
 //! `<data>` that exists at the launch and is not the session's own, found on the launch-prep
 //! thread. Claude Code has no allow rule that beats a deny, so the session's own folders (its
-//! run folder, this matter's notes, Claude's plans folder, and the matter folder when it sits in
-//! `<data>`) are left out by walking down to them: every sibling on the way is denied.
+//! run and work folders, this matter's notes, Claude's plans folder, and the matter folder when
+//! it sits in `<data>`) are left out by walking down to them: every sibling on the way is
+//! denied.
 //!
 //! Claude's transcripts live in its home's `projects/<project key>` folders, and so do the
 //! large tool results it saves and has the model Read back (`<session id>/tool-results`, which
@@ -11,8 +12,9 @@
 //! folder that exists is denied whole, and in this session's own project only its sessions'
 //! `tool-results` folders are left out ([`claude_projects`]).
 //!
-//! The residual, accepted: a run folder, a matter's notes or another matter's Claude project
-//! made after the launch is in no rule until the next launch (its transcripts are). The host's
+//! The residual, accepted: a run folder, a conversation's work folder, a matter's notes or
+//! another matter's Claude project made after the launch is in no rule until the next launch
+//! (its transcripts are). The host's
 //! auto-deny ([`super::FenceCheck`]) refuses a request for any of them when Claude asks, but
 //! Claude does not ask for every read (decision record 0030).
 

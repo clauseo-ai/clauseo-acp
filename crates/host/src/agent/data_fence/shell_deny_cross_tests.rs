@@ -11,7 +11,9 @@ use std::path::PathBuf;
 pub(super) use super::index_tests::Rules;
 use super::windows_shell_deny_rules;
 use crate::agent::data_fence::LaunchDeny;
-use crate::agent::data_fence::big_folder::{self, OWN_RUN, PREFIX_RUN, matter_id};
+use crate::agent::data_fence::big_folder::{
+    self, OTHER_THREAD, OWN_RUN, OWN_THREAD, PREFIX_RUN, matter_id,
+};
 use crate::pipeline::tests::support::TempDir;
 
 /// The default data folder of the VM's lawyer.
@@ -112,6 +114,11 @@ fn protected() -> Vec<Vec<String>> {
         names(r"profile\claude-plugin\skills\x\SKILL.md"),
         names(&format!(r"agent-state\{}\notes\x", matter_id(7))),
         names(&format!(r"run\{PREFIX_RUN}\work\x")),
+        names(&format!(r"run\{OWN_RUN}\work\x")),
+        names(&format!(
+            r"agent-state\{}\work\{OTHER_THREAD}\x",
+            matter_id(0)
+        )),
         names(r"run\01a1d5c4-90d5-7548-96d0-4a1610744922-2\x"),
         names(clauseo_settings::SETTINGS_FILE),
         names("state.sqlite"),
@@ -200,8 +207,8 @@ fn own_commands(lead: &str, sep: &str, samples: usize) -> Vec<(&'static str, Str
     own_commands_over(lead, sep, samples, &own)
 }
 
-/// The own folders of a session with run folder `run`, matter `matter` and Claude project
-/// `key`: each as the names down to it and names inside it.
+/// The own folders of a session with run folder `run` (`<thread>-<n>`), matter `matter` and
+/// Claude project `key`: each as the names down to it and names inside it.
 pub(super) fn own_folders(run: &str, matter: &str, key: &str) -> Vec<(Vec<String>, Vec<String>)> {
     let names = |list: &[&str]| {
         list.iter()
@@ -209,7 +216,16 @@ pub(super) fn own_folders(run: &str, matter: &str, key: &str) -> Vec<(Vec<String
             .collect::<Vec<_>>()
     };
     vec![
-        (names(&["run", run]), names(&["work", "reply.md"])),
+        (names(&["run", run]), names(&["tmp", "a.txt"])),
+        (
+            names(&[
+                "agent-state",
+                matter,
+                "work",
+                run.rsplit_once('-').unwrap().0,
+            ]),
+            names(&["reply.md"]),
+        ),
         (
             names(&["agent-state", matter, "notes"]),
             names(&["sub", "notes.md"]),
@@ -284,11 +300,11 @@ fn launch(root: &std::path::Path, data: &str) -> (LaunchDeny, Rules) {
 }
 
 /// The Windows VM's 7 denied commands (`shell_deny_launch_tests.rs` has them in full), in the
-/// big folder's terms: this matter's notes, the own run's work folder.
+/// big folder's terms: this matter's notes, the own conversation's work folder.
 fn vm_commands() -> Vec<(&'static str, String)> {
     let base = DATA.replace('\\', "/");
     let notes = format!("{base}/agent-state/{}/notes", matter_id(0));
-    let work = format!("{base}/run/{OWN_RUN}/work");
+    let work = format!("{base}/agent-state/{}/work/{OWN_THREAD}", matter_id(0));
     let work_back = work.replace('/', "\\");
     let notes_back = notes.replace('/', "\\");
     vec![

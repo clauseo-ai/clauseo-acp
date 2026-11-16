@@ -470,10 +470,20 @@ fn a_share_path_and_a_star_are_escaped() {
         rules.contains(&r"Bash(*C:\d\run*\relay-token*)".to_owned()),
         "{rules:#?}"
     );
-    assert!(!denied_by(
+    // A stale work folder in a run folder, the own one too (the work folder is in agent-state).
+    assert!(
+        rules.contains(&r"Bash(*C:\d\run*\work*)".to_owned()),
+        "{rules:#?}"
+    );
+    assert!(denied_by(
         &rules,
         "Bash",
         r"type C:\d\run\own\work\reply.md"
+    ));
+    assert!(!denied_by(
+        &rules,
+        "Bash",
+        r"type C:\d\run\own\tmp\reply.md"
     ));
     // No rule holds a globstar (`/**/`), which Claude Code reads otherwise.
     assert!(
