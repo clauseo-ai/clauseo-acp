@@ -287,7 +287,7 @@ fn each_source_names_the_key_its_updater_trusts() {
         serde_json::from_slice(&std::fs::read(crate_dir().join("tauri.conf.json")).unwrap())
             .unwrap();
     let checked = conf["plugins"]["updater"]["pubkey"].as_str().unwrap();
-    assert!(!checked.is_empty());
+    assert_ne!(checked, "");
     assert_eq!(Source::Config.pubkey(&config).as_deref(), Some(checked));
     config
         .plugins
