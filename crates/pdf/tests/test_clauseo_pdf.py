@@ -27,6 +27,11 @@ def run(*args, stdin=None, env=None):
     )
 
 
+def lines(data):
+    """Output as text with "\n" line ends (Windows' text-mode stdout writes "\r\n")."""
+    return data.decode("utf-8").replace("\r\n", "\n")
+
+
 def script():
     """The script as a module, for the tests that change a cap or a function before main."""
     spec = importlib.util.spec_from_file_location("clauseo_pdf", SCRIPT)
@@ -77,7 +82,7 @@ class PdfTools(unittest.TestCase):
     def test_pdfinfo_gives_the_page_count_and_size(self):
         done = run("pdfinfo", self.pdf(12))
         self.assertEqual(done.returncode, 0, done.stderr)
-        text = done.stdout.decode()
+        text = lines(done.stdout)
         self.assertRegex(text, r"(?m)^Pages:\s+12$")
         self.assertIn("Page size:      612 x 792 pts (letter)\n", text)
         self.assertIn("Encrypted:      no\n", text)
@@ -85,7 +90,7 @@ class PdfTools(unittest.TestCase):
     def test_pdfinfo_reads_stdin(self):
         with open(self.pdf(3), "rb") as file:
             done = run("pdfinfo", "-", stdin=file.read())
-        self.assertRegex(done.stdout.decode(), r"(?m)^Pages:\s+3$")
+        self.assertRegex(lines(done.stdout), r"(?m)^Pages:\s+3$")
 
     def test_names_are_padded_by_the_page_count_like_poppler(self):
         for pages, want in ((9, ["page-1.jpg", "page-9.jpg"]),
@@ -306,7 +311,7 @@ class PdfTools(unittest.TestCase):
         done = run("pdfinfo", "-f", "2", path)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn(b"Page  201 size:", done.stdout)
-        self.assertRegex(run("pdfinfo", path).stdout.decode(), r"(?m)^Pages:\s+201$")
+        self.assertRegex(lines(run("pdfinfo", path).stdout), r"(?m)^Pages:\s+201$")
 
     @unittest.skipIf(pypdf is None, "pypdf is not installed")
     def test_hindi_text_and_names_come_out_as_utf8_under_a_cp1252_console(self):
@@ -320,7 +325,7 @@ class PdfTools(unittest.TestCase):
             writer.write(file)
         done = run("pdfinfo", path, env=env)
         self.assertEqual(done.returncode, 0, done.stderr)
-        text = done.stdout.decode("utf-8")
+        text = lines(done.stdout)
         self.assertIn("Title:          अनुबंध\n", text)
         self.assertIn("Author:         Zoë\n", text)
         missing = os.path.join(self.dir, "गुम.pdf")
