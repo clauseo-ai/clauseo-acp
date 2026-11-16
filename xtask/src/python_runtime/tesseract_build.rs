@@ -4,17 +4,25 @@
 //!
 //! The recipe (`leptonica_args`, `tesseract_args`):
 //! - leptonica with every image codec off (no zlib, PNG, GIF, JPEG, TIFF, WebP or OpenJPEG): pages
-//!   reach tesseract as PGM/PNM, which leptonica reads by itself, so no other library goes in;
+//!   tesseract then reads PNM, BMP, SPIX only, the formats leptonica decodes by itself, so no
+//!   other library goes in (pages reach it as PGM, a PNM);
 //! - tesseract without training tools, libarchive, libcurl, libtiff, `OpenCL`, `OpenMP` or the
 //!   `ScrollView` viewer, and without its configs (plain text output needs none);
 //! - static libraries everywhere (`BUILD_SHARED_LIBS=OFF`), and on Windows the static C runtime
 //!   (`/MT`), since `clauseo-bin` has no VC++ runtime beside it; macOS links only the system's
 //!   libSystem and libc++, built for macOS 13.0 (the app's floor);
-//! - Release, installed with `--strip`.
+//! - Release, installed with `--strip`;
+//! - hardened (`hardening_args`, both projects, so every object in the program): on Windows
+//!   Control Flow Guard (`/guard:cf`, compile and link) and, on x64, CET shadow-stack
+//!   compatibility (`/CETCOMPAT`; ARM64 has no CET), MSVC's `/GS`, ASLR and DEP being its
+//!   defaults; MSVC has no `_FORTIFY_SOURCE`. On macOS `_FORTIFY_SOURCE=2` (Release builds
+//!   with `-O3`) and `-fstack-protector-strong`; PIE is the macOS linker's default.
 //!
 //! On macOS the program is then signed ad hoc with the hardened runtime, as release.yml signs the
 //! app's helpers until there is a Developer ID; the build checks `otool -L` (only system
-//! libraries) and the `minos` of its load commands. On Windows the workflow's
+//! libraries) and the `minos` of its load commands. On Windows the build checks its PE flags
+//! (`pe_flag_problems`: ASLR, high-entropy ASLR, DEP, CFG, and CET on x64, as
+//! `crates/sandbox/tests/setup_exe.rs` checks the setup exe's), and the workflow's
 //! `pe-crt-imports.mjs` step checks it imports no VC++ runtime DLL.
 
 use super::Failure;
@@ -72,6 +80,26 @@ fn common_args(src: &Path, build: &Path, prefix: &Path, target: Target) -> Vec<S
         }
         Target::WinArm64 => args.extend(["-A".to_owned(), "ARM64".to_owned()]),
         Target::WinX64 => args.extend(["-A".to_owned(), "x64".to_owned()]),
+    }
+    args.extend(hardening_args(target));
+    args
+}
+
+/// The hardening flags (the header says which and why). They go in the `_INIT` variables, which
+/// `CMake` adds its own defaults to (`/DWIN32 /D_WINDOWS /EHsc` with MSVC), where setting
+/// `CMAKE_<LANG>_FLAGS` would replace them.
+pub(crate) fn hardening_args(target: Target) -> Vec<String> {
+    let (compile, link) = match target {
+        Target::MacArm64 | Target::MacX64 => ("-D_FORTIFY_SOURCE=2 -fstack-protector-strong", ""),
+        Target::WinArm64 => ("/guard:cf", "/guard:cf"),
+        Target::WinX64 => ("/guard:cf", "/guard:cf /CETCOMPAT"),
+    };
+    let mut args = vec![
+        format!("-DCMAKE_C_FLAGS_INIT={compile}"),
+        format!("-DCMAKE_CXX_FLAGS_INIT={compile}"),
+    ];
+    if !link.is_empty() {
+        args.push(format!("-DCMAKE_EXE_LINKER_FLAGS_INIT={link}"));
     }
     args
 }
@@ -250,8 +278,101 @@ pub(crate) fn install(
     // copy_file_in keeps the built program's mode (0755).
     if target.is_macos() {
         sign_and_check(&dest, &bin)?;
+    } else {
+        let image =
+            std::fs::read(&dest).map_err(|error| Failure::io("reading tesseract.exe", &error))?;
+        let problems = pe_flag_problems(&image, target);
+        if !problems.is_empty() {
+            return Err(Failure::new(
+                format!("tesseract.exe is not hardened: {}", problems.join("; ")),
+                "check hardening_args in tesseract_build.rs and that CMake passed them on",
+            ));
+        }
     }
     Ok(dest)
+}
+
+/// `IMAGE_DLLCHARACTERISTICS_*` a Windows tesseract.exe must have: the setup exe's three
+/// (`crates/sandbox/tests/setup_exe.rs`) and `/guard:cf`'s.
+const PE_FLAGS: [(u32, &str); 4] = [
+    (0x20, "HIGH_ENTROPY_VA"),
+    (0x40, "DYNAMIC_BASE"),
+    (0x100, "NX_COMPAT"),
+    (0x4000, "GUARD_CF"),
+];
+
+/// `IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS`, the debug-directory entry `/CETCOMPAT` adds, and
+/// its `IMAGE_DLLCHARACTERISTICS_EX_CET_COMPAT` bit.
+const DEBUG_TYPE_EX_DLLCHARACTERISTICS: u32 = 20;
+const EX_CET_COMPAT: u32 = 0x1;
+
+/// What a Windows `image` (a PE32+ exe's bytes) lacks of `PE_FLAGS`, and of CET compatibility
+/// on x64, one line each; empty when it has them all. An image that can't be read is a problem.
+pub(crate) fn pe_flag_problems(image: &[u8], target: Target) -> Vec<String> {
+    match read_pe_flags(image) {
+        None => vec!["its PE headers can't be read".to_owned()],
+        Some((flags, ex_flags)) => {
+            let mut problems: Vec<String> = PE_FLAGS
+                .iter()
+                .filter(|(bit, _)| flags & bit != *bit)
+                .map(|(_, name)| format!("{name} is off (DllCharacteristics {flags:#x})"))
+                .collect();
+            if target == Target::WinX64 && ex_flags & EX_CET_COMPAT == 0 {
+                problems.push("CET_COMPAT is off (no /CETCOMPAT)".to_owned());
+            }
+            problems
+        }
+    }
+}
+
+/// A PE32+ image's `DllCharacteristics` and its extended ones (0 without the debug entry), read
+/// at the offsets `setup_exe.rs`'s `Pe` uses; `None` when the headers don't parse.
+fn read_pe_flags(image: &[u8]) -> Option<(u32, u32)> {
+    let u16_at = |at: usize| -> Option<u32> {
+        let bytes = image.get(at..at.checked_add(2)?)?;
+        Some(u32::from(u16::from_le_bytes(bytes.try_into().ok()?)))
+    };
+    let u32_at = |at: usize| -> Option<u32> {
+        let bytes = image.get(at..at.checked_add(4)?)?;
+        Some(u32::from_le_bytes(bytes.try_into().ok()?))
+    };
+    let size = |value: u32| usize::try_from(value).ok();
+    let header = size(u32_at(0x3C)?)?;
+    if image.get(header..header.checked_add(4)?)? != b"PE\0\0" {
+        return None;
+    }
+    let sections = size(u16_at(header + 6)?)?;
+    let optional = header + 24;
+    let table = optional + size(u16_at(header + 20)?)?;
+    if u16_at(optional)? != 0x20B {
+        return None;
+    }
+    let flags = u16_at(optional + 70)?;
+    // Data directory 6, the debug directory: its RVA and size, 112 bytes into the header.
+    let (debug_rva, debug_size) = (
+        u32_at(optional + 112 + 6 * 8)?,
+        u32_at(optional + 116 + 6 * 8)?,
+    );
+    if debug_rva == 0 {
+        return Some((flags, 0));
+    }
+    // The section holding the RVA turns it into a file offset.
+    let debug = (0..sections).find_map(|n| {
+        let at = table + n * 40;
+        let (virtual_size, start, raw) = (u32_at(at + 8)?, u32_at(at + 12)?, u32_at(at + 20)?);
+        (start..start.checked_add(virtual_size)?)
+            .contains(&debug_rva)
+            .then(|| size(debug_rva - start + raw))?
+    })?;
+    // 28-byte IMAGE_DEBUG_DIRECTORY entries: Type at 12, PointerToRawData at 24, the data a u32.
+    let mut ex_flags = 0;
+    for n in 0..size(debug_size)? / 28 {
+        let entry = debug + n * 28;
+        if u32_at(entry + 12)? == DEBUG_TYPE_EX_DLLCHARACTERISTICS {
+            ex_flags = u32_at(size(u32_at(entry + 24)?)?)?;
+        }
+    }
+    Some((flags, ex_flags))
 }
 
 /// macOS: signs `program` ad hoc with the hardened runtime, verifies it, and checks with otool
