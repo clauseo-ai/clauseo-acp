@@ -11,7 +11,8 @@ use crate::write;
 /// The variable.
 pub(super) const VAR: &str = "CLAUSEO_PROXY_SECRET_FILE";
 /// The refusal of a file the one open could not open.
-pub(super) const UNREADABLE: &str =
+#[cfg(unix)]
+const UNREADABLE: &str =
     "CLAUSEO_PROXY_SECRET_FILE names a file the guard cannot open to read and empty";
 /// An obviously fake password: 64 of `0-9 a-f`.
 pub(super) const SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

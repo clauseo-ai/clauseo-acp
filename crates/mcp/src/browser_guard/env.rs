@@ -220,6 +220,7 @@ enum Problem {
     NotSecret,
     NotSpent,
     NotPlain,
+    Busy,
     SecretWithoutProxy,
     ProxyWithoutSecret,
 }
@@ -243,6 +244,11 @@ impl fmt::Display for EnvError {
             Problem::Unreadable => write!(
                 f,
                 "{name} names a file the guard cannot open to read and empty"
+            ),
+            Problem::Busy => write!(
+                f,
+                "{name} names a file another program has open; the guard waited and could not \
+                 take it"
             ),
             Problem::NotPlain => write!(
                 f,
@@ -418,13 +424,14 @@ fn windows_join(dir: &OsStr, name: &str) -> OsString {
 /// The proxy's password, from the file [`PROXY_SECRET_FILE`] names: `None` when the guard's
 /// environment has neither that variable nor [`PROXY`]. An error when one comes without the
 /// other, or the variable names no local file at an absolute path ([`is_local_file`]), or names
-/// one that is not a plain file with one name (a link, a folder; never followed), cannot be
-/// opened to read and write, is over [`SECRET_FILE_MAX_BYTES`] or does not hold exactly 64 of
-/// `0-9 a-f` and at most one `\n`. The file is opened once, without following a link at its
-/// name, and read, emptied and deleted through that handle (`write/secret.rs`), whatever it
-/// held; one that cannot be deleted is left empty (and noted), and one that cannot be emptied
-/// is an error too, so the password never outlives the guard's start on disk. Nothing that
-/// failed the checks is changed. The error names the variable, never the file's content.
+/// one that is not a plain file with one name (a link, a folder; never followed), is held open
+/// by another program for the whole wait (Windows), cannot be opened to read and write, is
+/// over [`SECRET_FILE_MAX_BYTES`] or does not hold exactly 64 of `0-9 a-f` and at most one
+/// `\n`. The file is opened once, without following a link at its name, and read, emptied and
+/// deleted through that handle (`write/secret.rs`), whatever it held; one that cannot be
+/// deleted is left empty (and noted), and one that cannot be emptied is an error too, so the
+/// password never outlives the guard's start on disk. Nothing that failed the checks is
+/// changed. The error names the variable, never the file's content.
 pub(crate) fn proxy_secret(source: &Source, os: Os) -> Result<Option<Password>, EnvError> {
     let Some(value) = source.get(os, PROXY_SECRET_FILE) else {
         return match source.get(os, PROXY) {
@@ -450,6 +457,7 @@ pub(crate) fn proxy_secret(source: &Source, os: Os) -> Result<Option<Password>, 
         error(match refused {
             Refused::NotPlain => Problem::NotPlain,
             Refused::Unopened | Refused::Unread => Problem::Unreadable,
+            Refused::Busy => Problem::Busy,
             Refused::NotEmptied => Problem::NotSpent,
         })
     })?;

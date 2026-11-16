@@ -326,6 +326,19 @@ pub(crate) fn open_unshared(file: &Path) -> io::Result<std::fs::File> {
         .open(file)
 }
 
+/// A file opened to read, sharing reading and writing but not deleting, as a scanner might hold
+/// it, for the unit tests' fixtures.
+#[cfg(all(test, windows))]
+pub(crate) fn open_shared_without_delete(file: &Path) -> io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    /// `FILE_SHARE_READ | FILE_SHARE_WRITE`.
+    const SHARE_READ_WRITE: u32 = 0x1 | 0x2;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(SHARE_READ_WRITE)
+        .open(file)
+}
+
 /// `os::unix::fs::symlink`, for the unit tests' fixtures.
 #[cfg(all(test, unix))]
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
