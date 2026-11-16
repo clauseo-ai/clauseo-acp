@@ -366,6 +366,8 @@ export function noticeLine(lang: Lang, notice: BlacklineNotice): string {
       return vt(lang, "Text in a text box changed. Open both versions in Word to see it.");
     case "cell_format_changed":
       return vt(lang, "The formatting of some table cells changed.");
+    // Its own words come with the sheet's change (UC-392 on); until then it says what "may differ" says.
+    case "header_or_footer_in_one_version":
     case "may_differ":
     case "unknown":
       return vt(lang, "Some of this may look different in Word.");

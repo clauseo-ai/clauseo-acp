@@ -3,15 +3,18 @@
 //! It answers: what one Word document's text looks like between two versions, paragraph by
 //! paragraph, as runs of text kept, inserted and deleted ([`WordBlackline`]); how each paragraph
 //! changed as a whole ([`ParagraphChange`]); what each run is ([`RunKind`]); and what the
-//! lawyer should know about the blackline as a whole ([`BlacklineNotice`], and the links whose
-//! address changed, [`WordBlackline::changed_links`]): a part not shown, text shown that Word
-//! hides, a change stetdoc's compare does not mark. The host makes it with stetdoc (`stetdoc
-//! compare`, then `stetdoc view`, `stetdoc check`, and a view of each version); nothing in it is
-//! a guess, and nothing is stored.
+//! lawyer should know about the blackline as a whole ([`BlacklineNotice`], the links whose
+//! address changed, [`WordBlackline::changed_links`], and the tables whose formatting changed,
+//! [`WordBlackline::changed_tables`]): a part not shown, text shown that Word hides, a change
+//! stetdoc's compare does not mark. The footnotes, endnotes, headers and footers that hold a
+//! change come with their paragraphs ([`WordBlackline::parts`], [`BlacklinePart`]). The host
+//! makes it with stetdoc (`stetdoc compare`, then `stetdoc view` of the body, the notes and the
+//! headers, `stetdoc check`, and a view of each version) and its own comparison of the two
+//! files' table formatting; nothing in it is a guess, and nothing is stored.
 
 use serde::{Deserialize, Serialize};
 
-use crate::open_enum::open_unit_enum;
+use crate::open_enum::{open_data_enum, open_unit_enum};
 
 /// A Word document's blackline, for `WordBlackline`: its body's paragraphs in document order,
 /// each paragraph of a table cell one of its own, a table inside a cell included (its cells'
@@ -38,6 +41,171 @@ pub struct WordBlackline {
     /// left out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub changed_links: Vec<String>,
+    /// The footnotes, endnotes, headers and footers that hold a change, each with its
+    /// paragraphs: the footnotes by number, then the endnotes by number, then the headers and
+    /// then the footers, each in the order of the first section they serve. One that holds no
+    /// change is left out. Empty when none; missing reads as empty, and empty is left out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<BlacklinePart>,
+    /// The tables whose formatting differs between the two versions (stetdoc 0.9.3's compare
+    /// marks none of it), found by Clauseo's own comparison of the two files; each once, in the
+    /// order of [`TablePlace`], then by number. At most 50: past them the blackline says it may
+    /// differ. Empty when none; missing reads as empty, and empty is left out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_tables: Vec<ChangedTable>,
+}
+
+/// A footnote, an endnote, a header or a footer that holds a change, shown after the body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct BlacklinePart {
+    /// Which one it is.
+    pub kind: BlacklinePartKind,
+    /// Its paragraphs, first to last, as the body's are (a table's cells' included).
+    pub paragraphs: Vec<BlacklineParagraph>,
+}
+
+open_data_enum! {
+    /// Which footnote, endnote, header or footer a [`BlacklinePart`] is.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum BlacklinePartKind {
+        /// A footnote, by the number Word shows for it.
+        Footnote = "footnote" {
+            /// Its number, from 1.
+            number: u32,
+        },
+        /// An endnote, by the number Word shows for it.
+        Endnote = "endnote" {
+            /// Its number, from 1.
+            number: u32,
+        },
+        /// A header, with the pages it is on.
+        Header = "header" {
+            /// Where Word shows it: each kind of page, with the sections. Empty when stetdoc
+            /// does not say.
+            uses: Vec<HeaderUse>,
+        },
+        /// A footer, with the pages it is on.
+        Footer = "footer" {
+            /// Where Word shows it, as for a header.
+            uses: Vec<HeaderUse>,
+        },
+        _ =>
+        /// A kind from a newer Clauseo; written back as the plain string `kind`.
+        Unknown,
+    }
+    test mod blackline_part_kind with [
+        BlacklinePartKind::Footnote { number: 3 },
+        BlacklinePartKind::Endnote { number: 1 },
+        BlacklinePartKind::Header {
+            uses: vec![HeaderUse {
+                slot: HeaderSlot::Default,
+                sections: vec![1, 2],
+            }],
+        },
+        BlacklinePartKind::Footer {
+            uses: vec![HeaderUse {
+                slot: HeaderSlot::FirstPage,
+                sections: vec![2],
+            }],
+        },
+    ];
+}
+
+/// One kind of page a header or footer is on, and the sections where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct HeaderUse {
+    /// The kind of page.
+    pub slot: HeaderSlot,
+    /// The sections, from 1, in order. Empty when not known.
+    pub sections: Vec<u32>,
+}
+
+open_unit_enum! {
+    /// Which pages of a section a header or footer is on.
+    pub enum HeaderSlot {
+        /// Every page the others do not take.
+        Default,
+        /// The section's first page.
+        FirstPage,
+        /// The even pages.
+        EvenPages,
+    }
+    test mod header_slot;
+}
+
+/// A table whose formatting differs between the two versions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ChangedTable {
+    /// The part of the document it is in.
+    pub place: TablePlace,
+    /// Its number in that part, from 1, counting every table in the order it starts (a table
+    /// inside a cell counts too), in the newer version.
+    pub number: u32,
+    /// What changed, each once, in the order of [`TableFormat`]; never empty.
+    pub formats: Vec<TableFormat>,
+}
+
+open_data_enum! {
+    /// The part of the document a [`ChangedTable`] is in.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum TablePlace {
+        /// The body.
+        Body = "body",
+        /// A header, with the pages it is on.
+        Header = "header" {
+            /// Where Word shows it, in the newer version. Empty when it is on none.
+            uses: Vec<HeaderUse>,
+        },
+        /// A footer, with the pages it is on.
+        Footer = "footer" {
+            /// Where Word shows it, as for a header.
+            uses: Vec<HeaderUse>,
+        },
+        /// The footnotes, all together: the number counts the tables of every footnote.
+        Footnotes = "footnotes",
+        /// The endnotes, all together.
+        Endnotes = "endnotes",
+        _ =>
+        /// A place from a newer Clauseo; written back as the plain string `kind`.
+        Unknown,
+    }
+    test mod table_place with [
+        TablePlace::Body,
+        TablePlace::Header {
+            uses: vec![HeaderUse {
+                slot: HeaderSlot::Default,
+                sections: vec![1],
+            }],
+        },
+        TablePlace::Footer { uses: Vec::new() },
+        TablePlace::Footnotes,
+        TablePlace::Endnotes,
+    ];
+}
+
+open_unit_enum! {
+    /// What changed in a table's formatting: the table's own, a row's or a cell's.
+    pub enum TableFormat {
+        /// Borders.
+        Borders,
+        /// Shading.
+        Shading,
+        /// Widths: the table's, its columns', a cell's, or the table's indent.
+        Widths,
+        /// Alignment: the table's on the page, a row's, or a cell's text from top to bottom.
+        Alignment,
+        /// Merged cells.
+        MergedCells,
+        /// A row's height.
+        RowHeight,
+        /// Anything else: the table's style, cell margins, a row kept on one page or repeated as
+        /// a heading, and the like.
+        Other,
+    }
+    test mod table_format;
 }
 
 /// One paragraph of a blackline.
@@ -118,16 +286,22 @@ open_unit_enum! {
         /// Some list or clause numbers may not match the ones Word shows.
         NumbersMayDiffer,
         /// stetdoc lists tracked changes (by id, `stetdoc check`) or counts more (its summary)
-        /// than the blackline's body names: the others are outside the main text (headers,
-        /// footers, footnotes, endnotes), which it does not show.
+        /// than the blackline shows, in its body and its parts: the others are outside what it
+        /// shows (a comment, or a footnote, endnote, header or footer it could not show).
         ChangesOutsideText,
+        /// A header or footer is in one version only: stetdoc's compare does not compare it, so
+        /// the blackline does not show it as a change.
+        HeaderOrFooterInOneVersion,
         /// The text of a comment differs between the two versions; the blackline does not show
         /// comments, and stetdoc 0.9.3's compare marks no change for it.
         CommentChanged,
         /// The text in a text box changed; the blackline does not show the old text.
         TextBoxChanged,
-        /// The formatting of some table cells changed (a tracked cell change), which the
-        /// blackline does not mark.
+        /// The formatting of some tables changed: a table's own (its borders, widths, alignment
+        /// and the like), a row's or a cell's (its shading, borders, merging). The blackline
+        /// does not mark it; [`WordBlackline::changed_tables`] names each table Clauseo's own
+        /// comparison found, and is empty when only stetdoc's list of changes said so (a tracked
+        /// cell change).
         CellFormatChanged,
         /// stetdoc warned about something else this version does not know: some of the
         /// blackline may not match the document in Word exactly.
