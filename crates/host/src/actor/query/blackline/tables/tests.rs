@@ -189,6 +189,28 @@ fn old_grids_old_exceptions_and_style_marks_are_no_change() {
     assert_eq!(bodies(&plain, &noisy), TablesCompared::default());
 }
 
+/// A table whose every row's deletion is tracked is gone, as accepting them leaves it: it takes
+/// no number, and the tables after it pair by order.
+#[test]
+fn a_table_whose_rows_are_all_deleted_is_left_out() {
+    let deleted = r#"<w:del w:id="6" w:author="A"/>"#;
+    let gone = table(
+        &row(&(cell("Gone", "") + &cell("Too", "")), deleted),
+        "",
+        COLS,
+    );
+    let shaded = r#"<w:shd w:val="clear" w:fill="FFFF00"/>"#;
+    let old = grid("X", "", "", "") + &grid("Y", "", "", "");
+    let new = gone + &grid("X", "", "", "") + &grid("Y", "", "", shaded);
+    assert_eq!(
+        bodies(&old, &new),
+        TablesCompared {
+            changed: vec![body(2, &[Shading])],
+            ..TablesCompared::default()
+        }
+    );
+}
+
 /// A table inserted before one whose shading changed: the tables pair by their text, and the
 /// changed one is named by its number in the newer version. Nothing is unpaired on both sides.
 #[test]
