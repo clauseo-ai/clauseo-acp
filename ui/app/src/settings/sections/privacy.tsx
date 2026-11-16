@@ -14,6 +14,9 @@
 // Left out until something stands behind them: a case-law source's row, the row for Clauseo's anonymous counts, and
 // the crash report switch.
 //
+// On Windows, under What leaves this computer, what Clauseo can't keep apart there (UC-820, then UC-850's Mac
+// advice; privacy-windows-line.tsx).
+//
 // Last, the sites allowed past the unsafe-site list, each with Remove (allowed-sites.tsx, 0053).
 //
 // The switches are the host's: SettingsView.tools, the effective `web_search` and `browser`, in get_settings and
@@ -23,7 +26,8 @@
 // keeps its tools. `locked` may list `tools.web_search` and `tools.browser`.
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
+import { late } from "@clauseo/components/lib/late.ts";
 import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
 import { tw } from "@clauseo/components/lib/words-tools.ts";
@@ -36,6 +40,11 @@ import type { SectionContext } from "../sections.tsx";
 import { AllowedSites } from "./allowed-sites.tsx";
 import { Group, PlateRow } from "./parts.tsx";
 import { KINDS } from "./usage-note.ts";
+
+/** On Windows, the line on what Clauseo can't keep apart there, in its own chunk. */
+const PrivacyWindowsLine = lazy(() =>
+  late(import("./privacy-windows-line.tsx")).then((m) => ({ default: m.PrivacyWindowsLine })),
+);
 
 /** The plans this window knows of, in the design's order: those in the limits view, or both while it has none. */
 function plansOf(ctx: SectionContext): readonly AgentKind[] {
@@ -159,6 +168,12 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
         ))}
         {!webOff && <WebsitesDest />}
       </Group>
+      {/* on Windows, what Clauseo can't keep apart there (UC-820, UC-850): the room's notice's words, for good */}
+      {platform === "windows" && (
+        <Suspense fallback={null}>
+          <PrivacyWindowsLine />
+        </Suspense>
+      )}
       {tools !== undefined && (
         <Group title={w.s("On the web")} note={tw(w.lang, "Changes apply to new conversations.")}>
           <ToolRow

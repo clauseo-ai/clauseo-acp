@@ -17,6 +17,12 @@ const SECOND: MatterSummary = {
   kind: "folder",
 };
 
+const SCRATCH: MatterSummary = {
+  matter: "00000000-0000-4000-8000-0000000000a9",
+  name: "Scratch",
+  kind: "scratch",
+};
+
 let h: Harness | null = null;
 beforeEach(() => {
   localStorage.clear();
@@ -48,6 +54,16 @@ test("on Windows with two matters the room shows the notice, UC-820 then UC-850,
 
 test("on Windows with one matter, nothing", async () => {
   h = await roomOn("windows", [THE_MATTER]);
+  expect(h.one("windows-line")).toBeNull();
+});
+
+test("Scratch and one folder matter make two: the notice shows", async () => {
+  h = await roomOn("windows", [SCRATCH, THE_MATTER]);
+  expect(h.one("windows-line")).not.toBeNull();
+});
+
+test("Scratch alone, nothing", async () => {
+  h = await roomOn("windows", [SCRATCH]);
   expect(h.one("windows-line")).toBeNull();
 });
 

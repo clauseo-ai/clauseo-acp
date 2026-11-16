@@ -31,8 +31,10 @@ export const BLOCKED_CODE = "sandbox.blocked";
 export const INSTALLER_CLOSE: ProtectionKey =
   "Clauseo will close so the installer can set up the Safe workspace. Run the installer you download, then open Clauseo again.";
 
-/** What the Safe workspace can't stop on Windows (UC-820), the launch build's command scan as the host has it, said
- * once in the room when a second matter exists and always in Settings' Safe workspace while it is on. Its Mac counterpart (UC-821) comes with the host's Mac fence. */
+/** What Clauseo can't keep apart on Windows (UC-820), the launch build's command scan as the host has it: at the top
+ * of every conversation on Windows once a second matter exists, until "Got it", and readable for good in Settings ›
+ * Privacy on Windows (and in Settings › Safe workspace while it's on, once that returns). Its Mac counterpart (UC-821)
+ * comes with the host's Mac fence. */
 export const WINDOWS_LINE: ProtectionKey =
   "On Windows, Clauseo stops Claude's and ChatGPT's file tools from opening or changing another matter's files, and refuses their commands that name another matter's folder. It can't catch everything: a program they write and run, a file location they piece together, or a shortcut they make first can still reach those files.";
 
