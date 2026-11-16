@@ -25,7 +25,11 @@ const cron = async () => {
   try {
     response = await worker.send("/__scheduled?cron=0+3+*+*+*");
   } catch (error) {
-    throw new Error(`the cron request failed (${error.message}); wrangler dev said:\n${worker.tail()}`);
+    // The cause names the transport error; wrangler dev's report of a dropped request can land
+    // a moment after the fetch fails, so the tail is read a second later.
+    const cause = error.cause ? `: ${error.cause.code ?? ""} ${error.cause.message}` : "";
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    throw new Error(`the cron request failed (${error.message}${cause}); wrangler dev said:\n${worker.tail()}`);
   }
   assert.equal(response.status, 200);
 };
