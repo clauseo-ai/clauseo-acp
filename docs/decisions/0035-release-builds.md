@@ -237,8 +237,8 @@ Developer ID.
 
 Every installed app reads `https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json`
 (R23), so which release GitHub calls latest is part of the update path, never left to its automatic
-choice. `publish` passes `--latest` when it publishes a `v*` draft; a test run's pre-release is
-created with `--latest=false`; a dry run publishes nothing.
+choice. `publish` passes `--latest` when it publishes a `v*` draft; the draft and a test run's
+pre-release are created with `--latest=false`; a dry run publishes nothing.
 
 Before anything builds, `check` refuses a `v*` release unless `plugins.updater.endpoints` is exactly
 that URL (no allowance for an empty list: the pubkey check already refuses a release until R23's
@@ -248,8 +248,10 @@ the job's read token; only releases neither draft nor pre-release and tagged exa
 count; none yet, the first app release, passes). An equal or lower version would publish a release no installed app takes and make it the one new
 downloads get.
 
-The job `latest` (after `publish`, release mode only) then checks what the apps will read: the
-API's `releases/latest` names exactly the tag; `latest.json`, downloaded anonymously from the app's
+The job `latest` (after `publish`, release mode only, whenever `publish` made the release public:
+its output `public`, set right after `gh release edit --draft=false --latest`, so a later step of
+`publish` that fails, as recording the release, doesn't skip the check) then checks what the apps
+will read: the API's `releases/latest` names exactly the tag; `latest.json`, downloaded anonymously from the app's
 own endpoint (`plugins.updater.endpoints[0]`, read from `tauri.conf.json`) (HTTPS only, redirects followed, retried up to six times 20 s apart for the API's and the
 CDN's lag), has the tag's version and every tier 1 platform (`latest-json.mjs`'s
 `tier1Platforms`); and each platform's `url` is an asset of the tag whose downloaded bytes
@@ -261,13 +263,12 @@ a Linux build and `publish` runs on macOS for the stapler, and this way the chec
 environment, no approval and only a read token, and can be re-run alone. A failure there means the
 release is already public: it is the signal to fix or pull it, not a gate before it.
 
-Only a published `v*` release may hold releases/latest: every other `gh release create` passes
-`--latest=false`, and only `publish` passes `--latest`. `latest-json.test.mjs` checks stage F's
-release workflows (`release.yml`, `agent-browser-build.yml`). On 2026-11-16 releases/latest was
-`python-runtime-3.13.18-c2`: `python-runtime.yml` (stage D) creates its releases without
-`--latest=false`, which stage D's own change adds; until it lands, a python-runtime release
-published after an app release takes releases/latest, and only the post-publish `latest` job, at
-the next app release, would notice.
+Only a published `v*` release may hold releases/latest: every other `gh release create` or
+`gh release edit` passes `--latest=false`, and only `publish` passes `--latest`.
+`latest-json.test.mjs` checks every workflow in `.github/workflows`, found by listing the folder so
+a new one is covered: those commands, a write to the releases API without `make_latest=false`, and
+an action that makes releases. On 2026-11-16 releases/latest was `python-runtime-3.13.18-c2`,
+made before `python-runtime.yml` (stage D) passed `--latest=false` (#1133).
 For the same reason `check`'s version bar is the highest published `v<X.Y.Z>` release in the full
 list, never whatever releases/latest names. Until the first `v*` release is published with
 `--latest`, releases/latest stays python-runtime's; no installed copy has the endpoint before R23's
@@ -282,6 +283,8 @@ fails unless `latest-json.mjs --verify` holds the signature under `plugins.updat
 file name and version. A wrong key or password fails minutes into the run instead of after every
 leg has built; `assemble` still verifies each signed asset. `build` and `sign-windows` need it.
 In a test or dry run it takes no environment and only says there is nothing to check.
+`custody` also decides the unsigned beta, once, in every mode (below): its outputs `has_apple` and
+`unsigned_beta` are the only way `assemble` and `publish` learn it.
 
 Its approval is one more wave of the `release` environment, since no job in that environment ran
 before the build legs. With ro-hansolo as required reviewer on `release`, a release run needs four
@@ -297,15 +300,21 @@ silent fall-through:
 - The switch is the repository variable `CLAUSEO_UNSIGNED_BETA`, exactly `'true'` (a tag push has
   no inputs). The release is an unsigned beta when it is `'true'` and no Apple secret is set
   (`APPLE_CERTIFICATE`, `APPLE_ID` or `APPLE_API_KEY`, Tauri's names, read only as a boolean on
-  the step's env). `assemble` (the release notes) and `publish` decide it with the same two
-  expressions; `latest-json.test.mjs` keeps them equal.
+  the step's env).
+- `custody` decides it once, at the start of the run, as two boolean job outputs: `has_apple`
+  (any Apple secret it can see: in release mode the `release` environment's as well as the
+  repository's) and `unsigned_beta` (the variable `'true'` and no Apple secret). `assemble` (the
+  release notes) and `publish` read only those outputs, never the variable or a secret, so a
+  variable flipped mid-run can't publish an ad hoc release without its first-open notes. In a test
+  or dry run `custody` takes no environment, so it sees what `assemble` read before (the
+  repository's variable and secrets) and the notes are as before. `latest-json.test.mjs` fails
+  if the variable or an Apple secret is read anywhere else.
 - Unset, or with any Apple secret: `publish` refuses exactly as before unless every DMG passes
   `xcrun stapler validate`. The variable never weakens a signed set-up.
 - An unsigned beta: `publish` mounts each DMG and requires its `Clauseo.app` to pass
   `codesign --verify --deep --strict` and be signed ad hoc (`Signature=adhoc`): Apple silicon runs
   no unsigned arm64 code, and a real identity's signature means a signed set-up, which must be
-  notarised, so it is refused (this also covers Apple secrets kept only in the `release`
-  environment, which `publish` cannot see). The job summary and a warning say the release is an
+  notarised, so it is refused. The job summary and a warning say the release is an
   unsigned beta.
 - The updater archive's minisign signature is the same in both: `build` signs it with the mode's
   updater key whatever the Apple signature, `assemble` and `latest` verify it.
@@ -319,10 +328,9 @@ silent fall-through:
   (`registry-release-notes.tsx`, English only), approved like any other before a `v*` release
   ships; `latest-json.test.mjs` fails unless the block, read as GitHub shows it, says exactly the
   registered strings.
-- A job sees only the secrets its environment gives it: `assemble` (no environment) the
-  repository's, `publish` those and `release-publish`'s. Apple secrets kept only in the `release`
-  environment, where `build` would sign, are invisible to both: `publish`'s ad hoc check still
-  refuses the signed DMG, but the draft's notes would carry the first-open steps. So S20a deletes
+- Apple secrets kept only in the `release` environment, where `build` would sign, are visible to
+  `custody` in release mode, so they end the beta. Apple secrets kept only in `release-publish`
+  are not: `publish`'s ad hoc check still refuses a DMG signed with a real identity. S20a deletes
   the variable when the Developer ID arrives.
 
 ## Linux and sizes (S20 follow-up, 2026-11-03)
