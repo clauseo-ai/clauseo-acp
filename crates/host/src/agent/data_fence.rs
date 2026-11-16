@@ -163,12 +163,12 @@ pub(crate) fn is_python_runtime(name: &str) -> bool {
 /// path and all under it (no folder above one: its `Edit` deny would cover all inside it, an
 /// ordinary save in Documents or every shell command under `/tmp`); then, unless the launch has
 /// Claude's shell sandbox (`sandboxed`: macOS or Linux with `agent::loads::sandbox` on; never
-/// Windows, nor a launch whose sandbox is `Off`), the own folders' glob denies ([`own_shell_glob_deny_rules`]), which
-/// refuse an allowed listing or read of an own folder that holds a glob. Under the sandbox they
-/// would buy nothing (Seatbelt checks the real path a glob reaches) and cost a pipe holding a glob
-/// after an own read (`cat <notes>/a.md | grep 'a.*b'`), which they refuse outright, the deny
-/// being matched on the whole command too. A spelling that is not UTF-8 gets none (no rule
-/// could name it).
+/// Windows, nor a launch whose sandbox is `Off`), the own folders' glob denies
+/// ([`own_shell_glob_deny_rules`]), which refuse an allowed listing or read of an own folder that
+/// holds a glob. Under the sandbox they would buy nothing (Seatbelt checks the real path a glob
+/// reaches) and cost a pipe holding a glob after an own read (`cat <notes>/a.md | grep 'a.*b'`),
+/// which they refuse outright, the deny being matched on the whole command too. A spelling that
+/// is not UTF-8 gets none (no rule could name it).
 pub(crate) fn claude_deny_rules(deny: &LaunchDeny, sandboxed: bool) -> Vec<String> {
     claude_deny_rules_on(deny, cfg!(windows), sandboxed)
 }

@@ -13,7 +13,11 @@ use crate::log_file::LIFECYCLE;
 /// (the matter was relocated since): stops that agent and starts a new one in the new folder for
 /// the turn, which goes back to step 2 and keeps the writer. `false` when the agent's folder is
 /// the matter's, or there is no running agent.
-pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
+pub(in super::super) fn restart_if_moved(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+) -> bool {
     let Ok(row) = actor.check_thread(thread).map(|entry| entry.row.matter) else {
         return false;
     };
@@ -43,7 +47,11 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
 /// reported yet is cut: the host sees it only when it reports, so the relaunch ends it and its
 /// result never comes. A relaunch within `cap_min_idle` of a turn that closed after a steer
 /// during a tool call is logged. `false` when nothing was restarted.
-pub(super) fn restart_if_marked(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
+pub(in super::super) fn restart_if_marked(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+) -> bool {
     let (now, window) = (actor.now().mono, actor.turn_path.idle.window());
     let Some(state) = state(actor, thread) else {
         return false;
