@@ -346,3 +346,33 @@ fn creating_the_record_refuses_a_symlink_already_there() {
     assert_eq!(std::fs::read(&target).unwrap(), PROFILE);
     assert!(!nowhere.exists(), "no file made through the dangling link");
 }
+
+/// As Codex's hook (no `--matter`, a `--record`), input that is empty, not JSON or can't be read
+/// refuses with the shared line and exit 2, and adds no record line; with `--matter` (Claude's
+/// hook) the same input is ignored as before.
+#[test]
+fn as_codexs_hook_unread_input_refuses_with_the_shared_line() {
+    let fx = Fixture::new("record-codex-unread");
+    let (file, args) = record_file(&fx);
+    let unchecked = format!("{}\n", crate::pre_write_guard::UNCHECKED);
+    for input in [&b""[..], b"  \n", b"not json", b"{\"cwd\": "] {
+        assert_eq!(guard_with(&strs(&args), input), unchecked, "{input:?}");
+    }
+    struct Broken;
+    impl std::io::Read for Broken {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("closed"))
+        }
+    }
+    let os: Vec<std::ffi::OsString> = args.iter().map(std::ffi::OsString::from).collect();
+    let mut errors = Vec::new();
+    let code = crate::pre_write_guard::run_timed(&os, Broken, (Vec::new(), &mut errors), false);
+    assert_eq!(code, crate::pre_write_guard::DENY);
+    assert_eq!(String::from_utf8(errors).unwrap(), unchecked);
+    assert!(records(&file).is_empty());
+    // Claude's hook names its matter: the same input is ignored, not refused.
+    let matter = fx.path("m");
+    let mut claude = vec!["--matter", matter.as_str()];
+    claude.extend(strs(&args));
+    assert!(guard_with(&claude, b"").starts_with(crate::pre_write_guard::IGNORED));
+}

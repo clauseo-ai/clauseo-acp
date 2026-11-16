@@ -221,7 +221,8 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 /// [`RECORD_FLAG`] and its file and [`RECORD_ID_FLAG`] and its identity, or none); one hook
 /// input object comes from `input`. Returns the exit code: [`DENY`], with the reason and a newline
 /// on `errors`, when a target is refused; 0 with an [`IGNORED`] line when the input could not be
-/// read; else 0 with nothing written. With `CLAUSEO_GUARD_TIMINGS` set in the environment (not
+/// read, but as Codex's hook (no `--matter`, a [`RECORD_FLAG`]) [`DENY`] with [`UNCHECKED`] when
+/// it is empty, unreadable or not JSON; else 0 with nothing written. With `CLAUSEO_GUARD_TIMINGS` set in the environment (not
 /// empty, not `0`), one more line follows, the phase timings (`timings.rs`).
 /// With `--ask-all` after the folder (forced ask, `agent/forced_ask.rs`), a tool it does not
 /// refuse that is not one of `ask::LOCAL_READS` gets Claude Code's `ask` decision on
@@ -261,6 +262,9 @@ fn run_timed(
             }
             (Some(refusal.reason()), DENY)
         }
+        Err(ignored) if as_codex_hook(args) && ignored.unread() => {
+            (Some(UNCHECKED.to_owned()), DENY)
+        }
         Err(ignored) => (Some(ignored.line()), 0),
     };
     if !refused && ask::wanted(args) && ask::asks(&bytes) {
@@ -283,6 +287,10 @@ fn run_timed(
     }
     code
 }
+
+/// What the agent reads when the guard could not run, ended with neither of its codes, or (as
+/// Codex's hook) could not read its input.
+pub(crate) const UNCHECKED: &str = "Clauseo could not check this step, so it did not run.";
 
 /// The start of the stderr line saying the guard ignored its input ([`Ignored::line`]).
 pub const IGNORED: &str = "Clauseo's pre-write guard ignored its input";
@@ -307,6 +315,11 @@ enum Ignored {
 }
 
 impl Ignored {
+    /// Input that was not read as a hook object at all: unreadable, empty or not JSON.
+    fn unread(self) -> bool {
+        matches!(self, Self::Unreadable | Self::Empty | Self::NotJson)
+    }
+
     /// The stderr line, without its newline. It names no input content.
     fn line(self) -> String {
         let why = match self {
@@ -319,6 +332,12 @@ impl Ignored {
         };
         format!("{IGNORED}: {why}. The tool goes on unchecked.")
     }
+}
+
+/// Whether the guard runs as Codex's hook: no `--matter` and a [`RECORD_FLAG`]. There input that
+/// is empty, unreadable or not JSON refuses ([`UNCHECKED`], [`DENY`]).
+fn as_codex_hook(args: &[OsString]) -> bool {
+    matter_arg(args).is_none() && args.iter().any(|arg| arg == RECORD_FLAG)
 }
 
 /// The folder after [`MATTER_FLAG`], when `args` start with it and it is absolute.

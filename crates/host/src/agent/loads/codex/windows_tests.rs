@@ -1,5 +1,5 @@
 //! The Windows hook line run as Codex runs it (Windows CI): `<shell> -NoProfile -Command <line>`
-//! with Windows PowerShell 5.1 (`powershell.exe`) and, when installed, PowerShell 7 (`pwsh.exe`),
+//! with Windows PowerShell 5.1 (`powershell.exe`) and PowerShell 7 (the `pwsh` on `PATH`),
 //! the environment cleared and set again, stdin piped (codex-rs at rust-v0.162.1
 //! `hooks/src/engine/command_runner.rs:384-433`). Each of the line's endings: the program's 0 and
 //! 2 come through unchanged, with its stdout and stderr byte for byte (a Devanagari JSON
@@ -20,21 +20,67 @@ const ECHO: &str = "CLAUSEO_PS_LINE_ECHO_CHILD";
 /// This test's own name, for the echo child's command line.
 const ECHO_TEST: &str = "agent::loads::codex::windows_tests::echo_child";
 
-/// The shells to run the line under: Windows PowerShell, and PowerShell 7 where it is installed
-/// in its usual place.
+/// The shells to run the hook under, the one Codex 0.162.1 would pick on this machine first
+/// (`shell-command/src/shell_detect.rs:257-297`: `pwsh` on `PATH`, then PowerShell 7 at its
+/// install path, then `powershell` on `PATH`, then Windows PowerShell at its system path; a
+/// `WindowsApps` hit skipped), then every other one of those found. On CI both PowerShell 7 and
+/// Windows PowerShell must be there; a local run takes what it finds.
 fn shells() -> Vec<String> {
-    let mut shells = vec!["powershell.exe".to_owned()];
-    let pwsh = std::env::var_os("ProgramFiles")
-        .map(|folder| Path::new(&folder).join(r"PowerShell\7\pwsh.exe"))
-        .filter(|pwsh| pwsh.is_file());
-    // Without PowerShell 7 a local run is Windows PowerShell's alone; on CI it must be there.
+    let at = |base: &str, rest: &str| {
+        std::env::var_os(base)
+            .map(|folder| Path::new(&folder).join(rest))
+            .filter(|path| path.is_file())
+            .map(|path| path.to_string_lossy().into_owned())
+    };
+    let found = [
+        on_path("pwsh"),
+        at("ProgramFiles", r"PowerShell\7\pwsh.exe"),
+        on_path("powershell"),
+        at(
+            "SystemRoot",
+            r"System32\WindowsPowerShell\v1.0\powershell.exe",
+        ),
+    ];
     let on_ci = std::env::var_os("CI").is_some_and(|value| !value.is_empty());
+    let has = |name: &str| {
+        found
+            .iter()
+            .flatten()
+            .any(|shell| shell.to_ascii_lowercase().ends_with(name))
+    };
     assert!(
-        pwsh.is_some() || !on_ci,
-        "PowerShell 7 is not at %ProgramFiles%\\PowerShell\\7\\pwsh.exe on this CI runner"
+        (has("pwsh.exe") && has("powershell.exe")) || !on_ci,
+        "this CI runner lacks PowerShell 7 or Windows PowerShell: {found:?}"
     );
-    shells.extend(pwsh.map(|pwsh| pwsh.to_string_lossy().into_owned()));
+    let mut shells: Vec<String> = Vec::new();
+    for shell in found.into_iter().flatten() {
+        if !shells
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(&shell))
+        {
+            shells.push(shell);
+        }
+    }
+    if shells.is_empty() {
+        shells.push("powershell.exe".to_owned());
+    }
     shells
+}
+
+/// The first `name` on `PATH` outside `WindowsApps`, as `where.exe` finds it; `None` when
+/// there is none.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test asks where.exe for the PowerShell Codex would find on PATH"
+)]
+fn on_path(name: &str) -> Option<String> {
+    let output = Command::new("where.exe").arg(name).output().ok()?;
+    let found = String::from_utf8(output.stdout).ok()?;
+    found
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.to_ascii_lowercase().contains(r"\windowsapps\"))
+        .map(str::to_owned)
 }
 
 /// Runs `line` as Codex runs a hook under `shell`, `input` on stdin, from `cwd`; the output and
@@ -183,6 +229,57 @@ fn the_programs_2_stdin_stdout_and_stderr_pass_byte_for_byte() {
             found,
             "{shell}: stdout {:?}",
             String::from_utf8_lossy(&stdout)
+        );
+    }
+}
+
+/// A program at a path over 260 characters: the line ends with 2 either way, the program's own 2
+/// with its stdin echoed when the shell can start it, else the plain words; never 0.
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test copies its own binary to a path over 260 characters"
+)]
+fn a_program_at_a_path_over_260_characters_never_ends_with_0() {
+    let root = crate::pipeline::tests::support::TempDir::new("ps-long");
+    let folder = root
+        .path()
+        .join("O'Brien & Sons ".repeat(9))
+        .join("Sharma v State 2024 ".repeat(7));
+    crate::write::create_dir_all(&folder).unwrap();
+    let program = folder.join("clauseo guard.exe");
+    assert!(program.as_os_str().len() > 260, "{program:?}");
+    std::fs::copy(std::env::current_exe().unwrap(), &program).unwrap();
+    let line = ps_command(&[
+        ps_quoted(&program.to_string_lossy()),
+        ps_quoted(ECHO_TEST),
+        "--exact".to_owned(),
+        "--nocapture".to_owned(),
+        "--test-threads=1".to_owned(),
+    ]);
+    let input = r#"{"tool_name":"Bash","tool_input":{"command":"dir"},"cwd":"C:\\x"}"#;
+    for shell in &shells() {
+        let output = Command::new(shell)
+            .args(["-NoProfile", "-Command", &line])
+            .env_clear()
+            .envs(std::env::vars_os())
+            .env(ECHO, "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                let mut stdin = child.stdin.take().unwrap();
+                stdin.write_all(input.as_bytes())?;
+                drop(stdin);
+                child.wait_with_output()
+            })
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{shell}: {output:?}");
+        let errors = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            errors == input || errors.contains(UNCHECKED),
+            "{shell}: {errors}"
         );
     }
 }

@@ -119,9 +119,12 @@ crates/desktop/src/jailed/macos.rs - unsafe_code
 crates/desktop/tests/jailed_windows.rs - unsafe_code
 crates/desktop/tests/jailed_macos.rs run clippy::disallowed_methods
 crates/desktop/tests/guard_record_windows.rs as_codex_runs_it clippy::disallowed_methods
+crates/desktop/tests/guard_record_windows.rs on_path clippy::disallowed_methods
 crates/desktop/tests/guard_record_windows.rs a_held_file_with_a_devanagari_name_is_refused_with_its_name_byte_for_byte clippy::disallowed_methods
 crates/host/src/agent/loads/codex/windows_tests.rs as_codex_runs_it clippy::disallowed_methods
 crates/host/src/agent/loads/codex/windows_tests.rs exit_with clippy::exit
+crates/host/src/agent/loads/codex/windows_tests.rs on_path clippy::disallowed_methods
+crates/host/src/agent/loads/codex/windows_tests.rs a_program_at_a_path_over_260_characters_never_ends_with_0 clippy::disallowed_methods
 crates/host/src/agent/loads/codex/windows_tests.rs the_programs_2_stdin_stdout_and_stderr_pass_byte_for_byte clippy::disallowed_methods
 xtask/src/clock.rs timed clippy::disallowed_methods
 xtask/src/output.rs Printer::put clippy::let_underscore_must_use
