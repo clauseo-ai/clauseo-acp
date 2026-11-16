@@ -119,14 +119,7 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
                 }
             }
             Event::End(_) => match stack.pop() {
-                Some(Frame::Table) => {
-                    let done = open.pop()?;
-                    let table = tables.get_mut(done)?;
-                    table.rows.retain(|row| !row.deleted);
-                    for row in &mut table.rows {
-                        row.cells.retain(|cell| !cell.deleted);
-                    }
-                }
+                Some(Frame::Table) => close_table(tables.get_mut(open.pop()?)?),
                 Some(_) => {}
                 None => return None,
             },
@@ -152,6 +145,14 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
             | Event::DocType(_)
             | Event::GeneralRef(_) => {}
         }
+    }
+}
+
+/// Closes `table`: a row or cell whose deletion is tracked is left out, as accepting it does.
+fn close_table(table: &mut Table) {
+    table.rows.retain(|row| !row.deleted);
+    for row in &mut table.rows {
+        row.cells.retain(|cell| !cell.deleted);
     }
 }
 
