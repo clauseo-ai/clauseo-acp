@@ -30,9 +30,14 @@
 //! What the proxy allows ([`proxy_config`]): open mode (`ProxyMode::Open`, ADR 0053), any
 //! public host on port 443 (CONNECT) or 80 (plain http), minus the unsafe-site block list and
 //! every loopback, private, link-local, unique-local, CGNAT or multicast address, checked after
-//! DNS against the address connected to (behind a firm's proxy on a network whose local DNS
-//! does not answer, a CONNECT goes on by name alone, under no internal or firm suffix:
-//! `clauseo_sandbox`'s `name_only`). Its allowlist (the agent kind's built-in hosts,
+//! DNS against the address connected to. Behind a firm's proxy, a name local DNS cannot answer
+//! is refused, unless a probe of fixed public names finds that local DNS answers none of them:
+//! only then does a CONNECT to port 443 go on by name alone, under no internal, firm or
+//! name-to-address suffix and never to the proxy's own host (`clauseo_sandbox`'s `name_only`).
+//! The firm's proxy, not Clauseo, resolves that name, so on such a network a public name that
+//! points at a private address is an accepted risk, limited by port 443, the firm's own proxy
+//! rules and those refusals (an agent can still proceed past Chrome's certificate warning; a
+//! separate change closes that before launch). Its allowlist (the agent kind's built-in hosts,
 //! `clauseo_sandbox::builtin_allowlist`, plus the browser's seed sites, `browser::seed_sites`)
 //! no longer decides anything in open mode. Chrome's background hosts (`browser::deny_hosts`)
 //! are refused silently. The upstream is the OS's (`Upstream::System`; R17 PR-D adds

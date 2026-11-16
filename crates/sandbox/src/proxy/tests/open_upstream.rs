@@ -1,6 +1,7 @@
 //! Open mode through the firm's proxy (`name_only`): a name let in without the list (the browser
 //! listener) is checked by local DNS when it answers, a private answer refused as before; when
-//! local DNS fails, times out or finds nothing, a CONNECT goes to the firm's proxy by name, and a
+//! local DNS fails, times out or finds nothing on a network whose DNS answers no public name (the
+//! probe's names unknown to the test network), a CONNECT goes to the firm's proxy by name, and a
 //! plain `http://` request is refused (`DnsUnavailable`). A direct route still needs local DNS,
 //! and a name the list vouched for (allowlist mode, or the agent listener in open mode) still
 //! goes on unchecked.
@@ -15,9 +16,9 @@ use crate::proxy::{Limits, ProxyMode};
 
 pub(super) const OPEN: &str = "HTTP/1.1 200 Connection established\r\n\r\n";
 
-/// A rig in `mode` allowing `allow`, through the upstream at `address`, with the firm's own
-/// suffixes `firm` and a short connect limit (under the name-only path's 2 s), so a held lookup
-/// times out quickly.
+/// A rig in `mode` allowing `allow`, through the upstream at `address`, on a network whose DNS
+/// answers no probe name, with the firm's own suffixes `firm` and a short connect limit (under
+/// the name-only path's 2 s), so a held lookup times out quickly.
 pub(super) fn through(
     address: SocketAddr,
     mode: ProxyMode,

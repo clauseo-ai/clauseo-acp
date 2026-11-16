@@ -2,8 +2,8 @@
 //! and for a PAC entry `CFNetworkExecuteProxyAutoConfigurationURL` or `...Script` on a run loop
 //! of the calling thread, in a private mode, for at most 5 s. For the firm's own names
 //! (`firm.rs`): the settings' `ExceptionsList`, and `SystemConfiguration`'s
-//! `State:/Network/Global/DNS` `SearchDomains`. Every CF object this file owns is a
-//! `CFRetained`, which releases it when dropped.
+//! `State:/Network/Global/DNS` `SearchDomains` and each service's `SupplementalMatchDomains`.
+//! Every CF object this file owns is a `CFRetained`, which releases it when dropped.
 #![expect(
     unsafe_code,
     reason = "FFI to CFNetwork's proxy settings and PAC calls, and SystemConfiguration's DNS"
@@ -63,6 +63,9 @@ unsafe extern "C-unwind" {
 unsafe extern "C-unwind" {
     /// A null `store` asks through a temporary session. Returns an owned property list or null.
     fn SCDynamicStoreCopyValue(store: *const c_void, key: &CFString) -> *mut CFType;
+    /// A null `store` asks through a temporary session. Returns an owned array of the keys that
+    /// match the regular expression `pattern`, or null.
+    fn SCDynamicStoreCopyKeyList(store: *const c_void, pattern: &CFString) -> *mut CFArray;
 }
 
 /// `CFNetwork`'s constant key and type names.
@@ -142,15 +145,39 @@ pub(super) fn exceptions() -> Option<Vec<String>> {
 /// are none, `None` when the dynamic store gives no DNS state.
 pub(super) fn search_domains() -> Option<Vec<String>> {
     let key = CFString::from_static_str("State:/Network/Global/DNS");
+    store_strings(&key, "SearchDomains")
+}
+
+/// Every network service's `SupplementalMatchDomains` (`State:/Network/Service/<id>/DNS`: the
+/// domains a VPN client sends to its own resolver); empty when there are none, `None` when the
+/// dynamic store gives no list of keys. A service gone between the two reads adds nothing.
+pub(super) fn supplemental_domains() -> Option<Vec<String>> {
+    let pattern = CFString::from_static_str("State:/Network/Service/[^/]+/DNS");
+    // SAFETY: a null store is a temporary session, as for `SCDynamicStoreCopyValue`; `pattern`
+    // is a valid string.
+    let keys = NonNull::new(unsafe { SCDynamicStoreCopyKeyList(std::ptr::null(), &pattern) })?;
+    // SAFETY: a Copy function's result is owned by the caller (+1), released once on drop.
+    let keys = unsafe { CFRetained::from_raw(keys) };
+    let mut found = Vec::new();
+    for key in strings(&keys) {
+        let key = CFString::from_str(&key);
+        found.extend(store_strings(&key, "SupplementalMatchDomains").unwrap_or_default());
+    }
+    Some(found)
+}
+
+/// The strings of the array `field` of the dynamic store's dictionary at `key`; empty when it
+/// has no such array, `None` when the store has no dictionary there.
+fn store_strings(key: &CFString, field: &'static str) -> Option<Vec<String>> {
     // SAFETY: a null store is a temporary session, as Apple documents; `key` is a valid string.
-    let found = NonNull::new(unsafe { SCDynamicStoreCopyValue(std::ptr::null(), &key) })?;
+    let found = NonNull::new(unsafe { SCDynamicStoreCopyValue(std::ptr::null(), key) })?;
     // SAFETY: a Copy function's result is owned by the caller (+1), released once on drop.
     let found = unsafe { CFRetained::from_raw(found) };
     let dns = found.downcast::<CFDictionary>().ok()?;
     // SAFETY: the dynamic store's DNS state is a property list keyed by strings.
     let dns = unsafe { dns.cast_unchecked::<CFString, CFType>() };
-    let domains = CFString::from_static_str("SearchDomains");
-    Some(value::<CFArray>(dns, &domains).map_or_else(Vec::new, |list| strings(&list)))
+    let field = CFString::from_static_str(field);
+    Some(value::<CFArray>(dns, &field).map_or_else(Vec::new, |list| strings(&list)))
 }
 
 /// The strings of a property list's array; any other item is skipped.

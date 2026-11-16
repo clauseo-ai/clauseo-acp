@@ -105,9 +105,11 @@ pub enum HostRefusal {
     PrivateAddress,
     /// The host's address could not be checked, and its name alone may not go on: through an
     /// upstream proxy, which gets the name unresolved, local DNS failed, timed out or answered
-    /// nothing for a name no list vouched for (open mode's browser listener), and the request
-    /// is a plain `http://` one, or the name is a single label or under an internal suffix
-    /// (`.local`, `.corp` and the like) or one of the firm's own.
+    /// nothing for a name no list vouched for (open mode's browser listener), and either local
+    /// DNS answers public names (the proxy's probe), or the request is a plain `http://` one,
+    /// or the name is one the name-only path refuses: a single label, a name under an internal
+    /// suffix (`.local`, `.corp` and the like), a name-to-address service or one of the firm's
+    /// own, or the firm proxy's own host.
     DnsUnavailable,
     /// The port is not one the proxy forwards.
     Port,

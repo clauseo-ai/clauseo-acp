@@ -1,14 +1,15 @@
 //! Open mode's name-only path (`name_only`), what it still refuses: single labels, the internal
-//! suffixes and the firm's own; IP literals in every form, checked by the proxy itself; listed
-//! hosts, by name before any DNS. And the launch's skip of local DNS after three failures.
+//! suffixes and the firm's own, names that spell an address, the firm proxy's own host; IP
+//! literals in every form, checked by the proxy itself; listed hosts, by name before any DNS.
+//! And where local DNS works, a name that does not exist never opens the path.
 
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use clauseo_blocklist::Tag;
 
 use super::blocked::{blocked, current};
 use super::harness::{Setup, host_denial, rig, upstream};
+use super::open_probe::probing;
 use super::open_upstream::{OPEN, through};
 use crate::HostRefusal::{DnsUnavailable, PrivateAddress};
 use crate::Upstream;
@@ -96,48 +97,69 @@ fn the_block_list_still_answers_403_by_name_before_any_lookup() {
 }
 
 #[test]
-fn three_failed_lookups_in_a_row_skip_local_dns_for_60_s() {
+fn nonexistent_names_never_open_the_path_where_local_dns_works() {
     let (address, heads) = upstream(OPEN);
-    let rig = through(address, ProxyMode::Open, &[], &[]);
+    let rig = probing(address, true, None);
     rig.net.name("inside.test", &["10.0.0.9"]);
     let code = |host: &str| rig.browser_connect(&format!("{host}:443")).1;
-    // Two failures, then an answer: the count starts again.
-    assert_eq!(code("a.test"), 200);
-    assert_eq!(code("b.test"), 200);
-    assert_eq!(code("inside.test"), 403);
-    assert_eq!(code("c.test"), 200);
-    assert_eq!(code("d.test"), 200);
-    assert_eq!(code("e.test"), 200, "the third failure in a row");
-    let asked = [
-        "a.test",
-        "b.test",
-        "inside.test",
-        "c.test",
-        "d.test",
-        "e.test",
-    ];
-    assert_eq!(rig.net.resolved(), asked);
-    // Skipped: no lookup, so the name checks alone decide. A private local answer goes unseen:
-    // the cost of the skip, on a network whose DNS has just failed three times.
-    assert_eq!(code("wiki.corp"), 403);
-    assert_eq!(code("inside.test"), 200);
-    rig.clock.advance(Duration::from_secs(59));
-    assert_eq!(code("f.test"), 200);
-    assert_eq!(rig.net.resolved(), asked, "no lookup for 60 s");
-    rig.clock.advance(Duration::from_secs(1));
-    assert_eq!(code("inside.test"), 403, "asked again");
-    assert_eq!(rig.net.resolved().len(), asked.len() + 1);
+    for host in [
+        "x1.nonexistent.test",
+        "x2.nonexistent.test",
+        "x3.nonexistent.test",
+    ] {
+        assert_eq!(code(host), 403, "{host}");
+    }
+    assert_eq!(code("inside.test"), 403, "still looked up and checked");
     assert_eq!(
         rig.denials(),
         vec![
-            host_denial("inside.test", 443, PrivateAddress, false),
-            host_denial("wiki.corp", 443, DnsUnavailable, false),
+            host_denial("x1.nonexistent.test", 443, DnsUnavailable, false),
+            host_denial("x2.nonexistent.test", 443, DnsUnavailable, false),
+            host_denial("x3.nonexistent.test", 443, DnsUnavailable, false),
             host_denial("inside.test", 443, PrivateAddress, false),
         ]
     );
+    assert_eq!(rig.net.resolved().len(), 4, "every name looked up");
+    assert_eq!(heads.try_iter().count(), 0, "nothing upstream");
+}
+
+#[test]
+fn the_firm_proxy_s_own_host_is_refused_by_name() {
+    let url = url::Url::parse("http://proxy.firm.test:3128").unwrap();
+    let rig = rig(Setup {
+        mode: ProxyMode::Open,
+        upstream: Upstream::Fixed(url),
+        ..Setup::default()
+    });
+    for target in ["proxy.firm.test:443", "Proxy.Firm.Test.:443"] {
+        assert_eq!(rig.browser_connect(target).1, 403, "{target}");
+    }
+    let own = host_denial("proxy.firm.test", 443, DnsUnavailable, false);
+    assert_eq!(rig.denials(), vec![own.clone(), own]);
     assert_eq!(
-        heads.try_iter().count(),
-        7,
-        "a to f, and inside.test while skipped"
+        rig.net.dialled(),
+        Vec::<SocketAddr>::new(),
+        "the proxy never reached"
     );
+}
+
+#[test]
+fn names_that_spell_an_address_are_refused_by_name() {
+    let (address, heads) = upstream(OPEN);
+    let rig = through(address, ProxyMode::Open, &[], &[]);
+    let refused = [
+        "10-0-0-5.sslip.io",
+        "127.0.0.1.nip.io",
+        "app.localtest.me",
+        "x.lvh.me",
+    ];
+    for host in refused {
+        assert_eq!(rig.browser_connect(&format!("{host}:443")).1, 403, "{host}");
+    }
+    let denials: Vec<_> = refused
+        .iter()
+        .map(|host| host_denial(host, 443, DnsUnavailable, false))
+        .collect();
+    assert_eq!(rig.denials(), denials);
+    assert_eq!(heads.try_iter().count(), 0, "nothing upstream");
 }
