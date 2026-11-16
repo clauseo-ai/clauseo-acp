@@ -1560,7 +1560,8 @@ expression: counts_schema()
         "agent.answer_failed",
         "agent.mode_missing",
         "agent.setting_refused",
-        "agent.program_blocked"
+        "agent.program_blocked",
+        "agent.program_missing"
       ],
       "type": "string"
     },

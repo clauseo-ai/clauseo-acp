@@ -16,7 +16,8 @@ use super::rig::Rig;
 use super::start_offline::start_rig;
 use crate::actor::Actor;
 use crate::actor::input::Input;
-use crate::actor::turn::agents::{START_WAIT, Stage};
+use crate::actor::turn::agents::Stage;
+use crate::actor::turn::agents::start_timer::START_WAIT;
 use crate::actor::turn::offline::probe::ReachProbe;
 use crate::agent::{AgentInput, Ended};
 

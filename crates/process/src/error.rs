@@ -42,33 +42,37 @@ pub enum Error {
 }
 
 impl Error {
-    /// The code a client sees: a program the OS would not run (missing, or not allowed) is
-    /// `agent.program_blocked`, which asking again cannot mend; anything else a failed launch.
+    /// The code a client sees: a program the OS did not find is `agent.program_missing`, one it
+    /// refused to run `agent.program_blocked`; anything else a failed launch.
     pub fn code(&self) -> ErrorCode {
         match self {
-            Error::Spawn { source, .. } if blocked(source) => ErrorCode::AgentProgramBlocked,
-            Error::InvalidSpec(_)
-            | Error::NoWorkingFolder
-            | Error::Spawn { .. }
-            | Error::Os { .. }
-            | Error::Closing => ErrorCode::AgentLaunchFailed,
+            Error::Spawn { source, .. } => spawn_code(source, cfg!(windows)),
+            Error::InvalidSpec(_) | Error::NoWorkingFolder | Error::Os { .. } | Error::Closing => {
+                ErrorCode::AgentLaunchFailed
+            }
         }
     }
 }
 
-/// Windows' "blocked by group policy" (`ERROR_ACCESS_DISABLED_BY_POLICY`) and its antivirus
-/// refusals (`ERROR_VIRUS_INFECTED`, `ERROR_VIRUS_DELETED`), which have no `io::ErrorKind`.
+/// Windows' "blocked by group policy" (`ERROR_ACCESS_DISABLED_BY_POLICY`, AppLocker and
+/// software restriction) and its antivirus refusals (`ERROR_VIRUS_INFECTED`,
+/// `ERROR_VIRUS_DELETED`), which have no `io::ErrorKind`.
 const WINDOWS_BLOCKED: [i32; 3] = [1260, 225, 226];
 
-/// Whether the OS's answer to a spawn says the program is missing or not allowed to run.
-fn blocked(source: &io::Error) -> bool {
-    matches!(
-        source.kind(),
-        io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
-    ) || (cfg!(windows)
+/// The code of a spawn the OS answered with `source`, on Windows when `windows`.
+fn spawn_code(source: &io::Error, windows: bool) -> ErrorCode {
+    let policy = windows
         && source
             .raw_os_error()
-            .is_some_and(|code| WINDOWS_BLOCKED.contains(&code)))
+            .is_some_and(|code| WINDOWS_BLOCKED.contains(&code));
+    let kind = source.kind();
+    if kind == io::ErrorKind::NotFound {
+        ErrorCode::AgentProgramMissing
+    } else if kind == io::ErrorKind::PermissionDenied || policy {
+        ErrorCode::AgentProgramBlocked
+    } else {
+        ErrorCode::AgentLaunchFailed
+    }
 }
 
 /// `program`'s file name, for [`Error::Spawn`]'s text: never the folders above it.
@@ -85,13 +89,26 @@ mod tests {
 
     #[test]
     fn codes_match_protocol() {
-        for kind in [io::ErrorKind::NotFound, io::ErrorKind::PermissionDenied] {
-            let blocked = Error::Spawn {
-                program: PathBuf::from("/missing"),
-                source: io::Error::from(kind),
-            };
-            assert_eq!(blocked.code(), ErrorCode::AgentProgramBlocked, "{blocked}");
+        let spawn = |source: io::Error| Error::Spawn {
+            program: PathBuf::from("/agent"),
+            source,
+        };
+        let missing = spawn(io::Error::from(io::ErrorKind::NotFound));
+        assert_eq!(missing.code(), ErrorCode::AgentProgramMissing, "{missing}");
+        let denied = spawn(io::Error::from(io::ErrorKind::PermissionDenied));
+        assert_eq!(denied.code(), ErrorCode::AgentProgramBlocked, "{denied}");
+        // Windows' policy and antivirus refusals, by their raw code alone.
+        for code in WINDOWS_BLOCKED {
+            let source = io::Error::from_raw_os_error(code);
+            assert_eq!(
+                spawn_code(&source, true),
+                ErrorCode::AgentProgramBlocked,
+                "{code}"
+            );
         }
+        // Elsewhere the same numbers are other errors: a failed launch.
+        let other = io::Error::other("busy");
+        assert_eq!(spawn_code(&other, true), ErrorCode::AgentLaunchFailed);
         let errors = [
             Error::InvalidSpec("relative program".to_owned()),
             Error::Spawn {

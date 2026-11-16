@@ -355,7 +355,7 @@ enum JobKind {
 pub(crate) fn agent_input(actor: &mut Actor, thread: ThreadId, input: AgentInput) {
     match input {
         AgentInput::Event(event) => {
-            agents::start_heard(actor, thread, None);
+            agents::start_timer::heard(actor, thread, None);
             updates::on_event(actor, thread, event);
         }
         AgentInput::Ended(ended) => agents::on_ended(actor, thread, ended),
@@ -370,7 +370,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             agent,
             reply,
         } => {
-            agents::start_heard(actor, thread, Some(agent));
+            agents::start_timer::heard(actor, thread, Some(agent));
             agents::on_reply(actor, thread, agent, reply);
         }
         TurnInput::Prepared { thread, id, result } => {

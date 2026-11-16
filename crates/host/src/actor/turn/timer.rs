@@ -53,6 +53,6 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::StopWait(id) => super::sign_in::stop_timer(actor, id),
         TimerKind::OwnQuiet(turn) => super::own_turn::on_quiet(actor, thread, turn),
         TimerKind::OwnLate => super::own_turn::on_late_timer(actor, thread),
-        TimerKind::Start(id) => super::agents::start_timer(actor, thread, id),
+        TimerKind::Start(id) => super::agents::start_timer::on_timer(actor, thread, id),
     }
 }

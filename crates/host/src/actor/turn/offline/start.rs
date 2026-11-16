@@ -30,7 +30,7 @@ pub(in crate::actor::turn) struct StartProbe {
 fn says_offline(error: &Error) -> bool {
     // A start that ran out of its bound said nothing: only the probe can tell.
     if let Error::Refused(refusal) = error
-        && refusal.message() == super::super::agents::START_TIMED_OUT
+        && refusal.message() == super::super::agents::start_timer::START_TIMED_OUT
     {
         return true;
     }
