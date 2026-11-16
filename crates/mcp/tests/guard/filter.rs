@@ -8,8 +8,10 @@ use crate::support::{Guard, Scratch, example, guard_command};
 
 /// A guard in front of the echo stub.
 struct Session {
-    scratch: Scratch,
+    /// Before `scratch`, so a failed test's guard has ended (its drop) before its folder goes:
+    /// fields drop in order, and on Windows a folder in use cannot be removed.
     guard: Guard,
+    scratch: Scratch,
     next_id: u64,
     /// Every line the child must have received, in order.
     forwarded: Vec<Value>,
@@ -508,11 +510,14 @@ fn codex_and_claude_get_the_same_filter_and_schema() {
             .iter()
             .find(|tool| tool["name"] == "agent_browser_open")
             .unwrap();
-        let keys: Vec<&String> = open["inputSchema"]["properties"]
+        // Sorted: a build with serde_json's `preserve_order` (unified on by another crate in the
+        // workspace's build) keeps agent-browser's order, and the key order means nothing.
+        let mut keys: Vec<&String> = open["inputSchema"]["properties"]
             .as_object()
             .unwrap()
             .keys()
             .collect();
+        keys.sort();
         assert_eq!(keys, ["timeoutMs", "url"], "{client}: {reply}");
         assert!(!reply.to_string().contains("allowedDomains"), "{client}");
         assert!(

@@ -6,7 +6,8 @@
 //! kept from an earlier start (`session/browser.rs`), then agent-browser, given the relay's
 //! endpoint and let in by the relay's peer check (route 2, decision record 0060).
 //!
-//! [`stop`] ends both as the guard's exit does: on Windows the job; on Unix agent-browser's
+//! [`stop`] ends both as the guard's exit does: on Windows the job, waited out and replaced by a
+//! new one for the next start (`job.rs`); on Unix agent-browser's
 //! process group, the run's daemon (`reaper::kill_daemon`) and Chrome's group, each reaped here
 //! and told to the reaper. The profile stays until the guard exits. The relay stops the browser
 //! after [`IDLE_STOP`] with no tool call in flight or completed, once the agent's
@@ -455,6 +456,8 @@ pub(crate) fn stop(launcher: &Launcher, state: &mut State) -> Option<Stopped> {
     // Before anything here ends Chrome (the job's end on Windows): a Chrome gone now died by
     // itself.
     let chrome_died = chrome.exited();
+    // Returns once the job's processes are gone (their files closed), and leaves a new job for
+    // the next start, which Windows would refuse in the ended one (`job.rs`).
     #[cfg(windows)]
     if !launcher.job.kill() {
         note("Windows refused to end the guard's job; ending agent-browser and Chrome alone");
