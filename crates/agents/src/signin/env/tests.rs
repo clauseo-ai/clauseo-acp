@@ -285,3 +285,28 @@ fn every_run_uses_the_system_ca_and_keeps_an_inherited_ssl_cert_file() {
     assert_eq!(get(&env, "SSL_CERT_FILE"), Some("/all-roots.pem"));
     assert_eq!(get(&env, "CODEX_CA_CERTIFICATE"), Some("/firm/ca.pem"));
 }
+
+/// Every Claude run, own or reused, gets the variables every Claude launch sets, over the
+/// inherited ones; a Codex run gets none of them.
+#[test]
+fn claude_runs_get_the_launch_variables() {
+    let mut base = base();
+    base.insert(
+        OsString::from("claude_code_harbor_kite"),
+        OsString::from("1"),
+    );
+    let home = Path::new("/data/agents/claude-acp/home");
+    for kind in [RunKind::Own { home }, RunKind::Reused { home }] {
+        let env = run_env(&inputs(&base, Vendor::Claude, kind));
+        for (name, value) in super::CLAUDE_FORCED_VARS {
+            assert_eq!(get(&env, name), Some(value), "{name}");
+            let named = env
+                .keys()
+                .filter(|key| key.to_string_lossy().eq_ignore_ascii_case(name))
+                .count();
+            assert_eq!(named, 1, "{name}");
+        }
+    }
+    let codex = run_env(&inputs(&base, Vendor::Codex, own()));
+    assert_eq!(get(&codex, "CLAUDE_CODE_DISABLE_CRON"), None);
+}

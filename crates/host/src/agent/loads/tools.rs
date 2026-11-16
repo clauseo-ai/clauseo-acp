@@ -69,35 +69,44 @@ pub(crate) const WINDOWS_LEFT_OUT: [&str; 1] = ["Bash"];
 /// off, `profile::WEB_TOOLS`).
 pub(crate) const WEB_TOOLS: [&str; 2] = ["WebFetch", "WebSearch"];
 
-/// The built-in tools Claude Code 2.1.293 offers that Clauseo leaves out, each also in
+/// The built-in tools Claude Code 2.1.293 knows that Clauseo leaves out, each also in
 /// `disallowedTools`, and what a lawyer's conversation loses without it:
-/// - `CronCreate`, `CronDelete`, `CronList`: prompts scheduled to run later, in this session or
-///   another (`CLAUDE_CODE_DISABLE_CRON`, [`super::CLAUDE_CRON_OFF_VAR`], also turns the
-///   scheduler off). Loses nothing: Clauseo has no scheduling, and a lawyer asks when present.
+/// - `CronCreate`, `CronDelete`, `CronList`: prompts scheduled to run later
+///   ([`super::CLAUDE_CRON_OFF_VAR`] also turns the scheduler off). Loses nothing: Clauseo has
+///   no scheduling, and a lawyer asks when present.
 /// - `ScheduleWakeup`: the same for the session itself; the variable leaves it offered, so it is
 ///   named. Loses nothing, as above.
+/// - `RemoteTrigger`: starts work on claude.ai's side. Loses nothing: a conversation runs here.
 /// - `EnterWorktree`, `ExitWorktree`: run git and move the session's folder into a worktree,
 ///   elsewhere with `path`. Loses nothing: a matter folder is no repository to branch.
 /// - `Workflow`: starts agents from a script, outside the helpers' limits. Loses nothing:
 ///   Clauseo's helpers go through `Agent`.
+/// - `REPL`: runs code in Claude Code's own interpreter, beside the shell. Loses nothing: the
+///   shell runs what a matter needs.
+/// - `LSP`: asks a code language server. Loses nothing a matter needs.
 /// - `DesignSync`: sends files to and from claude.ai's design projects, off this computer.
 ///   Loses nothing a matter needs.
-/// - `PushNotification`: notifies the account's other devices. Loses nothing: the window shows
-///   when a turn ends.
+/// - `PushNotification`, `SendUserMessage` (`Brief`, the same tool): reach the lawyer outside
+///   the conversation. Loses nothing: the window shows each answer and when a turn ends.
 /// - `Monitor`: follows a background command's output as it is written. Loses the live view
 ///   only: `Read` reads the output file, and Claude Code says when the command ends.
 /// - `ListAgents` (`ListPeers`, the same tool): lists the agents a session may message. Loses
 ///   nothing: a helper is continued by the id `Agent` gave.
-pub(crate) const NOT_OFFERED: [&str; 12] = [
+pub(crate) const NOT_OFFERED: [&str; 17] = [
     "CronCreate",
     "CronDelete",
     "CronList",
     "ScheduleWakeup",
+    "RemoteTrigger",
     "EnterWorktree",
     "ExitWorktree",
     "Workflow",
+    "REPL",
+    "LSP",
     "DesignSync",
     "PushNotification",
+    "SendUserMessage",
+    "Brief",
     "Monitor",
     "ListAgents",
     "ListPeers",

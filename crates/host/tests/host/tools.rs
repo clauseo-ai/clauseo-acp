@@ -61,16 +61,21 @@ const SEEDED: [&str; 33] = [
 /// The `allowedTools` a Claude session gets with no hook and web search on.
 /// The built-in tools every Claude launch leaves out and denies by name, after the web's two
 /// when web search is off (`agent/loads/tools.rs`).
-const LEFT_OUT: [&str; 12] = [
+const LEFT_OUT: [&str; 17] = [
     "CronCreate",
     "CronDelete",
     "CronList",
     "ScheduleWakeup",
+    "RemoteTrigger",
     "EnterWorktree",
     "ExitWorktree",
     "Workflow",
+    "REPL",
+    "LSP",
     "DesignSync",
     "PushNotification",
+    "SendUserMessage",
+    "Brief",
     "Monitor",
     "ListAgents",
     "ListPeers",

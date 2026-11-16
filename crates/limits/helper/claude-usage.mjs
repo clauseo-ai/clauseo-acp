@@ -95,6 +95,7 @@ async function main() {
     persistSession: false,
     settingSources: [],
     allowedTools: [],
+    tools: [],
     mcpServers: {},
     strictMcpConfig: true,
     hooks: {},
