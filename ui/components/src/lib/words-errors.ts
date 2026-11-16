@@ -82,6 +82,7 @@ export type ErrorCode =
   | "signin.agents_still_running"
   | "agent.keys_loading"
   | "agent.key_unreadable"
+  | "agent.firm_key_needed"
   | "matter.document_path_too_long"
   | "matter.protected_link"
   | "sandbox.setup_refused"
@@ -256,6 +257,9 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "agent.keys_loading": "Clauseo is still starting. Try again in a moment.",
   "agent.key_unreadable":
     "Clauseo couldn't check for a saved API key in time. If this computer asks for permission, allow it, then try again.",
+  // provisional (firm endpoint PR, Rohan's batch review)
+  "agent.firm_key_needed":
+    "Claude can't start here until an API key for your firm's gateway is saved. Ask your firm's IT for the key, then add it in Settings, then Plans.",
   "matter.document_path_too_long":
     "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
   // provisional: the item's path joins it once PR6 carries it as a field

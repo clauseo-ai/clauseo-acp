@@ -1,0 +1,13 @@
+{
+  "U3-err-agent.firm_key_needed": {
+    "en": "Claude can't start here until an API key for your firm's gateway is saved. Ask your firm's IT for the key, then add it in Settings, then Plans.",
+    "hi": "जब तक आपकी फ़र्म के गेटवे के लिए API key सहेजी नहीं जाती, Claude यहाँ शुरू नहीं हो सकता। अपनी फ़र्म की IT टीम से key लें, फिर सेटिंग्स खोलें, फिर प्लान में उसे जोड़ें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "firm endpoint (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "firm endpoint (provisional; Rohan batch review)",
+    "note": "new (firm endpoint PR): a firm endpoint with the first-party provider and no saved key; Claude not started so the lawyer's own sign-in token never reaches the firm's gateway; provisional for Rohan"
+  }
+}

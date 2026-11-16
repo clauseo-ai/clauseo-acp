@@ -28,7 +28,7 @@ use clauseo_settings::{Effective, Plan, SystemFiles, launch_is_clauseos};
 
 use super::backend::AgentsBackend;
 use super::firm_policy::firm_policy;
-use super::hook::plans_of;
+use super::hook::{plans_of, sends_own_signin};
 use super::leave::restart_if_usable;
 use super::network::NetworkFacts;
 use crate::bridge::lock;
@@ -40,6 +40,9 @@ pub(crate) struct SettingsRead {
     pub(crate) firm: BTreeSet<AgentId>,
     /// Those whose endpoint or provider a firm policy sets.
     pub(crate) firm_policy: BTreeSet<AgentId>,
+    /// Those whose plan sends them to its endpoint with Claude Code's own sign-in still on
+    /// (`hook::sends_own_signin`): refused while no key is in memory (`refusal::in_force`).
+    pub(crate) own_signin: BTreeSet<AgentId>,
     /// Those an unreadable policy blocks.
     pub(crate) blocked: BTreeSet<AgentId>,
     /// Every plan, for the launch hook.
@@ -68,6 +71,15 @@ impl SettingsRead {
             })
             .cloned()
             .collect();
+        let own_signin = firm
+            .iter()
+            .filter(|agent| {
+                effective
+                    .plan(agent.as_str())
+                    .is_some_and(|plan| sends_own_signin(agent, plan))
+            })
+            .cloned()
+            .collect();
         let policy_set = firm
             .iter()
             .filter(|agent| effective.is_locked(&format!("plans.{agent}")))
@@ -79,6 +91,7 @@ impl SettingsRead {
         Self {
             firm,
             firm_policy: policy_set,
+            own_signin,
             blocked,
             plans: plans_of(effective),
             network,
@@ -129,6 +142,9 @@ pub(crate) async fn apply_settings(backend: &AgentsBackend, read: SettingsRead) 
             if now(&read.firm) {
                 arrived.push(agent);
             }
+        }
+        if now(&before.own_signin) != now(&read.own_signin) {
+            backend.compose.set_own_signin(agent, now(&read.own_signin));
         }
         if now(&before.firm_policy) != now(&read.firm_policy) {
             backend.set_firm_policy(agent, now(&read.firm_policy));

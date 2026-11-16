@@ -61,6 +61,7 @@ const STATES: [string, SignIn][] = [
   ["failed", { failed: { code: "signin.cancelled", at: AT } }],
   ["no plan", { failed: { code: "signin.no_plan", at: AT } }],
   ["key unreadable", { failed: { code: "agent.key_unreadable", at: AT } }],
+  ["firm key needed", { failed: { code: "agent.firm_key_needed", at: AT } }],
   ["switching", { switching: { since: AT, stuck: true } }],
   ["signed in, reused", plans.signed({ source: "reused" })],
 ];
@@ -118,9 +119,13 @@ test.each(STATES)(
           const yes = document.querySelector<HTMLButtonElement>('[data-testid$="-confirm"]');
           if (yes !== null) await plans.press(yes);
         }
-    // the presses happened (switching offers nothing to press but the key's field, empty)
-    if (typeof state !== "object" || state.switching === undefined)
-      expect(t.setups().length).toBeGreaterThan(0);
+    // the presses happened (switching offers nothing to press but the key's field, empty; a firm key needed, the
+    // same: its one quiet button opens that field, and nothing is saved)
+    const keyOnly =
+      typeof state === "object" &&
+      (state.switching !== undefined ||
+        ("failed" in state && state.failed?.code === "agent.firm_key_needed"));
+    if (!keyOnly) expect(t.setups().length).toBeGreaterThan(0);
     // the window's own connectors check on opening (U15) is the only host command
     expect(plans.hostCommands(t)).toEqual(["connector"]);
     expect(t.connectorCommands()).toEqual([{ check: {} }]);

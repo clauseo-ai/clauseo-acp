@@ -18,6 +18,9 @@
 //!   agent whose key is stored. A read waits for the key slot, at most [`KEYS_HOLD`], checked
 //!   every [`KEYS_POLL`] on the readers' timer, and fails if it stays empty; an agent whose
 //!   stored key is unreadable fails its read too. A failed read shows no account's numbers.
+//! - No Claude read goes out under a plan's endpoint with the first-party provider and no key in
+//!   memory (`hook::sends_own_signin`): it would run Claude Code with the firm's
+//!   `ANTHROPIC_BASE_URL` and its own sign-in on, which sends the lawyer's token there.
 //! - No read goes out for an agent an unreadable policy blocks (`signin.policy_unreadable`,
 //!   review M2): with no plan to read, its read would take a stored key, perhaps the firm
 //!   gateway's, to the vendor's own host while its launches are refused. The blocked agents
@@ -41,7 +44,7 @@ use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_settings::{AgentLaunch, Effective};
 use zeroize::Zeroizing;
 
-use super::hook::{Plans, setup_vars};
+use super::hook::{Plans, sends_own_signin, setup_vars};
 use super::keys::KeySlot;
 use super::network::NetworkSlot;
 use crate::dialogs::BoxFuture;
@@ -158,22 +161,32 @@ fn refuse_blocked(blocked: &RwLock<BTreeSet<AgentId>>, kind: AgentKind) -> Resul
 
 /// Waits until `keys` has loaded, at most [`KEYS_HOLD`]: the failure a read of `kind` ends
 /// with when they have not, or when its stored key is unreadable (as the launches see it, with
-/// its firm plan in `plans`: `KeyCache::unreadable_for`).
+/// its firm plan in `plans`: `KeyCache::unreadable_for`), or when that plan sends it to its
+/// endpoint with Claude Code's own sign-in on and no key is in memory (`agent.firm_key_needed`
+/// for the launches): the read runs Claude Code, which would send the lawyer's token there.
 async fn keys_ready(keys: &KeySlot, plans: &Plans, kind: AgentKind) -> Result<(), ReadFailure> {
     let mut waited = Duration::ZERO;
     loop {
         if let Some(cache) = keys.get() {
-            let unreadable = AgentId::new(kind.id()).is_ok_and(|agent| {
-                let firm = plans
-                    .read()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .get(&agent)
-                    .is_some_and(|plan| plan.endpoint.is_some() || plan.provider.is_some());
-                cache.unreadable_for(&agent, firm)
-            });
-            if unreadable {
+            let Ok(agent) = AgentId::new(kind.id()) else {
+                return Ok(());
+            };
+            let (firm, own_signin) = plans
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&agent)
+                .map_or((false, false), |plan| {
+                    let firm = plan.endpoint.is_some() || plan.provider.is_some();
+                    (firm, sends_own_signin(&agent, plan))
+                });
+            if cache.unreadable_for(&agent, firm) {
                 return Err(ReadFailure::LaunchFailed(
                     "the stored API key could not be read".to_owned(),
+                ));
+            }
+            if own_signin && !cache.in_memory(&agent) {
+                return Err(ReadFailure::LaunchFailed(
+                    "the firm's endpoint needs a saved key".to_owned(),
                 ));
             }
             return Ok(());

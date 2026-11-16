@@ -485,3 +485,43 @@ fn a_failed_key_read_with_no_firm_plan_lets_the_read_go_out() {
     };
     assert!(keys_ready_with_failed_read(Some(env_only)).is_ok());
 }
+
+/// Whether a Claude read gets past the key check under `plan`, with `key` stored or none.
+fn keys_ready_with(plan: Option<Plan>, key: bool) -> Result<(), ReadFailure> {
+    let claude = AgentId::new("claude-acp").unwrap();
+    let keychain = Keychain::memory();
+    if key {
+        keychain
+            .store(&claude, "sk-ant-api03-FIRM-KEY-0004")
+            .unwrap();
+    }
+    let slot = Arc::new(OnceLock::new());
+    let _set = slot.set(Arc::new(KeyCache::load_all(keychain, [&claude])));
+    let plans: crate::setup::hook::Plans = Arc::new(std::sync::RwLock::new(
+        plan.map(|plan| (claude.clone(), plan))
+            .into_iter()
+            .collect(),
+    ));
+    block_on(super::keys_ready(&slot, &plans, AgentKind::Claude))
+}
+
+/// Decision record 0048, "A firm endpoint needs a key": the read runs Claude Code with the
+/// plan's `ANTHROPIC_BASE_URL`, so with the first-party provider and no key it never goes out (it
+/// would carry the lawyer's own sign-in there); a key, a cloud provider or no plan lets it go.
+#[test]
+fn a_firm_endpoint_with_no_key_fails_the_read_and_a_key_or_a_cloud_provider_lets_it_go() {
+    let endpoint = |provider| Plan {
+        endpoint: Some("https://gw.firm.example".to_owned()),
+        provider,
+        ..Plan::default()
+    };
+    for provider in [None, Some(PlanProvider::Anthropic)] {
+        let failed = keys_ready_with(Some(endpoint(provider)), false);
+        assert!(failed.is_err(), "{provider:?}");
+        assert!(keys_ready_with(Some(endpoint(provider)), true).is_ok());
+    }
+    for provider in [PlanProvider::Bedrock, PlanProvider::Vertex] {
+        assert!(keys_ready_with(Some(endpoint(Some(provider))), false).is_ok());
+    }
+    assert!(keys_ready_with(None, false).is_ok());
+}

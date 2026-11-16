@@ -387,6 +387,10 @@ error_codes! {
         service, or a proxy or firewall in front of it, refused, timed out or blocked the \
         connection, or its name did not resolve. The answer so far is kept; asking again can \
         work.";
+    AgentFirmKeyNeeded = "agent.firm_key_needed", retryable: false, meaning: "A firm plan sends \
+        Claude to its own endpoint and no API key is saved: Claude Code would offer the lawyer's \
+        own sign-in token to that endpoint, so no agent was started. Saving the firm's key lets \
+        it start.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

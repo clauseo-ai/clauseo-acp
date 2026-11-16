@@ -225,6 +225,10 @@ fn mcp_failures() -> Vec<DomainEvent> {
             ErrorCode::BlacklineFormatUnknown,
             "the view is not in the stet 1 format",
         ),
+        failed(
+            ErrorCode::AgentFirmKeyNeeded,
+            "the firm's endpoint needs a saved key",
+        ),
     ]
 }
 

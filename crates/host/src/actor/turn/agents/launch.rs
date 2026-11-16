@@ -136,6 +136,21 @@ pub(super) fn launch(
     let spec = agent::spec_of(settings, env, session_folder)
         .map_err(super::super::launch_checks::folder::gone_at_spawn)?
         .with_redacted(redacted);
+    // Desktop refuses a firm endpoint with no key first (`agent.firm_key_needed`); this checks the
+    // env the agent would get, whatever set its base URL (an entry's env, the inherited one), and
+    // holds if desktop's refusal never reached the host or has not yet (a settings change lands
+    // in the launch hook before desktop's `refusal::sync_all`).
+    let env = spec
+        .env()
+        .iter()
+        .map(|(name, value)| (name.as_os_str(), value.as_os_str()));
+    if claude && clauseo_settings::own_signin_reaches_endpoint(env) {
+        tracing::warn!(agent = %row.agent, "a launch is refused: a custom endpoint with no key");
+        return Err(Error::refused(
+            ErrorCode::AgentFirmKeyNeeded,
+            "a custom endpoint with no key saved would get Claude's own sign-in",
+        ));
+    }
     let plan_notes = claude
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
         .flatten();

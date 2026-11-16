@@ -398,6 +398,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         for agent in read.known.keys() {
             compose.set_blocked(agent, facts.blocked.contains(agent));
             compose.set_firm(agent, facts.firm.contains(agent));
+            compose.set_own_signin(agent, facts.own_signin.contains(agent));
         }
         let firm_policy = facts.firm_policy.clone();
         // The route resolved so far, if any, goes first in `Agents`' queue.
@@ -488,7 +489,14 @@ fn python_path(config: &AgentsConfig, slot: PythonSlot) -> PythonPath {
 fn settle_with_no_platform(host: &dyn SetupHost, keys: &KeyCache, read: &SetupStart) {
     let settings = &read.settings;
     let known = read.known.keys();
-    let settle = settle_after_load(host, keys, known, &settings.blocked, &settings.firm);
+    let settle = settle_after_load(
+        host,
+        keys,
+        known,
+        &settings.blocked,
+        &settings.firm,
+        &settings.own_signin,
+    );
     futures::executor::block_on(settle);
 }
 

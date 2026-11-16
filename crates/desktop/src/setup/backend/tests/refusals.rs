@@ -44,6 +44,7 @@ fn the_keys_lift_clears_only_the_agents_the_policy_does_not_block() {
         [&claude(), &codex()],
         &blocked,
         &std::collections::BTreeSet::new(),
+        &std::collections::BTreeSet::new(),
     ));
     assert_eq!(
         rig.host.calls(),

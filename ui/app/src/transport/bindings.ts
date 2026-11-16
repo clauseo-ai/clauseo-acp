@@ -1979,6 +1979,8 @@ export type ErrorCode =
 "blackline.format_unknown" | 
 /** The agent could not get through to its service while answering, and the computer did not seem offline: the service, or a proxy or firewall in front of it, refused, timed out or blocked the connection, or its name did not resolve. The answer so far is kept; asking again can work. */
 "agent.unreachable" | 
+/** A firm plan sends Claude to its own endpoint and no API key is saved: Claude Code would offer the lawyer's own sign-in token to that endpoint, so no agent was started. Saving the firm's key lets it start. */
+"agent.firm_key_needed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

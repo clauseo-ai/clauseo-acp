@@ -104,7 +104,8 @@ fn line_outcome(talked: Line, code: Option<i32>, stderr_tail: String) -> ReadOut
 /// `run_dir`, where Claude Code reads a project `.claude/settings.json`, but passes
 /// `settingSources: []`, so no such file there can change the account or provider it reads.
 /// The env is the `inherited` one under the entry's variables, with `CLAUDE_CONFIG_DIR` forced
-/// to `claude_home` when given (`ProcessReaders::with_claude_home`).
+/// to `claude_home` when given (`ProcessReaders::with_claude_home`). An env that would carry
+/// Claude Code's own sign-in to a custom base URL is refused (`own_signin_reaches_endpoint`).
 fn prepare(
     launch: &AgentLaunch,
     run_dir: &Path,
@@ -119,6 +120,15 @@ fn prepare(
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     let forced = claude_home.map(|home| (OsStr::new(CLAUDE_CONFIG_DIR), home.as_os_str()));
     let env = spec_env(&launch.env, inherited, forced, &[]);
+    // Decision record 0048, "A firm endpoint needs a key": with a custom base URL and no key,
+    // Claude Code would send its own sign-in (the lawyer's token) there, so the helper never runs.
+    // Desktop refuses such a read first; this holds whatever set the base URL.
+    let pairs = env
+        .iter()
+        .map(|(name, value)| (name.as_os_str(), value.as_os_str()));
+    if clauseo_settings::own_signin_reaches_endpoint(pairs) {
+        return Err("a custom endpoint with no key would get Claude's own sign-in".to_owned());
+    }
     LaunchSpec::new(
         located.program,
         vec![helper.into_os_string()],

@@ -131,6 +131,7 @@ fn settled_with(keys: &KeyCache, firm: &BTreeSet<AgentId>) -> Vec<HostCall> {
         agents,
         &BTreeSet::new(),
         firm,
+        &BTreeSet::new(),
     ));
     rig.host.calls()
 }

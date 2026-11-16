@@ -522,6 +522,27 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     refusal first, so a key that just turned unreadable is refused before the restart's
     launches. A `set_launch_refused` call that fails is tried once more, then logged by the
     agent and the error's code.
+  - *A firm endpoint needs a key* (amended 2026-11-16, the orchestrator's ruling on the
+    reading behind #1132). Claude Code 2.1.293 keeps its own Anthropic sign-in on under a
+    custom `ANTHROPIC_BASE_URL` and sends that token, the lawyer's claude.ai one under a
+    reused login, to the custom URL as a Bearer. Only bare mode, an API socket, a provider
+    other than first-party (Bedrock, Vertex, Foundry), `ANTHROPIC_AUTH_TOKEN`, an API key or an
+    `apiKeyHelper` turn that sign-in off (`clauseo_settings::own_signin`, re-checked at each
+    Claude Code bump), and a plan's `env` can set none but the provider. So a Claude agent whose
+    plan has an `endpoint` and the first-party provider (`anthropic` or none) is refused with
+    `agent.firm_key_needed` while no key is in memory: no launch (`setup/refusal.rs`), no limits
+    read (`setup/readers.rs`), and the card shows `Failed { code: agent.firm_key_needed }` in
+    place of `Firm` (`setup/compose.rs`). Saving the firm's key lifts it. Bedrock and Vertex
+    plans launch with no key as before: they use the cloud's credentials. The host checks each
+    Claude launch's own env the same way and refuses it with that code whatever set the base
+    URL (`actor/turn/agents/launch.rs`), and so does the limits reader (`readers/claude.rs`):
+    that check also covers the gap between a settings change reaching the launch hook and
+    desktop's `refusal::sync_all`. Unlike a failed key read under a firm plan, where the hook
+    drops the endpoint and provider (`setup/hook.rs`, `setup_parts`), the endpoint stays: a
+    launch with it dropped would go keyless to the vendor's own host on a personal sign-in.
+    The accepted cost: a gateway that takes no key at all stops working until any key is saved
+    (`docs/firm-it.md`). Codex is not covered: a plan's endpoint sets no Codex variable and a
+    plan cannot name a provider or base URL for it (`setup/hook.rs`, `plan_env`).
 - *`LoginCheck::shared(&AgentId, agent_home: &Path) -> Shared`*, a second hook call, where
   `Shared` is `Yes`, `No` or `Unknown`. It asks whether the home's `auth.json` is the lawyer's
   file, whatever the link check says. A symlinked `auth.json` is `Split` to `check` (it is no

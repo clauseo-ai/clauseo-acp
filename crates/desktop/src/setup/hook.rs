@@ -45,6 +45,14 @@ use super::keys::KeySlot;
 use super::network::{NetworkSlot, with_loopback};
 use super::python_path::PythonSlot;
 
+/// Whether `plan` sends `agent` to a custom endpoint with Claude Code's own sign-in still on
+/// (`clauseo_settings::plan_keeps_own_signin`: an endpoint, the first-party provider): with no
+/// key in memory such an agent never starts (`agent.firm_key_needed`, `refusal.rs`), nor does
+/// its limits read (`readers.rs`). Claude only: a Codex endpoint adds no variable (`plan_env`).
+pub(crate) fn sends_own_signin(agent: &AgentId, plan: &Plan) -> bool {
+    AgentKind::of(agent) == Some(AgentKind::Claude) && clauseo_settings::plan_keeps_own_signin(plan)
+}
+
 /// Each agent's firm plan, by agent id, as the settings last read gave it.
 pub(crate) type Plans = Arc<RwLock<BTreeMap<AgentId, Plan>>>;
 
@@ -186,6 +194,9 @@ fn setup_parts(
             plan.endpoint = None;
             plan.provider = None;
         }
+        // No key stored under a first-party endpoint (`sends_own_signin`) keeps the endpoint:
+        // such a launch is refused (`agent.firm_key_needed`), by the host's own env check too
+        // in that gap, rather than sent keyless to the vendor's host on a personal sign-in.
         plan_env(kind, &plan, &mut vars);
     }
     let route = network.read().unwrap_or_else(PoisonError::into_inner);

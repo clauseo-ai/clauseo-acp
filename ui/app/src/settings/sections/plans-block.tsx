@@ -70,6 +70,9 @@ type Stand =
   /** A stored key that couldn't be read in time (agent.key_unreadable, #506): its words, and a sign-in, which the
    * host doesn't bar meanwhile. */
   | { kind: "failed"; code: string }
+  /** A firm's own endpoint with no key saved (agent.firm_key_needed): its words, and no sign-in, since Claude stays
+   * off until a key is saved (the key's panel under the card saves one). */
+  | { kind: "needs-key"; code: string }
   | { kind: "gate" };
 
 function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
@@ -96,6 +99,8 @@ function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
       return { kind: "signed-out", found: undefined };
     if (signIn.failed?.code === "agent.key_unreadable")
       return { kind: "failed", code: signIn.failed.code };
+    if (signIn.failed?.code === "agent.firm_key_needed")
+      return { kind: "needs-key", code: signIn.failed.code };
   }
   return { kind: "gate" };
 }
@@ -424,6 +429,13 @@ export function PlanBlock({
         body = (
           <PlanCard plan={plan} note={errorWords(lang, stand.code)}>
             <MainAct label={s("Sign in again")} onClick={signIn} testId="plans-sign-in" />
+          </PlanCard>
+        );
+        break;
+      case "needs-key":
+        body = (
+          <PlanCard plan={plan} note={errorWords(lang, stand.code)}>
+            {null}
           </PlanCard>
         );
         break;

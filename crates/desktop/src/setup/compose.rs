@@ -20,6 +20,9 @@
 //!    that failed with no "key stored" mark, only under a firm plan), `Failed { code:
 //!    agent.key_unreadable }`: its launches are refused until a read succeeds. It bars no
 //!    sign-in: a key that may be there is no key in use (the desktop review's item 1).
+//!    Then, while the agent's plan sends it to its endpoint with Claude Code's own sign-in on
+//!    (`hook::sends_own_signin`) and no key is in memory, `Failed { code: agent.firm_key_needed }`:
+//!    its launches are refused (`refusal.rs`) until the firm's key is saved.
 //! 4. Otherwise `SignedIn { method: Firm }` while the agent has an endpoint or a provider
 //!    (`plans.<id>`, the lawyer's or the firm's policy's);
 //! 5. else `SignedIn { method: ApiKey }` while a key is in memory (read, or just stored), with
@@ -66,6 +69,9 @@ pub(crate) struct Facts {
     pub(crate) blocked: Option<SystemTime>,
     /// Since when a firm policy sets the agent's endpoint or provider, if it does.
     pub(crate) managed: Option<SystemTime>,
+    /// Since when the agent's plan sends it to its endpoint with Claude Code's own sign-in on
+    /// (`hook::sends_own_signin`), if it does: `agent.firm_key_needed` while no key is in memory.
+    pub(crate) own_signin: Option<SystemTime>,
     /// Since when an automatic leave has been trying again, if one is (its first try's end).
     pub(crate) switching: Option<SystemTime>,
     /// Whether that leave has been trying for 2 minutes (`leave::hold::STUCK_AFTER`).
@@ -105,6 +111,12 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
     if let Some(since) = facts.unreadable.or(facts.read_failed.filter(|_| firm)) {
         return Some(SignIn::Failed {
             code: ErrorCode::AgentKeyUnreadable,
+            at: timestamp(since),
+        });
+    }
+    if let Some(since) = facts.own_signin.filter(|_| facts.key.is_none()) {
+        return Some(SignIn::Failed {
+            code: ErrorCode::AgentFirmKeyNeeded,
             at: timestamp(since),
         });
     }
@@ -439,6 +451,13 @@ impl Compose {
                 took_over(agent, known);
             }
             known.facts.firm = firm.then(|| known.facts.firm.unwrap_or(now));
+        });
+    }
+
+    /// Whether `agent`'s plan sends it to its endpoint with Claude Code's own sign-in on.
+    pub(crate) fn set_own_signin(&self, agent: &AgentId, own_signin: bool) {
+        self.change(agent, |known, now| {
+            known.facts.own_signin = own_signin.then(|| known.facts.own_signin.unwrap_or(now));
         });
     }
 

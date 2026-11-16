@@ -355,3 +355,26 @@ fn the_plan_s_variables_go_in_beside_the_key() {
     assert!(key == Some(OsString::from(FAKE_KEY)), "not the stored key");
     launcher.wait_stdout_closed();
 }
+
+/// Decision record 0048, "A firm endpoint needs a key": a custom base URL with no key would let
+/// Claude Code send its own sign-in there, so the read fails and nothing is launched; with a
+/// key it goes out (above).
+#[test]
+fn a_custom_base_url_with_no_key_launches_nothing() {
+    let setup = installed_setup();
+    let launcher = TestLauncher::new(Play::Scenario("claude-api-key"));
+    let reader = setup
+        .readers(&launcher, &SharedTimer::default())
+        .with_launch_env(|_agent| {
+            vec![(
+                "ANTHROPIC_BASE_URL".to_owned(),
+                Zeroizing::new("https://gw.firm.example".to_owned()),
+            )]
+        });
+    let outcome = block_on(reader.read(AgentKind::Claude));
+    assert!(
+        matches!(outcome, ReadOutcome::Failed(ReadFailure::LaunchFailed(_))),
+        "{outcome:?}"
+    );
+    assert!(launcher.specs().is_empty(), "nothing launched");
+}

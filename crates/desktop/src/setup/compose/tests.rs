@@ -438,3 +438,49 @@ fn a_refused_key_shows_on_its_line_until_a_key_is_saved_or_removed() {
         ]
     );
 }
+
+/// A plan's endpoint with the first-party provider and no key in memory: the card says the
+/// firm's key is needed (decision record 0048, "A firm endpoint needs a key") in place of
+/// `Firm`; with the key it is `Firm`; an unreadable key still says so first, and a running
+/// sign-in still passes through.
+#[test]
+fn a_firm_endpoint_with_no_key_shows_firm_key_needed_until_a_key_is_in_memory() {
+    let out = SigninState::SignedOut { found: None };
+    let own = Facts {
+        own_signin: Some(at(T)),
+        ..facts(true, false, false)
+    };
+    assert_eq!(
+        compose(&claude(), Some(&out), own),
+        Some(SignIn::Failed {
+            code: ErrorCode::AgentFirmKeyNeeded,
+            at: timestamp(at(T)),
+        })
+    );
+    let keyed = Facts {
+        key: Some(at(T)),
+        ..own
+    };
+    assert!(matches!(
+        compose(&claude(), Some(&out), keyed),
+        Some(SignIn::SignedIn {
+            method: SignInMethod::Firm,
+            ..
+        })
+    ));
+    let unreadable = Facts {
+        unreadable: Some(at(T)),
+        ..own
+    };
+    assert!(matches!(
+        compose(&claude(), Some(&out), unreadable),
+        Some(SignIn::Failed {
+            code: ErrorCode::AgentKeyUnreadable,
+            ..
+        })
+    ));
+    assert_eq!(
+        compose(&claude(), Some(&SigninState::Queued), own),
+        Some(SignIn::Queued)
+    );
+}

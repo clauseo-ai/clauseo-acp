@@ -4,6 +4,9 @@
 //! - `signin.policy_unreadable` while an unreadable policy blocks it;
 //! - else `agent.key_unreadable` while its stored key is marked unreadable (the read failed,
 //!   or did not answer within the first load's bound: `setup/keys/reads.rs`);
+//! - else `agent.firm_key_needed` while its plan sends it to an endpoint with Claude Code's own
+//!   sign-in still on (`hook::sends_own_signin`) and no key is in memory: Claude Code 2.1.293
+//!   would send the lawyer's claude.ai token to that endpoint as a Bearer;
 //! - else none: no key is stored (it launches without one), or its key is in memory.
 //!
 //! `agent.keys_loading` is the host's from its start until the first load is over and the
@@ -28,10 +31,12 @@ use super::keys::{KeyCache, KeyNote};
 use crate::bridge::lock;
 
 /// The refusal in force for `agent`, given whether a policy `blocked` it, whether a firm plan
-/// (an endpoint or a provider) is set for it, and its `keys`.
+/// (an endpoint or a provider) is set for it, whether that plan keeps Claude Code's own sign-in
+/// on toward its endpoint (`own_signin`), and its `keys`.
 pub(crate) fn in_force(
     blocked: bool,
     firm: bool,
+    own_signin: bool,
     keys: &KeyCache,
     agent: &AgentId,
 ) -> Option<ErrorCode> {
@@ -39,6 +44,8 @@ pub(crate) fn in_force(
         Some(ErrorCode::SigninPolicyUnreadable)
     } else if keys.unreadable_for(agent, firm) {
         Some(ErrorCode::AgentKeyUnreadable)
+    } else if own_signin && !keys.in_memory(agent) {
+        Some(ErrorCode::AgentFirmKeyNeeded)
     } else {
         None
     }
@@ -46,14 +53,15 @@ pub(crate) fn in_force(
 
 /// The refusal in force for `agent` as `backend` holds the settings and keys.
 pub(crate) fn wanted(backend: &AgentsBackend, agent: &AgentId) -> Option<ErrorCode> {
-    let (blocked, firm) = {
+    let (blocked, firm, own_signin) = {
         let applied = lock(&backend.wiring.applied);
         (
             applied.blocked.contains(agent),
             applied.firm.contains(agent),
+            applied.own_signin.contains(agent),
         )
     };
-    in_force(blocked, firm, &backend.keys, agent)
+    in_force(blocked, firm, own_signin, &backend.keys, agent)
 }
 
 /// Tells the host `agent`'s refusal in force when it is not what the host was last told. A
@@ -104,16 +112,24 @@ pub(crate) async fn lift_at_start(backend: &AgentsBackend, wait: Duration) {
 
 /// The first load is over and no backend follows (no platform): each of `known` but those in
 /// `blocked` (whose refusal is the policy's) gets its refusal in force from `keys`, those in
-/// `firm` under their firm plan. A call that fails is logged by the agent and its code.
+/// `firm` under their firm plan and those in `own_signin` under its endpoint
+/// (`SettingsRead::own_signin`). A call that fails is logged by the agent and its code.
 pub(crate) async fn settle_after_load<'a>(
     host: &dyn SetupHost,
     keys: &KeyCache,
     known: impl IntoIterator<Item = &'a AgentId>,
     blocked: &BTreeSet<AgentId>,
     firm: &BTreeSet<AgentId>,
+    own_signin: &BTreeSet<AgentId>,
 ) {
     for agent in known.into_iter().filter(|agent| !blocked.contains(*agent)) {
-        let code = in_force(false, firm.contains(agent), keys, agent);
+        let code = in_force(
+            false,
+            firm.contains(agent),
+            own_signin.contains(agent),
+            keys,
+            agent,
+        );
         if let Err(error) = host.set_launch_refused(agent.clone(), code).await {
             let code = error.code().as_str();
             tracing::warn!(%agent, code, "the keys' launch refusal was not set");

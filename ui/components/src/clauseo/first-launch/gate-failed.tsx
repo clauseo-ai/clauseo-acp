@@ -125,6 +125,13 @@ export function Failed({
           </span>
         </Act>
       );
+    case "agent.firm_key_needed":
+      // no sign-in can help: the words only, the key's saving is in Settings, then Plans
+      return (
+        <Act>
+          <Say>{errorWords(lang, "agent.firm_key_needed")}</Say>
+        </Act>
+      );
     default:
       return (
         <Act act={signIn(w("Try again"))}>

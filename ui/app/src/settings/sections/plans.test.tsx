@@ -451,6 +451,17 @@ test("agent.key_unreadable shows as failed, in words-errors' words, with Sign in
   expect(t.setups()).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });
 
+test("agent.firm_key_needed shows the card with its words, no sign-in button, and the key's quiet button", async () => {
+  const t = await at({ failed: { code: "agent.firm_key_needed", at: AT } });
+  expect(block("claude")!.dataset["state"]).toBe("needs-key");
+  expect(words()).toContain(
+    "Claude can't start here until an API key for your firm's gateway is saved. Ask your firm's IT for the key, then add it in Settings, then Plans.",
+  );
+  expect(block("claude")!.querySelector('[data-testid="plans-sign-in"]')).toBeNull();
+  expect(button("Use an API key instead", block("claude")!)).not.toBeNull();
+  expect(t.setups()).toEqual([]);
+});
+
 test("keys: Sign out's confirm starts on Cancel, and Escape sends nothing and gives focus back to Sign out", async () => {
   const t = await at(signed());
   const opener = document.querySelector<HTMLElement>('[data-testid="plans-sign-out"]');

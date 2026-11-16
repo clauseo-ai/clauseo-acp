@@ -136,6 +136,9 @@ export const HI = {
     "Clauseo अभी शुरू हो रहा है। थोड़ी देर में फिर से प्रयास करें।",
   "Clauseo couldn't check for a saved API key in time. If this computer asks for permission, allow it, then try again.":
     "Clauseo समय पर सहेजी गई API key की जाँच नहीं कर सका। अगर यह कंप्यूटर अनुमति माँगे, तो अनुमति दें, फिर दोबारा प्रयास करें।",
+  // provisional (firm endpoint PR, Rohan's batch review)
+  "Claude can't start here until an API key for your firm's gateway is saved. Ask your firm's IT for the key, then add it in Settings, then Plans.":
+    "जब तक आपकी फ़र्म के गेटवे के लिए API key सहेजी नहीं जाती, Claude यहाँ शुरू नहीं हो सकता। अपनी फ़र्म की IT टीम से key लें, फिर सेटिंग्स खोलें, फिर प्लान में उसे जोड़ें।",
   "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.":
     "इस फ़ाइल का पाथ Word के लिए बहुत लंबा है। मामले के फ़ोल्डर को ड्राइव के ऊपरी स्तर के पास ले जाएँ, या उसके फ़ोल्डरों के नाम छोटे करें।",
   "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.":
