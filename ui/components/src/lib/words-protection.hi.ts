@@ -109,6 +109,6 @@ export const HI = {
     "फ़र्म Clauseo का सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता।",
   // what Windows' Safe workspace can't stop (UC-820): the room's one-time notice and Settings' Safe workspace.
   // Provisional; hi: later
-  "On Windows, Clauseo stops Claude's file tools and its usual file commands from opening or changing another matter's files. It can't stop everything yet: a program Claude writes and runs, or a command it tucks inside another command, can still reach them; ChatGPT's commands can read other matters' folders; and, until an update closes it, Claude can see the names and sizes of the folders and files of other matters kept in the same folder as this one. For matters that must stay strictly apart, use a Mac.":
+  "On Windows, Clauseo stops Claude's and ChatGPT's file tools from opening or changing another matter's files, and refuses their commands that name another matter's folder. It can't catch everything: a program they write and run, a file location they piece together, or a shortcut they make first can still reach those files.":
     null,
 } as const;

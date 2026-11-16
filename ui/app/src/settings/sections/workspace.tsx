@@ -8,7 +8,8 @@
 // line stands in the button's place while a command runs, and a refusal's words under the block.
 // While the firm's policy is active (firmPolicy, blocked.ts), a block only the firm can act on, or a
 // sandbox.blocked refusal, adds "Copy details for IT" (it-details.ts) under them. On Windows, while it's on, the block
-// also says what the Safe workspace can't stop there (UC-820, WINDOWS_LINE).
+// also says what the Safe workspace can't stop there (UC-820, WINDOWS_LINE), then the Mac advice (UC-850,
+// WINDOWS_STRICT).
 // Where the host doesn't answer the query yet (`command.invalid`, before R17 PR-B admits this
 // window) the section says so quietly. A matter's own state (a full pool, protection switched off)
 // is the room's, never shown here. No timers: the view is read when the window opens, after each
@@ -17,7 +18,12 @@ import { CopyForIt } from "@clauseo/components/clauseo/copy-for-it.tsx";
 import { ProtectionConfirm } from "@clauseo/components/clauseo/protection-confirm.tsx";
 import { IconSafeWorkspace } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
-import { INSTALLER_CLOSE, pw, WINDOWS_LINE } from "@clauseo/components/lib/words-protection.ts";
+import {
+  INSTALLER_CLOSE,
+  pw,
+  WINDOWS_LINE,
+  WINDOWS_STRICT,
+} from "@clauseo/components/lib/words-protection.ts";
 import { useSettingsWords, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useEffect, useId, useRef, useState } from "react";
@@ -198,6 +204,8 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
           {!off && platform === "windows" && (
             <p className="set-note" data-testid="protection-platform-line" data-platform="windows">
               {w.say(pw(lang, WINDOWS_LINE))}
+              {/* UC-850, Rohan's call: its own sentence, to go alone */}{" "}
+              {w.say(pw(lang, WINDOWS_STRICT))}
             </p>
           )}
           {/* UC-821, the Mac's counterpart, goes here: words pending, shown on the Mac only once host PR #1085 (the

@@ -2,7 +2,7 @@
 // The Windows line's notice (UC-820) in the real room over FakeTransport: it shows on Windows once the room lists a
 // second matter, never with one matter, never on the Mac, and never again once "Got it" was pressed (kept in
 // localStorage with when); its English is the copy registry's.
-import { pw, WINDOWS_LINE } from "@clauseo/components/lib/words-protection.ts";
+import { pw, WINDOWS_LINE, WINDOWS_STRICT } from "@clauseo/components/lib/words-protection.ts";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { APPROVALS } from "../../review/approvals.ts";
 import { UC_WINDOWS_LINE } from "../../review/registry-uc-windows-line.tsx";
@@ -35,11 +35,13 @@ async function roomOn(platform: "windows" | "mac", matters: MatterSummary[]): Pr
   return room;
 }
 
-test("on Windows with two matters the room shows the notice, with UC-820's words and Got it", async () => {
+test("on Windows with two matters the room shows the notice, UC-820 then UC-850, and Got it", async () => {
   h = await roomOn("windows", [THE_MATTER, SECOND]);
   const note = h.one("windows-line");
   expect(note).not.toBeNull();
-  expect(note?.textContent).toContain(pw("en", WINDOWS_LINE));
+  expect(note?.querySelector("p")?.textContent).toBe(
+    `${pw("en", WINDOWS_LINE)} ${pw("en", WINDOWS_STRICT)}`,
+  );
   expect(note?.querySelector("[role=status]")).not.toBeNull();
   expect(h.one("windows-line-got-it")?.textContent).toBe("Got it");
 });
@@ -49,9 +51,11 @@ test("on Windows with one matter, nothing", async () => {
   expect(h.one("windows-line")).toBeNull();
 });
 
-test("on the Mac with two matters, nothing", async () => {
+test("on the Mac with two matters, nothing: neither UC-820 nor UC-850", async () => {
   h = await roomOn("mac", [THE_MATTER, SECOND]);
   expect(h.one("windows-line")).toBeNull();
+  expect(document.body.textContent).not.toContain(pw("en", WINDOWS_LINE));
+  expect(document.body.textContent).not.toContain(pw("en", WINDOWS_STRICT));
 });
 
 test("Got it puts it away and records when, and a remount after that shows nothing", async () => {

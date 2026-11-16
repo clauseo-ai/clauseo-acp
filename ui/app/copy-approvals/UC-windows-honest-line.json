@@ -1,11 +1,20 @@
 {
   "UC-820": {
-    "en": "On Windows, Clauseo stops Claude's file tools and its usual file commands from opening or changing another matter's files. It can't stop everything yet: a program Claude writes and runs, or a command it tucks inside another command, can still reach them; ChatGPT's commands can read other matters' folders; and, until an update closes it, Claude can see the names and sizes of the folders and files of other matters kept in the same folder as this one. For matters that must stay strictly apart, use a Mac.",
+    "en": "On Windows, Clauseo stops Claude's and ChatGPT's file tools from opening or changing another matter's files, and refuses their commands that name another matter's folder. It can't catch everything: a program they write and run, a file location they piece together, or a shortcut they make first can still reach those files.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-16",
     "by": "app track (provisional)",
-    "note": "Provisional and wider than the launch build: narrowed to what still gets through the host's command scan once the host sends that list (orchestrator, 16 Nov). Also changes when the folder-listing gap closes."
+    "note": "Describes the launch build's command scan (Claude and ChatGPT). If a case is still open at the cut, the list grows on the day (host follow-ups)."
+  },
+  "UC-850": {
+    "en": "For matters that must stay strictly apart, use a Mac.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (provisional)",
+    "note": "A product statement only Rohan can make; shown after UC-820 only if he keeps it."
   }
 }
