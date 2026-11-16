@@ -13,11 +13,10 @@ import {
   AlertDialogPopup,
 } from "@clauseo/components/ui/alert-dialog.tsx";
 import { Button } from "@clauseo/components/ui/button.tsx";
-import type { HeldFolder } from "./first-folder-check.ts";
-import type { Warned } from "./folder-warning.tsx";
+import type { DriveWarned, HeldFolder } from "./first-folder-check.ts";
 
 /** Each warning's words, New matter's (folder-warning.tsx): its title, what it says, and why. */
-const SAYS: Readonly<Record<Warned, { head: FolderKey; info: FolderKey }>> = {
+const SAYS: Readonly<Record<DriveWarned, { head: FolderKey; info: FolderKey }>> = {
   network: {
     head: "On a network drive",
     info: "Clauseo can't keep Claude and ChatGPT inside a folder on a network drive.",

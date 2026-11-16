@@ -10,10 +10,13 @@ import type { Matters } from "./matters.ts";
 /** How long the pick waits for the check, as New matter's Create does (folder-check.tsx's CHECK_WAIT_MS). */
 const CHECK_WAIT_MS = 5000;
 
+/** The warnings this step gives: a drive's. A folder whose name has a backslash gets Locate's step first (FR30). */
+export type DriveWarned = Exclude<Warned, "backslash">;
+
 /** A pick held for the step: the folder as it shows, its warning, and the step's two ways on. */
 export type HeldFolder = {
   display: string;
-  kind: Warned;
+  kind: DriveWarned;
   /** Choose another folder: the picker again. */
   again: () => Promise<void>;
   /** Open anyway: the folder made a matter. */
@@ -21,7 +24,10 @@ export type HeldFolder = {
 };
 
 /** The warning for a folder picked, or null: fine, refused, or no answer within the wait. */
-export async function warningOf(matters: Matters, folder: FolderRefId): Promise<Warned | null> {
+export async function warningOf(
+  matters: Matters,
+  folder: FolderRefId,
+): Promise<DriveWarned | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const asked = matters.folderSupport({ existing_folder: { folder } }).then(
     (support) => (support === "network" || support === "no_permissions" ? support : null),
