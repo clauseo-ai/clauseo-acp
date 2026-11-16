@@ -411,9 +411,11 @@ fn resumed_expecting_the_note(dir: &Dir) -> Scenario {
         "\"scenario\":\"undo-note-resumed\"",
         1,
     );
+    // After a start of the app the resumed thread first hears the matters it may read again.
+    let notes = crate::undo_note_restart::after_start(CODEX, BRIEF_NOTE);
     for step in [
         json!({"expect": {"method": "session/prompt", "as": "p1", "params": {
-            "sessionId": "sess-1", "prompt": [{"type": "text", "text": BRIEF_NOTE},
+            "sessionId": "sess-1", "prompt": [{"type": "text", "text": notes},
                 {"type": "text", "text": NEXT}]}}}),
         end_turn("p1"),
     ] {

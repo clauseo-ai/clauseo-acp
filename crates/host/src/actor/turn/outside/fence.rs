@@ -81,25 +81,36 @@ pub(crate) fn matters_hash(actor: &Actor) -> u64 {
     hasher.finish()
 }
 
-/// The instructions part for the matters `run`'s conversation may read
-/// (`clauseo_profile::instructions::matter_reads_part`): each one's name and folder as stored;
-/// for Codex (`inside` false) not one inside the own matter, which stays fenced for it
-/// (`agent::codex_fence::Session::other_matters`).
-pub(crate) fn reads_part(run: &RunFolders, inside: bool) -> String {
+/// The matters `run`'s conversation may read; for Codex (`inside` false) not one inside the own
+/// matter, which stays fenced for it (`agent::codex_fence::Session::other_matters`).
+fn invited(run: &RunFolders, inside: bool) -> Vec<&Other> {
     let fence = &run.data_deny.matters;
-    let within = |other: &crate::agent::matter_fence::Other| {
+    let within = |other: &Other| {
         other
             .spellings
             .iter()
             .any(|spelling| fence.inside_own.iter().any(|(p, _)| p == spelling))
     };
-    let reads: Vec<(&str, &str)> = fence
+    fence
         .others
         .iter()
         .filter(|other| other.invited && (inside || !within(other)))
+        .collect()
+}
+
+/// [`invited`]'s names and folders as stored; a folder that is no UTF-8 is left out.
+fn named(run: &RunFolders, inside: bool) -> Vec<(&str, &str)> {
+    invited(run, inside)
+        .into_iter()
         .filter_map(|other| Some((other.name.as_str(), other.folder.to_str()?)))
-        .collect();
-    clauseo_profile::instructions::matter_reads_part(&reads)
+        .collect()
+}
+
+/// The instructions part for the matters `run`'s conversation may read ([`invited`],
+/// `clauseo_profile::instructions::matter_reads_part`): Claude's (`inside` true); Codex hears
+/// them in a note ([`codex_reads_note`]).
+pub(crate) fn reads_part(run: &RunFolders, inside: bool) -> String {
+    clauseo_profile::instructions::matter_reads_part(&named(run, inside))
 }
 
 /// `part` appended to the instructions `text`, when it is a string and `part` is not empty.
@@ -112,9 +123,12 @@ pub(crate) fn append_part(text: &mut Value, part: &str) {
 }
 
 /// The other matters' rule (`{other_matters}`) for a Codex launch: on Windows (`windows`),
-/// where nothing fences Codex from them, the name-free rule that knows a matter by its
-/// `.clauseo` folder (`clauseo_profile::instructions::other_matters_unfenced`); elsewhere its
-/// sandbox fences them and it gets the fenced rule, as Claude does everywhere.
+/// where nothing fences Codex from them, the rule that knows a matter by its `.clauseo` folder
+/// and opens one only when a Clauseo note names it
+/// (`clauseo_profile::instructions::other_matters_unfenced`); elsewhere its sandbox fences them
+/// and it gets the fenced rule, as Claude does everywhere. Neither names a matter: the note
+/// carries every grant ([`codex_reads_note`]), a resumed Codex thread keeping the instructions of
+/// its first launch.
 pub(crate) fn codex_rule(windows: bool) -> &'static str {
     use clauseo_profile::instructions::{OTHER_MATTERS, other_matters_unfenced};
     if windows {
@@ -122,6 +136,14 @@ pub(crate) fn codex_rule(windows: bool) -> &'static str {
     } else {
         OTHER_MATTERS.trim()
     }
+}
+
+/// The note that tells a Codex agent the other matters `run`'s conversation may read now, by
+/// the names the lawyer sees (`clauseo_profile::instructions::reads_note`), on every OS: sent
+/// first in the lawyer's next message when it differs from what the agent was last told
+/// (`turn/note_parts.rs`).
+pub(crate) fn codex_reads_note(run: &RunFolders) -> String {
+    clauseo_profile::instructions::reads_note(&named(run, false))
 }
 
 /// What a Claude session's `meta` gets from the fence after its instructions are filled: the

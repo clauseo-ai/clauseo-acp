@@ -1,4 +1,5 @@
-//! Step 5: the prompt, with the notes first: the offline-shell note a steer could not deliver
+//! Step 5: the prompt, with the notes first: the instruction parts a resumed Codex thread has not
+//! heard (`note_parts.rs`), the offline-shell note a steer could not deliver
 //! (`shell_network.rs`), then the undo note (the files put back since the last turn).
 //!
 //! The note is added here, after `SendPrompt` checked the question alone, so a Codex prompt is

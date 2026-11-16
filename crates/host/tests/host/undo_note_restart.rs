@@ -35,6 +35,17 @@ pub(crate) fn note(files: &str) -> String {
     )
 }
 
+/// The notes a prompt of `agent` starts with after a start of the app, `undo` among them: a
+/// resumed Codex thread first hears again the other matters it may read (none here), which
+/// nothing tells the host it heard before (`actor/turn/note_parts.rs`).
+pub(crate) fn after_start(agent: &str, undo: &str) -> String {
+    if agent == CODEX {
+        format!("{}\n{undo}", clauseo_profile::instructions::reads_note(&[]))
+    } else {
+        undo.to_owned()
+    }
+}
+
 /// A `session/prompt` labelled `label` whose blocks are exactly `texts`.
 pub(crate) fn prompt_exactly(label: &str, texts: &[&str]) -> Value {
     let blocks: Vec<Value> = texts
@@ -203,7 +214,7 @@ fn undone_then_restarted(agent: &str, test: &str) {
     events.assert_no_mismatch();
     host.shutdown();
 
-    let brief = note("brief.txt");
+    let brief = after_start(agent, &note("brief.txt"));
     let mut steps = answered("p2", &[&brief, NEXT]).to_vec();
     steps.extend(answered("p3", &[AFTER]));
     after_restart(&dir, thread, agent, "undo-note-run1", steps);
@@ -273,7 +284,7 @@ fn a_refused_codex_prompt_then_a_restart_keeps_the_note() {
     events.assert_no_mismatch();
     host.shutdown();
 
-    let brief = note("brief.txt");
+    let brief = after_start(CODEX, &note("brief.txt"));
     let mut steps = answered("p2", &[&brief, NEXT]).to_vec();
     steps.extend(answered("p3", &[AFTER]));
     after_restart(&dir, thread, CODEX, "undo-note-refused-run1", steps);

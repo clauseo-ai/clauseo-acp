@@ -108,6 +108,9 @@ mod codex_options;
 #[path = "host/codex_plans.rs"]
 mod codex_plans;
 #[cfg(test)]
+#[path = "host/codex_reads_note.rs"]
+mod codex_reads_note;
+#[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
 

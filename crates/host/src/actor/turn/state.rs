@@ -304,6 +304,10 @@ pub(super) struct ToldOnce {
     /// Claude's commands were told they can't open the matter (`outside/fence.rs`), while it
     /// lasts: told again once a launch can re-open the matter and a later one can't.
     pub(super) shell_limited: bool,
+    /// What a Codex agent was last told of each instruction part that can change while its
+    /// thread lives, by part (`note_parts.rs`): a resumed Codex thread keeps the instructions
+    /// of its first launch, so a part that changed goes first in the lawyer's next message.
+    pub(super) parts: std::collections::BTreeMap<&'static str, String>,
 }
 
 /// The once-a-turn notes a turn has given, each at most once.
