@@ -17,6 +17,8 @@ use self::unix as os;
 mod win;
 #[cfg(windows)]
 use self::win as os;
+#[cfg(windows)]
+pub(crate) use self::win::dns_suffixes;
 
 /// One interface address and the length of its on-link prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

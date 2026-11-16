@@ -18,10 +18,11 @@
 //! `Port`), an IP literal that is not public or a `localhost` name (403, `PrivateAddress`; no
 //! allowlist entry lets one through), the allowlist (403, `NotAllowed`; skipped on the browser
 //! listener in open mode), the route, the address check (403, `PrivateAddress`, or through an
-//! upstream `DnsUnavailable` when local DNS could not check a name), then the
-//! connect. Open mode moves the allowlist check only, and only on the browser listener; every
-//! other check holds in both modes. An origin's 407 to a forwarded `http://` request becomes a
-//! 502, so no site can make the browser answer a proxy challenge with its credential.
+//! upstream `DnsUnavailable` when open mode's name-only path refuses a name local DNS could not
+//! check), then the connect. Open mode moves the allowlist check only, and only on the browser
+//! listener; every other check holds in both modes. An origin's 407 to a forwarded `http://`
+//! request becomes a 502, so no site can make the browser answer a proxy challenge with its
+//! credential.
 //!
 //! The address check is made on the addresses connected to. On a direct connection a name is
 //! resolved once, refused if any answer is not public, and only those checked addresses are
@@ -30,10 +31,12 @@
 //! resolved locally too and refused if any local answer is not. When local DNS fails, times out
 //! or finds nothing, a name the allowlist passed goes upstream unchecked (a desktop that
 //! resolves only through its proxy): a known gap, limited to listed names. A name let in without
-//! the list (open mode's browser listener) is refused then instead (`DnsUnavailable`). Either
-//! way the upstream resolves the name again itself, so a DNS answer that changes between the
-//! proxy's lookup and the upstream's (rebinding) can still reach an address the proxy did not
-//! check; the firm's proxy decides what it reaches.
+//! the list (open mode's browser listener) takes the name-only path then (`name_only`): local
+//! DNS is waited for 2 s at most, and the name goes upstream unresolved only as a CONNECT to a
+//! name with a dot under no internal suffix and none of the firm's own, else is refused
+//! (`DnsUnavailable`). Either way the upstream resolves the name again itself, so a DNS answer
+//! that changes between the proxy's lookup and the upstream's (rebinding) can still reach an
+//! address the proxy did not check; the firm's proxy decides what it reaches.
 //!
 //! A sink or record callback runs on the proxy thread and must not block: one that blocks stalls
 //! every connection of the launch, and `ProxyHandle`'s drop, which joins the thread.
@@ -49,6 +52,7 @@ mod http;
 mod load;
 mod local_net;
 mod mode;
+mod name_only;
 mod net;
 mod relay;
 mod server;
@@ -83,6 +87,7 @@ pub use upstream::{
 use crate::{Clock, DenialSink, Error, HostRefusal, SystemClock};
 use allowlist::Name;
 use local_net::LocalNets;
+use name_only::FirmNames;
 use net::{Network, SystemNetwork};
 pub(crate) use shared::{Shared, Unopened};
 use token::Token;
@@ -288,6 +293,8 @@ pub(crate) struct Options {
     pub(crate) reach: Option<Box<Reach>>,
     /// The machine's own networks in place of the OS's list (the test seam).
     pub(crate) local: Option<LocalNets>,
+    /// The firm's own suffixes in place of those learned from the OS (the test seam).
+    pub(crate) firm: Option<FirmNames>,
 }
 
 impl Default for Options {
@@ -298,6 +305,7 @@ impl Default for Options {
             system: None,
             reach: None,
             local: None,
+            firm: None,
         }
     }
 }
@@ -370,9 +378,21 @@ pub(crate) fn start_with(
     } else {
         (None, None)
     };
+    let open_browser = config.mode == ProxyMode::Open && config.browser;
     let local = match options.local {
         Some(local) => local,
-        None => local_nets(config.mode == ProxyMode::Open && config.browser)?,
+        None => local_nets(open_browser)?,
+    };
+    // Only open mode's browser listener has the name-only path.
+    let firm = match options.firm {
+        Some(firm) => firm,
+        None if open_browser => {
+            let no_proxy = Env::from_process().no_proxy;
+            let firm = FirmNames::new(upstream::firm_suffixes(no_proxy.as_deref()));
+            tracing::debug!(learned = firm.count(), "egress: the firm's own names read");
+            firm
+        }
+        None => FirmNames::default(),
     };
     if config.block.first_unloaded_notice() {
         tracing::warn!("egress: the block list is not loaded; no site is blocked");
@@ -390,7 +410,9 @@ pub(crate) fn start_with(
             browser: browser_token.clone(),
         },
         denials: config.denials,
+        dns_clock: SharedClock(Arc::clone(&options.clock)),
         clock: SharedClock(options.clock),
+        firm,
         net,
         lookup,
         record: config.record,

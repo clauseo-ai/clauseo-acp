@@ -15,6 +15,7 @@ use futures::channel::oneshot;
 use futures::future::BoxFuture;
 
 use crate::proxy::local_net::{LocalNets, OnLink};
+use crate::proxy::name_only::FirmNames;
 use crate::proxy::net::Network;
 use crate::proxy::upstream::{Answer, Env, Failure, Intent, OsAnswer, OsRoute, Reach, Scheme};
 use crate::proxy::{Exchange, Limits, Options, ProxyConfig, ProxyHandle, ProxyMode, start_with};
@@ -217,6 +218,8 @@ pub(crate) struct Setup {
     /// The machine's own networks, each an address and its prefix length (none by default, so
     /// no test depends on this machine's interfaces).
     pub(crate) local: Vec<(&'static str, u8)>,
+    /// The firm's own suffixes, normalised (none by default, nothing read from this machine).
+    pub(crate) firm: Vec<&'static str>,
 }
 
 impl Default for Setup {
@@ -236,6 +239,7 @@ impl Default for Setup {
             browser: true,
             mode: ProxyMode::Allowlist,
             local: Vec::new(),
+            firm: Vec::new(),
         }
     }
 }
@@ -321,6 +325,13 @@ pub(crate) fn rig(setup: Setup) -> Rig {
                 .local
                 .iter()
                 .map(|(ip, prefix)| OnLink::new(ip.parse().unwrap(), *prefix))
+                .collect(),
+        )),
+        firm: Some(FirmNames::new(
+            setup
+                .firm
+                .iter()
+                .map(|suffix| (*suffix).to_owned())
                 .collect(),
         )),
     };

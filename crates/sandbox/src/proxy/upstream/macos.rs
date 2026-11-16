@@ -1,23 +1,25 @@
 //! The macOS lookup: `CFNetworkCopySystemProxySettings`, then `CFNetworkCopyProxiesForURL`,
 //! and for a PAC entry `CFNetworkExecuteProxyAutoConfigurationURL` or `...Script` on a run loop
-//! of the calling thread, in a private mode, for at most 5 s. Every CF object this file owns is
-//! a `CFRetained`, which releases it when dropped.
+//! of the calling thread, in a private mode, for at most 5 s. For the firm's own names
+//! (`firm.rs`): the settings' `ExceptionsList`, and `SystemConfiguration`'s
+//! `State:/Network/Global/DNS` `SearchDomains`. Every CF object this file owns is a
+//! `CFRetained`, which releases it when dropped.
 #![expect(
     unsafe_code,
-    reason = "FFI to CFNetwork's proxy settings and PAC calls"
+    reason = "FFI to CFNetwork's proxy settings and PAC calls, and SystemConfiguration's DNS"
 )]
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use objc2_cf_network::{
-    CFNetworkCopyProxiesForURL, CFNetworkCopySystemProxySettings, kCFNetworkProxiesHTTPEnable,
-    kCFNetworkProxiesHTTPSEnable, kCFNetworkProxiesProxyAutoConfigEnable,
-    kCFNetworkProxiesProxyAutoConfigJavaScript, kCFNetworkProxiesProxyAutoConfigURLString,
-    kCFProxyAutoConfigurationJavaScriptKey, kCFProxyAutoConfigurationURLKey, kCFProxyHostNameKey,
-    kCFProxyPortNumberKey, kCFProxyTypeAutoConfigurationJavaScript,
-    kCFProxyTypeAutoConfigurationURL, kCFProxyTypeHTTP, kCFProxyTypeHTTPS, kCFProxyTypeKey,
-    kCFProxyTypeNone,
+    CFNetworkCopyProxiesForURL, CFNetworkCopySystemProxySettings, kCFNetworkProxiesExceptionsList,
+    kCFNetworkProxiesHTTPEnable, kCFNetworkProxiesHTTPSEnable,
+    kCFNetworkProxiesProxyAutoConfigEnable, kCFNetworkProxiesProxyAutoConfigJavaScript,
+    kCFNetworkProxiesProxyAutoConfigURLString, kCFProxyAutoConfigurationJavaScriptKey,
+    kCFProxyAutoConfigurationURLKey, kCFProxyHostNameKey, kCFProxyPortNumberKey,
+    kCFProxyTypeAutoConfigurationJavaScript, kCFProxyTypeAutoConfigurationURL, kCFProxyTypeHTTP,
+    kCFProxyTypeHTTPS, kCFProxyTypeKey, kCFProxyTypeNone,
 };
 use objc2_core_foundation::{
     CFArray, CFDictionary, CFError, CFNumber, CFRetained, CFRunLoop, CFRunLoopRunResult,
@@ -55,6 +57,12 @@ unsafe extern "C-unwind" {
         cb: PacCallback,
         client_context: *mut CFStreamClientContext,
     ) -> *mut CFRunLoopSource;
+}
+
+#[link(name = "SystemConfiguration", kind = "framework")]
+unsafe extern "C-unwind" {
+    /// A null `store` asks through a temporary session. Returns an owned property list or null.
+    fn SCDynamicStoreCopyValue(store: *const c_void, key: &CFString) -> *mut CFType;
 }
 
 /// `CFNetwork`'s constant key and type names.
@@ -116,6 +124,44 @@ pub(super) fn configured() -> Configured {
     };
     // SAFETY: the system proxy settings are keyed by strings, whose values are CF objects.
     configured_from(unsafe { settings.cast_unchecked::<CFString, CFType>() })
+}
+
+/// The proxy settings' exception list (`ExceptionsList`), raw; empty when it has none, `None`
+/// when the settings cannot be read.
+pub(super) fn exceptions() -> Option<Vec<String>> {
+    // SAFETY: takes no arguments and returns an owned dictionary or null.
+    let settings = unsafe { CFNetworkCopySystemProxySettings() }?;
+    // SAFETY: the system proxy settings are keyed by strings, whose values are CF objects.
+    let settings = unsafe { settings.cast_unchecked::<CFString, CFType>() };
+    // SAFETY: CFNetwork's exported constant string, as in `names`.
+    let key = unsafe { kCFNetworkProxiesExceptionsList };
+    Some(value::<CFArray>(settings, key).map_or_else(Vec::new, |list| strings(&list)))
+}
+
+/// The DNS search domains (`State:/Network/Global/DNS`'s `SearchDomains`); empty when there
+/// are none, `None` when the dynamic store gives no DNS state.
+pub(super) fn search_domains() -> Option<Vec<String>> {
+    let key = CFString::from_static_str("State:/Network/Global/DNS");
+    // SAFETY: a null store is a temporary session, as Apple documents; `key` is a valid string.
+    let found = NonNull::new(unsafe { SCDynamicStoreCopyValue(std::ptr::null(), &key) })?;
+    // SAFETY: a Copy function's result is owned by the caller (+1), released once on drop.
+    let found = unsafe { CFRetained::from_raw(found) };
+    let dns = found.downcast::<CFDictionary>().ok()?;
+    // SAFETY: the dynamic store's DNS state is a property list keyed by strings.
+    let dns = unsafe { dns.cast_unchecked::<CFString, CFType>() };
+    let domains = CFString::from_static_str("SearchDomains");
+    Some(value::<CFArray>(dns, &domains).map_or_else(Vec::new, |list| strings(&list)))
+}
+
+/// The strings of a property list's array; any other item is skipped.
+fn strings(list: &CFArray) -> Vec<String> {
+    // SAFETY: a property list's array holds CF objects only.
+    let items = unsafe { list.cast_unchecked::<CFType>() }.to_vec();
+    items
+        .into_iter()
+        .filter_map(|item| item.downcast::<CFString>().ok())
+        .map(|text| text.to_string())
+        .collect()
 }
 
 /// A PAC URL turned on, an inline PAC script present (an MDM profile's; its presence is the

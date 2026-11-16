@@ -1,5 +1,6 @@
 //! The interface list on Windows: `GetAdaptersAddresses`, each unicast address with the
-//! on-link prefix length Windows keeps for it.
+//! on-link prefix length Windows keeps for it, and each adapter's DNS suffix (the firm's own
+//! names, `upstream/firm.rs`).
 #![expect(
     unsafe_code,
     reason = "GetAdaptersAddresses, and reading the adapter list it writes into our buffer"
@@ -25,6 +26,17 @@ const FIRST_SIZE: u32 = 16 * 1024;
 
 /// Every IPv4 and IPv6 unicast address of every adapter, with its on-link prefix length.
 pub(super) fn read() -> io::Result<Vec<OnLink>> {
+    adapters(walk)
+}
+
+/// Every adapter's connection-specific DNS suffix (set by DHCP or by hand), where it has one.
+pub(crate) fn dns_suffixes() -> io::Result<Vec<String>> {
+    adapters(suffixes)
+}
+
+/// `GetAdaptersAddresses`'s list, read by `walker` while its buffer lives; empty when there is
+/// no adapter.
+fn adapters<T: Default>(walker: unsafe fn(*const IP_ADAPTER_ADDRESSES_LH) -> T) -> io::Result<T> {
     let flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
     let mut size = FIRST_SIZE;
     // The list can grow between the call that sizes it and the next; three tries.
@@ -48,15 +60,16 @@ pub(super) fn read() -> io::Result<Vec<OnLink>> {
             continue;
         }
         if status == ERROR_NO_DATA.0 {
-            return Ok(Vec::new());
+            return Ok(T::default());
         }
         if status != ERROR_SUCCESS.0 {
             return Err(io::Error::other(format!(
                 "GetAdaptersAddresses failed: {status}"
             )));
         }
-        // SAFETY: on success the list starts at `first`, inside `buffer`, alive here.
-        return Ok(unsafe { walk(first.cast_const()) });
+        // SAFETY: on success the list starts at `first`, inside `buffer`, alive here, which is
+        // what `walker` asks for.
+        return Ok(unsafe { walker(first.cast_const()) });
     }
     Err(io::Error::other("the adapter list kept growing"))
 }
@@ -80,6 +93,29 @@ unsafe fn walk(mut adapter: *const IP_ADAPTER_ADDRESSES_LH) -> Vec<OnLink> {
                 found.push(OnLink::new(ip, address.OnLinkPrefixLength));
             }
             unicast = address.Next.cast_const();
+        }
+        adapter = node.Next.cast_const();
+    }
+    found
+}
+
+/// The DNS suffixes of the adapter list starting at `adapter`; an empty one is skipped.
+///
+/// # Safety
+///
+/// `adapter` is null or the head of a list `GetAdaptersAddresses` wrote, still alive.
+unsafe fn suffixes(mut adapter: *const IP_ADAPTER_ADDRESSES_LH) -> Vec<String> {
+    let mut found = Vec::new();
+    while !adapter.is_null() {
+        // SAFETY: a node of the list, as the caller vouches.
+        let node = unsafe { &*adapter };
+        if !node.DnsSuffix.is_null() {
+            // SAFETY: a non-null suffix is a NUL-terminated UTF-16 string in the same list.
+            if let Ok(suffix) = unsafe { node.DnsSuffix.to_string() }
+                && !suffix.trim().is_empty()
+            {
+                found.push(suffix);
+            }
         }
         adapter = node.Next.cast_const();
     }

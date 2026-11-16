@@ -337,6 +337,16 @@ lawyer's documents somewhere.
   name's DNS can choose that branch (fail or stall the desktop's query, answer the upstream's
   with a private address); the upstream may also resolve it differently (split DNS, or rebinding
   on each request). Refusing that branch when the upstream is on loopback is G10's call
+- `built`: Open mode's browser listener lets in names no list vouched for. Behind a firm's
+  proxy, when local DNS gives no answer within 2 s, such a name goes on unresolved only as a
+  CONNECT to port 443, and never a single label, a name under `localhost`, `.local`,
+  `.internal`, `.lan`, `.corp`, `.home`, `.home.arpa`, `.localdomain` or `.intranet`, or a
+  name under the firm's own suffixes (the domains of `NO_PROXY`, the Windows bypass list, the
+  macOS proxy exceptions and the DNS search domains, read at start); anything else is refused
+  (`DnsUnavailable`). After three failed lookups in a row the launch skips local DNS for 60 s.
+  Gap: an intranet host with a public-looking name under a suffix none of those name (PAC rules
+  cannot be listed); DNS rebinding through the firm's proxy, blunted by TLS (the certificate
+  must match the name); and, during a 60 s skip, a name whose local answer would be private
 - `built`: It decides by host name and never intercepts TLS: it holds no CA. Gap: a CONNECT to
   an allowed host can carry TLS whose SNI or `Host` names another site on the same address
   (domain fronting)

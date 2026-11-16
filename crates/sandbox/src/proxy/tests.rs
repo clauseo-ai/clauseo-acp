@@ -12,6 +12,7 @@ mod http;
 mod limits;
 mod local_net;
 mod open;
+mod open_name_only;
 mod open_private;
 mod open_unloaded;
 mod open_upstream;
