@@ -68,6 +68,11 @@ text = "\u0928\u094d\u092f\u093e\u092f\u093e\u0932\u092f " * 5 if hindi else "re
 sys.stdout.write("%sw%s\n" % (text, width))
 """
 
+# The fake engine is a "#!python" script, and Windows runs only an .exe; there the real-engine
+# test (CLAUSEO_TEST_TESSERACT) covers the engine instead.
+fake_engine = unittest.skipIf(os.name == "nt", "the fake engine is a Python script; Windows runs "
+                              "only .exe; the real-engine test covers Windows")
+
 
 def pdf_bytes(pages):
     """A PDF of `pages`: ("text", [lines]) in Helvetica, ("scan", image) a Pillow "L" image over
@@ -203,6 +208,7 @@ class PdfToText(unittest.TestCase):
         self.assertEqual(err, "")
         self.assertFalse(os.path.exists(os.path.join(self.ocr, "doc.pdf.txt")))
 
+    @fake_engine
     def test_a_mixed_pdf_ocrs_only_its_scanned_page_and_says_so(self):
         self.pdf([("text", ["A typed first page with enough characters in it."]),
                   ("blank", 200), ("text", ["A typed third page with enough characters too."])])
@@ -253,6 +259,7 @@ class PdfToText(unittest.TestCase):
         self.assertRegex(first, r"^ *Left column words {10,}Right column$")
         self.assertIn("Second left line", out.split("\n")[1])
 
+    @fake_engine
     def test_a_short_budget_prints_what_it_has_and_a_rerun_finishes_without_redoing_pages(self):
         self.pdf([("blank", 200 + 10 * n) for n in range(5)], name="Bundle.pdf")
         code, out, err = self.run_tool("Bundle.pdf", "-", TEST_BUDGET=1, FAKE_SLEEP=0.4,
@@ -275,6 +282,7 @@ class PdfToText(unittest.TestCase):
         self.assertEqual(out.count("recognised words"), 5)
         self.assertNotIn("not yet read", self.mirror("Bundle.pdf"))
 
+    @fake_engine
     def test_a_cache_hit_runs_no_tesseract(self):
         self.pdf([("blank", 200), ("blank", 210)])
         first = self.run_tool("doc.pdf", "-")
@@ -284,12 +292,14 @@ class PdfToText(unittest.TestCase):
         self.assertEqual(first[1], second[1])
         self.assertIn("pages 1-2 had no text layer", second[2])
 
+    @fake_engine
     def test_without_a_cache_folder_it_still_ocrs_and_keeps_nothing(self):
         self.pdf([("blank", 200)])
         code, out, _ = self.run_tool("doc.pdf", "-", CLAUSEO_OCR_DIR=None)
         self.assertEqual((code, out), (0, "recognised words w834\n\f"))
         self.assertFalse(os.path.exists(self.ocr))
 
+    @fake_engine
     def test_a_changed_byte_misses_and_a_rename_reuses_by_hash(self):
         path = self.pdf([("blank", 200), ("blank", 210)])
         self.run_tool("doc.pdf", "-")
@@ -306,6 +316,7 @@ class PdfToText(unittest.TestCase):
         self.run_tool(renamed, "-")
         self.assertEqual(len(self.calls()), 4)
 
+    @fake_engine
     def test_two_processes_at_once_do_one_ocr(self):
         self.pdf([("blank", 200 + 10 * n) for n in range(4)])
         procs = [self.start("doc.pdf", "-", FAKE_SLEEP=0.3, TEST_WORKERS=2) for _ in range(2)]
@@ -315,6 +326,7 @@ class PdfToText(unittest.TestCase):
         self.assertEqual(outs[0][0], outs[1][0])
         self.assertEqual(outs[0][0].decode().count("recognised words"), 4)
 
+    @fake_engine
     def test_a_dead_holders_lock_is_taken_over(self):
         self.pdf([("blank", 200), ("blank", 210)])
         self.run_tool("-l", "1", "doc.pdf", "-")
@@ -330,6 +342,7 @@ class PdfToText(unittest.TestCase):
         self.assertEqual((code, out), (0, "recognised words w834\n\frecognised words w876\n\f"))
         self.assertFalse(os.path.exists(lock))
 
+    @fake_engine
     def test_the_language_probe_keeps_hindi_only_when_the_first_scan_has_it(self):
         self.pdf([("blank", 200 + 10 * n) for n in range(3)])
         self.run_tool("doc.pdf", "-", TEST_WORKERS=1)
@@ -368,6 +381,7 @@ class PdfToText(unittest.TestCase):
         self.assertIn("locked.pdf is encrypted (it needs a password)", err)
         self.assertEqual(self.calls(), [])
 
+    @fake_engine
     def test_the_page_cap_names_the_pages_past_it(self):
         self.pdf([("blank", 200 + 10 * n) for n in range(4)])
         code, out, _ = self.run_tool("doc.pdf", "-", TEST_MAX_OCR=2)
@@ -384,6 +398,7 @@ class PdfToText(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("[page 1 of doc.pdf: no text layer, and OCR is not available", out)
 
+    @fake_engine
     def test_non_ascii_names_print_utf8_whatever_the_console(self):
         name = os.path.join("दस्तावेज़", "Écrit 1.pdf")
         self.pdf([("blank", 200)], name=name)
@@ -408,6 +423,7 @@ class PdfToText(unittest.TestCase):
         with open(SCRIPT, encoding="utf-8") as file:
             ast.parse(file.read())
 
+    @fake_engine
     def test_a_slow_engine_is_stopped_inside_the_budget(self):
         self.pdf([("blank", 200), ("blank", 210)])
         began = time.monotonic()
@@ -417,6 +433,7 @@ class PdfToText(unittest.TestCase):
         self.assertIn("[pages 1-2 of doc.pdf: not yet recognised", out)
         self.assertEqual(self.calls(), [])
 
+    @fake_engine
     def test_a_failed_page_is_named_and_the_others_are_kept(self):
         self.pdf([("blank", 200), ("blank", 210), ("blank", 220)])
         code, out, err = self.run_tool("doc.pdf", "-", FAKE_FAIL_WIDTH=876, TEST_WORKERS=1)
@@ -522,10 +539,11 @@ class PdfToText(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("CLAUSEO_TEST_TESSERACT"), "CLAUSEO_TEST_TESSERACT unset")
     def test_a_scanned_page_yields_its_words_with_the_real_engine(self):
         folder = os.environ["CLAUSEO_TEST_TESSERACT"]
+        engine = os.path.join(folder, "tesseract.exe" if os.name == "nt" else "tesseract")
         lines = ["IN THE HIGH COURT OF DELHI", "The petition is allowed with costs."]
         self.pdf([("scan", scan_image(lines))])
         code, out, err = self.run_tool(
-            "doc.pdf", "-", TEST_ENGINE=os.path.join(folder, "tesseract"),
+            "doc.pdf", "-", TEST_ENGINE=engine,
             TEST_TESSDATA=os.path.join(folder, "tessdata"))
         self.assertEqual(code, 0, err)
         for word in ("HIGH", "COURT", "DELHI", "petition", "allowed", "costs"):
