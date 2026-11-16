@@ -65,8 +65,8 @@ fn size(deny: &LaunchDeny, spellings: &[PathBuf]) -> usize {
 /// The rules' size for the big folder (60 matters) whose own matter holds 1 and 500 other
 /// conversations' work folders, with the default folder and with a configured one spelled two
 /// ways; and, for the record, the size had each been named whole (as before the groups). On
-/// Windows two spellings' rules are 906,222 bytes before any conversation (the data folder's,
-/// about 86% of the 1 MiB bound here) and 938,942 at 500; named whole, 1,547,942.
+/// Windows two spellings' rules are 914,264 bytes before any conversation (the data folder's,
+/// about 87% of the 1 MiB bound here) and 946,984 at 500; named whole, 1,555,984.
 #[test]
 fn five_hundred_conversations_in_a_matter_stay_under_the_settings_file_cap() {
     let configured = [
