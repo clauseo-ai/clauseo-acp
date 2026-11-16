@@ -52,11 +52,6 @@ impl FirmNames {
         FirmNames { suffixes }
     }
 
-    /// How many suffixes were learned.
-    pub(crate) fn count(&self) -> usize {
-        self.suffixes.len()
-    }
-
     /// Whether `name` may go to the firm's proxy by name alone: a domain with a dot, under
     /// none of [`INTERNAL`] and none of the firm's suffixes. Never an IP literal.
     pub(crate) fn admits(&self, name: &Name) -> bool {
