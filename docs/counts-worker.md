@@ -374,8 +374,8 @@ Two workflows, so no workflow that holds the Cloudflare token runs for a pull re
   1. in the job `bundle`, with no secret and no environment: the schema snapshot test,
      `cargo test`, `pnpm test`, `check-deploy.mjs` on `wrangler.toml`, and the wasm build
      (`worker-build --release`). Then one sha256 (`scripts/bundle-hash.mjs`) over what the
-     deploy ships: `build/`, `wrangler.toml`, `migrations/`, the deploy scripts and the
-     lockfile that pins wrangler. Those files are the job's artifact; the deploy job downloads
+     deploy ships: `build/`, `wrangler.toml`, `migrations/`, the deploy scripts, the
+     lockfile that pins wrangler, and `counts-deploy.yml` itself (its deploy steps). Those files are the job's artifact; the deploy job downloads
      them, checks the hash and builds nothing, so the bytes approved are the bytes hashed;
   2. the R2 bucket `clauseo-crash`, found or created in the EU jurisdiction, with a lifecycle
      rule that deletes objects after 90 days (other rules are kept). If the token lacks Workers
@@ -396,7 +396,8 @@ Two workflows, so no workflow that holds the Cloudflare token runs for a pull re
 
 A push that would ship the same Worker skips the deploy, and so the approval. Most
 `crates/protocol` changes don't touch what the Worker compiles: the job `bundle` finds the hash
-of the last deploy on `main` (the newest run whose deploy job ran, if it succeeded) and, when
+of the last deploy on `main` (of this repository's push and by-hand runs, the deploy job that
+completed last, if it succeeded; a pull request's run is never trusted) and, when
 it equals this bundle's, ends green with the deploy job skipped and the line "same Worker as
 deployed (<hash>), no deploy" in the run's summary. Any doubt deploys: no hash found, an expired
 one, a failed last deploy or a build that is not byte for byte the same. The hash cannot see a
