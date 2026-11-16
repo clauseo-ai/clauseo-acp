@@ -670,6 +670,27 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     on Windows after #1098, and with them these denies. A sandboxed macOS or Linux launch gets
     no denies at all: there Seatbelt (bubblewrap) checks the real path a glob reaches, so they
     would cost those pipes and buy nothing.
+- **2026-11-16: one shell on Windows, PowerShell, Git or not (orchestrator).** Claude Code
+  2.1.293 drops its Bash tool and turns PowerShell on where there is no Git Bash, and on a
+  machine with Git uses Bash, so the shell followed whether Git was installed.
+  A Windows Claude launch now sets `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` itself, in the process
+  env (any inherited, settings-entry or hook value and any `CLAUDE_CODE_GIT_BASH_PATH` dropped)
+  and in `_meta`'s and the flag settings' `env`, and its flag settings deny the whole `Bash`
+  tool (`agent/one_shell.rs`). A Bash deny rule turns PowerShell off where Git Bash exists
+  unless the variable is on (`sBr`, `bS()`), so the two go together. The shell is Windows
+  PowerShell 5.1, or PowerShell 7 when the lawyer has it (Claude Code's `BG()` prefers `pwsh`;
+  no variable moves it), and both are met: every Windows acceptance row runs on the Git-free
+  machine twice, with 5.1 only and with `pwsh` 7 installed. Each PowerShell call runs as
+  `claude.exe` → `cmd.exe /d /s /c "chcp.com 65001 >nul & pwsh.exe -NoProfile -NonInteractive
+  -ExecutionPolicy Bypass -Command …"` (seen on the VM), so `cmd.exe` and `chcp.com` sit in every
+  call's chain and PowerShell is not Claude Code's direct child; the guard hook is (exec form).
+  On the Git-free VM with no variable Claude Code already offered PowerShell and no Bash, on
+  `pwsh` 7 and on 5.1 alone (`…\System32\WindowsPowerShell\v1.0\powershell.exe`, 5.1.26100
+  Desktop); with the variable at `1` and Bash denied the same; at `0` it refused to start. The
+  variable makes a machine with Git match. The scoped `Bash(…)` rules stay for now. Claude
+  Code also reads settings sources of its own (its user settings in Clauseo's Claude home,
+  managed settings and the `HKLM`/`HKCU` `Policies\ClaudeCode` keys, and a folder's project and
+  local settings for this variable); what they may set is the launch check's (#1167).
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the
