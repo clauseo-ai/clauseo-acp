@@ -232,12 +232,15 @@ jobs:
             if [ "$mode" = dry ]; then echo "version_suffix=dev.${GITHUB_SHA:0:9}"; else echo "version_suffix="; fi
           } | tee -a "$GITHUB_OUTPUT"
 
-      # A v* release must be newer than the latest one: the updater offers only a higher
-      # version, so an equal or lower one would publish a release no installed app takes, and
-      # --latest would make it the one new downloads get. GitHub's latest release is a published
-      # v<X.Y.Z> (never a draft or pre-release); none yet (HTTP 404) passes. The job's read token
-      # is enough: check keeps contents: read.
-      - name: A release's version is above the latest release's
+      # A v* release must be newer than every app release already out: the updater offers only a
+      # higher version, so an equal or lower one would publish a release no installed app takes,
+      # and --latest would make it the one new downloads get. Not read from releases/latest,
+      # which another workflow's release can hold (python-runtime's did, 2026-11-16): every
+      # release is listed, and only published (not draft, not pre-release) ones tagged exactly
+      # v<X.Y.Z> count; the highest of those is the bar. None yet is the first app release, which
+      # passes. That releases/latest then names this tag is what the post-publish `latest` job
+      # proves. The job's read token is enough: check keeps contents: read.
+      - name: A release's version is above every published app release's
         if: steps.mode.outputs.mode == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -245,27 +248,19 @@ jobs:
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
-          if ! latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> "$RUNNER_TEMP/latest.err"); then
-            if grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err"; then
-              echo "No latest release yet: $VERSION is the first."
-              exit 0
-            fi
-            cat "$RUNNER_TEMP/latest.err"
-            fail "could not read the latest release of $GITHUB_REPOSITORY"
+          bysemver() { sort -t . -k 1,1n -k 2,2n -k 3,3n; }
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" > "$RUNNER_TEMP/releases.json" ||
+            fail "could not list the releases of $GITHUB_REPOSITORY"
+          highest=$(jq -r '.[] | select((.draft | not) and (.prerelease | not)) | .tag_name' "$RUNNER_TEMP/releases.json" |
+            sed -nE 's/^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$/\1/p' | bysemver | tail -n 1)
+          if [ -z "$highest" ]; then
+            echo "No published v<X.Y.Z> release yet: $VERSION is the first."
+            exit 0
           fi
-          [[ "$latest" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
-            fail "the latest release's tag is \"$latest\", not v<X.Y.Z>"
-          have=("${BASH_REMATCH[@]:1:3}")
-          IFS=. read -r -a want <<< "$VERSION"
-          for i in 0 1 2; do
-            if (( 10#${want[i]} > 10#${have[i]} )); then
-              echo "$VERSION is above the latest release, $latest."
-              exit 0
-            elif (( 10#${want[i]} < 10#${have[i]} )); then
-              break
-            fi
-          done
-          fail "$VERSION is not above the latest release, $latest"
+          if [ "$VERSION" = "$highest" ] || [ "$(printf '%s\n' "$highest" "$VERSION" | bysemver | tail -n 1)" != "$VERSION" ]; then
+            fail "$VERSION is not above the highest published app release, v$highest"
+          fi
+          echo "$VERSION is above the highest published app release, v$highest."
 
       # A v* release ships only English Rohan approved: every entry in ui/app/copy-approvals/*.json
       # "approved". Provisional Hindi only warns (Rohan, 2026-11-15: hindi later; provisional Hindi

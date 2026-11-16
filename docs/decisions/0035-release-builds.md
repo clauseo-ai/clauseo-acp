@@ -36,7 +36,8 @@ Developer ID.
     the run's artifact `dist-assets`. Since a dry run holds nothing secret, it may start from any
     branch, so a fix can be dry-run before it merges (`gh workflow run release.yml --ref <branch>`).
 - **Jobs:** `check` (mode, tag against version and branch, the release overlays, no test feature in a
-  `v*` build); `ui` (the ui built once for every leg, with hidden source maps moved out of
+  `v*` build, a `v*` release's endpoint and version);
+  `ui` (the ui built once for every leg, with hidden source maps moved out of
   its `dist` folder before any leg embeds it); `build` (the matrix below); `build`'s macOS legs rename the bundler's `Clauseo.app.tar.gz` to `Clauseo_<v>_<arch>.app.tar.gz`, drop its `.sig` and sign the renamed file; `sign-windows` (SignPath's slot, then both NSIS
   installers from the one exe with `tauri bundle --no-binary-patching`, then the updater signature,
   last); `assemble` (refuses a bundler-named `Clauseo.app.tar.gz`, checks each Mac archive's signature, writes `latest.json` and
@@ -242,9 +243,9 @@ created with `--latest=false`; a dry run publishes nothing.
 Before anything builds, `check` refuses a `v*` release unless `plugins.updater.endpoints` is exactly
 that URL (no allowance for an empty list: the pubkey check already refuses a release until R23's
 PR 6 sets both; test and dry runs don't refuse, as an e2e/test build ignores the endpoint), and
-unless its version is above the current latest release's (`gh api .../releases/latest` with the
-job's read token; HTTP 404, no release yet, passes; a latest tag that is not `v<X.Y.Z>` fails). An
-equal or lower version would publish a release no installed app takes and make it the one new
+unless its version is above every published app release's (`gh api --paginate .../releases` with
+the job's read token; only releases neither draft nor pre-release and tagged exactly `v<X.Y.Z>`
+count; none yet, the first app release, passes). An equal or lower version would publish a release no installed app takes and make it the one new
 downloads get.
 
 The job `latest` (after `publish`, release mode only) then checks what the apps will read: the
@@ -259,6 +260,15 @@ minisign (the `blocklist` job's tarball and SHA-256, which `latest-json.test.mjs
 a Linux build and `publish` runs on macOS for the stapler, and this way the check needs no
 environment, no approval and only a read token, and can be re-run alone. A failure there means the
 release is already public: it is the signal to fix or pull it, not a gate before it.
+
+Only a published `v*` release may hold releases/latest: every other `gh release create` in
+`.github/workflows/` passes `--latest=false` (python-runtime's did not, and on 2026-11-16
+releases/latest was `python-runtime-3.13.18-c2`; agent-browser's and a test run's already did), and
+only `publish` passes `--latest`. `latest-json.test.mjs` reads every workflow and fails otherwise.
+For the same reason `check`'s version bar is the highest published `v<X.Y.Z>` release in the full
+list, never whatever releases/latest names. Until the first `v*` release is published with
+`--latest`, releases/latest stays python-runtime's; no installed copy has the endpoint before R23's
+PR 6, so nothing breaks today.
 
 ## The unsigned beta (2026-11-16)
 

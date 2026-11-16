@@ -31,7 +31,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -1156,30 +1156,33 @@ test("check refuses a release whose endpoint is not releases/latest, or whose ve
   // check stays read-only.
   const permissions = check.indexOf("permissions:");
   assert.deepEqual(check.slice(permissions + 1, permissions + 3), ["contents: read", "outputs:"]);
-  const name = "A release's version is above the latest release's";
+  const name = "A release's version is above every published app release's";
   const step = check.indexOf(`- name: ${name}`);
   assert.equal(check[step + 1], "if: steps.mode.outputs.mode == 'release'");
 });
 
-test("the version check passes a first release or a higher version and refuses the rest", { skip: process.platform === "win32" }, () => {
-  const script = stepScript(readFileSync(RELEASE_YML, "utf8"), "A release's version is above the latest release's");
+test("the version check passes a first app release or a higher version and refuses the rest", { skip: process.platform === "win32" }, () => {
+  const script = stepScript(readFileSync(RELEASE_YML, "utf8"), "A release's version is above every published app release's");
   const dir = mkdtempSync(join(tmpdir(), "version-check-"));
   try {
-    // gh api answers with $LATEST, or as gh does for a 404 or another failure.
+    // gh api --paginate prints each page's array, one after another; FAIL makes it fail.
     writeFileSync(
       join(dir, "gh"),
-      [
-        "#!/bin/bash",
-        'case "$LATEST" in',
-        '  404) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;',
-        '  500) echo "gh: Server Error (HTTP 500)" >&2; exit 1 ;;',
-        '  *) echo "$LATEST" ;;',
-        "esac",
-        "",
-      ].join("\n"),
+      ["#!/bin/bash", '[ -z "$FAIL" ] || { echo "gh: Server Error (HTTP 500)" >&2; exit 1; }', 'printf "%s" "$PAGES"', ""].join("\n"),
       { mode: 0o755 },
     );
-    const run = (version, latest) =>
+    const release = (tag, { draft = false, prerelease = false } = {}) => ({ tag_name: tag, draft, prerelease });
+    // releases/latest today is python-runtime's; drafts, pre-releases and test tags never count.
+    const others = [
+      release("python-runtime-3.13.18-c2"),
+      release("v9.0.0", { draft: true }),
+      release("v8.0.0", { prerelease: true }),
+      release("test-v7.0.0", { prerelease: true }),
+      release("v7.0"),
+      release("v07.0.0"),
+    ];
+    const pages = (...lists) => lists.map((list) => JSON.stringify(list)).join("\n");
+    const run = (version, PAGES, FAIL = "") =>
       spawnSync("bash", ["-c", script], {
         encoding: "utf8",
         env: {
@@ -1188,35 +1191,70 @@ test("the version check passes a first release or a higher version and refuses t
           RUNNER_TEMP: dir,
           GITHUB_REPOSITORY: "clauseo-ai/clauseo-acp",
           VERSION: version,
-          LATEST: latest,
+          PAGES,
+          FAIL,
         },
       });
-    for (const [version, latest] of [
-      ["0.1.0", "404"],
-      ["1.2.4", "v1.2.3"],
-      ["1.3.0", "v1.2.9"],
-      ["2.0.0", "v1.99.99"],
-      ["1.10.0", "v1.9.0"],
+    for (const [version, listed] of [
+      ["0.1.0", pages([])],
+      ["0.1.0", pages(others)],
+      ["1.2.4", pages(others, [release("v1.2.3")])],
+      ["1.3.0", pages([release("v1.2.9"), release("v0.9.0")], others)],
+      ["2.0.0", pages([release("v1.99.99")])],
+      ["1.10.0", pages([release("v1.9.0"), release("v1.2.0")])],
     ]) {
-      const result = run(version, latest);
-      assert.equal(result.status, 0, `${version} over ${latest}: ${result.stdout}${result.stderr}`);
+      const result = run(version, listed);
+      assert.equal(result.status, 0, `${version} over ${listed}: ${result.stdout}${result.stderr}`);
     }
-    for (const [version, latest, error] of [
-      ["1.2.3", "v1.2.3", "::error::1.2.3 is not above the latest release, v1.2.3"],
-      ["1.2.2", "v1.2.3", "::error::1.2.2 is not above the latest release, v1.2.3"],
-      ["1.9.0", "v1.10.0", "::error::1.9.0 is not above the latest release, v1.10.0"],
-      ["0.9.9", "v1.0.0", "::error::0.9.9 is not above the latest release, v1.0.0"],
-      ["1.2.4", "test-v1.2.3", '::error::the latest release\'s tag is "test-v1.2.3", not v<X.Y.Z>'],
-      ["1.2.4", "v1.2", '::error::the latest release\'s tag is "v1.2", not v<X.Y.Z>'],
-      ["1.2.4", "500", "::error::could not read the latest release of clauseo-ai/clauseo-acp"],
+    for (const [version, listed, error, fail = ""] of [
+      ["1.2.3", pages(others, [release("v1.2.3")]), "::error::1.2.3 is not above the highest published app release, v1.2.3"],
+      ["1.2.2", pages([release("v1.2.3")]), "::error::1.2.2 is not above the highest published app release, v1.2.3"],
+      ["1.9.0", pages([release("v1.10.0"), release("v1.2.0")]), "::error::1.9.0 is not above the highest published app release, v1.10.0"],
+      ["1.0.5", pages([release("v1.0.4")], [release("v1.1.0")]), "::error::1.0.5 is not above the highest published app release, v1.1.0"],
+      ["1.2.4", pages([]), "::error::could not list the releases of clauseo-ai/clauseo-acp", "yes"],
     ]) {
-      const result = run(version, latest);
-      assert.equal(result.status, 1, `${version} over ${latest}`);
-      assert.ok(result.stdout.includes(error), result.stdout);
+      const result = run(version, listed, fail);
+      assert.equal(result.status, 1, `${version} over ${listed}`);
+      assert.ok(result.stdout.includes(error), result.stdout + result.stderr);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("no workflow's release takes releases/latest but a published v* app release", () => {
+  // Every installed app reads latest.json through releases/latest, so every other release this
+  // repository makes (python-runtime's, agent-browser's, a test run's) says --latest=false, and
+  // only release.yml's publish says --latest. python-runtime's once held releases/latest.
+  const dir = join(here, "..", "workflows");
+  const creates = [];
+  const latest = [];
+  for (const name of readdirSync(dir).filter((one) => /\.ya?ml$/.test(one)).sort()) {
+    const lines = readFileSync(join(dir, name), "utf8")
+      .replace(/\\\n\s*/g, " ")
+      .split("\n")
+      .map((line) => stripComment(line).trim());
+    for (const line of lines) {
+      if (/\bgh release create\b/.test(line)) {
+        creates.push([name, line]);
+      }
+      if (/--latest\b(?!=false)/.test(line)) {
+        latest.push([name, line]);
+      }
+    }
+  }
+  assert.ok(creates.length >= 3, creates.join("\n"));
+  for (const [name, line] of creates) {
+    if (name === "release.yml") {
+      // The draft (release) or the pre-release with --latest=false (test), from kind.
+      assert.match(line, / --verify-tag "\$\{kind\[@\]\}" /, line);
+    } else {
+      assert.match(line, / --latest=false\b/, `${name}: ${line}`);
+    }
+  }
+  assert.deepEqual(latest, [
+    ["release.yml", 'run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest'],
+  ]);
 });
 
 test("the workflow lint fails each broken rule", () => {
