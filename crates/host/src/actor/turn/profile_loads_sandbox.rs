@@ -100,7 +100,8 @@ pub(super) fn sandbox_denies(run: &RunFolders) -> SandboxDenies {
         .collect();
     let mut limited = false;
     let mut form = |path: &Path| {
-        let (path, widened) = crate::agent::loads::sandbox::deny_form(path, &stored);
+        let (path, widened) =
+            crate::agent::loads::sandbox::deny_form(path, &stored, SandboxOs::CURRENT);
         limited |= widened;
         path
     };

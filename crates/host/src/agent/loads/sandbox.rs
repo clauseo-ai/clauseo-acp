@@ -7,8 +7,12 @@
 //! - on Windows: Claude Code 2.1.293 never auto-allows there, and its Windows sandbox needs a
 //!   one-time admin install behind a feature gate;
 //! - when Claude's short temp folder could not be made (`agent::temp::make_claude_tmp`);
-//! - when a path in its lists holds `*` or `?`, which Claude Code reads as a pattern with no
-//!   escape ([`Off::Wildcard`]);
+//! - when a path of the session's own (or `<data>`) holds `*` or `?`, which Claude Code reads
+//!   as a pattern with no escape ([`Off::Wildcard`]);
+//! - when another matter's registered folder holding `*` or `?` would deny one of the session's
+//!   own folders ([`Off::CoversOwn`]): on macOS its deny stays the pattern it is, which only
+//!   ever covers more than the folder; on Linux it is widened to the folder above it with
+//!   neither ([`deny_form`], [`glob`], where the runtime's conversion is quoted);
 //! - when a path it must deny is not UTF-8 (it could not be named).
 //!
 //! Each of those but Windows also leaves `auto` for `acceptEdits` ([`Off::holds_auto_back`],
@@ -16,13 +20,14 @@
 //! classifier alone where the sandbox was meant to be.
 //!
 //! A `[` (in `Smith [2024]`) is escaped instead ([`escape_brackets`]). Claude Code 2.1.293
-//! reads a sandbox path holding `*`, `?`, `[` or `]` as a glob (its `W4t`: `[…]` stays a
-//! regex class, `*` becomes `[^/]*` even inside one, a `\` is a literal backslash, so no
-//! escape exists for `*` or `?`). `[[]` is a class holding only `[`, and a lone `]` is literal,
-//! so `Smith [[]2024]` names `Smith [2024]` alone. A glob deny covers all under it (`z4t`
-//! adds `(/.*)?`), but a glob allow only the path itself (`W4t`, Seatbelt's `(regex …)`), so
-//! each escaped allowed folder goes in twice, as itself and with `/**`. Which lists read globs
-//! differs by OS (code.claude.com/docs/en/settings-reference, "Sandbox path prefixes"): every
+//! reads a sandbox path holding `*`, `?`, `[` or `]` as a glob (its `W4t`, sandbox-runtime
+//! 0.0.77/0.0.78's `globToRegex`: `[…]` stays a regex class, `*` becomes `[^/]*` even inside
+//! one, a `\` is a literal backslash, so no escape exists for `*` or `?`). `[[]` is a class
+//! holding only `[`, and a lone `]` is literal, so `Smith [[]2024]` names `Smith [2024]` alone.
+//! A glob deny covers all under it (`z4t` adds `(/.*)?`), but a glob allow only the path itself
+//! (`W4t`, Seatbelt's `(regex …)`), so each escaped allowed folder goes in twice, as itself and
+//! with `/**`. Which lists read globs differs by OS
+//! (code.claude.com/docs/en/settings-reference, "Sandbox path prefixes"): every
 //! list on macOS, only `denyRead` and `allowRead` on Linux, where a glob write path is
 //! skipped, so the write lists stay as written there.
 //!
@@ -94,6 +99,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
+pub(crate) mod glob;
+
 /// The hosts a sandboxed command may not reach even through Claude Code's proxy: loopback, where
 /// the browser's debugging port and agent-browser's daemon listen, and the any-address
 /// `0.0.0.0` and `[::]`, which reach loopback too (stage C on a Mac, 2026-11-11). `127.1`, the
@@ -139,8 +146,12 @@ pub(crate) enum Off {
     NoTemp,
     /// A path to deny is not UTF-8.
     NotUtf8,
-    /// A path holds `*` or `?`.
+    /// A path of the session's own, or of `<data>`, holds `*` or `?`.
     Wildcard,
+    /// Another matter's deny, its registered folder holding `*` or `?`, would also deny one
+    /// of the session's own folders: as the pattern on macOS, as the folder it is widened to on
+    /// Linux ([`glob::fence_others`]).
+    CoversOwn,
 }
 
 impl Off {
@@ -221,7 +232,8 @@ const RUNTIME_PREFIX: &str = "clauseo-python-";
 
 impl ClaudeSandbox {
     /// The sandbox for `paths` on `os`; none on Windows, without Claude's short temp folder,
-    /// when a path to deny is not UTF-8, or when any path holds `*` or `?` (one info line, no
+    /// when a path to deny is not UTF-8, when a path of its own or `<data>` holds `*` or `?`,
+    /// or when another matter's deny holding one would cover its own folders (one info line, no
     /// path). A `[` is escaped ([`escape_brackets`]).
     pub(crate) fn for_os(os: SandboxOs, paths: &SandboxPaths<'_>) -> Result<Self, Off> {
         if os == SandboxOs::Windows {
@@ -232,6 +244,12 @@ impl ClaudeSandbox {
             return Err(Off::NoTemp);
         };
         let denied = paths.data.iter().chain(paths.other_matters);
+        let others: Vec<&Path> = paths
+            .other_matters
+            .iter()
+            .chain(paths.matter_inside)
+            .map(PathBuf::as_path)
+            .collect();
         let Some(mut deny_read) = strict_texts(denied.map(PathBuf::as_path)) else {
             tracing::info!("Claude's sandbox is off: a folder to deny is not UTF-8");
             return Err(Off::NotUtf8);
@@ -239,16 +257,20 @@ impl ClaudeSandbox {
         deny_read.splice(0..0, DENY_READ.iter().map(|path| (*path).to_owned()));
         let marker = paths.matter.join(MATTER_MARKER);
         let inside = paths.matter_inside.iter().map(PathBuf::as_path);
-        let sandbox = Self {
+        let mut sandbox = Self {
             allow_write: texts([paths.matter, paths.work, paths.tmp, paths.notes, claude_tmp]),
             deny_write: texts(std::iter::once(marker.as_path()).chain(inside)),
             deny_read,
             allow_read: Self::allow_read(paths, claude_tmp),
             quiet: texts([paths.claude_home.join(SNAPSHOTS).as_path()]),
         };
-        if sandbox.has_wildcard() {
+        if sandbox.has_wildcard(&texts(others.iter().copied())) {
             tracing::info!("Claude's sandbox is off: a sandbox path holds * or ?; acceptEdits");
             return Err(Off::Wildcard);
+        }
+        if glob::fence_others(os, &mut sandbox).is_err() {
+            tracing::info!("Claude's sandbox is off: another matter's deny covers its own folders");
+            return Err(Off::CoversOwn);
         }
         let mut sandbox = sandbox.escaped(os);
         sandbox
@@ -280,18 +302,18 @@ impl ClaudeSandbox {
         }
     }
 
-    /// Whether any path in the lists holds one of [`WILDCARDS`].
-    fn has_wildcard(&self) -> bool {
-        [
-            &self.allow_write,
-            &self.deny_write,
-            &self.deny_read,
-            &self.allow_read,
-            &self.quiet,
-        ]
-        .into_iter()
-        .flatten()
-        .any(|path| path.contains(WILDCARDS))
+    /// Whether any path in the lists holds one of [`WILDCARDS`], but another matter's deny
+    /// (`others`), which [`glob::fence_others`] keeps as a pattern or widens.
+    fn has_wildcard(&self, others: &[String]) -> bool {
+        let wild = |path: &&String| path.contains(WILDCARDS);
+        let own = [&self.allow_write, &self.allow_read, &self.quiet];
+        let denied = [&self.deny_write, &self.deny_read];
+        own.into_iter().flatten().any(|path| wild(&path))
+            || denied
+                .into_iter()
+                .flatten()
+                .filter(wild)
+                .any(|path| !others.contains(path))
     }
 
     /// `filesystem.allowRead`: the writable folders, the browser's downloads, the skill packs,
@@ -388,20 +410,29 @@ pub(crate) fn escape_brackets(text: &str) -> String {
     text.replace('[', "[[]")
 }
 
-/// How another matter's folder `path` is denied in the sandbox's lists, and whether it had to
-/// be widened: as the lawyer registered it (`stored`) always; where it only leads there
-/// (through a link the agent could make in its matter) as itself when the sandbox can write it
-/// (UTF-8, no `*` or `?`), else as the longest folder above it that it can write, which covers
-/// it (`true`: the session's commands are limited, `NoticeKind::ShellLimited`). A deny is never
-/// dropped, and nothing the agent makes turns the sandbox off ([`Off::NotUtf8`],
-/// [`Off::Wildcard`]).
-pub(crate) fn deny_form(path: &Path, stored: &[&Path]) -> (PathBuf, bool) {
-    let writable = |path: &Path| path.to_str().is_some_and(|text| !text.contains(WILDCARDS));
-    if stored.contains(&path) || writable(path) {
+/// How another matter's folder `path` is denied in the sandbox's lists on `os`, and whether it
+/// had to be widened (`true`: the session's commands are limited, `NoticeKind::ShellLimited`).
+///
+/// - Where it only leads there (through a link the agent could make in its matter): as itself
+///   when the sandbox can write it (UTF-8, no `*` or `?`), else as the longest folder above it
+///   that it can write, which covers it ([`glob::widened`]). Nothing the agent makes turns the
+///   sandbox off.
+/// - As the lawyer registered it (`stored`): always as written. A `*` or `?` in it stays the
+///   pattern it is on macOS, whose deny can only cover more than the folder (`[` is escaped,
+///   `]` and `\` are literal; [`glob`]); on Linux the sandbox widens it
+///   ([`glob::fence_others`]), so it counts as widened here. Either way the sandbox is off
+///   ([`Off::CoversOwn`]) when that deny would cover the session's own folders.
+///
+/// A deny is never dropped.
+pub(crate) fn deny_form(path: &Path, stored: &[&Path], os: SandboxOs) -> (PathBuf, bool) {
+    if glob::writable(path) {
         return (path.to_path_buf(), false);
     }
-    let above = path.ancestors().skip(1).find(|above| writable(above));
-    (above.unwrap_or_else(|| Path::new("/")).to_path_buf(), true)
+    if stored.contains(&path) {
+        let wild = path.to_str().is_some_and(|text| text.contains(WILDCARDS));
+        return (path.to_path_buf(), wild && os == SandboxOs::Linux);
+    }
+    (glob::widened(path), true)
 }
 
 /// An allowed path's entries: itself, and with `/**` too once escaped (a glob allow opens only

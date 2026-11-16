@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use super::super::sandbox::deny_form;
+use super::super::sandbox::{SandboxOs, deny_form};
 use super::{Session, mac};
 
 /// A fenced matter inside this one (`Sub`, then deeper down): the matter is not re-opened for
@@ -58,11 +58,20 @@ fn a_deny_the_sandbox_cannot_write_is_widened_never_dropped() {
     let abs = |path: &str| PathBuf::from(crate::testing::abs(path));
     let stored = abs("/Users/l/Clients/A/W*/Sub");
     let as_stored = [stored.as_path()];
-    assert_eq!(deny_form(&stored, &as_stored), (stored.clone(), false));
+    assert_eq!(
+        deny_form(&stored, &as_stored, SandboxOs::Mac),
+        (stored.clone(), false)
+    );
     let plain = abs("/tmp/plain/Sub");
-    assert_eq!(deny_form(&plain, &as_stored), (plain.clone(), false));
+    assert_eq!(
+        deny_form(&plain, &as_stored, SandboxOs::Mac),
+        (plain.clone(), false)
+    );
     let wild = abs("/Users/l/Clients/A/W?/x*/Sub");
-    assert_eq!(deny_form(&wild, &[]), (abs("/Users/l/Clients/A"), true));
+    assert_eq!(
+        deny_form(&wild, &[], SandboxOs::Mac),
+        (abs("/Users/l/Clients/A"), true)
+    );
 }
 
 /// The agent renames a folder above another matter to a wildcard name and links the old name
@@ -98,7 +107,7 @@ fn a_wildcard_rename_behind_a_link_widens_the_deny() {
     let as_stored = [stored.as_path()];
     let denied: Vec<(PathBuf, bool)> = fence
         .fenced_folders()
-        .map(|path| deny_form(path, &as_stored))
+        .map(|path| deny_form(path, &as_stored, SandboxOs::Mac))
         .collect();
     assert!(denied.contains(&(stored.clone(), false)), "{denied:?}");
     assert!(denied.contains(&(acme, true)), "{denied:?}");

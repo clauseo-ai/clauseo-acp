@@ -278,3 +278,20 @@ fn a_short_path_into_the_own_matter_names_no_parent() {
         Some(id(1))
     );
 }
+
+/// A matter registered through a link (`Linked` → `real/m`, outside every deny the sandbox has
+/// otherwise): Claude Code's sandbox resolves no link in a deny, so both spellings are fenced,
+/// the link's and where it leads; invited, both are allowed reads.
+#[cfg(unix)]
+#[test]
+fn a_matter_registered_through_a_link_is_fenced_by_both_spellings() {
+    let (_dir, root) = tree("mfence-link", &["own", "real/m", "data"]);
+    write::symlink(&root.join("real/m"), &root.join("Linked")).unwrap();
+    let both = [root.join("real/m"), root.join("Linked")];
+    let fenced = fence(&root, "own", &[("Linked", false)]);
+    let folders: Vec<&Path> = fenced.fenced_folders().collect();
+    assert_eq!(folders, both);
+    let invited = fence(&root, "own", &[("Linked", true)]);
+    let allowed: Vec<&Path> = invited.read_allowed().collect();
+    assert_eq!(allowed, both);
+}
