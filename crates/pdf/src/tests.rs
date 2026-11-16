@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
-use super::{Os, RECEIPT, SCRIPT, Tool, command, exit_byte, find_python_with, runtime_program};
+use super::{
+    Os, PDFTOTEXT, RECEIPT, SCRIPT, Tool, command, exit_byte, find_python_with, runtime_program,
+};
 
 /// The files a test's file system holds: a runtime's receipt and interpreter under `root`.
 fn runtime(root: &Path, os: Os) -> BTreeSet<PathBuf> {
@@ -83,14 +85,31 @@ fn the_command_runs_the_script_isolated_with_the_tool_and_arguments_as_given() {
     );
     let info = super::command(python, Tool::Pdfinfo, &[]);
     assert_eq!(info.get_args().nth(5), Some(OsStr::new("pdfinfo")));
+    let text = super::command(python, Tool::Pdftotext, &[]);
+    let args: Vec<&OsStr> = text.get_args().skip(4).collect();
+    assert_eq!(args, [OsStr::new(PDFTOTEXT), OsStr::new("pdftotext")]);
 }
 
 #[test]
 fn the_script_fits_a_windows_command_line() {
-    // CreateProcess takes at most 32,767 characters; the script goes as one argument, each `"`
-    // and `\` in it escaped with a backslash.
-    let escaped = SCRIPT.len() + SCRIPT.matches(['"', '\\']).count();
-    assert!(escaped < 24_000, "{escaped} characters");
+    // CreateProcess takes at most 32,767 characters; the script goes as one argument.
+    assert!(escaped(SCRIPT) < 24_000, "{} characters", escaped(SCRIPT));
+}
+
+#[test]
+fn the_pdftotext_script_fits_a_windows_command_line() {
+    // pdftotext's own arguments are a few flags and at most two paths, so its script may take
+    // more of the line than pdftoppm's, whose arguments are as many.
+    assert!(
+        escaped(PDFTOTEXT) < 28_000,
+        "{} characters",
+        escaped(PDFTOTEXT)
+    );
+}
+
+/// A script's length as one Windows command-line argument: each `"` and `\` escaped.
+fn escaped(script: &str) -> usize {
+    script.len() + script.matches(['"', '\\']).count()
 }
 
 #[test]
