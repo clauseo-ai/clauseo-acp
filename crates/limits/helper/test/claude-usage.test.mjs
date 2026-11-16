@@ -66,6 +66,7 @@ function expectedOptions(cwd) {
     persistSession: false,
     settingSources: [],
     allowedTools: [],
+    tools: [],
     mcpServers: {},
     strictMcpConfig: true,
     hooks: {},

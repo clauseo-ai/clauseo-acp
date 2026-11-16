@@ -2,19 +2,21 @@
 //! 0048): Claude Code gets `<data>/agents/claude-acp/home` as `CLAUDE_CONFIG_DIR`, Codex
 //! `<data>/agents/codex-acp/home` as `CODEX_HOME`, over what the host inherited, both made at the
 //! launch. The profile's Codex skills go in that same Codex home, and Codex's `CODEX_CONFIG`
-//! carries the two overrides `limits` reads with, from the one shared list.
+//! carries the two overrides `limits` reads with, from the one shared list. A Claude launch's own
+//! environment carries every variable the launch sets (`agent::loads::CLAUDE_LAUNCH_VARS`).
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use clauseo_protocol::{AgentKind, StreamId};
+use clauseo_protocol::{AgentKind, StopReason, StreamId, ThreadId, TurnId};
 use clauseo_settings::Locations;
 use serde_json::json;
 
-use crate::codex::run_turn;
+use crate::codex::{Recording, run_turn};
+use crate::observe::Events;
 use crate::profile_rig::{CLAUDE, CODEX, Seen, Wired};
-use crate::support::{Dir, FAKE, Scenario, matter_with_thread};
+use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
 
 /// The config folder and Codex home the host itself starts with: the lawyer's own.
 const LAWYERS_CLAUDE: &str = "/elsewhere/lawyer/.claude";
@@ -157,4 +159,50 @@ fn codex_launches_with_the_file_login_store_and_the_default_excludes() {
         config["shell_environment_policy"]["ignore_default_excludes"],
         json!(false)
     );
+}
+
+/// Imports `folder` as a matter with a Claude thread and runs one prompt.
+fn turn_in(host: &Running, folder: &Path) -> (ThreadId, Events, TurnId) {
+    let matter = host.create_matter("m", folder);
+    let thread = host.create_thread(matter, CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let turn = run_turn(host, &mut events, thread);
+    (thread, events, turn)
+}
+
+/// A Claude launch's own environment carries every variable the launch sets
+/// (`agent::loads::CLAUDE_LAUNCH_VARS`).
+#[test]
+fn a_claude_launch_sets_the_launch_variables_in_its_own_environment() {
+    let dir = Dir::new(
+        "claude_launch_vars",
+        &[(CLAUDE, Scenario::Local("claude-mode-new"))],
+    );
+    let folder = dir.folder("m", &[("brief.txt", "x\n")]);
+    let launcher = Recording::new(&dir);
+    let envs = Arc::clone(&launcher.envs);
+    let host = dir.start_launching(0, Arc::new(launcher), |config| config);
+    let (_, events, turn) = turn_in(&host, &folder);
+    assert_eq!(
+        events.turn_ended(turn).unwrap().stop,
+        StopReason::EndTurn,
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+    let envs = envs.lock().unwrap();
+    let env = envs.first().expect("a launch");
+    for (name, value) in [
+        ("CLAUDE_CODE_DISABLE_CRON", "1"),
+        ("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS", "1"),
+        ("CLAUDE_CODE_HARBOR_KITE", "0"),
+        ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
+    ] {
+        let named: Vec<_> = env
+            .iter()
+            .filter(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case(name))
+            .collect();
+        assert_eq!(named.len(), 1, "{name}: {named:?}");
+        assert_eq!(named[0].1, value, "{name}");
+    }
 }

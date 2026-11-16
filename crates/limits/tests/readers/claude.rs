@@ -9,7 +9,7 @@ use clauseo_protocol::{AgentKind, Billing, LimitSource, PlanLabel};
 use futures::executor::block_on;
 use futures::future::join;
 
-use crate::harness::{FAKE_KEY, INHERITED, Play, Setup, SharedTimer, TestLauncher};
+use crate::harness::{CLAUDE_FORCED, FAKE_KEY, INHERITED, Play, Setup, SharedTimer, TestLauncher};
 use crate::write;
 
 /// The helper the reader must write, byte for byte.
@@ -74,6 +74,13 @@ fn the_spec_runs_settings_command_on_the_helper_in_the_run_folder() {
     let names: Vec<&OsString> = spec.env().keys().collect();
     let expected_names: Vec<&OsString> = expected.keys().collect();
     assert_eq!(names, expected_names, "the env's names");
+    for (name, value) in CLAUDE_FORCED {
+        assert_eq!(
+            spec.env().get(OsStr::new(name)),
+            Some(&OsString::from(value)),
+            "{name}"
+        );
+    }
     assert!(
         spec.env().get(OsStr::new("ANTHROPIC_API_KEY")) == Some(&OsString::from(FAKE_KEY)),
         "ANTHROPIC_API_KEY is not the settings value"
