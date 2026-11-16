@@ -375,5 +375,8 @@ mod tests {
     }
 }
 
-#[cfg(all(test, windows))]
+// Two attributes, not `all(test, windows)`: clippy counts a module as test code (unwraps and
+// prints allowed, clippy.toml) only under a plain `cfg(test)`.
+#[cfg(test)]
+#[cfg(windows)]
 mod windows_tests;

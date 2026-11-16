@@ -35,10 +35,8 @@ fn shells() -> Vec<String> {
     let pwsh = std::env::var_os("ProgramFiles")
         .map(|folder| Path::new(&folder).join(r"PowerShell\7\pwsh.exe"))
         .filter(|pwsh| pwsh.is_file());
-    match pwsh {
-        Some(pwsh) => shells.push(pwsh.to_string_lossy().into_owned()),
-        None => eprintln!("SKIPPED pwsh.exe: not installed"),
-    }
+    // Without PowerShell 7 the runs are Windows PowerShell's alone (win-02 has both).
+    shells.extend(pwsh.map(|pwsh| pwsh.to_string_lossy().into_owned()));
     shells
 }
 
