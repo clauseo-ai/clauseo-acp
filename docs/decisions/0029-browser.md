@@ -1273,7 +1273,8 @@ The download that fills step 3 is the next section.
 
 Linux (development and CI only): `/usr/bin/google-chrome`, then `/usr/bin/chromium`. A path
 counts when it is a regular file, following links (an installed Chrome may be one). In
-`<app data>/browsers/` a version folder must be a real folder (`file_type`, no link followed)
+`<app data>/browsers/` must itself be a real folder (a link or junction there is never followed, and
+no Chrome for Testing is run), a version folder in it must be a real folder (`file_type`, no link followed)
 and the binary, links resolved, must sit under the browsers folder, so a planted link picks
 nothing. That folder must stay outside what any agent can write (in tier C too). Every root comes in through `ChromeRoots`
 (`HostConfig::with_chrome_roots`; production uses `ChromeRoots::system`, which reads `HOME`,

@@ -486,3 +486,16 @@ fn chrome_for_testing_more_than_one_release_behind_is_not_run() {
     write_record(&browsers, &record("158.0.0.2", None)).unwrap();
     assert_eq!(find(&roots), Some(copy));
 }
+
+/// A link at `<app data>/browsers` itself is never followed: the copy it points at is not run.
+#[cfg(unix)]
+#[test]
+fn a_linked_browsers_folder_is_not_followed() {
+    let dir = TempDir::new("chrome-cft-linked-folder");
+    let elsewhere = dir.path().join("elsewhere");
+    let binary = touch(&elsewhere, &format!("chrome-158.0.6778.85/{CFT_MAC_ARM}"));
+    write::create_dir_all(&dir.path().join("app")).unwrap();
+    write::symlink(&elsewhere, &dir.path().join("app/browsers")).unwrap();
+    assert!(binary.is_file());
+    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), None);
+}

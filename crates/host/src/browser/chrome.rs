@@ -419,6 +419,12 @@ fn windows_installed_with(roots: &ChromeRoots, edge_allowed: bool) -> WindowsBro
 fn chrome_for_testing(roots: &ChromeRoots) -> Option<PathBuf> {
     let binary = roots.platform.cft_binary()?;
     let browsers = roots.app_data.join(BROWSERS_DIR);
+    // The browsers folder itself must be a real folder: a link there (or a junction) is never
+    // followed, so it cannot point the search at a Chrome somewhere else.
+    if !crate::write::is_real_dir(&browsers) {
+        tracing::warn!("the browsers folder is not a real folder; no Chrome for Testing is run");
+        return None;
+    }
     let real_browsers = dunce::canonicalize(&browsers).ok()?;
     let mut found: Vec<(Vec<u64>, PathBuf)> = std::fs::read_dir(&browsers)
         .ok()?
