@@ -57,8 +57,9 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 /// ```json
 /// {"PreToolUse": [{"matcher": "apply_patch|Write|Edit|Bash", "hooks": [{"type": "command",
 ///   "command": "'<program>' --pre-write-guard --record '<record>' --record-id <hex>",
-///   "commandWindows": "& '<program>' --pre-write-guard --record '<record>' --record-id <hex>;
-///     exit $(…)", "timeout": 10}]}],
+///   "commandWindows": "$global:LASTEXITCODE = -1; & '<program>' --pre-write-guard --record
+///     '<record>' --record-id <hex>; $c = $LASTEXITCODE; if ($c -eq 0 -or $c -eq 2) { exit $c };
+///     [Console]::Error.WriteLine('…'); exit 2", "timeout": 10}]}],
 ///  "state": {"/<session-flags>/config.toml:pre_tool_use:0:0": {"trusted_hash": "sha256:…"}}}
 /// ```
 ///
