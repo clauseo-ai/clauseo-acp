@@ -252,6 +252,22 @@ fn a_header_text_one_version_only_has_is_said_unless_shown() {
     });
     note_tables(&mut shown, lone(&["Headerone.", "Headertwo."]));
     assert_eq!(shown.notices, []);
+    // A list number the view writes into the runs, which the part's text does not hold.
+    let mut numbered = empty.clone();
+    numbered.parts.push(BlacklinePart {
+        kind: BlacklinePartKind::Footer { uses: Vec::new() },
+        paragraphs: vec![BlacklineParagraph {
+            change: ParagraphChange::Changed,
+            runs: vec![
+                run(RunKind::Same, "1. Draft "),
+                run(RunKind::Del, "1"),
+                run(RunKind::Ins, "2"),
+            ],
+            hidden: false,
+        }],
+    });
+    note_tables(&mut numbered, lone(&["Draft1", "Draft2"]));
+    assert_eq!(numbered.notices, []);
     let mut said = empty;
     said.notices
         .push(BlacklineNotice::HeaderOrFooterNotCompared);

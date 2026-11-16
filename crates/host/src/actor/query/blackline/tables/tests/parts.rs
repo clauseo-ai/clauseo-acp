@@ -154,6 +154,34 @@ fn a_header_text_one_version_only_has_is_listed() {
     );
 }
 
+/// A header's text reads entity and character references as the characters they stand for, and
+/// a symbol (`w:sym`) as its character, as the views write them.
+#[test]
+fn a_header_text_reads_references_and_symbols_as_their_characters() {
+    let entity = |d: &str| {
+        hdr(&format!(
+            "<w:p><w:r><w:t>Smith &amp; Co &#8212; Draft {d}</w:t></w:r></w:p>"
+        ))
+    };
+    let old = sectioned(&[entity("1")], "Body.");
+    let new = sectioned(&[entity("2")], "Body.");
+    assert_eq!(
+        compare(&old, &new).lone_header_texts,
+        ["Smith&Co\u{2014}Draft1", "Smith&Co\u{2014}Draft2"]
+    );
+    let symbol = |d: &str| {
+        hdr(&format!(
+            r#"<w:p><w:r><w:sym w:font="Wingdings" w:char="F0FC"/><w:t>Draft {d}</w:t></w:r></w:p>"#
+        ))
+    };
+    let old = sectioned(&[symbol("1")], "Body.");
+    let new = sectioned(&[symbol("2")], "Body.");
+    assert_eq!(
+        compare(&old, &new).lone_header_texts,
+        ["\u{f0fc}Draft1", "\u{f0fc}Draft2"]
+    );
+}
+
 /// A table in a footnote, and one in an endnote, are named by the notes' place, after the body.
 #[test]
 fn a_tables_change_in_the_notes_names_the_notes() {
