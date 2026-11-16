@@ -57,7 +57,7 @@ pub(super) fn launch(
     redacted.extend(agent::loads::lawyer::redacted(&prepared.run.lawyer.servers));
     let folder = prepared.stored;
     let claude_home = prepared.claude_home.clone();
-    let record = super::super::updates::guard_blocks::file(&prepared.run.root);
+    let record = super::super::updates::guard_blocks::file(&prepared.run.browser);
     let (mut forced, codex) = if let Some(prepared) = prepared.codex {
         let hooks = codex_hooks(actor, &record);
         let guard = hooks.is_some();

@@ -108,8 +108,8 @@ pub(super) fn on_rate_timer(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
-/// Passes on everything the rate cap holds, before the turn ends or is cancelled, then the
-/// steps the guard stopped since (`updates/guard_blocks.rs`).
+/// Passes on everything the rate cap holds, before the turn ends or is cancelled, then asks for
+/// the steps the guard stopped since (`updates/guard_blocks.rs`).
 pub(super) fn flush_rate(actor: &mut Actor, thread: ThreadId) {
     let Some(agent) = agent(actor, thread) else {
         return;
@@ -119,7 +119,7 @@ pub(super) fn flush_rate(actor: &mut Actor, thread: ThreadId) {
             handle(actor, thread, *item.0);
         }
     }
-    guard_blocks::tell(actor, thread);
+    guard_blocks::tell(actor, thread, true);
 }
 
 /// One event, past the rate cap. A request with no prompt in flight waits for a turn
@@ -267,9 +267,9 @@ fn log_update(
     context: Context,
     update: AgentUpdate,
 ) {
-    // A step the guard stopped came before this update (`updates/guard_blocks.rs`).
+    // A step the guard stopped may have come before this update (`updates/guard_blocks.rs`).
     if matches!(context, Context::Live(_)) {
-        guard_blocks::tell(actor, thread);
+        guard_blocks::tell(actor, thread, false);
     }
     let done = match update {
         AgentUpdate::MessageChunk {

@@ -317,6 +317,16 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::CodexFolderBlocked),
         },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo stopped a step.".to_owned(),
+            kind: Some(NoticeKind::GuardStepBlocked),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo stopped 3 more steps.".to_owned(),
+            kind: Some(NoticeKind::GuardStepsMore { more: 3 }),
+        },
     ];
     notices.extend(
         [

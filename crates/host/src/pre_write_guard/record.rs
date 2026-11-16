@@ -1,14 +1,22 @@
 //! The guard's record of the refusals the lawyer is told about. Codex sends no event for a call
 //! its hook blocked (codex-acp 2.6.0 ignores `hook/completed`), so with [`FLAG`] and a file
-//! (Codex's hook passes `<data>/run/<session>/guard-blocks.jsonl`, `agent/loads/codex.rs`), a
-//! refusal for a held-open file or the `.codex` folder is appended to that file as one JSON line,
-//! a [`Record`], and the host reads it back during the turn to show "Clauseo stopped a step"
-//! (`actor/turn/updates/guard_blocks.rs`). Claude Code's entry passes no file: Claude shows the
-//! blocked call as a failed step of its own.
+//! (Codex's hook passes `<data>/browser/run/<session>/guard-blocks.jsonl`,
+//! `agent/loads/codex.rs`), a refusal for a held-open file or the `.codex` folder is appended to
+//! that file as one JSON line, a [`Record`], and the host reads it back during the turn to show
+//! "Clauseo stopped a step" (`actor/turn/updates/guard_blocks.rs`). Claude Code's entry passes no
+//! file: Claude shows the blocked call as a failed step of its own.
 //!
-//! Best effort: a file that cannot be opened or written (no folder, a link, a pipe, no room) is
-//! skipped without a word, and the exit code and the reason never change. The line holds no agent
-//! text but the tool's name: the path is the guard's own listing of the held file.
+//! The guard runs outside the agent's sandbox, so it writes only the file the host made: the host
+//! makes it empty at the launch, with `O_EXCL`, in a folder the agent's shells and patch tools are
+//! denied (`launch_checks/folders.rs` `guard_record`), and the guard never creates it and refuses
+//! anything but a regular file with one link there, reached through no link
+//! (`write::open_append_record`). So a hard link or a symlink planted at its place (to a shell
+//! profile, say) is never written through. Each line starts on a line of its own (a newline
+//! first), so a line cut short before it never spoils it.
+//!
+//! Best effort: a file that cannot be opened or written (none, a link, a pipe, no room) is skipped
+//! without a word, and the exit code and the reason never change. The line holds no agent text
+//! but the tool's name: the path is the guard's own listing of the held file.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -20,6 +28,9 @@ use serde_json::Value;
 
 use super::Refusal;
 use crate::clock::{Clock, SystemClock};
+
+/// The record file's name, in the session's browser folder (`launch_checks/folders.rs`).
+pub(crate) const FILE_NAME: &str = "guard-blocks.jsonl";
 
 /// The argument that names the record file, followed by the file; after any other argument.
 pub(crate) const FLAG: &str = "--record";
@@ -101,13 +112,15 @@ fn cut(tool: &str) -> String {
     tool.get(..end).unwrap_or_default().to_owned()
 }
 
-/// Appends `record` to `file` as one line, in one write; any failure is dropped.
+/// Appends `record` to `file` as one line, a newline before and after it, in one write; any
+/// failure is dropped.
 pub(super) fn append(file: &Path, record: &Record) {
-    let Ok(mut line) = serde_json::to_vec(record) else {
+    let mut line = vec![b'\n'];
+    if serde_json::to_writer(&mut line, record).is_err() {
         return;
-    };
+    }
     line.push(b'\n');
-    if let Ok(mut out) = crate::write::open_append_regular(file) {
+    if let Ok(mut out) = crate::write::open_append_record(file) {
         drop(out.write_all(&line));
     }
 }

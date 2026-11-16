@@ -4318,7 +4318,7 @@ export type NoticeKind =
 	files: MatterPath[],
 	/**  How many more came back beyond `files`. */
 	more: number,
-} }) & { held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**
  *  A skill pack the launch left out: which pack, and why. The app words it by kind; the
  *  notice's `text` is the fallback.
@@ -4328,7 +4328,7 @@ export type NoticeKind =
 	pack: PackId,
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
-} }) & { files_came_back?: never; held_open_blocked?: never } | 
+} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never } | 
 /**
  *  Claude Code's `auto` permission mode is not available for this session (the account,
  *  the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
@@ -4355,14 +4355,30 @@ export type NoticeKind =
  *  Word (or another program) has open. Codex sends no event of its own for it.
  */
 ({ held_open_blocked: {
-	/**  The paper, as the matter lists it. */
+	/**
+	 *  The paper's name, the last part of its path in the matter, cut to a length the
+	 *  line can show. A newer host sends no folder, an older one the whole path.
+	 */
 	file: MatterPath,
-} }) & { files_came_back?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; guard_steps_more?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Clauseo's pre-write guard refused a step of the agent's that would change the
  *  matter's `.codex` folder, the agent's own settings there.
  */
 "codex_folder_blocked" | 
+/**
+ *  Clauseo's pre-write guard refused a step of the agent's, the paper not named: the
+ *  guard's record named none the matter holds.
+ */
+"guard_step_blocked" | 
+/**
+ *  Clauseo's pre-write guard refused `more` steps of the agent's in the turn beyond the
+ *  ones already told, told once at the turn's end.
+ */
+({ guard_steps_more: {
+	/**  How many. */
+	more: number,
+} }) & { files_came_back?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

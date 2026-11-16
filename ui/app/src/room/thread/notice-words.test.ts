@@ -125,6 +125,23 @@ test("a step the guard stopped in the .codex folder names the agent's own settin
   );
 });
 
+test("a step the guard stopped with no paper named, and the turn's count of more, in English and Hindi", () => {
+  const codex = { kind: "codex", name: "codex-acp" } as const;
+  expect(noticeLine("guard_step_blocked", en, codex)).toBe("Clauseo stopped a step.");
+  expect(noticeLine("guard_step_blocked", words("hi"))).toBe("Clauseo ने एक काम रोक दिया।");
+  expect(noticeLine({ guard_steps_more: { more: 1 } }, en, codex)).toBe(
+    "Clauseo stopped one more step.",
+  );
+  expect(noticeLine({ guard_steps_more: { more: 1 } }, words("hi"))).toBe(
+    "Clauseo ने एक और काम रोका।",
+  );
+  expect(noticeLine({ guard_steps_more: { more: 3 } }, en)).toBe("Clauseo stopped 3 more steps.");
+  expect(noticeLine({ guard_steps_more: { more: 3 } }, words("hi"))).toBe(
+    "Clauseo ने 3 और काम रोके।",
+  );
+  expect(noticeLine({ guard_steps_more: { more: 0 } }, en)).toBeNull();
+});
+
 test("a guard notice with no paper gives null, so the row shows its text", () => {
   expect(noticeLine({ held_open_blocked: {} } as unknown as NoticeKind, en)).toBeNull();
 });

@@ -73,4 +73,8 @@ fn the_guards_notice_kinds_decode_and_round_trip() {
         &held,
     );
     round_trips(&held);
+    decodes_in_both(r#""guard_step_blocked""#, &NoticeKind::GuardStepBlocked);
+    let more = NoticeKind::GuardStepsMore { more: 3 };
+    decodes_in_both(r#"{"guard_steps_more":{"more":3}}"#, &more);
+    round_trips(&more);
 }

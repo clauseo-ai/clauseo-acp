@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // A step Clauseo's pre-write guard stopped, in the room's thread: the host's notice (held_open_blocked with its paper,
-// or codex_folder_blocked) is a quiet warning line in the app's words, the agent and the paper named, never the host's
+// codex_folder_blocked, guard_step_blocked, guard_steps_more) is a quiet warning line in the app's words, the agent and the paper named, never the host's
 // English text. In English and Hindi. The harness thread is claude-acp; the words are the same for any agent name.
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { afterEach, expect, test } from "vitest";
@@ -39,6 +39,8 @@ for (const lang of ["en", "hi"] as const) {
         userMessage(5, 1, "Add a clause on late payment to the lease."),
         notice(6, { held_open_blocked: { file: "Drafts/Lease.docx" } }),
         notice(7, "codex_folder_blocked"),
+        notice(8, "guard_step_blocked"),
+        notice(9, { guard_steps_more: { more: 3 } }),
       ]),
     ]);
     await h.settle();
@@ -56,8 +58,15 @@ for (const lang of ["en", "hi"] as const) {
           name: "Claude",
         },
       ),
+      th(lang, "Clauseo stopped a step."),
+      th(lang, "Clauseo stopped {n} more steps.", { n: "3" }),
     ]);
     expect(h.host.textContent).not.toContain(HOST_TEXT);
-    expect(notices.map((n) => n.dataset["level"])).toEqual(["warning", "warning"]);
+    expect(notices.map((n) => n.dataset["level"])).toEqual([
+      "warning",
+      "warning",
+      "warning",
+      "warning",
+    ]);
   });
 }

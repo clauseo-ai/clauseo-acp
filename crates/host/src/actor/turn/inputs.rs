@@ -50,6 +50,8 @@ pub(crate) enum TurnInput {
     },
     /// The offline-shell note's steer to `thread` did not land (`shell_network.rs`).
     OfflineNoteOwed(ThreadId),
+    /// A read of the guard's record file answered (`updates/guard_blocks.rs`).
+    GuardRead(Box<super::updates::guard_blocks::Answer>),
 }
 
 /// An agent call's result.

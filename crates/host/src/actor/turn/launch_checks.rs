@@ -112,9 +112,9 @@ pub(crate) struct RunFolders {
     /// `{browser_dir}`, the guard's `--cwd`: `<data>/browser/run/<session id>`, outside the
     /// run folder, since Codex's shell may write the run folder and the guard, unfenced, writes
     /// through this one (its downloads, screenshots, home, temporary files and Chrome's profile).
-    /// Made by the launch prep only for a session the entry goes to (`browser::entry_folder`),
-    /// removed with the run folder ([`Self::remove`]); an earlier run's are swept at start
-    /// ([`RunSweep`]).
+    /// Made by the launch prep for a session the entry goes to (`browser::entry_folder`) and for
+    /// the guard's record (`folders::make_guard_record`), removed with the run folder
+    /// ([`Self::remove`]); an earlier run's are swept at start ([`RunSweep`]).
     pub(crate) browser: PathBuf,
     /// `{matter_notes}`, `<data>/agent-state/<matter id>/notes`: the matter's, shared by its
     /// agents, kept when a session ends.
@@ -396,7 +396,7 @@ pub(super) fn prepare(
                 run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
-                claim(&mut run, &data, claims, slot);
+                claim(&mut run, &data, claims, slot, claude);
                 run.mcp_secrets = Arc::new(mcp.read());
                 let skills_written = write_skills(&skills);
                 let packs_skipped;

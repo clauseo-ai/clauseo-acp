@@ -84,35 +84,57 @@ pub(crate) fn open_append(path: &Path) -> io::Result<std::fs::File> {
     options.open(path)
 }
 
-/// Opens the regular file `path` for appending, creating it (0600 on Unix), never through a link
-/// at its last component and never waiting on a pipe (`O_NOFOLLOW | O_NONBLOCK` on Unix,
-/// `FILE_FLAG_OPEN_REPARSE_POINT` on Windows); anything but a regular file fails. The pre-write
-/// guard's record of its refusals (`pre_write_guard/record.rs`), in a folder the agent can write.
-pub(crate) fn open_append_regular(path: &Path) -> io::Result<std::fs::File> {
+/// Opens the guard's record of its refusals (`pre_write_guard/record.rs`) for appending: the
+/// file the host made empty at the launch ([`create_record`]), never created here, never through
+/// a link at its last component and never waiting on a pipe (`O_NOFOLLOW | O_NONBLOCK` on Unix,
+/// `FILE_FLAG_OPEN_REPARSE_POINT` on Windows). Anything but a regular file with one link fails,
+/// so a hard link planted at its place (to a shell profile, say) is never written through.
+pub(crate) fn open_append_record(path: &Path) -> io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
-    options.append(true).create(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options
-            .mode(0o600)
-            .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
-    }
-    #[cfg(windows)]
-    std::os::windows::fs::OpenOptionsExt::custom_flags(
-        &mut options,
-        windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0,
-    );
-    regular(options.open(path)?)
+    options.append(true);
+    no_follow_no_wait(&mut options);
+    single(options.open(path)?)
 }
 
-/// `file` when it is a regular file, else an error.
-fn regular(file: std::fs::File) -> io::Result<std::fs::File> {
-    if file.metadata()?.is_file() {
-        Ok(file)
-    } else {
-        Err(io::Error::other("not a regular file"))
+/// Makes the guard's record file `path` empty (0600 on Unix), when nothing is there yet:
+/// anything already there, a link included, fails with `AlreadyExists` and is never followed.
+/// The launch prep's, in a folder only the host writes (`launch_checks/folders.rs`).
+pub(crate) fn create_record(path: &Path) -> io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(path).map(drop)
+}
+
+/// `O_NOFOLLOW | O_NONBLOCK` on Unix, `FILE_FLAG_OPEN_REPARSE_POINT` on Windows.
+fn no_follow_no_wait(options: &mut std::fs::OpenOptions) {
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        options,
+        nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK,
+    );
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(
+        options,
+        windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0,
+    );
+}
+
+/// `file` when it is a regular file with one link (`st_nlink`, or `NumberOfLinks` on
+/// Windows), else an error.
+fn single(file: std::fs::File) -> io::Result<std::fs::File> {
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("not a regular file"));
     }
+    #[cfg(unix)]
+    let links = std::os::unix::fs::MetadataExt::nlink(&file.metadata()?);
+    #[cfg(windows)]
+    let links = u64::from(crate::network_paths::link_count(&file)?);
+    if links != 1 {
+        return Err(io::Error::other("a file with more than one link"));
+    }
+    Ok(file)
 }
 
 /// Renames the file `from` to `to`, replacing a file at `to`: the log file's rotation, and a
@@ -345,23 +367,14 @@ pub(crate) fn open_read_nofollow(path: &Path) -> io::Result<std::fs::File> {
     options.open(path)
 }
 
-/// [`open_read_nofollow`] for a regular file only, never waiting on a pipe (`O_NONBLOCK` on
-/// Unix): the host's read of the guard's record (`actor/turn/updates/guard_blocks.rs`), which the
-/// agent could swap for a link or a FIFO.
-pub(crate) fn open_read_regular(path: &Path) -> io::Result<std::fs::File> {
+/// [`open_read_nofollow`] for a regular file with one link only, never waiting on a pipe
+/// (`O_NONBLOCK` on Unix): the host's read of the guard's record
+/// (`actor/turn/updates/guard_blocks.rs`).
+pub(crate) fn open_read_record(path: &Path) -> io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::custom_flags(
-        &mut options,
-        nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK,
-    );
-    #[cfg(windows)]
-    std::os::windows::fs::OpenOptionsExt::custom_flags(
-        &mut options,
-        windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0,
-    );
-    regular(options.open(path)?)
+    no_follow_no_wait(&mut options);
+    single(options.open(path)?)
 }
 
 /// Opens `path` for reading with a share mode that lets others read but not write or delete
@@ -388,4 +401,18 @@ pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
 #[cfg(all(test, windows))]
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::windows::fs::symlink_dir(target, link)
+}
+
+/// Makes `link` a symbolic link to the file `target`; fails without the right to make links
+/// (Developer Mode or an elevated token). For unit tests: a link at the guard's record.
+#[cfg(all(test, windows))]
+pub(crate) fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_file(target, link)
+}
+
+/// Makes `link` a second name of the file `target`. For unit tests: a hard link at the guard's
+/// record.
+#[cfg(test)]
+pub(crate) fn hard_link(target: &Path, link: &Path) -> io::Result<()> {
+    std::fs::hard_link(target, link)
 }

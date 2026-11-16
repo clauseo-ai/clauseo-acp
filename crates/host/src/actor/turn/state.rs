@@ -300,7 +300,4 @@ pub(super) struct Told {
     pub(super) offline: bool,
     /// A data-fence refusal of the turn was told to the lawyer and the agent (`outside.rs`).
     pub(super) outside: bool,
-    /// The guard's refusals of the turn told to the lawyer, by paper and reason
-    /// (`updates/guard_blocks.rs`).
-    pub(super) guard: Vec<clauseo_protocol::NoticeKind>,
 }

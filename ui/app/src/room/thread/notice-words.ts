@@ -67,10 +67,22 @@ function packSkipped(pack: string, reason: string, w: NoticeWords): string | nul
   }
 }
 
-/** The line for a step Clauseo's pre-write guard stopped (the host's held_open_blocked with its paper, or
- * codex_folder_blocked): the agent named as the outside-matter line names it, the AI where none is known; the paper
- * named as Versions names it. A kind of another shape gives null. */
+/** The line for a step Clauseo's pre-write guard stopped (the host's held_open_blocked with its paper's name,
+ * codex_folder_blocked, guard_step_blocked with no paper named, or guard_steps_more counting the turn's steps past
+ * those told): the agent named as the outside-matter line names it, the AI where none is known; the paper named as
+ * Versions names it. A kind of another shape gives null. */
 function guardBlocked(kind: NoticeKind, w: NoticeWords, agent?: AgentName): string | null {
+  if (kind === "guard_step_blocked") return w.th("Clauseo stopped a step.");
+  const more =
+    typeof kind === "object" && kind !== null && "guard_steps_more" in kind
+      ? kind.guard_steps_more
+      : undefined;
+  if (more !== undefined) {
+    if (typeof more.more !== "number" || more.more < 1) return null;
+    return more.more === 1
+      ? w.th("Clauseo stopped one more step.")
+      : w.th("Clauseo stopped {n} more steps.", { n: more.more });
+  }
   const name = agentNameOf(agent);
   if (kind === "codex_folder_blocked")
     return name === null

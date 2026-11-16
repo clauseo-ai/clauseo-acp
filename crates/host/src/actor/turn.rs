@@ -400,6 +400,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         TurnInput::RunRemoved { key, freed } => launch_checks::on_run_removed(actor, key, freed),
         TurnInput::CameBack(check) => came_back::on_due(actor, check),
         TurnInput::SteerChecked(checked) => queue::on_steer_checked(actor, *checked),
+        TurnInput::GuardRead(answer) => updates::guard_blocks::on_read(actor, *answer),
         TurnInput::OfflineProbe {
             thread,
             turn,
