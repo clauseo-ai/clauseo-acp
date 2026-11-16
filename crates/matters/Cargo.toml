@@ -72,6 +72,10 @@ features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"]
 clauseo-matters = { path = ".", features = ["test-support"] }
 criterion = { workspace = true, features = ["cargo_bench_support"] }
 
+# `setrlimit`: a write-back test under launchd's open-file limit (writeback/outcome_tests.rs).
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dev-dependencies]
+rustix = { workspace = true, features = ["fs", "process"] }
+
 [[bench]]
 name = "checkpoint"
 harness = false

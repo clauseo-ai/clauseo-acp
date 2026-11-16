@@ -15,11 +15,14 @@
 //! writable file, so the mode comes after the attributes. Linux: the attributes but the ACL, then
 //! the mode, then the ACL attribute (setting it rewrites the group bits to the ACL's mask, as the
 //! original has them); a Linux ACL cannot keep a file from being removed (that is the folder's
-//! write permission), so it goes on the temp file. macOS: the attributes, then the mode, and the
-//! ACL only once the temp file is the target: a macOS ACL can deny `delete`, and on the temp file
-//! that would refuse its removal after a failed rename. The cost: from the rename to the ACL, the
-//! file has the folder's inherited ACL, and a crash between them leaves it so (the content is
-//! the new one; only the ACL is lost).
+//! write permission), so it goes on the temp file. macOS: the attributes, then an owner-only mode
+//! (the original's owner bits, and owner read), and the ACL and the original's mode only once the
+//! temp file is the target ([`After`]): a macOS ACL can deny `delete`, and on the temp file that
+//! would refuse its removal after a failed rename. The ACL is read into memory here and both
+//! files closed, so a write-back of many files holds no descriptor per file until its renames.
+//! From the rename to the ACL, and for good if a crash or a failure comes between them, the file
+//! is its owner's alone: never more open than the original (the content is the new one; the ACL
+//! and the group and other bits are what is lost).
 //!
 //! Nothing here fails the write: each attribute that could not be read or set counts as one lost,
 //! with its errno, and the caller logs the total once.
@@ -29,6 +32,8 @@ use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::Path;
 
 use super::Lost;
+#[cfg(target_os = "macos")]
+use super::temps::FileId;
 
 /// The largest attribute value copied (a resource fork can be large); a larger one counts as
 /// lost. Linux caps values at 64 KiB, so only macOS meets it.
@@ -39,51 +44,74 @@ const MAX_VALUE: usize = 64 << 20;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 const ACL_ACCESS: &[u8] = b"system.posix_acl_access";
 
-/// What is copied once the temp file is the target: on macOS the original's ACL, from the
-/// original, still open, to the temp file. Nothing elsewhere.
+/// What [`copy`] did: what it lost, and on macOS what waits for the rename.
 #[derive(Debug)]
-pub(super) struct After {
+pub(super) struct Copied {
+    pub(super) lost: Lost,
     #[cfg(target_os = "macos")]
-    acl: Option<(File, File)>,
+    pub(super) after: Option<After>,
 }
 
+/// macOS: what is set once the temp file is the target: the original's ACL (read at staging,
+/// held in memory), then its mode.
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+pub(super) struct After {
+    acl: Option<super::macos::Acl>,
+    mode: u32,
+}
+
+#[cfg(target_os = "macos")]
 impl After {
-    /// Copies what waited for the rename; what could not be copied. The file is synced again,
-    /// so the sync covers it.
-    pub(super) fn apply(self) -> Lost {
-        #[cfg(not(target_os = "macos"))]
-        let Self {} = self;
-        #[cfg(target_os = "macos")]
-        if let Some((original, temp)) = self.acl {
-            let copied = super::macos::copy_acl(&original, &temp)
-                .and_then(|()| crate::fsync::sync_file(&temp));
-            if let Err(err) = copied {
-                return Lost::one(err.raw_os_error());
-            }
+    /// Opens `target` without following a symlink and, if it is the file `id` just renamed into
+    /// place, sets the ACL and then the mode through that descriptor and syncs it. On an error the
+    /// file keeps its owner-only mode.
+    pub(super) fn apply(self, target: &Path, id: Option<FileId>) -> std::io::Result<()> {
+        let file = super::open_read_nofollow(target)?;
+        let found = super::temps::identity(&file)?;
+        if !found.regular || Some(found.id) != id {
+            return Err(std::io::Error::other("another file since the rename"));
         }
-        Lost::default()
+        if let Some(acl) = &self.acl {
+            super::macos::set_acl(&file, acl)?;
+        }
+        file.set_permissions(Permissions::from_mode(self.mode))?;
+        crate::fsync::sync_file(&file)
     }
+}
+
+/// The mode a temp file has until [`After`] sets the original's `mode`: its owner bits alone,
+/// and owner read, so the file can be opened again after the rename.
+#[cfg(target_os = "macos")]
+pub(super) const fn owner_only(mode: u32) -> u32 {
+    (mode & 0o700) | 0o400
 }
 
 /// Copies what the file `original` has to the open temp file `temp`; what could not be copied,
 /// and what waits for the rename. A missing `original` (a new file, or a restore of a deleted
 /// one: checkpoints record no metadata) or one that is not a plain file leaves the temp file
 /// with the defaults, and is no loss.
-pub(super) fn copy(original: &Path, temp: &File) -> (Lost, After) {
-    let none = After {
+pub(super) fn copy(original: &Path, temp: &File) -> Copied {
+    let none = |lost| Copied {
+        lost,
         #[cfg(target_os = "macos")]
-        acl: None,
+        after: None,
     };
     let metadata = match std::fs::symlink_metadata(original) {
         Ok(metadata) if metadata.is_file() => metadata,
-        Ok(_) => return (Lost::default(), none),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return (Lost::default(), none),
-        Err(err) => return (Lost::one(err.raw_os_error()), none),
+        Ok(_) => return none(Lost::default()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return none(Lost::default()),
+        Err(err) => return none(Lost::one(err.raw_os_error())),
     };
+    let mode = metadata.mode() & 0o777;
     let mut lost = Lost::default();
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     lost.add(xattrs::copy(original, temp, |name| name != ACL_ACCESS));
-    if let Err(err) = temp.set_permissions(Permissions::from_mode(metadata.mode() & 0o777)) {
+    #[cfg(target_os = "macos")]
+    let temp_mode = owner_only(mode);
+    #[cfg(not(target_os = "macos"))]
+    let temp_mode = mode;
+    if let Err(err) = temp.set_permissions(Permissions::from_mode(temp_mode)) {
         lost.add(Lost::one(err.raw_os_error()));
     }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -95,20 +123,20 @@ pub(super) fn copy(original: &Path, temp: &File) -> (Lost, After) {
         if let Err(err) = super::macos::set_birth_time(temp, secs, nanos) {
             lost.add(Lost::one(err.raw_os_error()));
         }
-    }
-    #[cfg(target_os = "macos")]
-    let none = {
-        let files =
-            super::open_read_nofollow(original).and_then(|from| Ok((from, temp.try_clone()?)));
-        match files {
-            Ok(files) => After { acl: Some(files) },
-            Err(err) => {
-                lost.add(Lost::one(err.raw_os_error()));
-                none
-            }
+        // Read now, the original closed again at once: nothing stays open until the rename.
+        let acl =
+            super::open_read_nofollow(original).and_then(|from| super::macos::read_acl(&from));
+        let acl = acl.unwrap_or_else(|err| {
+            lost.add(Lost::one(err.raw_os_error()));
+            None
+        });
+        Copied {
+            lost,
+            after: Some(After { acl, mode }),
         }
-    };
-    (lost, none)
+    }
+    #[cfg(not(target_os = "macos"))]
+    none(lost)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

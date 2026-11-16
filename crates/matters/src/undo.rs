@@ -379,6 +379,7 @@ pub(crate) fn undo(
     let writeback::Deleted {
         paths: deleted,
         removals,
+        ..
     } = writeback::apply(core, folder, settings.trash.as_ref(), &ops)?;
     let (checkpoint, resurrected) = take_after_deletes(
         core,
