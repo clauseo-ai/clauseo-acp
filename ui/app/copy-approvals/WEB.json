@@ -24,9 +24,12 @@
   "WEB-07": {
     "en": "{name} didn't say which pages it found",
     "hi": "{name} ने नहीं बताया कि उसे कौन-से पेज मिले",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; Rohan batch review)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "was \"{name} doesn't list its pages\", unclear in the sweep (D-028); shows only beside a page, since searches that list no page show no list"
   },
   "WEB-09": {

@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Under Blocked by a browser policy on Windows (browser_blocked_by_policy): Edge and Chrome are both installed and each one's own policy (RemoteDebuggingAllowed 0 or DeveloperToolsAvailability 2) blocks it. Clauseo's own opt-in can't lift it, since such a browser refuses Clauseo's pipe, so it asks the firm's IT; unlike UET-45 (the Mac line). Reworded from 'stop apps from using ... Ask your firm's IT to allow Clauseo', which pointed at that opt-in"
   },
   "UC-551": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Under Can't use your Chrome (UC-554) on Windows (browser_per_user_chrome_only): no Edge and no Program Files Chrome, only %LOCALAPPDATA%\\Google\\Chrome, which can't start under Clauseo's browser guard; replaces UET-50, which told the lawyer to install what they have"
   },
   "UC-552": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "UC-550 when Edge is the one browser installed (browser_blocked_edge), so only Edge is named"
   },
   "UC-553": {
@@ -38,9 +38,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "UC-550 when a Program Files Chrome is the one browser installed (browser_blocked_chrome), so only Chrome is named"
   },
   "UC-554": {
@@ -49,9 +49,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; Rohan to approve on the screenshots page, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The browser's reason on Windows when the only Chrome is a per-user copy (browser_per_user_chrome_only); UC-551 says it in full under it; in the tool line's tooltip as 'Browser: off, can't use your Chrome.'"
   }
 }

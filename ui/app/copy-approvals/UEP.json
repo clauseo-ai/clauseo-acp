@@ -150,9 +150,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "D-052: the anonymous counts' switch in Settings, Privacy; UD1-06's approved words and Hindi, reused"
   },
   "UEP-26": {
@@ -161,9 +161,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "D-052: the counts switch's line in Settings, Privacy; UD1-08's approved words and Hindi, reused"
   },
   "UEP-27": {
@@ -172,9 +172,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "D-064: under What leaves this computer, what Clauseo fetches by itself at start; the orchestrator's English"
   },
   "UEP-28": {
@@ -183,9 +183,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "D-068: behind Web search's info icon, replacing UEP-06's \"subprocessor\" on Claude's row"
   }
 }

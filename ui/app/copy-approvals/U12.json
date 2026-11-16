@@ -319,9 +319,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings' Plan and usage while a plan's first read runs (usage.tsx), so the page is never blank"
   },
   "U12-46": {
@@ -330,9 +330,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings' Plan and usage with no plan set up (usage.tsx), so the page is never blank"
   }
 }

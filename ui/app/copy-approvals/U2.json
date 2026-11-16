@@ -23,9 +23,12 @@
   "U2-09": {
     "en": "Limit reached",
     "hi": "सीमा पूरी",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "orchestrator (decided 2026-11-10)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "orchestrator (decided 2026-11-10)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "trimmed from \"Limit reached. Reset not given.\" (approved 2026-11-02, Rohan)"
   },
   "U2-16": {

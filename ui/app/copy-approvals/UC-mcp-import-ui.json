@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; A4, import over A3's host)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: the pressed Import button's words while its import (and the host's confirm) is in flight; every Import button is off meanwhile"
   },
   "UC-251": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; A4, import over A3's host)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: last line under the import's per-tool lines, when the host leaves some out without naming them (McpImportResult.others); with none named, the count line counts them instead"
   }
 }

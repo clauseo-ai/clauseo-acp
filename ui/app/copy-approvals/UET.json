@@ -93,9 +93,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (provisional; Rohan approved the words 2026-11-09, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "No browser on a Mac (browser_not_installed), after #870's shell browser: the lawyer's step, replacing Needs Chrome"
   },
   "UET-26": {
@@ -214,9 +214,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Browser policy (RemoteDebuggingAllowed) couldn't be read (browser_policy_unreadable): pending copy review; no download offered"
   },
   "UET-47": {
@@ -225,9 +225,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Browser policy (RemoteDebuggingAllowed) couldn't be read (browser_policy_unreadable): pending copy review; no download offered"
   },
   "UET-48": {
@@ -236,9 +236,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (provisional; Rohan approved the words 2026-11-09, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "No browser on Windows (browser_not_installed): the host takes Edge when it finds no Chrome"
   },
   "UET-49": {
@@ -247,9 +247,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; Rohan approved the words 2026-11-09, start a new conversation after #899 2026-11-10, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Under Install Chrome on a Mac: the browser's skill loads as each conversation starts (#899), so a new conversation finds it"
   },
   "UET-50": {
@@ -258,9 +258,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; Rohan approved the words 2026-11-09, start a new conversation after #899 2026-11-10, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Under Install Chrome or Edge on Windows: the browser's skill loads as each conversation starts (#899), so a new conversation finds it"
   }
 }

@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "over the blackline sheet when a line of stetdoc's view couldn't be read, or stetdoc left content out (BlacklineNotice part_not_shown); the rest is shown"
   },
   "UC-308": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "over the blackline sheet when the document holds hidden or hard-to-see text, which the blackline shows as ordinary text (BlacklineNotice hidden_text)"
   },
   "UC-309": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "over the blackline sheet when stetdoc warns list or clause numbers may differ from Word's (BlacklineNotice numbers_may_differ)"
   },
   "UC-310": {
@@ -38,9 +38,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "over the blackline sheet for any other stetdoc warning, a marker this version doesn't know, or a notice from a newer Clauseo (BlacklineNotice may_differ, unknown)"
   },
   "UC-311": {
@@ -49,9 +49,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "blackline.nested_table: stetdoc 0.9.3's compare refuses (validation_failed, exit 5) when an inner table that ends its cell is removed; no Try again"
   },
   "UC-312": {
@@ -60,9 +60,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "blackline.cannot_compare: stetdoc refused the compare for another reason (validation_failed, unsupported); no Try again"
   },
   "UC-313": {
@@ -71,9 +71,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "blackline.not_readable: stetdoc can't read a version (malformed_input, corrupt_complement, unsupported_version); no Try again"
   },
   "UC-314": {
@@ -82,9 +82,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "blackline.too_large: a version is past a stetdoc size limit (limit_exceeded); no Try again"
   },
   "UC-315": {
@@ -93,9 +93,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "blackline.format_unknown: stetdoc's view is in a format other than stet 1; no Try again"
   },
   "UC-368": {
@@ -104,9 +104,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "over the blackline sheet when stetdoc counts more tracked changes than the body shows: the rest are in headers, footers, notes or comments (BlacklineNotice changes_outside_text)"
   },
   "UC-369": {
@@ -115,9 +115,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "on the blackline sheet where a paragraph stood that Clauseo couldn't read from stetdoc's view (ParagraphChange not_shown)"
   },
   "UC-370": {
@@ -126,9 +126,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "above a blackline paragraph that holds text Word hides, shown as ordinary text (BlacklineParagraph hidden)"
   },
   "UC-371": {
@@ -137,9 +137,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-16",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject picture)"
   },
   "UC-377": {
@@ -148,9 +148,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-16",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject chart)"
   },
   "UC-378": {
@@ -159,9 +159,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-16",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject shape)"
   },
   "UC-379": {
@@ -170,9 +170,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-16",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject note)"
   },
   "UC-380": {
@@ -181,9 +181,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-16",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject field)"
   },
   "UC-381": {
@@ -192,9 +192,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-16",
-    "by": "blackline-never-fails (en provisional, for the orchestrator)",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "in a marked-up paragraph, for an inserted or deleted change that holds no text of its own (BlacklineObject other)"
   }
 }

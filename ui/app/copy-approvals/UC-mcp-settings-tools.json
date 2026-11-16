@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: the section's name, on the side and as the pane's head"
   },
   "UC-170": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: the pane's lead, the plain line (plan.md, changes after the first look 4)"
   },
   "UC-171": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: under the lead, while the Safe workspace doesn't start a lawyer's tools (SAFE_WORKSPACE_NOTE; decision pending)"
   },
   "UC-172": {
@@ -38,9 +38,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: the empty list"
   },
   "UC-173": {
@@ -49,9 +49,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: the button under the list, and the form's head when adding"
   },
   "UC-174": {
@@ -60,9 +60,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: over the read-only list a firm's policy sets (mcp.servers)"
   },
   "UC-175": {
@@ -71,9 +71,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: the one line when the firm's managed-mcp.json runs MCP; also a save refused with lockedByFirm"
   },
   "UC-176": {
@@ -82,9 +82,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: the tool's name field, and a secret row's name field's accessible name"
   },
   "UC-177": {
@@ -93,9 +93,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: the program field (and, with remote tools, the kind switch's local side)"
   },
   "UC-178": {
@@ -104,9 +104,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: the Command field's optional help; the host resolves a bare name itself (changes after the first look 2)"
   },
   "UC-179": {
@@ -115,9 +115,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: the arguments field"
   },
   "UC-180": {
@@ -126,9 +126,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: the environment values' rows"
   },
   "UC-181": {
@@ -137,9 +137,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: a secret whose value is saved (never shown)"
   },
   "UC-182": {
@@ -148,9 +148,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: types a new value for a saved secret"
   },
   "UC-183": {
@@ -159,9 +159,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: the confirm before Remove; {name} is the tool's name as filed; Cancel and Remove are existing words"
   },
   "UC-184": {
@@ -170,9 +170,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: refusal nameEmpty, under Name"
   },
   "UC-185": {
@@ -181,9 +181,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: refusals nameTaken and nameReserved, under Name"
   },
   "UC-186": {
@@ -192,9 +192,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: refusals nameInvalid and headerNameInvalid (env names have UC-205)"
   },
   "UC-187": {
@@ -203,9 +203,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools remote form (behind REMOTE_TOOLS): the Address field's line and its refusal urlInvalid; {example} is https://tools.example.com/mcp"
   },
   "UC-188": {
@@ -214,9 +214,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools remote form (behind REMOTE_TOOLS): the address field, and the kind switch's remote side"
   },
   "UC-189": {
@@ -225,9 +225,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve through the shots)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools remote form (behind REMOTE_TOOLS): the headers' rows"
   },
   "UC-190": {
@@ -236,9 +236,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: one Import button per app found, leading the empty state and the list; {source} is Claude Desktop, Claude Code or Codex (the app's own name); {count} 2 or more"
   },
   "UC-191": {
@@ -247,9 +247,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: UC-190 for one tool"
   },
   "UC-192": {
@@ -258,9 +258,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: the one line after an import, 2 or more imported"
   },
   "UC-193": {
@@ -269,9 +269,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: UC-192 for one"
   },
   "UC-194": {
@@ -280,9 +280,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: after UC-192/193 (or alone), how many an import left out; the names and reasons follow, one line each (UC-206 to UC-211)"
   },
   "UC-195": {
@@ -291,9 +291,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: refusal commandNotFound { program }, under Command; {program} as typed"
   },
   "UC-196": {
@@ -302,9 +302,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: refusal mcp.command_invalid (a relative path such as bin/x, or a network path such as \\\\server\\share\\x.exe), under Command"
   },
   "UC-205": {
@@ -313,9 +313,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's changes after the first look, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools form: refusal envNameInvalid, under Environment values ('-' isn't valid in an environment variable's name)"
   },
   "UC-206": {
@@ -324,9 +324,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: one line under the import's count line; import skipped: commandNotFound; {program} as the source names it"
   },
   "UC-207": {
@@ -335,9 +335,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: one line under the import's count line; import skipped: unsupportedTransport"
   },
   "UC-208": {
@@ -346,9 +346,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: one line under the import's count line; import skipped: unresolvedVariable"
   },
   "UC-209": {
@@ -357,9 +357,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: one line under the import's count line; import skipped: alreadyAdded"
   },
   "UC-210": {
@@ -368,9 +368,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: one line under the import's count line; import skipped: unreadable"
   },
   "UC-211": {
@@ -379,9 +379,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator's import reasons, 2026-11-11)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Settings › Tools: one line under the import's count line; import skipped: notApproved (a Claude Code project's server not approved there)"
   }
 }
