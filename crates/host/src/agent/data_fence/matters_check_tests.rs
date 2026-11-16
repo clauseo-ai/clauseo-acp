@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::MatterId;
 use serde_json::json;
 
-use super::{named_in_words, other_matter_on};
+use super::{named_in_words, other_matter_on, other_matter_on_in};
 use crate::agent::data_fence::resolve::Disk;
 use crate::agent::data_fence::tests::{check, layout};
 use crate::network_paths::{FOLD_CASE, NetEnv};
@@ -88,4 +88,40 @@ fn a_word_in_another_unicode_form_names_the_matter() {
         named_in_words(&word("cat /m/ZO\u{cb}"), &matters, true),
         Some(id(1))
     );
+}
+
+/// Another matter on macOS's data volume (modelled under the temp folder: `System/Volumes/Data`
+/// beside a `Users` the walk never sees, as with a firmlink) is refused by either spelling,
+/// stored long or short, and so is a search folder that holds it by the other spelling; the own
+/// matter beside it, by either spelling, is not. Unix paths (the firmlink is macOS's).
+#[cfg(unix)]
+#[test]
+fn another_matter_by_its_data_volume_twin_is_refused_and_the_own_matter_is_not() {
+    let dir = layout("matters-check-firmlink");
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    let data = root.join("System/Volumes/Data");
+    let long = data.join("Users/a/Clients");
+    for folder in ["Own", "B"] {
+        crate::write::create_dir_all(&long.join(folder)).unwrap();
+    }
+    let short = root.join("Users/a/Clients");
+    let net = NetEnv::current();
+    let disk = Disk::real(&net);
+    let volume = Some((root.as_path(), data.as_path()));
+    for (stored, asked) in [(&long, &short), (&short, &long)] {
+        let matters = [(id(1), vec![stored.join("B")])];
+        let refused = |paths: &[&Path], input: Option<&serde_json::Value>| {
+            let paths: Vec<&str> = paths.iter().map(|path| path.to_str().unwrap()).collect();
+            let check = check(&root, &paths, input);
+            other_matter_on_in(&check, &matters, FOLD_CASE, &disk, volume)
+        };
+        let file = asked.join("B/f.pdf");
+        assert_eq!(refused(&[&file], None), Some(id(1)), "{stored:?}: {file:?}");
+        let grep = json!({"command": format!("grep -r secret {}", asked.display())});
+        assert_eq!(refused(&[], Some(&grep)), Some(id(1)), "{stored:?}: grep");
+        for base in [&long, &short] {
+            let own = base.join("Own/a.txt");
+            assert_eq!(refused(&[&own], None), None, "{stored:?}: {own:?}");
+        }
+    }
 }
