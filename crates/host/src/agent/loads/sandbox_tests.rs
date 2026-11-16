@@ -266,11 +266,12 @@ fn the_data_folder_and_other_matters_are_denied_wherever_they_are() {
     );
 }
 
-/// `*` or `?` in any path the lists would hold turns the sandbox off: Claude Code reads both as
-/// a pattern with no escape. The off names the deepest folder holding one, the matter folder's
-/// first (`Off::Wildcard`); the launch is then refused (`sandbox_launch_tests.rs`).
+/// `*` or `?` in a path of the session's own, or in `<data>`, turns the sandbox off: Claude
+/// Code reads both as a pattern with no escape. The off names the deepest folder holding one,
+/// the matter folder's first (`Off::Wildcard`); the launch is then refused
+/// (`sandbox_launch_tests.rs`). Another matter's folder does not (`sandbox_wild_tests.rs`).
 #[test]
-fn a_wildcard_in_any_path_sends_no_sandbox() {
+fn a_wildcard_in_an_own_path_sends_no_sandbox() {
     let wild = |folder: &str, in_matter| {
         let folder = folder.to_owned();
         Err(Off::Wildcard(Wild { folder, in_matter }))
@@ -282,13 +283,11 @@ fn a_wildcard_in_any_path_sends_no_sandbox() {
             let off = ClaudeSandbox::for_os(os, &session.paths());
             assert_eq!(off, wild(glob, true), "{glob}");
         }
-        let mut session = Session::new("s-1");
-        session
-            .other_matters
-            .push(PathBuf::from("/Users/l/Clients").join(glob));
-        assert_eq!(mac(&session.paths()), wild(glob, false), "{glob}");
         let settings = settings(&session, None, false, false, &json!({}));
         assert!(settings.get("sandbox").is_none());
+        let mut session = Session::new("s-1");
+        session.data = vec![PathBuf::from("/Users/l").join(glob)];
+        assert_eq!(mac(&session.paths()), wild(glob, false), "{glob}");
     }
     assert!(mac(&Session::new("s-1").paths()).is_ok());
 }
@@ -518,3 +517,6 @@ fn only_the_trust_roots_file_opens() {
     let sandbox = mac(&session.paths()).unwrap();
     assert!(!sandbox.allow_read.iter().any(|path| path.contains("/tls")));
 }
+
+#[path = "sandbox_wild_tests.rs"]
+mod wild;

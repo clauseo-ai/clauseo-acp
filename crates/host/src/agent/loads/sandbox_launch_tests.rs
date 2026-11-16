@@ -92,7 +92,14 @@ fn every_mac_and_linux_launch_has_a_sandbox_or_a_refusal() {
         // unix-paths-ok: sandbox paths as text, never opened
         ("parent *", with_matter("/Users/l/Clients*/A"), &own),
         ("brackets", with_matter(BRACKETS), &brackets),
-        ("other matter *", with_other(STAR), &clauseos),
+        // Another matter's `*` stays a pattern; refused only when it would cover this one.
+        ("other matter *", with_other(STAR), &sandboxed),
+        // unix-paths-ok: sandbox paths as text, never opened
+        (
+            "other matter over this",
+            with_other("/Users/l/Clients/?"),
+            &clauseos,
+        ),
         (
             "notes ?",
             // unix-paths-ok: sandbox paths as text, never opened
@@ -121,6 +128,30 @@ fn every_mac_and_linux_launch_has_a_sandbox_or_a_refusal() {
         let launch = launch(&session, SandboxOs::Linux);
         assert_eq!(launch, Launch::Refused(ErrorCode::AgentSandboxUnavailable));
     }
+}
+
+/// A neighbour named with `*` or `?` in the matter's parent (`/Users/l/Clients/What?` beside
+/// `/Users/l/Clients/A`): on Linux its deny widens to the parent, which holds this matter, so the
+/// launch is refused with UC-471 (`agent.sandbox_wildcard`), never run without the sandbox; on
+/// macOS the pattern covers neither, so the launch carries it. #1085's own test states the same
+/// for its branch.
+#[test]
+fn a_wildcard_neighbour_in_the_parent_refuses_on_linux_and_never_turns_the_sandbox_off() {
+    // unix-paths-ok: sandbox paths as text, never opened
+    let session = with_other("/Users/l/Clients/What?");
+    assert_eq!(
+        launch(&session, SandboxOs::Linux),
+        Launch::Refused(ErrorCode::AgentSandboxWildcard)
+    );
+    assert_eq!(
+        ClaudeSandbox::for_os(SandboxOs::Linux, &session.paths()),
+        Err(Off::CoversOwn)
+    );
+    let Launch::Sandboxed(mac) = launch(&session, SandboxOs::Mac) else {
+        panic!("macOS refused a neighbour whose pattern covers nothing of this matter's");
+    };
+    let denied = mac["filesystem"]["denyRead"].as_array().unwrap();
+    assert!(denied.iter().any(|path| path == "/Users/l/Clients/What?"));
 }
 
 /// Windows carries no sandbox and no refusal: none was meant to be there.
