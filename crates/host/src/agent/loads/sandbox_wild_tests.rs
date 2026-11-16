@@ -133,3 +133,22 @@ fn a_wildcard_matter_inside_this_one() {
     let linux = ClaudeSandbox::for_os(SandboxOs::Linux, &session.paths());
     assert_eq!(linux, Err(Off::CoversOwn));
 }
+
+/// Today's behaviour, stated so the change is seen: on Linux a neighbour holding `*` or `?` in
+/// the session's own matter's parent folder (`/Users/l/Clients/What?` beside the own
+/// `/Users/l/Clients/…`) widens to that parent, which holds the own matter, so the launch goes
+/// without Claude's sandbox (`Off::CoversOwn`) and goes on. The sandbox main PR makes this a
+/// refused launch (UC-471) with a refusal test of its own; whichever PR lands second flips this
+/// assertion to that refusal.
+#[test]
+fn linux_a_wildcard_neighbour_in_the_own_parent_switches_the_sandbox_off_today() {
+    for name in ["What?", "A*B"] {
+        let mut session = Session::new("s-1");
+        let parent = session.matter.parent().unwrap().to_path_buf();
+        session.other_matters = vec![parent.join(name)];
+        let linux = ClaudeSandbox::for_os(SandboxOs::Linux, &session.paths());
+        assert_eq!(linux, Err(Off::CoversOwn), "{name}");
+        // macOS denies the pattern itself and keeps the sandbox.
+        assert!(mac(&session.paths()).is_ok(), "{name}");
+    }
+}
