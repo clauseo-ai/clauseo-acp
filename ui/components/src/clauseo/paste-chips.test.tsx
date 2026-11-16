@@ -288,3 +288,58 @@ test("Cmd+Z after a chip's remove button brings the chip back where it stood, fr
   expect(await undoKey(field())).toBe(true);
   expect(ref.current?.draft()).toEqual({ typed: "Compare.", pastes: [one, two] });
 });
+
+test("Cmd+Z right after a paste takes that chip off, and leaves the words typed before it", async () => {
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref }));
+  const one = brief(PASTE_CHIP_MIN, "a");
+  await paste(one);
+  await type("Before.");
+  const two = brief(PASTE_CHIP_MIN, "b");
+  await paste(two);
+  field().focus();
+  expect(await undoKey(field())).toBe(true);
+  expect(ref.current?.draft()).toEqual({ typed: "Before.", pastes: [one] });
+  // the words typed since the first paste are the engine's to undo: the chip stays
+  expect(await undoKey(field())).toBe(false);
+  expect(chips()).toHaveLength(1);
+});
+
+/** The engine's editing, as WebKit and Chromium do it: the selection replaced, then an input event. */
+function engine() {
+  const exec = (command: string, _ui?: boolean, value?: string) => {
+    const a = document.activeElement;
+    if (!(a instanceof HTMLTextAreaElement)) return false;
+    const insert = command === "delete" ? "" : (value ?? "");
+    const next = a.value.slice(0, a.selectionStart) + insert + a.value.slice(a.selectionEnd);
+    Reflect.set(HTMLTextAreaElement.prototype, "value", next, a);
+    a.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  };
+  Object.defineProperty(document, "execCommand", { value: exec, configurable: true });
+}
+
+test("a long paste over selected words takes them out, as any paste does; Cmd+Z puts them back and takes the chip off", async () => {
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref }));
+  await type("Compare THIS with clause 4.");
+  field().focus();
+  field().setSelectionRange(8, 13);
+  const one = brief(PASTE_CHIP_MIN, "a");
+  expect(await paste(one)).toBe(true);
+  expect(ref.current?.draft()).toEqual({ typed: "Compare with clause 4.", pastes: [one] });
+  // happy-dom has no execCommand: taken out in place, and the composer's own undo puts them back
+  expect(await undoKey(field())).toBe(true);
+  expect(ref.current?.draft()).toEqual({ typed: "Compare THIS with clause 4.", pastes: [] });
+  // through the engine's editing, its undo is the engine's: the chip goes, and the key goes on to the engine
+  engine();
+  try {
+    field().setSelectionRange(8, 13);
+    expect(await paste(one)).toBe(true);
+    expect(ref.current?.draft()).toEqual({ typed: "Compare with clause 4.", pastes: [one] });
+    expect(await undoKey(field())).toBe(false);
+    expect(chips()).toHaveLength(0);
+  } finally {
+    Reflect.deleteProperty(document, "execCommand");
+  }
+});

@@ -3,14 +3,16 @@
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { chipOf, type PasteChip } from "./paste-chips-logic.ts";
 
-/** A change of the chips, alone (a chip's remove button) or with a change of the field's words (a clear, fill or set
- * through the handle), which Cmd/Ctrl+Z takes back, with the field's: `box` is what the field held after it, `engine`
- * whether the engine's undo holds the field's part of it. */
-type Step = {
+/** A change of the chips, alone (a paste, a chip's remove button) or with a change of the field's words (a paste
+ * over selected words, a clear, fill or set through the handle), which Cmd/Ctrl+Z takes back, with the field's: `box`
+ * is what the field held after it, `engine` whether the engine's undo holds the field's part of it, and `was`, when
+ * the field's part was made in place, what the field held before it. */
+export type Step = {
   before: readonly PasteChip[];
   after: readonly PasteChip[];
   box: string;
   engine: boolean;
+  was?: string;
 };
 
 /** The composer's chips: the list to draw, read through a ref so a keystroke never waits on a render, and the chips'
@@ -40,11 +42,10 @@ export function usePasteChips(initial: readonly PasteChip[]) {
     /** The chips now, read without a render. */
     now: () => now.current,
     has: () => now.current.length > 0,
-    /** A paste of `text`, as the last chip: the lawyer's own change, so no undo step of the field's comes with it. */
-    add: (text: string) => {
-      steps.current = [];
-      put([...now.current, chipOf(text)]);
-    },
+    /** A paste of `text`, as the last chip: one step Cmd/Ctrl+Z takes back, the field holding `box`. The step comes
+     * back for a paste over selected words to say how they went. */
+    add: (text: string, box: string): Step =>
+      push({ before: now.current, after: [...now.current, chipOf(text)], box, engine: false }),
     /** A chip's remove button: one step Cmd/Ctrl+Z takes back, from the field or from a chip's button, so a stray
      * press never loses the paste. `box` is what the field holds. */
     remove: (id: number, box: string) => {
@@ -67,18 +68,19 @@ export function usePasteChips(initial: readonly PasteChip[]) {
       steps.current = [];
     },
     /** Cmd/Ctrl+Z, on the field (`inField`) or on a chip's button, the field holding `box`: when the next undo is
-     * of a step that changed the chips, their change is taken back too. True when the field's part was not the
-     * engine's to undo, so the key must do nothing more. Off the field, a step whose words the engine holds is left
-     * for the field's own undo. */
-    undo: (e: ReactKeyboardEvent, mac: boolean, box: string, inField: boolean): boolean => {
+     * of a step that changed the chips, their change is taken back too, and the step comes back. When its `engine` is
+     * false the key must do nothing more (and the field's words go back to its `was`, if it has one); when true, the
+     * engine's own undo takes the field's part back. Off the field, a step whose words the engine holds is left for
+     * the field's own undo. */
+    undo: (e: ReactKeyboardEvent, mac: boolean, box: string, inField: boolean): Step | null => {
       const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-      if (!mod || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z") return false;
+      if (!mod || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z") return null;
       const top = steps.current.at(-1);
-      if (top === undefined || top.after !== now.current || top.box !== box) return false;
-      if (top.engine && !inField) return false;
+      if (top === undefined || top.after !== now.current || top.box !== box) return null;
+      if (top.engine && !inField) return null;
       steps.current.pop();
       put(top.before);
-      return !top.engine;
+      return top;
     },
   };
 }

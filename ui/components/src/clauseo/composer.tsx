@@ -26,7 +26,7 @@ import type { MenuShown } from "./composer-menu.tsx";
 import { useRoom } from "./room-scope.ts";
 import { PaperChips } from "./paper-chips.tsx";
 import { PasteChips } from "./paste-chips.tsx";
-import { usePasteChips } from "./paste-chips-state.ts";
+import { usePasteChips, type Step } from "./paste-chips-state.ts";
 import {
   chipOf,
   draftOf,
@@ -316,6 +316,15 @@ export function Composer<V extends string = string>({
     setEmpty(none);
     onInput?.(draft(), none && !chips.has());
   };
+  // a Cmd/Ctrl+Z the chips took (usePasteChips's undo): with its words not the engine's to undo, nothing more of the
+  // key, the field's words put back if they were taken out in place, and the room told. True when the key is done
+  const undone = (e: KeyboardEvent<HTMLElement>, step: Step | null, a: HTMLTextAreaElement) => {
+    if (step === null || step.engine) return false;
+    e.preventDefault();
+    if (step.was !== undefined) a.value = step.was;
+    changed();
+    return true;
+  };
   // the field's words and the chips together set to `next`, as it holds them apart: the chips first, so the field's
   // input event reads them, and one undo step for both (usePasteChips); a field the engine left as it was is told here.
   // A chip kept in its place keeps its words' count
@@ -464,10 +473,8 @@ export function Composer<V extends string = string>({
                   onKeyDown={(e) => {
                     // Cmd/Ctrl+Z on a chip's button, as after a remove whose focus went to the next chip: the
                     // chip comes back
-                    if (chips.undo(e, platform === "mac", area.current?.value ?? "", false)) {
-                      e.preventDefault();
-                      changed();
-                    }
+                    const a = area.current;
+                    if (a !== null) undone(e, chips.undo(e, platform === "mac", a.value, false), a);
                   }}
                 />
               )}
@@ -501,12 +508,34 @@ export function Composer<V extends string = string>({
             }}
             onInput={(e) => changed(true, (e.nativeEvent as InputEvent).inputType)}
             onPaste={(e) => {
-              // a long paste is a chip, not words in the field (paste-chips-logic.ts)
+              // a long paste is a chip, not words in the field (paste-chips-logic.ts), one step undo takes back
               const text = e.clipboardData.getData("text/plain");
               if (composing.current || text.length < PASTE_CHIP_MIN) return;
               e.preventDefault();
-              chips.add(text);
-              changed();
+              const a = e.currentTarget;
+              const was = a.value;
+              const [from, to] = [a.selectionStart, a.selectionEnd];
+              // the chip first, so the input event of the selection's removal reads it
+              const step = chips.add(text, was);
+              if (from === to) {
+                changed();
+                return;
+              }
+              // a paste over selected words takes them out, as any paste does: through the engine's editing where it
+              // can, so its undo puts them back with the chip's; else in place, and the step puts them back
+              const doc = a.ownerDocument;
+              const engine =
+                typeof doc.execCommand === "function" &&
+                doc.execCommand("delete") &&
+                a.value !== was;
+              if (!engine) {
+                a.value = was.slice(0, from) + was.slice(to);
+                a.setSelectionRange(from, from);
+                step.was = was;
+              }
+              step.box = a.value;
+              step.engine = engine;
+              if (!engine) changed();
             }}
             onCompositionStart={() => {
               composing.current = true;
@@ -525,12 +554,10 @@ export function Composer<V extends string = string>({
               settle(true);
             }}
             onKeyDown={(e) => {
-              // Cmd/Ctrl+Z taking back a clear, fill or set takes its chips back too, and a chip removed comes back
-              if (chips.undo(e, platform === "mac", e.currentTarget.value, true)) {
-                e.preventDefault();
-                changed();
-                return;
-              }
+              // Cmd/Ctrl+Z taking back a clear, fill or set takes its chips back too; a chip removed comes back, and
+              // a chip just pasted goes
+              const a = e.currentTarget;
+              if (undone(e, chips.undo(e, platform === "mac", a.value, true), a)) return;
               const key = {
                 key: e.key,
                 shiftKey: e.shiftKey,
