@@ -524,11 +524,16 @@ fn only_the_trust_roots_file_opens() {
     assert!(!sandbox.allow_read.iter().any(|path| path.contains("/tls")));
 }
 
-/// The own folders' shell allow rules come with the sandbox only: with it off (`Off`, falling
-/// back to `acceptEdits`) a command they allowed would run unsandboxed and unjudged. Their
-/// `Read` rules stay either way. (On Windows, which has no sandbox, the shell rules stay.)
+/// The own folders' shell rules and their glob denies, by launch: on Windows (never sandboxed)
+/// the glob denies go in and the allow rules stay; on macOS or Linux with Claude's sandbox
+/// `Off` the glob denies go in and the own folders' shell allow rules are dropped (a command
+/// one allowed would run unsandboxed and unjudged); sandboxed, no glob denies and the allow
+/// rules stay. The own folders' `Read` rules stay in every case.
 #[test]
-#[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
+#[cfg_attr(
+    windows,
+    ignore = "Claude's sandbox is macOS and Linux only; see the next test"
+)]
 fn the_own_folders_shell_rules_need_the_sandbox() {
     let session = Session::new("s-1");
     let deny = LaunchDeny {
@@ -536,7 +541,7 @@ fn the_own_folders_shell_rules_need_the_sandbox() {
         own_reads: vec!["run/s-1/work".to_owned()],
         ..LaunchDeny::default()
     };
-    let allow = |sandbox: Option<&ClaudeSandbox>| {
+    let permissions = |sandbox: Option<&ClaudeSandbox>| {
         let keys = ClaudeKeys {
             web_search: Switch {
                 on: false,
@@ -555,15 +560,41 @@ fn the_own_folders_shell_rules_need_the_sandbox() {
         };
         let mut options = serde_json::Map::new();
         claude_options(&mut options, &keys);
-        let allow = texts(&options["settings"]["permissions"]["allow"]);
-        allow.into_iter().map(str::to_owned).collect::<Vec<_>>()
+        let list = |name: &str| -> Vec<String> {
+            texts(&options["settings"]["permissions"][name])
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        };
+        (list("allow"), list("deny"))
     };
-    let shell = |rules: &[String]| rules.iter().any(|rule| rule.starts_with("Bash("));
+    let globs = crate::agent::data_fence::own_shell_glob_deny_rules(&deny, false);
+    assert!(!globs.is_empty());
+    let glob_denies = |rules: &[String]| globs.iter().all(|glob| rules.contains(glob));
+    let any_glob_deny = |rules: &[String]| globs.iter().any(|glob| rules.contains(glob));
+    let own_shell = crate::agent::data_fence::own_shell_allow_rules(&deny, false);
+    assert!(!own_shell.is_empty());
+    let shell = |rules: &[String]| own_shell.iter().all(|rule| rules.contains(rule));
+    let any_shell = |rules: &[String]| own_shell.iter().any(|rule| rules.contains(rule));
     let read = |rules: &[String]| rules.iter().any(|rule| rule.ends_with("/run/s-1/work/**)"));
+    let (allow, denied) = permissions(None);
+    assert!(read(&allow), "{allow:?}");
+    assert!(glob_denies(&denied), "{denied:?}");
+    assert!(!any_shell(&allow), "{allow:?}");
     let sandbox = mac(&session.paths()).unwrap();
-    let on = allow(Some(&sandbox));
-    assert!(shell(&on) && read(&on), "{on:?}");
-    let off = allow(None);
-    assert!(read(&off), "{off:?}");
-    assert!(!shell(&off), "{off:?}");
+    let (allow, denied) = permissions(Some(&sandbox));
+    assert!(shell(&allow) && read(&allow), "{allow:?}");
+    assert!(!any_glob_deny(&denied), "{denied:?}");
+}
+
+/// Which launches drop the own folders' shell allow rules, and which get their glob denies:
+/// Windows (never sandboxed) gets the denies and keeps the allows; macOS or Linux with the
+/// sandbox `Off` gets the denies and drops the allows; sandboxed, neither.
+#[test]
+fn the_own_folders_rules_by_launch() {
+    use super::profile::own_shell_rules;
+    // (windows, sandboxed) → (glob denies, shell allows dropped)
+    assert_eq!(own_shell_rules(true, false), (true, false));
+    assert_eq!(own_shell_rules(false, false), (true, true));
+    assert_eq!(own_shell_rules(false, true), (false, false));
 }

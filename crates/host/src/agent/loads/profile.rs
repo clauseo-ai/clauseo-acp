@@ -272,6 +272,13 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
 /// 2 MiB settings file Claude Code reads (`agent::launch_settings`), which refuses a larger one.
 pub(crate) const SHED_AT: usize = 1_887_436;
 
+/// For a launch on Windows (`windows`) or not, `sandboxed` by Claude's shell sandbox or not:
+/// whether the own folders' glob denies go in (no shell sandbox), and whether their shell allow
+/// rules are dropped (Claude's sandbox `Off` where one was meant to be: all but Windows).
+pub(super) fn own_shell_rules(windows: bool, sandboxed: bool) -> (bool, bool) {
+    (!sandboxed, !windows && !sandboxed)
+}
+
 /// `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`; on Windows also its
 /// `Bash` and `PowerShell` rules, `data_fence::windows_shell_deny_rules`, without the variable
 /// forms when all of them would take the settings past [`SHED_AT`], counting the allow rules),
@@ -290,11 +297,10 @@ fn deny_data_folder(
     if data.spellings.is_empty() {
         return;
     }
-    // Claude's sandbox off where one was meant to be (`sandbox::Off`, all but Windows).
-    let sandbox_off = !cfg!(windows) && !sandboxed;
+    let (glob_denies, sandbox_off) = own_shell_rules(cfg!(windows), sandboxed);
     let mut permissions = take_object(settings, "permissions");
     let mut deny = take_array(&mut permissions, "deny");
-    for rule in crate::agent::data_fence::claude_deny_rules(data, sandboxed) {
+    for rule in crate::agent::data_fence::claude_deny_rules(data, !glob_denies) {
         push_new(&mut deny, &rule);
     }
     let mut allow = take_array(&mut permissions, "allow");

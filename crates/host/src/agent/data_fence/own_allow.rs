@@ -70,7 +70,7 @@
 //! listing that follows links (`ls -RL <notes>`, Windows PowerShell 5.1's `Get-ChildItem
 //! -Recurse` through a junction) can list the names in a linked target, though not its contents.
 //!
-//! When that sandbox is off (`loads::sandbox::Off`: no short temp folder, a path not UTF-8 or
+//! When Claude's sandbox is off (`loads::sandbox::Off`: no short temp folder, a path not UTF-8 or
 //! with a wildcard), a launch gets none of the own folders' shell allow rules
 //! (`super::claude_allow_rules`): a command one allowed would run unsandboxed and unjudged.
 
