@@ -19,6 +19,7 @@ use clauseo_protocol::{
     CheckpointId, FileChange, FolderSupportKind, MatterId, MatterPath, RestoreRequest,
 };
 
+use crate::agent::always::real_within;
 use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
 use crate::agent::folder_support::CheckSource;
 use crate::clock::Clock;
@@ -117,14 +118,13 @@ pub(crate) enum MatterJob {
     /// `Matter::create`; the worker keeps the matter. Its folder check uses `check`, the
     /// actor's source.
     Create { new: NewMatter, check: CheckSource },
-    /// `Matter::import` with a no-op progress callback; `cancel` is set by shutdown.
-    /// Before it, the place check (`check_place`) and then the registry: a folder that is,
-    /// holds or sits inside one of `registry`'s folders is refused (`check_registry`:
-    /// `matter.folder_is_matter`, `matter.folder_inside_matter`, `matter.folder_holds_matter`),
-    /// and a listed matter's own folder or one being made is answered
-    /// without an import (`ImportEnd::Listed`, `ImportEnd::Making`). A marker naming a matter
-    /// the registry does not hold is adopted or set aside (`import.rs`). Its folder check uses
-    /// `check`, the actor's source.
+    /// `Matter::import` with a no-op progress callback; `cancel` is set by shutdown. Before it, the
+    /// place check (`check_place`) and then the registry: a folder that is, holds or sits inside
+    /// one of `registry`'s folders is refused (`check_registry`: `matter.folder_is_matter`,
+    /// `matter.folder_inside_matter`, `matter.folder_holds_matter`), and a listed matter's own
+    /// folder or one being made is answered without an import (`ImportEnd::Listed`,
+    /// `ImportEnd::Making`). A marker naming a matter the registry does not hold is adopted or set
+    /// aside (`import.rs`). Its folder check uses `check`, the actor's source.
     Import {
         new: NewMatter,
         refused: Vec<PathBuf>,
@@ -183,12 +183,10 @@ pub(crate) enum MatterJob {
         scope: RestoreRequest,
         undoes: Option<CheckpointId>,
     },
-    /// The first of `paths` (as the agent named them: absolute, or relative to `folder`) that
-    /// lies in `folder` and that Word or another program holds open, by
-    /// `clauseo_matters::held_open_at`, after the data-folder check `fence`
-    /// (`agent/data_fence.rs`), when there is one; and whether `real`, a kept path rule's
-    /// file, is inside `folder` by its real path (`agent::always::real_within`). Needs no
-    /// open matter.
+    /// The first of `paths` (as the agent named them: absolute, or relative to `folder`) in
+    /// `folder` that Word or another program holds open (`clauseo_matters::held_open_at`), after
+    /// the `fence` check (`agent/data_fence.rs`); and whether `real`, a kept rule's file, is
+    /// inside `folder` by its real path (`agent::always::real_within`). Needs no open matter.
     HeldOpen {
         folder: PathBuf,
         paths: Vec<PathBuf>,
@@ -519,8 +517,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             fence,
             real,
         } => {
-            let inside =
-                real.map(|real| crate::agent::always::real_within(&real, &folder, cfg!(windows)));
+            let inside = real.map(|real| real_within(&real, &folder, cfg!(windows)));
             MatterReply::HeldOpen(check_paths(&folder, paths, fence.as_deref()), inside)
         }
         MatterJob::ListPapers { limit } => {
