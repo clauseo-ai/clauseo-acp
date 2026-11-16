@@ -71,7 +71,19 @@ const CODEX_HOME: &str = "CODEX_HOME";
 /// plugins are on by default. `features.plugins=false` stops it; nothing the home's config names
 /// (MCP servers, plugin and skill MCP servers, hooks) ran before a thread. The others cost
 /// nothing.
-pub const CODEX_OVERRIDES: [&str; 8] = [
+///
+/// Memories off (one matter's facts never surface in another's session): every matter's Codex
+/// sessions share one home, and Codex's memories (`memories_1.sqlite` and `memories/` there)
+/// are home-wide. At 0.162.1 the feature is off by default (`features/src/lib.rs:1230-1235`,
+/// key `memories`), but an app-server client may turn it on at run time
+/// (`experimentalFeature/enablement/set`, `app-server/src/request_processors/
+/// config_processor.rs:66-79`); a `features` key any config layer sets is protected from that
+/// (`app-server/src/config_manager.rs:574-616`). `features.memories=false` stops extraction
+/// (`memories/write/src/start.rs:33-38`) and prompt injection
+/// (`ext/memories/src/extension.rs:48`); `memories.use_memories=false` is the injection's own
+/// switch, and `memories.generate_memories=false` stores each new thread with `memory_mode =
+/// "disabled"` (`config/src/types.rs:327-330`), so no thread of a session is ever extracted.
+pub const CODEX_OVERRIDES: [&str; 11] = [
     "features.apps=false",
     "features.plugins=false",
     "features.skill_mcp_dependency_install=false",
@@ -80,6 +92,9 @@ pub const CODEX_OVERRIDES: [&str; 8] = [
     "skills.include_instructions=false",
     "cli_auth_credentials_store=\"file\"",
     "shell_environment_policy.ignore_default_excludes=false",
+    "features.memories=false",
+    "memories.generate_memories=false",
+    "memories.use_memories=false",
 ];
 
 /// What the app-server answered.

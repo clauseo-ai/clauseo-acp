@@ -100,10 +100,10 @@ pub(crate) const WINDOWS_SANDBOX: &str = "unelevated";
 /// The `CODEX_CONFIG` object: [`MODEL_KEYS`] from a settings `CODEX_CONFIG` that parses as a
 /// JSON object; then the launch profile's keys (`agent::loads::profile::codex_keys`), only
 /// [`LAUNCH_KEYS`], merged add-only ([`merge_add_only`]); then every one of
-/// `clauseo_limits::CODEX_OVERRIDES` (apps, plugins, skill MCP installs, cloud skills and
-/// bundled skills off, and no skills instructions) as nested keys over them all, so R15's pins
-/// win; then `hooks`, the object the [hooks seam](crate::actor::turn) gives, when there is one,
-/// over everything. On Windows, `windows.sandbox` is [`WINDOWS_SANDBOX`], set with R15's pins.
+/// `clauseo_limits::CODEX_OVERRIDES` (apps, plugins, skill MCP installs, cloud skills, bundled
+/// skills and memories off, and no skills instructions) as nested keys over them all, so R15's
+/// pins win; then `hooks`, the object the [hooks seam](crate::actor::turn) gives, when there is
+/// one, over everything. On Windows, `windows.sandbox` is [`WINDOWS_SANDBOX`], set with R15's pins.
 /// Nothing here reaches `<agent_home>/config.toml` ([`home_config`]). With folders on the
 /// session's `PATH`, off Windows, the launch then adds `allow_login_shell = false` and
 /// `features.shell_snapshot = false` ([`without_login_shell`]), so Codex's shells keep the

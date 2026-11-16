@@ -13,7 +13,8 @@ use super::{browser_run_dir, remove_tree, run_dir};
 /// folders (the guard's `--cwd`), is set aside and deleted the same way, within `<data>/browser`,
 /// and so is `<data>/browser/guard`, the sessions' guard records (`pre_write_guard/record.rs`).
 /// The files in `<data>/launch-settings`, earlier runs' Claude settings
-/// (`agent::launch_settings`), are removed there and then, before any launch writes one.
+/// (`agent::launch_settings`), are removed there and then, before any launch writes one, and so
+/// are Codex's memories from earlier builds, once per data folder (`agent::codex_memories`).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RunSweep(std::sync::Arc<std::sync::Mutex<Swept>>);
 
@@ -44,6 +45,7 @@ impl RunSweep {
             &parents[1],
         );
         crate::agent::launch_settings::sweep(&crate::agent::launch_settings::folder(data));
+        crate::agent::codex_memories::clear_once(data);
         let started = std::thread::Builder::new()
             .name("clauseo-run-sweep".to_owned())
             .spawn(move || parents.iter().for_each(|parent| delete_set_aside(parent)));
@@ -120,3 +122,7 @@ fn delete_set_aside(parent: &Path) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "sweep_tests.rs"]
+mod tests;

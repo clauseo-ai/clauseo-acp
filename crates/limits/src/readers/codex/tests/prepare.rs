@@ -86,6 +86,12 @@ fn codex_home_is_forced_over_inherited_and_settings_values_in_any_case() {
         "cli_auth_credentials_store=\"file\"",
         "-c",
         "shell_environment_policy.ignore_default_excludes=false",
+        "-c",
+        "features.memories=false",
+        "-c",
+        "memories.generate_memories=false",
+        "-c",
+        "memories.use_memories=false",
     ]
     .map(OsString::from);
     let mut args = vec![codex_js.into_os_string()];
