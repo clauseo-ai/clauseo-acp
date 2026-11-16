@@ -128,8 +128,10 @@ pub(crate) struct Read {
     pub(crate) first_skip: Option<Unreadable>,
     /// stetdoc's warnings by code alone (`other` for a code that is not a plain word).
     pub(crate) warnings: Vec<String>,
-    /// The ids of the changes the body's lines name, and the lines of the parts shown
-    /// (`story.rs`), for the check against stetdoc's own list (`ledger.rs`).
+    /// The ids of the changes the body's lines name, and the lines of every part the story views
+    /// read (`story.rs`; a part read and not shown names ids only when a line names a change no
+    /// paragraph shows, which says the blackline may differ), for the check against stetdoc's
+    /// own list (`ledger.rs`).
     pub(crate) ids: BTreeSet<u64>,
     /// How many tracked changes stetdoc's summary counts, in every story.
     pub(crate) counted: usize,

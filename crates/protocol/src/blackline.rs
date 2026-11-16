@@ -81,8 +81,8 @@ open_data_enum! {
         },
         /// A header, with the pages it is on.
         Header = "header" {
-            /// Where Word shows it: each kind of page, with the sections. Empty when stetdoc
-            /// does not say.
+            /// Where Word shows it: each kind of page, with the sections. Empty for a part no
+            /// section uses (stetdoc prints a bare `{header}`).
             uses: Vec<HeaderUse>,
         },
         /// A footer, with the pages it is on.
@@ -118,7 +118,7 @@ open_data_enum! {
 pub struct HeaderUse {
     /// The kind of page.
     pub slot: HeaderSlot,
-    /// The sections, from 1, in order. Empty when not known.
+    /// The sections, from 1, in order; never empty.
     pub sections: Vec<u32>,
 }
 
@@ -301,9 +301,9 @@ open_unit_enum! {
         TextBoxChanged,
         /// The formatting of some tables changed: a table's own (its borders, widths, alignment
         /// and the like), a row's or a cell's (its shading, borders, merging). The blackline
-        /// does not mark it; [`WordBlackline::changed_tables`] names each table Clauseo's own
-        /// comparison found, and is empty when only stetdoc's list of changes said so (a tracked
-        /// cell change).
+        /// does not mark it. [`WordBlackline::changed_tables`] names each table Clauseo's own
+        /// comparison of the two files found. The notice can also come from stetdoc's list of
+        /// changes (a tracked cell change in the redline), which names no table.
         CellFormatChanged,
         /// stetdoc warned about something else this version does not know: some of the
         /// blackline may not match the document in Word exactly.

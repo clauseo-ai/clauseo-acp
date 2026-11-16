@@ -557,9 +557,9 @@ export type BlacklineNotice =
 /**
  *  The formatting of some tables changed: a table's own (its borders, widths, alignment
  *  and the like), a row's or a cell's (its shading, borders, merging). The blackline
- *  does not mark it; [`WordBlackline::changed_tables`] names each table Clauseo's own
- *  comparison found, and is empty when only stetdoc's list of changes said so (a tracked
- *  cell change).
+ *  does not mark it. [`WordBlackline::changed_tables`] names each table Clauseo's own
+ *  comparison of the two files found. The notice can also come from stetdoc's list of
+ *  changes (a tracked cell change in the redline), which names no table.
  */
 "cell_format_changed" | 
 /**
@@ -630,8 +630,8 @@ export type BlacklinePartKind =
 /**  A header, with the pages it is on. */
 ({ header: {
 	/**
-	 *  Where Word shows it: each kind of page, with the sections. Empty when stetdoc
-	 *  does not say.
+	 *  Where Word shows it: each kind of page, with the sections. Empty for a part no
+	 *  section uses (stetdoc prints a bare `{header}`).
 	 */
 	uses: HeaderUse[],
 } }) & { endnote?: never; footer?: never; footnote?: never } | 
@@ -2437,7 +2437,7 @@ export type HeaderSlot =
 export type HeaderUse = {
 	/**  The kind of page. */
 	slot: HeaderSlot,
-	/**  The sections, from 1, in order. Empty when not known. */
+	/**  The sections, from 1, in order; never empty. */
 	sections: number[],
 };
 
