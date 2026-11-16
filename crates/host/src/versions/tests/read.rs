@@ -178,21 +178,25 @@ fn the_constant_keeps_deleted_files_unreadable() {
     );
 }
 
+#[cfg(unix)]
 #[test]
-fn a_file_put_back_as_a_link_or_under_another_case_is_not_in_the_matter() {
+fn a_file_put_back_as_a_link_is_not_in_the_matter() {
     let (fixture, v2) = deleted_fixture("versions-read-deleted-link");
     let outside = fixture.dir.path().join("outside.txt");
     crate::write::write_file(&outside, b"elsewhere").unwrap();
     crate::write::symlink(&outside, &fixture.folder().join("gone.txt")).unwrap();
-    let backend = fixture.backend();
     assert_eq!(
-        refused(&read(&backend, v2, "gone.txt")),
+        refused(&read(&fixture.backend(), v2, "gone.txt")),
         Refusal::Deleted.text()
     );
-    crate::write::remove_link(&fixture.folder().join("gone.txt")).unwrap();
+}
+
+#[test]
+fn a_file_put_back_under_another_case_is_not_in_the_matter() {
+    let (fixture, v2) = deleted_fixture("versions-read-deleted-case");
     fixture.put("GONE.txt", b"another file");
     assert_eq!(
-        refused(&read(&backend, v2, "gone.txt")),
+        refused(&read(&fixture.backend(), v2, "gone.txt")),
         Refusal::Deleted.text()
     );
 }
