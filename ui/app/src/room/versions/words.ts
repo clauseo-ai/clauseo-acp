@@ -10,7 +10,7 @@ import {
   type Calendar,
   type Version,
 } from "@clauseo/components/clauseo/versions-model.ts";
-import type { Lang } from "@clauseo/components/lib/display.ts";
+import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { clock } from "@clauseo/components/lib/words.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
@@ -25,7 +25,15 @@ import type {
 } from "../../transport/protocol.ts";
 import { serviceName } from "../sync-services.ts";
 import { clockOf } from "../when.ts";
-import { changedSince, type Ask, type Done, type Snapshot, type Unsaved } from "./state.ts";
+import {
+  changedSince,
+  type Ask,
+  type Clash,
+  type Done,
+  type FileUndid,
+  type Snapshot,
+  type Unsaved,
+} from "./state.ts";
 import { fileName, namesOf } from "@clauseo/components/lib/words-core.ts";
 
 /** A conversation's name as the rail gives it (conversations.ts's titleOf); one without a title is a new
@@ -68,7 +76,7 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
   const v = versionOf(s, ask.id);
   if (v === undefined) return null;
   // a refusal that named no file: the dialog stays as it was, says why, and offers Try again
-  const failed = ask.failed === null ? null : errorWords(lang, ask.failed);
+  const failed = ask.failed === null ? null : refusalWords(lang, ask.failed, s.clash);
   if (ask.act === "restore") {
     const { changes, added_since, kept } = ask.preview;
     // undoing a restore: the files it added go (an older host's answer names none)
@@ -109,9 +117,15 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
               papers: quoted(kept),
             }),
     ].filter((x) => x !== null);
+    // a file renamed since comes back at its old name, and the renamed one stays beside it
+    const renamed = s.compare?.changes?.find(
+      (c) =>
+        typeof c.change === "object" && "renamed" in c.change && c.change.renamed.from === ask.file,
+    );
+    const current = renamed === undefined ? null : fileName(renamed.path);
     if (ask.file !== null && ask.undoes === null)
       return {
-        ...fileAskOf(lang, cal, v, name(ask.file), changes[0]?.change, kept.length > 0),
+        ...fileAskOf(lang, cal, v, name(ask.file), changes[0]?.change, kept.length > 0, current),
         stays: stays.length === 0 ? null : stays.join(" "),
         failed,
       };
@@ -163,8 +177,9 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
 }
 
 /** The restore dialog's words for putting one file back as it was at a version (Versions' per-file Restore): a copy
- * there now is replaced and stays in Versions; a file gone comes back. change: what the preview says writing it does
- * (modified: replaced, added: back), undefined when it writes nothing; kept: the file can't be restored. */
+ * there now is replaced and stays in Versions; a file gone comes back, beside the renamed copy (current) that stays.
+ * change: what the preview says writing it does (modified: replaced, added: back), undefined when it writes nothing;
+ * kept: the file can't be restored. */
 function fileAskOf(
   lang: Lang,
   cal: Calendar,
@@ -172,6 +187,7 @@ function fileAskOf(
   paper: string,
   change: FileChange["change"] | undefined,
   kept: boolean,
+  current: string | null,
 ): RestoreAsk & { kind: "confirm" } {
   return {
     kind: "confirm",
@@ -194,13 +210,19 @@ function fileAskOf(
             "This replaces '{paper}' as it is now. The copy you have now stays in Versions, so you can undo this.",
             { paper },
           )
-        : change !== undefined
-          ? vt(lang, "'{paper}' comes back as it was then. You can undo this.", { paper })
-          : kept
-            ? vt(lang, "Nothing will change.")
-            : vt(lang, "Nothing will change. '{paper}' is already the same as it was then.", {
-                paper,
-              }),
+        : change !== undefined && current !== null
+          ? vt(
+              lang,
+              "'{paper}' comes back as it was then, next to '{current}', which stays as it is. You can undo this.",
+              { paper, current },
+            )
+          : change !== undefined
+            ? vt(lang, "'{paper}' comes back as it was then. You can undo this.", { paper })
+            : kept
+              ? vt(lang, "Nothing will change.")
+              : vt(lang, "Nothing will change. '{paper}' is already the same as it was then.", {
+                  paper,
+                }),
     stays: null,
     edited: [],
     editedHead: null,
@@ -300,8 +322,44 @@ export function undoAskOf(lang: Lang, cal: Calendar, u: StepUndo): RestoreAsk {
   };
 }
 
-/** The line under the band for what the room last did; without its Undo, which the band adds. */
-export function doneLine(lang: Lang, cal: Calendar, s: Snapshot, done: Done): string {
+/** What undoing a one-file restore did to that paper, by its preview: put it back, moved it to the computer's bin (it
+ * wasn't in the matter before the restore), or nothing (it changed since the restore). */
+function undidFileLine(
+  lang: Lang,
+  paper: string,
+  undid: FileUndid | undefined,
+  platform: Platform,
+) {
+  if (undid === "none")
+    return vt(
+      lang,
+      "Nothing was undone: '{paper}' has changed since the restore, so Clauseo left it as it is.",
+      { paper },
+    );
+  if (undid !== "removed")
+    return vt(lang, "Undid the restore. '{paper}' is back as it was before.", { paper });
+  return platform === "windows"
+    ? vt(
+        lang,
+        "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Recycle Bin.",
+        { paper },
+      )
+    : vt(
+        lang,
+        "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Trash.",
+        { paper },
+      );
+}
+
+/** The line under the band for what the room last did; without its Undo, which the band adds. platform: the
+ * computer's, whose bin a removed paper went to. */
+export function doneLine(
+  lang: Lang,
+  cal: Calendar,
+  s: Snapshot,
+  done: Done,
+  platform: Platform = "mac",
+): string {
   switch (done.kind) {
     case "restored": {
       const to = versionOf(s, done.to);
@@ -323,6 +381,12 @@ export function doneLine(lang: Lang, cal: Calendar, s: Snapshot, done: Done): st
       const to = versionOf(s, done.to);
       const time = to === undefined ? "" : timeOf(lang, to);
       const paper = fileName(done.file);
+      if (done.moved === true)
+        return vt(
+          lang,
+          "'{paper}' had changed since you opened this, so Clauseo restored it as it was then. Your newer version is kept in Versions.",
+          { paper },
+        );
       // a version no longer in the timeline: no time to say
       if (to === undefined) return vt(lang, "Restored '{paper}'.", { paper });
       return to.day === cal.today
@@ -334,10 +398,7 @@ export function doneLine(lang: Lang, cal: Calendar, s: Snapshot, done: Done): st
           });
     }
     case "undidRestore":
-      if (done.file !== null)
-        return vt(lang, "Undid the restore. '{paper}' is back as it was before.", {
-          paper: fileName(done.file),
-        });
+      if (done.file !== null) return undidFileLine(lang, fileName(done.file), done.undid, platform);
       return vt(lang, "Undid the restore. The matter stands as it did at {time}.", {
         time: timeOfTs(lang, s, done.at),
       });
@@ -359,12 +420,13 @@ export function doneLines(
   s: Snapshot,
   done: Done,
   place: FolderPlace | undefined,
+  platform: Platform,
 ): { text: string; kept: boolean }[] {
   const kept = done.kind === "undidChange" ? (done.kept ?? []) : [];
   const own =
     done.kind === "undidChange" && done.papers.length === 0 && kept.length > 0
       ? []
-      : [{ text: doneLine(lang, cal, s, done), kept: false }];
+      : [{ text: doneLine(lang, cal, s, done, platform), kept: false }];
   return [
     ...own,
     ...kept.map((f) => ({ text: cantUndoWords(lang, f.path, f.reason, place), kept: true })),
@@ -407,10 +469,28 @@ export function cantUndoWords(
 /** A moment's clock time in the language: "4:31 pm", or "शाम 4:31". */
 const timeOfTs = (lang: Lang, s: Snapshot, ts: Timestamp) => clock(lang, at(s, ts));
 
-/** The line for a failed act, by its code: never the host's message. */
-export const failedLine = (lang: Lang, code: string): BandNotice => ({
+/** A refusal's words, by its code: never the host's message. A file/folder clash that names the entry in the way says
+ * which folder or file to rename. */
+export function refusalWords(lang: Lang, code: string, clash: Clash | null): string {
+  if (code !== "matter.file_folder_clash" || clash === null) return errorWords(lang, code);
+  const name = fileName(clash.at);
+  return clash.folder
+    ? vt(
+        lang,
+        "Clauseo can't restore this paper: there's now a folder called '{name}' where it was. Nothing has changed. Rename or move that folder, then try again.",
+        { name },
+      )
+    : vt(
+        lang,
+        "Clauseo can't restore this paper: '{name}', the folder it was in, is now a file. Nothing has changed. Rename or move that file, then try again.",
+        { name },
+      );
+}
+
+/** The line for a failed act, by its code (refusalWords). */
+export const failedLine = (lang: Lang, code: string, clash: Clash | null = null): BandNotice => ({
   tone: "failed",
-  text: errorWords(lang, code),
+  text: refusalWords(lang, code, clash),
 });
 
 /** The not-saved line: which paper Clauseo changed and when, that the change couldn't be kept as a version, and that

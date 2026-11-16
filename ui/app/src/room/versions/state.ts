@@ -35,6 +35,8 @@ type RestoreAsk = {
   preview: RestorePreview;
   undoes: string | null;
   file: string | null;
+  /** The matter moved while the dialog was open and what restoring writes changed (the list was asked again). */
+  moved?: boolean;
 };
 
 /** What the restore dialog asks: to go ahead (failed: the code of a refusal that named no file, with Try again), or,
@@ -68,10 +70,13 @@ export function inRowOrder(t: Timeline, id: string, paths: readonly string[]): s
 /** What the room last did, said under the band at now. */
 export type Done =
   | { kind: "restored"; to: string; n: number; outcome: Outcome }
-  /** One file put back as it was at a version, by Versions' per-file Restore. */
-  | { kind: "restoredFile"; to: string; file: string; outcome: Outcome }
-  /** file: the one file the restore undone had put back (Versions' Restore this document), null for the matter. */
-  | { kind: "undidRestore"; at: Timestamp; file: string | null }
+  /** One file put back as it was at a version, by Versions' per-file Restore; moved: it changed while the dialog was
+   * open, and the copy it had then is kept in Versions. */
+  | { kind: "restoredFile"; to: string; file: string; outcome: Outcome; moved?: boolean }
+  /** file: the one file the restore undone had put back (Versions' Restore this document), null for the matter; undid:
+   * for that file, what the undo did to it, by its preview: put it back (back), removed it, as the restore had brought
+   * it back (removed), or nothing, as it changed since the restore (none). */
+  | { kind: "undidRestore"; at: Timestamp; file: string | null; undid?: FileUndid }
   | {
       kind: "undidChange";
       of: Timestamp;
@@ -81,18 +86,35 @@ export type Done =
       kept?: readonly SkippedFile[];
     };
 
-/** What a restore that went through did: undid the restore it undoes (that file alone, for a one-file restore's undo),
- * restored the matter, or restored one file. */
-export const restoreDone = (
-  ask: Pick<RestoreAsk, "id" | "preview" | "undoes" | "file">,
+/** What an undo of a one-file restore did to that file. */
+export type FileUndid = "back" | "removed" | "none";
+
+/** Whether restoring writes nothing: no file changed or removed (the file is the same, or the host keeps it). */
+export const writesNothing = (p: RestorePreview): boolean =>
+  p.changes.length === 0 && (p.removes ?? []).length === 0;
+
+/** What a restore that went through did: undid the restore it undoes (that file alone, for a one-file restore's undo,
+ * saying what it did to it by the preview), restored the matter, or restored one file (moved: it changed while the
+ * dialog was open, and the restore wrote). */
+export function restoreDone(
+  ask: Pick<RestoreAsk, "id" | "preview" | "undoes" | "file" | "moved">,
   outcome: Outcome,
   at: Timestamp,
-): Done =>
-  ask.undoes !== null
-    ? { kind: "undidRestore", at, file: ask.file }
-    : ask.file === null
-      ? { kind: "restored", to: ask.id, n: ask.preview.changes.length, outcome }
-      : { kind: "restoredFile", to: ask.id, file: ask.file, outcome };
+): Done {
+  const { file, preview } = ask;
+  if (ask.undoes !== null) {
+    if (file === null) return { kind: "undidRestore", at, file };
+    const undid: FileUndid = (preview.removes ?? []).includes(file)
+      ? "removed"
+      : preview.changes.length > 0
+        ? "back"
+        : "none";
+    return { kind: "undidRestore", at, file, undid };
+  }
+  if (file === null) return { kind: "restored", to: ask.id, n: preview.changes.length, outcome };
+  const moved = ask.moved === true && outcome.kind === "wrote";
+  return { kind: "restoredFile", to: ask.id, file, outcome, ...(moved ? { moved } : {}) };
+}
 
 /** The restore a restored line's Undo takes back: only one the host wrote and marked on the matter's stream. A restore
  * that found nothing to write answers with a version that was already there, and has no marker. */
@@ -111,6 +133,16 @@ export function restorable(f: FileChange): string | null {
   return typeof f.change === "object" && "renamed" in f.change ? f.change.renamed.from : null;
 }
 
+/** The restore dialog with what restoring writes, asked again: at confirm, moved once the list differs from one shown. */
+export function askedAgain(
+  ask: Extract<Ask, { act: "restore" }>,
+  preview: RestorePreview,
+): Extract<Ask, { act: "restore"; stage: "confirm" }> {
+  const { act, id, undoes, file } = ask;
+  const moved = ask.moved === true || !sameChanges(ask.preview, preview);
+  return { act, id, preview, undoes, file, moved, stage: "confirm", failed: null };
+}
+
 /** Whether two previews would write the same: the same files, each changed the same way, and the same files removed. */
 export const sameChanges = (a: RestorePreview, b: RestorePreview): boolean =>
   a.changes.length === b.changes.length &&
@@ -119,6 +151,10 @@ export const sameChanges = (a: RestorePreview, b: RestorePreview): boolean =>
 
 /** A turn whose change couldn't be kept as a version: its conversation, its first file and when it ended. */
 export type Unsaved = { thread: ThreadId; paper: string; ts: Timestamp };
+
+/** What a file/folder clash names for its words: the entry in the way, by its matter path (its own name is said), and
+ * whether it's a folder that now has the paper's name (else a file where its folder was). */
+export type Clash = { at: string; folder: boolean };
 
 export type Snapshot = {
   /** Whether the matter's first window has arrived. */
@@ -136,6 +172,8 @@ export type Snapshot = {
   canUndo: boolean;
   /** The code of the last act the host refused, for its words. */
   failed: string | null;
+  /** What the last matter.file_folder_clash refusal named, for its words; null when it named nothing. */
+  clash: Clash | null;
   unsaved: Unsaved | null;
   /** Comparing: the files that differ between the version and the folder now, null while they're asked for. */
   compare: { id: string; changes: readonly FileChange[] | null } | null;
@@ -159,6 +197,7 @@ export const freshSnapshot = (now: Timestamp, zone: string): Snapshot => ({
   done: null,
   canUndo: true,
   failed: null,
+  clash: null,
   unsaved: null,
   compare: null,
   titles: new Map(),

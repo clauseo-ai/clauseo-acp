@@ -22,6 +22,8 @@ import { localZone } from "../when.ts";
 import { lockedFiles, wordLocks } from "../word/lock.ts";
 import { Conversations } from "./conversations.ts";
 import {
+  clashOf,
+  compareNow,
   DoneWatch,
   editedSince,
   lockedRestore,
@@ -37,6 +39,7 @@ import {
   changedSince,
   defaultChoices,
   freshSnapshot,
+  askedAgain,
   inRowOrder,
   keepChangedSince,
   keepEdited,
@@ -279,17 +282,11 @@ export class VersionsController {
     this.#compared += 1;
     const asked = this.#compared;
     if (!again) this.#set({ compare: { id, changes: null } });
-    const current = () => asked === this.#compared && this.#snap.compare?.id === id;
-    try {
-      const r = await this.#transport.query({
-        compare_versions: { matter: this.matter, from: id },
-      });
-      if (!current()) return;
-      if ("file_changes" in r) this.#set({ compare: { id, changes: r.file_changes } });
-      else this.#set({ compare: null, failed: "internal" });
-    } catch (e) {
-      if (current()) this.#set({ compare: null, failed: toHostError(e).code });
-    }
+    const r = await compareNow(this.#transport, this.matter, id);
+    if (asked !== this.#compared || this.#snap.compare?.id !== id) return;
+    this.#set(
+      "changes" in r ? { compare: { id, changes: r.changes } } : { compare: null, failed: r.code },
+    );
   }
 
   /* ---------- undoing and restoring ---------- */
@@ -360,6 +357,12 @@ export class VersionsController {
   ): Promise<RestorePreview | null> =>
     previewRestore(this.#transport, this.matter, id, undoes, file);
 
+  /** A refusal's code, kept with what a clash names for its words (file: the one file being restored). */
+  #code(e: Pick<HostError, "code" | "files">, file: string | null): string {
+    this.#snap = { ...this.#snap, clash: clashOf(e, file) };
+    return e.code;
+  }
+
   /** Opens the restore dialog for a version, with what restoring it would write now; undoes: the restore this one
    * takes back; file: the one file to put back (Versions' per-file Restore). Only the newest ask opens it. */
   async askRestore(
@@ -379,7 +382,7 @@ export class VersionsController {
       });
     } catch (e) {
       const ask = await refusedPreview(id, undoes, file, toHostError(e), again);
-      if (asked === this.#asked) await this.#refused(toHostError(e).code, () => ask);
+      if (asked === this.#asked) await this.#refused(this.#code(toHostError(e), file), () => ask);
     }
   }
 
@@ -394,22 +397,23 @@ export class VersionsController {
         const now = this.#snap.ask;
         if (asked !== this.#asked || preview === null) return;
         if (now?.act === "restore" && now.stage === "confirm" && now.id === ask.id)
-          this.#set({ ask: { ...now, preview } });
+          this.#set({ ask: { ...askedAgain(now, preview), failed: now.failed } });
       },
       (error: unknown) => {
         // the list may be out of date: the dialog says the act failed, and Try again asks again
         const now = this.#snap.ask;
         if (asked !== this.#asked || now?.act !== "restore" || now.stage !== "confirm") return;
-        if (now.id === ask.id) this.#set({ ask: { ...now, failed: toHostError(error).code } });
+        if (now.id === ask.id)
+          this.#set({ ask: { ...now, failed: this.#code(toHostError(error), now.file) } });
       },
     );
   }
 
   /** Undoes a restore by restoring the version just before it, the files the restore added removed (undoes), through
    * the restore dialog, which lists what that writes and removes now; a one-file restore's undo puts back that file
-   * alone. Only a restore version is undone this way. */
+   * alone. Only a restore the matter's stream has a marker for is undone, since the marker says what it put back. */
   undoRestore(checkpoint: string): void {
-    if (this.meta(checkpoint)?.kind !== "restore" || this.#acting) return;
+    if (!this.#snap.restores.has(checkpoint) || this.#acting) return;
     const { history } = this.#snap.timeline;
     const i = history.findIndex((v) => v.id === checkpoint);
     const prior = i > 0 ? history[i - 1] : undefined;
@@ -496,13 +500,10 @@ export class VersionsController {
         ...(thread === null ? {} : { thread }),
       },
     });
-    if (
-      outcome.kind === "refused" &&
-      outcome.code === "matter.file_folder_clash" &&
-      outcome.current
-    )
+    const clash = outcome.kind === "refused" && outcome.code === "matter.file_folder_clash";
+    if (clash && outcome.current)
       // the file can't come back as things stand: the dialog says why, and Try again once it's renamed or moved
-      return this.#set({ ask: { ...ask, stage: "confirm", failed: outcome.code } });
+      return this.#set({ ask: { ...ask, stage: "confirm", failed: this.#code(outcome, file) } });
     if (outcome.kind === "refused") {
       const again = (p: string) => this.#preview(p, undoes, file);
       await this.#refused(
@@ -587,12 +588,12 @@ export class VersionsController {
     try {
       preview = await this.#preview(ask.id, ask.undoes, ask.file);
     } catch (e) {
-      if (asked === this.#asked) await this.#refused(toHostError(e).code, () => ask);
+      if (asked === this.#asked)
+        await this.#refused(this.#code(toHostError(e), ask.file), () => ask);
       return;
     }
     if (asked !== this.#asked || preview === null) return;
-    const { act, id, undoes, file } = ask;
-    const next: RestoreAsk = { act, id, preview, undoes, file, stage: "confirm", failed: null };
+    const next = askedAgain(ask, preview);
     if (sameChanges(ask.preview, preview)) await this.#restore(next);
     else this.#set({ ask: next, failed: null });
   }

@@ -103,7 +103,10 @@ fn hand_built() -> [(Error, ErrorCode); 18] {
         ),
         (Error::NoFilesChosen, ErrorCode::CommandInvalid),
         (
-            Error::FileFolderClash { path: path("a") },
+            Error::FileFolderClash {
+                path: path("a/b"),
+                in_way: path("a"),
+            },
             ErrorCode::MatterFileFolderClash,
         ),
         (

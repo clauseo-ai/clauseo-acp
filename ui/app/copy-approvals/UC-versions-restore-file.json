@@ -100,13 +100,13 @@
   },
   "UC-325": {
     "en": "Undid the restore. '{paper}' is back as it was before.",
-    "hi": "पुनर्स्थापना पूर्ववत की गई। '{paper}' फिर से वैसा है जैसा वह पहले था।",
+    "hi": "पुनर्स्थापन पूर्ववत किया गया। '{paper}' फिर से वैसा है जैसा वह पहले था।",
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-16",
-    "note": "Versions' line after undoing a one-document restore (Undo on its done line); the paper is back as it was just before the restore, so no time is given",
+    "note": "Versions' line after undoing a one-document restore that put the paper back (its preview changes it); the paper is back as it was just before the restore, so no time is given",
     "by": "host follow-ups (provisional; orchestrator to approve)"
   },
   "UC-428": {
@@ -130,5 +130,82 @@
     "at": "2026-11-16",
     "by": "host follow-ups (provisional; orchestrator to approve)",
     "note": "matter.file_folder_clash: Versions' Restore this document refused, the paper's name now a folder or its folder now a file; nothing written. Id form required by status.test.ts (one U3-err-<code> per ErrorCode)"
+  },
+  "UC-392": {
+    "en": "'{paper}' had changed since you opened this, so Clauseo restored it as it was then. Your newer version is kept in Versions.",
+    "hi": "इसे खोलने के बाद '{paper}' बदल गया था, इसलिए Clauseo ने उसे वैसा पुनर्स्थापित किया जैसा वह तब था। आपका नया रूप संस्करणों में रखा गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host follow-ups (provisional; orchestrator to approve)",
+    "note": "Versions' line after a one-document restore whose paper changed while the dialog was open (the dialog asked again, then the restore wrote); the restore's outside-edits version keeps the newer copy (restore.rs step 4, before the write)"
+  },
+  "UC-393": {
+    "en": "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Trash.",
+    "hi": "पुनर्स्थापन पूर्ववत किया गया। '{paper}' उससे पहले इस मामले में नहीं था, इसलिए Clauseo ने उसे Trash में डाल दिया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host follow-ups (provisional; orchestrator to approve)",
+    "note": "Versions' line after undoing a one-document restore that had brought the paper back (it is in the undo's removes): the undo moved it to the computer's bin; Mac and Linux. Windows: UC-394. The host deletes it for good only when the bin can't take it and the history holds it (writeback.rs)"
+  },
+  "UC-394": {
+    "en": "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Recycle Bin.",
+    "hi": "पुनर्स्थापन पूर्ववत किया गया। '{paper}' उससे पहले इस मामले में नहीं था, इसलिए Clauseo ने उसे Recycle Bin में डाल दिया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host follow-ups (provisional; orchestrator to approve)",
+    "note": "UC-393 on Windows"
+  },
+  "UC-395": {
+    "en": "Nothing was undone: '{paper}' has changed since the restore, so Clauseo left it as it is.",
+    "hi": "कुछ पूर्ववत नहीं हुआ: पुनर्स्थापन के बाद '{paper}' बदल गया है, इसलिए Clauseo ने उसे जैसा है वैसा ही छोड़ दिया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host follow-ups (provisional; orchestrator to approve)",
+    "note": "Versions' line after undoing a one-document restore whose preview wrote and removed nothing: the paper changed since the restore (it had brought it back and the lawyer edited it), so the undo left it"
+  },
+  "UC-396": {
+    "en": "Clauseo can't restore this paper: there's now a folder called '{name}' where it was. Nothing has changed. Rename or move that folder, then try again.",
+    "hi": "Clauseo यह दस्तावेज़ पुनर्स्थापित नहीं कर सकता: जहाँ यह था, वहाँ अब '{name}' नाम का एक फ़ोल्डर है। कुछ नहीं बदला है। उस फ़ोल्डर का नाम बदलें या उसे कहीं और ले जाएँ, फिर दोबारा प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host follow-ups (provisional; orchestrator to approve)",
+    "note": "matter.file_folder_clash naming the paper's own path (HostError.files): a folder now has its name; {name} is that folder's own name. Older hosts that name nothing get U3-err-matter.file_folder_clash"
+  },
+  "UC-397": {
+    "en": "Clauseo can't restore this paper: '{name}', the folder it was in, is now a file. Nothing has changed. Rename or move that file, then try again.",
+    "hi": "Clauseo यह दस्तावेज़ पुनर्स्थापित नहीं कर सकता: '{name}', जिस फ़ोल्डर में यह था, अब एक फ़ाइल है। कुछ नहीं बदला है। उस फ़ाइल का नाम बदलें या उसे कहीं और ले जाएँ, फिर दोबारा प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host follow-ups (provisional; orchestrator to approve)",
+    "note": "matter.file_folder_clash naming one of the paper's folders (HostError.files): it is now a file; {name} is that file's own name"
+  },
+  "UC-398": {
+    "en": "'{paper}' comes back as it was then, next to '{current}', which stays as it is. You can undo this.",
+    "hi": "'{paper}' वैसा ही वापस आ जाएगा जैसा तब था, और उसके साथ '{current}' भी जैसा है वैसा ही रहेगा। आप इसे पूर्ववत कर सकते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-16",
+    "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host follow-ups (provisional; orchestrator to approve)",
+    "note": "Restore this document's dialog for a paper renamed since (compared as a rename): it comes back at its old name, and the renamed copy {current} stays, so the lawyer has both. A paper removed since keeps UC-320"
   }
 }

@@ -218,30 +218,36 @@ pub(crate) fn writable(
     Ok(true)
 }
 
-/// Whether `path` meets the other kind of entry in the folder: a folder where the file goes, or
-/// a file, pipe, socket or device where one of its folders goes. A link, or nothing, on the way
+/// The entry in the folder of the other kind that `path` meets, by its matter path: a folder
+/// where the file goes (`path` itself), or a file, pipe, socket or device where one of its
+/// folders goes (that folder's path). `None` when it meets none; a link, or nothing, on the way
 /// is no clash ([`writable`] refuses a link).
-pub(crate) fn clash(folder: &Path, path: &MatterPath) -> Result<bool, Error> {
+pub(crate) fn clash(folder: &Path, path: &MatterPath) -> Result<Option<MatterPath>, Error> {
     let mut at = folder.to_owned();
+    let mut end = 0;
     let mut parts = path.as_str().split('/').peekable();
     while let Some(part) = parts.next() {
         at.push(part);
+        end += part.len();
         let kind = match std::fs::symlink_metadata(&at) {
             Ok(metadata) => metadata.file_type(),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(err) => return Err(Error::io("stat", &at, err)),
         };
         if kind.is_symlink() {
-            return Ok(false);
+            return Ok(None);
         }
         let last = parts.peek().is_none();
         // a folder where the file goes, or anything but a folder (a file, a pipe, a socket)
         // where one of its folders goes
         if (last && kind.is_dir()) || (!last && !kind.is_dir()) {
-            return Ok(true);
+            let in_way = MatterPath::new(&path.as_str()[..end])
+                .map_err(|err| Error::history("clash", err))?;
+            return Ok(Some(in_way));
         }
+        end += 1;
     }
-    Ok(false)
+    Ok(None)
 }
 
 /// Carries out `ops` so that a failure while writing changes nothing, and a deletion never

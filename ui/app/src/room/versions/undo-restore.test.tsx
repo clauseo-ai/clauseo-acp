@@ -246,3 +246,13 @@ test("undoing a restore that also writes files back lists the change, then the f
     "'\u2068a.md\u2069' and '\u2068b.md\u2069', added by the restore, will be removed.",
   );
 });
+
+test("a restore version whose marker isn't in offers no Undo: the marker says what it put back", async () => {
+  h = await mountVersions([...VERSIONS, version(4, "restore")], STEPS, {
+    query: answering({ preview_restore: { restore_preview: PREVIEW } }),
+  });
+  await h.openVersions();
+  await h.lookAt("cp4");
+  expect(h.one("version-undo")).toBeNull();
+  expect(h.queried("preview_restore")).toEqual([]);
+});

@@ -97,14 +97,18 @@ fn one_deleted_file_comes_back_with_its_folders() {
     assert_eq!(fx.read("a.txt"), b"two");
 }
 
-/// Refused with `matter.file_folder_clash`, by the preview and the restore alike, with nothing
-/// written and no checkpoint taken.
-fn assert_refused(fx: &Fixture, matter: &mut Matter, chosen: &[MatterPath]) {
+/// Refused with `matter.file_folder_clash`, by the preview and the restore alike, naming the
+/// entry in the way (`in_way_of`), with nothing written and no checkpoint taken.
+fn assert_refused(fx: &Fixture, matter: &mut Matter, chosen: &[MatterPath], in_way_of: &str) {
     let before = ids(matter);
     let err = matter
         .preview_restore(cid(1), RestoreFiles::Only(chosen), None)
         .unwrap_err();
-    assert!(matches!(&err, Error::FileFolderClash { path } if path == &chosen[0]));
+    assert!(
+        matches!(&err, Error::FileFolderClash { path, in_way }
+            if path == &chosen[0] && in_way.as_str() == in_way_of),
+        "{err:?}"
+    );
     assert_eq!(err.code(), ErrorCode::MatterFileFolderClash);
     let err = matter
         .restore(&restore_request(1, RestoreFiles::Only(chosen), 4, 5))
@@ -121,7 +125,7 @@ fn a_file_whose_name_is_now_a_folder_is_refused() {
     support::remove_file(fx.file("a.txt"));
     fx.write("a.txt/inside.txt", "in a folder now");
 
-    assert_refused(&fx, &mut matter, &only("a.txt"));
+    assert_refused(&fx, &mut matter, &only("a.txt"), "a.txt");
     assert_eq!(fx.read("a.txt/inside.txt"), b"in a folder now");
 
     // The whole matter keeps it as it is instead, as before.
@@ -137,7 +141,7 @@ fn a_file_whose_folder_is_now_a_file_is_refused() {
     support::remove_dir_all(fx.file("sub"));
     fx.write("sub", "a file now");
 
-    assert_refused(&fx, &mut matter, &only("sub/deep/c.txt"));
+    assert_refused(&fx, &mut matter, &only("sub/deep/c.txt"), "sub");
     assert_eq!(fx.read("sub"), b"a file now");
 }
 
@@ -149,7 +153,7 @@ fn a_file_whose_folder_is_now_a_socket_is_refused() {
     support::remove_dir_all(fx.file("sub"));
     let _socket = support::socket(fx.file("sub"));
 
-    assert_refused(&fx, &mut matter, &only("sub/deep/c.txt"));
+    assert_refused(&fx, &mut matter, &only("sub/deep/c.txt"), "sub");
 }
 
 /// Undo of a one-file restore, scoped to that file as Versions asks it: the file goes back to

@@ -5,7 +5,9 @@
 import type { ViewStore } from "../../store/store.ts";
 import { streamOf, type StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
+import { toHostError } from "../../transport/host-transport.ts";
 import type {
+  FileChange,
   HostError,
   MatterId,
   RestorePreview,
@@ -19,7 +21,7 @@ import type {
 } from "../../transport/protocol.ts";
 import { orderOf, pageBefore } from "../matter-stream.ts";
 import { lockedFiles, wordLocks } from "../word/lock.ts";
-import { inRowOrder, type Ask, type Done, type Unsaved } from "./state.ts";
+import { inRowOrder, type Ask, type Clash, type Done, type Unsaved } from "./state.ts";
 import type { Timeline } from "./timeline.ts";
 
 /** Pages a stream back from its window's first entry, oldest first, until none are left or `enough` says so. A page
@@ -237,6 +239,28 @@ export async function previewRestore(
     },
   });
   return "restore_preview" in r ? r.restore_preview : null;
+}
+
+/** What a refusal names for matter.file_folder_clash's words, for the file being restored: null for another code, and
+ * when the host named no entry in the way (an older host). */
+export function clashOf(e: Pick<HostError, "code" | "files">, file: string | null): Clash | null {
+  const at = e.code === "matter.file_folder_clash" ? e.files?.[0] : undefined;
+  return at === undefined ? null : { at, folder: at === file };
+}
+
+/** compare_versions' answer for a version with the folder now: the files that differ, or the code it failed with (an
+ * answer of the wrong shape is "internal"). */
+export async function compareNow(
+  transport: HostTransport,
+  matter: MatterId,
+  from: string,
+): Promise<{ changes: FileChange[] } | { code: string }> {
+  try {
+    const r = await transport.query({ compare_versions: { matter, from } });
+    return "file_changes" in r ? { changes: r.file_changes } : { code: "internal" };
+  } catch (e) {
+    return { code: toHostError(e).code };
+  }
 }
 
 /** What a restore puts back: the whole matter, or the one file Versions' per-file Restore names. */
