@@ -359,9 +359,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         tracing::warn!("no agent installs on this platform: setup answers internal");
         drop(parts.start);
         wait_for_keys(load, &keys, load_began, &side.keys);
-        let blocked = &read.settings.blocked;
-        let settle = settle_after_load(&*parts.host, &keys, read.known.keys(), blocked);
-        futures::executor::block_on(settle);
+        settle_with_no_platform(&*parts.host, &keys, &read);
         return;
     };
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
@@ -483,6 +481,15 @@ fn python_path(config: &AgentsConfig, slot: PythonSlot) -> PythonPath {
     );
     python.fill();
     python
+}
+
+/// The setup thread's end with no platform: once the keys' load is over, each agent's launch
+/// refusal from the keys (`settle_after_load`), under the firm plans the settings read gave.
+fn settle_with_no_platform(host: &dyn SetupHost, keys: &KeyCache, read: &SetupStart) {
+    let settings = &read.settings;
+    let known = read.known.keys();
+    let settle = settle_after_load(host, keys, known, &settings.blocked, &settings.firm);
+    futures::executor::block_on(settle);
 }
 
 /// Waits for the keys' first load, at most [`KEYS_LOAD_BOUND`], and logs how long it took and

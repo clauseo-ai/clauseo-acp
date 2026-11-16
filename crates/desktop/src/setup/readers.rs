@@ -82,6 +82,8 @@ pub(crate) const KEYS_POLL: Duration = Duration::from_millis(100);
 pub(crate) struct SwappableReaders {
     readers: Arc<ProcessReaders<AsyncIoTimer>>,
     keys: KeySlot,
+    /// Each agent's firm plan: a failed key read refuses a read under one (`keys_ready`).
+    plans: Plans,
     blocked: Arc<RwLock<BTreeSet<AgentId>>>,
     /// Whether the login keychain is locked now: `clauseo_agents::login_keychain_locked`, or a
     /// test's answer.
@@ -108,10 +110,12 @@ impl SwappableReaders {
         )
         .with_claude_home(locations.agent_home(AgentKind::Claude.id()));
         let vars = Arc::clone(&keys);
+        let firm_plans = Arc::clone(&plans);
         let readers = readers.with_launch_env(move |kind| read_vars(&vars, &plans, &network, kind));
         Self {
             readers: Arc::new(readers),
             keys,
+            plans: firm_plans,
             blocked: Arc::default(),
             // Tests never read the machine's keychain (a CI Mac's may be locked or missing).
             keychain_locked: if cfg!(test) {
@@ -153,12 +157,20 @@ fn refuse_blocked(blocked: &RwLock<BTreeSet<AgentId>>, kind: AgentKind) -> Resul
 }
 
 /// Waits until `keys` has loaded, at most [`KEYS_HOLD`]: the failure a read of `kind` ends
-/// with when they have not, or when its stored key is unreadable.
-async fn keys_ready(keys: &KeySlot, kind: AgentKind) -> Result<(), ReadFailure> {
+/// with when they have not, or when its stored key is unreadable (as the launches see it, with
+/// its firm plan in `plans`: `KeyCache::unreadable_for`).
+async fn keys_ready(keys: &KeySlot, plans: &Plans, kind: AgentKind) -> Result<(), ReadFailure> {
     let mut waited = Duration::ZERO;
     loop {
         if let Some(cache) = keys.get() {
-            let unreadable = AgentId::new(kind.id()).is_ok_and(|agent| cache.unreadable(&agent));
+            let unreadable = AgentId::new(kind.id()).is_ok_and(|agent| {
+                let firm = plans
+                    .read()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(&agent)
+                    .is_some_and(|plan| plan.endpoint.is_some() || plan.provider.is_some());
+                cache.unreadable_for(&agent, firm)
+            });
             if unreadable {
                 return Err(ReadFailure::LaunchFailed(
                     "the stored API key could not be read".to_owned(),
@@ -183,10 +195,11 @@ impl ReadLimits for SwappableReaders {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ReadOutcome> + Send>> {
         let readers = Arc::clone(&self.readers);
         let keys = Arc::clone(&self.keys);
+        let plans = Arc::clone(&self.plans);
         let blocked = Arc::clone(&self.blocked);
         let keychain_locked = Arc::clone(&self.keychain_locked);
         Box::pin(async move {
-            let ready = keys_ready(&keys, agent).await;
+            let ready = keys_ready(&keys, &plans, agent).await;
             // After the wait, so a block that came meanwhile holds.
             if let Err(failure) = ready.and_then(|()| refuse_blocked(&blocked, agent)) {
                 return ReadOutcome::Failed(failure);

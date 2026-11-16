@@ -91,3 +91,61 @@ fn a_failing_call_is_locked() {
         "the login keychain's failed"
     );
 }
+
+/// What the probe below prints before the record's home folder.
+#[cfg(target_os = "macos")]
+const PROBE_LINE: &str = "user-record-home:";
+
+/// Set only in the child [`the_home_is_the_user_record_s_with_home_set_elsewhere`] starts.
+#[cfg(target_os = "macos")]
+const PROBE_VAR: &str = "CLAUSEO_KEYCHAIN_HOME_PROBE";
+
+/// The child's half: prints `user_home_uncached` under the environment the parent gave it.
+/// Does nothing in a normal run.
+#[cfg(target_os = "macos")]
+#[test]
+fn user_record_home_probe() {
+    if std::env::var_os(PROBE_VAR).is_none() {
+        return;
+    }
+    let home = super::user_home_uncached().expect("the user record has a home folder");
+    println!("{PROBE_LINE}{}", home.display());
+}
+
+/// `HOME` and `CFFIXED_USER_HOME` pointing elsewhere change nothing: the folder is the user
+/// record's. The environment is set on a child (this test binary, running the probe alone), so
+/// no other test's environment changes.
+#[cfg(target_os = "macos")]
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "runs this test binary once more, with its own environment, and reads what it prints"
+)]
+fn the_home_is_the_user_record_s_with_home_set_elsewhere() {
+    let elsewhere = "/private/var/empty/clauseo-not-the-home";
+    let exe = std::env::current_exe().unwrap();
+    let output = std::process::Command::new(exe)
+        .args([
+            "--exact",
+            "signin::keychain_lock::tests::user_record_home_probe",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(PROBE_VAR, "1")
+        .env("HOME", elsewhere)
+        .env("CFFIXED_USER_HOME", elsewhere)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "the probe failed: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let printed = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix(PROBE_LINE))
+        .expect("the probe printed the home folder");
+    let record = nix::unistd::User::from_uid(nix::unistd::getuid())
+        .unwrap()
+        .unwrap()
+        .dir;
+    assert_eq!(Path::new(printed), record);
+    assert_ne!(Path::new(printed), Path::new(elsewhere));
+}
