@@ -89,3 +89,34 @@ fn codex_s_rule_names_no_matter_and_its_note_only_the_invited() {
     run.data_deny.matters = MatterFence::asked(vec![other(1, "Smith", false)]);
     assert!(codex_reads_note(&run).ends_with("may read no other matter."));
 }
+
+/// Nothing Clauseo gives Codex names a button, on any OS: its rule (fenced on macOS and Linux,
+/// the Windows one), its reads note and the notes after a refused call; each rule says, in the
+/// Windows rule's words, that the lawyer can right-click this conversation and choose the menu
+/// item (`clauseo_profile::instructions::invite_item`).
+#[test]
+fn nothing_codex_is_told_names_a_button_and_every_rule_names_the_menu_item() {
+    use crate::actor::turn::outside::fence::{codex_reads_note, codex_rule};
+    use crate::actor::turn::outside::{AGENT_NOTE, OTHER_MATTER_NOTE};
+
+    let item = clauseo_profile::instructions::invite_item();
+    let sentence = format!(
+        "say it is another matter, and that the lawyer can right-click this conversation and \
+         choose \"{item}\""
+    );
+    let data = PathBuf::from(crate::testing::abs("/Users/l/AppData/Local/Clauseo"));
+    let run = folders(&data, 1);
+    for (windows, rule) in [(false, codex_rule(false)), (true, codex_rule(true))] {
+        assert!(rule.contains(&sentence), "windows {windows}: {rule}");
+    }
+    let texts = [
+        codex_rule(false).to_owned(),
+        codex_rule(true).to_owned(),
+        codex_reads_note(&run),
+        OTHER_MATTER_NOTE.to_owned(),
+        AGENT_NOTE.to_owned(),
+    ];
+    for text in texts {
+        assert!(!text.to_lowercase().contains("button"), "{text}");
+    }
+}

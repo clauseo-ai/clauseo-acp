@@ -155,6 +155,20 @@ test("a guard notice with no paper gives null, so the row shows its text", () =>
   expect(noticeLine({ held_open_blocked: {} } as unknown as NoticeKind, en)).toBeNull();
 });
 
+const CLAUDE = { kind: "claude", name: "claude-acp" } as const;
+
+test("a read taken away mid-answer names the agent and the matter, isolated (UC-424)", () => {
+  const kind: NoticeKind = { matter_read_stopped: { matter: "m-1", name: "Joshi v. Joshi" } };
+  expect(noticeLine(kind, en, CLAUDE)).toBe(
+    `Stopped this answer so Claude can no longer read ${iso("Joshi v. Joshi")}'s files.`,
+  );
+  // the room's name for the matter, when it has one, and the host's words with no agent name
+  expect(noticeLine(kind, en, CLAUDE, () => "Joshi")).toBe(
+    `Stopped this answer so Claude can no longer read ${iso("Joshi")}'s files.`,
+  );
+  expect(noticeLine(kind, en)).toBeNull();
+});
+
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
   expect(noticeLine(undefined, en)).toBeNull();
 });

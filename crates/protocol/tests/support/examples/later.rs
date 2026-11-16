@@ -353,6 +353,15 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::ShellLimited),
         },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Stopped this answer so the AI can no longer read another matter's files."
+                .to_owned(),
+            kind: Some(NoticeKind::MatterReadStopped {
+                matter: matter_id(3),
+                name: "Smith".to_owned(),
+            }),
+        },
     ];
     notices.extend(
         [

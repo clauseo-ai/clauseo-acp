@@ -2,7 +2,8 @@
 //! each logs its event in the thread's stream, which the reducer keeps on the header
 //! (`read_matters`), so it survives a restart. The agent gets it at its next launch
 //! (`agent::matter_fence`); a live agent whose fence it changes is stopped once idle
-//! (`turn::outside::fence`).
+//! (`turn::outside::fence`), and a withdrawal while a turn runs stops that turn at once
+//! (`turn/idle/fence.rs`).
 
 use clauseo_protocol::{ErrorCode, MatterId, MatterReadAllowed, MatterReadWithdrawn, ThreadId};
 

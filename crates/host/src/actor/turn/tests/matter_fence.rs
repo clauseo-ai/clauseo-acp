@@ -20,7 +20,7 @@ use crate::agent::data_fence::{claude_allow_rules, claude_deny_rules, rule_path}
 use crate::pipeline::tests::support::TempDir;
 
 /// Registers the folder `name` under `papers` as a matter with command `n`.
-fn other_matter(rig: &mut Rig, papers: &Path, name: &str, n: u128) -> MatterId {
+pub(super) fn other_matter(rig: &mut Rig, papers: &Path, name: &str, n: u128) -> MatterId {
     let folder = papers.join(name);
     crate::write::create_dir_all(&folder).unwrap();
     let now = rig.actor.now().wall;
@@ -57,7 +57,7 @@ fn reads_note(rig: &Rig, thread: ThreadId) -> String {
 }
 
 /// The live run's Claude rules naming `matter`'s folder: (Read denied, Edit denied, Read allowed).
-fn rules_for(rig: &Rig, thread: ThreadId, matter: MatterId) -> (bool, bool, bool) {
+pub(super) fn rules_for(rig: &Rig, thread: ThreadId, matter: MatterId) -> (bool, bool, bool) {
     let run = rig.actor.threads[&thread].turn.run.as_ref().unwrap();
     let other = run
         .data_deny
@@ -92,7 +92,7 @@ fn stops_idle(rig: &mut Rig, thread: ThreadId, n: u128, command: HostCommand) {
 }
 
 /// Sends prompt `n` and runs its turn to the end on a fresh launch.
-fn turn(rig: &mut Rig, thread: ThreadId, n: u128) {
+pub(super) fn turn(rig: &mut Rig, thread: ThreadId, n: u128) {
     send_prompt(rig, n, thread);
     rig.run_until("the turn's end", |actor| {
         let state = &actor.threads[&thread].turn;

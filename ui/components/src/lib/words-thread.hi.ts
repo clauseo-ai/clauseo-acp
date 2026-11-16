@@ -211,6 +211,9 @@ export const HI = {
   "Clauseo stopped a step: the AI tried to open {matter}'s files. That's another matter.":
     "Clauseo ने एक काम रोक दिया: AI ने {matter} की फ़ाइलें खोलने की कोशिश की। वह दूसरा मामला है।",
   "Let this conversation read {matter}'s files": "इस बातचीत को {matter} की फ़ाइलें पढ़ने दें",
+  // a read the lawyer took away (or the matter forgotten) stopped the answer; {name} the agent, {matter} that
+  // matter's name, isolated (provisional, UC-424; Hindi later)
+  "Stopped this answer so {name} can no longer read {matter}'s files.": null,
   // matters Clauseo couldn't fully keep the agent out of (Claude on Windows: too many for its
   // commands; or a parent folder on a network share, or one it couldn't list); {matters} lists
   // them, with "{n} more" at the end (provisional, UC-349 and UC-350)

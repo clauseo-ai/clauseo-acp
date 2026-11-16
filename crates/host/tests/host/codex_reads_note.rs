@@ -65,6 +65,21 @@ fn branch(label: &str, blocks: &[&str], saw: &str) -> Value {
     ])
 }
 
+/// The prompt Codex holds until it is cancelled.
+const HANG: &str = "Hang on.";
+
+/// A prompt branch for [`HANG`] alone: a first word, then `session/cancel`, ended `cancelled`.
+fn hang(label: &str) -> Value {
+    json!([
+        {"expect": {"method": "session/prompt", "as": label,
+            "params": {"sessionId": "sess-1", "prompt": [{"type": "text", "text": HANG}]}}},
+        {"update": {"session": "sess-1", "update": {"sessionUpdate": "agent_message_chunk",
+            "messageId": format!("m-{label}"), "content": {"type": "text", "text": "Reading."}}}},
+        {"expect": {"method": "session/cancel", "params": {"sessionId": "sess-1"}}},
+        {"respond": {"to": label, "result": {"stopReason": "cancelled"}}},
+    ])
+}
+
 /// The scenario, written beside `folder`, with `invited` the note a launch after an invite carries.
 fn scenario(folder: &Path, invited: &str) -> Scenario {
     let none = reads_note(&[]);
@@ -98,6 +113,7 @@ fn scenario(folder: &Path, invited: &str) -> Scenario {
             branch(&p("third"), &["Third."], "saw-plain"),
             branch(&p("typed-none"), &[none.as_str(), invited], "saw-typed-none"),
             branch(&p("typed-invite"), &[invited, invited], "saw-typed-invite"),
+            hang(&p("hang")),
         ]}));
     }
     let mut text = String::new();
@@ -376,5 +392,39 @@ fn two_threads_on_one_matter_each_hear_their_own_note() {
     assert_eq!(ask(&host, &mut first, one, "Third."), "saw-plain");
     first.assert_no_mismatch();
     second.assert_no_mismatch();
+    host.shutdown();
+}
+
+/// A withdrawal while Codex answers stops the turn at once; the relaunched agent's next prompt
+/// starts with the note that it may read no other matter.
+#[test]
+fn a_withdrawal_mid_turn_stops_it_and_the_none_note_goes_first_next() {
+    let (dir, folder, smith, _) = setup("codex_reads_note_stopped");
+    let host = dir.start(0);
+    let matter = host.create_matter("m", &folder);
+    let other = host.create_matter("Smith", &smith);
+    let thread = host.create_thread(matter, CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    assert_eq!(ask(&host, &mut events, thread, "First."), "saw-plain");
+    host.ok(HostCommand::AllowMatterRead {
+        thread,
+        matter: other,
+    });
+    host.settle();
+    assert_eq!(ask(&host, &mut events, thread, "Second."), "saw-invite");
+    let (hung, _) = host.prompt(thread, HANG);
+    events.until("the turn's start", |e| {
+        e.events()
+            .any(|event| matches!(event, DomainEvent::TurnStarted(started) if started.turn == hung))
+    });
+    host.settle();
+    host.ok(HostCommand::WithdrawMatterRead {
+        thread,
+        matter: other,
+    });
+    assert_eq!(events.until_turn_ended(hung).stop, StopReason::Cancelled);
+    host.settle();
+    assert_eq!(ask(&host, &mut events, thread, "Third."), "saw-none");
+    events.assert_no_mismatch();
     host.shutdown();
 }

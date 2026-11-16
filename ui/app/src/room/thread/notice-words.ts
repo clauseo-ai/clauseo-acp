@@ -132,6 +132,31 @@ export function refusedMatterOf(
   return { matter: refused.matter, name };
 }
 
+/** "Stopped this answer so Claude can no longer read Sharma's files." (UC-424): a read the lawyer took
+ * away, or a matter forgotten, stopped the answer. The matter isolated, as a name the lawyer typed; null (the row shows
+ * the host's words) with no agent name or no matter name. Undefined for any other kind. */
+function readStopped(
+  kind: NoticeKind | undefined,
+  w: NoticeWords,
+  agent: AgentName,
+  names: MatterNameOf,
+): string | null | undefined {
+  const stopped =
+    typeof kind === "object" && kind !== null && "matter_read_stopped" in kind
+      ? kind.matter_read_stopped
+      : undefined;
+  if (stopped === undefined) return undefined;
+  const name = agentNameOf(agent);
+  if (name === null || typeof stopped.matter !== "string") return null;
+  const matter = names(stopped.matter) ?? (typeof stopped.name === "string" ? stopped.name : "");
+  return matter === ""
+    ? null
+    : w.th("Stopped this answer so {name} can no longer read {matter}'s files.", {
+        name,
+        matter: isolate(matter),
+      });
+}
+
 /** "Clauseo stopped a step: Claude tried to open Sharma's files. That's another matter.": the matter isolated, as a
  * name the lawyer typed. */
 function otherRefused(matter: string, w: NoticeWords, agent: AgentName): string {
@@ -239,6 +264,8 @@ export function noticeLine(
       : undefined;
   if (came !== undefined)
     return came.files.length + came.more === 0 ? null : cameBack(came.files, came.more, w);
+  const stopped = readStopped(kind, w, agent, names);
+  if (stopped !== undefined) return stopped;
   const refused = refusedMatterOf(kind, names);
   if (refused !== undefined)
     return refused.name === "" ? null : otherRefused(refused.name, w, agent);

@@ -39,6 +39,9 @@ pub(super) mod why {
     pub(in crate::actor::turn) const FAILURE: &str = "failure";
     /// The host stops.
     pub(in crate::actor::turn) const SHUTDOWN: &str = "shutdown";
+    /// The lawyer stopped letting the conversation read another matter, or forgot it
+    /// (`idle/fence.rs`).
+    pub(in crate::actor::turn) const FENCE: &str = "fence";
 }
 
 /// `Cancel { thread }`: stops the thread's current turn only.

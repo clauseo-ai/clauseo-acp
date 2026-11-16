@@ -113,3 +113,21 @@ fn the_menu_item_is_the_apps_own_words() {
     let table = include_str!("../../../../ui/components/src/lib/words-triage-late.hi.ts");
     assert!(table.contains(&format!("\"{item}\":")), "{item}");
 }
+
+/// Codex's whole instructions name no button with either rule (fenced on macOS and Linux, the
+/// Windows one), and each rule names the menu item, in the Windows rule's words.
+#[test]
+fn codex_s_instructions_name_no_button_and_each_rule_names_the_menu_item() {
+    let profile = super::launch_profile(std::path::Path::new("/data"));
+    let text = profile.instructions_for(clauseo_protocol::AgentKind::Codex);
+    assert!(!text.to_lowercase().contains("button"), "{text}");
+    let sentence = format!(
+        "say it is another matter, and that the lawyer can right-click this conversation and \
+         choose \"{}\"",
+        invite_item()
+    );
+    for rule in [OTHER_MATTERS.trim(), other_matters_unfenced()] {
+        assert!(rule.contains(&sentence), "{rule}");
+        assert!(!rule.to_lowercase().contains("button"), "{rule}");
+    }
+}

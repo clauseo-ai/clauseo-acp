@@ -18,6 +18,7 @@ mod limit_stop;
 mod limit_timer;
 mod made;
 mod matter_fence;
+mod matter_fence_stop;
 mod matter_panic;
 mod offline;
 mod offline_backstop;
