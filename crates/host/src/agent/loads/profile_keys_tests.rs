@@ -35,7 +35,7 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         web_search,
         login,
         folders: folders(),
-        seed_sites: &WEB_FETCH_SITES,
+        seed_sites: WEB_FETCH_SITES.as_slice(),
         forced_ask: false,
         data: &NO_DENY,
         case_law: false,

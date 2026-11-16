@@ -209,7 +209,7 @@ pub(super) fn session_loads(
         web_search,
         login,
         folders,
-        seed_sites: &WEB_FETCH_SITES,
+        seed_sites: WEB_FETCH_SITES.as_slice(),
         forced_ask,
         data: &run.data_deny,
         case_law: case_law_entry.is_some(),

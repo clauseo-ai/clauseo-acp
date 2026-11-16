@@ -510,6 +510,9 @@ mod tool_switches;
 #[cfg(test)]
 #[path = "host/tools.rs"]
 mod tools;
+#[cfg(test)]
+#[path = "host/tools_seeds.rs"]
+mod tools_seeds;
 
 #[cfg(test)]
 #[path = "host/lawyer_file.rs"]
