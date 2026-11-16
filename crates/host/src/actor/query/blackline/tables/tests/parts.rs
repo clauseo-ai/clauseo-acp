@@ -58,19 +58,25 @@ fn logo(text: &str, tcpr: &str) -> String {
 }
 
 /// A file whose sections each use one header, by default: `headers` gives each section's header
-/// part's XML, first to last, and the body holds `body` in the last section.
+/// part's XML, first to last (empty for a section that takes the one before it), and the body
+/// holds `body` in the last section.
 fn sectioned(headers: &[String], body: &str) -> Vec<u8> {
     let mut parts = Vec::new();
     let mut rels = String::new();
     let mut xml = String::new();
     for (index, header) in headers.iter().enumerate() {
         let name = format!("header{index}.xml");
-        let _infallible = write!(
-            rels,
-            r#"<Relationship Id="rIdH{index}" Type="{REL}/header" Target="{name}"/>"#
-        );
-        parts.push((format!("word/{name}"), header.clone()));
-        let reference = format!(r#"<w:headerReference w:type="default" r:id="rIdH{index}"/>"#);
+        // An empty header: the section has none of its own and takes the one before it.
+        let reference = if header.is_empty() {
+            String::new()
+        } else {
+            let _infallible = write!(
+                rels,
+                r#"<Relationship Id="rIdH{index}" Type="{REL}/header" Target="{name}"/>"#
+            );
+            parts.push((format!("word/{name}"), header.clone()));
+            format!(r#"<w:headerReference w:type="default" r:id="rIdH{index}"/>"#)
+        };
         if index + 1 < headers.len() {
             let _infallible = write!(
                 xml,
@@ -111,7 +117,9 @@ fn a_header_whose_section_moved_pairs_from_the_last_section_back() {
                 number: 1,
                 formats: vec![Shading],
             }],
-            may_differ: false,
+            // The versions' section counts differ and a header holds a table: the pairing may
+            // not be stetdoc's.
+            may_differ: true,
             lone_header_texts: vec!["Coverheader.".to_owned()],
         }
     );
@@ -121,15 +129,30 @@ fn a_header_whose_section_moved_pairs_from_the_last_section_back() {
 /// table can't be told, so the blackline may differ.
 #[test]
 fn a_header_with_tables_and_no_counterpart_may_differ() {
-    let old = sectioned(&[hdr(&logo("Logo", ""))], "One year.");
+    // Two sections each: the older version's second takes its first's header, which pairs once,
+    // with the newer second section's; the newer first section's header pairs with nothing.
+    let old = sectioned(&[hdr(&logo("Logo", "")), String::new()], "One year.");
     let new = sectioned(
         &[hdr(&logo("Logo", "")), hdr(&logo("Seal", ""))],
         "Two years.",
     );
     assert!(compare(&old, &new).may_differ);
-    // Without a table, a header with no counterpart has nothing to compare.
-    let plain = sectioned(&[hdr(&p("Cover.")), hdr(&logo("Logo", ""))], "Two years.");
-    assert!(!compare(&old, &plain).may_differ);
+}
+
+/// When the versions have different numbers of sections, the pairing is an approximation of
+/// stetdoc's: any header or footer with a table may differ, even one that paired and shows no
+/// change. With no table in any header, there is nothing it could miss.
+#[test]
+fn different_section_counts_with_header_tables_may_differ() {
+    let old = sectioned(&[hdr(&logo("Logo", ""))], "One year.");
+    let new = sectioned(&[hdr(&p("Cover.")), hdr(&logo("Logo", ""))], "One year.");
+    let found = compare(&old, &new);
+    assert_eq!((found.changed.len(), found.may_differ), (0, true));
+    let plain_old = sectioned(&[hdr(&p("Main."))], "One year.");
+    let plain_new = sectioned(&[hdr(&p("Cover.")), hdr(&p("Main."))], "One year.");
+    assert!(!compare(&plain_old, &plain_new).may_differ);
+    let same_count = sectioned(&[hdr(&logo("Logo", ""))], "Two years.");
+    assert!(!compare(&old, &same_count).may_differ);
 }
 
 /// A header's text one version only has is listed, white space taken out; a header edited in
