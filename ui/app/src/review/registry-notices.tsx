@@ -150,11 +150,11 @@ const UNFENCED_NOTICE = notice(6, {
   kind: { matters_unfenced: { matters: [JOSHI.matter, KAPOOR.matter], more: 3 } },
 });
 const INSIDE =
-  "{matter} is inside this matter's folder. Move {matter}'s folder out of it, or remove one of the two matters from Clauseo.";
+  "{matter}'s folder is inside this matter's folder. Move it out, or remove {matter} from the list. If you remove it, its papers count as part of this matter.";
 /** Joshi's folder is inside this matter's: no turn runs here, and the notice says what to do (UC-387). */
 const INSIDE_NOTICE = notice(6, {
   level: "warning",
-  text: "Joshi is inside this matter's folder. Move Joshi's folder out of it, or remove one of the two matters from Clauseo.",
+  text: "Joshi's folder is inside this matter's folder. Move it out, or remove Joshi from the list. If you remove it, its papers count as part of this matter.",
   kind: { matter_inside: { matter: JOSHI.matter, name: JOSHI.name } },
 });
 const iso = (name: string) => `\u2068${name}\u2069`;

@@ -168,8 +168,8 @@ export const HI = {
     "Claude की कमांड अभी कुछ फ़ोल्डर तक नहीं पहुँच सकतीं; वह इस मामले की फ़ाइलें अब भी पढ़ और संपादित कर सकता है।",
   // another matter on the list lies inside this matter's folder, so no turn runs; {matter} is that matter, with what
   // to do (provisional, UC-387)
-  "{matter} is inside this matter's folder. Move {matter}'s folder out of it, or remove one of the two matters from Clauseo.":
-    "{matter} इस मामले के फ़ोल्डर के अंदर है। {matter} का फ़ोल्डर इससे बाहर ले जाएँ, या दोनों में से एक मामले को Clauseo से हटा दें।",
+  "{matter}'s folder is inside this matter's folder. Move it out, or remove {matter} from the list. If you remove it, its papers count as part of this matter.":
+    "{matter} का फ़ोल्डर इस मामले के फ़ोल्डर के अंदर है। उसे बाहर ले जाएँ, या {matter} को सूची से हटा दें। अगर आप उसे हटाते हैं, तो उसके दस्तावेज़ इस मामले का हिस्सा माने जाएँगे।",
   // Clauseo's data fence refused, unasked, a request of the agent's that reached outside the
   // matter; {name} is the agent as the outside-matter stop names it (provisional, TN-11), and
   // the AI where none is known (provisional, TN-12)

@@ -211,7 +211,7 @@ export function noticeLine(
     return inside === ""
       ? null
       : w.th(
-          "{matter} is inside this matter's folder. Move {matter}'s folder out of it, or remove one of the two matters from Clauseo.",
+          "{matter}'s folder is inside this matter's folder. Move it out, or remove {matter} from the list. If you remove it, its papers count as part of this matter.",
           { matter: isolate(inside) },
         );
   const loose =

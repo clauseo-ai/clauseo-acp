@@ -68,6 +68,9 @@ export type MatterRowProps = {
   where?: string | undefined;
   /** A line under the note saying why a search found it, where the name alone doesn't show: "Client, Asha Rao". */
   match?: string | undefined;
+  /** Optional: the name of the listed matter whose folder holds this one's (the host's `inside`): the remove confirm
+   * says what removing it opens (UC-485). */
+  inside?: string | undefined;
   /** Optional: protection is off for this matter, or couldn't be set up. The row's name line ends in the open
    * lock, 14 px in concrete, named "Not protected" to assistive technology and under the pointer, for as long as that
    * lasts. */
@@ -320,6 +323,7 @@ export function MatterRow({
   match,
   where,
   unprotected,
+  inside,
   onOpen,
   onPin,
   onLocate,
@@ -358,7 +362,13 @@ export function MatterRow({
   const menu = hasActions(actions);
   // beside the row, not inside it: the dialog's events, carried up React's tree, never reach the row's context menu
   const confirm = onRemove !== undefined && (
-    <RemoveConfirm name={name} open={asking} onOpenChange={setAsking} onConfirm={onRemove} />
+    <RemoveConfirm
+      name={name}
+      inside={inside}
+      open={asking}
+      onOpenChange={setAsking}
+      onConfirm={onRemove}
+    />
   );
   const button = (
     <button

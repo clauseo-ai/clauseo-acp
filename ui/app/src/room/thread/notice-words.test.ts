@@ -45,10 +45,10 @@ test("a matter inside this one is named by its name now, else the host's, and sa
   const SUB = "0190a000-0000-7000-8000-000000000011";
   const kind = { matter_inside: { matter: SUB, name: "Sub (old)" } } as NoticeKind;
   expect(noticeLine(kind, en, undefined, (m) => (m === SUB ? "Sub" : undefined))).toBe(
-    `${iso("Sub")} is inside this matter's folder. Move ${iso("Sub")}'s folder out of it, or remove one of the two matters from Clauseo.`,
+    `${iso("Sub")}'s folder is inside this matter's folder. Move it out, or remove ${iso("Sub")} from the list. If you remove it, its papers count as part of this matter.`,
   );
   expect(noticeLine(kind, words("hi"))).toBe(
-    `${iso("Sub (old)")} इस मामले के फ़ोल्डर के अंदर है। ${iso("Sub (old)")} का फ़ोल्डर इससे बाहर ले जाएँ, या दोनों में से एक मामले को Clauseo से हटा दें।`,
+    `${iso("Sub (old)")} का फ़ोल्डर इस मामले के फ़ोल्डर के अंदर है। उसे बाहर ले जाएँ, या ${iso("Sub (old)")} को सूची से हटा दें। अगर आप उसे हटाते हैं, तो उसके दस्तावेज़ इस मामले का हिस्सा माने जाएँगे।`,
   );
   const nameless = { matter_inside: { matter: SUB } } as unknown as NoticeKind;
   expect(noticeLine(nameless, en)).toBeNull();

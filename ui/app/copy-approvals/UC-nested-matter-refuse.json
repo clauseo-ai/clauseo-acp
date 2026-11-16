@@ -11,14 +11,23 @@
     "note": "matter.holds_other_matter: the turn's stop line when another matter on Clauseo's list lies inside this matter's folder (folders moved outside Clauseo); at a launch, a resume or before a prompt. The question is kept; the UC-387 notice before it names the matter"
   },
   "UC-387": {
-    "en": "{matter} is inside this matter's folder. Move {matter}'s folder out of it, or remove one of the two matters from Clauseo.",
-    "hi": "{matter} इस मामले के फ़ोल्डर के अंदर है। {matter} का फ़ोल्डर इससे बाहर ले जाएँ, या दोनों में से एक मामले को Clauseo से हटा दें।",
+    "en": "{matter}'s folder is inside this matter's folder. Move it out, or remove {matter} from the list. If you remove it, its papers count as part of this matter.",
+    "hi": "{matter} का फ़ोल्डर इस मामले के फ़ोल्डर के अंदर है। उसे बाहर ले जाएँ, या {matter} को सूची से हटा दें। अगर आप उसे हटाते हैं, तो उसके दस्तावेज़ इस मामले का हिस्सा माने जाएँगे।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-15",
+    "hi_at": "2026-11-16",
     "hi_by": "nestrefuse (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-15",
+    "at": "2026-11-16",
     "by": "nestrefuse (provisional; Rohan batch review)",
-    "note": "Host notice NoticeKind::MatterInside, given with each turn refused matter.holds_other_matter: {matter} is the inner matter by its name now, bidi-isolated; what to do is move its folder out, or remove one of the two matters from Clauseo"
+    "note": "CHANGED LINE (wording page): was \"{matter} is inside this matter's folder. Move {matter}'s folder out of it, or remove one of the two matters from Clauseo.\"; the app thread's final words: removing the outer matter is no longer offered, and a removed inner matter's papers count as the outer's. Host notice NoticeKind::MatterInside, given with each turn refused matter.holds_other_matter; {matter} is the inner matter by its name now, bidi-isolated"
+  },
+  "UC-485": {
+    "en": "Its folder is inside {outer}'s folder, so conversations in {outer} will be able to read its papers.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "nestrefuse (provisional; the app thread's words)",
+    "note": "Added line in the Remove from the list confirm (UC-131, UC-132) when the host's MatterSummary.inside names the listed matter whose folder holds this one's; {outer} is that matter's name now, bidi-isolated"
   }
 }

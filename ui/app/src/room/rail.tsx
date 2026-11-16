@@ -287,6 +287,8 @@ export function RoomRail({
       testIds: { row: "matter-row" },
       // UC: Not protected, as the row has it now (matters.ts takes protection_changed onto it)
       unprotected: notProtected(m.protection),
+      // the listed matter whose folder holds this one's, by its name now: the remove confirm's UC-485
+      ...insideOf(m, view.matters),
       // the open matter's conversations, once its list is in
       ...snoozing,
       ...(below === undefined ? {} : { below }),
@@ -483,4 +485,11 @@ export function RoomRail({
       testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}
     />
   );
+}
+
+/** The remove confirm's outer matter (UC-485): the name of the listed matter the host says holds `m`'s folder, when
+ * the list has it. The host decides the nesting; this only looks the name up. */
+function insideOf(m: MatterInfo, all: readonly MatterInfo[]): { inside?: string } {
+  const outer = m.inside === undefined ? undefined : all.find((o) => o.matter === m.inside);
+  return outer === undefined ? {} : { inside: outer.name };
 }

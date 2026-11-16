@@ -80,12 +80,12 @@ function lists(): Map<string, ThreadInfo[]> {
   ]);
 }
 
-const triageHost = (): FakeTransport => {
+const triageHost = (inside = false): FakeTransport => {
   const threads = lists();
   return new FakeTransport({
     next: fakeNext({
       matters: () => [
-        detailed(SHARMA, { last_opened: Date.now() }),
+        detailed(SHARMA, { last_opened: Date.now(), ...(inside ? { inside: KAPOOR.matter } : {}) }),
         detailed(JOSHI),
         detailed(KAPOOR),
         detailed(RAO, { status: "needs_permission" }),
@@ -107,7 +107,14 @@ export type Act =
 /** The room, then `acts` taken as the lawyer would, each once the last has settled: the pointer coming to the
  * conversation titled `arm`, a press on `press` (a selector), the menu row reading `item`, the focus on `focus`, or the
  * pointer resting on `hover` (its tooltip open). */
-export function RoomTriage({ acts = [] }: { acts?: readonly Act[] }) {
+/** `inside`: Sharma's folder sits inside Kapoor's, as the host's row says (UC-485 in the remove confirm). */
+export function RoomTriage({
+  acts = [],
+  inside = false,
+}: {
+  acts?: readonly Act[];
+  inside?: boolean;
+}) {
   const taken = useRef(false);
   useEffect(() => {
     // once, though Strict Mode runs the effect twice
@@ -164,7 +171,7 @@ export function RoomTriage({ acts = [] }: { acts?: readonly Act[] }) {
       }
     })();
   }, [acts]);
-  return <RoomOver host={triageHost} />;
+  return <RoomOver host={() => triageHost(inside)} />;
 }
 
 /** The snooze menu alone, its times worked out for `hour`:00 today. */

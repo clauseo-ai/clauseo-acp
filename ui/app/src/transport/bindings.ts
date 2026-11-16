@@ -3901,6 +3901,14 @@ export type MatterSummary = {
 	 *  and from a host that does not tell.
 	 */
 	protection?: Protection,
+	/**
+	 *  The listed matter whose folder holds this matter's folder (folders moved outside
+	 *  Clauseo), compared by the folders' text as the host stores them, never a walk of the
+	 *  disk: conversations in that matter are refused (`matter.holds_other_matter`) until this
+	 *  one moves out or is removed from the list, and then may read its papers. Missing when
+	 *  none does; the innermost when several do.
+	 */
+	inside?: MatterId,
 };
 
 /**

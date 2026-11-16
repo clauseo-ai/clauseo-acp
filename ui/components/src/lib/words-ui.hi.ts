@@ -14,6 +14,10 @@ export const HI = {
   "Remove {name} from the list?": "{name} को सूची से हटाएँ?",
   "The matter and its conversations leave the list and Recent. Its folder and papers stay where they are.":
     "यह मामला और इसकी बातचीत सूची और ‘हाल के’ से हट जाएँगी। इसका फ़ोल्डर और दस्तावेज़ अपनी जगह पर रहेंगे।",
+  // UC-485: the confirm's added line when the matter's folder sits inside another listed matter's ({outer}, isolated);
+  // provisional, Hindi later
+  "Its folder is inside {outer}'s folder, so conversations in {outer} will be able to read its papers.":
+    null,
   // the plan to ask with
   "Plan to ask with": "प्रश्न किस प्लान से पूछें",
   // restoring a version

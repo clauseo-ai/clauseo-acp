@@ -117,6 +117,14 @@ export const U16B: Entry[] = [
     ),
     () => <RoomTriage acts={REMOVING} />,
   ),
+  // the confirm's added line for a matter whose folder sits inside another listed matter's (provisional, Hindi later)
+  entry(
+    "UC-485",
+    uiWords(
+      "Its folder is inside {outer}'s folder, so conversations in {outer} will be able to read its papers.",
+    ),
+    () => <RoomTriage acts={REMOVING} inside />,
+  ),
   // the Done fold, folded, then open with its explanation behind the info icon
   entry("RO-16", w("Done"), () => <RoomTriage />),
   entry(
