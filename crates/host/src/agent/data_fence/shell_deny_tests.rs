@@ -390,17 +390,17 @@ fn every_spelling_of_the_data_folder_is_denied_in_both_shells() {
 /// `%LOCALAPPDATA%`.
 #[test]
 fn a_configured_folder_gets_its_paths_and_the_variable_it_sits_under() {
-    let data = PathBuf::from(r"C:\Users\Asha\AppData\Roaming\Firm Data\clauseo");
+    let data = PathBuf::from(r"C:\Users\Asha\AppData\Roaming\Firm Data\records");
     let rules = windows_shell_deny_rules(&LaunchDeny::fixed(vec![data]), &env);
     for command in [
-        r"type C:\Users\Asha\AppData\Roaming\Firm Data\clauseo\settings.json",
-        r"cat C:\\Users\\Asha\\AppData\\Roaming\\Firm\ Data\\clauseo\\settings.json",
-        "cat 'C:/Users/Asha/AppData/Roaming/Firm Data/clauseo/logs/x'",
-        "cat '/c/Users/Asha/AppData/Roaming/Firm Data/clauseo/state.sqlite-wal'",
-        r#"type "%APPDATA%\Firm Data\clauseo\settings.json""#,
-        r#"Get-Content "$env:APPDATA/Firm Data/clauseo/settings.json""#,
-        r#"cat "${APPDATA}/Firm Data/clauseo/settings.json""#,
-        r#"ls "$APPDATA/Firm Data/clauseo""#,
+        r"type C:\Users\Asha\AppData\Roaming\Firm Data\records\settings.json",
+        r"cat C:\\Users\\Asha\\AppData\\Roaming\\Firm\ Data\\records\\settings.json",
+        "cat 'C:/Users/Asha/AppData/Roaming/Firm Data/records/logs/x'",
+        "cat '/c/Users/Asha/AppData/Roaming/Firm Data/records/state.sqlite-wal'",
+        r#"type "%APPDATA%\Firm Data\records\settings.json""#,
+        r#"Get-Content "$env:APPDATA/Firm Data/records/settings.json""#,
+        r#"cat "${APPDATA}/Firm Data/records/settings.json""#,
+        r#"ls "$APPDATA/Firm Data/records""#,
     ] {
         // The escaped form's space is `\ `, a form no rule spells: that one is the residual.
         if command.contains(r"Firm\ Data") {

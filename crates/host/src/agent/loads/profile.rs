@@ -284,10 +284,6 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     options.insert("settings".to_owned(), Value::Object(settings));
 }
 
-#[path = "profile_matters.rs"]
-mod matters;
-pub(crate) use matters::{matter_rules_within, unfenced_matters};
-
 /// The size past which a launch's settings shed the data folder's variable forms from its shell
 /// rules (`data_fence::windows_shell_deny_rules_without_variables`): about 1.8 MiB, under the
 /// 2 MiB settings file Claude Code reads (`agent::launch_settings`), which refuses a larger one.
@@ -295,8 +291,9 @@ pub(crate) const SHED_AT: usize = 1_887_436;
 
 /// `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`; on Windows also its
 /// `Bash` and `PowerShell` rules, `data_fence::windows_shell_deny_rules`, without the variable
-/// forms when all of them would take the settings past [`SHED_AT`], counting the allow rules,
-/// then the other matters' as many as fit, [`matter_rules_within`]), and `permissions.allow` the
+/// forms when all of them would take the settings past [`SHED_AT`], counting the allow rules;
+/// the other matters get none, their `Read` and `Edit` denies being what Claude Code checks a
+/// command's file paths against, `data_fence::claude_deny_rules`), and `permissions.allow` the
 /// Read of the built-in skills' folder and the own folders' listing and reading
 /// (`data_fence::claude_allow_rules`), each after any the hook put there. The own folders' glob
 /// denies go in only without Claude's shell sandbox (`sandboxed`, `keys.sandbox`: on Windows,
@@ -323,14 +320,12 @@ fn deny_data_folder(
         let var = |name: &str| std::env::var_os(name);
         let spent = json_len(&*settings) + json_len(&deny) + json_len(&allow);
         let shell = shell_rules_within(data, &var, spent, SHED_AT);
-        let spent = spent + json_len(&shell);
-        let (matters, _) = matter_rules_within(data, &var, spent, SHED_AT);
         // A set, not `push_new`: a busy data folder gives a few thousand of these.
         let mut known: std::collections::HashSet<String> = deny
             .iter()
             .filter_map(|rule| rule.as_str().map(str::to_owned))
             .collect();
-        for rule in shell.into_iter().chain(matters) {
+        for rule in shell {
             if known.insert(rule.clone()) {
                 deny.push(Value::String(rule));
             }

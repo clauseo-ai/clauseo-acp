@@ -246,7 +246,7 @@ fn long_env(name: &str) -> Option<OsString> {
 fn worst() -> LaunchDeny {
     let dir = TempDir::new("shell-deny-worst");
     let (deny, _, _) = laptop(dir.path(), 7, 1000, "alexandra.montgomery-smith");
-    let configured = r"C:\Users\alexandra.montgomery-smith\AppData\Roaming\Clauseo Data";
+    let configured = r"C:\Users\alexandra.montgomery-smith\AppData\Roaming\Records Data";
     LaunchDeny {
         spellings: vec![
             PathBuf::from(configured),
@@ -326,8 +326,8 @@ fn a_launch_past_its_budget_sheds_the_variable_forms() {
     let (deny, _, _) = laptop(dir.path(), 11, 1000, "alexandra.montgomery-smith");
     let home = r"C:\Users\alexandra.montgomery-smith\AppData";
     let spellings = [
-        format!(r"{home}\Local\Clauseo Data"),
-        format!(r"{home}\Roaming\Clauseo Data"),
+        format!(r"{home}\Local\Records Data"),
+        format!(r"{home}\Roaming\Records Data"),
     ];
     let deny = LaunchDeny {
         spellings: spellings.iter().map(PathBuf::from).collect(),
@@ -355,7 +355,7 @@ fn a_launch_past_its_budget_sheds_the_variable_forms() {
         "{text}"
     );
     assert!(
-        text.contains("budget=") && !text.contains("Clauseo Data"),
+        text.contains("budget=") && !text.contains("Records Data"),
         "{text}"
     );
     let rules = Rules::new(&got);

@@ -148,11 +148,10 @@ pub(crate) fn codex_reads_note(run: &RunFolders) -> String {
 
 /// What a Claude session's `meta` gets from the fence after its instructions are filled: the
 /// invited matters' part appended to them, and the lawyer told of the matters the launch could
-/// not fence and those its Windows shell rules left out ([`tell_unfenced`]), and that Claude's
+/// not fence ([`tell_unfenced`]), and that Claude's
 /// sandboxed commands can't open the matter when a fenced matter lies inside it or `limited`
 /// (a deny widened to a folder above, `agent::loads::sandbox::deny_form`). Claude's alone:
-/// Codex's instructions and unfenced line go with its keys (`profile_loads::launch_keys`), and
-/// on Windows it has no shell rules to report.
+/// Codex's instructions and unfenced line go with its keys (`profile_loads::launch_keys`).
 pub(crate) fn after_meta(
     actor: &mut Actor,
     thread: ThreadId,
@@ -165,14 +164,7 @@ pub(crate) fn after_meta(
     if let Some(text) = prompt.and_then(|prompt| prompt.get_mut("append")) {
         append_part(text, &reads);
     }
-    let mut unfenced = run.data_deny.matters.unfenced.clone();
-    let shell = crate::agent::loads::profile::unfenced_matters(meta, &run.data_deny, cfg!(windows));
-    let new: Vec<MatterId> = shell
-        .into_iter()
-        .filter(|m| !unfenced.contains(m))
-        .collect();
-    unfenced.extend(new);
-    tell_unfenced(actor, thread, unfenced);
+    tell_unfenced(actor, thread, run.data_deny.matters.unfenced.clone());
     // Claude on macOS and Linux alone has the sandbox (its short temp folder was made).
     let sandboxed = run.claude_tmp.is_some();
     let shut = run.data_deny.matters.own_shut || limited;
@@ -208,9 +200,8 @@ pub(crate) fn tell_limited(actor: &mut Actor, thread: ThreadId, limited: bool) {
 /// The words the unfenced notice falls back to, for a view that does not know its kind.
 const UNFENCED_TEXT: &str = "Clauseo couldn't fully keep the AI out of some other matters.";
 
-/// Tells the lawyer the other matters a launch left unfenced (`MatterFence::unfenced`, and for
-/// Claude on Windows those its shell rules could not fit,
-/// `agent::loads::profile::unfenced_matters`): one notice naming at most five of them,
+/// Tells the lawyer the other matters a launch left unfenced (`MatterFence::unfenced`): one
+/// notice naming at most five of them,
 /// when that set differs from the one the thread was last told in this host run. Counts only in
 /// the log.
 pub(crate) fn tell_unfenced(actor: &mut Actor, thread: ThreadId, unfenced: Vec<MatterId>) {

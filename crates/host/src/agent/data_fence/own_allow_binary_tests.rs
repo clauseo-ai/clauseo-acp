@@ -106,7 +106,7 @@ fn every_allowed_command_is_one_claude_code_checks_the_paths_of() {
             .all(|c| PATH_CHECKED_POWERSHELL_READ.contains(&c.as_str()))
     );
     let dir = TempDir::new("own-allow-checked");
-    let Launch { allow_rules, .. } = launch(&dir, &[DATA, r"D:\FirmData\Clauseo"]);
+    let Launch { allow_rules, .. } = launch(&dir, &[DATA, r"D:\FirmData\Records"]);
     for rule in &allow_rules {
         let (tool, content) = parse(rule).unwrap();
         let command = content.split(' ').next().unwrap();
