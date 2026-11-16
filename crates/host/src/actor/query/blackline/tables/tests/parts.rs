@@ -3,6 +3,8 @@
 //! has, the notes' place, and where a header is, as stetdoc's view says and as the table
 //! comparison says.
 
+use std::fmt::Write as _;
+
 use clauseo_protocol::TableFormat::{Alignment, Shading};
 use clauseo_protocol::{BlacklinePartKind, ChangedTable, HeaderSlot, HeaderUse, TablePlace};
 
@@ -63,17 +65,19 @@ fn sectioned(headers: &[String], body: &str) -> Vec<u8> {
     let mut xml = String::new();
     for (index, header) in headers.iter().enumerate() {
         let name = format!("header{index}.xml");
-        rels.push_str(&format!(
+        let _infallible = write!(
+            rels,
             r#"<Relationship Id="rIdH{index}" Type="{REL}/header" Target="{name}"/>"#
-        ));
+        );
         parts.push((format!("word/{name}"), header.clone()));
         let reference = format!(r#"<w:headerReference w:type="default" r:id="rIdH{index}"/>"#);
         if index + 1 < headers.len() {
-            xml.push_str(&format!(
+            let _infallible = write!(
+                xml,
                 "<w:p><w:pPr><w:sectPr>{reference}</w:sectPr></w:pPr></w:p>"
-            ));
+            );
         } else {
-            xml.push_str(&format!("{}<w:sectPr>{reference}</w:sectPr>", p(body)));
+            let _infallible = write!(xml, "{}<w:sectPr>{reference}</w:sectPr>", p(body));
         }
     }
     let parts: Vec<(&str, String)> = parts
@@ -210,7 +214,9 @@ fn a_parts_uses_and_the_table_comparisons_agree() {
         .map(|part| match part.kind {
             BlacklinePartKind::Header { uses } => Where::Header(uses),
             BlacklinePartKind::Footer { uses } => Where::Footer(uses),
-            other => panic!("not a header or footer: {other:?}"),
+            other @ (BlacklinePartKind::Footnote { .. }
+            | BlacklinePartKind::Endnote { .. }
+            | BlacklinePartKind::Unknown { .. }) => panic!("not a header or footer: {other:?}"),
         })
         .collect();
     assert_eq!(stetdocs.len(), 2);
