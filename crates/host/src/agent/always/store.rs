@@ -8,7 +8,8 @@
 //! an operation on a rule that one the actor gave a later number already applied to is skipped:
 //! an add whose write was still pending when the lawyer removed the rule never puts it back.
 //!
-//! A file this host cannot take (not JSON it reads, larger than [`MAX_FILE_LEN`], unreadable) is
+//! A file this host cannot take (not JSON it reads, a `version` other than [`VERSION`], larger
+//! than [`MAX_FILE_LEN`], unreadable) is
 //! never written over: the next write sets it aside first, as `claude-allow.json.bad-<n>`, and
 //! starts empty. Until then it reads as no rules.
 
@@ -21,6 +22,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::Value;
 
 use super::{MAX_RULES, file_beside, well_formed};
+
+/// The file's format: a file naming another `version`, or none, is one this host cannot take.
+const VERSION: u64 = 1;
 
 /// The largest file read.
 const MAX_FILE_LEN: u64 = 1 << 20;
@@ -121,6 +125,7 @@ fn read_unlocked(file: &Path) -> Kept {
     }
     let parsed: Option<Vec<String>> = serde_json::from_slice::<Value>(&bytes)
         .ok()
+        .filter(|value| value.get("version").and_then(Value::as_u64) == Some(VERSION))
         .and_then(|value| serde_json::from_value(value.get("allow")?.clone()).ok());
     let Some(rules) = parsed else {
         tracing::warn!("a matter's kept Claude rules are not JSON this host reads");
@@ -192,7 +197,7 @@ pub(crate) fn remove_now(file: &Path, rule: &str, seq: u64) -> std::io::Result<b
 }
 
 fn write_unlocked(file: &Path, rules: &[String]) -> std::io::Result<()> {
-    let text = serde_json::json!({ "version": 1, "allow": rules });
+    let text = serde_json::json!({ "version": VERSION, "allow": rules });
     let mut bytes = serde_json::to_vec_pretty(&text).map_err(std::io::Error::other)?;
     bytes.push(b'\n');
     crate::write::replace_private_file(file, &bytes)?;

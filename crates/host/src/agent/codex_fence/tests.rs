@@ -3,7 +3,9 @@ use std::path::{Component, Path, PathBuf};
 use clauseo_settings::Locations;
 use serde_json::{Map, Value, json};
 
-use super::{EXTENDS, Listed, PROFILE, SECRET_GLOB, SET_ASIDE_GLOB, Session, keys};
+use super::{
+    EXTENDS, KEPT_RULES_GLOB, Listed, PROFILE, SECRET_GLOB, SET_ASIDE_GLOB, Session, keys,
+};
 
 /// What of `<data>` is left readable to a Codex shell on purpose, with why. The guard test checks
 /// that each `Locations` path is denied or here.
@@ -291,6 +293,7 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
         "run",
         "agent-state",
         SET_ASIDE_GLOB,
+        KEPT_RULES_GLOB,
     ] {
         assert_eq!(scoped.get(subpath), Some(&json!("deny")), "{subpath}");
     }
@@ -542,6 +545,50 @@ fn a_data_folder_with_a_glob_character_is_named_literally_without_the_set_aside_
     assert_eq!(scoped.get("search.sqlite"), Some(&json!("deny")));
     assert_eq!(scoped.get(SET_ASIDE_GLOB), None);
     assert_eq!(scoped.get(SECRET_GLOB), None);
+    assert_eq!(scoped.get(KEPT_RULES_GLOB), None);
+}
+
+/// A matter's kept Claude rules file made after a Codex launch (by a Claude session of the same
+/// matter) is in no listed rule, since the launch listed only what existed then; the glob denies
+/// it, and every other matter's, whatever the listing found.
+#[test]
+fn a_kept_rules_file_made_after_the_launch_is_denied_by_the_glob() {
+    let own = data().join("agent-state").join("m1");
+    // The launch found this matter's folder holding only its notes, and matter m2's folder.
+    let listed = Listed {
+        agent_state: Some(vec![data().join("agent-state").join("m2")]),
+        ..Listed::default()
+    };
+    let keys = fence_with(&listed);
+    let scoped = keys["permissions"][PROFILE]["filesystem"][data().to_str().unwrap()]
+        .as_object()
+        .expect("rules under <data>");
+    assert!(
+        !scoped.contains_key("agent-state/m1/claude-allow.json"),
+        "the listing knew no file"
+    );
+    assert_eq!(scoped.get(KEPT_RULES_GLOB), Some(&json!("deny")));
+    // The glob names exactly the file the host keeps, for this matter and any other.
+    for matter in ["m1", "m2", "m9"] {
+        let file = data()
+            .join("agent-state")
+            .join(matter)
+            .join(crate::agent::always::FILE);
+        let relative = file
+            .strip_prefix(data())
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(
+            KEPT_RULES_GLOB.replace('*', matter),
+            relative.replace('\\', "/")
+        );
+    }
+    assert_eq!(
+        own.join(crate::agent::always::FILE),
+        crate::agent::always::file_beside(&notes()).unwrap()
+    );
 }
 
 #[test]

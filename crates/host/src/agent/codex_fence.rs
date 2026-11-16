@@ -46,7 +46,8 @@
 //!   Codex's escalation, which the lawyer approved.
 //! - The residual, accepted as for Claude's rules (decision record 0030): a session's run folder,
 //!   a matter's state or an entry of `agents` or its runtime made after the launch is in no rule
-//!   until the next launch. The sign-in shim, the downloads, the npm cache and settings, Claude's
+//!   until the next launch (but a matter's kept Claude rules file, denied by a glob as well,
+//!   [`KEPT_RULES_GLOB`]). The sign-in shim, the downloads, the npm cache and settings, Claude's
 //!   folder and Codex's login, transcripts and databases are named whether or not they exist, so
 //!   no credential is in that residual.
 //!
@@ -146,6 +147,15 @@ pub(crate) const SECRET_GLOB: &str = "run/*/proxy-secret";
 
 /// The run sweep's set-aside folders (`launch_checks/sweep.rs`), as a glob under `<data>`.
 pub(crate) const SET_ASIDE_GLOB: &str = "run.old-*";
+
+/// Every matter's kept Claude rules file (`agent/always.rs`, `always::FILE`), as a glob under
+/// `<data>`: the listing at the launch names only the files that exist then, and a Claude
+/// session of the same matter may make this one later. A glob deny reaches a file made after
+/// the launch: Seatbelt checks its regex at each access, for reads and writes
+/// (`codex-rs/sandboxing/src/seatbelt.rs:579-616`), and bubblewrap expands it before each
+/// command (`codex-rs/linux-sandbox/src/bwrap.rs:468-472, 849-892`). It names files, never a
+/// folder, so Seatbelt's regex naming only the matching path is all it needs.
+pub(crate) const KEPT_RULES_GLOB: &str = "agent-state/*/claude-allow.json";
 
 /// The folders holding every session's run folder and every matter's state, each denied whole
 /// when the launch could not list it ([`Listed`]).
@@ -401,10 +411,10 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
 
 /// The `CODEX_CONFIG` keys of the fence: `default_permissions` naming [`PROFILE`], and
 /// `permissions.<PROFILE>` extending [`EXTENDS`] with each of [`rules`] as `deny` and the
-/// session's run folder and notes as `write`, scoped under `<data>`, plus [`SET_ASIDE_GLOB`]
-/// and [`SECRET_GLOB`] when the data folder's path holds no glob character (a scoped glob reads
-/// its base as glob text; decision record 0030 names the gap). A rule outside `<data>` is keyed
-/// by its own path. Empty on Windows (`windows`). A path that is not UTF-8 is
+/// session's run folder and notes as `write`, scoped under `<data>`, plus [`SET_ASIDE_GLOB`],
+/// [`SECRET_GLOB`] and [`KEPT_RULES_GLOB`] when the data folder's path holds no glob character (a
+/// scoped glob reads its base as glob text; decision record 0030 names the gap). A rule outside
+/// `<data>` is keyed by its own path. Empty on Windows (`windows`). A path that is not UTF-8 is
 /// left out with a warning; the launch already fails on a run folder or notes that are not
 /// (`Folders::of`), and those sit in the data folder.
 pub(crate) fn keys(
@@ -443,12 +453,13 @@ pub(crate) fn keys(
     }
     if base.contains(['*', '?', '[', ']', '{', '}']) {
         tracing::warn!(
-            "the data folder's path holds a glob character: run.old-* and the other sessions' \
-             proxy password files stay readable"
+            "the data folder's path holds a glob character: run.old-*, the other sessions' proxy \
+             password files and a kept rules file made after the launch stay readable"
         );
     } else {
         scoped.insert(SET_ASIDE_GLOB.to_owned(), Value::from("deny"));
         scoped.insert(SECRET_GLOB.to_owned(), Value::from("deny"));
+        scoped.insert(KEPT_RULES_GLOB.to_owned(), Value::from("deny"));
     }
     filesystem.insert(base.to_owned(), Value::Object(scoped));
     let mut profile = Map::new();

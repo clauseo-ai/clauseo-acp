@@ -188,13 +188,14 @@ fn a_hand_edited_file_gives_only_its_well_formed_rules() {
         .collect();
     let mut rules = vec![json!("Bash(*)"), json!(1), json!("Read(//etc/hosts)")];
     rules.extend(many.iter().map(|rule| json!(rule)));
-    crate::write::write_file(&file, json!({ "allow": rules }).to_string().as_bytes()).unwrap();
+    let kept = |rules: &[Value]| json!({ "version": 1, "allow": rules }).to_string();
+    crate::write::write_file(&file, kept(&rules).as_bytes()).unwrap();
     assert!(
         read(&file).is_empty(),
         "a non-string entry fails the whole list"
     );
     rules.remove(1);
-    crate::write::write_file(&file, json!({ "allow": rules }).to_string().as_bytes()).unwrap();
+    crate::write::write_file(&file, kept(&rules).as_bytes()).unwrap();
     let got = read(&file);
     assert_eq!(got.len(), MAX_RULES);
     assert_eq!(got[0], "Read(//etc/hosts)");
@@ -303,6 +304,30 @@ fn a_link_swapped_into_the_matter_is_outside() {
     crate::write::remove_file(&matter.join("work")).unwrap();
     crate::write::symlink(&matter.join(".claude"), &matter.join("work")).unwrap();
     assert!(!real_within(&file, &matter, false));
+}
+
+/// A file naming no `version`, or one other than 1, reads as no rules, and is set aside like
+/// any file this host cannot take.
+#[test]
+fn a_file_of_another_version_reads_as_no_rules() {
+    let dir = TempDir::new("always_version");
+    let file = dir.path().join(FILE);
+    for text in [
+        json!({ "allow": ["Bash(ls)"] }),
+        json!({ "version": 2, "allow": ["Bash(ls)"] }),
+        json!({ "version": "1", "allow": ["Bash(ls)"] }),
+    ] {
+        crate::write::write_file(&file, text.to_string().as_bytes()).unwrap();
+        assert_eq!(read(&file), Vec::<String>::new(), "{text}");
+    }
+    crate::write::write_file(
+        &file,
+        json!({ "version": 1, "allow": ["Bash(ls)"] })
+            .to_string()
+            .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(read(&file), ["Bash(ls)"]);
 }
 
 /// A file this host cannot take is never written over: the next write sets it aside as
