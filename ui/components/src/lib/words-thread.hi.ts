@@ -159,6 +159,10 @@ export const HI = {
     "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। इसकी फ़ाइलें मान्य स्किल पैक नहीं हैं।",
   "Clauseo didn't load the skill pack '{pack}'. Clauseo loads at most 16 skill packs at a time.":
     "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। Clauseo एक बार में अधिकतम 16 स्किल पैक लोड करता है।",
+  // a matter's folder replaced by a shortcut to somewhere else, where Claude's sandbox left the link's place out (UC-846,
+  // a warning; {matter} is that matter's name, isolated). Provisional English; hi: later
+  "The folder for {matter} has been replaced by a shortcut to somewhere else, so Clauseo can no longer keep Claude out of the place it leads to. Check that folder before you open {matter} again.":
+    null,
   // Claude's auto mode isn't available, so the session runs in acceptEdits (en settled, hi provisional, TN-10)
   "Claude's automatic mode isn't available for this account, so Claude asks before running commands.":
     "इस खाते के लिए Claude का स्वचालित मोड उपलब्ध नहीं है, इसलिए Claude कमांड चलाने से पहले पूछता है।",

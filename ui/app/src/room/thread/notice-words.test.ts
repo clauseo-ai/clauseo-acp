@@ -264,3 +264,22 @@ test("a skill pack notice with no pack gives null, so the row shows its text", (
     noticeLine({ skill_pack_not_loaded: { reason: "changed" } } as unknown as NoticeKind, en),
   ).toBeNull();
 });
+
+// UC-846: the other matter's name, isolated, in both languages until its Hindi comes (English shows); an empty or
+// missing name gives null, so the row shows the host's text
+const other = (matter: string | undefined) =>
+  ({
+    other_matter_link_unexpected: matter === undefined ? {} : { matter },
+  }) as unknown as NoticeKind;
+test("a folder replaced by a shortcut names its matter, isolated, in both languages (English until its Hindi)", () => {
+  const line =
+    "The folder for \u2068Acme v Jones\u2069 has been replaced by a shortcut to somewhere else, so Clauseo can no longer keep Claude out of the place it leads to. Check that folder before you open \u2068Acme v Jones\u2069 again.";
+  expect(noticeLine(other("Acme v Jones"), en)).toBe(line);
+  expect(noticeLine(other("Acme v Jones"), words("hi"))).toBe(line);
+});
+
+test("a folder replaced by a shortcut with an empty or no matter name gives null, so the row shows its text", () => {
+  expect(noticeLine(other(""), en)).toBeNull();
+  expect(noticeLine(other("  "), en)).toBeNull();
+  expect(noticeLine(other(undefined), en)).toBeNull();
+});

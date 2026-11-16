@@ -1,7 +1,7 @@
 // The app's own line for a host notice, by its kind (NoticeEntry.kind): the words the lawyer reads in place of the
 // host's text. An agent's notice has no kind; a kind this version doesn't know (a newer host's, arriving as some other
 // string or as an object it doesn't read) gives null, and the row shows the notice's text as the host wrote it.
-import { listOf, namesOf } from "@clauseo/components/lib/words-core.ts";
+import { isolate, listOf, namesOf } from "@clauseo/components/lib/words-core.ts";
 import type { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import type { NoticeKind } from "../../transport/protocol.ts";
@@ -165,6 +165,19 @@ export function noticeLine(
       : undefined;
   if (came !== undefined)
     return came.files.length + came.more === 0 ? null : cameBack(came.files, came.more, w);
+  // a matter's folder replaced by a shortcut to elsewhere (UC-846): its name, isolated as the other names are; with no
+  // name, null, so the row shows the host's text
+  const other =
+    typeof kind === "object" && kind !== null && "other_matter_link_unexpected" in kind
+      ? kind.other_matter_link_unexpected
+      : undefined;
+  if (other !== undefined)
+    return typeof other.matter !== "string" || other.matter.trim() === ""
+      ? null
+      : w.th(
+          "The folder for {matter} has been replaced by a shortcut to somewhere else, so Clauseo can no longer keep Claude out of the place it leads to. Check that folder before you open {matter} again.",
+          { matter: isolate(other.matter) },
+        );
   const skipped =
     typeof kind === "object" && kind !== null && "skill_pack_not_loaded" in kind
       ? kind.skill_pack_not_loaded

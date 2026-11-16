@@ -24,6 +24,24 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "app thread voice check (final words, provisional; Hindi later)",
-    "note": "agent.sandbox_unavailable: Claude's sandbox couldn't be set up for another reason (its short temp folder couldn't be made, or a folder to deny isn't UTF-8), so the host didn't start Claude; also matter.folder_wildcard's line when the folder with the * or ? is unknown or out of sight; not retryable"
+    "note": "agent.sandbox_unavailable: Claude's sandbox couldn't be set up for another reason (its short temp folder couldn't be made, or Claude Code's own \"sandbox required but unavailable\"; a name that isn't UTF-8 is matter.name_unreadable since the security review), so the host didn't start Claude; also matter.folder_wildcard's line when the folder with the * or ? is unknown or out of sight; not retryable"
+  },
+  "U3-err-matter.name_unreadable": {
+    "en": "Claude can't start in any matter while a matter's folder, or Clauseo's data folder, leads to a folder with a name Clauseo can't read. Rename that folder, then try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app thread (provisional; Rohan batch review)",
+    "note": "a folder Claude's sandbox must deny has a name that isn't UTF-8 (where another matter's folder leads, or the data folder's real path; a stored folder is always UTF-8), so the host refuses Claude in every matter; it names no folder (the stop line can't know it without a snapshot-format change); routed off UC-472 so the restart advice never shows. A launch refusal, not retryable"
+  },
+  "UC-846": {
+    "en": "The folder for {matter} has been replaced by a shortcut to somewhere else, so Clauseo can no longer keep Claude out of the place it leads to. Check that folder before you open {matter} again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app thread (provisional; Rohan batch review)",
+    "note": "UC-846 (a launch notice, warning level): Claude's sandbox left out where another matter's folder leads because it is `/`, a folder above this matter's, or a system folder; the link itself stays denied; told once per matter per thread for the host's run; {matter} is the other matter's display name, isolated; the line says Claude, since only Claude's sandbox follows other matters' links"
   }
 }

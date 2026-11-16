@@ -129,6 +129,7 @@ export type ErrorCode =
   | "matter.folder_wildcard"
   | "agent.sandbox_wildcard"
   | "agent.sandbox_unavailable"
+  | "matter.name_unreadable"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -391,9 +392,14 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "agent.sandbox_wildcard":
     "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again.",
   // provisional (UC-472): Claude's protection couldn't be set up for another reason (its short temp folder couldn't
-  // be made; a folder to keep it out of isn't UTF-8; Claude Code's own "sandbox required but unavailable"), so Claude
-  // didn't start. Hindi later
+  // be made; Claude Code's own "sandbox required but unavailable"), so Claude didn't start. A name that isn't UTF-8
+  // has its own code (matter.name_unreadable). Hindi later
   "agent.sandbox_unavailable": SANDBOX_UNAVAILABLE,
+  // provisional (U3-err-matter.name_unreadable; a launch refusal, not retryable): a folder Claude's sandbox must deny has
+  // a name that isn't UTF-8 (another matter's folder, or the data folder's real path), so Claude doesn't start in any
+  // matter. It names no folder, and never reads as SANDBOX_UNAVAILABLE's restart line (UC-472). Hindi later
+  "matter.name_unreadable":
+    "Claude can't start in any matter while a matter's folder, or Clauseo's data folder, leads to a folder with a name Clauseo can't read. Rename that folder, then try again.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

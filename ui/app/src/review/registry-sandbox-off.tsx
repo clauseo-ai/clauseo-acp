@@ -3,7 +3,8 @@
 // send's refusal, in place of the "U3-err-<code>" entry (registry-offline.tsx's ownEntry). UC-470 names the matter
 // folder's own name with its *; UC-471 the other matter's folder whose * or ? pattern would cover this one's (with
 // none to name, the code's own line, which names none); UC-472 is also matter.folder_wildcard's line with no folder
-// to name.
+// to name. matter.name_unreadable (U3-err-matter.name_unreadable, provisional) is a launch refusal for a folder name
+// Claude's sandbox can't read, which names no folder; it reads as the code's own line, never UC-472's.
 import { step, userMessage } from "../testing/stream-script.ts";
 import type { ErrorCode } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
@@ -63,6 +64,16 @@ export const SANDBOX_OFF: Partial<Record<ErrorCode, Entry[]>> = {
       ),
       screen: "room/thread",
       render: stopped("agent.sandbox_unavailable", "Documents/Matters/Acme"),
+    },
+  ],
+  "matter.name_unreadable": [
+    {
+      id: "U3-err-matter.name_unreadable",
+      words: errorWords(
+        "Claude can't start in any matter while a matter's folder, or Clauseo's data folder, leads to a folder with a name Clauseo can't read. Rename that folder, then try again.",
+      ),
+      screen: "room/thread",
+      render: stopped("matter.name_unreadable", "Documents/Matters/Acme"),
     },
   ],
 };

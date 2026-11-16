@@ -285,7 +285,11 @@ test("an agent's name fills no other code", () => {
 test("only the agent.* codes that name Claude have a sentence per plan", () => {
   // Claude-only refusals: the host sends them for a Claude launch alone (its sandbox, macOS and Linux), so no other
   // plan's thread ever shows their line (UC-472)
-  const claudeOnly: readonly WordedCode[] = ["agent.sandbox_unavailable", "matter.folder_wildcard"];
+  const claudeOnly: readonly WordedCode[] = [
+    "agent.sandbox_unavailable",
+    "matter.folder_wildcard",
+    "matter.name_unreadable",
+  ];
   const naming = (Object.keys(ERROR_WORDS) as WordedCode[]).filter(
     (c) => ERROR_WORDS[c].includes("Claude") && !claudeOnly.includes(c),
   );
@@ -422,4 +426,18 @@ test.each([
   // the folder reaches no other code's line
   expect(errorWords("en", "agent.sandbox_wildcard", CLAUDE, place)).toBe(UC471);
   expect(errorWords("en", "matter.folder_backslash", CLAUDE, place)).not.toContain("Test*");
+});
+
+// matter.name_unreadable (provisional; hi: later): a launch refusal for a folder name Clauseo can't read, which names no
+// folder and is never UC-472's restart line, with or without the matter's place
+const NAME_UNREADABLE =
+  "Claude can't start in any matter while a matter's folder, or Clauseo's data folder, leads to a folder with a name Clauseo can't read. Rename that folder, then try again.";
+test("matter.name_unreadable reads its own sentence in both languages, with and without a place, never UC-472's", () => {
+  const place = { platform: "mac", parent: null } as const;
+  for (const lang of ["en", "hi"] as const) {
+    expect(errorWords(lang, "matter.name_unreadable")).toBe(NAME_UNREADABLE);
+    expect(errorWords(lang, "matter.name_unreadable", CLAUDE, place)).toBe(NAME_UNREADABLE);
+    expect(errorWords(lang, "matter.name_unreadable")).not.toBe(UC472);
+  }
+  expect(NAME_UNREADABLE).not.toMatch(BANNED_EN);
 });

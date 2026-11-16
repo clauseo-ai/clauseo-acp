@@ -89,6 +89,15 @@ const OFFLINE_NOTICE = notice(6, {
   text: "Clauseo stopped a step: ChatGPT tried to go online by running a command. ChatGPT can use web search instead.",
   kind: "shell_network_blocked",
 });
+/** A matter's folder replaced by a shortcut elsewhere (UC-846): {matter} is the other matter's name, isolated. */
+const OTHER_MATTER =
+  "The folder for {matter} has been replaced by a shortcut to somewhere else, so Clauseo can no longer keep Claude out of the place it leads to. Check that folder before you open {matter} again.";
+/** The host's notice for that link, the one matter named (the review's example). */
+const OTHER_MATTER_NOTICE = notice(6, {
+  level: "warning",
+  text: "The folder for Acme v Jones has been replaced by a shortcut to somewhere else.",
+  kind: { other_matter_link_unexpected: { matter: "Acme v Jones" } },
+});
 const OFFLINE_NO_SEARCH = "Clauseo stopped a step: {name} tried to go online by running a command.";
 const OFFLINE_NO_SEARCH_ALONE =
   "Clauseo stopped a step: the AI tried to go online by running a command.";
@@ -198,6 +207,12 @@ export const TN: Entry[] = [
     words: threadWords(OFFLINE_NO_SEARCH),
     screen: "room/thread",
     render: thread(OFFLINE_NO_SEARCH_NOTICE),
+  },
+  {
+    id: "UC-846",
+    words: threadWords(OTHER_MATTER),
+    screen: "room/thread",
+    render: thread(OTHER_MATTER_NOTICE),
   },
   {
     // Where the room knows no agent name, as TN-14: rendered alone.

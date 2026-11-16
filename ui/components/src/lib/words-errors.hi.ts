@@ -271,6 +271,9 @@ export const HI = {
     null,
   "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again.":
     null,
+  // provisional English (U3-err-matter.name_unreadable: a launch refusal, not retryable); hi: later
+  "Claude can't start in any matter while a matter's folder, or Clauseo's data folder, leads to a folder with a name Clauseo can't read. Rename that folder, then try again.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */
