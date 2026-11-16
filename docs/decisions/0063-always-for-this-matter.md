@@ -192,15 +192,16 @@ card what "Always" would keep. #1109's `HostQuery::KeptPermissions` and
 | UC-811 | card, file edit | Always allow changes to files in this matter. |
 | UC-812 | card, site | Always allow {site} in this matter. |
 | UC-814 | thread, host answered | Allowed: always for this matter. |
-| UC-815 | thread, "No" holds | You said no to this before. {agent} asked again, so Clauseo said no for you. |
 | UC-816 | empty list | Nothing is always allowed in this matter yet. |
 | UC-817 | session option | For this conversation |
 
 The list reuses #1109's "Kept permissions…" dialog and `UBL-26` "Remove". The words are in
-`ui/app/copy-approvals/UC-always-for-this-matter.json` (UC-810..819 and UC-857; UC-818, UC-819
-and UC-857 replace #1109's UC-502, UC-503 and UC-507, UC-816 replaces UC-505). UC-813 ("applies
-only until Clauseo closes") is gone: no notice shows a failed save, and a rule the host could not
-write holds only in the answering agent's memory until that agent stops.
+`ui/app/copy-approvals/UC-always-for-this-matter.json` (UC-810..812, UC-814, UC-816..819 and
+UC-857; UC-818, UC-819 and UC-857 replace #1109's UC-502, UC-503 and UC-507, UC-816 replaces
+UC-505). UC-813 ("applies only until Clauseo closes") is gone: no notice shows a failed save,
+and a rule the host could not write holds only in the answering agent's memory until that agent
+stops. UC-815 ("You said no to this before…") is gone too: nothing refuses a repeat request for
+the lawyer, so nothing would show it.
 
 Later, with the folder grant (`folder_save`, provisional, Hindi later; the list shows a grant
 in the same words):

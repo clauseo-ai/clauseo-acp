@@ -43,17 +43,6 @@
     "by": "always_core words (provisional)",
     "note": "the thread's line where a card would have been: Clauseo answered the request itself, once, from a rule the lawyer kept for this matter"
   },
-  "UC-815": {
-    "en": "You said no to this before. {agent} asked again, so Clauseo said no for you.",
-    "hi": "आपने पहले इसके लिए मना किया था। {agent} ने फिर पूछा, इसलिए Clauseo ने आपकी ओर से मना कर दिया।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-16",
-    "hi_by": "always_core words (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-16",
-    "by": "always_core words (provisional)",
-    "note": "the thread's line when the lawyer's earlier No holds and Clauseo refuses a repeat request without a card. {agent} is Claude or ChatGPT"
-  },
   "UC-816": {
     "en": "Nothing is always allowed in this matter yet.",
     "hi": "इस मामले में अभी तक कुछ भी हमेशा के लिए अनुमत नहीं है।",
