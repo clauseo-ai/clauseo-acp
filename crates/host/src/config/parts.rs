@@ -165,6 +165,13 @@ impl HostConfig {
         self
     }
 
+    /// No guard program, as when the desktop cannot name its own executable: no hook goes, and
+    /// a Claude launch that rests on the guard is refused (`agent.guard_missing`).
+    pub fn without_pre_write_guard(mut self) -> Self {
+        self.pre_write_guard = None;
+        self
+    }
+
     /// Whether each Claude launch first runs the guard's hook command, exactly as its entry
     /// states it, on a made-up tool call it must refuse, and is refused
     /// (`agent.guard_selftest_failed`) when it does not refuse in time (`guard_selftest.rs`,

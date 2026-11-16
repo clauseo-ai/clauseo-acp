@@ -149,82 +149,9 @@ pub fn later_variants() -> Vec<DomainEvent> {
             PageVia::CodexOpenPage,
         )
         .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::MatterFolderIsDrive,
-            detail: Some("/ is a drive root".to_owned()),
-            setting: None,
-        }
-        .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::MatterFolderIsHome,
-            detail: Some("the home folder".to_owned()),
-            setting: None,
-        }
-        .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::MatterFolderIsSystem,
-            detail: Some("/usr is a system folder".to_owned()),
-            setting: None,
-        }
-        .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::MatterFolderUnreadable,
-            detail: Some("permission denied".to_owned()),
-            setting: None,
-        }
-        .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::MatterFolderIsMatter,
-            detail: Some("already a matter".to_owned()),
-            setting: None,
-        }
-        .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::MatterFolderInMattersRoot,
-            detail: Some("inside the data folder".to_owned()),
-            setting: None,
-        }
-        .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::MatterFolderNetwork,
-            detail: Some("on a network drive".to_owned()),
-            setting: None,
-        }
-        .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::MatterFolderNoPermissions,
-            detail: Some("no file permissions".to_owned()),
-            setting: None,
-        }
-        .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::AgentGuardMissing,
-            detail: Some("the guard hook has no program".to_owned()),
-            setting: None,
-        }
-        .into(),
-        CheckpointRecorded::new(checkpoint_id(18), CheckpointKind::Revisions, None, None)
-            .unwrap()
-            .into(),
-        // Never a turn's failure in practice (the updater's code); here for the corpus.
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::UpdateFailed,
-            detail: Some("the signature did not verify".to_owned()),
-            setting: None,
-        }
-        .into(),
     ]
     .into_iter()
+    .chain(folder_failures())
     .chain(later::failures_then_case_law())
     .chain(setup::turns())
     .chain(later::notices())
@@ -232,6 +159,53 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .chain(later::steers())
     .chain(later::policy_settings())
     .collect()
+}
+
+/// [`later_variants`]' failures of a matter folder, the guard's missing program, a
+/// checkpoint of revisions and the updater's failure, in that order.
+fn folder_failures() -> Vec<DomainEvent> {
+    let mut events: Vec<DomainEvent> = [
+        (ErrorCode::MatterFolderIsDrive, "/ is a drive root"),
+        (ErrorCode::MatterFolderIsHome, "the home folder"),
+        (ErrorCode::MatterFolderIsSystem, "/usr is a system folder"),
+        (ErrorCode::MatterFolderUnreadable, "permission denied"),
+        (ErrorCode::MatterFolderIsMatter, "already a matter"),
+        (
+            ErrorCode::MatterFolderInMattersRoot,
+            "inside the data folder",
+        ),
+        (ErrorCode::MatterFolderNetwork, "on a network drive"),
+        (ErrorCode::MatterFolderNoPermissions, "no file permissions"),
+        (
+            ErrorCode::AgentGuardMissing,
+            "the guard hook has no program",
+        ),
+    ]
+    .into_iter()
+    .map(|(code, detail)| failed(code, detail))
+    .collect();
+    events.push(
+        CheckpointRecorded::new(checkpoint_id(18), CheckpointKind::Revisions, None, None)
+            .unwrap()
+            .into(),
+    );
+    // Never a turn's failure in practice (the updater's code); here for the corpus.
+    events.push(failed(
+        ErrorCode::UpdateFailed,
+        "the signature did not verify",
+    ));
+    events
+}
+
+/// A failure of turn 3 with `code` and `detail`.
+fn failed(code: ErrorCode, detail: &str) -> DomainEvent {
+    TurnFailed {
+        turn: turn_id(3),
+        code,
+        detail: Some(detail.to_owned()),
+        setting: None,
+    }
+    .into()
 }
 
 /// One example of every known event kind, in `DomainEvent::KINDS` order.

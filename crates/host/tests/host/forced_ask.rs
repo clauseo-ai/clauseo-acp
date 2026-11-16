@@ -382,7 +382,9 @@ fn a_forced_ask_launch_without_a_guard_is_refused() {
         &[(CLAUDE, Scenario::Local("claude-forced-ask-no-guard"))],
     );
     let host = dir.start_with(0, |config| {
-        config.with_folder_support(Some(FolderSupportKind::Network))
+        config
+            .with_folder_support(Some(FolderSupportKind::Network))
+            .without_pre_write_guard()
     });
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
     let mut events = host.events(StreamId::Thread(thread));

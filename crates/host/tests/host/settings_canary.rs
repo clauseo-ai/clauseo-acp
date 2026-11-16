@@ -146,12 +146,18 @@ fn a_resume_without_its_canary_is_refused_after_one_retry() {
 /// With the switch on but no guard program, no canary can go: the session is not checked, as
 /// no guard goes either (a launch resting on the guard is refused elsewhere, `guard_missing`).
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "a Windows Claude launch without the guard program is refused (agent.guard_missing)"
+)]
 fn without_the_guard_program_no_canary_goes_and_the_session_runs() {
     let dir = Dir::new(
         "settings_canary_no_guard",
         &[(CLAUDE, Scenario::Local("claude-mode-new"))],
     );
-    let host = dir.start_with(0, |config: HostConfig| config.with_settings_canary(true));
+    let host = dir.start_with(0, |config: HostConfig| {
+        config.with_settings_canary(true).without_pre_write_guard()
+    });
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
     assert_eq!(turn(&host, thread, "Summarise clause 4."), "First answer.");
     host.shutdown();

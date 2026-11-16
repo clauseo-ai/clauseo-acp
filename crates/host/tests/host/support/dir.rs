@@ -154,7 +154,7 @@ impl Dir {
     ) -> HostConfig {
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(locations, &SystemFiles, &[&policy]);
-        crate::idle_stop::off(HostConfig::new(effective, launcher))
+        let config = crate::idle_stop::off(HostConfig::new(effective, launcher))
             // A silent turn is never probed: no host test touches the network (D-050).
             .with_quiet_watch(false)
             .with_limits_reader(Arc::new(NoReader))
@@ -168,7 +168,29 @@ impl Dir {
             // tests set their own.
             .with_mcp_confirm(Arc::new(AllowAll))
             // Undo's and restore's deletes go to the test's own trash, never the machine's.
-            .with_matter_trash(self.trash())
+            .with_matter_trash(self.trash());
+        self.stand_in_guard(config)
+    }
+
+    /// On Windows a Claude launch has no sandbox and rests on the guard hook: the app always
+    /// names one (its own executable), and a launch without it is refused
+    /// (`agent.guard_missing`). For a folder whose agents are Claude's alone, this names a stand-in
+    /// for that program, `<root>/app/clauseo-desktop.exe`: the fake agent runs no hook, and the
+    /// guard's self-test and the settings canary are off in test builds. Not with a Codex agent,
+    /// whose launch with a guard waits for a hooks list the fake agent does not answer. Tests of
+    /// a launch with no guard program take it out (`HostConfig::without_pre_write_guard`).
+    fn stand_in_guard(&self, config: HostConfig) -> HostConfig {
+        let settings: serde_json::Value =
+            serde_json::from_str(&self.settings_json()).unwrap_or_default();
+        let agents = settings["agents"].as_object();
+        let claude_only = agents.is_some_and(|agents| {
+            agents.contains_key("claude-acp") && agents.keys().all(|id| id == "claude-acp")
+        });
+        if cfg!(windows) && claude_only {
+            config.with_pre_write_guard(self.root.join("app").join("clauseo-desktop.exe"))
+        } else {
+            config
+        }
     }
 
     /// The folder undo's and restore's deletes go into (`with_matter_trash`).
