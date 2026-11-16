@@ -23,35 +23,48 @@ use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::{BlacklineNotice, WordBlackline};
 
 use super::{REDLINE, VIEW_LIMIT, author_arg, run};
+use crate::actor::query::blackline::parse::ledger::{self, Change};
 use crate::actor::query::blackline::parse::sides::{Crossed, Side, cross, read_side};
-use crate::actor::query::blackline::parse::{Read, ledger, order};
+use crate::actor::query::blackline::parse::{Read, order};
 use crate::config::Stetdoc;
 use crate::matter_worker::{NEW, OLD};
 
 /// The most changed links the blackline names; past it, it says the rest may differ.
 pub(crate) const LINKS_MAX: usize = 50;
 
-/// Checks `read`, the redline's view in `dir`: against stetdoc's list of the redline's changes,
-/// and, when the versions differ (`differ`), against what each version's view shows.
+/// stetdoc's list of the changes of the redline in `dir` (`stetdoc check --json`), or why there
+/// is none.
+pub(crate) async fn list_changes<T: Timer>(
+    launcher: &dyn Launcher,
+    timer: &T,
+    stetdoc: &Stetdoc,
+    dir: &Path,
+) -> Result<Vec<Change>, String> {
+    let check = vec![
+        "check".into(),
+        "--json".into(),
+        author_arg(&stetdoc.author),
+        dir.join(REDLINE).into_os_string(),
+    ];
+    run(launcher, timer, stetdoc, dir, "check", check, VIEW_LIMIT)
+        .await
+        .map_err(|failed| failed.to_string())
+        .and_then(|out| ledger::read_check(&out).map_err(str::to_owned))
+}
+
+/// Checks `read`, the redline's view in `dir` with its parts: against stetdoc's list of the
+/// redline's changes (`listed`, [`list_changes`]), and, when the versions differ (`differ`),
+/// against what each version's view shows.
 pub(crate) async fn cross_check<T: Timer>(
     launcher: &dyn Launcher,
     timer: &T,
     stetdoc: &Stetdoc,
     dir: &Path,
     read: &mut Read,
+    listed: Result<Vec<Change>, String>,
     differ: bool,
 ) {
     let path = |name: &str| dir.join(name).into_os_string();
-    let check = vec![
-        "check".into(),
-        "--json".into(),
-        author_arg(&stetdoc.author),
-        path(REDLINE),
-    ];
-    let listed = run(launcher, timer, stetdoc, dir, "check", check, VIEW_LIMIT)
-        .await
-        .map_err(|failed| failed.to_string())
-        .and_then(|out| ledger::read_check(&out).map_err(str::to_owned));
     match listed {
         Ok(changes) => ledger::apply(read, &changes),
         Err(why) => tracing::info!(%why, "the Word blackline is checked by the view's summary"),

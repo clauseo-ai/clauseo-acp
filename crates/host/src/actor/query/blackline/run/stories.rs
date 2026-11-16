@@ -14,19 +14,17 @@ use clauseo_process::{Launcher, Timer};
 use futures::future::join;
 
 use super::{REDLINE, VIEW_LIMIT, run};
-use crate::actor::query::blackline::parse::Read;
-use crate::actor::query::blackline::parse::story::{Story, StoryRead, add_parts, read_story};
+use crate::actor::query::blackline::parse::story::{Story, StoryRead, read_story};
 use crate::config::Stetdoc;
 
-/// Shows in `read` the parts of the redline in `dir` that hold a change: both story views, run
-/// at once.
-pub(crate) async fn show_parts<T: Timer>(
+/// The redline's notes and headers in `dir`, read (both story views, run at once), for
+/// `add_parts`; a story whose view fails is left out.
+pub(crate) async fn view_stories<T: Timer>(
     launcher: &dyn Launcher,
     timer: &T,
     stetdoc: &Stetdoc,
     dir: &Path,
-    read: &mut Read,
-) {
+) -> Vec<StoryRead> {
     let (notes, headers) = join(
         view_story(launcher, timer, stetdoc, dir, Story::Notes),
         view_story(launcher, timer, stetdoc, dir, Story::Headers),
@@ -41,7 +39,7 @@ pub(crate) async fn show_parts<T: Timer>(
             }
         }
     }
-    add_parts(read, stories);
+    stories
 }
 
 /// The redline's view of `story`, read.
