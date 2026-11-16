@@ -194,7 +194,7 @@ fn codex_browser_tools_are_allowed_unseen() {
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Find the judgment.");
-    answer_from(&host, &mut events, thread, 0, &["allow_once", "approved"]);
+    answer_from(&host, &mut events, thread, 0, &["allow_once", "allow_once"]);
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());

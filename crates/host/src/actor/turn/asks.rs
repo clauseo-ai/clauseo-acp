@@ -15,9 +15,9 @@ use std::path::PathBuf;
 use clauseo_acp::{AcpEvent, LimitSignal, LimitStatus, Origin, PendingKey};
 use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
-    AgentChoiceId, AgentSessionId, CompactString, Deliverable, ElicitationId, ElicitationRequest,
-    ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionAbout,
-    PermissionChoice, PermissionOption, PermissionRequestId, PermissionRequested,
+    AgentChoiceId, AgentKind, AgentSessionId, CompactString, Deliverable, ElicitationId,
+    ElicitationRequest, ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath,
+    PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PermissionRequested,
     PermissionResolved, Principal, StreamId, ThreadId, TurnId,
 };
 
@@ -65,7 +65,8 @@ pub(super) struct HeldOpenCheck {
 /// forced ask it first loses the options `agent::forced_ask::keep_option` drops. A Claude request
 /// naming only its own plan note is marked `about: agent_plan` (`agent/plan_note.rs`), a label that
 /// changes nothing else. In the live turn, a Codex approval of a `browser` tool is answered
-/// `allow_session` at once, unseen ([`browser_tool_to_allow`]).
+/// `allow_session` at once, unseen ([`browser_tool_to_allow`]). Any other Codex request keeps
+/// only the options `agent::codex_options::keep_option` keeps: none that outlives the session.
 pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
     let AcpEvent::PermissionRequested {
         session,
@@ -89,7 +90,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     // Read from the paths the request itself names, before any fallback to the tool call's.
     let plans = agent(actor, thread).and_then(|agent| agent.plan_notes.clone());
     let about = crate::agent::plan_note::about(plans.as_deref(), &paths, cfg!(windows));
-    let ask = PermissionAsk {
+    let mut ask = PermissionAsk {
         session,
         key,
         acp_tool_call_id,
@@ -110,6 +111,23 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     }
     if super::shell_network::refused(actor, thread, &ask, raw_input.as_ref()) {
         return;
+    }
+    // Codex (`agent/codex_options.rs`): only the once-only and refusing options
+    // reach the lawyer, so no card can make a standing rule in the agent's home, and an answer
+    // naming a dropped option is refused as one the agent did not offer. After the answers the
+    // host gives itself above, which read the request's own options (`allow_session`,
+    // `allow_once`, a network amendment's id) and never give an amendment.
+    let kind = actor
+        .check_thread(thread)
+        .ok()
+        .and_then(|entry| AgentKind::of(&entry.row.agent));
+    if kind == Some(AgentKind::Codex) {
+        let offered = ask.options.len();
+        ask.options.retain(crate::agent::codex_options::keep_option);
+        let dropped = offered - ask.options.len();
+        if dropped > 0 {
+            tracing::info!(%thread, dropped, "a Codex permission request lost options that outlive the session");
+        }
     }
     // The shell the request's tool call runs (Claude Code's `Bash` or `PowerShell`), as its
     // start or updates named it; unknown when none did.

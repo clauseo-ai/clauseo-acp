@@ -322,7 +322,7 @@ fn holds(path: &Path, bytes: &[u8]) -> bool {
 
 /// The failure of a Codex launch whose home or `config.toml` could not be made: the error's
 /// codes go to the log only, never the path (it holds the user's name).
-fn home_failed(error: &dyn std::fmt::Display) -> Error {
+pub(super) fn home_failed(error: &dyn std::fmt::Display) -> Error {
     agent_home_failed("Codex", error)
 }
 
@@ -483,7 +483,8 @@ pub(crate) fn make_agent_home(data: &Path, home: &Path, who: &str) -> Result<(),
 /// resolved through links ([`crate::agent::session_folder`], the spelling the agent runs in),
 /// the `.codex` refusal, the matter's folder check `check` (`agent/folder_support.rs`: Codex is
 /// refused on a network drive or a drive without permissions), the home made under `data`,
-/// then `config.toml`. The resolved folder comes back, with the folder check's answer.
+/// its `rules` removed ([`rules::remove_rules`]), then `config.toml`. The resolved folder
+/// comes back, with the folder check's answer.
 pub(crate) fn prepare_launch(
     check: &FolderCheck,
     stored: &Path,
@@ -494,11 +495,13 @@ pub(crate) fn prepare_launch(
     refuse_codex_folder(&folder)?;
     let support = check.refuse_unsupported(&folder)?;
     make_home(data, home)?;
+    rules::remove_rules(home)?;
     write_home_config(home)?;
     Ok((folder, support))
 }
 
 pub(crate) mod prepare;
+pub(crate) mod rules;
 
 #[cfg(test)]
 mod code_mode_tests;
