@@ -19,8 +19,8 @@
 use super::MUST_BE_FALSE;
 
 /// The keys every tool shares that pass, each still checked (`timeoutMs` up to
-/// [`super::MAX_TIMEOUT_MS`], as every key of [`super::TIME_KEYS`] is; `extraArgs` from
-/// [`super::EXTRA_ARGS_ALLOWED`] only).
+/// [`super::MAX_TIMEOUT_MS`], each key of [`super::TIME_KEYS`] up to its own maximum;
+/// `extraArgs` from [`super::EXTRA_ARGS_ALLOWED`] only).
 pub(crate) const COMMON_KEYS: &[&str] = &["extraArgs", "timeoutMs"];
 
 /// Each allowed tool's own keys that pass, in [`super::ALLOWED_TOOLS`]' order.

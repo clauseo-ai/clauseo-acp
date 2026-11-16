@@ -22,7 +22,7 @@
 //!    a. any key of [`REFUSED_KEYS`];
 //!    b. a key of [`MUST_BE_FALSE`] whose value is anything but `false`;
 //!    c. a key of [`TIME_KEYS`] (`timeoutMs` and the other waits) that is not a whole number up
-//!    to [`MAX_TIMEOUT_MS`];
+//!    to its [`time_max`]: [`MAX_TIMEOUT_MS`], or [`MAX_DELAY_MS`] for `delayMs`;
 //!    d. on `agent_browser_screenshot`, a `selector` agent-browser would take for a file path;
 //!    on `agent_browser_read`, any key of [`READ_FETCH_KEYS`];
 //!    e. a `url` that is not a string, names a scheme other than http, https or
@@ -31,7 +31,8 @@
 //!    g. any other string, at any depth, shaped like a command-line flag (`-x`, `--x`,
 //!    `--x=y`, see [`looks_like_flag`]): agent-browser's MCP server puts typed values into the
 //!    CLI's argv, and the CLI reads global flags anywhere in argv (`mcp.rs:2659-2661`);
-//!    h. any key off the tool's pass list (`keys.rs`): "‹key› is not supported in Clauseo.".
+//!    h. any key off the tool's pass list (`keys.rs`): "This option is not supported in
+//!    Clauseo.", the same line for every key.
 //!    Nothing passes by being unknown.
 //!
 //!    A refused request gets an `isError` tool result with its id; a refused notification is
@@ -102,10 +103,9 @@ pub(crate) const READ_FETCH: &str =
     "agent_browser_read fetching a page itself (open the page, then read it)";
 /// The refusal's name for a screenshot selector that reads as a path.
 pub(crate) const SCREENSHOT_PATH: &str = "a file path as the screenshot selector";
-/// The keys that hold a time in milliseconds, each capped at [`MAX_TIMEOUT_MS`] as
-/// `timeoutMs` is: a wait (`waitTimeoutMs`, `agent_browser_wait_ms`'s `ms`), the delay
-/// between keystrokes (`delayMs`, per key) or `readTimeoutMs` could otherwise stall the one
-/// call the MCP server runs at a time.
+/// The keys that hold a time in milliseconds, each capped at its [`time_max`]: a wait
+/// (`waitTimeoutMs`, `agent_browser_wait_ms`'s `ms`), the delay between keystrokes (`delayMs`)
+/// or `readTimeoutMs` could otherwise stall the one call the MCP server runs at a time.
 pub(crate) const TIME_KEYS: &[&str] = &[
     "timeoutMs",
     "waitTimeoutMs",
@@ -114,10 +114,24 @@ pub(crate) const TIME_KEYS: &[&str] = &[
     "readTimeoutMs",
 ];
 
+/// The longest `delayMs` that passes: agent-browser waits it between every two keystrokes, so
+/// 300000 would make a short text take hours.
+pub(crate) const MAX_DELAY_MS: u64 = 1000;
+
+/// The most a key of [`TIME_KEYS`] may hold: [`MAX_DELAY_MS`] for `delayMs`, else
+/// [`MAX_TIMEOUT_MS`].
+pub(crate) fn time_max(key: &str) -> u64 {
+    if key == "delayMs" {
+        MAX_DELAY_MS
+    } else {
+        MAX_TIMEOUT_MS
+    }
+}
+
 /// The refusal's name for a key of [`TIME_KEYS`] out of range, such as "a timeoutMs other than
 /// a whole number up to 300000".
 pub(crate) fn time_refusal(key: &str) -> String {
-    format!("a {key} other than a whole number up to {MAX_TIMEOUT_MS}")
+    format!("a {key} other than a whole number up to {}", time_max(key))
 }
 
 /// The only `extraArgs` tokens that pass, each exactly: global flags, which agent-browser's CLI
@@ -335,7 +349,7 @@ fn check_arguments(tool: &str, arguments: &Map<String, Value>) -> Result<(), Str
     if let Some(key) = TIME_KEYS.iter().find(|key| {
         arguments
             .get(**key)
-            .is_some_and(|value| value.as_u64().is_none_or(|ms| ms > MAX_TIMEOUT_MS))
+            .is_some_and(|value| value.as_u64().is_none_or(|ms| ms > time_max(key)))
     }) {
         return Err(time_refusal(key));
     }
