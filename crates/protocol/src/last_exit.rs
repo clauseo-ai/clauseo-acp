@@ -12,7 +12,8 @@ use crate::{Count, MatterId, ThreadId, Timestamp};
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct LastExit {
     /// The run before this one ended without its quit: a crash, a forced quit or a power cut.
-    /// Also true when an action below was left unfinished, however that run ended.
+    /// The desktop's flag alone: `interrupted` can hold actions after a clean quit too (an idle
+    /// Quit or a logoff while one ran), and then this is false.
     pub unclean: bool,
     /// When this run started: a window keeps the lawyer's dismissal per value, so the notice
     /// shows once per unclean exit.
