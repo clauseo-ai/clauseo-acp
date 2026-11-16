@@ -1,9 +1,11 @@
 //! The list's lines: folded in order, a bad line skipped, nothing without the header, and the
 //! changes the host appends.
 
+use std::fmt::Write as _;
+
 use clauseo_protocol::{MatterPath, SkippedFile, SkippedFileReason};
 
-use super::{HEADER, List, MAX_FILES};
+use super::{HEADER, List, MAX_BYTES, MAX_FILES, fitting, within_limit};
 
 const CLOUD: SkippedFileReason = SkippedFileReason::CloudOnly;
 const LARGE: SkippedFileReason = SkippedFileReason::OverSizeCap;
@@ -102,4 +104,31 @@ fn at_most_the_first_files_are_listed() {
     let changes = List::default().changes(&many);
     assert_eq!(changes.lines().count(), MAX_FILES);
     assert!(!changes.contains(&format!("f{MAX_FILES:05}.pdf")));
+}
+
+/// A list longer than the guard reads is read up to its last whole line within the limit, never
+/// as empty; and the host appends only the whole lines that fit within it.
+#[test]
+fn a_list_past_the_limit_is_read_to_its_last_whole_line() {
+    let limit = usize::try_from(MAX_BYTES).unwrap();
+    let mut text = HEADER.to_owned();
+    let mut n = 0;
+    while text.len() <= limit {
+        writeln!(text, "add cloud-only f{n:07}.pdf").unwrap();
+        n += 1;
+    }
+    let kept = within_limit(text.as_bytes());
+    assert!(kept.len() <= limit && kept.ends_with(b"\n"));
+    let list = List::decode(std::str::from_utf8(kept).unwrap());
+    assert!(listed(&list, "f0000000.pdf").is_some(), "read, not empty");
+    assert!(
+        listed(&list, &format!("f{:07}.pdf", n - 1)).is_none(),
+        "the cut line left out"
+    );
+
+    let changes = "remove A.pdf\nadd cloud-only B.pdf\n";
+    assert_eq!(fitting(changes, 0), changes);
+    assert_eq!(fitting(changes, MAX_BYTES - 20), "remove A.pdf\n");
+    assert_eq!(fitting(changes, MAX_BYTES - 5), "");
+    assert_eq!(fitting(changes, MAX_BYTES + 5), "");
 }

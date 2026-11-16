@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use clauseo_protocol::{MatterPath, SkippedFile, SkippedFileReason};
 
 use super::update;
-use crate::pre_write_guard::no_copy::{HEADER, NoCopyList};
+use crate::pre_write_guard::no_copy::{HEADER, List, MAX_BYTES, MAX_FILES, NoCopyList};
 use crate::write::{self, RecordId};
 
 fn folder(test: &str) -> PathBuf {
@@ -68,5 +68,38 @@ fn another_file_or_a_link_at_its_place_is_never_written() {
     };
     update(Some(&linked), &[cloud("A.pdf")]);
     assert_eq!(std::fs::read_to_string(&target).unwrap(), HEADER);
+    write::remove_dir_all(&root).unwrap();
+}
+
+/// 20,000 files with paths of about 440 bytes come to more than the guard reads: the host stops
+/// appending at the guard's limit, the guard still reads the list (never as empty), and the next
+/// turn's update appends nothing more, so the file does not grow turn by turn.
+#[test]
+fn a_list_at_the_guards_limit_is_still_read_and_never_grows() {
+    let root = folder("limit");
+    let list = made(&root);
+    let long = "x".repeat(140);
+    let files: Vec<SkippedFile> = (0..MAX_FILES)
+        .map(|i| cloud(&format!("{long}/{long}/{long}-{i:05}.pdf")))
+        .collect();
+    update(Some(&list), &files);
+    let len = std::fs::metadata(&list.file).unwrap().len();
+    assert!(len <= MAX_BYTES, "{len} bytes");
+    assert!(len > MAX_BYTES - 1024, "filled to the limit: {len} bytes");
+    let text = std::fs::read_to_string(&list.file).unwrap();
+    assert!(text.ends_with('\n'), "whole lines only");
+    let first = MatterPath::new(&format!("{long}/{long}/{long}-00000.pdf")).unwrap();
+    assert!(
+        !List::read(&list).changes(&[]).is_empty(),
+        "the list reads as the files it names, not as empty"
+    );
+    assert!(List::read(&list).names(&first));
+    update(Some(&list), &files);
+    update(Some(&list), &files);
+    assert_eq!(
+        std::fs::metadata(&list.file).unwrap().len(),
+        len,
+        "nothing re-appended"
+    );
     write::remove_dir_all(&root).unwrap();
 }
