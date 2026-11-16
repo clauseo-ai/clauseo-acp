@@ -293,20 +293,26 @@ pub(crate) struct GuardHook<'a> {
     /// Forced ask (`agent/forced_ask.rs`): the hook runs before every tool, with
     /// [`ASK_ALL_FLAG`](crate::agent::forced_ask::ASK_ALL_FLAG) after the folder.
     pub(crate) ask_all: bool,
+    /// The launch's file-tool fence file (`crate::file_fence`), passed after the folder as
+    /// `--fence <file> <sha-256>`; none when the launch wrote none.
+    pub(crate) fence: Option<&'a crate::file_fence::Written>,
 }
 
 /// The tools the pre-write guard's hook runs before: Claude Code's file tools (`MultiEdit` is
-/// only a legacy alias at 2.1.293, harmless to keep), `Bash` and `PowerShell` (on by default on
-/// Windows for some accounts), which the guard checks by a heuristic. A matcher of names joined
-/// by `|` is an exact list.
-pub(crate) const GUARD_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell";
+/// only a legacy alias at 2.1.293, harmless to keep), the ones that read and search included,
+/// for the file-tool fence (`crate::file_fence`, `decide::FENCED_TOOLS`), and `Bash` and
+/// `PowerShell` (on by default on Windows for some accounts), which the guard checks by a
+/// heuristic. A matcher of names joined by `|` is an exact list.
+pub(crate) const GUARD_MATCHER: &str =
+    "Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell";
 
 /// The seconds Claude Code waits for the guard before going on without it (default 600).
 pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 
 /// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
-/// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools;
-/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` last.
+/// (`crate::pre_write_guard`) and `--matter <matter>`, then `--fence <file> <sha-256>` when the
+/// launch wrote a fence file, before each of [`GUARD_MATCHER`]'s tools; with `ask_all`, before
+/// every tool (MCP tools included) and with `--ask-all` last.
 /// The matter folder goes as an argument because the hook input's `cwd` follows the agent's
 /// `cd`. `None`, with a warning, when `program` or `matter` is no UTF-8 string: JSON cannot
 /// carry it, and a lossy copy could run another program or guard another folder.
@@ -328,6 +334,7 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         program,
         matter,
         ask_all,
+        fence,
     } = guard;
     let (Some(command), Some(matter)) = (program.to_str(), matter.to_str()) else {
         tracing::warn!(
@@ -341,6 +348,13 @@ pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
         crate::pre_write_guard::MATTER_FLAG,
         matter,
     ];
+    match fence.map(|fence| (fence.path.to_str(), fence.digest.as_str())) {
+        Some((Some(file), digest)) => args.extend([crate::file_fence::FLAG, file, digest]),
+        Some((None, _)) => tracing::warn!(
+            "the file-tool fence file's path is not UTF-8: the guard runs without the fence"
+        ),
+        None => {}
+    }
     let matcher = if ask_all {
         args.push(crate::agent::forced_ask::ASK_ALL_FLAG);
         crate::agent::forced_ask::EVERY_TOOL

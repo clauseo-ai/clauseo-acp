@@ -223,6 +223,7 @@ pub(super) fn session_loads(
             program,
             matter,
             ask_all: forced_ask,
+            fence: run.data_deny.fence.as_ref(),
         });
     // Without the guard's hook, a forced-ask session would rest on the ask rules alone, and a
     // hook that is missing fails open: refuse it.

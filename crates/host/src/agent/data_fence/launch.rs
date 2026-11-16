@@ -93,6 +93,10 @@ pub(crate) struct LaunchDeny {
     /// ([`own_reads`]): what Claude may list and read with no question to the auto-mode
     /// classifier (`super::own_allow_rules`). None before the launch prep has them.
     pub(crate) own_reads: Vec<String>,
+    /// The file-tool fence file written for this launch (`crate::file_fence`), its path and
+    /// digest going to the guard's hook; none before the launch prep writes it, for Codex, and
+    /// when it could not be written (the deny rules alone stand then).
+    pub(crate) fence: Option<crate::file_fence::Written>,
 }
 
 impl LaunchDeny {
@@ -116,6 +120,7 @@ impl LaunchDeny {
             targets,
             kept,
             own_reads: Vec::new(),
+            fence: None,
         }
     }
 }

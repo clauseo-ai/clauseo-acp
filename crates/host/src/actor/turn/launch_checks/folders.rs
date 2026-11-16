@@ -9,6 +9,10 @@ use clauseo_protocol::MatterId;
 
 use super::RunFolders;
 use crate::agent::data_fence;
+use crate::file_fence::{FenceFile, RootKind, Written};
+
+/// No folders: the fence's place for a list the launch does not have yet.
+const NO_ROOTS: [&Path; 0] = [];
 
 /// The data folder canonicalised, then as configured when that differs; as configured alone
 /// when it does not resolve (the data-folder refusal has refused that launch already).
@@ -37,7 +41,31 @@ pub(super) fn launch_deny(
     });
     let mut deny = data_fence::launch_deny(data_spellings(data), data, &own, &projects);
     deny.own_reads = data_fence::own_reads(data, &[&run.work, &run.notes]);
+    if claude_home.is_some() {
+        // Other matters' folders and protected folders join the fence here, one call per list;
+        // the launch has none of its own yet.
+        let fence = FenceFile::launch(&deny)
+            .with_roots(RootKind::Matter, NO_ROOTS)
+            .with_edit_roots(RootKind::Matter, NO_ROOTS);
+        deny.fence = write_fence(&run.root, &fence);
+    }
     deny
+}
+
+/// Writes the file-tool fence `fence` in the run folder `root` (`crate::file_fence`): other
+/// matters' folders and protected folders join it with `FenceFile::with_roots`. `None`, with a
+/// warning, when it can't be written: the deny rules alone stand for that launch.
+fn write_fence(root: &Path, fence: &FenceFile) -> Option<Written> {
+    match fence.write_in(root) {
+        Ok(written) => Some(written),
+        Err(error) => {
+            tracing::warn!(
+                kind = ?error.kind(),
+                "the file-tool fence file was not written; the deny rules alone stand"
+            );
+            None
+        }
+    }
 }
 
 /// The session's own folders, which Claude's deny rules leave out: its run folder, this

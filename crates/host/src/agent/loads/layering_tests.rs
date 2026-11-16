@@ -164,6 +164,7 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
         program,
         matter,
         ask_all: false,
+        fence: None,
     });
     let keys = ClaudeKeys {
         web_search: ON,
@@ -216,6 +217,7 @@ fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
             program: Path::new("/app/clauseo"),
             matter: Path::new("/m"),
             ask_all: forced_ask,
+            fence: None,
         });
         let keys = ClaudeKeys {
             web_search: ON,
@@ -340,6 +342,7 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
             program: Path::new("/app/clauseo"),
             matter: Path::new("/m"),
             ask_all: forced_ask,
+            fence: None,
         });
         let meta = session_meta(
             hook.as_object().cloned(),
@@ -391,6 +394,7 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
             !rules.iter().any(|rule| {
                 (rule.contains("/run/")
                     && !rule.ends_with("/run/*/relay-token)")
+                    && !rule.ends_with("/run/*/file-fence.json)")
                     && !rule.ends_with("/run/*/agent-browser/config.json)"))
                     || rule.contains("/agent-state")
             }),
@@ -413,6 +417,7 @@ fn a_guard_that_cannot_go_has_a_reason() {
             program,
             matter,
             ask_all: true,
+            fence: None,
         })
     };
     assert_eq!(guard_missing(None), Some("no_program"));
@@ -552,6 +557,7 @@ fn an_accept_edits_session_keeps_the_deny_rules_the_guard_and_its_two_folders() 
         program: Path::new("/app/clauseo"),
         matter: Path::new("/m"),
         ask_all: false,
+        fence: None,
     });
     let hook = json!({"claudeCode": {"options": {"extraArgs": {"permission-mode": "default"}}}});
     let meta = session_meta(

@@ -77,7 +77,9 @@ pub(crate) use variables::launch_vars;
 /// Claude's home whole: Claude Code writes its plan note to `plans` there with its own Edit
 /// tool, and a deny rule has no exceptions. And in every run folder, the own one too, the
 /// case-law relay's token file (R24): `clauseo-mcp` reads it itself, so Claude's tools never
-/// need it, and a token read through them would land in the transcript; and the shell
+/// need it, and a token read through them would land in the transcript; the file-tool fence's
+/// file (`file_fence::FILE_NAME`), which only the guard reads, so the agent can't change what it
+/// denies; and the shell
 /// browser's config file
 /// (`browser::SESSION_CONFIG`), which agent-browser reads itself: an edit to it could set what
 /// the `agent-browser` deny rules refuse as flags (`--profile`, `--config`).
@@ -86,8 +88,9 @@ pub(crate) use variables::launch_vars;
 /// session's Claude settings file (`agent::launch_settings`), its own too: Claude Code reads
 /// it itself at its start, so its tools never need it, and it holds every session's rules.
 /// And Claude's config folder's names (`claude_home::CLAUDE_HOME`, added by the launch).
-pub(crate) const DENIED: [&str; 31] = [
+pub(crate) const DENIED: [&str; 32] = [
     "run/*/relay-token",
+    "run/*/file-fence.json",
     "run/*/agent-browser/config.json",
     "skill-packs/**",
     "matters/**",

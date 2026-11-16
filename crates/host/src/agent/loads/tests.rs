@@ -155,9 +155,10 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
         program: &program,
         matter: &matter,
         ask_all: false,
+        fence: None,
     });
     let entry = json!({
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
+        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell",
         "hooks": [{
             "type": "command",
             "command": program.to_str().unwrap(),
@@ -167,7 +168,7 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
     });
     assert_eq!(
         GUARD_MATCHER,
-        "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell"
+        "Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell"
     );
     assert_eq!(guard.and_then(guard_entry), Some(entry.clone()));
     let firm = json!({"matcher": "Read", "hooks": [{"type": "command", "command": "firm"}]});
@@ -218,6 +219,7 @@ fn a_path_that_is_not_utf8_gets_no_entry() {
         program,
         matter,
         ask_all: false,
+        fence: None,
     };
     assert_eq!(guard_entry(hook(odd, plain)), None);
     assert_eq!(guard_entry(hook(plain, odd)), None);

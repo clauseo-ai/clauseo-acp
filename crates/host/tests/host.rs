@@ -191,6 +191,9 @@ mod egress_wait;
 #[path = "host/elicitation_withheld.rs"]
 mod elicitation_withheld;
 #[cfg(test)]
+#[path = "host/file_fence.rs"]
+mod file_fence;
+#[cfg(test)]
 #[path = "host/first_read.rs"]
 mod first_read;
 #[cfg(test)]

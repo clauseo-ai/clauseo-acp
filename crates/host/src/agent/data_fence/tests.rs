@@ -111,6 +111,7 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         let named = |r: &&String| {
             r.contains(kept)
                 && !r.ends_with("/run/*/relay-token)")
+                && !r.ends_with("/run/*/file-fence.json)")
                 && !r.ends_with("/run/*/agent-browser/config.json)")
         };
         assert!(!rules.iter().any(|r| named(&r)), "{kept}: {rules:?}");
