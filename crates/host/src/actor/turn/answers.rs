@@ -84,7 +84,7 @@ pub(super) fn answer_permission(
 }
 
 /// Sends an answer's commit with its receipt; `then` tells the agent once it is durable.
-fn send_answer(
+pub(super) fn send_answer(
     actor: &mut Actor,
     ctx: CommandCtx,
     thread: ThreadId,

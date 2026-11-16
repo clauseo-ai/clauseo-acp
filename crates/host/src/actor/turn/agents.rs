@@ -99,7 +99,8 @@ pub(super) struct Agent {
     pub(super) compaction: BTreeMap<CompactString, String>,
     /// The thread's whole log folded, for replay dedupe while `session/load` runs.
     pub(super) replay: Option<SentView>,
-    /// Replayed updates, held until the session is attached.
+    /// Replayed updates, and options updates while the session starts, held until the session
+    /// is attached.
     pub(super) replayed: Vec<AcpEvent>,
     /// A Codex session's checks, or a Claude session's switch to Clauseo's mode, run before its
     /// attach: every update is held with the replayed ones meanwhile, so none is logged before
