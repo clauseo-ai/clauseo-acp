@@ -109,9 +109,10 @@ pub(crate) struct TurnState {
     run: Option<launch_checks::RunFolders>,
     /// The skill packs its launches skipped, each pack and reason told once for the host's run.
     packs: launch_checks::PackNotices,
-    /// The thread was told Claude's auto mode is not available (`session/claude_mode.rs`), once
-    /// for the host's run.
+    /// The thread was told Claude's auto mode is not available (`session/claude_mode.rs`).
     auto_told: bool,
+    /// The conversation's ask mode, kept across its launches (`session/ask_mode.rs`).
+    ask: session::ask_mode::AskMode,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
     /// The thread's sources in progress: the browser's opens and the agents' web calls that have

@@ -98,6 +98,21 @@ const OFFLINE_NO_SEARCH_NOTICE = notice(6, {
   text: "Clauseo stopped a step: ChatGPT tried to go online by running a command.",
   kind: "shell_network_blocked_no_web_search",
 });
+const ASK_TOO_MANY =
+  "Claude will ask before each change in this conversation. Clauseo is protecting more matters than Claude's automatic checks can handle at once, so Claude asks you instead.";
+/** The launch's context is too big for Claude's automatic checks, so Claude asks before each change (UC-491). */
+const ASK_TOO_MANY_NOTICE = notice(6, {
+  text: ASK_TOO_MANY,
+  kind: "ask_mode_too_many_matters",
+});
+const ASK_STOPPED =
+  "Claude now asks before each change in this conversation, because its automatic checks stopped working here. Clauseo's own protections still apply.";
+/** Claude Code refused a call for want of its automatic checks; the conversation asks from now on (UC-492). */
+const ASK_STOPPED_NOTICE = notice(6, {
+  level: "warning",
+  text: ASK_STOPPED,
+  kind: "ask_mode_checks_stopped",
+});
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
   kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
@@ -209,5 +224,17 @@ export const TN: Entry[] = [
         <p>{th(lang, OFFLINE_NO_SEARCH_ALONE)}</p>
       </main>
     ),
+  },
+  {
+    id: "UC-491",
+    words: threadWords(ASK_TOO_MANY),
+    screen: "room/thread",
+    render: thread(ASK_TOO_MANY_NOTICE),
+  },
+  {
+    id: "UC-492",
+    words: threadWords(ASK_STOPPED),
+    screen: "room/thread",
+    render: thread(ASK_STOPPED_NOTICE),
   },
 ];

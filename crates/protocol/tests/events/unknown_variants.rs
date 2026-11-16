@@ -162,23 +162,24 @@ fn pack_skip_reason() {
 
 #[test]
 fn notice_kind() {
-    decodes_in_both(r#""context_not_restored""#, &NoticeKind::ContextNotRestored);
-    decodes_in_both(
-        r#""auto_mode_unavailable""#,
-        &NoticeKind::AutoModeUnavailable,
-    );
-    decodes_in_both(
-        r#""outside_matter_blocked""#,
-        &NoticeKind::OutsideMatterBlocked,
-    );
-    decodes_in_both(
-        r#""shell_network_blocked""#,
-        &NoticeKind::ShellNetworkBlocked,
-    );
-    decodes_in_both(
-        r#""shell_network_blocked_no_web_search""#,
-        &NoticeKind::ShellNetworkBlockedNoWebSearch,
-    );
+    let units = [
+        ("context_not_restored", NoticeKind::ContextNotRestored),
+        ("auto_mode_unavailable", NoticeKind::AutoModeUnavailable),
+        ("outside_matter_blocked", NoticeKind::OutsideMatterBlocked),
+        ("shell_network_blocked", NoticeKind::ShellNetworkBlocked),
+        (
+            "shell_network_blocked_no_web_search",
+            NoticeKind::ShellNetworkBlockedNoWebSearch,
+        ),
+        (
+            "ask_mode_too_many_matters",
+            NoticeKind::AskModeTooManyMatters,
+        ),
+        ("ask_mode_checks_stopped", NoticeKind::AskModeChecksStopped),
+    ];
+    for (wire, kind) in &units {
+        decodes_in_both(&format!("\"{wire}\""), kind);
+    }
     let pack = PackId::new("nda-kit").unwrap();
     let skipped = NoticeKind::SkillPackNotLoaded {
         pack,

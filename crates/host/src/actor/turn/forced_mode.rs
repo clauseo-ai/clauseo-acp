@@ -13,6 +13,8 @@
 //!   "go ahead" in the mode the matter runs in; "use auto mode" lands in `auto` and stays; and
 //!   `bypassPermissions`, `dontAsk` or an unknown mode, which claude-agent-acp 0.89.1 never
 //!   offers, go back too (decision record 0030, "Claude's permission mode").
+//! - Ask mode (`session/ask_mode.rs`, outside forced ask): `default`, `acceptEdits` and `plan`
+//!   are kept; `auto` and any other mode go back to `default`.
 
 use clauseo_protocol::{AgentChoiceId, AgentKind, CompactString, ModeChanged, ThreadId};
 
@@ -61,7 +63,12 @@ pub(super) fn reset_if_refused(actor: &mut Actor, thread: ThreadId, mode: &str) 
         return;
     }
     let unavailable = agent.auto.off();
-    let Some(target) = reset_to(agent.forced_ask, unavailable, mode) else {
+    let target = if !agent.forced_ask && agent.auto == super::session::Auto::Ask {
+        super::session::ask_mode::reset_to(mode)
+    } else {
+        reset_to(agent.forced_ask, unavailable, mode)
+    };
+    let Some(target) = target else {
         return;
     };
     let (Some(session), Ok(back)) = (agent.session.clone(), AgentChoiceId::new(target)) else {

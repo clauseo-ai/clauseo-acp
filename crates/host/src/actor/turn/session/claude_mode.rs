@@ -13,6 +13,9 @@
 //!   whose model cannot run auto to `acceptEdits` and says so (`session-mode.js:98-102`,
 //!   `:161-162`).
 //!
+//! A conversation in ask mode (`ask_mode.rs`: its auto-mode context would be over budget, or
+//! Claude Code refused a call for want of it) runs in `default` instead ([`Auto::Ask`]).
+//!
 //! claude-agent-acp 0.89.1 lists `auto` whatever the account (`session-mode.js:233-258`), and a
 //! CLI that drops to `default` on its own (its remote kill switch) is never relayed, so the host
 //! cannot see that case.
@@ -51,6 +54,10 @@ pub(crate) enum Auto {
     /// goes back to it, as when unavailable, with no notice: the account has auto, and only this
     /// launch's paths keep it off.
     NoSandbox,
+    /// Held in ask mode by the host (`ask_mode.rs`): the launch's auto-mode context would be
+    /// over budget, or an earlier session of the conversation was refused for want of it. The
+    /// session runs in `default` (`forced_ask::ASK_MODE`) and goes back to it.
+    Ask,
 }
 
 impl Auto {
@@ -93,7 +100,9 @@ pub(super) fn claude_start(
         return no_mode(actor, thread, wanted, "reported no modes");
     };
     let offered = |id: &str| modes.available.iter().any(|mode| mode.id == id);
-    let target = if !forced_ask && agent.auto == Auto::NoSandbox {
+    let target = if !forced_ask && agent.auto == Auto::Ask {
+        crate::agent::forced_ask::ASK_MODE
+    } else if !forced_ask && agent.auto == Auto::NoSandbox {
         CLAUDE_FALLBACK_MODE
     } else if !forced_ask && (agent.auto == Auto::Unavailable || !offered(wanted)) {
         if agent.auto != Auto::Unavailable {

@@ -1,0 +1,20 @@
+{
+  "UC-491": {
+    "en": "Claude will ask before each change in this conversation. Clauseo is protecting more matters than Claude's automatic checks can handle at once, so Claude asks you instead.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host follow-ups autoask (provisional; app thread's words)",
+    "note": "Host notice NoticeKind::AskModeTooManyMatters: a Claude launch whose auto-mode context would be over budget runs in ask mode (actor/turn/session/ask_mode.rs)"
+  },
+  "UC-492": {
+    "en": "Claude now asks before each change in this conversation, because its automatic checks stopped working here. Clauseo's own protections still apply.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host follow-ups autoask (provisional; app thread's words)",
+    "note": "Host notice NoticeKind::AskModeChecksStopped: Claude Code refused a call for want of its automatic checks; the conversation relaunches in ask mode (actor/turn/session/ask_mode.rs)"
+  }
+}

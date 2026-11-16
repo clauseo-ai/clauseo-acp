@@ -150,6 +150,19 @@ test("no kind (an agent's notice) gives null, so the row shows its own text", ()
   expect(noticeLine(undefined, en)).toBeNull();
 });
 
+test("Claude's ask mode notices give the app's lines, in English (no Hindi yet: the English shows)", () => {
+  expect(noticeLine("ask_mode_too_many_matters", en)).toBe(
+    "Claude will ask before each change in this conversation. Clauseo is protecting more matters than Claude's automatic checks can handle at once, so Claude asks you instead.",
+  );
+  expect(noticeLine("ask_mode_checks_stopped", en)).toBe(
+    "Claude now asks before each change in this conversation, because its automatic checks stopped working here. Clauseo's own protections still apply.",
+  );
+  // no Hindi yet: hi: later, so the Hindi page shows the English as well
+  expect(noticeLine("ask_mode_checks_stopped", words("hi"))).toBe(
+    "Claude now asks before each change in this conversation, because its automatic checks stopped working here. Clauseo's own protections still apply.",
+  );
+});
+
 test("a kind this version does not know gives null, so the row shows its text", () => {
   expect(noticeLine("something_newer" as NoticeKind, en)).toBeNull();
 });

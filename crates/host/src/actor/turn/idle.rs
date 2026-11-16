@@ -91,6 +91,9 @@ pub(super) struct Mark {
 pub(super) enum Relaunch {
     /// Its lawyer servers would differ now (Settings › Tools, [`tools`]).
     ToolsChanged,
+    /// Claude Code refused a call for want of its auto checks: the relaunch runs in ask mode
+    /// (`session/ask_mode.rs`).
+    ChecksStopped,
 }
 
 impl Relaunch {
@@ -98,6 +101,7 @@ impl Relaunch {
     pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::ToolsChanged => "tools_changed",
+            Self::ChecksStopped => "checks_stopped",
         }
     }
 }

@@ -30,6 +30,7 @@ use crate::error::Error;
 use crate::log_file::{Cause, LIFECYCLE};
 use crate::sent::SentView;
 
+pub(super) mod ask_mode;
 mod claude_mode;
 mod named;
 
@@ -547,6 +548,9 @@ fn attach_commit(
         )?;
     }
     if let Some(notice) = claude_mode::notice(actor, thread) {
+        out.push(actor, notice)?;
+    }
+    if let Some(notice) = ask_mode::launch_notice(actor, thread) {
         out.push(actor, notice)?;
     }
     // The skill packs the launch left out, each pack and reason told once per thread (0040).

@@ -29,6 +29,9 @@ mod agent_homes;
 #[path = "host/agent_name.rs"]
 mod agent_name;
 #[cfg(test)]
+#[path = "host/ask_mode.rs"]
+mod ask_mode;
+#[cfg(test)]
 #[path = "host/ask_user_question.rs"]
 mod ask_user_question;
 #[cfg(test)]

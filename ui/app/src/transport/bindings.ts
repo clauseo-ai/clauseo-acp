@@ -4379,6 +4379,18 @@ export type NoticeKind =
 	/**  How many. */
 	more: number,
 } }) & { files_came_back?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+/**
+ *  Claude runs in ask mode (`default`) in this conversation: the launch's permission
+ *  rules would make Claude Code's auto-mode context larger than it sends, so its
+ *  automatic checks could not work. Once a conversation.
+ */
+"ask_mode_too_many_matters" | 
+/**
+ *  Claude Code refused a call for want of its automatic checks, so the conversation
+ *  relaunches in ask mode (`default`). Once a conversation, and not after
+ *  `ask_mode_too_many_matters`.
+ */
+"ask_mode_checks_stopped" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

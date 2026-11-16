@@ -212,7 +212,24 @@ fn context(actor: &mut Actor, thread: ThreadId, origin: Origin) -> Option<Contex
     }
 }
 
+/// One update, routed by its origin ([`route`]); then, when it carries Claude Code's refusal for
+/// want of the auto-mode context and is not a replay, the conversation goes to ask mode
+/// (`session/ask_mode.rs`), after the update is logged.
 fn on_update(
+    actor: &mut Actor,
+    thread: ThreadId,
+    session: &AgentSessionId,
+    origin: Origin,
+    update: AgentUpdate,
+) {
+    let refused = origin != Origin::Replay && super::session::ask_mode::carries_refusal(&update);
+    route(actor, thread, session, origin, update);
+    if refused {
+        super::session::ask_mode::checks_stopped(actor, thread);
+    }
+}
+
+fn route(
     actor: &mut Actor,
     thread: ThreadId,
     session: &AgentSessionId,

@@ -471,6 +471,20 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   The plan exit's "use auto mode" lands in `auto` and stays. Forced ask is unchanged. The
   bullets below record the 2026-11-10 `acceptEdits` decision this replaces, and still describe
   the fallback.
+- **2026-11-16: ask mode when the auto-mode context would not be sent.** Claude Code 2.1.293
+  sends auto mode's context (its JSON holds the permission rules) only while it is at most
+  1,040,000 bytes; above that every `Edit` and `Bash` of the launch is refused ("no server
+  verdict for this call (server_not_requested)"). A Claude launch outside forced ask whose flag
+  settings would give a context over 900,000 bytes (`agent/auto_context.rs`: each deny or ask
+  rule's JSON with doubled backslashes plus 33 B, a file rule's root and pattern on top, allow
+  rules 0, 3 KB fixed; within 5% of the fake-API numbers for main at 8 matters and #1085 at
+  200) runs in `default` instead, with every rule kept and one notice
+  (`NoticeKind::AskModeTooManyMatters`, UC-491). A refusal seen anyway in a tool result, an
+  answer or a notice of a session in `auto` gives one notice (`NoticeKind::AskModeChecksStopped`,
+  UC-492, not after UC-491) and relaunches the conversation at its next prompt in `default`,
+  kept for every launch of it until the host starts again (`actor/turn/session/ask_mode.rs`).
+  In ask mode `default`, `acceptEdits` and `plan` are kept and `auto` goes back to `default`.
+  No rule is trimmed and no launch refused.
 - **2026-11-11: Windows stays in `auto`, with shell deny rules.** Claude has no browser on
   Windows and no sandbox there, so a command in no rule goes to `auto`'s classifier alone.
   Beside the data folder's `Read` and `Edit` denies, a Windows session's flag settings get

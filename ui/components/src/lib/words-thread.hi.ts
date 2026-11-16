@@ -199,6 +199,11 @@ export const HI = {
   "Clauseo stopped a step.": "Clauseo ने एक काम रोक दिया।",
   "Clauseo stopped one more step.": "Clauseo ने एक और काम रोका।",
   "Clauseo stopped {n} more steps.": "Clauseo ने {n} और काम रोके।",
+  // Claude's ask mode, its notices (UC-491, UC-492): no Hindi yet (hi: later), so the English shows in Hindi too
+  "Claude will ask before each change in this conversation. Clauseo is protecting more matters than Claude's automatic checks can handle at once, so Claude asks you instead.":
+    null,
+  "Claude now asks before each change in this conversation, because its automatic checks stopped working here. Clauseo's own protections still apply.":
+    null,
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

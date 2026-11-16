@@ -155,6 +155,14 @@ export function noticeLine(
       return w.th(
         "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
       );
+    if (kind === "ask_mode_too_many_matters")
+      return w.th(
+        "Claude will ask before each change in this conversation. Clauseo is protecting more matters than Claude's automatic checks can handle at once, so Claude asks you instead.",
+      );
+    if (kind === "ask_mode_checks_stopped")
+      return w.th(
+        "Claude now asks before each change in this conversation, because its automatic checks stopped working here. Clauseo's own protections still apply.",
+      );
     return null;
   }
   // read by shape: a value from a newer host, or none (null), that this version doesn't know gives null. The field
