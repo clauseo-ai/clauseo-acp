@@ -104,6 +104,12 @@ fn word_reads_racing_for_the_last_runs_take_exactly_the_cap() {
         lock(&backend.inner.caps).docx_runs(),
         MAX_DOCX_RUNS_PER_TURN
     );
+    // No read past the cap copied its file: each copy had its run reserved before it.
+    let planned = backend
+        .inner
+        .copies_planned
+        .load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(planned, MAX_DOCX_RUNS_PER_TURN);
 }
 
 #[test]

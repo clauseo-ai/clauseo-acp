@@ -206,6 +206,9 @@ struct Backend {
     flight: Arc<flight::Flight>,
     /// Held while stetdoc runs: one run per session at a time.
     stetdoc_run: Mutex<()>,
+    /// Word copies planned, each with its run reserved (tests).
+    #[cfg(test)]
+    copies_planned: std::sync::atomic::AtomicU32,
 }
 
 impl std::fmt::Debug for VersionsBackend {
@@ -238,6 +241,8 @@ impl VersionsBackend {
                 docx: docx::Kept::default(),
                 flight: Arc::default(),
                 stetdoc_run: Mutex::new(()),
+                #[cfg(test)]
+                copies_planned: std::sync::atomic::AtomicU32::new(0),
             }),
         }
     }

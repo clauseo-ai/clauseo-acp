@@ -206,10 +206,16 @@ fn plan<'a>(backend: &'a Backend, file: &VersionFile) -> Plan<'a> {
                 Plan::Refuse(Refusal::NoWordTool)
             } else {
                 match lock(&backend.caps).reserve_docx_run() {
-                    Some(reserved) => Plan::Copy(Run {
-                        backend,
-                        reserved: Some(reserved),
-                    }),
+                    Some(reserved) => {
+                        #[cfg(test)]
+                        backend
+                            .copies_planned
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        Plan::Copy(Run {
+                            backend,
+                            reserved: Some(reserved),
+                        })
+                    }
                     None => Plan::Refuse(Refusal::TooManyDocx),
                 }
             }
