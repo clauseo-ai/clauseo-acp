@@ -1,11 +1,12 @@
 //! revisions: the tracked-changes scan `zip_has_marks` (clauseo-host, revisions/marks.rs) against
 //! an oracle that shares none of its XML reading.
 //!
-//! Items driven: `zip_has_marks`, on a zip in memory. build.rs compiles marks.rs (and its parts.rs)
-//! into this target, so the scan runs as the host builds it without this crate depending on
-//! clauseo-host. That makes it the one target that reaches a private item; a marks.rs that needs
-//! more of the host than `super::is_docx` and `crate::write::open_read_nofollow` needs a stand-in
-//! below.
+//! Items driven: `zip_has_marks`, on a zip in memory. marks.rs (and its parts.rs) is compiled
+//! into this target as a module (`#[path]`), so the scan runs as the host builds it without this
+//! crate depending on clauseo-host. That makes it the one target that reaches a crate-private
+//! item; a marks.rs that needs more of the host than `super::is_docx` and
+//! `crate::write::open_read_nofollow` needs a stand-in below, and until then the build fails with
+//! rustc's error at the line in crates/host/src/revisions/marks.rs.
 //!
 //! Input: byte 0 = mode, rest = payload.
 //!   mode & 1 == 0: the payload is choices for docx_gen.rs, which builds a small .docx from them.
@@ -65,11 +66,10 @@ mod write {
 
 #[expect(
     dead_code,
-    reason = "the copied scan keeps the host's helpers this target never calls"
+    reason = "the host's scan keeps helpers (Kept, check) this target never calls"
 )]
-mod marks {
-    include!(concat!(env!("OUT_DIR"), "/marks.rs"));
-}
+#[path = "../../crates/host/src/revisions/marks.rs"]
+mod marks;
 
 /// The scan's cap on one part, decompressed (marks.rs `MAX_XML_BYTES`).
 const PART_CAP: u64 = 16 * 1024 * 1024;
@@ -254,7 +254,7 @@ fuzz_target!(|data: &[u8]| {
         .as_ref()
         .map_or("raw zip", |docx| docx.spec.as_str());
 
-    let answer = marks::fuzz_zip_has_marks(zip);
+    let answer = marks::zip_has_marks(std::io::Cursor::new(zip));
     let verdict = oracle(zip);
     match (&verdict, answer) {
         (Verdict::Marks(part), Some(false)) => {
@@ -282,7 +282,7 @@ fuzz_target!(|data: &[u8]| {
             panic!("{why}, zip_has_marks said Some(false): {spec}");
         }
         if let Some(twin) = &docx.svg_twin {
-            let plain = marks::fuzz_zip_has_marks(twin);
+            let plain = marks::zip_has_marks(std::io::Cursor::new(twin));
             assert_eq!(answer, plain, "the odd SVG changed the answer: {spec}");
         }
     }

@@ -27,7 +27,7 @@ rusqlite = { version = "0.41", features = ["bundled", "blob"] }
 zstd = { version = "0.14.3", default-features = false }
 sha1_smol = "1"
 # zip_marks: the tracked-changes scan's own dependencies, at clauseo-host's versions and features
-# (build.rs compiles crates/host/src/revisions/marks.rs into the target), and roxmltree, the
+# (zip_marks.rs compiles crates/host/src/revisions/marks.rs as a module), and roxmltree, the
 # oracle's XML parser, which shares no code with quick-xml.
 zip = { version = "9.2.2", default-features = false, features = [
   "deflate-flate2",
