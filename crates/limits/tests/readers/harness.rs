@@ -34,6 +34,14 @@ pub(crate) const CODEX_JS: &str = "@openai/codex/bin/codex.js";
 /// An inherited variable the settings env overrides in another case; cargo and nextest set it
 /// for every test run.
 pub(crate) const INHERITED: &str = "CARGO_MANIFEST_DIR";
+/// What every Claude read sets in the helper's env, over the inherited and settings values
+/// (`readers/claude.rs`'s `CLAUDE_FORCED_VARS`).
+pub(crate) const CLAUDE_FORCED: [(&str, &str); 4] = [
+    ("CLAUDE_CODE_DISABLE_CRON", "1"),
+    ("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS", "1"),
+    ("CLAUDE_CODE_HARBOR_KITE", "0"),
+    ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
+];
 
 /// `rel` (`/`-separated) under `base`, joined one component at a time, so it is spelled with
 /// the OS's own separator and compares equal to a path the reader built.
@@ -296,7 +304,7 @@ impl Setup {
 
     /// The env a spec should carry, by the case rule: inherited minus the variables no reader
     /// gets (`GIT_*`, `SSH_*`, `NO_BROWSER`, `CLAUDE_CODE_REMOTE`, `readers/env.rs`) and what
-    /// settings names in any case, then the settings variables.
+    /// settings names in any case, then the settings variables and `CLAUDE_FORCED`.
     pub(crate) fn expected_env() -> BTreeMap<OsString, OsString> {
         let mut env: BTreeMap<OsString, OsString> = std::env::vars_os()
             .filter(|(name, _)| {
@@ -311,6 +319,9 @@ impl Setup {
                     && !name.eq_ignore_ascii_case("CLAUDE_CODE_REMOTE")
                     && !name.eq_ignore_ascii_case("ANTHROPIC_API_KEY")
                     && !name.eq_ignore_ascii_case(INHERITED)
+                    && !CLAUDE_FORCED
+                        .iter()
+                        .any(|(forced, _)| name.eq_ignore_ascii_case(forced))
             })
             .collect();
         env.insert("ANTHROPIC_API_KEY".into(), FAKE_KEY.into());
@@ -318,6 +329,7 @@ impl Setup {
             INHERITED.to_ascii_lowercase().into(),
             "from-settings".into(),
         );
+        env.extend(CLAUDE_FORCED.map(|(name, value)| (name.into(), value.into())));
         env
     }
 }

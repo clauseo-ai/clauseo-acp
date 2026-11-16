@@ -2,7 +2,6 @@
 //! Claude launch sets (`tools.rs`, `loads.rs`). A pin bump that adds a tool changes nothing here
 //! until someone decides; these lists say what was decided.
 
-use std::collections::BTreeMap;
 use std::ffi::OsString;
 
 use serde_json::{Value, json};
@@ -73,9 +72,11 @@ fn strings(value: &Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
+/// The launch's `claudeCode.options` over a hook that sent `hook` as its `claudeCode.options`.
 fn options(hook: Value, web: super::browser::Switch) -> Value {
+    let given = json!({"claudeCode": {"options": hook}});
     let meta = session_meta(
-        hook.as_object().cloned(),
+        given.as_object().cloned(),
         McpControl::Clauseo,
         None,
         Some(&keys(web)),
@@ -131,11 +132,16 @@ fn the_tools_left_out_are_denied_by_name() {
             "CronDelete",
             "CronList",
             "ScheduleWakeup",
+            "RemoteTrigger",
             "EnterWorktree",
             "ExitWorktree",
             "Workflow",
+            "REPL",
+            "LSP",
             "DesignSync",
             "PushNotification",
+            "SendUserMessage",
+            "Brief",
             "Monitor",
             "ListAgents",
             "ListPeers",
@@ -165,6 +171,7 @@ fn the_launch_keeps_claude_codes_scheduler_and_agent_listing_off() {
         "CronDelete",
         "CronList",
         "ScheduleWakeup",
+        "RemoteTrigger",
         "ListAgents",
     ] {
         assert!(
@@ -231,9 +238,9 @@ fn every_claude_launch_keeps_the_scheduler_off() {
     );
 }
 
-/// Every Claude launch leaves the repository status out of the conversation: the variable is
-/// `1` in the adapter's environment, in the env it spawns Claude Code with and in the flag
-/// settings' `env`, and the flag setting is `false`, over a hook's own values.
+/// Every Claude launch sets its variable in the adapter's environment, in the env it spawns
+/// Claude Code with and in the flag settings' `env`, and its flag setting, over a hook's own
+/// values.
 #[test]
 fn the_launch_does_not_add_repository_status_to_the_conversation() {
     for hook in [
@@ -265,10 +272,9 @@ fn the_launch_does_not_add_repository_status_to_the_conversation() {
     );
 }
 
-/// Every Claude launch turns Claude Code's messaging between sessions off, adds no marketplace
-/// by itself, refuses other sessions' messages and has Remote Control off: the variables in the
-/// adapter's environment, in the env it spawns Claude Code with and in the flag settings' `env`,
-/// and the two settings, over a hook's own values.
+/// Every Claude launch sets these launch variables in the adapter's environment, in the env it
+/// spawns Claude Code with and in the flag settings' `env`, and these flag settings, over a
+/// hook's own values.
 #[test]
 fn every_claude_launch_keeps_messaging_between_sessions_and_remote_control_off() {
     let vars = [
@@ -327,4 +333,27 @@ fn send_message_stays_and_list_agents_is_left_out() {
         assert!(strings(&options["disallowedTools"]).contains(&name));
         assert!(!strings(&options["allowedTools"]).contains(&name), "{name}");
     }
+}
+
+/// A hook's extra flags cannot set the tools or the flag settings beside the launch's own keys;
+/// its other extra flags stay.
+#[test]
+fn extra_flags_cannot_set_the_tools_or_the_settings() {
+    let hook = json!({"claudeCode": {"options": {"extraArgs": {
+        "tools": "default",
+        "allowedTools=CronCreate": null,
+        "disallowed-tools": "",
+        "settings": "{}",
+        "debug": null,
+    }}}});
+    let meta = session_meta(
+        hook.as_object().cloned(),
+        McpControl::Clauseo,
+        None,
+        Some(&keys(OFF)),
+    );
+    assert_eq!(
+        meta["claudeCode"]["options"]["extraArgs"],
+        json!({"debug": null})
+    );
 }

@@ -158,6 +158,9 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
                     set(&mut env, "CLAUDE_SECURESTORAGE_CONFIG_DIR", OsStr::new(""));
                 }
             }
+            for (name, value) in CLAUDE_FORCED_VARS {
+                set(&mut env, name, OsStr::new(value));
+            }
             if let Some(shim) = inputs.shim {
                 set(&mut env, "BROWSER", shim.browser.as_os_str());
                 set(
@@ -192,6 +195,15 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
     }
     env
 }
+
+/// What every Claude run here sets, over any of the same name, as `host`'s Claude launches do
+/// (`agent::loads::CLAUDE_LAUNCH_VARS`, which this crate cannot depend on).
+pub(crate) const CLAUDE_FORCED_VARS: [(&str, &str); 4] = [
+    ("CLAUDE_CODE_DISABLE_CRON", "1"),
+    ("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS", "1"),
+    ("CLAUDE_CODE_HARBOR_KITE", "0"),
+    ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
+];
 
 /// The variable that makes Node trust the OS's certificate store beside its own roots:
 /// `NODE_USE_SYSTEM_CA=1`, for every Node Clauseo starts (sign-in's runs here, desktop's
