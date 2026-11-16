@@ -4,12 +4,23 @@
 // words for the rest, with data-failure.
 import { ERROR_WORDS, errorWords, type ErrorCode } from "@clauseo/components/lib/words-errors.ts";
 import { brk } from "@clauseo/components/lib/words-breaks.ts";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import { agentText, reset, step, userMessage, uuid } from "../testing/stream-script.ts";
+import { assertWarm, WARM_MS, warmUp } from "@clauseo/components/lib/warm-up.ts";
 import { whenOf } from "./thread/clock.ts";
+import { loadThread } from "./thread/chunk.ts";
 import { mountRoom, type Harness } from "./thread/harness.ts";
 
+// the thread's chunk every mount waits on, loaded once before the first test under its own budget (warm-up.ts)
+let warmFailure: string | null = null;
+beforeAll(async () => {
+  warmFailure = await warmUp("the thread's chunk", loadThread);
+}, WARM_MS + 5_000);
+
 let h: Harness | null = null;
+beforeEach(() => {
+  assertWarm(warmFailure);
+});
 afterEach(async () => {
   await h?.unmount();
   h = null;
@@ -18,9 +29,11 @@ afterEach(async () => {
 
 const SECRET = "SECRET-DETAIL for logs";
 
-test("a refused send shows its code's line on the working line for every code, never the message; an unknown code reads as internal", async () => {
-  const codes = [...(Object.keys(ERROR_WORDS) as ErrorCode[]), "store.melted"];
-  for (const code of codes) {
+// one test per code, each with its own room: a slow or failed code fails its own test, and no test's state (its room,
+// its timer) is left for the next to find
+test.each([...(Object.keys(ERROR_WORDS) as ErrorCode[]), "store.melted"])(
+  "a refused send shows its code's line on the working line, never the message; code %s (an unknown code reads as internal)",
+  async (code) => {
     h = await mountRoom({
       dispatch: (command) => {
         if (command.send_prompt !== undefined) throw { code, message: SECRET, retryable: false };
@@ -38,11 +51,8 @@ test("a refused send shows its code's line on the working line for every code, n
     expect(h.host.textContent).not.toContain(SECRET);
     if (code === "store.melted" || code === "unknown")
       expect(line?.textContent).toContain(errorWords("en", "internal"));
-    await h.unmount();
-    h = null;
-  }
-  // a room per code: some 30 mounts, which a busy machine can take past the default 5 s
-}, 20_000);
+  },
+);
 
 test("a failed step: agent.exited marks where it stopped with its time; every other code keeps its words; data-failure on each", async () => {
   h = await mountRoom();
