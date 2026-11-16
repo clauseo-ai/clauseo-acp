@@ -1,0 +1,5 @@
+# The Apple Developer Team ID that signs Clauseo's macOS releases (decision 0035, "Apple
+# Developer ID", "The Team ID, pinned"): one line of 10 capital letters and digits below these
+# comments, or none. release.yml's custody refuses Developer ID signing while it is empty or is
+# not the certificate's team, and the Developer ID check and publish compare every signature with
+# it. Set by a one-line PR once the enrolment gives the Team ID.

@@ -11,14 +11,13 @@ Clauseo the first time" section, and the rest of this page isn't needed.
 
 Clauseo is a small open-source project with no funding yet. Apple lets an app open after one plain
 question once Apple has checked it, a check called notarisation, done under a paid Apple developer
-account. Clauseo's beta builds aren't notarised. They carry only their own seal, which says the
-app hasn't changed since it was built but not who built it.
+account. A beta build that isn't notarised carries only its own seal, which says the app hasn't
+changed since it was built but not who built it.
 
 So macOS can't check who made Clauseo, and blocks it until you say yes.
 
-Clauseo is in beta, and the beta isn't notarised. Notarisation needs a paid Apple developer account,
-which costs money every year. Until a release is notarised, every version you download from the
-release page asks this once.
+Clauseo is in beta, and not every beta release is notarised. Notarisation needs a paid Apple
+developer account, which costs money every year. Each version that isn't notarised asks this once.
 
 ## What the message means
 

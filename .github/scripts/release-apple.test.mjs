@@ -3,21 +3,25 @@
 //
 //   node --test .github/scripts/release-apple.test.mjs
 //
-// release.yml is read as text, as latest-json.test.mjs reads it. The rules: an Apple secret
-// appears only on the steps that use it (custody's decision and its check, build's bundle step
-// and its Developer ID check), always behind the mode or DEVELOPER_ID, never in a run: script;
+// release.yml is read as text, as latest-json.test.mjs reads it. The rules: every mention of
+// `secrets` in the whole workflow, in any syntax, is on a step and env key SECRET_TABLE lists;
+// no step turns on shell tracing; no upload, and no copy into an uploaded folder, reaches
+// RUNNER_TEMP; an Apple secret appears only on the steps that use it (custody's decision and its
+// check, build's bundle step and its Developer ID check), always behind the mode or DEVELOPER_ID,
+// never in a run: script; the Team ID is the one committed in crates/desktop/release/apple-team-id;
 // every Developer ID codesign has --timestamp, and every one on code --options runtime;
-// notarisation, stapling and the keychain happen only on a Developer ID leg; the Developer ID
-// check holds its spctl, stapler and codesign checks; custody refuses a partial set of Apple
-// secrets (its script is run here, with a throwaway certificate when openssl is there); and the
-// entitlements file holds none of the entitlements the decision leaves out. Each rule is a
-// function that returns what is wrong, and each test breaks the workflow on purpose to show the
-// rule catches it.
+// notarisation, stapling and the keychain happen only on a Developer ID leg, and only Accepted
+// staples; the Developer ID check holds its spctl, stapler and codesign checks; custody refuses a
+// partial set of Apple secrets (its script is run here, with a throwaway certificate when openssl
+// is there); the
+// entitlements file holds none of the entitlements the decision leaves out; and apple-setup.sh
+// runs by hand only. Each rule is a function that returns what is wrong, and each test breaks the
+// workflow on purpose to show the rule catches it.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -29,6 +33,9 @@ const ROOT = join(here, "..", "..");
 const RELEASE_YML = join(ROOT, ".github", "workflows", "release.yml");
 const TAURI_CONF = join(ROOT, "crates", "desktop", "tauri.conf.json");
 const workflow = () => readFileSync(RELEASE_YML, "utf8");
+const TEAM_ID_FILE = "crates/desktop/release/apple-team-id";
+// How every reader of the committed Team ID reads it: comments and white space dropped.
+const TEAM_ID_READ = "sed 's/#.*//' crates/desktop/release/apple-team-id | tr -d '[:space:]'";
 
 const APPLE_SIX = [
   "APPLE_CERTIFICATE",
@@ -223,6 +230,474 @@ test("an Apple secret appears only on the steps that use it, behind the mode or 
   for (const [i, broken] of breaks.entries()) {
     assert.notEqual(broken, text, `break ${i} applies`);
     assert.notDeepEqual(appleSecretProblems(broken), [], `break ${i} is caught`);
+  }
+});
+
+// ---- Every secret, in any syntax, in the whole workflow: only where the table allows ----
+
+const APPLE_ALL = [...APPLE_SIX, ...APPLE_ID_NAMES];
+const RELEASE_KEY_STEP = "The release key signs, and tauri.conf.json's pubkey verifies it";
+const TAURI_RELEASE = {
+  TAURI_SIGNING_PRIVATE_KEY: ["TAURI_SIGNING_PRIVATE_KEY"],
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ["TAURI_SIGNING_PRIVATE_KEY_PASSWORD"],
+};
+const TAURI_RELEASE_OR_TEST = {
+  TAURI_SIGNING_PRIVATE_KEY: ["TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_TEST"],
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ["TAURI_SIGNING_PRIVATE_KEY_PASSWORD", "TAURI_SIGNING_PRIVATE_KEY_TEST_PASSWORD"],
+};
+const eachItself = (names) => Object.fromEntries(names.map((name) => [name, [name]]));
+
+/**
+ * Every step of release.yml that may mention `secrets`, and on which env key, which secrets.
+ * A mention anywhere else (another step, a job's or the workflow's env, `with:`, `if:`, a run:
+ * script, `secrets: inherit`), or in any other syntax (`secrets['X']`, `toJSON(secrets)`, a bare
+ * `secrets`), fails. A new secret is a decision, made here and in the workflow together.
+ */
+const SECRET_TABLE = [
+  { job: "custody", step: "Decide the unsigned beta", env: { HAS_APPLE: APPLE_ALL } },
+  { job: "custody", step: CUSTODY_STEP, env: eachItself(APPLE_ALL) },
+  { job: "custody", step: RELEASE_KEY_STEP, env: TAURI_RELEASE },
+  { job: "build", step: BUNDLE_STEP, env: { ...eachItself(APPLE_ALL), ...TAURI_RELEASE_OR_TEST } },
+  { job: "build", step: CHECK_STEP, env: eachItself(["APPLE_SIGNING_IDENTITY"]) },
+  { job: "sign-windows", step: "Sign the sandbox tool for the updater", env: TAURI_RELEASE_OR_TEST },
+  { job: "sign-windows", step: "Sign the currentUser installer for the updater", env: TAURI_RELEASE_OR_TEST },
+  { job: "publish", step: "Record the release (S23)", env: eachItself(["CLAUSEO_RELEASE_ACCESS_CLIENT_ID", "CLAUSEO_RELEASE_ACCESS_CLIENT_SECRET"]) },
+];
+
+/**
+ * Each line of <text> with where it sits: its job, its step (index and name, or null), whether
+ * it is the body of a block scalar (a run: script: no YAML comments there, and GitHub expands
+ * `${{ }}` even in a bash comment), and the env key it sets when it is a step's env entry.
+ */
+function placedLines(text) {
+  const lines = text.split("\n");
+  const placed = [];
+  let inJobs = false;
+  let job = null;
+  let step = null;
+  let steps = 0;
+  let block = null;
+  let inEnv = false;
+  lines.forEach((raw, i) => {
+    const indent = raw.length - raw.trimStart().length;
+    if (block !== null && (raw.trim() === "" || indent > block)) {
+      placed.push({ no: i + 1, raw, code: raw, job, step, scalar: true, envKey: null });
+      return;
+    }
+    block = null;
+    const code = stripComment(raw);
+    if (/^jobs:\s*$/.test(code)) {
+      inJobs = true;
+    } else if (/^\S/.test(code)) {
+      inJobs = false;
+      job = null;
+    }
+    const jobHead = inJobs ? code.match(/^ {2}([A-Za-z0-9_-]+):\s*$/) : null;
+    if (jobHead) {
+      job = jobHead[1];
+      step = null;
+      inEnv = false;
+    } else if (job !== null && /^ {6}- /.test(raw)) {
+      steps += 1;
+      step = { id: steps, name: null, at: i + 1 };
+      inEnv = false;
+    } else if (/^ {0,5}\S/.test(code)) {
+      step = null;
+      inEnv = false;
+    }
+    if (step !== null) {
+      const named = code.match(/^ {6}(- | {2})name: (.*)$/);
+      if (named) {
+        step.name = named[2].trim();
+      }
+      if (/^ {8}\S/.test(code)) {
+        inEnv = /^ {8}env:\s*$/.test(code);
+      }
+    }
+    const entry = step !== null && inEnv ? code.match(/^ {10}([A-Za-z_][A-Za-z0-9_]*): (.*)$/) : null;
+    placed.push({ no: i + 1, raw, code, job, step, scalar: false, envKey: entry ? entry[1] : null, envValue: entry ? entry[2].trim() : null });
+    if (/:\s*[|>][-+0-9]*\s*$/.test(code)) {
+      block = indent;
+    }
+  });
+  return placed;
+}
+
+const where = (line) =>
+  `${line.job ?? "(no job)"}/${line.step === null ? "(no step)" : line.step.name ?? `(unnamed step at line ${line.step.at})`}, line ${line.no}`;
+
+/** Every mention of `secrets` in <text> that the table does not allow, by job, step and line. */
+function secretMentionProblems(text) {
+  const problems = [];
+  const placed = placedLines(text);
+  // Offsets of each line's start, and of every ${{ }} span (which may run over lines).
+  const starts = [];
+  let offset = 0;
+  for (const line of placed) {
+    starts.push(offset);
+    offset += line.raw.length + 1;
+  }
+  const spans = [...text.matchAll(/\$\{\{[\s\S]*?\}\}/g)].map((match) => [match.index, match.index + match[0].length]);
+  const inSpan = (at) => spans.some(([from, to]) => at >= from && at < to);
+  const lineAt = (at) => {
+    let low = 0;
+    while (low + 1 < starts.length && starts[low + 1] <= at) {
+      low += 1;
+    }
+    return placed[low];
+  };
+  const mentioned = new Map();
+  for (const match of text.matchAll(/\bsecrets\b/gi)) {
+    const line = lineAt(match.index);
+    const column = match.index - starts[line.no - 1];
+    // Outside an expression: in YAML, a mention unless in a comment (`secrets: inherit`, an if:
+    // condition); in a block scalar, plain text that GitHub does not expand.
+    if (!inSpan(match.index) && (line.scalar || column >= line.code.length)) {
+      continue;
+    }
+    if (!mentioned.has(line.no)) {
+      mentioned.set(line.no, line);
+    }
+  }
+  const seen = new Set();
+  for (const line of mentioned.values()) {
+    const entry = SECRET_TABLE.find((one) => one.job === line.job && line.step !== null && one.step === line.step.name);
+    if (line.scalar) {
+      problems.push(`${where(line)}: a secret in a run: script or another block (only a step's env may hold one)`);
+      continue;
+    }
+    if (entry === undefined) {
+      problems.push(`${where(line)}: mentions secrets, and the table lets no secret there`);
+      continue;
+    }
+    if (line.envKey === null) {
+      problems.push(`${where(line)}: mentions secrets outside the step's env`);
+      continue;
+    }
+    // Every mention is secrets.NAME: never secrets[...], toJSON(secrets) or a bare secrets.
+    const all = [...line.code.matchAll(/\bsecrets\b/gi)].length;
+    const named = [...line.code.matchAll(/\bsecrets\.([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*[[(])/gi)].map((match) => match[1]);
+    if (named.length !== all) {
+      problems.push(`${where(line)}: ${line.envKey} names secrets other than as secrets.NAME`);
+      continue;
+    }
+    const want = entry.env[line.envKey];
+    if (want === undefined) {
+      problems.push(`${where(line)}: ${line.envKey} is not an env key the table lets hold a secret`);
+      continue;
+    }
+    const have = [...new Set(named)].sort();
+    if (JSON.stringify(have) !== JSON.stringify([...want].sort())) {
+      problems.push(`${where(line)}: ${line.envKey} holds ${have.join(" ")}, the table ${[...want].sort().join(" ")}`);
+      continue;
+    }
+    seen.add(`${entry.job}/${entry.step}/${line.envKey}`);
+  }
+  for (const entry of SECRET_TABLE) {
+    for (const key of Object.keys(entry.env)) {
+      if (!seen.has(`${entry.job}/${entry.step}/${key}`)) {
+        problems.push(`${entry.job}/${entry.step}: ${key} is in the table but not in the workflow, or not as the table says`);
+      }
+    }
+  }
+  return problems;
+}
+
+const COLLECT = "      - name: Collect this leg's assets\n        if: runner.os != 'Windows'\n        run: |\n          set -euo pipefail\n";
+
+test("every mention of secrets, in any syntax, is on a step and env key the table lists", () => {
+  const text = workflow();
+  assert.deepEqual(secretMentionProblems(text), []);
+  const withEnv = (env) =>
+    text.replace(COLLECT, `      - name: Collect this leg's assets\n        if: runner.os != 'Windows'\n        env:\n          ${env}\n        run: |\n          set -euo pipefail\n`);
+  const breaks = [
+    // The review's: every secret in one value, and one by index.
+    [withEnv("ALL: ${{ toJSON(secrets) }}"), "build/Collect this leg's assets"],
+    [withEnv("KEY: ${{ secrets['APPLE_API_KEY_P8'] }}"), "build/Collect this leg's assets"],
+    [withEnv('KEY: ${{ secrets["TAURI_SIGNING_PRIVATE_KEY"] }}'), "build/Collect this leg's assets"],
+    [withEnv("KEY: ${{ secrets[format('{0}_P8', 'APPLE_API_KEY')] }}"), "build/Collect this leg's assets"],
+    [withEnv("KEY: ${{ SECRETS.APPLE_API_KEY_P8 }}"), "build/Collect this leg's assets"],
+    // On a listed step, in another syntax or another key.
+    [text.replace("          APPLE_TEAM_ID: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_TEAM_ID || '' }}\n",
+      "          APPLE_TEAM_ID: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_TEAM_ID || '' }}\n          ALL: ${{ toJSON(secrets) }}\n"), BUNDLE_STEP],
+    [text.replace("secrets.CLAUSEO_RELEASE_ACCESS_CLIENT_SECRET }}", "secrets.TAURI_SIGNING_PRIVATE_KEY }}"), "Record the release"],
+    // In a run: script, even in a bash comment (GitHub expands it there too).
+    [text.replace(COLLECT, `${COLLECT}          # \${{ secrets.APPLE_PASSWORD }}\n`), "a run: script"],
+    // A job's env, an action's with:, and secrets: inherit.
+    [text.replace("    env:\n      MODE: ${{ needs.check.outputs.mode }}\n      VERSION: ${{ needs.check.outputs.version }}\n    steps:\n",
+      "    env:\n      MODE: ${{ needs.check.outputs.mode }}\n      VERSION: ${{ needs.check.outputs.version }}\n      ALL: ${{ toJSON(secrets) }}\n    steps:\n"), "custody/(no step)"],
+    [text.replace("        with:\n          name: ui-dist\n", "        with:\n          name: ui-dist\n          token: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}\n"), "ui/"],
+    [text.replace("    name: publish\n", "    name: publish\n    secrets: inherit\n"), "publish/(no step)"],
+    // A table entry the workflow lost.
+    [text.replace("          CLAUSEO_RELEASE_ACCESS_CLIENT_ID: ${{ secrets.CLAUSEO_RELEASE_ACCESS_CLIENT_ID }}\n", ""), "CLAUSEO_RELEASE_ACCESS_CLIENT_ID is in the table"],
+  ];
+  for (const [i, [broken, words]] of breaks.entries()) {
+    assert.notEqual(broken, text, `break ${i} applies`);
+    const problems = secretMentionProblems(broken);
+    assert.ok(problems.some((problem) => problem.includes(words)), `break ${i} is caught, naming ${words}: ${JSON.stringify(problems)}`);
+  }
+  // A problem names the line.
+  assert.match(secretMentionProblems(withEnv("ALL: ${{ toJSON(secrets) }}"))[0], /, line \d+: /);
+});
+
+// ---- No shell tracing anywhere, so no step that holds a secret can print it ----
+
+/** Every line of <text> that turns on shell tracing (set -x in any form, bash -x, PS4, ...). */
+function tracingProblems(text) {
+  const flags = String.raw`(?:[-+][A-Za-z]+\s+|-o\s+\S+\s+)*`;
+  const patterns = [
+    [new RegExp(String.raw`(^|[\s;&|({\x60])set\s+${flags}-[A-Za-z]*x`), "set -x"],
+    [/\bxtrace\b/i, "xtrace"],
+    [new RegExp(String.raw`\b(ba|da|z|k)?sh\s+${flags}-[A-Za-z]*x`), "a shell run with -x"],
+    [/\bBASH_XTRACEFD\b/, "BASH_XTRACEFD"],
+    [/\bPS4\b/, "PS4"],
+    [/\bSHELLOPTS\b/, "SHELLOPTS"],
+  ];
+  const problems = [];
+  for (const line of placedLines(text)) {
+    // In a run: script, bash's own comments go; elsewhere, YAML's already have.
+    const code = line.scalar ? stripComment(line.raw) : line.code;
+    for (const [pattern, what] of patterns) {
+      if (pattern.test(code)) {
+        problems.push(`${where(line)}: ${what} (${code.trim()})`);
+      }
+    }
+  }
+  return problems;
+}
+
+test("no step turns on shell tracing, in any form", () => {
+  const text = workflow();
+  assert.deepEqual(tracingProblems(text), []);
+  const bundleScript = `        run: |\n          set -euo pipefail\n          fail() { echo "::error::$1"; exit 1; }\n          if [ "$MODE" = dry ]; then\n`;
+  assert.ok(text.includes(bundleScript));
+  const breaks = [
+    // The review's: in the bundle step, which holds every Apple secret.
+    text.replace(bundleScript, bundleScript.replace("set -euo pipefail", "set -euxo pipefail")),
+    text.replace(bundleScript, bundleScript.replace("set -euo pipefail", "set -euo pipefail; set -x")),
+    text.replace(bundleScript, bundleScript.replace("set -euo pipefail", "set -e -x -o pipefail")),
+    text.replace(bundleScript, bundleScript.replace("set -euo pipefail", "set -o xtrace")),
+    text.replace(bundleScript, bundleScript.replace("set -euo pipefail", "set -euo pipefail && exec {fd}>&2 && BASH_XTRACEFD=$fd")),
+    text.replace(bundleScript, bundleScript.replace("set -euo pipefail", "set -euo pipefail; PS4='$(env)'")),
+    text.replace(bundleScript, bundleScript.replace("set -euo pipefail", "bash -x -c true")),
+    text.replace(`        timeout-minutes: 50\n`, `        timeout-minutes: 50\n        shell: bash -euxo pipefail {0}\n`),
+    text.replace("    defaults:\n      run:\n        shell: bash\n    steps:\n      - uses: actions/checkout", "    defaults:\n      run:\n        shell: bash -x {0}\n    steps:\n      - uses: actions/checkout"),
+    text.replace("          BETA_VARIABLE: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}\n", "          BETA_VARIABLE: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}\n          SHELLOPTS: xtrace\n"),
+  ];
+  for (const [i, broken] of breaks.entries()) {
+    assert.notEqual(broken, text, `break ${i} applies`);
+    assert.notDeepEqual(tracingProblems(broken), [], `break ${i} is caught`);
+  }
+  // set +x (tracing off) and the -o options without x are fine.
+  assert.deepEqual(tracingProblems(text.replace(bundleScript, bundleScript.replace("set -euo pipefail", "set +x; set -euo pipefail"))), []);
+});
+
+// ---- No upload can reach RUNNER_TEMP, where the keychain, the .p8 and the key files are ----
+
+/** The RUNNER_TEMP paths an upload may name, each a file or folder no secret is written to. */
+const TEMP_UPLOADS = [
+  "${{ runner.temp }}/ui-sourcemaps",
+  "${{ runner.temp }}/dry-updater.key.pub",
+  "${{ runner.temp }}/smoke",
+];
+
+const COPIES = /^(cp|mv|ln|rsync|ditto|install|Copy-Item|Move-Item)$/;
+
+/**
+ * Where the command <segment> (one simple command, its redirections included) writes: its
+ * redirection targets; a copy's last argument; tar's archive when it creates one; tee's files;
+ * dd's of=. Words keep their quotes off.
+ */
+function destinations(segment) {
+  const out = [];
+  for (const match of segment.matchAll(/(?:^|[^<>&0-9])[0-9]?>{1,2}\s*([^\s&][^\s]*)/g)) {
+    out.push(match[1]);
+  }
+  const words = segment.replace(/[0-9]?>{1,2}\s*[^\s]+/g, " ").trim().split(/\s+/).filter(Boolean);
+  const [verb, ...args] = words;
+  if (verb === undefined) {
+    return out;
+  }
+  if (COPIES.test(verb) && args.length > 0) {
+    out.push(args[args.length - 1]);
+  } else if (verb === "tar") {
+    const creates = args.some((arg) => /^-?[A-Za-z]*c[A-Za-z]*$/.test(arg) && !arg.startsWith("--") && /^-|^[a-z]+$/.test(arg));
+    const file = args.findIndex((arg) => /^-?[A-Za-z]*f$/.test(arg));
+    if (creates && file !== -1 && args[file + 1] !== undefined) {
+      out.push(args[file + 1]);
+    }
+    for (const arg of args) {
+      if (arg.startsWith("--file=")) {
+        out.push(arg.slice(7));
+      }
+    }
+  } else if (verb === "tee" || verb === "zip" || verb === "7z") {
+    out.push(...args.filter((arg) => !arg.startsWith("-")));
+  } else if (verb === "dd") {
+    out.push(...args.filter((arg) => arg.startsWith("of=")).map((arg) => arg.slice(3)));
+  }
+  return out.map((word) => word.replace(/["']/g, "")).filter((word) => word !== "/dev/null");
+}
+
+/** Where an upload can reach RUNNER_TEMP: an upload path, or a copy into an uploaded folder. */
+function uploadProblems(text) {
+  const problems = [];
+  const placed = placedLines(text);
+  const steps = new Map();
+  for (const line of placed) {
+    if (line.step !== null) {
+      steps.set(line.step.id, [...(steps.get(line.step.id) ?? []), line]);
+    }
+  }
+  // Each upload-artifact step's path entries.
+  const uploads = [];
+  for (const lines of steps.values()) {
+    if (!lines.some((line) => /^ {6}(- | {2})uses: actions\/upload-artifact@/.test(line.code))) {
+      continue;
+    }
+    const at = lines.findIndex((line) => /^ {10}path:/.test(line.code));
+    if (at === -1) {
+      problems.push(`${where(lines[0])}: an upload with no path`);
+      continue;
+    }
+    const inline = lines[at].code.replace(/^ {10}path:\s*/, "").trim();
+    const entries = /^[|>]/.test(inline)
+      ? lines.slice(at + 1).filter((line) => line.scalar).map((line) => line.raw.trim()).filter(Boolean)
+      : [inline];
+    for (const entry of entries) {
+      uploads.push({ line: lines[at], entry });
+    }
+  }
+  if (uploads.length === 0) {
+    problems.push("no upload-artifact step found");
+  }
+  // A name's value in the job's env (or the workflow's).
+  const envValue = (job, name) => {
+    let block = null;
+    const values = [];
+    for (const line of placed) {
+      if (line.step !== null || line.scalar || (line.job !== job && line.job !== null)) {
+        continue;
+      }
+      if (/^env:\s*$/.test(line.code) || /^ {4}env:\s*$/.test(line.code)) {
+        block = line.code.indexOf("env:") + 2;
+        continue;
+      }
+      if (block !== null && line.code.trim() !== "" && line.code.length - line.code.trimStart().length < block) {
+        block = null;
+      }
+      const match = block !== null ? line.code.match(new RegExp(`^ {${block}}${name}: (.*)$`)) : null;
+      if (match) {
+        values.push(match[1].trim());
+      }
+    }
+    return values.length > 0 ? values.join(" ") : null;
+  };
+  const temp = /runner\.temp|RUNNER_TEMP/i;
+  // Per job: the env names and the literal paths its uploads take.
+  const roots = new Map();
+  const rootsOf = (job) => roots.get(job) ?? roots.set(job, { names: new Set(), literals: new Set() }).get(job);
+  for (const { line, entry } of uploads) {
+    if (/(^|\/)\.\.(\/|$)/.test(entry) || /^[/~]/.test(entry)) {
+      problems.push(`${where(line)}: the upload path ${entry} leaves the workspace`);
+    }
+    if (temp.test(entry)) {
+      if (!TEMP_UPLOADS.includes(entry)) {
+        problems.push(`${where(line)}: the upload path ${entry} reaches RUNNER_TEMP, and is not one of ${TEMP_UPLOADS.join(", ")}`);
+      }
+      continue;
+    }
+    for (const match of entry.matchAll(/\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g)) {
+      const value = envValue(line.job, match[1]);
+      if (value === null || temp.test(value)) {
+        problems.push(`${where(line)}: the upload path ${entry} names env.${match[1]}, which is ${value ?? "not set in the job's env"}`);
+      }
+      rootsOf(line.job).names.add(match[1]);
+    }
+    if (!entry.startsWith("${{")) {
+      // The literal path up to its first glob or expression.
+      rootsOf(line.job).literals.add(entry.split(/[*?[]|\$\{\{/)[0].replace(/\/[^/]*$/, (tail) => (entry.includes("*") ? "" : tail)));
+    }
+  }
+  // Copies: in each run: script, the names that hold a RUNNER_TEMP path and those that hold an
+  // uploaded folder's (assignments, followed through); a command that writes into an uploaded
+  // folder while it names a RUNNER_TEMP path fails, whatever it copies.
+  for (const lines of steps.values()) {
+    const first = lines[0];
+    const job = rootsOf(first.job);
+    // The script's commands, a backslash-continued one joined, each with its first line's number.
+    const commands = [];
+    let open = null;
+    for (const line of lines.filter((one) => one.scalar)) {
+      const code = stripComment(line.raw);
+      if (open !== null) {
+        open.code += ` ${code.trim()}`;
+      } else {
+        open = { no: line.no, code };
+        commands.push(open);
+      }
+      if (/\\$/.test(open.code)) {
+        open.code = open.code.slice(0, -1);
+      } else {
+        open = null;
+      }
+    }
+    const tainted = new Set(["RUNNER_TEMP"]);
+    const uploaded = new Set(job.names);
+    const mentions = (set, code) => set.size > 0 && new RegExp(String.raw`\$\{?(?:${[...set].join("|")})\b`).test(code);
+    const holdsTemp = (code) => mentions(tainted, code) || /runner\.temp/.test(code);
+    const holdsUploaded = (code) =>
+      mentions(uploaded, code) ||
+      [...uploaded].some((name) => code.includes(`env.${name}`)) ||
+      [...job.literals].some((root) => root !== "" && (code === root || code.startsWith(`${root}/`) || code.includes(`/${root}`)));
+    for (const { code } of commands) {
+      const assigned = code.trim().match(/^(?:local\s+|export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (assigned && holdsTemp(assigned[2])) {
+        tainted.add(assigned[1]);
+      } else if (assigned && holdsUploaded(assigned[2])) {
+        uploaded.add(assigned[1]);
+      }
+    }
+    for (const { no, code } of commands) {
+      const at = `${where(first).replace(/, line \d+$/, "")}, line ${no}`;
+      for (const segment of code.split(/\|\||&&|[|;]/)) {
+        if (!holdsTemp(segment) && !holdsTemp(code)) {
+          continue;
+        }
+        const into = destinations(segment.trim()).filter(holdsUploaded);
+        if (into.length > 0) {
+          problems.push(`${at}: writes into an uploaded folder (${into.join(" ")}) while naming RUNNER_TEMP: ${code.trim()}`);
+        }
+      }
+      // An uploaded folder's name set through GITHUB_ENV could point it at RUNNER_TEMP.
+      if (/GITHUB_ENV/.test(code) && [...job.names].some((name) => new RegExp(`\\b${name}=`).test(code))) {
+        problems.push(`${at}: sets an uploaded folder's name through GITHUB_ENV: ${code.trim()}`);
+      }
+    }
+  }
+  return problems;
+}
+
+test("no upload path, and no copy into an uploaded folder, reaches RUNNER_TEMP", () => {
+  const text = workflow();
+  assert.deepEqual(uploadProblems(text), []);
+  const breaks = [
+    // The review's.
+    text.replace(COLLECT, `${COLLECT}          cp -r "$RUNNER_TEMP" "$OUT/t"\n`),
+    text.replace(COLLECT, `${COLLECT}          cp -r "\${RUNNER_TEMP}/apple" "$OUT/"\n`),
+    text.replace(COLLECT, `${COLLECT}          keys=$RUNNER_TEMP/apple\n          bundle=$RELEASE_DIR/bundle\n          tar -czf "$bundle/x.tgz" "$keys"\n`),
+    text.replace(COLLECT, `${COLLECT}          ln -s "$RUNNER_TEMP" "$OUT/t"\n`),
+    text.replace(COLLECT, `${COLLECT}          cat "$RUNNER_TEMP/dry-updater.key" > "$OUT/key"\n`),
+    text.replace(COLLECT, `${COLLECT}          echo "OUT=$RUNNER_TEMP" >> "$GITHUB_ENV"\n`),
+    text.replace("          path: ${{ env.OUT }}\n", "          path: ${{ runner.temp }}\n"),
+    text.replace("          path: ${{ env.OUT }}\n", "          path: |\n            ${{ env.OUT }}\n            ${{ runner.temp }}/apple\n"),
+    text.replace("          path: ${{ runner.temp }}/dry-updater.key.pub\n", "          path: ${{ runner.temp }}/dry-updater.key*\n"),
+    text.replace("          path: ${{ env.OUT }}\n", "          path: ${{ env.OUT }}/..\n"),
+    text.replace("      OUT: ${{ github.workspace }}/release-out\n", "      OUT: ${{ runner.temp }}/release-out\n"),
+  ];
+  for (const [i, broken] of breaks.entries()) {
+    assert.notEqual(broken, text, `break ${i} applies`);
+    assert.notDeepEqual(uploadProblems(broken), [], `break ${i} is caught`);
   }
 });
 
@@ -498,10 +973,17 @@ test("the Developer ID check holds its codesign, spctl and stapler checks", () =
 const haveBash = spawnSync("bash", ["--version"]).status === 0;
 const haveOpenssl = spawnSync("openssl", ["version"]).status === 0;
 
-/** Runs custody's Apple step's script with <env> (names to values); node's notary call faked. */
-function runCustodyCheck(script, env) {
+/**
+ * Runs custody's Apple step's script with <env> (names to values), in a scratch checkout whose
+ * crates/desktop/release/apple-team-id pins <pin> (under a comment, as the committed file is);
+ * node's notary call faked.
+ */
+function runCustodyCheck(script, env, { pin = "ABCDE12345" } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "custody-apple-"));
   try {
+    const checkout = join(dir, "checkout");
+    mkdirSync(join(checkout, "crates", "desktop", "release"), { recursive: true });
+    writeFileSync(join(checkout, TEAM_ID_FILE), `# The Team ID (a comment, as committed).\n${pin}\n`);
     const bin = join(dir, "bin");
     spawnSync("mkdir", ["-p", bin]);
     // `node .github/scripts/apple-notary.mjs --check` answers "accepted" without the network.
@@ -519,15 +1001,19 @@ function runCustodyCheck(script, env) {
       ...Object.fromEntries([...APPLE_SIX, ...APPLE_ID_NAMES].map((name) => [name, ""])),
       ...env,
     };
-    const result = spawnSync("bash", ["-c", script], { cwd: ROOT, env: full, encoding: "utf8" });
+    const result = spawnSync("bash", ["-c", script], { cwd: checkout, env: full, encoding: "utf8" });
     return { status: result.status, out: `${result.stdout}${result.stderr}`, summary: readFileSync(summary, "utf8") };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-/** A Developer ID-like .p12 (base64) from a throwaway CA, and its password. */
-function throwawayIdentity(dir, { team = "ABCDE12345", name = "Test Person", issuer = "Developer ID Certification Authority", days = 30 } = {}) {
+/**
+ * A Developer ID-like .p12 (base64) from a throwaway CA, and its password. An expired one is
+ * issued with `openssl ca -startdate/-enddate` (2020), which OpenSSL 3.0 (boxbox, the runners)
+ * and 4.x both take: 3.0's `x509` has no -not_before/-not_after, and 4.x refuses -days 0.
+ */
+function throwawayIdentity(dir, { team = "ABCDE12345", name = "Test Person", issuer = "Developer ID Certification Authority", expired = false } = {}) {
   const run = (...args) => {
     const result = spawnSync("openssl", args, { cwd: dir, encoding: "utf8" });
     assert.equal(result.status, 0, `openssl ${args.join(" ")}: ${result.stderr}`);
@@ -536,7 +1022,19 @@ function throwawayIdentity(dir, { team = "ABCDE12345", name = "Test Person", iss
   run("req", "-x509", ...ec, "-keyout", "ca.key", "-out", "ca.pem", "-days", "2", "-subj", `/CN=${issuer}`);
   const cn = `Developer ID Application: ${name} (${team})`;
   run("req", "-new", ...ec, "-keyout", "leaf.key", "-out", "leaf.csr", "-subj", `/UID=${team}/CN=${cn}/OU=${team}/O=${name}/C=IN`);
-  run("x509", "-req", "-in", "leaf.csr", "-CA", "ca.pem", "-CAkey", "ca.key", "-days", String(days), "-out", "leaf.pem");
+  if (expired) {
+    writeFileSync(join(dir, "index.txt"), "");
+    writeFileSync(join(dir, "serial"), "01\n");
+    writeFileSync(
+      join(dir, "ca.cnf"),
+      "[ca]\ndefault_ca = throwaway\n[throwaway]\ndatabase = index.txt\nnew_certs_dir = .\nserial = serial\n" +
+        "default_md = sha256\npolicy = anything\nunique_subject = no\n[anything]\ncommonName = supplied\n",
+    );
+    run("ca", "-batch", "-config", "ca.cnf", "-preserveDN", "-notext", "-cert", "ca.pem", "-keyfile", "ca.key", "-in", "leaf.csr",
+      "-out", "leaf.pem", "-startdate", "20200101000000Z", "-enddate", "20200102000000Z");
+  } else {
+    run("x509", "-req", "-in", "leaf.csr", "-CA", "ca.pem", "-CAkey", "ca.key", "-days", "30", "-out", "leaf.pem");
+  }
   const password = "throwaway-p12-password";
   run("pkcs12", "-export", "-inkey", "leaf.key", "-in", "leaf.pem", "-passout", `pass:${password}`, "-out", "id.p12");
   return { p12: readFileSync(join(dir, "id.p12")).toString("base64"), password, identity: cn };
@@ -628,6 +1126,30 @@ test("custody opens the certificate and checks its identity, team, issuer and da
       assert.ok(!result.out.includes(good.password), "no secret printed");
     };
     refused({ APPLE_CERTIFICATE_PASSWORD: "wrong" }, "does not open with APPLE_CERTIFICATE_PASSWORD");
+    // The committed Team ID: empty, another team's, or not a Team ID is refused, naming both.
+    const pinRefusals = (body) => {
+      const said = [];
+      const empty = runCustodyCheck(body, secrets, { pin: "" });
+      if (empty.status === 0 || !empty.out.includes("apple-team-id is empty, and the certificate's Team ID is ABCDE12345")) {
+        said.push(`an empty pin: ${empty.out}`);
+      }
+      const other = runCustodyCheck(body, secrets, { pin: "ZZZZZ99999" });
+      if (other.status === 0 || !other.out.includes("the certificate's Team ID is ABCDE12345, but crates/desktop/release/apple-team-id pins ZZZZZ99999")) {
+        said.push(`another team's pin: ${other.out}`);
+      }
+      const junk = runCustodyCheck(body, secrets, { pin: "abc" });
+      if (junk.status === 0 || !junk.out.includes("not a Team ID")) {
+        said.push(`a pin that is no Team ID: ${junk.out}`);
+      }
+      return said;
+    };
+    assert.deepEqual(pinRefusals(script), []);
+    // Broken on purpose: each pin check skipped once.
+    for (const from of ['[ "$team" = "$pinned" ] ||', '[ -n "$pinned" ] ||', '[[ "$pinned" =~ ^([A-Z0-9]{10})?$ ]] ||']) {
+      const lax = script.replace(from, "true ||");
+      assert.notEqual(lax, script, from);
+      assert.notDeepEqual(pinRefusals(lax), [], from);
+    }
     // The Apple ID set instead of the API key's: its Team ID must be the certificate's.
     const appleIdSet = {
       ...secrets,
@@ -647,7 +1169,7 @@ test("custody opens the certificate and checks its identity, team, issuer and da
     const notAnAsp = runCustodyCheck(script, { ...appleIdSet, APPLE_PASSWORD: "my-real-password" });
     assert.ok(notAnAsp.status !== 0 && notAnAsp.out.includes("not an app-specific password"), notAnAsp.out);
     // Broken on purpose: the Team ID not compared, so the mismatch passes.
-    const lax = script.replace('[ "$APPLE_TEAM_ID" = "$team" ] ||', "true ||");
+    const lax = script.replace('[ "$APPLE_TEAM_ID" = "$pinned" ] ||', "true ||");
     assert.notEqual(lax, script);
     assert.equal(runCustodyCheck(lax, { ...appleIdSet, APPLE_TEAM_ID: "ZZZZZ99999" }).status, 0);
     refused({ APPLE_SIGNING_IDENTITY: "Developer ID Application: Someone Else (ABCDE12345)" }, "is not APPLE_SIGNING_IDENTITY's");
@@ -657,7 +1179,7 @@ test("custody opens the certificate and checks its identity, team, issuer and da
     try {
       const selfIssued = throwawayIdentity(other, { issuer: "Clauseo Code Signing" });
       refused({ APPLE_CERTIFICATE: selfIssued.p12 }, "not issued by Developer ID Certification Authority");
-      const expired = throwawayIdentity(other, { days: 0 });
+      const expired = throwawayIdentity(other, { expired: true });
       refused({ APPLE_CERTIFICATE: expired.p12 }, "the Developer ID certificate expired");
       const otherTeam = throwawayIdentity(other, { team: "ZZZZZ99999" });
       refused({ APPLE_CERTIFICATE: otherTeam.p12, APPLE_SIGNING_IDENTITY: good.identity }, "is not APPLE_SIGNING_IDENTITY's");
@@ -939,5 +1461,193 @@ test("every mode's .app has the hardened runtime and per-binary entitlements on 
   for (const [i, broken] of breaks.entries()) {
     assert.notEqual(broken, text, `break ${i} applies`);
     assert.notDeepEqual(runtimeStepProblems(broken), [], `break ${i} is caught`);
+  }
+});
+
+// ---- The DMG's notary verdict: only the notary service's "Accepted" staples ----
+
+/**
+ * What the bundle step's DMG notarisation gets wrong, run from `submitted=` to the stapler's
+ * validate with a fake xcrun that answers <status>: a refusal, an empty answer or a failed call
+ * must fail before stapling; only Accepted staples.
+ */
+function verdictProblems(text) {
+  const run = stepNamed(text, "build", BUNDLE_STEP)?.run ?? "";
+  const lines = run.split("\n");
+  const from = lines.findIndex((line) => line.trim().startsWith("submitted=$(xcrun notarytool submit"));
+  const to = lines.findIndex((line) => line.trim().startsWith('xcrun stapler validate "$dmg"'));
+  if (from === -1 || to < from) {
+    return ["the bundle step has no notarytool submit followed by the DMG's stapler validate"];
+  }
+  const dir = mkdtempSync(join(tmpdir(), "notary-verdict-"));
+  try {
+    const log = join(dir, "calls.log");
+    writeFileSync(
+      join(dir, "xcrun"),
+      `#!/bin/bash\necho "$*" >> "${log}"\ncase "$1 $2" in\n  "notarytool submit") [ "$ANSWER" = fail ] && exit 1; printf '%s' "$ANSWER" ;;\nesac\nexit 0\n`,
+    );
+    chmodSync(join(dir, "xcrun"), 0o755);
+    const script = ['set -euo pipefail', 'fail() { echo "::error::$1"; exit 1; }', 'dmg=Clauseo_0.0.0_aarch64.dmg', "notary=(--key k)", ...lines.slice(from, to + 1)].join("\n");
+    const problems = [];
+    const answers = [
+      ['{"id":"x","status":"Invalid"}', false],
+      ['{"id":"x","status":"In Progress"}', false],
+      ["", false],
+      ["fail", false],
+      ["not json", false],
+      ['{"id":"x","status":"Accepted"}', true],
+    ];
+    for (const [answer, staples] of answers) {
+      writeFileSync(log, "");
+      const result = spawnSync("bash", ["-c", script], { cwd: dir, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ANSWER: answer }, encoding: "utf8" });
+      const stapled = readFileSync(log, "utf8").includes("stapler staple");
+      if (staples && (result.status !== 0 || !stapled)) {
+        problems.push(`an Accepted DMG is not stapled (${result.status}: ${result.stdout}${result.stderr})`);
+      }
+      if (!staples && (result.status === 0 || stapled)) {
+        problems.push(`the answer ${JSON.stringify(answer)} staples or passes`);
+      }
+    }
+    return problems;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("only the notary service's Accepted lets the DMG be stapled; anything else fails the step", { skip: !haveBash || process.platform === "win32" || spawnSync("jq", ["--version"]).status !== 0 }, () => {
+  const text = workflow();
+  assert.deepEqual(verdictProblems(text), []);
+  const verdictLine = "            verdict=$(jq -r '.status // \"\"' <<< \"$submitted\" 2> /dev/null) || verdict=\"\"\n";
+  assert.ok(text.includes(verdictLine));
+  const breaks = [
+    // The verdict forced to Accepted, three ways.
+    text.replace(verdictLine, `${verdictLine}            verdict=Accepted\n`),
+    text.replace(verdictLine, verdictLine.replace('|| verdict=""', "|| verdict=Accepted").replace("'.status // \"\"'", "'.status // \"Accepted\"'")),
+    text.replace('            if [ "$verdict" != Accepted ]; then\n', '            if false; then\n'),
+    // A refusal that goes on to staple.
+    text.replace("              [ -z \"$id\" ] || xcrun notarytool log \"$id\" \"${notary[@]}\" || true\n              exit 1\n", "              [ -z \"$id\" ] || xcrun notarytool log \"$id\" \"${notary[@]}\" || true\n"),
+  ];
+  for (const [i, broken] of breaks.entries()) {
+    assert.notEqual(broken, text, `break ${i} applies`);
+    assert.notDeepEqual(verdictProblems(broken), [], `break ${i} is caught`);
+  }
+});
+
+// ---- The committed Team ID: one file, read the same way by custody, the check and publish ----
+
+/** Where the committed Team ID is not the one every signature is compared with. */
+function teamPinProblems(text, committed) {
+  const problems = [];
+  const value = committed.replace(/#.*/g, "").replace(/\s/g, "");
+  if (!/^([A-Z0-9]{10})?$/.test(value)) {
+    problems.push(`${TEAM_ID_FILE} holds "${value}", not a Team ID or nothing`);
+  }
+  const custody = stepNamed(text, "custody", CUSTODY_STEP)?.run ?? "";
+  const check = stepNamed(text, "build", CHECK_STEP)?.run ?? "";
+  const publish = stepNamed(text, "publish", "Every DMG is notarised and stapled, or this is an unsigned beta on purpose")?.run ?? "";
+  for (const [step, script, read] of [
+    ["custody", custody, `pinned=$(${TEAM_ID_READ}) ||`],
+    ["the Developer ID check", check, `team=$(${TEAM_ID_READ})`],
+    ["publish", publish, `team=$(${TEAM_ID_READ})`],
+  ]) {
+    if (!script.includes(read)) {
+      problems.push(`${step} does not read the Team ID from ${TEAM_ID_FILE} (${read})`);
+    }
+  }
+  // The check: the identity's team must be the pinned one, and every TeamIdentifier is compared
+  // with the pinned one, never with the secret's own.
+  if (/^\s*team=\$\{BASH_REMATCH/m.test(check) || !check.includes('[ "$identity_team" = "$team" ] ||')) {
+    problems.push("the Developer ID check takes its team from APPLE_SIGNING_IDENTITY, not from the committed file");
+  }
+  if (!check.includes('grep -qx "TeamIdentifier=$team" <<< "$info"')) {
+    problems.push("the Developer ID check does not compare each TeamIdentifier with the committed team");
+  }
+  // publish: each notarised DMG and its .app signed by the committed team.
+  const signed = publish.indexOf('if [ "$UNSIGNED_BETA" != true ] || [ "$HAS_APPLE" = true ]; then');
+  const team = publish.indexOf('grep -c "^TeamIdentifier=$team\\$"');
+  const both = publish.indexOf('[ "$signers" = 2 ] ||');
+  if (signed === -1 || !(signed < team && team < both) || !publish.includes('codesign -dv "$mnt/Clauseo.app"')) {
+    problems.push("publish does not check that each notarised DMG and its .app are signed by the committed team");
+  }
+  return problems;
+}
+
+test("the Team ID is committed in one file, and custody, the check and publish compare with it", () => {
+  const text = workflow();
+  const committed = readFileSync(join(ROOT, TEAM_ID_FILE), "utf8");
+  assert.deepEqual(teamPinProblems(text, committed), []);
+  const breaks = [
+    [text, `${committed}ABCDE1234\n`],
+    [text.replace(`          team=$(${TEAM_ID_READ})\n          [[ "$team" =~`, `          team=$identity_team\n          [[ "$team" =~`), committed],
+    [text.replace('          [ "$identity_team" = "$team" ] ||\n', "          true ||\n"), committed],
+    [text.replace('[ "$signers" = 2 ] ||', "true ||"), committed],
+    [text.replace("pinned=$(sed 's/#.*//' crates/desktop/release/apple-team-id", "pinned=$(sed 's/#.*//' crates/desktop/release/team"), committed],
+  ];
+  for (const [i, [broken, file]] of breaks.entries()) {
+    assert.ok(broken !== text || file !== committed, `break ${i} applies`);
+    assert.notDeepEqual(teamPinProblems(broken, file), [], `break ${i} is caught`);
+  }
+});
+
+// ---- apple-setup.sh runs by hand only, and leaves no password on the USB ----
+
+const SETUP = join(here, "apple-setup.sh");
+
+/** What apple-setup.sh gets wrong: run under CI and without a terminal; read for the rest. */
+function setupProblems(script) {
+  const problems = [];
+  const dir = mkdtempSync(join(tmpdir(), "apple-setup-"));
+  try {
+    const file = join(dir, "apple-setup.sh");
+    writeFileSync(file, script);
+    const run = (env) => spawnSync("bash", [file, "--check"], { env: { PATH: process.env.PATH, HOME: dir, ...env }, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+    for (const env of [{ CI: "true" }, { GITHUB_ACTIONS: "true" }]) {
+      const result = run(env);
+      if (result.status === 0 || !result.stderr.includes("never under CI")) {
+        problems.push(`under ${Object.keys(env)[0]} it does not stop (${result.status}: ${result.stdout}${result.stderr})`);
+      }
+    }
+    const piped = run({});
+    if (piped.status === 0 || !piped.stderr.includes("needs a terminal")) {
+      problems.push(`without a terminal it does not stop (${piped.status}: ${piped.stdout}${piped.stderr})`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const code = script.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+  if (/p12_password[^\n]*[^0-9&]>{1,2}\s*(?!\/dev\/null|&)\S|password\.txt/.test(code)) {
+    problems.push("the .p12's password is written to a file");
+  }
+  if (/Desktop\/DeveloperID\.p12/.test(code) || !code.includes('work=$(mktemp -d "$HOME/clauseo-apple-setup.XXXXXX")')) {
+    problems.push("the .p12 is not exported into the script's own folder outside Desktop and Documents");
+  }
+  if (!code.includes("pbcopy < /dev/null")) {
+    problems.push("the clipboard is not cleared");
+  }
+  // One paste of the app-specific password: notarytool checks the value GitHub gets.
+  if ((code.match(/read -r -s -p "  App-specific password: " asp/g) ?? []).length !== 1 || !code.includes('--password "$asp"') || !code.includes("printf '%s' \"$asp\" | set_secret APPLE_PASSWORD")) {
+    problems.push("the app-specific password notarytool checks is not the one set on GitHub");
+  }
+  if (!code.includes('[[ "$pick" =~ ^[0-9]{1,3}$ ]] && [ "$pick" -ge 1 ] && [ "$pick" -le "${#identities[@]}" ] ||')) {
+    problems.push("the identity's number is not checked before arithmetic");
+  }
+  return problems;
+}
+
+test("apple-setup.sh stops under CI or without a terminal, and keeps the .p12's password off disk", { skip: !haveBash || process.platform === "win32" }, () => {
+  const script = readFileSync(SETUP, "utf8");
+  assert.deepEqual(setupProblems(script), []);
+  const breaks = [
+    script.replace('if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then', "if false; then"),
+    script.replace("if ! [ -t 0 ] || ! [ -t 1 ]; then", "if false; then"),
+    script.replace("cp \"$p12\" \"$dest/DeveloperID.p12\"\n", "cp \"$p12\" \"$dest/DeveloperID.p12\"\n(umask 077 && printf '%s\\n' \"$p12_password\" > \"$dest/DeveloperID.p12.password.txt\")\n"),
+    script.replace('"$work/DeveloperID.p12")', '"$HOME/Desktop/DeveloperID.p12")'),
+    script.replace("  pbcopy < /dev/null", "  true"),
+    script.replace(' --password "$asp"', ""),
+    script.replace('[[ "$pick" =~ ^[0-9]{1,3}$ ]] && ', ""),
+  ];
+  for (const [i, broken] of breaks.entries()) {
+    assert.notEqual(broken, script, `break ${i} applies`);
+    assert.notDeepEqual(setupProblems(broken), [], `break ${i} is caught`);
   }
 });
