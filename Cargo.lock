@@ -1021,7 +1021,7 @@ dependencies = [
 
 [[package]]
 name = "clauseo-desktop"
-version = "0.0.0"
+version = "0.0.6"
 dependencies = [
  "async-io",
  "base64 0.22.1",
