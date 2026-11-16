@@ -544,9 +544,9 @@ fn shell_chrome<'a>(actor: &Actor, run: &'a RunFolders) -> Option<&'a Path> {
 }
 
 /// Which browser part `run`'s session gets: `none_here`'s for an agent with no browser on this
-/// OS (`browser::no_browser`: the no-browser sentence for Claude anywhere and Codex on
-/// Windows and Linux); else the shell tool's (no agent's for launch), else the one the `browser` entry's
-/// state gives (Codex, `browser::entry_part`), else none.
+/// OS (`browser::no_browser`: the no-browser sentence for Claude anywhere, Codex on Windows and
+/// Linux); else the shell tool's (no agent's for launch), else the one the `browser` entry's state
+/// gives (Codex, `browser::entry_part`), else none.
 fn session_part(
     shell: Option<&(clauseo_protocol::ToolState, BrowserPart)>,
     entry: Option<&clauseo_protocol::ToolState>,

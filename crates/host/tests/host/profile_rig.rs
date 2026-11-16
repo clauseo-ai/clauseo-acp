@@ -358,8 +358,8 @@ pub(crate) fn filled_browser() -> Value {
 }
 
 /// `servers` as a Codex `session/new` carries them on this OS: without the `browser` entry
-/// where Codex has no browser at all (Windows and Linux, `clauseo_profile::servers::no_browser`), else
-/// all of them. Claude's keep it everywhere.
+/// where Codex has no browser at all (Windows and Linux, `clauseo_profile::servers::no_browser`),
+/// else all of them. Claude's keep it everywhere.
 pub(crate) fn codex_servers(servers: &[Value]) -> Vec<Value> {
     let none_here = clauseo_profile::servers::no_browser(Some(AgentKind::Codex));
     servers
