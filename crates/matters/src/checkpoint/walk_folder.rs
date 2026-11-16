@@ -55,8 +55,9 @@ use crate::{Error, locks, rules};
 /// them for a few milliseconds), so the first, short wait finds nearly every such file back;
 /// the longer two cover a busy disk or an antivirus scan holding up the second rename. 300 ms
 /// added to a checkpoint that saw a save in flight stays well inside a turn's start or end, and
-/// a file deleted for good is deleted then, as before.
-pub(super) const VANISHED_WAITS: [Duration; 3] = [
+/// a file deleted for good is deleted then, as before. A write-back's rename or delete refused
+/// on Windows is tried again after each of the same waits ([`crate::write::again_while_denied`]).
+pub(crate) const VANISHED_WAITS: [Duration; 3] = [
     Duration::from_millis(50),
     Duration::from_millis(100),
     Duration::from_millis(150),
@@ -400,20 +401,20 @@ pub(super) fn worth_listing(old: Option<&CacheEntry>, stat: &Stat) -> bool {
 
 /// Waits `wait` on the calling thread (the matter worker's). In unit tests it never sleeps:
 /// [`pauses`] counts the wait and runs the action a test armed.
-fn pause(wait: Duration) {
+pub(crate) fn pause(wait: Duration) {
     #[cfg(test)]
     pauses::pause(wait);
     #[cfg(not(test))]
     #[expect(
         clippy::disallowed_methods,
-        reason = "the walk's one wait, on the matter thread; unit tests count it instead (`pauses`)"
+        reason = "the walk's waits and a write-back's retries, on the matter thread; unit tests count them instead (`pauses`)"
     )]
     std::thread::sleep(wait);
 }
 
 /// Unit tests only: the walk's waits, counted instead of slept, per thread.
 #[cfg(test)]
-pub(super) mod pauses {
+pub(crate) mod pauses {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
 
@@ -427,12 +428,12 @@ pub(super) mod pauses {
     }
 
     /// Runs `action` at each wait, with the wait's number (0 for the first).
-    pub(in crate::checkpoint) fn on_pause(action: impl FnMut(usize) + 'static) {
+    pub(crate) fn on_pause(action: impl FnMut(usize) + 'static) {
         ACTION.set(Some(Box::new(action)));
     }
 
     /// How many waits there were and how long they took in all, then forgets them.
-    pub(in crate::checkpoint) fn take() -> (usize, Duration) {
+    pub(crate) fn take() -> (usize, Duration) {
         ACTION.set(None);
         (COUNT.take(), WAITED.take())
     }

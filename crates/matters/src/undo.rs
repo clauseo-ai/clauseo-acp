@@ -391,6 +391,7 @@ pub(crate) fn undo(
     let writeback::Deleted {
         paths: deleted,
         removals,
+        unfinished,
         ..
     } = writeback::apply(core, folder, settings.trash.as_ref(), &ops)?;
     let (checkpoint, resurrected) = take_after_deletes(
@@ -405,7 +406,14 @@ pub(crate) fn undo(
         ),
         &deleted,
     )?;
-    let restored = acting.iter().map(|step| step.path.clone()).collect();
+    // A refused file: the rest is written and checkpointed (so it can be undone), and the
+    // lawyer hears which file was not (`Undone::refused`).
+    let refused = unfinished.refused;
+    let restored = acting
+        .iter()
+        .map(|step| step.path.clone())
+        .filter(|path| !refused.iter().any(|(gone, _)| gone == path))
+        .collect();
     kept.sort();
     Ok(Undone {
         outside_edits,
@@ -417,6 +425,7 @@ pub(crate) fn undo(
         resurrected,
         deleted: sorted(deleted),
         removals,
+        refused,
     })
 }
 

@@ -285,6 +285,9 @@ crates/matters/src/checkpoint/walk_folder.rs pause clippy::disallowed_methods
 crates/matters/src/fsync.rs sync_dir clippy::unnecessary_wraps
 crates/matters/src/fsync.rs barrier clippy::unnecessary_wraps
 crates/matters/src/fsync.rs full_flush clippy::unnecessary_wraps
+# Added by matter-write-in-place: `saved` moves into the macOS write in place; compiled out
+# elsewhere.
+crates/matters/src/write/rename.rs Staged::rename_with clippy::needless_pass_by_value
 # Added by R8 relink: SetFileAttributesW, to hide `.clauseo` on Windows (#100).
 crates/matters/src/write/windows.rs - unsafe_code
 # Added by keep-file-attrs: copyfile with COPYFILE_ACL, so a rewritten file keeps its macOS ACL.

@@ -22,8 +22,9 @@
 //!    A crash while staging leaves the folder as it was (with `.clauseo-<n>.tmp` files at
 //!    worst, removed by the next write in that folder or by the host's matter worker as it opens
 //!    the matter, `recover_leftovers`); while renaming or before the folder syncs, partly
-//!    restored, each file old or new, recorded by nothing until the next checkpoint, which takes
-//!    it as outside edits. A retry with fresh ids writes only what still differs.
+//!    restored, each file old or new (but one written in place, its rename refused, which may be
+//!    torn), recorded by nothing until the next checkpoint, which takes it as outside edits. A
+//!    retry with fresh ids writes only what still differs.
 //! 6. The `restore` checkpoint. A crash before its publish leaves the folder restored and
 //!    recorded by the next checkpoint as outside edits; a retry finds nothing to write.
 //!
@@ -516,6 +517,7 @@ pub(crate) fn restore(
             deleted: Vec::new(),
             added_since: plan.added_since,
             kept: plan.kept,
+            refused: Vec::new(),
         });
     }
     // 5. Stage, check again, rename; a folder made since the plan where a file goes, or a file
@@ -526,21 +528,27 @@ pub(crate) fn restore(
     crate::test_support::before_restore_write(folder, &plan.targets())?;
     let ops = plan.ops();
     let ops: Vec<&Op> = ops.iter().collect();
-    let deleted = writeback::apply(core, folder, settings.trash.as_ref(), &ops)?.for_good;
-    // 6. The restore checkpoint.
+    let applied = writeback::apply(core, folder, settings.trash.as_ref(), &ops)?;
+    // 6. The restore checkpoint, of what was written even when a file was refused: the lawyer
+    // hears which (`Restored::refused`), and the restore so far can be undone.
     let checkpoint = core.take(
         folder,
         settings,
         &spec(request.checkpoint, CheckpointKind::Restore, request),
     )?;
+    let refused = applied.unfinished.refused;
+    let done = |path: &MatterPath| !refused.iter().any(|(gone, _)| gone == path);
+    let restored = restored.into_iter().filter(|path| done(path)).collect();
+    let removed = plan.removes.into_iter().filter(|path| done(path)).collect();
     Ok(Restored {
         outside_edits,
         checkpoint,
         written: restored,
-        removed: plan.removes,
-        deleted,
+        removed,
+        deleted: applied.for_good,
         added_since: plan.added_since,
         kept: plan.kept,
+        refused,
     })
 }
 

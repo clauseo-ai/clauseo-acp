@@ -13,19 +13,19 @@ use crate::stat::{CacheEntry, EntryState, Stat};
 use crate::test_dir::TestDir;
 use crate::{Error, OsProbe, write};
 
-fn path(text: &str) -> MatterPath {
+pub(super) fn path(text: &str) -> MatterPath {
     MatterPath::new(text).unwrap()
 }
 
 /// A matter folder and its history, with an empty cache.
-struct Matter {
+pub(super) struct Matter {
     _dir: TestDir,
-    folder: PathBuf,
-    core: Core,
+    pub(super) folder: PathBuf,
+    pub(super) core: Core,
     trash: crate::FolderTrash,
 }
 
-fn matter(name: &str) -> Matter {
+pub(super) fn matter(name: &str) -> Matter {
     let dir = TestDir::new(name);
     let folder = dir.path().join("matter");
     write::create_dir_all(&folder).unwrap();
@@ -41,7 +41,7 @@ fn matter(name: &str) -> Matter {
 }
 
 /// `text` written to the new file `file`, making its folder.
-fn put_text(file: &Path, text: &str) {
+pub(super) fn put_text(file: &Path, text: &str) {
     use std::io::Write as _;
     write::create_dir_all(file.parent().unwrap()).unwrap();
     write::create_new(file)
@@ -51,7 +51,7 @@ fn put_text(file: &Path, text: &str) {
 }
 
 /// `text` stored as a blob of the matter's history, from a file outside the folder.
-fn blob(matter: &mut Matter, text: &str) -> Oid {
+pub(super) fn blob(matter: &mut Matter, text: &str) -> Oid {
     const PROBE: &dyn crate::PlaceholderProbe = &OsProbe;
     let source = matter
         .folder
@@ -82,7 +82,7 @@ fn cached(matter: &mut Matter, name: &str, text: &str) -> PathBuf {
 }
 
 /// Runs the write-back of `ops` on `matter`.
-fn write_back(matter: &Matter, ops: &[Op]) -> Result<super::Deleted, super::Failed> {
+pub(super) fn write_back(matter: &Matter, ops: &[Op]) -> Result<super::Deleted, super::Failed> {
     let ops: Vec<&Op> = ops.iter().collect();
     apply_or_partial(&matter.core, &matter.folder, &matter.trash, &ops)
 }
@@ -106,6 +106,7 @@ fn a_write_back_names_the_temp_files_it_could_not_remove() {
     let left = Unfinished {
         owner_only: Vec::new(),
         left_behind: vec![path(".clauseo-4.tmp"), path("sub/.clauseo-2.tmp")],
+        refused: Vec::new(),
     };
     assert_eq!(done.unwrap().unfinished, left);
     let read = |name: &str| std::fs::read_to_string(matter.folder.join(name)).unwrap();
@@ -123,7 +124,7 @@ fn a_write_back_names_the_temp_files_it_could_not_remove() {
         "{:?}",
         failed.error
     );
-    assert_eq!(failed.unfinished, left);
+    assert_eq!(*failed.unfinished, left);
 }
 
 /// A write-back whose step after a rename fails (macOS: the ACL and the mode) goes, and names
@@ -145,6 +146,7 @@ fn a_write_back_names_a_file_whose_step_after_the_rename_failed() {
         Unfinished {
             owner_only: vec![path("Lease.docx")],
             left_behind: Vec::new(),
+            refused: Vec::new(),
         }
     );
     let text = std::fs::read_to_string(matter.folder.join("Lease.docx")).unwrap();

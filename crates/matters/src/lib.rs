@@ -165,7 +165,7 @@ mod write;
 mod writeback;
 
 pub use diff::names_a_write;
-pub use error::{Error, MissingReason, Refusal};
+pub use error::{Error, MissingReason, Refusal, RefusedBecause};
 pub use folder_scan::{FolderScan, FolderTotals, ScanProgress, scan_folder};
 pub use locks::{
     HeldOpen, OwnersBeside, held_open, held_open_at, held_open_beside, held_open_resolved,

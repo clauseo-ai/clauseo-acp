@@ -30,6 +30,12 @@ pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     removing(path, delete_file)
 }
 
+/// Tests: `fs::hard_link`, a second name for `original` at `link`.
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
+    std::fs::hard_link(original, link)
+}
+
 /// Takes the file at `path` out of the folder with `remove`: a move to a trash
 /// ([`crate::Trash`]), or [`delete_file`]. In tests a file can come back after it
 /// (`no_download::resurrect` in unit tests, `test_support::bring_back_after_delete` with the
@@ -225,6 +231,9 @@ mod replace_keeping;
 
 mod temps;
 
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
+mod in_place;
+
 pub(crate) use temps::{sweep_temps, temps_in};
 
 /// Sets the modification time of the file `path`.
@@ -309,26 +318,11 @@ impl Lost {
     }
 }
 
-/// Why [`Staged::rename`] failed.
-#[derive(Debug)]
-pub(crate) struct RenameFailed {
-    pub(crate) error: Error,
-    /// The target is not there any more: the folder changed. The temp file, which holds the new
-    /// content, is kept (Windows, after a failed `ReplaceFileW` that moved the old file away).
-    pub(crate) changed: bool,
-}
+mod rename;
 
-/// A staged file renamed into place ([`Staged::rename`]).
-#[derive(Debug)]
-pub(crate) struct Renamed {
-    /// The target's folder, which the caller syncs.
-    pub(crate) dir: PathBuf,
-    /// What of the old file's metadata the new one did not keep; the caller logs the total once.
-    pub(crate) lost: Lost,
-    /// The step after the rename failed (macOS: the old file's ACL and mode not set): the file
-    /// stays readable and writable by its owner alone, and the caller names it.
-    pub(crate) owner_only: bool,
-}
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
+pub(crate) use rename::SavedCopy;
+pub(crate) use rename::again_while_denied;
 
 /// Writes what `fill` writes to a new temp file in `target`'s folder, named `.clauseo-<n>.tmp`
 /// (excluded from every checkpoint), and syncs it. Never touches `target` itself; the temp file
@@ -385,106 +379,6 @@ fn stage_as(
     Ok(staged)
 }
 
-impl Staged {
-    /// Renames the temp file over the target, then syncs the folder. Never truncates the
-    /// target in place.
-    pub(crate) fn commit(self) -> Result<(), Error> {
-        let Renamed { dir, .. } = self.rename().map_err(|failed| failed.error)?;
-        fsync::sync_dir(&dir).map_err(|err| Error::io("sync", &dir, err))
-    }
-
-    /// Renames the temp file over the target without syncing the folder; returns the folder,
-    /// which the caller syncs (once for many renames in it) before relying on the rename. A
-    /// lawyer's file on Windows goes in by `ReplaceFileW` ([`replace_keeping`]).
-    pub(crate) fn rename(self) -> Result<Renamed, RenameFailed> {
-        #[cfg(windows)]
-        let replace: Option<&ReplaceFn> = Some(&windows::replace_file);
-        #[cfg(not(windows))]
-        let replace: Option<&ReplaceFn> = None;
-        self.rename_with(replace)
-    }
-
-    /// [`Self::rename`], with `replace` (`ReplaceFileW`, or a simulation of it in tests) for a
-    /// lawyer's file, or the plain rename.
-    fn rename_with(mut self, replace: Option<&ReplaceFn>) -> Result<Renamed, RenameFailed> {
-        let dir = self.target.parent().unwrap_or(&self.target).to_owned();
-        let Some(temp) = self.temp.take() else {
-            return Ok(Renamed {
-                dir,
-                lost: self.lost,
-                owner_only: false,
-            });
-        };
-        #[cfg(test)]
-        if let Err(err) = injected("rename") {
-            self.temp = Some(temp);
-            return Err(RenameFailed {
-                error: Error::io("rename", &self.target, err),
-                changed: false,
-            });
-        }
-        #[cfg(any(windows, test))]
-        let renamed = match replace {
-            Some(replace) if self.keep => {
-                replace_keeping::replace_keeping(&temp, &self.target, replace)
-            }
-            _ => plain_rename(&temp, &self.target),
-        };
-        #[cfg(not(any(windows, test)))]
-        let renamed = {
-            // Only Windows keeps metadata at the rename; elsewhere [`stage`] copied it.
-            let _ = (replace, self.keep);
-            plain_rename(&temp, &self.target)
-        };
-        match renamed {
-            Ok(lost) => {
-                self.lost.add(lost);
-                let unfinished = finish(&mut self);
-                if let Some(err) = &unfinished {
-                    self.lost.add(Lost::one(err.raw_os_error()));
-                }
-                Ok(Renamed {
-                    dir,
-                    lost: self.lost,
-                    owner_only: unfinished.is_some(),
-                })
-            }
-            #[cfg(any(windows, test))]
-            Err(replace_keeping::Failed::TargetGone(err)) => {
-                // The temp file stays: it holds the new content, and the old file is not there.
-                Err(RenameFailed {
-                    error: Error::io("replace; the folder changed", &self.target, err),
-                    changed: true,
-                })
-            }
-            Err(failed) => {
-                self.temp = Some(temp);
-                Err(RenameFailed {
-                    error: Error::io("rename", &self.target, failed.into_error()),
-                    changed: false,
-                })
-            }
-        }
-    }
-}
-
-/// The step after the rename of `staged`'s temp file: on macOS the old file's ACL and then its
-/// mode, set on the target once it is that file ([`keep::After`]); until then the file is its
-/// owner's alone. Its failure, if any: never a failure of the write.
-fn finish(staged: &mut Staged) -> Option<io::Error> {
-    #[cfg(test)]
-    if let Err(err) = injected("after rename") {
-        return Some(err);
-    }
-    #[cfg(target_os = "macos")]
-    if let Some(after) = staged.after.take() {
-        return after.apply(&staged.target, staged.id).err();
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = staged;
-    None
-}
-
 /// `ReplaceFileW`'s shape: `(replaced, replacement, backup)`.
 type ReplaceFn = dyn Fn(&Path, &Path, &Path) -> io::Result<()>;
 
@@ -515,27 +409,13 @@ fn plain_rename(temp: &Path, target: &Path) -> Result<Lost, Failed> {
 }
 
 #[cfg(test)]
-thread_local! {
-    /// Tests: the step of a write that fails, once armed by [`fail_at`] on this thread.
-    static FAIL_AT: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
-}
-
-/// Tests: makes the step `step` of this thread's writes fail: "keep", "sync", "rename" (before
-/// it), "after rename" (the step after it, [`finish`]) or "sweep" (each removal of a crash's
-/// temp file, [`sweep_temps`]).
+mod seams;
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+pub(crate) use seams::after_open;
 #[cfg(test)]
-pub(crate) fn fail_at(step: Option<&'static str>) {
-    FAIL_AT.with(|at| at.set(step));
-}
-
-/// Tests: the failure [`fail_at`] armed for `step`, if any.
+pub(crate) use seams::fail_at;
 #[cfg(test)]
-fn injected(step: &'static str) -> io::Result<()> {
-    if FAIL_AT.with(std::cell::Cell::get) == Some(step) {
-        return Err(io::Error::other(step));
-    }
-    Ok(())
-}
+use seams::{injected, refusing};
 
 impl Drop for Staged {
     fn drop(&mut self) {

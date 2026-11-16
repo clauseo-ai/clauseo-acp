@@ -19,7 +19,10 @@ use crate::types::{Checkpoint, CheckpointOutcome, CommitId, Progress, Settings, 
 use crate::{Error, rules, trailers};
 pub(crate) use timeline::Timeline;
 pub(crate) use walk_folder::OnHeld;
+#[cfg(test)]
+pub(crate) use walk_folder::pauses;
 use walk_folder::walk_folder;
+pub(crate) use walk_folder::{VANISHED_WAITS, pause};
 
 /// The history of one matter as this process holds it: the repository, the stat cache and the
 /// timeline rebuilt from the trailers.
