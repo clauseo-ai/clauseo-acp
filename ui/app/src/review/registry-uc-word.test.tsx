@@ -1,14 +1,39 @@
 // @vitest-environment happy-dom
 // The tracked changes' copy review cells (UC-120 on), rendered as the review renders them (in StrictMode): each shows
 // its string, its slots filled, in the state it names, after the presses that bring it.
-import { act, StrictMode } from "react";
+import { act, StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import { stubFonts } from "../room/thread/testing.ts";
+import { assertWarm, WARM_MS, warmUp } from "@clauseo/components/lib/warm-up.ts";
 import { UC_WORD } from "./registry-uc-word.tsx";
 
 stubFonts();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+/** Renders a cell as the tests do, then takes it away: the first render of a cold file is the slow one. */
+async function renderAndTake(element: ReactNode) {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(<StrictMode>{element}</StrictMode>));
+  await act(async () => root.unmount());
+  host.remove();
+}
+
+// every cell rendered once before the first test, under its own budget (warm-up.ts), so each test measures itself
+let warmFailure: string | null = null;
+beforeAll(async () => {
+  warmFailure = await warmUp("the review cells' first render", async () => {
+    for (const entry of UC_WORD) await renderAndTake(entry.render("en"));
+    // what the renders left behind is not the first test's to see
+    document.body.replaceChildren();
+    localStorage.clear();
+  });
+}, WARM_MS + 5_000);
+beforeEach(() => {
+  assertWarm(warmFailure);
+});
 
 let unmount: (() => Promise<void>) | null = null;
 afterEach(async () => {
