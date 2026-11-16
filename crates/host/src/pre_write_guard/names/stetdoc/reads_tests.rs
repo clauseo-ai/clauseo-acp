@@ -19,7 +19,7 @@ mod on_disk {
     use std::path::{Path, PathBuf};
 
     use super::super::{Fenced, fenced_read};
-    use super::fence;
+    use super::{GuardFence, fence};
     use crate::network_paths::resolve::Disk;
     use crate::network_paths::resolve::tests::{Fake, FakeFs};
     use crate::network_paths::tests::plain_net;
