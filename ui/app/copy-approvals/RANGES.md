@@ -10,14 +10,26 @@ Every lawyer-facing string has an id registered in `ui/app/src/review/registry*.
 
 ## UC blocks (from 2026-11-15)
 
-| Thread    | UC ids                                |
-| --------- | ------------------------------------- |
-| app track | up to 303 (in use), and 400 to 499    |
-| host      | 304 to 399                            |
-| stage C   | 700 to 749                            |
-| stage D   | 600 to 699                            |
-| stage E   | 500 to 599                            |
-| stage F   | 260 to 261 (reserved), and 750 to 799 |
+| Thread        | UC ids                                                                                        |
+| ------------- | --------------------------------------------------------------------------------------------- |
+| app track     | up to 303 (in use), 400 to 499 (in use; handed out below), and 800 to 899                     |
+| host          | 304 to 399; from the app track: 424 to 429, 470 to 472, 491, 492                              |
+| Indian Kanoon | from the app track: 450 to 469                                                                |
+| stage C       | 700 to 749                                                                                    |
+| stage D       | 600 to 699; from the app track: 420 to 423, 473, 484, 486, 487, 499                           |
+| stage E       | 500 to 599; from the app track: 475 to 483, 488 to 490, 493 to 498                            |
+| stage F       | 260 to 261 (reserved), and 750 to 799                                                         |
+| shared        | 900 to 999, the reserve: the app track hands out sub-ranges to a thread that runs out (below) |
+
+The app track's 400 to 499 is used up. Parts went to other threads, as their rows say: host follow-ups, the Indian Kanoon thread, stage D and stage E. The ids not handed out are the app track's own. New app-track ids take 800 to 899.
+
+### Shared reserve: UC-900 to UC-999
+
+When a thread runs out of its block, it asks the app track, which hands out a sub-range of 900 to 999. Every hand-out gets a row here.
+
+| Thread     | UC ids | Handed out |
+| ---------- | ------ | ---------- |
+| (none yet) |        |            |
 
 ## Other prefixes: closed to new ids
 
