@@ -47,9 +47,16 @@ export function menusOf(
       label: th(lang, p.category === "model" ? "Model" : "Effort"),
       value: valueOf(p),
       options: p.choices.map((c) =>
-        // the host's seed: one choice, the agent left to its own default, named for the plan (UC-874)
+        // the host's seed: one choice, the agent left to its own default; the model's named for the plan (UC-874), the
+        // effort's in words of its own (UC-884), so the two triggers side by side never read the same
         c.value === AGENT_DEFAULT_VALUE && plan !== undefined
-          ? { value: c.value, name: th(lang, "{agent}'s default", { agent: plan }) }
+          ? {
+              value: c.value,
+              name:
+                p.category === "model"
+                  ? th(lang, "{agent}'s default", { agent: plan })
+                  : th(lang, "Default effort"),
+            }
           : c.value === DEFAULT_VALUE && resolved !== undefined
             ? { value: c.value, name: resolved, note: th(lang, "(default)") }
             : {
@@ -64,7 +71,8 @@ export function menusOf(
 }
 
 /** A new conversation's menus, while the open conversation is a draft: undefined otherwise. Before a plan's agent has
- * reported its options (its first conversation reports them), the host's seed: one "{agent}'s default" row a menu. */
+ * reported its options (its first conversation reports them), the host's seed: one row a menu, "{agent}'s default" for the
+ * model and "Default effort" for the effort. */
 export function useDraftMenus(
   talks: ConversationsView,
   conversations: Conversations,

@@ -237,6 +237,8 @@ export const HI = {
   "(default)": "(डिफ़ॉल्ट)",
   // the model and effort of a new conversation before the plan's agent has said what it offers: its own default (UC-874)
   "{agent}'s default": null,
+  // the effort's one row in the same state, so it never reads the same as the model beside it (UC-884)
+  "Default effort": null,
   // empty states
   "Clauseo has read this matter's {n} papers.": "Clauseo ने इस मामले के {n} दस्तावेज़ पढ़ लिए हैं।",
   "Ask the first question below. Each answer cites the paper and page it relies on.":

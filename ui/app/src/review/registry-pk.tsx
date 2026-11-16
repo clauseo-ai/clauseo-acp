@@ -1,4 +1,5 @@
-// The pickers' copy review entries (PK-01 to PK-05, UC-152's "(default)" and UC-874's "{agent}'s default"): the
+// The pickers' copy review entries (PK-01 to PK-05, UC-152's "(default)", UC-874's "{agent}'s default" and UC-884's
+// "Default effort"): the
 // agent's model and effort on the composer's status line, and the plan not set up on this computer, each in the real room over a FakeTransport with the setup wire, the agents'
 // options as they last reported them, and the scene's steps taken in order (RoomDriven). The model and value names are
 // the agents' own, never Clauseo's words, so they are fake here. Apart from registry.tsx to keep that file under the
@@ -265,6 +266,17 @@ export const PK: Entry[] = [
       events: BOTH,
       options: SEEDED,
       steps: [{ press: '[data-testid="pick-model"]' }],
+    }),
+  },
+  // the same seed, the effort menu open: its one row in words of its own, never the model's
+  {
+    id: "UC-884",
+    words: threadWords("Default effort"),
+    screen,
+    render: renderPick({
+      events: BOTH,
+      options: SEEDED,
+      steps: [{ press: '[data-testid="pick-effort"]' }],
     }),
   },
   // a new conversation, ChatGPT chosen but not set up on this computer
