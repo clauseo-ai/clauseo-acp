@@ -74,7 +74,8 @@ fn the_picks_set_and_dropped_are_logged_with_the_agent_model_and_effort_only() {
     );
     assert_eq!(
         line(&log, "the agent does not take a config pick"),
-        "the agent does not take a config pick; dropped agent=claude-acp model=opus effort=max"
+        // The session does not list max, so it shows as `-` (record 0047: listed short ids only).
+        "the agent does not take a config pick; dropped agent=claude-acp model=opus effort=-"
     );
     for line in log
         .lines()
