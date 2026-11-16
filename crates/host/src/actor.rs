@@ -307,6 +307,7 @@ fn run(
         };
         allowed::start(&mut actor, allowed_sites);
         startup::begin_startup(&mut actor);
+        turn::idle::profile_start(&mut actor);
         // Only when something enforces the list (`blocklist::needed`); stops when this block
         // ends, however it ends (`blocklist.rs`).
         let _blocklist = blocklist.and_then(|start| {
@@ -515,6 +516,7 @@ impl Actor {
             Input::Limits(input) => limits::on_input(self, input),
             Input::SnoozeWake { generation } => triage::on_wake(self, generation),
             Input::IdleDeadline { generation } => turn::idle_due(self, generation),
+            Input::ProfileChanged { generation } => turn::idle::profile_changed(self, generation),
             Input::FolderStates(states) => query::on_folder_states(self, states),
             Input::Scan(input) => scan::on_input(self, input),
             Input::PaperMarks(batch) => papers::scan::on_batch(self, batch),

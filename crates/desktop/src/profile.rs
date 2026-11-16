@@ -7,9 +7,9 @@
 //! renders the skills. When the start has no answer from stetdoc, the background tries (20 s for
 //! one not seen yet, then 20 s, then 30 s) run on a thread of their own and put the profile they
 //! render in place for the next agent start (`profile/stetdoc.rs`); an agent launch while one
-//! is in flight waits for it (`ProfileHook::launch_wait`, at most 20 s). The hook's methods
-//! then only map what it holds, as the trait requires: they read no file, start nothing
-//! and keep nothing between calls.
+//! is in flight waits for it (`ProfileHook::launch_wait`, at most 20 s), and agents launched
+//! before a new profile are marked to relaunch on it (`ProfileHook::changed`).
+//! The hook's methods only map what it holds: they read no file and start nothing.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -17,7 +17,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use clauseo_host::{HostConfig, LaunchWait, McpServer, PackRequest, ProfileHook};
+use clauseo_host::{
+    HostConfig, LaunchSkills, LaunchWait, McpServer, PackRequest, ProfileChange, ProfileHook,
+};
 use clauseo_profile::skills::stetdoc::start::{Limits, State, Tries};
 use clauseo_profile::{
     BrowserSidecars, ClauseoProfile, PackWrite, PacksWritten, ProfileError, ProfilePaths,
@@ -31,6 +33,8 @@ use crate::setup::SetupHook;
 use stetdoc::Live;
 
 mod stetdoc;
+
+pub(crate) use stetdoc::{bundled_stetdoc, stetdoc_program};
 
 /// The target of the profile's support lines: host.log keeps info only from `clauseo_*::lifecycle`
 /// targets (`clauseo_host::log_file`).
@@ -65,8 +69,7 @@ impl fmt::Display for BuildError {
 pub(crate) struct DesktopProfile {
     /// Read at each hook call, so an agent start gets the profile as it is then.
     profile: Live,
-    /// stetdoc's background tries: an agent launch waits for the one in flight
-    /// (`ProfileHook::launch_wait`).
+    /// stetdoc's background tries: a launch waits for the one in flight (`launch_wait`).
     tries: Tries,
     prepend_stetdoc: bool,
     /// `<data>/tools`, holding the `agent-browser` command, when its copy is there
@@ -406,46 +409,6 @@ fn agent_browser_path(dir: &Path, macos: bool, exists: impl Fn(&Path) -> bool) -
 
 /// Where a release bundles stetdoc, in a folder of its own so that only that folder goes first
 /// on the agents' `PATH` (U13; `.github/scripts/sidecars.mjs`, `crates/desktop/stetdoc.toml`).
-/// On macOS (`macos`), `Clauseo.app/Contents/Helpers/stetdoc/stetdoc`, found from `exe_dir`
-/// (`Contents/MacOS`): notarisation wants no program in `Contents/Resources`. Elsewhere
-/// `<resource_dir>/stetdoc/stetdoc[.exe]`, Tauri's resource folder (on Windows the install
-/// folder, beside `Clauseo.exe`; on Linux `/usr/lib/Clauseo`). None when that folder is not
-/// known.
-pub(crate) fn bundled_stetdoc(
-    macos: bool,
-    exe_dir: &Path,
-    resource_dir: Option<&Path>,
-) -> Option<PathBuf> {
-    let program = format!("{STETDOC}{}", std::env::consts::EXE_SUFFIX);
-    let folder = if macos {
-        exe_dir.parent()?.join("Helpers")
-    } else {
-        resource_dir?.to_path_buf()
-    };
-    Some(folder.join(STETDOC).join(program))
-}
-
-/// The stetdoc to run: `bundled` (from [`bundled_stetdoc`]) when it is a program there. When
-/// it is not, a `release` build runs none and warns (the profile then leaves stetdoc out), and
-/// a debug build takes the first `stetdoc` on `path` (the `PATH` value).
-pub(crate) fn stetdoc_program(
-    bundled: Option<&Path>,
-    path: Option<&OsStr>,
-    release: bool,
-) -> Option<PathBuf> {
-    if let Some(bundled) = bundled.filter(|bundled| is_program(bundled)) {
-        return Some(bundled.to_path_buf());
-    }
-    if release {
-        tracing::warn!(
-            expected = ?bundled,
-            "the bundled stetdoc is missing: agents start without it"
-        );
-        return None;
-    }
-    first_on_path(STETDOC, path?)
-}
-
 /// The first program named `name` (with the OS's executable suffix, `.exe` on Windows) in an
 /// absolute folder of `path`, as `which` finds it: a file that is not a program
 /// ([`is_program`], no execute bit on Unix) is skipped and the walk goes on. A relative folder
@@ -525,8 +488,20 @@ impl ProfileHook for DesktopProfile {
         let (live, kind) = (self.profile.clone(), AgentKind::of(agent));
         Some(Box::pin(async move {
             end.await;
-            live.get().launch_writes(kind)
+            let (generation, profile) = live.now();
+            LaunchSkills {
+                generation,
+                writes: profile.launch_writes(kind),
+            }
         }))
+    }
+
+    fn generation(&self) -> u64 {
+        self.profile.now().0
+    }
+
+    fn changed(&self, seen: u64) -> Option<ProfileChange> {
+        Some(self.profile.changed(seen))
     }
 
     fn pack_write(&self, agent: &AgentId, request: &PackRequest) -> Option<PackWrite> {

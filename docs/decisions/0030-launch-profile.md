@@ -375,9 +375,13 @@ two dependencies, `profile` and `tracing`.
   launch (`ProfileHook::launch_wait`, `LAUNCH_WAIT_LIMIT`, 2026-11-15): the turn stays
   "starting" meanwhile, and the launch writes the skill the try brought, or on a timeout or a
   failure what it had. A launch with no try in flight does not wait. An agent already running
-  keeps what it launched with until it starts again (after 300 s idle, for one); nothing is
-  shown to the lawyer. The `PATH` entry and the blackline's program were given to the host at
-  its start and stay until the app restarts.
+  when a new profile lands (launched before it, or past the 20 s) is marked to relaunch, as a
+  Tools change marks one (`Relaunch::ProfileChanged`, `ProfileHook::generation` and
+  `changed`, `turn/idle.rs`, 2026-11-15 and 2026-11-16): never mid-turn, it is idle-stopped
+  once it has had nothing pending for the grace (`cap_min_idle`, 60 s), and its next question
+  relaunches it on the new profile and resumes its session, at once when that question comes
+  within the grace; nothing else is shown to the lawyer. The `PATH` entry and the blackline's program were given
+  to the host at its start and stay until the app restarts.
   stetdoc 0.9.3 prints its skill's body with no frontmatter: Clauseo writes one, its
   description stetdoc's first `# ` heading, the body unchanged (2026-11-11).
   The rest of the build is file reads and rendering. The build finds the

@@ -28,7 +28,7 @@ use crate::window::PATCH_WINDOW_BYTES;
 mod idle;
 pub(crate) use idle::IdleStop;
 pub use idle::{CAP_MIN_IDLE, IDLE_LIMIT, LIVE_AGENTS};
-mod profile_hook;
+pub(crate) mod profile_hook;
 pub use profile_hook::{LAUNCH_WAIT_LIMIT, LaunchWait, NoProfile, ProfileHook};
 mod parts;
 pub(crate) use parts::{ConfigParts, UpdateSeams};

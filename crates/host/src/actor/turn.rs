@@ -20,7 +20,7 @@ mod codex_cap;
 mod end;
 mod failure;
 mod forced_mode;
-mod idle;
+pub(crate) mod idle;
 mod inputs;
 mod key_retry;
 mod known;

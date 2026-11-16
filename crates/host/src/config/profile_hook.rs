@@ -17,7 +17,21 @@ use super::PackRequest;
 
 /// A launch's wait for [`ProfileHook::launch_wait`]'s step: it ends with the skills writes to
 /// run.
-pub type LaunchWait = Pin<Box<dyn Future<Output = Vec<SkillWrite>> + Send>>;
+pub type LaunchWait = Pin<Box<dyn Future<Output = LaunchSkills> + Send>>;
+
+/// A launch's skills writes and the profile generation ([`ProfileHook::generation`]) they are
+/// of, read no later than the writes.
+#[derive(Debug, Clone, Default)]
+pub struct LaunchSkills {
+    /// The generation, read before the writes.
+    pub generation: u64,
+    /// The writes.
+    pub writes: Vec<SkillWrite>,
+}
+
+/// A wait for the profile to change ([`ProfileHook::changed`]): it ends with the new
+/// generation.
+pub type ProfileChange = Pin<Box<dyn Future<Output = u64> + Send>>;
 
 /// The longest a launch waits for [`ProfileHook::launch_wait`], from the launch: the turn
 /// stays "starting" meanwhile.
@@ -96,6 +110,20 @@ pub trait ProfileHook: Send {
     /// writes what it ended with, or on the limit what `launch_writes` gave. `None`: nothing
     /// is in flight, and the launch does not wait. No I/O here: it only hands out the wait.
     fn launch_wait(&self, _agent: &AgentId) -> Option<LaunchWait> {
+        None
+    }
+    /// The profile's generation (default: 0): it grows each time the profile the other methods
+    /// read changes, as desktop's does when stetdoc's background try puts a new one in place.
+    /// The host reads it before a launch's skills writes, and an agent launched on an older
+    /// generation is marked to relaunch once [`Self::changed`] tells of a newer one: it is
+    /// idle-stopped once idle for the grace (`cap_min_idle`), never mid-turn, and its next
+    /// question relaunches it on the new profile. No I/O.
+    fn generation(&self) -> u64 {
+        0
+    }
+    /// A wait that ends once the generation is past `seen` (default: none, it never changes).
+    /// Awaited on a host task, never this thread. No I/O here: it only hands out the wait.
+    fn changed(&self, _seen: u64) -> Option<ProfileChange> {
         None
     }
     /// The skill packs to load and write before `agent` starts, from `request` (default:

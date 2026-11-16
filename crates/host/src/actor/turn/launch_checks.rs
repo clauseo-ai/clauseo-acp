@@ -47,7 +47,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_process::TreeWatch;
-use clauseo_profile::{PacksWritten, SkillWrite, SkillsWritten};
+use clauseo_profile::{PacksWritten, SkillsWritten};
 use clauseo_protocol::{AgentId, AgentKind, ThreadId};
 
 use super::super::Actor;
@@ -94,6 +94,8 @@ pub(crate) struct Prepared {
     /// This launch's own token for its first skills write (Claude's plugin), taken by
     /// `profile_loads::launch_keys`; `None` when that write failed or there was none.
     pub(super) skills_written: Option<SkillsWritten>,
+    /// The profile generation its skills are of (`skill_wait.rs`).
+    pub(super) profile: u64,
     /// The skill packs this launch left out, by id, with the reason, for its notice.
     pub(super) packs_skipped: Vec<(String, PackSkip)>,
     /// What the agent's own settings files say ([`SettingsRead`]), read after Claude's home
@@ -282,8 +284,7 @@ pub(crate) struct CodexPrepared {
 }
 
 /// Phase one: the checks go to their thread, and `waiting` waits on the thread's state. With
-/// `keys_wait` (the agent's waited-out key refusal, `sign_in::keys_wait`) they start once
-/// it has resolved.
+/// `keys_wait` (the agent's waited-out key refusal, `sign_in::keys_wait`) they start after it.
 pub(super) fn prepare(
     actor: &mut Actor,
     thread: ThreadId,
@@ -381,7 +382,7 @@ pub(super) fn prepare(
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
                 run.mcp_secrets = Arc::new(mcp.read());
-                let skills_written = write_skills(&skills);
+                let skills_written = skill_wait::write_skills(&skills.writes);
                 let packs_skipped;
                 (run.packs_written, packs_skipped) = packs.run(&run.skill_packs);
                 Ok(Prepared {
@@ -392,6 +393,7 @@ pub(super) fn prepare(
                     folder: answer,
                     run,
                     skills_written,
+                    profile: skills.generation,
                     packs_skipped,
                 })
             },
@@ -458,23 +460,6 @@ fn remember_folder_support(
         return;
     };
     crate::actor::query::on_folder_support(actor, matter, support);
-}
-
-/// Writes `writes` in order, on the launch-prep thread; a failure is a warning. The first
-/// write's token, when it succeeded: the one the launch's Codex keys may take the index from.
-fn write_skills(writes: &[SkillWrite]) -> Option<SkillsWritten> {
-    let mut first = None;
-    for (at, write) in writes.iter().enumerate() {
-        match clauseo_profile::write_skills(write) {
-            Ok(written) if at == 0 => first = Some(written),
-            Ok(_) => {}
-            Err(error) => tracing::warn!(
-                error = %Cause(&error),
-                "the profile's skills were not written; the agent starts with what the folder holds"
-            ),
-        }
-    }
-    first
 }
 
 /// Phase two: the checks `id` answered. The agent launches with what they found, or the

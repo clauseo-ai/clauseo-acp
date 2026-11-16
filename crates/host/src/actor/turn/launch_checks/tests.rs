@@ -378,8 +378,7 @@ fn a_codex_launch_in_a_missing_folder_is_folder_missing() {
     write::remove_dir_all(&data).unwrap();
 }
 
-/// A prep nobody waits for any more frees what it claimed: no agent was started, so there is
-/// nothing to wait for, and its parts are not held.
+/// A prep nobody waits for any more frees what it claimed: no agent started, nothing is held.
 #[test]
 fn a_late_prep_frees_its_claims() {
     let data = scratch("undo-late");
@@ -410,6 +409,7 @@ fn a_late_prep_frees_its_claims() {
         folder: None,
         run,
         skills_written: None,
+        profile: 0,
         packs_skipped: Vec::new(),
         settings: SettingsRead::default(),
     });

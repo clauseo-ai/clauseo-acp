@@ -391,6 +391,9 @@ mod privacy;
 #[path = "host/profile.rs"]
 mod profile;
 #[cfg(test)]
+#[path = "host/profile_refresh.rs"]
+mod profile_refresh;
+#[cfg(test)]
 #[path = "host/profile_rig.rs"]
 mod profile_rig;
 #[cfg(test)]
