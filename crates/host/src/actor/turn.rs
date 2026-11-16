@@ -188,6 +188,8 @@ struct Current {
     /// The prompt's content, as step 5 sends it (kept, so a turn held for the sign-in goes
     /// back to the queue with it, `sign_in.rs`).
     prompt: Vec<ContentBlock>,
+    /// The notes step 5 put before it (`prompt.rs`), for the agent's title (`updates/title.rs`).
+    note: Option<String>,
     phase: TurnPhase,
     /// The lawyer cancelled it (or shutdown did); it ends `Cancelled`.
     cancelled: bool,
