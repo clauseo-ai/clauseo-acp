@@ -4,7 +4,8 @@
 //! pinned its identity in the hook command, so it is never replaced: the changes since the list
 //! as it reads now are appended, an `add` or a `remove` line each, in one write, through the
 //! same checks the guard reads it with (a regular file with one link, the identity the launch
-//! made, reached through no link). Off the actor: on the matter's thread, before the turn's
+//! made, reached through no link), and never past the length the guard reads
+//! (`no_copy::MAX_BYTES`). Off the actor: on the matter's thread, before the turn's
 //! `TurnStarted`, so the agent's first tool call meets this turn's list.
 
 use std::io::Write as _;
@@ -12,7 +13,7 @@ use std::io::Write as _;
 use clauseo_protocol::SkippedFile;
 
 use crate::log_file::Cause;
-use crate::pre_write_guard::no_copy::{List, NoCopyList};
+use crate::pre_write_guard::no_copy::{self, List, NoCopyList};
 
 /// Appends to `list`, if the session has one, what makes it name `files`; a failure is a
 /// warning, and the guard still looks at each target itself.
@@ -24,8 +25,13 @@ pub(super) fn update(list: Option<&NoCopyList>, files: &[SkippedFile]) {
     if changes.is_empty() {
         return;
     }
-    let written = crate::write::open_append_record(&list.file, list.id)
-        .and_then(|mut file| file.write_all(changes.as_bytes()));
+    // Never past what the guard reads (`no_copy::MAX_BYTES`): lines left out are asked for again
+    // next turn, and appended once there is room (never, for a full list: the guard still reads
+    // it, and its live check still applies).
+    let written = crate::write::open_append_record(&list.file, list.id).and_then(|mut file| {
+        let len = file.metadata()?.len();
+        file.write_all(no_copy::fitting(&changes, len).as_bytes())
+    });
     if let Err(error) = written {
         tracing::warn!(
             error = %Cause(&error),

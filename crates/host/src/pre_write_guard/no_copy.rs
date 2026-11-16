@@ -16,8 +16,9 @@
 //! only reads it, and only the regular file with one link whose opened handle has that identity,
 //! opened through no link at its last part and never waiting on a pipe (`write::open_read_record`);
 //! a link, a reparse point, a pipe or a folder there, a second link to it, another file, a file it
-//! cannot read or longer than [`MAX_BYTES`], or one without its header reads as an empty list. It
-//! folds the lines in order, a line it cannot read skipped. Text:
+//! cannot read, or one without its header reads as an empty list. A list longer than
+//! [`MAX_BYTES`] is read up to its last whole line within that, and the host never appends past
+//! it. It folds the lines in order, a line it cannot read skipped. Text:
 //!
 //! ```text
 //! clauseo-no-copy 1
@@ -112,8 +113,10 @@ pub(crate) const HEADER: &str = "clauseo-no-copy 1\n";
 /// The most files the host lists; the rest go unlisted (the live check still applies).
 pub(crate) const MAX_FILES: usize = 20_000;
 
-/// The longest list the guard reads; a longer one reads as empty.
-const MAX_BYTES: u64 = 8 * 1024 * 1024;
+/// The most of a list the guard reads, and the most the host writes
+/// (`matter_worker/no_copy_list.rs` stops appending there): a longer list is read up to its last
+/// whole line within this, never as empty.
+pub(crate) const MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 /// The files a list names, each by its key as this system's file system compares names.
 #[derive(Debug, Default)]
@@ -147,14 +150,15 @@ impl List {
         let Ok(opened) = crate::write::open_read_record(&list.file, list.id) else {
             return Self::default();
         };
-        let mut text = String::new();
-        let read = opened
+        let mut bytes = Vec::new();
+        if opened
             .take(MAX_BYTES.saturating_add(1))
-            .read_to_string(&mut text);
-        if read.is_err() || text.len() as u64 > MAX_BYTES {
+            .read_to_end(&mut bytes)
+            .is_err()
+        {
             return Self::default();
         }
-        Self::decode(&text)
+        Self::decode(&String::from_utf8_lossy(within_limit(&bytes)))
     }
 
     /// The list `text` holds, its lines folded in order; empty without the header, a line it
@@ -233,6 +237,12 @@ impl List {
         self.files.get(&disk_key(path.as_str())).cloned()
     }
 
+    /// Whether `path` is listed.
+    #[cfg(test)]
+    pub(crate) fn names(&self, path: &MatterPath) -> bool {
+        self.file(path).is_some()
+    }
+
     /// The first listed file (by path bytes), when one is.
     fn first(&self) -> Option<(MatterPath, SkippedFileReason)> {
         self.files
@@ -254,6 +264,35 @@ impl List {
             .map(|(_, file)| file.clone())
             .min_by(|a, b| a.0.as_str().cmp(b.0.as_str()))
     }
+}
+
+/// `bytes`, or when longer than [`MAX_BYTES`] its whole lines within that: a line cut at the
+/// limit is left out, the lines before it kept.
+fn within_limit(bytes: &[u8]) -> &[u8] {
+    let Ok(limit) = usize::try_from(MAX_BYTES) else {
+        return bytes;
+    };
+    if bytes.len() <= limit {
+        return bytes;
+    }
+    let head = bytes.get(..limit).unwrap_or(bytes);
+    head.iter()
+        .rposition(|byte| *byte == b'\n')
+        .and_then(|at| head.get(..=at))
+        .unwrap_or_default()
+}
+
+/// The first lines of `changes` that fit after a list of `len` bytes within [`MAX_BYTES`]:
+/// the host never appends past what the guard reads. `remove` lines come first in
+/// [`List::changes`], so they are the last to be left out.
+pub(crate) fn fitting(changes: &str, len: u64) -> &str {
+    let room = usize::try_from(MAX_BYTES.saturating_sub(len)).unwrap_or(usize::MAX);
+    if changes.len() <= room {
+        return changes;
+    }
+    let head = changes.get(..room).unwrap_or_default();
+    head.rfind('\n')
+        .map_or("", |at| changes.get(..=at).unwrap_or_default())
 }
 
 /// How a list line spells `reason`; `None` for one that is never listed.
