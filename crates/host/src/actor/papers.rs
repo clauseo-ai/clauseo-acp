@@ -132,6 +132,7 @@ pub(super) fn answer(
         | MatterReply::Restored(_)
         | MatterReply::Compared(_)
         | MatterReply::Previewed(_)
+        | MatterReply::Read
         | MatterReply::EditedSince(_)
         | MatterReply::Located(_)
         | MatterReply::HeldOpen(_)

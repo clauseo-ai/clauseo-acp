@@ -204,6 +204,7 @@ fn failed_in_history(settings: &Settings, reply: &MatterReply) -> bool {
         | MatterReply::Restored(Ok(_))
         | MatterReply::Compared(_)
         | MatterReply::Previewed(_)
+        | MatterReply::Read
         | MatterReply::HeldOpen(_)
         | MatterReply::Papers(_)
         | MatterReply::EditedSince(_)

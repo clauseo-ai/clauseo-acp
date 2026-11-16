@@ -3,7 +3,6 @@
 //! open-in-Word check, listing papers) off the actor, which sends each job with a tag and gets
 //! each reply back through `post`, tagged the same way.
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -13,7 +12,7 @@ use std::thread::{self, JoinHandle};
 use clauseo_matters::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, Limits, Matter, MissingReason, NewMatter,
     OsProbe, PaperList, Place, Restore, RestorePlan, Restored, Retention, Settings, TimelineEntry,
-    TurnMeta, UndoRequest, Undone, matter_path_of_resolved,
+    TurnMeta, UndoRequest, Undone,
 };
 use clauseo_protocol::{
     CheckpointId, FileChange, FolderSupportKind, MatterId, MatterPath, RestoreRequest,
@@ -24,58 +23,9 @@ use crate::agent::folder_support::CheckSource;
 use crate::clock::Clock;
 use crate::error::Error;
 use crate::log_file::Cause;
-use crate::network_paths::resolve::Disk;
-use crate::network_paths::{self, NetEnv};
-use crate::sent::{Places, TurnPaths};
-use crate::shell_writes;
+use crate::sent::TurnPaths;
 
 pub(crate) use jobs::{RestoreJob, UndoJob};
-
-/// The matter paths a turn's tool calls wrote ([`TurnPaths::written`]), in `folder`: those
-/// `acp` placed inside the session folder by text, and each `outside` path that the network-safe
-/// walk resolves into `folder` on the disk (a spelling through a symlink, or in another case
-/// where the file system ignores case). The rest lie outside the matter, and so does a path the
-/// network-safe walk does not vouch for, or one in a matter kept on a share, which is never
-/// resolved ([`network_paths::touchable`]; its walked path compared by
-/// [`matter_path_of_resolved`]).
-pub(crate) fn tool_paths(folder: &Path, paths: &TurnPaths) -> BTreeSet<MatterPath> {
-    let Places {
-        mut inside,
-        outside,
-    } = paths.written();
-    let net = NetEnv::current();
-    let disk = Disk::resolved(&net);
-    for path in outside {
-        // The walked path, compared as it is: the agent's text is never resolved again.
-        let Some(walked) = network_paths::touchable(Path::new(&path), folder, &disk) else {
-            continue;
-        };
-        if let Some(found) = matter_path_of_resolved(folder, &walked) {
-            inside.insert(found);
-        }
-    }
-    inside
-}
-
-/// The files the turn's shell commands write that lie in `folder`, as paths relative to it: by
-/// text first ([`shell_writes::in_matter`]), else, for an absolute target, where the
-/// network-safe walk leads, compared with the folder as [`tool_paths`] compares an `outside`
-/// place. So a spelling through a symlink (macOS's `/var` for `/private/var`, a matter under a
-/// linked cloud folder) is the matter's file, a file not made yet resolves through
-/// its folder, and a target in a matter kept on a share is never resolved.
-fn writes_in(folder: &Path, writes: &BTreeSet<String>) -> BTreeSet<String> {
-    let net = NetEnv::current();
-    let disk = Disk::resolved(&net);
-    writes
-        .iter()
-        .filter_map(|target| {
-            shell_writes::in_matter(folder, target).or_else(|| {
-                let walked = network_paths::touchable(Path::new(target), folder, &disk)?;
-                matter_path_of_resolved(folder, &walked).map(|path| path.as_str().to_owned())
-            })
-        })
-        .collect()
-}
 
 /// The name every matter thread carries.
 const THREAD_NAME: &str = "clauseo-matter";
@@ -210,6 +160,9 @@ pub(crate) enum MatterJob {
     WriteSides(Sides),
     /// Tracked changes in a Word file: list them, or decide some (`revisions.rs`).
     Revisions(Box<crate::revisions::RevisionsJob>),
+    /// A version-history read (`versions.rs`), run with the open matter; it answers its caller
+    /// itself, and its reply is [`MatterReply::Read`].
+    Read(crate::versions::MatterRead),
 }
 
 /// One job's result, one variant per [`MatterJob`] kind.
@@ -241,6 +194,8 @@ pub(crate) enum MatterReply {
     /// The blackline's folder with both sides in it.
     SidesWritten(Result<BlacklineDir, Error>),
     Revisions(Box<crate::revisions::RevisionsDone>),
+    /// A version-history read ran, or did not: its caller has its answer.
+    Read,
 }
 
 impl MatterReply {
@@ -264,6 +219,7 @@ impl MatterReply {
             Self::Discarded(_) => "Discarded",
             Self::SidesWritten(_) => "SidesWritten",
             Self::Revisions(_) => "Revisions",
+            Self::Read => "Read",
         }
     }
 }
@@ -533,6 +489,10 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             Slot::Empty | Slot::Unopened { .. } => Ok(()),
         }),
         MatterJob::WriteSides(sides) => sides.reply(settings, slot),
+        MatterJob::Read(read) => {
+            read.run(open(settings, slot).map(|matter| &*matter));
+            MatterReply::Read
+        }
     }
 }
 
@@ -576,6 +536,7 @@ mod claims;
 mod crash;
 mod import;
 mod jobs;
+mod paths;
 mod relocate;
 mod sides;
 mod too_deep;
@@ -586,6 +547,8 @@ pub(crate) use claims::{Claim, Claimed, Held, check_registry, is_same_folder};
 pub(crate) use crash::hook;
 use import::import;
 pub(crate) use import::{ImportEnd, made};
+pub(crate) use paths::tool_paths;
+use paths::writes_in;
 pub(crate) use relocate::{Registry, Relink};
 use relocate::{locate, relink_matter};
 pub(crate) use sides::{BlacklineDir, NEW, OLD, Sides};

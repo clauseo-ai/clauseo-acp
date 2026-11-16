@@ -194,6 +194,8 @@ pub(crate) enum MatterTag {
     CameBack(super::turn::CameBackCheck),
     /// A Word blackline's sides, then its stetdoc runs (`query/blackline.rs`).
     Blackline(Box<super::query::blackline::Ask>),
+    /// A version-history read (`versions.rs`): it answers its caller itself.
+    Read,
 }
 
 /// Everything else the actor reads, posted by its own tasks and by other threads.
@@ -223,6 +225,15 @@ pub(crate) enum Input {
     MadeRow {
         matter: MatterId,
         result: Result<bool, clauseo_store::Error>,
+    },
+    /// A version-history read for `matter`'s thread, from a session's tool (`versions.rs`).
+    #[expect(
+        dead_code,
+        reason = "the transport that builds `versions::HostSource` comes in the next change"
+    )]
+    MatterRead {
+        matter: MatterId,
+        read: crate::versions::MatterRead,
     },
     /// A matter worker's reply.
     Matter {
@@ -316,6 +327,7 @@ impl std::fmt::Debug for Input {
             Self::EventPage { .. } => "EventPage",
             Self::MadeRow { .. } => "MadeRow",
             Self::Matter { .. } => "Matter",
+            Self::MatterRead { .. } => "MatterRead",
             Self::Snapshot(_) => "Snapshot",
             Self::Agent { .. } => "Agent",
             Self::Timer(_) => "Timer",

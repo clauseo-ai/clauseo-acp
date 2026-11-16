@@ -28,6 +28,8 @@ pub(super) enum Kind {
     StillGone,
     Discard,
     WriteSides,
+    /// A version-history read: dropped unrun, its caller hears nothing and gives up.
+    Read,
     /// The job's private folder, removed when the job does not finish, as `revisions::run`
     /// removes it after a job that does.
     Revisions {
@@ -56,6 +58,7 @@ impl Kind {
             MatterJob::StillGone { .. } => Self::StillGone,
             MatterJob::Discard => Self::Discard,
             MatterJob::WriteSides(_) => Self::WriteSides,
+            MatterJob::Read(_) => Self::Read,
             MatterJob::Revisions(job) => Self::Revisions {
                 decide: matches!(job.act, Act::Decide { .. }),
                 work: job.work.clone(),
@@ -83,6 +86,7 @@ impl Kind {
             Self::StillGone => "StillGone",
             Self::Discard => "Discard",
             Self::WriteSides => "WriteSides",
+            Self::Read => "Read",
             Self::Revisions { .. } => "Revisions",
         }
     }
@@ -122,6 +126,7 @@ impl Kind {
             Self::StillGone => MatterReply::StillGone(Err(error)),
             Self::Discard => MatterReply::Discarded(Err(error)),
             Self::WriteSides => MatterReply::SidesWritten(Err(error)),
+            Self::Read => MatterReply::Read,
             Self::Revisions { decide, .. } => MatterReply::Revisions(Box::new(if *decide {
                 RevisionsDone::Decided(Err(error))
             } else {

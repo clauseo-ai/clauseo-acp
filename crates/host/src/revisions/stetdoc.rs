@@ -87,8 +87,9 @@ impl<'a> Runner<'a> {
 /// false). On Windows `SystemRoot`, as every child the host starts gets it (system DLLs read
 /// it), from `lookup` (the host's environment) or else `windows_dir`, left out when neither
 /// has it; and `TEMP` and `TMP` set to `work`, the job's private folder, so whatever stetdoc
-/// writes there goes with the folder.
-pub(super) fn env(
+/// writes there goes with the folder. The version-history tool's Word reads use it too
+/// (`versions/docx.rs`).
+pub(crate) fn env(
     windows: bool,
     lookup: impl Fn(&str) -> Option<OsString>,
     windows_dir: impl Fn() -> Option<OsString>,

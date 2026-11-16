@@ -16,7 +16,7 @@
 
 mod marks;
 mod parse;
-mod stetdoc;
+pub(crate) mod stetdoc;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

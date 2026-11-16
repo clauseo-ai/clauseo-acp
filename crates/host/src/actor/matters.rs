@@ -511,6 +511,20 @@ pub(super) fn on_matter_reply(
         MatterTag::Discard => made::discarded(actor, matter, &reply),
         MatterTag::CameBack(check) => turn::came_back_reply(actor, check, reply),
         MatterTag::Blackline(ask) => super::query::blackline::sides_written(ask, reply),
+        MatterTag::Read => {}
+    }
+}
+
+/// A version-history read for `matter`'s thread, started now if the matter has none. An unknown
+/// matter, or a thread that cannot take it, drops it unrun: its caller hears nothing.
+pub(super) fn read(actor: &mut Actor, matter: MatterId, read: crate::versions::MatterRead) {
+    let sent = matter_worker(actor, matter)
+        .and_then(|worker| worker.send(MatterJob::Read(read), MatterTag::Read));
+    match sent {
+        Ok(()) => actor.work.matter_jobs += 1,
+        Err(error) => {
+            tracing::info!(%matter, error = %Cause(&error), "a version read was not sent");
+        }
     }
 }
 

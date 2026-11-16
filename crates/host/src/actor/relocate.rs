@@ -160,6 +160,7 @@ pub(super) fn located(
         | MatterReply::Restored(_)
         | MatterReply::Compared(_)
         | MatterReply::Previewed(_)
+        | MatterReply::Read
         | MatterReply::EditedSince(_)
         | MatterReply::HeldOpen(_)
         | MatterReply::StillGone(_)

@@ -29,6 +29,9 @@
 //!   the matter's thread against private copies in `<data folder>/revisions/<matter id>/`, never
 //!   in the folder; a decision holds the writer and writes the file as a restore does, between
 //!   an `outside-edits` and a `revisions` checkpoint.
+//! - The version-history tool's answers (`versions.rs`): `list_versions` and `read_version`
+//!   against one session's matter, read on its matter thread and never written; the transport
+//!   that carries them to the agent is wired separately.
 //! - The block list's updates (`blocklist.rs`, decision record 0053), with
 //!   [`BlockListSeams::apply`] and something enforcing the list only (the guarded browser or
 //!   the Safe workspace; neither in the plain build): a `clauseo-blocklist` thread, started
@@ -278,6 +281,11 @@ mod stetdoc_args;
 mod testing;
 mod undo_note;
 mod update;
+#[expect(
+    dead_code,
+    reason = "the backend is wired to its listener and launches by the transport, the next change"
+)]
+mod versions;
 mod view;
 mod window;
 mod write;

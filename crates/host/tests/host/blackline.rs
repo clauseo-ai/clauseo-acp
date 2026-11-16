@@ -349,14 +349,19 @@ fn a_view_past_8_mib_fails() {
 
 /// A blackline folder's name for an id minted at `millis`.
 fn blackline_dir_at(millis: i64) -> String {
+    dir_at("blackline-", millis)
+}
+
+/// A folder's name of `prefix` and an id minted at `millis`.
+fn dir_at(prefix: &str, millis: i64) -> String {
     let millis = u64::try_from(millis).unwrap();
     let id = uuid::Builder::from_unix_timestamp_millis(millis, &[7; 10]).into_uuid();
-    format!("blackline-{}", id.simple())
+    format!("{prefix}{}", id.simple())
 }
 
 /// A crash or quit while stetdoc ran leaves its folder: the next start removes the blackline
-/// folders of earlier runs from `<data>/tmp`, and leaves everything else there, a folder named
-/// for this run's start included.
+/// folders, and the version-history tool's Word copies, of earlier runs from `<data>/tmp`, and
+/// leaves everything else there, a folder named for this run's start included.
 #[test]
 fn the_next_start_removes_leftover_blackline_folders_and_nothing_else() {
     let dir = Dir::new(
@@ -369,7 +374,16 @@ fn the_next_start_removes_leftover_blackline_folders_and_nothing_else() {
     let this_run = tmp.join(blackline_dir_at(START_MS));
     let other = tmp.join("other-folder");
     let file = tmp.join("blackline-a-file");
-    for folder in [&earlier, &not_an_id, &this_run, &other] {
+    let earlier_copy = tmp.join(dir_at("versions-", START_MS - 60_000));
+    let this_run_copy = tmp.join(dir_at("versions-", START_MS));
+    for folder in [
+        &earlier,
+        &not_an_id,
+        &this_run,
+        &other,
+        &earlier_copy,
+        &this_run_copy,
+    ] {
         write::create_dir_all(folder);
         write::write(&folder.join("old.docx"), b"x");
     }
@@ -377,12 +391,13 @@ fn the_next_start_removes_leftover_blackline_folders_and_nothing_else() {
 
     let host = dir.start(0);
     wait("the sweep", async {
-        while earlier.exists() || not_an_id.exists() {
+        while earlier.exists() || not_an_id.exists() || earlier_copy.exists() {
             async_io::Timer::after(Duration::from_millis(5)).await;
         }
     });
     host.settle();
     assert!(this_run.join("old.docx").exists());
+    assert!(this_run_copy.join("old.docx").exists());
     assert!(other.join("old.docx").exists());
     assert!(file.exists());
     host.shutdown();

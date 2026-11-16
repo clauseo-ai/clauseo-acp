@@ -504,6 +504,7 @@ impl Actor {
             Input::Matter { matter, tag, reply } => {
                 matters::on_matter_reply(self, matter, tag, reply);
             }
+            Input::MatterRead { matter, read } => matters::read(self, matter, read),
             Input::Snapshot(snapshot) => streams::on_snapshot(self, snapshot),
             Input::Agent { thread, input } => turn::agent_input(self, thread, input),
             Input::Timer(timer) => turn::timer(self, timer),

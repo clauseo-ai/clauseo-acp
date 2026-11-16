@@ -216,8 +216,9 @@ fn run_stetdoc(ask: Ask, dir: BlacklineDir) {
 }
 
 /// At host start, on a thread of its own: removes the blackline folders an earlier run left in
-/// `<data>/tmp/` (a crash or a quit while stetdoc ran), and nothing else there. A folder is an
-/// earlier run's when its name is `blackline-<id>` and the id's time is before `started`, or
+/// `<data>/tmp/` (a crash or a quit while stetdoc ran), and the version-history tool's Word copies
+/// (`versions-<id>`), and nothing else there. A folder is an earlier run's when its name is
+/// `blackline-<id>` or `versions-<id>` and the id's time is before `started`, or
 /// the rest of its name is no id at all; a folder this run makes has an id from its start or
 /// later, so the sweep never races a blackline of this run. Links and files are left.
 pub(in crate::actor) fn sweep_leftovers(data_dir: &Path, started: Timestamp) {
@@ -243,7 +244,10 @@ fn sweep(tmp: &Path, started: Timestamp) -> usize {
     let mut removed = 0;
     for entry in entries.flatten() {
         let name = entry.file_name();
-        let Some(rest) = name.to_str().and_then(|name| name.strip_prefix(DIR_PREFIX)) else {
+        let Some(rest) = name.to_str().and_then(|name| {
+            name.strip_prefix(DIR_PREFIX)
+                .or_else(|| name.strip_prefix(crate::versions::DOCX_DIR_PREFIX))
+        }) else {
             continue;
         };
         let earlier = uuid::Uuid::try_parse(rest)
