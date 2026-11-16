@@ -697,3 +697,5 @@ crates/pdf/src/lib.rs start clippy::disallowed_methods
 # The shared "does this matter hold a denied folder?" answer (#1085); stage D's matter allow
 # rules (#1065) are its caller, unused until that lands.
 crates/host/src/agent/data_fence/launch.rs LaunchDeny::denies_inside dead_code
+crates/host/src/agent/short_forms.rs Looked::Missing dead_code
+crates/host/src/agent/short_forms.rs Looked::Unread dead_code
