@@ -32,11 +32,14 @@ pub(crate) const HELPER: &str = include_str!("../../helper/claude-usage.mjs");
 const CLAUDE_CONFIG_DIR: &str = "CLAUDE_CONFIG_DIR";
 /// What every read sets in the helper's environment, over any of the same name from the entry
 /// or the inherited environment, as `host`'s Claude launches do (`agent::loads::
-/// claude_launch_vars`, which `limits` cannot depend on): Claude Code's scheduler off, and no
-/// repository status added to the conversation.
-pub(crate) const CLAUDE_FORCED_VARS: [(&str, &str); 2] = [
+/// claude_launch_vars`, which `limits` cannot depend on): Claude Code's scheduler off, no
+/// repository status added to the conversation, its messaging between sessions off, and no
+/// marketplace added by itself.
+pub(crate) const CLAUDE_FORCED_VARS: [(&str, &str); 4] = [
     ("CLAUDE_CODE_DISABLE_CRON", "1"),
     ("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS", "1"),
+    ("CLAUDE_CODE_HARBOR_KITE", "0"),
+    ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
 ];
 /// How long a read may take before its tree is killed.
 pub(crate) const LIMIT: Duration = Duration::from_secs(25);
