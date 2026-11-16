@@ -38,6 +38,8 @@ use crate::write;
 pub(crate) use session::{Session, processes};
 use session::{group_of, stderr_within};
 
+#[path = "real_chrome/certificate.rs"]
+mod certificate;
 #[path = "real_chrome/close.rs"]
 mod close;
 #[path = "real_chrome/idle.rs"]
