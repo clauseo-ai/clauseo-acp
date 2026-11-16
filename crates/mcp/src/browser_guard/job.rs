@@ -9,6 +9,12 @@
 //! agent-browser and its daemon; so does the job's last handle closing when the guard exits,
 //! however it exits. The guard itself runs in the agent's job (`clauseo-process`); jobs nest.
 //!
+//! Each end ([`Job::kill`], the browser's stop in `session.rs`) waits until no process is left
+//! in the job, and then puts a new, empty job in its place for the next start: Windows creates no
+//! process in a job that is terminating (`AssignProcessToJobObject`'s remarks), so a start in the
+//! ended job failed, and `TerminateJobObject` returns before the processes are gone, whose files
+//! (the profile, the executables) stay open until they are.
+//!
 //! The guard's hardened copy (`harden.rs`) is the one process started outside such a job
 //! ([`start_copy`]): it stays in the guard's own jobs, as any child does, and makes its own job
 //! for Chrome and agent-browser. Its first process waits for it, and the copy watches that
@@ -29,13 +35,17 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use windows::Win32::Foundation::{
     DUPLICATE_HANDLE_OPTIONS, DuplicateHandle, HANDLE, WAIT_OBJECT_0,
 };
 use windows::Win32::System::JobObjects::{
-    CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
+    CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicAccountingInformation,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+    TerminateJobObject,
 };
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, INFINITE, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -50,11 +60,18 @@ pub(crate) use spawn::{Io, Launch, inheritable, windows_dirs};
 
 /// The exit code the job's end gives its processes.
 const TERMINATED: u32 = 1;
+/// How long [`Job::kill`] waits for the ended job's processes to be gone, as the Unix stop waits
+/// for Chrome's group (`chrome.rs`).
+const END_WAIT: Duration = Duration::from_secs(5);
+/// How often that wait looks.
+const END_LOOK: Duration = Duration::from_millis(10);
 
 /// The guard's job. Dropping it closes the handle, which ends what is left in it.
 #[derive(Debug)]
 pub(crate) struct Job {
-    job: OwnedHandle,
+    /// The job's handle: a new job's after each [`Job::kill`]. Held locked while a child is
+    /// created in it, so an end never swaps it in the middle of a creation.
+    job: Mutex<OwnedHandle>,
     /// The descriptors every child starts with (`harden.rs`); none only in this module's tests.
     hardened: Option<Hardened>,
 }
@@ -63,18 +80,53 @@ impl Job {
     /// Starts `launch` in the job, running: nothing the guard starts is ever outside it
     /// (`job/spawn.rs`).
     pub(crate) fn spawn(&self, launch: &Launch<'_>) -> io::Result<Child> {
-        spawn::spawn(Some(self.handle()), self.hardened.as_ref(), launch)
+        let job = self.lock();
+        spawn::spawn(
+            Some(HANDLE(job.as_raw_handle())),
+            self.hardened.as_ref(),
+            launch,
+        )
     }
 
-    /// Ends every process in the job: Chrome, agent-browser and its daemon. Returns whether
-    /// Windows took the call.
+    /// Ends every process in the job (Chrome, agent-browser and its daemon), waits until none
+    /// is left in it, at most [`END_WAIT`], and puts a new, empty job in its place, which the
+    /// next start uses. Returns whether Windows took the end.
+    ///
+    /// `TerminateJobObject` returns before the processes are gone; until they are, their files
+    /// stay open (the profile, and the executables, which a test's folder holds). And Windows
+    /// creates no process in a job that is terminating (`AssignProcessToJobObject`'s remarks;
+    /// `PROC_THREAD_ATTRIBUTE_JOB_LIST` then fails the creation, `job/spawn.rs`): the start after
+    /// a stop, in the ended job, failed with "the browser could not start" (Windows CI, PR
+    /// #1140). The old handle closes once the new job is in place, which ends anything still in
+    /// the old one (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`).
     pub(crate) fn kill(&self) -> bool {
-        // SAFETY: `self.handle()` is the job handle `self` owns, open until `self` drops.
-        unsafe { TerminateJobObject(self.handle(), TERMINATED) }.is_ok()
+        let mut job = self.lock();
+        let handle = HANDLE(job.as_raw_handle());
+        // SAFETY: `handle` is the job handle `self` owns, open while `job` is locked.
+        let ended = unsafe { TerminateJobObject(handle, TERMINATED) }.is_ok();
+        if ended && !wait_empty(handle) {
+            super::note(
+                "processes in the guard's job were still running when the guard stopped waiting \
+                 for them",
+            );
+        }
+        match make_job() {
+            Ok(fresh) => *job = fresh,
+            Err(error) => super::note(&format!(
+                "could not make a new job for the browser's next start: {error}"
+            )),
+        }
+        ended
     }
 
+    /// The job's handle now; a later [`Job::kill`] closes it.
+    #[cfg(test)]
     fn handle(&self) -> HANDLE {
-        HANDLE(self.job.as_raw_handle())
+        HANDLE(self.lock().as_raw_handle())
+    }
+
+    fn lock(&self) -> MutexGuard<'_, OwnedHandle> {
+        self.job.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// A new job that ends its processes when its last handle closes, whose children all
@@ -91,34 +143,71 @@ impl Job {
     }
 
     fn make(hardened: Option<Hardened>) -> io::Result<Job> {
-        // SAFETY: no security attributes and no name are valid arguments; the handle returned
-        // is owned by the `Job` built from it, which closes it once.
-        let raw = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
-            .map_err(|error| io::Error::other(format!("could not create a job: {error}")))?;
-        // SAFETY: `raw` is the open handle CreateJobObjectW just returned, which nothing else
-        // owns; the `OwnedHandle` closes it once, on drop.
-        let owned = unsafe { OwnedHandle::from_raw_handle(raw.0) };
-        let job = Job {
-            job: owned,
+        Ok(Job {
+            job: Mutex::new(make_job()?),
             hardened,
-        };
-        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let size = u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
-            .map_err(io::Error::other)?;
-        // SAFETY: `limits` is a live JOBOBJECT_EXTENDED_LIMIT_INFORMATION of `size` bytes, the
-        // struct this information class takes, and `job.handle()` is the handle `job` owns.
-        unsafe {
-            SetInformationJobObject(
-                job.handle(),
-                JobObjectExtendedLimitInformation,
-                (&raw const limits).cast(),
-                size,
-            )
-        }
-        .map_err(|error| io::Error::other(format!("could not set the job's limit: {error}")))?;
-        Ok(job)
+        })
     }
+}
+
+/// A new job that ends its processes when its last handle closes; no breakaway flag is set.
+fn make_job() -> io::Result<OwnedHandle> {
+    // SAFETY: no security attributes and no name are valid arguments; the handle returned is
+    // owned by the `OwnedHandle` built from it, which closes it once.
+    let raw = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
+        .map_err(|error| io::Error::other(format!("could not create a job: {error}")))?;
+    // SAFETY: `raw` is the open handle CreateJobObjectW just returned, which nothing else owns;
+    // the `OwnedHandle` closes it once, on drop (also when the limit below fails).
+    let owned = unsafe { OwnedHandle::from_raw_handle(raw.0) };
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    let size = u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
+        .map_err(io::Error::other)?;
+    // SAFETY: `limits` is a live JOBOBJECT_EXTENDED_LIMIT_INFORMATION of `size` bytes, the
+    // struct this information class takes, and the handle is the one `owned` holds open.
+    unsafe {
+        SetInformationJobObject(
+            HANDLE(owned.as_raw_handle()),
+            JobObjectExtendedLimitInformation,
+            (&raw const limits).cast(),
+            size,
+        )
+    }
+    .map_err(|error| io::Error::other(format!("could not set the job's limit: {error}")))?;
+    Ok(owned)
+}
+
+/// Waits until no process is left in `job` (child jobs counted), at most [`END_WAIT`]; whether
+/// none is. A job whose count cannot be read is not waited for.
+fn wait_empty(job: HANDLE) -> bool {
+    for _ in 0..END_WAIT.as_millis() / END_LOOK.as_millis() {
+        match active_processes(job) {
+            Some(0) => return true,
+            Some(_) => super::pause(END_LOOK),
+            None => return false,
+        }
+    }
+    active_processes(job) == Some(0)
+}
+
+/// How many processes are in `job` now, child jobs included; `None` if Windows will not say.
+fn active_processes(job: HANDLE) -> Option<u32> {
+    let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+    let size = u32::try_from(size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>()).ok()?;
+    // SAFETY: `info` is a live JOBOBJECT_BASIC_ACCOUNTING_INFORMATION of `size` bytes, the
+    // struct this information class fills, and `job` is open for the call (its owner holds the
+    // lock); no length is asked back.
+    unsafe {
+        QueryInformationJobObject(
+            Some(job),
+            JobObjectBasicAccountingInformation,
+            (&raw mut info).cast(),
+            size,
+            None,
+        )
+    }
+    .ok()?;
+    Some(info.ActiveProcesses)
 }
 
 /// The guard's hardened copy, as its first process holds it: by a handle that may only wait for

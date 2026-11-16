@@ -1,6 +1,7 @@
 //! Windows: a child started through [`Job::spawn`] is in the job and running from its start,
 //! with its arguments, environment and folder as given; its pipes carry lines both ways; and the
-//! job's end ends it. An inheritable handle outside the handle list stays out of the child, and
+//! job's end ends it, and the job takes new children after its end. An inheritable handle
+//! outside the handle list stays out of the child, and
 //! a relative program or a batch file is refused. A child created in the guard's job stays in
 //! the job of the process that creates it too (the agent's), and that job's end ends it. The
 //! children are this crate's examples (`examples/env_stub.rs`, `examples/echo_stub.rs`), which
@@ -190,6 +191,24 @@ fn the_jobs_end_and_kill_end_the_child_with_code_1() {
     third.kill().unwrap();
     assert_eq!(third.wait().unwrap().code(), Some(1));
     drop(held);
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// The job takes new children after its end, and they are in it: Windows creates none in a job
+/// that is terminating, so the browser's start after a stop (`session.rs`) failed in the ended
+/// job (Windows CI, PR #1140). The end puts a new job in place, which ends with the next end.
+#[test]
+fn a_child_starts_in_the_job_after_its_end() {
+    let dir = scratch("again");
+    let job = Job::unhardened().unwrap();
+    for _ in 0..2 {
+        let mut child = echo(&job, &dir);
+        let held = child.stdin.take();
+        assert!(in_job(child.as_raw_handle(), &job));
+        assert!(job.kill());
+        assert_eq!(child.wait().unwrap().code(), Some(1));
+        drop(held);
+    }
     write::remove_dir_all(&dir).unwrap();
 }
 
