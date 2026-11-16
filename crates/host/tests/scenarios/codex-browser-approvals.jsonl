@@ -21,8 +21,8 @@
 {"expect_response":{"id":"perm-law","result":{"outcome":{"outcome":"selected","optionId":"allow_once"}}}}
 {"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-law","status":"completed"}}}
 {"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-shell","title":"echo hi","kind":"execute","status":"pending","rawInput":{"command":["echo","hi"]}}}}
-{"request":{"id":"perm-shell","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-shell","kind":"execute","status":"pending"},"options":[{"optionId":"approved","name":"Yes","kind":"allow_once"},{"optionId":"approved-for-session","name":"Always","kind":"allow_always"},{"optionId":"abort","name":"No","kind":"reject_once"}]}}}
-{"expect_response":{"id":"perm-shell","result":{"outcome":{"outcome":"selected","optionId":"approved"}}}}
+{"request":{"id":"perm-shell","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-shell","kind":"execute","status":"pending"},"options":[{"optionId":"allow_once","name":"Yes","kind":"allow_once"},{"optionId":"allow_for_session","name":"Always","kind":"allow_always"},{"optionId":"cancel","name":"No","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-shell","result":{"outcome":{"outcome":"selected","optionId":"allow_once"}}}}
 {"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-shell","status":"completed"}}}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Done."}}}}
 {"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

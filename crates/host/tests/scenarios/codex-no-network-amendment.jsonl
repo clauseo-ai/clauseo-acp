@@ -1,0 +1,10 @@
+{"scenario":"codex-no-network-amendment","description":"Codex (codex-acp 2.2.2 shapes) asks to run a command with network amendments, allow and deny (dist/index.js:32186-32194): the host declines it unseen (shell_network.rs), so neither amendment reaches the lawyer or the agent","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"workspace-write","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"request":{"id":"perm-net","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"call-net","title":"python fetch.py","kind":"execute","status":"pending","rawInput":{"command":"python fetch.py","cwd":"/m"}},"options":[{"optionId":"allow_once","name":"Yes, proceed","kind":"allow_once"},{"optionId":"apply_network_policy_amendment:0","name":"Yes, and allow this host in the future","kind":"allow_always"},{"optionId":"apply_network_policy_amendment:1","name":"No, and block this host in the future","kind":"reject_always"},{"optionId":"decline","name":"No, continue without running it","kind":"reject_once"},{"optionId":"cancel","name":"No, and tell Codex what to do differently","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-net","result":{"outcome":{"outcome":"selected","optionId":"decline"}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
