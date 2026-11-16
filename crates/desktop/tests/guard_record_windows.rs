@@ -4,7 +4,7 @@
 //! the turn's folder (codex-rs at rust-v0.162.1 `core/src/session/mod.rs:5141-5149`,
 //! `hooks/src/engine/command_runner.rs:384-433`), under Windows PowerShell 5.1 and, when
 //! installed, PowerShell 7. A data folder under `…\O'Brien & Sons Zoë Q\…\data` (an apostrophe,
-//! an ampersand, spaces, non-ASCII names, a record path over 200 characters); the record made as the host's launch makes it
+//! an ampersand, spaces, non-ASCII names, a record path over 260 characters); the record made as the host's launch makes it
 //! (`clauseo_host::pre_write_guard::make_record`); the hook built as the host builds it
 //! (`clauseo_host::codex_hook_config`), with the built app as the guard. The guard refuses a
 //! `.codex` write with its code 2 and its reason, and appends one line to the record; a file held
@@ -24,25 +24,72 @@ use sha2::{Digest as _, Sha256};
 /// The binary under test.
 const APP: &str = env!("CARGO_BIN_EXE_clauseo-desktop");
 
-/// What the line writes when the guard could not run (`agent/loads/codex.rs`, `UNCHECKED`).
+/// What the line writes when the guard could not run (`pre_write_guard.rs`, `UNCHECKED`).
 const UNCHECKED: &str = "Clauseo could not check this step, so it did not run.";
 
-/// The shells Codex may run a hook under: Windows PowerShell, and PowerShell 7 where it is
-/// installed in its usual place (Codex prefers it when it is on `PATH`).
+/// The shells to run the hook under, the one Codex 0.162.1 would pick on this machine first
+/// (`shell-command/src/shell_detect.rs:257-297`: `pwsh` on `PATH`, then PowerShell 7 at its
+/// install path, then `powershell` on `PATH`, then Windows PowerShell at its system path; a
+/// `WindowsApps` hit skipped), then every other one of those found. On CI both PowerShell 7 and
+/// Windows PowerShell must be there; a local run takes what it finds.
 #[cfg(test)]
 fn shells() -> Vec<String> {
-    let mut shells = vec!["powershell.exe".to_owned()];
-    let pwsh = std::env::var_os("ProgramFiles")
-        .map(|folder| Path::new(&folder).join(r"PowerShell\7\pwsh.exe"))
-        .filter(|pwsh| pwsh.is_file());
-    // Without PowerShell 7 a local run is Windows PowerShell's alone; on CI it must be there.
+    let at = |base: &str, rest: &str| {
+        std::env::var_os(base)
+            .map(|folder| Path::new(&folder).join(rest))
+            .filter(|path| path.is_file())
+            .map(|path| path.to_string_lossy().into_owned())
+    };
+    let found = [
+        on_path("pwsh"),
+        at("ProgramFiles", r"PowerShell\7\pwsh.exe"),
+        on_path("powershell"),
+        at(
+            "SystemRoot",
+            r"System32\WindowsPowerShell\v1.0\powershell.exe",
+        ),
+    ];
     let on_ci = std::env::var_os("CI").is_some_and(|value| !value.is_empty());
+    let has = |name: &str| {
+        found
+            .iter()
+            .flatten()
+            .any(|shell| shell.to_ascii_lowercase().ends_with(name))
+    };
     assert!(
-        pwsh.is_some() || !on_ci,
-        "PowerShell 7 is not at %ProgramFiles%\\PowerShell\\7\\pwsh.exe on this CI runner"
+        (has("pwsh.exe") && has("powershell.exe")) || !on_ci,
+        "this CI runner lacks PowerShell 7 or Windows PowerShell: {found:?}"
     );
-    shells.extend(pwsh.map(|pwsh| pwsh.to_string_lossy().into_owned()));
+    let mut shells: Vec<String> = Vec::new();
+    for shell in found.into_iter().flatten() {
+        if !shells
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(&shell))
+        {
+            shells.push(shell);
+        }
+    }
+    if shells.is_empty() {
+        shells.push("powershell.exe".to_owned());
+    }
     shells
+}
+
+/// The first `name` on `PATH` outside `WindowsApps`, as `where.exe` finds it; `None` when
+/// there is none.
+#[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test asks where.exe for the PowerShell Codex would find on PATH"
+)]
+fn on_path(name: &str) -> Option<String> {
+    let output = Command::new("where.exe").arg(name).output().ok()?;
+    let found = String::from_utf8(output.stdout).ok()?;
+    found
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.to_ascii_lowercase().contains(r"\windowsapps\"))
+        .map(str::to_owned)
 }
 
 /// Runs `command` as Codex runs a hook's `commandWindows` under `shell`, `input` on its stdin,
@@ -80,7 +127,7 @@ fn as_codex_runs_it(shell: &str, command: &str, input: &[u8], cwd: &Path) -> (Ou
 fn codex_hash(command: &str) -> String {
     let identity = format!(
         "{{\"event_name\":\"pre_tool_use\",\"hooks\":[{{\"async\":false,\"command\":{},\
-         \"timeout\":10,\"type\":\"command\"}}],\"matcher\":\"apply_patch|Write|Edit|Bash\"}}",
+         \"timeout\":30,\"type\":\"command\"}}],\"matcher\":\"apply_patch|Write|Edit|Bash\"}}",
         serde_json::to_string(command).unwrap()
     );
     let digest = Sha256::digest(identity.as_bytes());
@@ -123,7 +170,8 @@ fn the_real_hook_command_refuses_and_records_under_powershell_from_an_apostrophe
     // over 200 characters.
     let user = folder(root.path(), "O'Brien & Sons Zoë Q");
     let long = folder(user.path(), &"Sharma v State 2024 papers ".repeat(5));
-    let data = folder(long.path(), "data");
+    let longer = folder(long.path(), &"Müller GmbH correspondence ".repeat(4));
+    let data = folder(longer.path(), "data");
     let data = data.path();
     assert!(
         data.to_str().unwrap().contains(r"O'Brien & Sons Zoë Q\"),
@@ -131,7 +179,7 @@ fn the_real_hook_command_refuses_and_records_under_powershell_from_an_apostrophe
     );
     let (record, id) = clauseo_host::pre_write_guard::make_record(data, "s1").unwrap();
     assert_eq!(record, data.join(r"browser\guard\s1\guard-blocks.jsonl"));
-    assert!(record.as_os_str().len() > 200, "{record:?}");
+    assert!(record.as_os_str().len() > 260, "{record:?}");
 
     let config = clauseo_host::codex_hook_config(Path::new(APP), Some((&record, &id))).unwrap();
     let hook = &config["PreToolUse"][0]["hooks"][0];
@@ -139,7 +187,7 @@ fn the_real_hook_command_refuses_and_records_under_powershell_from_an_apostrophe
     let quoted = |path: &str| format!("'{}'", path.replace('\'', "''"));
     assert!(
         command.starts_with(&format!(
-            "$global:LASTEXITCODE = -1; & {} --pre-write-guard --record {} --record-id {id}; $c",
+            "$global:LASTEXITCODE = -1; & {} --pre-write-guard --record {} --record-id '{id}'; $c",
             quoted(APP),
             quoted(&record.display().to_string()),
         )),
@@ -221,11 +269,19 @@ fn a_held_file_with_a_devanagari_name_is_refused_with_its_name_byte_for_byte() {
     let patch = "*** Begin Patch\n*** Update File: अनुबंध.docx\n@@\n-x\n+y\n*** End Patch\n";
     let input = codex_input(matter.path(), "apply_patch", patch);
     let want = "अनुबंध.docx is open in Word or another program on this computer.";
+    // Fifty runs under each shell: every one gets the whole input on stdin (no record here, so an
+    // input lost on the way would let the step go and fail the run).
     for shell in &shells() {
-        let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
-        assert_eq!(output.status.code(), Some(2), "{shell}: {output:?}");
-        let errors = String::from_utf8(output.stderr).expect("stderr stays UTF-8");
-        assert!(errors.contains(want), "{shell}: {errors:?}");
+        for run in 0..50 {
+            let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
+            assert_eq!(
+                output.status.code(),
+                Some(2),
+                "{shell} run {run}: {output:?}"
+            );
+            let errors = String::from_utf8(output.stderr).expect("stderr stays UTF-8");
+            assert!(errors.contains(want), "{shell} run {run}: {errors:?}");
+        }
     }
 }
 

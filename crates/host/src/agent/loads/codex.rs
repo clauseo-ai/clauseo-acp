@@ -10,6 +10,8 @@
 //!   (`shell-command/src/shell_detect.rs:350-353`); `%COMSPEC% /C "<command>"` only when the
 //!   session has no shell (`hooks/src/engine/command_runner.rs:384-409`). So `command` quotes in
 //!   POSIX single quotes, and `commandWindows` is one PowerShell statement ([`ps_command`]).
+//!   Under `cmd`, the session's fallback shell, this line does not run as one command; where
+//!   PowerShell is blocked or absent, Codex can't start the guard.
 //! - The hook passes no `--matter`: Codex's hook input `cwd` is the turn's working folder
 //!   (`core/src/hook_runtime.rs`, `tool_hook_cwd`: the local environment's cwd, else the turn's),
 //!   which a command's `cd` does not move, so the guard takes the matter from it, and the value
@@ -39,8 +41,9 @@ use sha2::{Digest, Sha256};
 /// and `Bash`. Names joined by `|` are an exact list in Codex.
 pub(crate) const CODEX_GUARD_MATCHER: &str = "apply_patch|Write|Edit|Bash";
 
-/// The seconds Codex waits for the guard (its default is 600); a timeout lets the tool go on.
-const CODEX_GUARD_TIMEOUT_SECONDS: u64 = 10;
+/// The seconds Codex waits for the guard (its default is 600), room for a cold PowerShell start
+/// and a first scan of a new program.
+const CODEX_GUARD_TIMEOUT_SECONDS: u64 = 30;
 
 /// The key of the first handler of the first `PreToolUse` group from session flags.
 #[cfg(not(windows))]
@@ -58,8 +61,8 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 /// {"PreToolUse": [{"matcher": "apply_patch|Write|Edit|Bash", "hooks": [{"type": "command",
 ///   "command": "'<program>' --pre-write-guard --record '<record>' --record-id <hex>",
 ///   "commandWindows": "$global:LASTEXITCODE = -1; & '<program>' --pre-write-guard --record
-///     '<record>' --record-id <hex>; $c = $LASTEXITCODE; if ($c -eq 0 -or $c -eq 2) { exit $c };
-///     [Console]::Error.WriteLine('…'); exit 2", "timeout": 10}]}],
+///     '<record>' --record-id '<hex>'; $c = $LASTEXITCODE; if ($c -eq 0 -or $c -eq 2) { exit $c };
+///     [Console]::Error.WriteLine('…'); exit 2", "timeout": 30}]}],
 ///  "state": {"/<session-flags>/config.toml:pre_tool_use:0:0": {"trusted_hash": "sha256:…"}}}
 /// ```
 ///
@@ -88,7 +91,7 @@ pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Optio
             flag.to_owned(),
             ps_quoted(file),
             id_flag.to_owned(),
-            id.to_owned(),
+            ps_quoted(id),
         ]);
     }
     let command_windows = ps_command(&windows);
@@ -124,8 +127,7 @@ pub(crate) fn posix_quoted(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
-/// What the agent reads when the guard could not run or ended with neither of its codes.
-pub(crate) const UNCHECKED: &str = "Clauseo could not check this step, so it did not run.";
+pub(crate) use crate::pre_write_guard::UNCHECKED;
 
 /// `words` (the program, then its arguments, each quoted as it must be) as one line of
 /// PowerShell: the call operator runs the program, whose stdin, stdout and stderr are the hook's
@@ -248,12 +250,12 @@ mod tests {
         let (key, hash) = if cfg!(windows) {
             (
                 r"C:\<session-flags>\config.toml:pre_tool_use:0:0",
-                hook_hash("pre_tool_use", "apply_patch|Write|Edit|Bash", &windows, 10),
+                hook_hash("pre_tool_use", "apply_patch|Write|Edit|Bash", &windows, 30),
             )
         } else {
             (
                 "/<session-flags>/config.toml:pre_tool_use:0:0",
-                "sha256:57fd0a13a8285ab7294f320ab698cbfcdfdb55d2cad5482964b9fa10551f7f93"
+                "sha256:1674028cddd3b0a1ede5c83351d6fa14f67d1c995b607b04ad58aab21ffb4624"
                     .to_owned(),
             )
         };
@@ -266,7 +268,7 @@ mod tests {
                         "type": "command",
                         "command": "'/opt/clauseo/clauseo-desktop' --pre-write-guard",
                         "commandWindows": windows,
-                        "timeout": 10,
+                        "timeout": 30,
                     }],
                 }],
                 "state": {key: {"trusted_hash": hash}},
@@ -333,7 +335,7 @@ mod tests {
             "--record".to_owned(),
             "'/data/browser/guard/s 1/guard-blocks.jsonl'".to_owned(),
             "--record-id".to_owned(),
-            id.to_owned(),
+            ps_quoted(id),
         ]);
         assert_eq!(hook["command"], posix);
         assert_eq!(hook["commandWindows"], windows);
@@ -345,12 +347,12 @@ mod tests {
         let trusted = &entry["trusted_hash"];
         assert_eq!(
             *trusted,
-            hook_hash("pre_tool_use", "apply_patch|Write|Edit|Bash", effective, 10)
+            hook_hash("pre_tool_use", "apply_patch|Write|Edit|Bash", effective, 30)
         );
         if !cfg!(windows) {
             assert_eq!(
                 *trusted,
-                "sha256:3611c22a15d888b80c600a3c02b6a2cbeb34ed372be387554f335d2dee202548"
+                "sha256:a7cad9406971426d55a138ac2b7994ff2291be229fdba66206fc9b69e34ba1b1"
             );
         }
         let odd = Path::new("/data/100%/guard-blocks.jsonl");

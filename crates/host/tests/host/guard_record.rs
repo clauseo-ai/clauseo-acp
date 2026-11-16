@@ -79,8 +79,8 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
         .strip_prefix(&format!(
             "$global:LASTEXITCODE = -1; & '{PROGRAM}' --pre-write-guard --record '"
         ))
-        .and_then(|rest| rest.split_once("' --record-id "))
-        .and_then(|(record, rest)| Some((record, rest.split_once(';')?.0)))
+        .and_then(|rest| rest.split_once("' --record-id '"))
+        .and_then(|(record, rest)| Some((record, rest.split_once("';")?.0)))
         .unwrap_or_else(|| panic!("{windows}"));
     let record = PathBuf::from(record);
     let posix = format!(
