@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { clock } from "./words.ts";
 import {
+  AGENTS_FOLDER_MAC,
   ERROR_WORDS,
   errorSentence,
   errorWords,
@@ -363,5 +364,27 @@ test.each([
 test("matter.folder_backslash with no place known: the Mac's line for the folder's own name, as before", () => {
   expect(errorWords("en", "matter.folder_backslash")).toBe(
     errorWords("en", "matter.folder_backslash", undefined, { platform: "mac", parent: null }),
+  );
+});
+
+// matter.agents_folder on the Mac (U3-err-matter.agents_folder.mac): the base line, then how to show the folders Finder
+// hides. Picked by the computer's platform alone, on the Mac only; Hindi later (null), so the English shows in both.
+test("matter.agents_folder on the Mac is its .mac line; elsewhere, and with no platform, the base line", () => {
+  const code = "matter.agents_folder";
+  const base = ERROR_WORDS[code];
+  expect(AGENTS_FOLDER_MAC).toBe(
+    `${base} Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.`,
+  );
+  expect(errorHindi[AGENTS_FOLDER_MAC]).toBeNull();
+  for (const agent of [CODEX, CLAUDE, undefined]) {
+    expect(errorWords("en", code, agent, { platform: "mac" })).toBe(AGENTS_FOLDER_MAC);
+    expect(errorWords("hi", code, agent, { platform: "mac" })).toBe(AGENTS_FOLDER_MAC);
+    expect(errorWords("en", code, agent, { platform: "windows" })).toBe(base);
+    expect(errorWords("en", code, agent, { platform: "linux" })).toBe(base);
+    expect(errorWords("en", code, agent)).toBe(base);
+  }
+  // the Mac's line is the one code's only: another code's line stays as it was on the Mac
+  expect(errorWords("en", "agent.folder_inaccessible", CLAUDE, { platform: "mac" })).toBe(
+    ERROR_WORDS["agent.folder_inaccessible"],
   );
 });

@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { QueueStrip } from "@clauseo/components/clauseo/queue.tsx";
 import type { QueueHold } from "@clauseo/components/clauseo/queue-model.ts";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
@@ -66,6 +67,7 @@ export function LiveQueueStrip({
   const store = useViewStore();
   const { lang } = useWords();
   const plan = useAgentPlan();
+  const { platform } = useDisplay();
   // R20b: the resume cue after an idle stop, once it has run past its threshold; it takes the strip's head line
   const cue = useResumeCue(store, stream);
   const resume = cue ? mt(lang, "Getting {plan} ready.", { plan: planNameOf(plan) }) : null;
@@ -174,7 +176,7 @@ export function LiveQueueStrip({
           words:
             refusal.code === GONE
               ? mt(lang, "That message had already gone.")
-              : errorWords(lang, refusal.code, plan),
+              : errorWords(lang, refusal.code, plan, { platform }),
           code: refusal.code,
         };
   return (

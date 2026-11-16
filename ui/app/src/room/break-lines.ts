@@ -2,7 +2,7 @@
 // the host has it (H10), and a stream that failed, with Try again only for a retryable code. In the thread's chunk
 // (stopped-mark.tsx imports it), so the first paint carries none of it; it hands itself to thread-break.ts as it runs.
 import { createElement } from "react";
-import type { Lang } from "@clauseo/components/lib/display.ts";
+import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { brk as say, streamFailedWords } from "@clauseo/components/lib/words-breaks.ts";
 import { errorWords, type AgentName } from "@clauseo/components/lib/words-errors.ts";
 import type { HostError } from "../transport/protocol.ts";
@@ -13,13 +13,15 @@ import { stamp } from "./thread/clock.ts";
 /** The working line for a stopped answer: agent.exited with its time, or, once the host restarts (H10), any code
  * Restart mends, with Restart; with H10 and agent.exited, the details say what Restart does. Null otherwise: the step
  * row's words say the rest. A refused Restart says its refusal's words, offers Restart again only when the refusal
- * says another try may work, and folds open no details. `agent` is the thread's, for the words that name it. */
+ * says another try may work, and folds open no details. `agent` is the thread's, for the words that name it; `platform`
+ * the computer's, for the line that differs on the Mac. */
 export function stoppedLine(
   lang: Lang,
   brk: Break,
   now: number,
   restart: { onRestart: () => void; refused: HostError | null } | null,
   agent?: AgentName,
+  platform?: Platform,
 ): BreakLine | null {
   const mends = restart !== null && RESTARTS.has(brk.code);
   if (brk.code !== TIMED && !mends) return null;
@@ -30,7 +32,7 @@ export function stoppedLine(
       ? say(lang, "The answer stopped at {time}. Your question and the answer so far are kept.", {
           time: stamp(lang, brk.step.ts, now),
         })
-      : errorWords(lang, code, agent);
+      : errorWords(lang, code, agent, platform === undefined ? undefined : { platform });
   const offers = mends && (refused === null || refused.retryable);
   return {
     testId: "agent-stopped",

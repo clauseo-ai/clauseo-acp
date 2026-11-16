@@ -7,7 +7,7 @@
 // into an empty field instead, and Ask relaunches the agent through send_prompt.
 import { useCallback, useState, useSyncExternalStore } from "react";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
-import type { Lang } from "@clauseo/components/lib/display.ts";
+import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { useStreamPart } from "../store/hooks.ts";
 import type { ViewStore } from "../store/store.ts";
@@ -189,11 +189,14 @@ export function useStoppedLine({
   restart,
   lines,
   plan,
+  platform,
 }: {
   /** The lines' chunk, once loaded. */
   lines: BreakLines | null;
   /** The thread's agent, for the words that name it (agent-plan.ts). */
   plan?: AgentName;
+  /** The computer's OS, for the line that differs on the Mac. */
+  platform?: Platform;
   lang: Lang;
   brk: Break | null;
   live: boolean;
@@ -225,5 +228,6 @@ export function useStoppedLine({
     brk.seen,
     restart === null ? null : { onRestart, refused: pressed?.refused ?? null },
     plan,
+    platform,
   );
 }

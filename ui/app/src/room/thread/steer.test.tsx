@@ -7,6 +7,7 @@
 // to the background says so, and the answer's note explains it once it finished; and a queued message coming, being
 // edited or going renders no row of the transcript.
 import { act, createElement, memo, Profiler, type ProfilerOnRenderCallback } from "react";
+import { AGENTS_FOLDER_MAC, ERROR_WORDS } from "@clauseo/components/lib/words-errors.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -295,6 +296,39 @@ test("Send now on a waiting steer whose words had already moved says so, as the 
   expect(h.one("steer-waiting-note")?.textContent).toBe(mt("en", "That message had already gone."));
   expect(thread().textContent).not.toContain("raw host text");
 });
+
+// a waiting steer's Send now refused as matter.agents_folder: the note says the Mac's own line on the Mac, the base
+// line elsewhere, and the host's text never shows
+test.each([
+  ["mac", AGENTS_FOLDER_MAC],
+  ["linux", ERROR_WORDS["matter.agents_folder"]],
+] as const)(
+  "a waiting steer's Send now refused as matter.agents_folder on %s says %j",
+  async (platform, said) => {
+    h = await mountRoom({
+      platform,
+      dispatch: (c) => {
+        if (c.send_queued_now !== undefined)
+          throw { code: "matter.agents_folder", message: "raw host text", retryable: false };
+        return defaultOutcome(c);
+      },
+    });
+    h.deliver([
+      reset(
+        [
+          ask(1, 1, "Who signed the cheque?", T1),
+          ask(2, 2, "Say who opened the account.", T1, { delivery: "steer", ts: AT }),
+        ],
+        header("running"),
+      ),
+    ]);
+    await h.settle();
+    await h.click(h.one("steer-waiting-send-now"));
+    await act(async () => h!.store.flush());
+    expect(h.one("steer-waiting-note")?.textContent).toBe(said);
+    expect(thread().textContent).not.toContain("raw host text");
+  },
+);
 
 test("with ChatGPT a steer is never the mark unless taken in: one waiting names ChatGPT, one sent now heads its exchange", async () => {
   h = await mountRoom({ threads: [{ ...summary(), agent: "codex-acp" }] });

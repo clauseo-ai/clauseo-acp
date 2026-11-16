@@ -86,6 +86,7 @@ import { UC_MCP_IMPORT } from "./registry-uc-mcp-import.tsx";
 import { UC_PASTE_CHIP } from "./registry-uc-paste-chip.tsx";
 import { MCP_TOOLS } from "./registry-mcp-tools.tsx";
 import { UC_AGENTS } from "./registry-uc-agents.tsx";
+import { AGENTS_FOLDER_MAC_ENTRIES } from "./registry-agents-folder.tsx";
 import { RELEASE_NOTES } from "./registry-release-notes.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
@@ -381,6 +382,7 @@ export const REGISTRY: readonly Entry[] = [
   },
   ...U3,
   ...ERRORS,
+  ...AGENTS_FOLDER_MAC_ENTRIES,
   ...U4,
   ...U4B,
   ...U10,

@@ -8,7 +8,11 @@
 // a Send now refused as prompt.too_long, or over the cap, keeps the words; and with a permission waiting, Enter answers
 // it only with the field empty (QU.9 a).
 import { act } from "react";
-import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import {
+  AGENTS_FOLDER_MAC,
+  ERROR_WORDS,
+  errorWords,
+} from "@clauseo/components/lib/words-errors.ts";
 import { afterEach, expect, test } from "vitest";
 import {
   header,
@@ -305,6 +309,33 @@ test.each([
     await h.type(QUESTION);
     await h.click(h.one("steer-send-now"));
     await keptAfterTooLong("send_now");
+  },
+);
+
+// matter.agents_folder's line where a send is refused: the Mac's own line (its `.mac` copy id) on the Mac, the base
+// line elsewhere; the words are kept, and the host's text never shows
+test.each([
+  ["mac", AGENTS_FOLDER_MAC],
+  ["linux", ERROR_WORDS["matter.agents_folder"]],
+] as const)(
+  "a Send now refused as matter.agents_folder on %s says %j and keeps the words",
+  async (platform, said) => {
+    h = await mountRoom({
+      platform,
+      dispatch: (c) => {
+        if (c.send_prompt !== undefined)
+          throw { code: "matter.agents_folder", message: "raw host text", retryable: false };
+        return defaultOutcome(c);
+      },
+    });
+    h.deliver([reset([userMessage(1, 1, "Q")], running(true))]);
+    await h.type(QUESTION);
+    await h.click(h.one("steer-send-now"));
+    await act(async () => h!.store.flush());
+    expect(h.one("error")?.dataset["code"]).toBe("matter.agents_folder");
+    expect(h.one("error")?.textContent).toBe(said);
+    expect(h.host.textContent).not.toContain("raw host text");
+    expect(field().value).toBe(QUESTION);
   },
 );
 

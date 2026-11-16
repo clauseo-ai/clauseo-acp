@@ -9,6 +9,7 @@
 import { use, useMemo, useRef, useState } from "react";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { SteerMark, SteerNote, SteerWaiting } from "@clauseo/components/clauseo/steer-marks.tsx";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { useMatterWords } from "@clauseo/components/lib/words-matters.ts";
 import { toHostError } from "../../transport/host-transport.ts";
@@ -87,6 +88,7 @@ export function SteerWaitingRow({
 }) {
   const w = useMatterWords();
   const plan = useAgentPlan();
+  const { platform } = useDisplay();
   const store = useViewStore();
   const send = use(ThreadActionsContext)?.sendSteerNow;
   const going = useRef(false);
@@ -115,7 +117,7 @@ export function SteerWaitingRow({
           words:
             refused === GONE
               ? w.m("That message had already gone.")
-              : errorWords(w.lang, refused, plan),
+              : errorWords(w.lang, refused, plan, { platform }),
         };
   return (
     <div className={ROW}>

@@ -9,6 +9,7 @@ import type {
   ConfigMenu,
   PlanChoice,
 } from "@clauseo/components/clauseo/composer.tsx";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { late } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
@@ -169,6 +170,7 @@ export function Work({
   const restart = useMemo(() => nextHostOf(transport).restart, [transport]);
   const lines = useBreakLines();
   const agentPlan = useAgentPlan();
+  const { platform } = useDisplay();
   const stopped = useStoppedLine({
     lang,
     brk,
@@ -179,6 +181,7 @@ export function Work({
     restart: archived ? null : restart,
     lines,
     plan: agentPlan,
+    platform,
   });
   // UD2: the question held for the plan's sign-in (queue_held_reason "sign_in"; from an older host that says no why, a held queue
   // after a turn failed with agent.auth_required). Any other reason keeps the held strip's own line

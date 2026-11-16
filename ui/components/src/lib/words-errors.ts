@@ -3,7 +3,7 @@
 // Each says what happened in plain words, and what stays kept where that is true. As in words.ts the English is the
 // key, the exact string on screen. The Hindi is a specialist's draft, waiting for a Hindi-speaking lawyer: the formal
 // आप, the danda, Western digits, English names in Latin script. Nothing here says मैं, पेंसिल, स्याही, चरण or कदम.
-import type { Lang } from "./display.ts";
+import type { Lang, Platform } from "./display.ts";
 import { wordsOf } from "./words-core.ts";
 import { BACKSLASH, backslashKey, byAgent, type BackslashPlace } from "./words-errors-backslash.ts";
 import { th } from "./words-thread.ts";
@@ -369,6 +369,16 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   unknown: "Something went wrong inside Clauseo.",
 };
 
+/** matter.agents_folder's line on the Mac, the copy id U3-err-matter.agents_folder.mac: the base line, then how to show
+ * the folders Finder hides. Picked on macOS only (errorWords' place); provisional, Hindi later. */
+export const AGENTS_FOLDER_MAC =
+  'This matter\'s folder holds a folder named ".agents", with instructions for AI tools. Clauseo doesn\'t let ChatGPT follow instructions kept in a matter\'s files. Rename or remove the ".agents" folder, and ChatGPT can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.' as const;
+
+/** The lines a code has on the Mac where they differ from ERROR_WORDS's, by the copy id `<code>.mac`. */
+const MAC_LINES: Partial<Record<string, keyof typeof HI>> = {
+  "matter.agents_folder": AGENTS_FOLDER_MAC,
+};
+
 /** Codes the app gives itself, never the host, so outside ErrorCode: an answer's link, or Versions' Open now, to a
  * paper the matter's folder no longer holds (room/open.ts). */
 export const APP_ERROR_WORDS = {
@@ -502,17 +512,20 @@ export type { BackslashPlace };
 
 /** A code's sentence in the language; a code this version doesn't know reads as "unknown", which reads as "internal".
  * `agent` is the thread's agent (AgentName), for the codes whose sentence names it (plannedKey); a caller that
- * doesn't know the thread leaves it out. `place` is where matter.folder_backslash's backslash is (BackslashPlace), for
- * a caller that knows the matter; left out, its line names the folder's own name and Finder. */
+ * doesn't know the thread leaves it out. `place` is where the refusal is on this computer: `platform` alone picks a
+ * code's Mac line (MAC_LINES); a BackslashPlace, where matter.folder_backslash's backslash is (left out, its line
+ * names the folder's own name and Finder). */
 export function errorWords(
   lang: Lang,
   code: string,
   agent?: AgentName,
-  place?: BackslashPlace,
+  place?: BackslashPlace | { platform: Platform },
 ): string {
   if (Object.hasOwn(APP_ERROR_WORDS, code))
     return own(lang, APP_ERROR_WORDS[code as keyof typeof APP_ERROR_WORDS]);
-  if (code === "matter.folder_backslash" && place !== undefined) {
+  const mac = place?.platform === "mac" ? MAC_LINES[code] : undefined;
+  if (mac !== undefined) return own(lang, mac);
+  if (code === "matter.folder_backslash" && place !== undefined && "parent" in place) {
     const { key, slots } = backslashKey(agent, place);
     return own(lang, key as keyof typeof HI, slots);
   }

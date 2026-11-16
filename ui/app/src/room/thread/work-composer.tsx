@@ -379,7 +379,7 @@ export function WorkComposer({
             words:
               refused === "thread.queue_full"
                 ? queueFullLine(w.lang)
-                : errorWords(w.lang, refused, agentPlan),
+                : errorWords(w.lang, refused, agentPlan, { platform }),
             pill: null,
             code: refused,
             ...(refusedActions === undefined ? {} : { actions: refusedActions }),

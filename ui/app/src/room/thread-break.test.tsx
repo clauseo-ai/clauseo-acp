@@ -6,7 +6,11 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { WorkingLine } from "@clauseo/components/clauseo/working-line.tsx";
 import { brk as say, streamFailedWords } from "@clauseo/components/lib/words-breaks.ts";
-import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import {
+  AGENTS_FOLDER_MAC,
+  ERROR_WORDS,
+  errorWords,
+} from "@clauseo/components/lib/words-errors.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import { agentText, step, userMessage } from "../testing/stream-script.ts";
 import type { EntryId, ViewEntry } from "../transport/protocol.ts";
@@ -145,6 +149,29 @@ test("a refused Restart shows its own code's words, never its message; Restart a
     errorWords("en", "command.unknown_thread"),
   );
   expect(final.querySelector('[data-testid="restart"]')).toBeNull();
+});
+
+// a refused Restart whose refusal is matter.agents_folder: the Mac's own line on the Mac (its .mac copy id), the base
+// line elsewhere; no Restart again (the refusal says no other try will do)
+test.each([
+  ["mac", AGENTS_FOLDER_MAC],
+  ["linux", ERROR_WORDS["matter.agents_folder"]],
+] as const)("a refused Restart for matter.agents_folder on %s says %j", (platform, said) => {
+  const host = draw(
+    stoppedLine(
+      "en",
+      brk("agent.exited"),
+      0,
+      {
+        onRestart: () => {},
+        refused: { code: "matter.agents_folder", message: "SECRET", retryable: false },
+      },
+      undefined,
+      platform,
+    ),
+  );
+  expect(host.querySelector('[data-testid="agent-stopped"]')?.textContent).toBe(said);
+  expect(host.textContent).not.toContain("SECRET");
 });
 
 test("the stopped question comes back only before H10, only for the codes asking again mends, only for a live break", () => {

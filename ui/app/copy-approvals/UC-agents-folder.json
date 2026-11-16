@@ -9,5 +9,13 @@
     "at": "2026-11-16",
     "by": "app track (words for #1159, via stage B; provisional)",
     "note": "Refusal of a ChatGPT (Codex) send in a matter whose folder holds a .agents folder (matter.agents_folder, crates/host/src/agent/codex.rs REFUSED_ENTRIES)."
+  },
+  "U3-err-matter.agents_folder.mac": {
+    "en": "This matter's folder holds a folder named \".agents\", with instructions for AI tools. Clauseo doesn't let ChatGPT follow instructions kept in a matter's files. Rename or remove the \".agents\" folder, and ChatGPT can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (the Mac's line of U3-err-matter.agents_folder, orchestrator ruling; provisional)",
+    "note": "The same refusal on macOS only, where Finder hides dot-folders: the base line plus how to show them (words-errors.ts AGENTS_FOLDER_MAC; picked by errorWords' place.platform). Hindi later."
   }
 }
