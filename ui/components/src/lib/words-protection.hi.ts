@@ -111,4 +111,6 @@ export const HI = {
   // Provisional; hi: later
   "On Windows, Clauseo stops Claude's and ChatGPT's file tools from opening or changing another matter's files, and refuses their commands that name another matter's folder. It can't catch everything: a program they write and run, a file location they piece together, or a shortcut they make first can still reach those files.":
     null,
+  // the Mac advice after it (UC-850): Rohan's call, its own entry so it can go alone. Provisional; hi: later
+  "For matters that must stay strictly apart, use a Mac.": null,
 } as const;
