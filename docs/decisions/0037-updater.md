@@ -42,28 +42,55 @@ PR 2 (this record's) adds the wire, stubbed, and `update.failed`.
   `unavailable` (`package` on Linux), so it never touches the network. The `e2e` build alone
   sets an endpoint in code (`E2E_UPDATE_ENDPOINT`) and trusts the test key (landed with PR 5).
 - **PR 6: the endpoint, built against a placeholder key.** PR 6 sets `endpoints` to the URL above
-  and `pubkey` to a placeholder: a throwaway minisign key made for PR 6 alone, whose private
-  half and password were deleted at once, so nothing can sign for it. Its public half is
-  committed as `crates/desktop/release/updater-placeholder.pub`. While it is the release key,
-  the desktop test `the_release_pubkey_is_not_the_placeholder` fails ("PR 6 can't merge until
-  Rohan's public key replaces the placeholder"), so PR 6 cannot merge by accident; a release
-  run would fail too, since the bundler checks the signing key against that pubkey. A release
-  build now gives the host `PluginUpdater` over the config; a debug build without `e2e`
-  still gives none.
-- **The swap, when Rohan's key arrives** (R23-key-steps.md): paste his `.pub` text as
-  `plugins.updater.pubkey` in `tauri.conf.json`; delete `updater-placeholder.pub` and the
-  test that reads it (`the_committed_placeholder_has_the_key_id_the_guard_refuses`). The guard
-  stays and keeps the placeholder's key id in the test (`PLACEHOLDER_KEY_ID`), so the placeholder
-  can never come back; it also refuses the test key, and a pubkey that is not a minisign public
-  key. Keeping it costs nothing, and deleting it would leave only "not empty" to catch a wrong
-  key.
-  The guard reads the key id from the key's own bytes (line 2 of the `.pub`: 42 bytes, `Ed`, the
-  id little-endian) and requires the untrusted comment to name the same id, so a rewritten
-  comment cannot pass. It also reads `tauri.{macos,windows,linux}.conf.json` when they exist,
-  since Tauri merges them on its own. The guard is a desktop test, not a required check, so
-  `release.yml`'s `check` job refuses the same keys, decoded the same way, in every `release`
-  run (0035, "The release key, checked before a release builds"). That check stays for good
-  after the swap.
+  and `pubkey` to a placeholder: a throwaway minisign key (id `AC986E7C6BA67AB9`) made for PR 6
+  alone, whose private half and password were deleted at once, so nothing can sign for it. Its
+  public half is committed as `crates/desktop/release/updater-placeholder.pub` and stays there
+  after the swap, as the guards' fixture. While it is the release key, three checks refuse it:
+  xtask's `tauri-config` check (fast lane, "R23 PR 6's placeholder key"), the desktop test
+  `the_release_pubkey_is_not_the_placeholder` ("PR 6 can't merge until Rohan's public key
+  replaces the placeholder"), so PR 6 cannot merge by accident, and `release.yml`'s `check` job
+  in a `release` run, before anything builds. Test and dry runs only warn: a test run's `e2e`
+  build trusts the test key in code and never reads the config's endpoint, and a dry run signs
+  with a key it makes itself. A release build gives the host `PluginUpdater` over the config; a
+  debug build without `e2e` still gives none. A dry run's app, if someone installed it, would
+  check the real endpoint and refuse every update, since no signature verifies under the
+  placeholder.
+- **The swap, when Rohan's key arrives**, is one line: `plugins.updater.pubkey` (line 61 of
+  `crates/desktop/tauri.conf.json`) becomes the text of his `.pub` file, which `tauri signer
+  generate` writes as one line of base64 already. Then the checks: `cargo test --locked -p xtask
+  checks::` (the static checks on the repo, `the_real_repo_passes_every_static_check`, and the
+  `tauri-config` cases), `cargo test --locked -p clauseo-desktop --lib update::`, and CI's
+  `cargo xtask check`.
+  Nothing else changes: the placeholder's file and its test stay. The guards stay and keep the
+  placeholder's key id (`PLACEHOLDER_KEY_ID`), so the placeholder can never come back; they also
+  refuse the test key, and a pubkey that is not a minisign public key (xtask names a pasted
+  secret key as such). Keeping them costs nothing, and deleting them would leave only "not
+  empty" to catch a wrong key.
+  The guards read the key id from the key's own bytes (line 2 of the `.pub`: 42 bytes, `Ed`,
+  the id little-endian) and require the untrusted comment to name the same id, so a rewritten
+  comment cannot pass. The desktop test also reads `tauri.{macos,windows,linux}.conf.json` when
+  they exist, since Tauri merges them on its own (xtask's check fails on any such file). Neither
+  guard is the control a merge cannot skip, so `release.yml`'s `check` job refuses the same
+  keys, decoded the same way, in every `release` run (0035, "The release key, checked before a
+  release builds"). That check stays for good after the swap.
+- **The endpoint is pinned.** xtask's `tauri-config` check fails unless `endpoints` is empty or
+  exactly the URL above (`RELEASE_ENDPOINT` in `xtask/src/checks/tauri_config/updater.rs`), so a
+  move is an edit of that const too, in review.
+- **What an installed copy fetches** (a release build, installed per user on macOS or Windows,
+  `update.mode` not `none`): 1 to 10 minutes after start and then every 60 ± 10 minutes, a GET of
+  the URL above, which GitHub answers with 302 to the latest release's
+  `releases/download/<tag>/latest.json` and then 302 to `release-assets.githubusercontent.com`
+  (HTTPS only, redirects included: `configure_client`). From `latest.json` the plugin takes
+  `version` and this platform's entry in `platforms` (`darwin-aarch64-app` or
+  `darwin-x86_64-app`, `windows-x86_64` or `windows-aarch64`; `windows-aarch64` for the x64
+  build emulated on ARM64). Only when that version is above the running one does it download
+  the entry's `url`: `Clauseo_<v>_aarch64.app.tar.gz` or `Clauseo_<v>_x64.app.tar.gz` on macOS,
+  `Clauseo_<v>_x64-setup.exe` or `Clauseo_<v>_arm64-setup.exe` on Windows, from the same
+  release, through the same redirects. It verifies the file's minisign signature under `pubkey`
+  and that the signature's trusted comment names that file (`file_binding.rs`), and saves it
+  under `updates/<version>/`. It installs at the next start (`auto`) or when the lawyer says so
+  (`notify`), verifying the saved bytes again. The requests carry no install id; counts go to
+  `t.clauseo.chat` (0036).
 
 ### The `Updater` trait
 
