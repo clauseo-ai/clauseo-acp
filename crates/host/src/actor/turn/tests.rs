@@ -1,6 +1,7 @@
 //! Unit tests of the turn path.
 
 mod agents;
+mod claude_settings;
 mod closed;
 mod failures;
 mod gave_up;

@@ -107,11 +107,10 @@ fn claude_and_codex_launch_with_clauseos_homes_not_the_lawyers() {
         "{settings}"
     );
     assert!(!codex_home.join("settings.json").exists());
-    // An agent of no kind reads neither variable, and the host forces neither on it.
-    assert_eq!(
-        var(fake, "CLAUDE_CONFIG_DIR").as_deref(),
-        Some(LAWYERS_CLAUDE)
-    );
+    // An agent of no kind gets neither forced on it. No inherited `CLAUDE_*` reaches any agent
+    // (`agent::spec::SCRUBBED_PREFIXES`), so it gets no config folder at all; its settings entry
+    // would have to name one.
+    assert_eq!(var(fake, "CLAUDE_CONFIG_DIR"), None);
     assert_eq!(var(fake, "CODEX_HOME").as_deref(), Some(LAWYERS_CODEX));
 }
 

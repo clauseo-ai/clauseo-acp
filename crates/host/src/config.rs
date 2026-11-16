@@ -83,10 +83,10 @@ impl HostConfig {
     ///
     /// The launcher must clear the environment (`SpawnOptions::clear_env`, or a launcher that
     /// always does, such as the sandbox's): an agent's spec is its whole environment, the host's
-    /// own minus the variables no agent may get (`GIT_*`, `SSH_*`, `NO_BROWSER`,
-    /// `CLAUDE_CODE_REMOTE`, and Codex's dropped names), and a launcher that lets the child
-    /// inherit the host's environment gives every dropped variable back. The plan readers'
-    /// specs (`clauseo_limits`) also carry the inherited environment, minus the same drops.
+    /// own minus the variables no agent may get (`agent::spec`: `GIT_*`, `SSH_*`, `CLAUDE_*`,
+    /// `ANTHROPIC_*`, and Codex's dropped names, among others), and a launcher that lets the
+    /// child inherit the host's environment gives every dropped variable back. The plan readers'
+    /// specs (`clauseo_limits`) carry it too, minus the `GIT_*` and `SSH_*` drops.
     pub fn new(effective: Effective, launcher: Arc<dyn Launcher>) -> Self {
         Self {
             effective,

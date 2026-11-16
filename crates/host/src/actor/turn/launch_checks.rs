@@ -365,12 +365,9 @@ pub(super) fn prepare(
                 if let Some(home) = &claude_home {
                     answer = Some(check.run(&cwd));
                     codex::make_agent_home(&data, home, "Claude Code")?;
-                    if let Err(error) = crate::agent::home::write_claude_settings(home) {
-                        tracing::warn!(
-                            error = %Cause(&error),
-                            "Claude's home settings were not written"
-                        );
-                    }
+                    // A file left as it was could loosen the session: the launch fails.
+                    crate::agent::home::write_claude_settings(home)
+                        .map_err(|error| crate::agent::home::settings_unwritten(&error))?;
                 }
                 run.make(&data, &sweep)?;
                 make_guard(&mut run, &data, claude)?;

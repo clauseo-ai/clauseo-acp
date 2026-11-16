@@ -340,6 +340,14 @@ open_data_enum! {
             /// How many.
             more: u32,
         },
+        /// The lawyer picked a model that cannot run Claude Code's `auto` permission mode, so
+        /// Clauseo switched the session back to the model it had, and to `auto`.
+        ModelSwitchRefused = "model_switch_refused" {
+            /// The picked model's name, as the agent's model option shows it.
+            picked: String,
+            /// The name of the model the session stays on.
+            kept: String,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -364,6 +372,10 @@ open_data_enum! {
             reason: PackSkipReason::Changed,
         },
         NoticeKind::AutoModeUnavailable,
+        NoticeKind::ModelSwitchRefused {
+            picked: "Haiku".to_owned(),
+            kept: "Opus".to_owned(),
+        },
     ];
 }
 

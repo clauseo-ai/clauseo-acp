@@ -84,7 +84,7 @@ pub(super) fn answer_permission(
 }
 
 /// Sends an answer's commit with its receipt; `then` tells the agent once it is durable.
-fn send_answer(
+pub(super) fn send_answer(
     actor: &mut Actor,
     ctx: CommandCtx,
     thread: ThreadId,
@@ -336,7 +336,13 @@ pub(super) fn on_config(
     same: bool,
     result: Result<Vec<ConfigOption>, clauseo_acp::Error>,
 ) {
+    // A model switch that moved Claude off auto is put back (`model_switch.rs`).
+    let left = super::model_switch::answered(actor, thread);
     let done = answered(same, result).and_then(|options| {
+        if let Some(from) = left {
+            super::model_switch::put_back(actor, thread, (ctx, &pick.1), options, from);
+            return Ok(());
+        }
         let mut out = Out::new(actor, thread, Some(ctx.id))?;
         out.push(actor, ConfigOptionsReplaced { options })?;
         if let Some(row) = super::picks::remember(actor, thread, &pick) {

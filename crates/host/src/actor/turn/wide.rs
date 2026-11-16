@@ -30,7 +30,14 @@ pub(crate) struct TurnPath {
     /// The kind the unit tests' `fake-agent` plays for the offline probe and the quiet arm.
     #[cfg(test)]
     pub(super) kind_for_tests: Option<clauseo_protocol::AgentKind>,
+    /// The user tier's policy value a unit test plays (`profile_loads/policy.rs`); none read.
+    #[cfg(test)]
+    pub(super) user_policy_for_tests: Option<std::sync::Arc<std::sync::Mutex<UserTierRead>>>,
 }
+
+/// A read of the user tier's policy value: its text, `None` when it is not there.
+#[cfg(test)]
+pub(super) type UserTierRead = Result<Option<String>, ()>;
 
 impl TurnPath {
     /// The turn path's state at start-up, with the idle stop's settings and the quiet watch's

@@ -25,6 +25,7 @@ mod env;
 mod held_pipe;
 mod path;
 mod redact;
+mod scrub;
 
 /// A 20-character fake GitHub token, as the test's "inherited" environment holds it.
 const FAKE_GITHUB_TOKEN: &str = "ghp_fakeToken0123456";

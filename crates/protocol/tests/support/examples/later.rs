@@ -171,6 +171,18 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentSandboxUnavailable,
             "Claude's short temp folder was not made, so it has no sandbox",
         ),
+        failed(
+            ErrorCode::AgentFirmHooksOff,
+            "the firm's managed Claude settings set disableAllHooks, so the guard hook can't run",
+        ),
+        failed(
+            ErrorCode::AgentUserPolicy,
+            "HKCU\\SOFTWARE\\Policies\\ClaudeCode sets permissions, outranked by no admin policy",
+        ),
+        failed(
+            ErrorCode::AgentSettingsChanged,
+            "Claude's settings file changed while Claude ran, so Clauseo stopped it",
+        ),
     ]
 }
 
@@ -338,6 +350,16 @@ pub(super) fn notices() -> Vec<DomainEvent> {
             level: NoticeLevel::Warning,
             text: "Clauseo stopped 3 more steps.".to_owned(),
             kind: Some(NoticeKind::GuardStepsMore { more: 3 }),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Haiku can't run in Claude's automatic mode, so Claude stays on Opus. To use a \
+                   different model, pick another one."
+                .to_owned(),
+            kind: Some(NoticeKind::ModelSwitchRefused {
+                picked: "Haiku".to_owned(),
+                kept: "Opus".to_owned(),
+            }),
         },
     ];
     notices.extend(

@@ -146,6 +146,18 @@ test("a guard notice with no paper gives null, so the row shows its text", () =>
   expect(noticeLine({ held_open_blocked: {} } as unknown as NoticeKind, en)).toBeNull();
 });
 
+test("a refused model switch names both models, isolated; English in Hindi until its Hindi comes", () => {
+  const kind: NoticeKind = { model_switch_refused: { picked: "Haiku", kept: "Opus" } };
+  const line = `${iso("Haiku")} can't run in Claude's automatic mode, so Claude stays on ${iso("Opus")}. To use a different model, pick another one.`;
+  expect(noticeLine(kind, en)).toBe(line);
+  expect(noticeLine(kind, words("hi"))).toBe(line);
+  // a name missing or blank gives null, so the row shows the host's text
+  const blank = { model_switch_refused: { picked: " ", kept: "Opus" } } as NoticeKind;
+  expect(noticeLine(blank, en)).toBeNull();
+  const half = { model_switch_refused: { picked: "Haiku" } } as unknown as NoticeKind;
+  expect(noticeLine(half, en)).toBeNull();
+});
+
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
   expect(noticeLine(undefined, en)).toBeNull();
 });

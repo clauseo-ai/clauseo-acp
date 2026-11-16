@@ -27,7 +27,9 @@
 //! list on macOS, only `denyRead` and `allowRead` on Linux, where a glob write path is
 //! skipped, so the write lists stay as written there.
 //!
-//! What the object says, every key Clauseo's:
+//! What the object says, every key Clauseo's (its single-value switches set again, with the
+//! weakening ones off and `enabled: false` where there is no sandbox, by `loads::pinned`, so a
+//! user settings file never sets one):
 //!
 //! - `enabled`, `autoAllowBashIfSandboxed`: on. Forced ask turns the second off after this
 //!   (`profile::forced_ask_settings`), so a forced-ask session asks for every command, sandboxed

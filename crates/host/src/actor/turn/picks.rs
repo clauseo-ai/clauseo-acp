@@ -53,6 +53,14 @@ pub(crate) struct Picked {
     stale: Vec<Pick>,
 }
 
+/// The choice id `value` names, for a select option; `None` for a boolean.
+pub(super) fn select(value: &ConfigValue) -> Option<&str> {
+    match value {
+        ConfigValue::Select(choice) => Some(choice.as_str()),
+        ConfigValue::Boolean(_) => None,
+    }
+}
+
 /// Whether the pickers set options of `category`.
 fn picked_category(category: ConfigCategory) -> bool {
     matches!(
@@ -71,7 +79,7 @@ fn header(actor: &Actor, thread: ThreadId) -> Option<&HeaderEntry> {
 }
 
 /// The options the thread logged last; `None` before its first session's.
-fn logged(actor: &Actor, thread: ThreadId) -> Option<&[ConfigOption]> {
+pub(super) fn logged(actor: &Actor, thread: ThreadId) -> Option<&[ConfigOption]> {
     let options = &header(actor, thread)?.config_options;
     (!options.is_empty()).then_some(options.as_slice())
 }

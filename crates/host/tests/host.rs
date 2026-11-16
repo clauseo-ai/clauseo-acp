@@ -73,6 +73,8 @@ mod claude_mode;
 #[cfg(test)]
 #[path = "host/claude_sandbox.rs"]
 mod claude_sandbox;
+#[path = "host/claude_settings.rs"]
+mod claude_settings;
 #[cfg(test)]
 #[path = "host/clear_env.rs"]
 mod clear_env;
@@ -318,6 +320,9 @@ mod mcp_tools_failures;
 #[cfg(test)]
 #[path = "host/mcp_trust.rs"]
 mod mcp_trust;
+#[cfg(test)]
+#[path = "host/model_switch.rs"]
+mod model_switch;
 #[cfg(test)]
 #[path = "host/not_allowed.rs"]
 mod not_allowed;

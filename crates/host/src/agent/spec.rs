@@ -26,11 +26,12 @@ pub(crate) fn launch_spec(
 
 /// The whole environment of `agent`'s launch. It holds the `inherited` environment (the host's
 /// own, read at launch) minus every `GIT_*` and `SSH_*` variable, the names in
-/// [`DROPPED_INHERITED`], and every name an agent, hook or forced variable also names, then the
-/// agent's variables minus those the hook or `forced` names, then the hook's minus those
-/// `forced` names, then `forced`: what the host sets for the agent's kind (a Codex agent's
-/// mode, home and config, `agent/codex.rs`; a Claude agent's home, `agent/home.rs`), which
-/// nothing in the settings can override, so no inherited `CLAUDE_CONFIG_DIR` reaches it. Every
+/// [`DROPPED_INHERITED`], every `CLAUDE_*` and `ANTHROPIC_*` and `IS_SANDBOX`
+/// ([`SCRUBBED_PREFIXES`], [`SCRUBBED`]), and every name an agent, hook or forced variable
+/// also names; then the agent's variables minus those the hook or `forced` names, then the
+/// hook's minus those `forced` names, then `forced`: what the host sets for the agent's kind
+/// (a Codex agent's mode, home and config, `agent/codex.rs`; a Claude agent's home,
+/// `agent/home.rs`), which nothing in the settings can override. Every
 /// name in `dropped` (a Codex agent's `codex::DROPPED_VARS`) is left out wherever it comes
 /// from (inherited, the agent's variables or the hook's), ignoring ASCII case, and so is
 /// `NODE_OPTIONS` and `NODE_PATH` (`clauseo_process::NODE_ENV`, which the spawn drops
@@ -192,17 +193,47 @@ pub(crate) const DROPPED_INHERITED_PREFIXES: [&str; 2] = ["GIT_", "SSH_"];
 /// skip the browser sign-in.
 pub(crate) const DROPPED_INHERITED: [&str; 2] = ["NO_BROWSER", "CLAUDE_CODE_REMOTE"];
 
+/// The prefixes of the inherited variables no agent gets because they belong to Claude Code:
+/// every one it reads starts `CLAUDE_` or `ANTHROPIC_`, and several loosen a Clauseo session
+/// (Claude Code 2.1.293, read in its code): `CLAUDE_CODE_BUBBLEWRAP` lets root bypass,
+/// `CLAUDE_CODE_SANDBOXED` trusts the workspace, `CLAUDE_BG_SESSION_PERMISSION_RULES` (with
+/// `CLAUDE_CODE_SESSION_KIND=bg`) adds allow rules and folders, `CLAUDE_CODE_AUTO_MODE_SERVER`
+/// moves auto mode's classifier, `CLAUDE_CODE_DISABLE_HOOK_FORWARDING`,
+/// `CLAUDE_CODE_DISABLE_PERMISSION_PROMPT_NOTIFY_HOOKS` and
+/// `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS` change the hooks,
+/// `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` loads more `CLAUDE.md`, `CLAUDE_CONFIG_DIR`
+/// picks the user settings, `CLAUDE_CODE_USE_COWORK_PLUGINS` the other user file, and
+/// `ANTHROPIC_*` the service and key. What a launch needs of them Clauseo sets itself, and so
+/// they never come from here: the forced ones (`CLAUDE_CONFIG_DIR`, `agent::home`;
+/// `CLAUDE_CODE_TMPDIR`, `agent::temp`; `CLAUDE_CODE_SHELL`, `agent::shell_path`), the
+/// sign-in's in the agent's settings entry (`ANTHROPIC_API_KEY` empty, `CLAUDE_CONFIG_DIR`,
+/// `CLAUDE_SECURESTORAGE_CONFIG_DIR`) and the profile hook's (the stored key, the firm plan's
+/// `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK` or `CLAUDE_CODE_USE_VERTEX` and its `env`),
+/// and [`CLAUDE_SHELL_FOLDER_VAR`] in `_meta`. Every agent drops them: Codex reads none, and an
+/// agent with no kind gets them from its settings entry. Unlike [`DROPPED_INHERITED_PREFIXES`],
+/// the plan readers (`crates/limits/src/readers/env.rs`) do not drop these yet.
+///
+/// [`CLAUDE_SHELL_FOLDER_VAR`]: crate::agent::loads::CLAUDE_SHELL_FOLDER_VAR
+pub(crate) const SCRUBBED_PREFIXES: [&str; 2] = ["CLAUDE_", "ANTHROPIC_"];
+
+/// The inherited variables outside [`SCRUBBED_PREFIXES`] that loosen Claude Code: `IS_SANDBOX=1`
+/// lets it run as root in bypass and cancels a policy's `disableNoSandbox` (2.1.293).
+pub(crate) const SCRUBBED: [&str; 1] = ["IS_SANDBOX"];
+
 /// Whether an inherited `name` stays out of every agent's environment: it has a prefix in
-/// [`DROPPED_INHERITED_PREFIXES`] or is in [`DROPPED_INHERITED`], ignoring ASCII case (Windows
-/// does).
-fn is_dropped_inherited(name: &OsStr) -> bool {
+/// [`DROPPED_INHERITED_PREFIXES`] or [`SCRUBBED_PREFIXES`], or is in [`DROPPED_INHERITED`] or
+/// [`SCRUBBED`], ignoring ASCII case (Windows does; on Unix a lowercase one dropped costs
+/// nothing).
+pub(crate) fn is_dropped_inherited(name: &OsStr) -> bool {
     let bytes = name.as_encoded_bytes();
-    DROPPED_INHERITED_PREFIXES.iter().any(|prefix| {
+    let prefixes = DROPPED_INHERITED_PREFIXES.iter().chain(&SCRUBBED_PREFIXES);
+    prefixes.into_iter().any(|prefix| {
         bytes
             .get(..prefix.len())
             .is_some_and(|start| start.eq_ignore_ascii_case(prefix.as_bytes()))
     }) || DROPPED_INHERITED
         .iter()
+        .chain(&SCRUBBED)
         .any(|drop| same(OsStr::new(drop), name))
 }
 

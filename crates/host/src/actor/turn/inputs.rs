@@ -98,6 +98,8 @@ pub(crate) enum AgentReply {
     /// The switch back after a Claude agent moved itself to a mode Clauseo doesn't run it in
     /// (`forced_mode.rs`) answered: the mode it was switched to, and the answer.
     ModeReset(&'static str, Result<(), clauseo_acp::Error>),
+    /// A refused model switch was put back (`model_switch.rs`).
+    ModelKept(Box<super::model_switch::Kept>),
     /// A steer into the running turn answered (`queue/steer.rs`).
     Steer(Box<super::queue::Steered>),
 }

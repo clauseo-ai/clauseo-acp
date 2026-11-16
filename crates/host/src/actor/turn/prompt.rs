@@ -8,9 +8,14 @@
 //!
 //! The undo note is held aside while its prompt is out, and put back unless the agent took that
 //! prompt (`note.rs`); the offline-shell note is spent once sent, or once the agent is gone.
+//!
+//! A Claude prompt goes out only while Claude Code's user settings are still the launch's, and
+//! is stopped when they change while it runs ([`claude_settings`]).
+
+pub(super) mod claude_settings;
 
 use clauseo_protocol::{ContentBlock, ErrorCode, ThreadId, TurnId};
-use futures::future::{AbortHandle, Abortable, join};
+use futures::future::{AbortHandle, Abortable};
 
 use super::super::Actor;
 use super::super::input::Input;
@@ -32,13 +37,14 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
                 (
                     agent.id,
                     agent.codex.is_some().then(|| agent.folder.clone()),
+                    agent.claude_home.clone(),
                 ),
                 (agent.link.client.clone(), agent.link.descendants().clone()),
                 agent.link.fence(),
                 session,
             ))
         });
-    let Some(((id, check), (client, descendants), fence, session)) = agent else {
+    let Some(((id, check, claude_home), (client, descendants), fence, session)) = agent else {
         // The undo note stays: no prompt reached the agent.
         if let Some(state) = state(actor, thread) {
             state.offline_owed = false;
@@ -64,6 +70,11 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     }
     content.extend(current.prompt.iter().cloned());
     let cancelled = current.cancelled;
+    // A user-writable Claude Code policy stops the conversation before anything is sent.
+    if let Some(error) = claude_settings::policy_refusal(actor, thread, claude_home.is_some()) {
+        super::end::on_prompt_refused(actor, thread, turn, &error);
+        return;
+    }
     // The text exactly as it goes out, the note in: over Codex's cap, nothing is sent.
     if let Err(error) = super::codex_cap::refuse(actor, thread, &content) {
         tracing::warn!(
@@ -102,24 +113,32 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let clock = std::sync::Arc::clone(&actor.clock);
     let matter = actor.threads.get(&thread).map(|entry| entry.row.matter);
     let list_clock = std::sync::Arc::clone(&actor.clock);
+    let checks = claude_settings::checks(actor, thread, claude_home.as_ref());
     let call = Abortable::new(
         async move {
-            // A Codex agent's matter folder is checked for `.codex` again first, and the agent's
-            // descendants are listed, both off the actor, before the prompt goes out: a
-            // cancelled turn ends what is new since this listing.
-            let (checked, listed) = join(
+            // A Codex agent's matter folder is checked for `.codex` again first, a Claude
+            // agent's user settings likewise, and the agent's descendants are listed, all off the
+            // actor, before the prompt goes out: a cancelled turn ends what is new since this
+            // listing.
+            let settings_clock = std::sync::Arc::clone(&clock);
+            let (checked, listed, settings) = futures::future::join3(
                 codex::prepare::recheck(clock, matter, check),
                 leftovers::snapshot(descendants, list_clock),
+                claude_settings::check(std::sync::Arc::clone(&settings_clock), matter, claude_home),
             )
             .await;
             *before.borrow_mut() = listed;
-            if let Err(error) = checked {
+            if let Err(error) = checked.and(settings) {
                 return AgentReply::PromptRefused { turn, error };
             }
             tracing::info!(target: LIFECYCLE, %thread, %turn, "prompt sent");
-            let result = retry
-                .run(&client, || client.prompt(&session, turn, content.clone()))
-                .await;
+            let call = retry.run(&client, || client.prompt(&session, turn, content.clone()));
+            // A Claude agent's settings and policy are watched while the prompt runs.
+            let result = match claude_settings::watched(call, settings_clock, matter, checks).await
+            {
+                Ok(result) => result,
+                Err(error) => return AgentReply::PromptRefused { turn, error },
+            };
             fence.await;
             AgentReply::Prompt { turn, result }
         },

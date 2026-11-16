@@ -283,9 +283,15 @@ test("an agent's name fills no other code", () => {
 });
 
 test("only the agent.* codes that name Claude have a sentence per plan", () => {
-  // Claude-only refusals: the host sends them for a Claude launch alone (its sandbox, macOS and Linux), so no other
-  // plan's thread ever shows their line (UC-472)
-  const claudeOnly: readonly WordedCode[] = ["agent.sandbox_unavailable", "matter.folder_wildcard"];
+  // Claude-only refusals: the host sends them for a Claude launch alone (its sandbox, macOS and Linux; its settings
+  // and hooks), so no other plan's thread ever shows their line (UC-472, UC-474 to UC-476)
+  const claudeOnly: readonly WordedCode[] = [
+    "agent.sandbox_unavailable",
+    "matter.folder_wildcard",
+    "agent.firm_hooks_off",
+    "agent.user_policy",
+    "agent.settings_changed",
+  ];
   const naming = (Object.keys(ERROR_WORDS) as WordedCode[]).filter(
     (c) => ERROR_WORDS[c].includes("Claude") && !claudeOnly.includes(c),
   );
@@ -402,4 +408,26 @@ test.each([
   // the folder reaches no other code's line
   expect(errorWords("en", "agent.sandbox_wildcard", CLAUDE, place)).toBe(UC471);
   expect(errorWords("en", "matter.folder_backslash", CLAUDE, place)).not.toContain("Test*");
+});
+
+// Claude refused or stopped over its settings (provisional; hi: later, so the Hindi display shows the English): the
+// firm's managed settings turn hooks off (UC-474), a policy any program can write (UC-475), the settings file changed
+// while Claude ran (UC-476). Claude-only, so no agent's name changes them
+const UC474 =
+  "Your firm's Claude settings on this computer switch off a safety check Clauseo needs (the setting disableAllHooks or allowManagedHooksOnly), so Claude can't start here. Start this conversation with Codex instead.";
+const UC475 =
+  "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is gone. Uninstall the program that made it, then try again, or use Codex for now.";
+const UC476 =
+  "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.";
+
+test.each([
+  ["agent.firm_hooks_off", UC474],
+  ["agent.user_policy", UC475],
+  ["agent.settings_changed", UC476],
+] as const)("%s's line, in English in both languages until its Hindi comes", (code, said) => {
+  for (const agent of [CLAUDE, undefined]) {
+    expect(errorWords("en", code, agent)).toBe(said);
+    expect(errorWords("hi", code, agent)).toBe(said);
+  }
+  expect(said).not.toMatch(BANNED_EN);
 });

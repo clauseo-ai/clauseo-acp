@@ -23,6 +23,7 @@ use crate::browser::seed_sites::SEED_SITES;
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
 
+pub(super) mod policy;
 mod sandbox;
 
 use sandbox::session_sandbox;
@@ -227,9 +228,15 @@ pub(super) fn session_loads(
             matter,
             ask_all: forced_ask,
         });
-    if claude.is_some() {
-        check_guard(actor, thread, forced_ask, guard)?;
-    }
+    let admin = match claude {
+        Some(_) => Some(policy::check_guard(
+            actor,
+            thread,
+            (forced_ask, sandbox.is_some()),
+            guard,
+        )?),
+        None => None,
+    };
     let mut meta = loads::session_meta(
         actor
             .profile
@@ -246,6 +253,9 @@ pub(super) fn session_loads(
     }
     let mut servers = lawyer_sent;
     super::super::mcp::left_out(actor, left_out);
+    if let Some(admin) = admin {
+        policy::keep_admin_tier(actor, thread, admin);
+    }
     note_mcp_sent(actor, thread, &trusted, case_law_entry.is_some());
     servers.extend(hook_servers);
     servers.extend(case_law_entry);
@@ -270,35 +280,6 @@ pub(super) fn session_loads(
         Vec::new()
     };
     Ok((meta, servers, directories))
-}
-
-/// A Claude launch's guard hook: without it, a forced-ask session would rest on the ask rules
-/// alone, and a hook that is missing fails open, so it is refused (`agent.guard_missing`);
-/// outside forced ask the launch goes on, with a warn line for support.
-fn check_guard(
-    actor: &Actor,
-    thread: ThreadId,
-    forced_ask: bool,
-    guard: Option<loads::GuardHook<'_>>,
-) -> Result<(), Error> {
-    let Some(reason) = loads::guard_missing(guard) else {
-        return Ok(());
-    };
-    if !forced_ask {
-        tracing::warn!(%thread, reason, "a Claude launch goes without the guard hook");
-        return Ok(());
-    }
-    let matter_id = actor.check_thread(thread)?.row.matter;
-    tracing::warn!(
-        matter = %matter_id,
-        reason,
-        "a forced-ask Claude launch has no guard hook to give: the launch is refused"
-    );
-    Err(Error::refused(
-        ErrorCode::AgentGuardMissing,
-        "this matter's folder is unprotected, and the guard that makes Claude ask before each \
-         change could not be set up",
-    ))
 }
 
 /// The run's snapshot of the lawyer's servers, made at launch ([`lawyer_servers`]), and those

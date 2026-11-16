@@ -253,11 +253,13 @@ fn the_login_follows_the_merged_launch_env() {
         OsString::from("0"),
     )]);
     assert_eq!(Login::of(&hook, &settings, |_| None), Login::FirstParty);
+    // An inherited cloud variable never reaches the agent (`agent::spec::SCRUBBED_PREFIXES`),
+    // so it decides nothing.
     assert_eq!(
         Login::of(&none, &BTreeMap::new(), |name| (name
             == "CLAUDE_CODE_USE_BEDROCK")
             .then(|| OsString::from("true"))),
-        Login::Bedrock
+        Login::FirstParty
     );
     assert_eq!(
         Login::of(&none, &BTreeMap::new(), |name| (name

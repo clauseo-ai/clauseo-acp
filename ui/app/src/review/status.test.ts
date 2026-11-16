@@ -113,7 +113,8 @@ test("U3's ids are written as they are: one per error code but U3-07's and Versi
         !(MARK_KEYS as readonly string[]).includes(key),
     )
     // agent.unreachable's entry came after U3 closed to new ids: it is UC-530 (registry-offline.tsx); the sandbox
-    // refusals' are UC-470 to UC-472 (registry-sandbox-off.tsx)
+    // refusals' are UC-470 to UC-472 (registry-sandbox-off.tsx); Claude's settings ones UC-474 to UC-476
+    // (registry-claude-settings.tsx)
     .filter(
       ([code]) =>
         ![
@@ -121,6 +122,9 @@ test("U3's ids are written as they are: one per error code but U3-07's and Versi
           "matter.folder_wildcard",
           "agent.sandbox_wildcard",
           "agent.sandbox_unavailable",
+          "agent.firm_hooks_off",
+          "agent.user_policy",
+          "agent.settings_changed",
         ].includes(code),
     )
     .map(([code]) => `U3-err-${code}`);

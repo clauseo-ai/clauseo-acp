@@ -269,6 +269,14 @@ export const HI = {
     null,
   "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again. If this keeps happening, ask your firm's IT.":
     null,
+  // agent.firm_hooks_off (UC-474), agent.user_policy (UC-475), agent.settings_changed (UC-476): Claude refused or
+  // stopped over its settings. Provisional English; hi: later
+  "Your firm's Claude settings on this computer switch off a safety check Clauseo needs (the setting disableAllHooks or allowManagedHooksOnly), so Claude can't start here. Start this conversation with Codex instead.":
+    null,
+  "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is gone. Uninstall the program that made it, then try again, or use Codex for now.":
+    null,
+  "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */
