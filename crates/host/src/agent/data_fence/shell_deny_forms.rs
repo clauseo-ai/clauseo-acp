@@ -191,6 +191,8 @@ fn last_name(path: &str) -> &str {
 /// costs: any command naming the name, whatever folder it means, is denied
 /// (`D:\Clauseo Data Export` beside a data folder `Clauseo Data`).
 pub(super) fn alone_name(name: &str, names: &[String], own: &[String]) -> bool {
+    // The default, `ai.clauseo.desktop` (a reverse-DNS app id), starts no name a lawyer's own
+    // file or folder carries, so its rules over-match nothing real.
     if name == clauseo_settings::IDENTIFIER {
         return true;
     }

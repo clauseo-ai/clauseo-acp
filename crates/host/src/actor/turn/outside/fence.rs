@@ -215,7 +215,7 @@ pub(crate) fn tell_unfenced(actor: &mut Actor, thread: ThreadId, unfenced: Vec<M
     if unfenced.is_empty() {
         return;
     }
-    tracing::warn!(%thread, matters = unfenced.len(), "other matters left out of the shell rules");
+    tracing::warn!(%thread, matters = unfenced.len(), "other matters left out of the fence");
     let more = u32::try_from(unfenced.len().saturating_sub(5)).unwrap_or(u32::MAX);
     let notice = Notice {
         level: NoticeLevel::Warning,
