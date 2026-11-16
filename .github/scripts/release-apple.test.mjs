@@ -428,7 +428,7 @@ function checkStepProblems(text) {
   const wanted = [
     'grep -qxF "Authority=$APPLE_SIGNING_IDENTITY" <<< "$info"',
     'grep -qx "TeamIdentifier=$team" <<< "$info"',
-    "grep -q '^Timestamp=' <<< \"$info\"",
+    "grep -q '^Timestamp=' <<< \"$info\" && ! grep -q '^Signed Time=' <<< \"$info\" ||",
     "grep -q ' flags=0x10000(runtime) ' <<< \"$info\"",
     'codesign -d --entitlements - --xml "$1"',
     "for left_out in get-task-allow ",
@@ -478,6 +478,8 @@ test("the Developer ID check holds its codesign, spctl and stapler checks", () =
     text.replace("source=Notarized Developer ID' <<< \"$assessed\" || fail \"Gatekeeper does not see $app", "source=Developer ID' <<< \"$assessed\" || fail \"Gatekeeper does not see $app"),
     text.replace('          xcrun stapler validate "$dmg" || fail "$dmg has no valid', '          true || fail "$dmg has no valid'),
     text.replace("for left_out in get-task-allow ", "for left_out in "),
+    // An untimestamped signature (Signed Time=) let through.
+    text.replace("grep -q '^Timestamp=' <<< \"$info\" && ! grep -q '^Signed Time=' <<< \"$info\" ||", "grep -q '^Timestamp=' <<< \"$info\" ||"),
     text.replace("for left_out in get-task-allow cs.allow-jit ", "for left_out in get-task-allow "),
     text.replace("grep -q ' flags=0x10000(runtime) ' <<< \"$info\"", "true"),
     text.replace('spctl -a -vv -t open --context context:primary-signature "$dmg"', 'spctl -a -vv -t open "$dmg"'),
@@ -731,4 +733,105 @@ test("notaryProblem passes a 200, and names the status of a refusal without the 
   });
   assert.match(shape, /APPLE_API_KEY is not a Key ID/);
   assert.equal(called, false);
+});
+
+// ---- The codesign wrapper: the bundler's signatures are timestamped, or the step fails first ----
+
+/** The wrapper's script, from the bundle step's here-document, or null. */
+function codesignWrapper(text) {
+  const run = stepNamed(text, "build", BUNDLE_STEP)?.run ?? "";
+  const match = run.match(/<< 'CODESIGN'\n([\s\S]*?)\nCODESIGN\n/);
+  return match ? match[1] : null;
+}
+
+/** Where the wrapper is placed wrong: outside a Developer ID leg, or not on PATH before the bundle. */
+function wrapperPlacementProblems(text) {
+  const run = stepNamed(text, "build", BUNDLE_STEP)?.run ?? "";
+  const lines = run.split("\n").map((line) => line.trim());
+  const under = conditions(run);
+  const written = lines.indexOf(`cat > "$apple/bin/codesign" << 'CODESIGN'`);
+  const onPath = lines.indexOf("export PATH=$apple/bin:$PATH");
+  const bundled = lines.findIndex((line) => /\btauri bundle\b/.test(line));
+  if (written === -1 || onPath === -1) {
+    return ["the bundle step writes no codesign wrapper, or does not put it first in PATH"];
+  }
+  const problems = [];
+  if (!under[written].includes(ON_DEVELOPER_ID) || !under[onPath].includes(ON_DEVELOPER_ID)) {
+    problems.push("the codesign wrapper is outside the Developer ID branch");
+  }
+  if (!(written < onPath && onPath < bundled)) {
+    problems.push("the codesign wrapper is not first in PATH before tauri bundle");
+  }
+  return problems;
+}
+
+/** What the wrapper gets wrong, run with a fake /usr/bin/codesign. */
+function wrapperProblems(wrapper) {
+  if (wrapper === null) {
+    return ["no codesign wrapper"];
+  }
+  const dir = mkdtempSync(join(tmpdir(), "codesign-wrapper-"));
+  try {
+    const log = join(dir, "calls.log");
+    // The fake logs each call's arguments; -dvv shows the line $STAMP names.
+    writeFileSync(
+      join(dir, "fake-codesign"),
+      `#!/bin/bash\necho "$*" >> "${log}"\nif [ "$1" = -dvv ]; then echo "$STAMP=Nov 16, 2026 at 10:00:00" >&2; fi\nexit 0\n`,
+    );
+    chmodSync(join(dir, "fake-codesign"), 0o755);
+    writeFileSync(join(dir, "codesign"), wrapper.replaceAll("/usr/bin/codesign", join(dir, "fake-codesign")));
+    chmodSync(join(dir, "codesign"), 0o755);
+    const call = (args, stamp = "Timestamp") => {
+      writeFileSync(log, "");
+      const result = spawnSync(join(dir, "codesign"), args, { env: { ...process.env, STAMP: stamp }, encoding: "utf8" });
+      const calls = readFileSync(log, "utf8").trim().split("\n");
+      return { status: result.status, out: `${result.stdout}${result.stderr}`, calls };
+    };
+    const problems = [];
+    const sign = ["--force", "-s", "Developer ID Application: T (ABCDE12345)", "--options", "runtime", "Clauseo.app"];
+    const signed = call(sign);
+    if (signed.status !== 0 || signed.calls[0] !== `--timestamp ${sign.join(" ")}` || signed.calls[1] !== "-dvv Clauseo.app") {
+      problems.push(`a signing is not given --timestamp and checked: ${JSON.stringify(signed)}`);
+    }
+    const already = call(["--force", "-s", "X", "--timestamp", "helper"]);
+    if (already.calls[0] !== "--force -s X --timestamp helper") {
+      problems.push(`a signing with --timestamp gets a second one: ${already.calls[0]}`);
+    }
+    const untimestamped = call(sign, "Signed Time");
+    if (untimestamped.status === 0 || !untimestamped.out.includes("without a secure timestamp")) {
+      problems.push("a signature showing Signed Time= (no secure timestamp) is not refused");
+    }
+    const looked = call(["-dvv", "Clauseo.app"]);
+    if (looked.status !== 0 || looked.calls.join("|") !== "-dvv Clauseo.app") {
+      problems.push(`a call that signs nothing is changed: ${looked.calls.join("|")}`);
+    }
+    return problems;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("the bundler's codesign gets --timestamp, and a signature without one fails before notarisation", { skip: !haveBash || process.platform === "win32" }, () => {
+  const text = workflow();
+  assert.deepEqual(wrapperPlacementProblems(text), []);
+  const wrapper = codesignWrapper(text);
+  assert.deepEqual(wrapperProblems(wrapper), []);
+  // Broken on purpose: no --timestamp added; no check after signing; on PATH only after the bundle.
+  const noStamp = wrapper.replace("stamp=(--timestamp)", "stamp=()");
+  assert.notEqual(noStamp, wrapper);
+  assert.notDeepEqual(wrapperProblems(noStamp), []);
+  const lax = wrapper.replace(
+    "if ! grep -q '^Timestamp=' <<< \"$info\" || grep -q '^Signed Time=' <<< \"$info\"; then",
+    "if false; then",
+  );
+  assert.notEqual(lax, wrapper);
+  assert.notDeepEqual(wrapperProblems(lax), []);
+  const late = text
+    .replace("            export PATH=$apple/bin:$PATH\n", "")
+    .replace(
+      '          if [ "$DEVELOPER_ID" = true ]; then\n            dmg=',
+      '          if [ "$DEVELOPER_ID" = true ]; then\n            export PATH=$apple/bin:$PATH\n            dmg=',
+    );
+  assert.notEqual(late, text);
+  assert.notDeepEqual(wrapperPlacementProblems(late), []);
 });
