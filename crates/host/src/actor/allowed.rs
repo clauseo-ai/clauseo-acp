@@ -126,6 +126,11 @@ enum Held {
 }
 
 impl AllowState {
+    /// The views every launch's proxy takes its matter's allowed sites from.
+    pub(crate) fn sites(&self) -> &Arc<AllowedSites> {
+        &self.sites
+    }
+
     /// Nothing noticed or stored yet; the file in `data_dir`, read by [`start`].
     pub(crate) fn new(data_dir: &Path) -> Self {
         Self {

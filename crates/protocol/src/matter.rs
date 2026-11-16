@@ -46,6 +46,8 @@ open_unit_enum! {
         Undo,
         /// A restore of an earlier version.
         Restore,
+        /// Tracked changes of a Word file accepted or rejected (`HostCommand::DecideRevisions`).
+        Revisions,
     }
     test mod checkpoint_kind;
 }

@@ -24,6 +24,7 @@ import { sx } from "@clauseo/components/lib/words-signin-expired.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { CODEX, setupStoreOf, type SetupSource, type SetupStore } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
+import { useOnline } from "../../transport/online.ts";
 import type { AgentId, SignIn, Timestamp } from "../../transport/protocol.ts";
 import { againLine, expiredOf } from "./expired-state.ts";
 import type { NoticeFrame } from "../first-run/hold.ts";
@@ -93,6 +94,7 @@ export function ExpiredCard({
     () => store.state().pasting,
   );
   const { lang } = useDisplay();
+  const online = useOnline();
   const plan: Plan = agent === CODEX ? "chatgpt" : "claude";
   const name = NAME[plan];
   const app = APP[plan];
@@ -165,7 +167,15 @@ export function ExpiredCard({
                 )
               : kept
           }
-          actions={gate(gateView(setup, { ...store.state(), keyOpen: false, pasting }, clock))}
+          actions={gate(
+            gateView(
+              setup,
+              { ...store.state(), keyOpen: false, pasting },
+              clock,
+              undefined,
+              online,
+            ),
+          )}
         />
       );
       break;

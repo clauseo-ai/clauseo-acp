@@ -111,7 +111,7 @@ test("not required, the note is unchanged: the cause's body, and it opens by its
   expect(noteText()).toContain(
     pw(
       "en",
-      "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+      "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer.",
     ),
   );
   expect(h!.one("protection-required")).toBeNull();

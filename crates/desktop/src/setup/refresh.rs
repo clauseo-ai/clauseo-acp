@@ -3,7 +3,8 @@
 //! launch hook, whether it has an endpoint or provider, whether a firm policy sets one, and
 //! whether an unreadable policy blocks it (`firm_policy.rs`, which also brings the
 //! `firm-policy` markers up to date), and the network facts the agents' proxy and CA files are
-//! resolved from (`network.rs`: the next install, sign-in and launch take them).
+//! resolved from (`network.rs`: the next install, sign-in and launch take them), and which
+//! agents Clauseo installed here before (their `agents.<id>` entry, #859).
 //!
 //! [`apply_settings`] tells [`Compose`](super::compose::Compose) what changed. A
 //! firm policy's endpoint or provider that arrives ends a running sign-in quietly, the same
@@ -23,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::PoisonError;
 
 use clauseo_protocol::AgentId;
-use clauseo_settings::{Effective, Plan, SystemFiles};
+use clauseo_settings::{Effective, Plan, SystemFiles, launch_is_clauseos};
 
 use super::backend::AgentsBackend;
 use super::firm_policy::firm_policy;
@@ -45,6 +46,10 @@ pub(crate) struct SettingsRead {
     pub(crate) plans: BTreeMap<AgentId, Plan>,
     /// What the network route is resolved from (`setup/network.rs`).
     pub(crate) network: NetworkFacts,
+    /// Those Clauseo installed here before: their `agents.<id>` entry is Clauseo's own, written
+    /// at an earlier install's `Ready` and kept when the install folder goes. A `Missing` for
+    /// one says `installed_before` (#859).
+    pub(crate) installed: BTreeSet<AgentId>,
 }
 
 impl SettingsRead {
@@ -69,6 +74,7 @@ impl SettingsRead {
             .cloned()
             .collect();
         let network = NetworkFacts::read(effective, known.clone());
+        let installed = installed_before(effective, known.clone());
         let blocked = firm_policy(effective, &SystemFiles, known);
         Self {
             firm,
@@ -76,8 +82,27 @@ impl SettingsRead {
             blocked,
             plans: plans_of(effective),
             network,
+            installed,
         }
     }
+}
+
+/// The agents of `known` whose `agents.<id>` entry is Clauseo's install (`launch_is_clauseos`)
+/// and not set by policy (IT's runtime is never Clauseo's install).
+pub(crate) fn installed_before<'a>(
+    effective: &Effective,
+    known: impl IntoIterator<Item = &'a AgentId>,
+) -> BTreeSet<AgentId> {
+    known
+        .into_iter()
+        .filter(|agent| !effective.is_locked(&format!("agents.{agent}")))
+        .filter(|agent| {
+            effective
+                .agent(agent.as_str())
+                .is_some_and(|launch| launch_is_clauseos(launch, effective.data_dir()))
+        })
+        .cloned()
+        .collect()
 }
 
 /// Takes in `read`: the plans snapshot and the readers' blocked agents, then each agent's facts

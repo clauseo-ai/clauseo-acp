@@ -144,6 +144,12 @@ fn the_first_act_sweeps_and_cleans_before_the_launch_and_the_agent() {
             "report Exited { code: 3 }",
         ]
     );
+    // The first act is the session's one cleanup (HKCU classes, Run, RunOnce, Startup): once,
+    // before the launch is read and the agent starts, and never at the end.
+    assert_eq!(
+        record.done.iter().filter(|step| *step == "clean").count(),
+        1
+    );
     // The cleanup's line came before ctl opened: the real calls hold it until `connect`.
     assert_eq!(record.lines.len(), 1);
     assert!(!record.lines[0].1);

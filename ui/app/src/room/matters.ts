@@ -12,11 +12,14 @@ import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { pickReopenMatter } from "../store/reopen.ts";
 import { ActRefusals } from "./act-refusals.ts";
-import type { HostTransport } from "../transport/host-transport.ts";
+import { LocateHeld } from "./locate-held.ts";
+import { LocateRefusals } from "./locate-refusal.ts";
+import { toHostError, type HostTransport } from "../transport/host-transport.ts";
 import type {
   FolderRefId,
   FolderScanned,
   FolderSupportKind,
+  HostError,
   MatterId,
   MatterSummary,
   ThreadId,
@@ -170,6 +173,10 @@ export class Matters {
   readonly #listeners = new Set<() => void>();
   /** What the lawyer's last open or show on each matter was refused with (act-refusals.ts). */
   readonly refusals = new ActRefusals();
+  /** A Locate held for its step: a folder picked whose name has a backslash (locate-held.ts). */
+  readonly located = new LocateHeld();
+  /** What the open matter's last Locate was refused with, said under its moved folder's line (locate-refusal.ts). */
+  readonly locateRefused = new LocateRefusals();
   #view: MattersView;
   /** Thread views the room watches without the matters part, for their headers: the open thread, and threads of left
    * matters still working. */
@@ -322,15 +329,35 @@ export class Matters {
   }
 
   /** H3: asks for the folder of a matter that moved, and tells the host where it is now. `around` runs the picker, so a
-   * caller can show its wait; left out, the pick runs as it is. */
+   * caller can show its wait; left out, the pick runs as it is. A folder Claude can't start in waits for Locate's step
+   * (`located`), which picks again or relocates there. */
   async locate(
     matter: MatterId,
     around: <T>(pick: () => Promise<T>) => Promise<T> = (pick) => pick(),
   ): Promise<void> {
     const picked = await around(() => this.#transport.pickFolder());
     if (picked === null) return;
+    // a new pick takes back what the last one was refused with: the lawyer can pick again
+    this.locateRefused.clear(matter);
+    if (this.located.warns(picked.display)) {
+      const { folder, display } = picked;
+      const again = () => this.locate(matter, around);
+      const anyway = () => this.#relocate(matter, folder, display);
+      return this.located.hold({ matter, display, again, anyway });
+    }
+    await this.#relocate(matter, picked.folder, picked.display);
+  }
+
+  /** Relocates `matter` to `folder`; a refusal stands in `locateRefused`, with the folder as it shows. */
+  async #relocate(matter: MatterId, folder: FolderRefId, display: string): Promise<void> {
     this.refusals.clear(matter);
-    await this.#command({ relocate_matter: { matter, folder: picked.folder } }, "relocate_matter");
+    const refused = await this.#command({ relocate_matter: { matter, folder } }, "relocate_matter");
+    if (refused !== null)
+      this.locateRefused.refuse(matter, {
+        code: refused.code,
+        matter: refused.matter,
+        path: display,
+      });
   }
 
   /** H11: shows the matter's folder in Finder or File Explorer; a refusal stands in `refusals`
@@ -387,14 +414,19 @@ export class Matters {
     });
   }
 
-  async #command(command: MattersCommand, name: string): Promise<void> {
-    if (this.#rows === null) return;
+  /** Sends a matters command and reads the list again. Its refusal is the answer (null when it went through): the
+   * caller says it, and the console has it. */
+  async #command(command: MattersCommand, name: string): Promise<HostError | null> {
+    if (this.#rows === null) return null;
+    let refused: HostError | null = null;
     try {
       await this.#rows.command(command);
     } catch (error) {
+      refused = toHostError(error);
       console.warn(`${name} failed: ${JSON.stringify(error)}`);
     }
     await this.refresh();
+    return refused;
   }
 
   /** An app event (H4): held until the frame, so a burst is one apply and one render. */

@@ -47,7 +47,7 @@ Sources are in `crates/profile/assets/skills/<name>/`, each `SKILL.md` with flat
 
 **Departure from research 25:** research 25 puts a short views paragraph in the research skill (25:463). R22 leaves it out, because typed views are not in the launch scope.
 
-Skills name what to do, never which tool to call: "use your own file tools", "edit the lawyer's Word file with stetdoc", "search and read pages with your web tools and the browser". No v2 tool name appears in shipped text.
+Skills name what to do, never which tool to call: "use your own file tools", "edit the lawyer's Word file with stetdoc", "search and read pages with your web tools". No v2 tool name appears in shipped text.
 
 ### The matter brief and its folder
 
@@ -73,6 +73,8 @@ Two agents may edit the brief close together, and there is no lock. The `matter-
 | Codex's skills index | at most 150 words |
 
 Amended by 0040 (skill packs): the 150 words cover the built-in lines; with a launch's pack lines after them, the whole index is at most 600 words, 4,800 characters and 40 entries.
+
+Amended by 0058 (identity, chat, saved-file and new-document rules): `legal.md` at most 1,360 words, the whole instructions, with the stetdoc line, at most 1,800. Amended again in 0058 by #1123: each agent's whole standing text has its own cap (Claude 2,250, Codex 2,000); `legal.md` stays at most 1,360 and the shared text at most 1,800.
 
 Words are counted by splitting on whitespace, as `wc -w` does. At launch: `legal.md` 1,168 words, the whole (tools part and `legal.md`) 1,362, and Codex's index 82 with stetdoc's skill and a data folder at `/data`, so Codex's `developer_instructions` is 1,444 words there. A data folder whose path holds spaces adds those words once per index line, and the host's filled folders add theirs: with `/Users/Ann Mary/Library/Application Support/Clauseo` and the work and notes folders filled, the index is 90 words, the shared text 1,370 and Codex's whole 1,460, under 1,500 (`the_budgets_hold_for_a_long_macos_path_with_the_folders_filled`).
 

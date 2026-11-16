@@ -207,7 +207,7 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "${IfNot} ${Silent}",
         "${AndIf} $PassiveMode <> 1",
         "${AndIf} $UpdateMode <> 1",
-        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyAppRunning)\"",
+        "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyAppRunning)\"",
         "${EndIf}",
         "${Else}",
         "!insertmacro CLAUSEO_RECORD_CHECK \"\"",
@@ -256,7 +256,7 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "${IfNot} ${Silent}",
         "${AndIf} $PassiveMode <> 1",
         "${AndIf} $UpdateMode <> 1",
-        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(setupExeRemoved)\"",
+        "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(setupExeRemoved)\"",
         "${EndIf}",
         "${Else}",
         "DetailPrint \"$(adminCopyMachineFailed)\"",
@@ -264,7 +264,7 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_FAILED}",
         "${ElseIf} $PassiveMode <> 1",
         "${AndIf} $UpdateMode <> 1",
-        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyMachineFailed)\"",
+        "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyMachineFailed)\"",
         "${EndIf}",
         "${EndIf}",
     ];
@@ -413,15 +413,17 @@ pub(super) fn firm_it_codes(firm: &str, heading: &str) -> Vec<u8> {
 #[test]
 fn the_installers_exit_codes_are_the_ones_firm_it_lists_by_mode() {
     let code = admin_code();
-    // The values themselves: admin_copy_ask.rs's the_installers_exit_codes_are_their_own.
+    // The values themselves: admin_copy_ask.rs's the_installers_exit_codes_are_their_own. 28,
+    // Clauseo.exe gone after the files are placed, both installers in every mode, is
+    // app_exe_missing.rs's.
     let firm = read("../../docs/firm-it.md");
     assert_eq!(
         firm_it_codes(&firm, "What a silent (`/S`) install can return:"),
-        [20, 22, 23, 24, 25]
+        [20, 22, 23, 24, 25, 28]
     );
     assert_eq!(
         firm_it_codes(&firm, "What an interactive install can also return:"),
-        [20, 24]
+        [20, 24, 28]
     );
     // Per user, 24 only past the /S and /P skip, which sets 22; 23 under /S also when the wait
     // ran out.
@@ -445,7 +447,7 @@ fn the_installers_exit_codes_are_the_ones_firm_it_lists_by_mode() {
     assert_run(
         temp,
         &[
-            "MessageBox MB_OK|MB_ICONSTOP \"$(installTempFailed)\" /SD IDOK",
+            "MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST \"$(installTempFailed)\" /SD IDOK",
             "!endif",
             "${EndIf}",
             "SetErrorLevel ${CLAUSEO_EXIT_TEMP_FAILED}",

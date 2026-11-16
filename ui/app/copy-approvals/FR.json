@@ -11,26 +11,15 @@
     "note": "Rohan, on the folder-rights copy page"
   },
   "FR-02": {
-    "en": "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and Codex inside the matter. Some edits won't go through.",
-    "hi": "आप यहाँ फ़ाइलें बदल सकते हैं, पर इस फ़ोल्डर की अनुमतियाँ नहीं। Claude और Codex को मामले के भीतर रखने के लिए Clauseo को इनकी ज़रूरत है। कुछ संपादन नहीं हो पाएँगे।",
+    "en": "Clauseo can't add its protection to this folder, so it asks before each edit. In a folder you made yourself on this computer, such as one in Documents, it doesn't need to ask.",
+    "hi": "Clauseo इस फ़ोल्डर में अपनी सुरक्षा नहीं जोड़ सकता, इसलिए हर संपादन से पहले पूछता है। इस कंप्यूटर पर आपके खुद बनाए फ़ोल्डर में, जैसे Documents के किसी फ़ोल्डर में, उसे पूछने की ज़रूरत नहीं होती।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
-    "at": "2026-11-05",
-    "by": "Rohan",
-    "note": "Rohan's approved line with 'the agent' replaced by 'Claude and Codex' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
-  },
-  "FR-03": {
-    "en": "What to tell IT",
-    "hi": "IT को क्या बताएँ",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the folder-rights copy page"
+    "at": "2026-11-11",
+    "by": "orchestrator (IT sweep, 2026-11-11)",
+    "note": "why the bar asks, and where it needn't; was \"You can change files here, but not this folder's permissions…\" (IT sweep: What to tell IT, FR-03 and FR-05, retired)"
   },
   "FR-04": {
     "en": "Close",
@@ -39,17 +28,6 @@
     "at": "2026-11-04",
     "by": "Rohan",
     "note": "Rohan, on the folder-rights copy page"
-  },
-  "FR-05": {
-    "en": "Please give my account \"Change permissions\" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder's permissions so Claude and Codex, which it runs, can write only inside it. / Copy",
-    "hi": "कृपया इस फ़ोल्डर पर मेरे खाते को \"Change permissions\" दें: {path}। इस मामले के लिए मेरा ऐप Clauseo फ़ोल्डर की अनुमतियों में एक प्रविष्टि जोड़ता है, ताकि वह जिन Claude और Codex को चलाता है, वे केवल इसी फ़ोल्डर के भीतर लिख सकें। / कॉपी करें",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-05",
-    "by": "Rohan",
-    "note": "Rohan's approved line with 'the agent' replaced by 'Claude and Codex' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "FR-06": {
     "en": "Can't set folder permissions / Clauseo can't change this folder's permissions, so it asks before each edit.",
@@ -74,15 +52,15 @@
     "note": "Rohan, on the folder-rights copy page"
   },
   "FR-08": {
-    "en": "Claude asks before every change. Codex can't work here. / Clauseo can't keep Claude and Codex inside a folder on a network drive.",
-    "hi": "Claude हर बदलाव से पहले पूछता है। Codex यहाँ काम नहीं कर सकता। / Clauseo, Claude और Codex को नेटवर्क ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता।",
+    "en": "Claude asks before every change. ChatGPT can't work here. / Clauseo can't keep Claude and ChatGPT inside a folder on a network drive.",
+    "hi": "Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / Clauseo, Claude और ChatGPT को नेटवर्क ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-05",
-    "by": "Rohan",
-    "note": "Rohan's approved line with 'an agent' replaced by 'Claude and Codex' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
+    "note": "Rohan's approved line with 'an agent' replaced by 'Claude and ChatGPT' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "FR-09": {
     "en": "Choose another folder",
@@ -115,14 +93,14 @@
     "note": "Rohan, on the folder-rights copy page"
   },
   "FR-12": {
-    "en": "On a network drive. / Claude asks before every change. Codex can't work here. / This matter's folder is on a network drive / Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
-    "hi": "नेटवर्क ड्राइव पर। / Claude हर बदलाव से पहले पूछता है। Codex यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर नेटवर्क ड्राइव पर है / Clauseo, Claude और Codex को इस फ़ोल्डर के भीतर नहीं रख सकता। सुरक्षित कार्यक्षेत्र में काम करने के लिए मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ।",
+    "en": "On a network drive. / Claude asks before every change. ChatGPT can't work here. / This matter's folder is on a network drive / Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside a folder on a network drive.",
+    "hi": "नेटवर्क ड्राइव पर। / Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर नेटवर्क ड्राइव पर है / मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ, ताकि आप यहाँ ChatGPT का उपयोग कर सकें और Claude हर बदलाव से पहले पूछे बिना काम कर सके। Clauseo उन्हें नेटवर्क ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-09",
+    "by": "app track (no Safe workspace at launch; info line settled by the orchestrator)"
   },
   "FR-13": {
     "en": "No file permissions / This drive doesn't keep file permissions",
@@ -136,25 +114,25 @@
     "note": "Rohan, on the folder-rights copy page"
   },
   "FR-14": {
-    "en": "Claude asks before every change. Codex can't work here. / Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
-    "hi": "Claude हर बदलाव से पहले पूछता है। Codex यहाँ काम नहीं कर सकता। / Clauseo, Claude और Codex को इस ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता। USB ड्राइव अक्सर अनुमतियाँ नहीं रखतीं।",
+    "en": "Claude asks before every change. ChatGPT can't work here. / Clauseo can't keep Claude and ChatGPT inside a folder on this drive. USB drives often don't keep permissions.",
+    "hi": "Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / Clauseo, Claude और ChatGPT को इस ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता। USB ड्राइव अक्सर अनुमतियाँ नहीं रखतीं।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-05",
-    "by": "Rohan",
-    "note": "Rohan's approved line with 'an agent' replaced by 'Claude and Codex' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
-  },
-  "FR-15": {
-    "en": "No file permissions. / Claude asks before every change. Codex can't work here. / This matter's folder is on a drive that doesn't keep file permissions / Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
-    "hi": "फ़ाइल अनुमतियाँ नहीं। / Claude हर बदलाव से पहले पूछता है। Codex यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर ऐसी ड्राइव पर है जो फ़ाइल अनुमतियाँ नहीं रखती / Clauseo, Claude और Codex को इस फ़ोल्डर के भीतर नहीं रख सकता। USB ड्राइव अक्सर अनुमतियाँ नहीं रखतीं। सुरक्षित कार्यक्षेत्र में काम करने के लिए मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-09",
+    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
+    "note": "Rohan's approved line with 'an agent' replaced by 'Claude and ChatGPT' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
+  },
+  "FR-15": {
+    "en": "No file permissions. / Claude asks before every change. ChatGPT can't work here. / This matter's folder is on a drive that doesn't keep file permissions / Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside this folder, and USB drives often don't keep file permissions.",
+    "hi": "फ़ाइल अनुमतियाँ नहीं। / Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर ऐसी ड्राइव पर है जो फ़ाइल अनुमतियाँ नहीं रखती / मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ, ताकि आप यहाँ ChatGPT का उपयोग कर सकें और Claude हर बदलाव से पहले पूछे बिना काम कर सके। Clauseo उन्हें इस फ़ोल्डर के भीतर नहीं रख सकता, और USB ड्राइव अक्सर फ़ाइल अनुमतियाँ नहीं रखतीं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (no Safe workspace at launch; info line settled by the orchestrator)"
   },
   "FR-20": {
     "en": "Clauseo couldn't check this folder, so Claude asks before every change.",
@@ -176,5 +154,104 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "FR-22": {
+    "en": "Open Privacy settings",
+    "hi": "गोपनीयता सेटिंग्स खोलें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator settled the words 2026-11-10, copy review pending)",
+    "note": "macOS only: the button under matter.folder_permission's stop; it opens System Settings at Privacy & Security, Files and Folders (the desktop's open_privacy_settings)"
+  },
+  "FR-23": {
+    "en": "Turn on access for Clauseo, then ask again.",
+    "hi": "Clauseo के लिए एक्सेस चालू करें, फिर दोबारा पूछें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; orchestrator settled the words 2026-11-10, copy review pending)",
+    "note": "macOS only: the line under Open Privacy settings"
+  },
+  "FR-24": {
+    "en": "This folder's name has a backslash (\\). / Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder. / This folder's name has a backslash",
+    "hi": "इस फ़ोल्डर के नाम में बैकस्लैश (\\) है। / Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें। / इस फ़ोल्डर के नाम में बैकस्लैश है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On macOS and Linux, New matter's warning for a folder whose name has a backslash, where Claude can't start (the host refuses it as matter.folder_backslash); Choose another folder (FR-09) and Create anyway (FR-10)"
+  },
+  "FR-25": {
+    "en": "This folder's name has a backslash (\\). / Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.",
+    "hi": "इस फ़ोल्डर के नाम में बैकस्लैश (\\) है। / Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "Locate's step for a folder picked whose name has a backslash, on macOS and Linux: FR-24's title and body, then Choose another folder (FR-09) and Locate anyway (FR-26)"
+  },
+  "FR-26": {
+    "en": "Locate anyway",
+    "hi": "फिर भी यही फ़ोल्डर चुनें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "Locate's step's other button: relocates the matter to the folder with a backslash anyway"
+  },
+  "FR-27": {
+    "en": "Claude can't work in a folder like this; ChatGPT can. Rename it in your file manager first, or choose another folder.",
+    "hi": "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले अपने फ़ाइल मैनेजर में इसका नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On Linux, New matter's warning for a folder whose own name has a backslash: its body, naming the file manager (title and name as FR-24); Locate's step and the first screen's say the same"
+  },
+  "FR-28": {
+    "en": "The folder \"{folder}\" in this folder's path has a backslash (\\). / Claude can't work in a folder like this; ChatGPT can. Rename that folder in Finder first, or choose another folder. / A folder in this folder's path has a backslash",
+    "hi": "इस फ़ोल्डर के पाथ में मौजूद फ़ोल्डर \"{folder}\" के नाम में बैकस्लैश (\\) है। / Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले Finder में उस फ़ोल्डर का नाम बदलें, या दूसरा फ़ोल्डर चुनें। / इस फ़ोल्डर के पाथ में किसी फ़ोल्डर के नाम में बैकस्लैश है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On the Mac, New matter's warning when a folder above the one picked has the backslash, named by {folder} (the nearest): its title, body and accessible name; Locate's step and the first screen's say the same"
+  },
+  "FR-29": {
+    "en": "Claude can't work in a folder like this; ChatGPT can. Rename that folder in your file manager first, or choose another folder.",
+    "hi": "Claude ऐसे फ़ोल्डर में काम नहीं कर सकता; ChatGPT कर सकता है। पहले अपने फ़ाइल मैनेजर में उस फ़ोल्डर का नाम बदलें, या दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On Linux, the same as FR-28: its body, naming the file manager"
+  },
+  "FR-30": {
+    "en": "Open anyway",
+    "hi": "फिर भी खोलें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (draft; Rohan to approve)",
+    "note": "On macOS and Linux, the first screen's Open the folder, a folder picked whose path has a backslash: the step's other button, which opens the folder as a matter anyway (the step's words as FR-24 or FR-28; Choose another folder as FR-09)"
   }
 }

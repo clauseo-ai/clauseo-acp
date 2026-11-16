@@ -1,6 +1,7 @@
 // The first screen for a plan that is installed but not signed in: the plan's Sign in on the working line at the foot,
 // where a missing plan's install line stands, sending the room gate's start_sign_in; a sign-in under way says the
-// gate's words with its Cancel and no second Sign in; a signed-in or locked plan shows none.
+// gate's words with its Cancel and no second Sign in; a status check under way says it is checking, with Sign in busy;
+// a signed-in or locked plan shows none.
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
 import {
@@ -23,7 +24,7 @@ import type { SignIn } from "../../transport/protocol.ts";
 const line = () => byId("signin-foot");
 const signInButtons = () => [...allById("signin-foot-sign-in"), ...allById("install-sign-in")];
 
-test("installed and signed out: the foot says Claude is ready with Sign in, which sends the room gate's start_sign_in", async () => {
+test("installed and signed out: the foot says Claude is ready with Sign in with Claude, which sends the room gate's start_sign_in", async () => {
   const t = await mountFirstRun({
     matters: [],
     first: [install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })],
@@ -31,7 +32,7 @@ test("installed and signed out: the foot says Claude is ready with Sign in, whic
   expect(line()?.dataset["state"]).toBe("signed-out");
   expect(byId("install-said")?.textContent).toBe("Claude is ready");
   const sign = byId("signin-foot-sign-in");
-  expect(sign?.textContent).toBe("Sign in");
+  expect(sign?.textContent).toBe("Sign in with Claude");
   expect(byId("signin")).toBeNull();
   expect(setups(t)).toEqual([]);
   await press(sign);
@@ -52,6 +53,17 @@ test("installed and signed out: the foot says Claude is ready with Sign in, whic
   expect(signInButtons()).toEqual([]);
 });
 
+test("installed, the sign-in status check still running: the foot is the checking line, not Claude is ready with Sign in", async () => {
+  await mountFirstRun({ matters: [], first: [install(CLAUDE, READY), signIn(CLAUDE, "checking")] });
+  expect(line()).toBeNull();
+  expect(byId("install-foot")?.dataset["state"]).toBe("checking");
+  expect(text()).toContain("Checking whether you're signed in to Claude…");
+  expect(byId("install-foot")?.textContent).not.toContain("is ready");
+  expect(byId("signin-foot-sign-in")).toBeNull();
+  expect(signInButtons()).toHaveLength(1);
+  expect(byId<HTMLButtonElement>("install-sign-in")?.disabled).toBe(true);
+});
+
 test("installed by the firm and signed out: the same Sign in", async () => {
   await mountFirstRun({
     matters: [],
@@ -61,16 +73,36 @@ test("installed by the firm and signed out: the same Sign in", async () => {
   expect(byId("signin-foot-sign-in")).not.toBeNull();
 });
 
-test("a sign-in that stopped: Sign in again on the foot", async () => {
+test("a sign-in that stopped (not a cancel): Claude is ready with Sign in on the foot", async () => {
   await mountFirstRun({
     matters: [],
     first: [
       install(CLAUDE, READY),
-      signIn(CLAUDE, { failed: { code: "signin.cancelled", at: 0 } }),
+      signIn(CLAUDE, { failed: { code: "signin.link_expired", at: 0 } }),
     ],
   });
   expect(line()?.dataset["state"]).toBe("failed");
-  expect(byId("signin-foot-sign-in")?.textContent).toBe("Sign in");
+  expect(byId("signin-foot-sign-in")?.textContent).toBe("Sign in with Claude");
+});
+
+test("D-007: a cancelled sign-in says so with Sign in again, never Claude is ready", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    first: [install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })],
+  });
+  await press(byId("signin-foot-sign-in"));
+  await play(t, signIn(CLAUDE, { waiting: { since: 0, nudge: false } }));
+  await press(byId("signin-foot-cancel"));
+  // the browser's Cancel, as desktop says it
+  await play(t, signIn(CLAUDE, { failed: { code: "signin.cancelled", at: 0 } }));
+  expect(line()?.dataset["state"]).toBe("cancelled");
+  const row = byId("install-foot")?.closest("[data-testid=plan-row]")?.textContent ?? text();
+  expect(row).toContain("Sign-in was cancelled.");
+  expect(row).not.toContain("is ready");
+  expect(byId("install-said")?.textContent).toContain("Sign-in was cancelled.");
+  expect(byId("signin-foot-sign-in")?.textContent).toBe("Sign in again");
+  await press(byId("signin-foot-sign-in"));
+  expect(setups(t).at(-1)).toEqual({ start_sign_in: { agent: CLAUDE } });
 });
 
 test("signed in, with a plan, a key or the firm's account: no Sign in on the foot", async () => {

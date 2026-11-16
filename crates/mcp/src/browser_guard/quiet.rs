@@ -6,8 +6,11 @@
 //!
 //! Nothing else weakens a security control; Safe Browsing's warnings are given up (ADR 0029).
 //! No certificate, sandbox, web-security or site isolation change. Safe Browsing is off, so its
-//! list updates and lookups never leave; the session's egress proxy and deny list are the
-//! control on where the browser goes.
+//! list updates and lookups never leave. Where the browser goes is bounded by the guard's URL
+//! filter (`filter.rs`) and, when the host gives one, the session's egress proxy and deny list;
+//! the plain client's Codex entry has no proxy, so like Claude's shell browser a redirect or a
+//! page's own navigation reaches any address, loopback and private ones included, past the
+//! filter's check of the address it is given (decision record 0029, the accepted residual).
 
 /// Chrome's one `--disable-features` and one `--enable-features` (Chrome reads only the last of
 /// each): agent-browser's own entries plus the features below, by Chromium's exact names.
@@ -20,10 +23,13 @@ pub(crate) const FEATURES: [&str; 2] = [
     // predictions (content-autofill.googleapis.com).
     "--disable-features=Translate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,\
      PreconnectToSearch,MediaRouter,AutofillServerCommunication",
-    // agent-browser's entries, plus SkipListAccountsWithoutGaiaCookies: no accounts.google.com
-    // ListAccounts without a Google cookie (Chrome 155 and later; earlier Chrome ignores it,
-    // and `--gaia-url` below covers them).
-    "--enable-features=NetworkService,NetworkServiceInProcess,WebMCPTesting,\
+    // agent-browser's entries less NetworkServiceInProcess, the network service in the browser's
+    // process and out of its sandbox (`chrome/sandbox.rs`; current Chrome reads it only as
+    // NetworkServiceInProcess2, `content_features.cc`, so it did nothing there), plus
+    // SkipListAccountsWithoutGaiaCookies: no accounts.google.com ListAccounts without a Google
+    // cookie (Chrome 155 and later; earlier Chrome ignores it, and `--gaia-url` below covers
+    // them).
+    "--enable-features=NetworkService,WebMCPTesting,\
      DevToolsWebMCPSupport,SkipListAccountsWithoutGaiaCookies",
 ];
 
@@ -79,5 +85,8 @@ pub(crate) fn preferences() -> serde_json::Value {
         "browser": {"enable_spellchecking": false},
         "url_keyed_anonymized_data_collection": {"enabled": false},
         "autofill": {"profile_enabled": false, "credit_card_enabled": false},
+        // A PDF link downloads rather than opening in Chrome's viewer, so agent-browser's
+        // `download` gets its download event.
+        "plugins": {"always_open_pdf_externally": true},
     })
 }

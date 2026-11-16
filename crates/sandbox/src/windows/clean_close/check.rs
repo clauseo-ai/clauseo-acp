@@ -20,7 +20,10 @@ use crate::windows::set_aside;
 /// (`OtherAccount`, `AdminCopyMissing`, `AdminCopyChanged`, `AdminCopyUnsafe`, or `ToolMissing`
 /// for a copy gone after Windows security blocked it) and nothing
 /// is read or removed: without a copy only administrators can
-/// change, tier B can't top up, reclaim or be removed safely, so it doesn't run. Then, under the
+/// change, tier B can't top up, reclaim or be removed safely, so it doesn't run. Then every
+/// unclean-session marker awaiting a sweep must be clean, or become clean within 15 s of a sweep
+/// this asks for (`runner::unclean::await_sweeps`), or the launch is refused with
+/// [`Error::UncleanSession`], nothing else read or removed. Then, under the
 /// matter's set-aside lock, it reads the matter's clean-close record and removes it, whatever
 /// comes next: a failed removal refuses the launch
 /// ([`Error::CleanClose`]), and a lock that can't be taken too ([`Error::SetAside`]). Then it
@@ -34,11 +37,13 @@ pub fn check_launch(
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
     let admin = admin_copy::os::WindowsAdminCopy;
-    check_launch_with(&admin, data_dir, ledger, plan, journal)
+    let mut sweeps = || crate::windows::runner::unclean::os::check_sweeps(data_dir);
+    check_launch_awaiting(&admin, &mut sweeps, data_dir, ledger, plan, journal)
 }
 
-/// [`check_launch`] with the admin copy read through `admin`: the machine on Windows, a fake
-/// in the tests.
+/// [`check_launch`] with the admin copy read through `admin`, and no marker awaiting a sweep:
+/// the tests'.
+#[cfg(test)]
 pub(crate) fn check_launch_with(
     admin: &dyn AdminCopyFs,
     data_dir: &Path,
@@ -46,7 +51,24 @@ pub(crate) fn check_launch_with(
     plan: &AdmittedPlan,
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
+    check_launch_awaiting(admin, &mut || Ok(()), data_dir, ledger, plan, journal)
+}
+
+/// [`check_launch`] with the admin copy read through `admin` and the markers' sweep checked by
+/// `sweeps`: the machine on Windows, fakes in the tests.
+pub(crate) fn check_launch_awaiting(
+    admin: &dyn AdminCopyFs,
+    sweeps: &mut dyn FnMut() -> Result<(), String>,
+    data_dir: &Path,
+    ledger: &Ledger,
+    plan: &AdmittedPlan,
+    journal: &dyn Journal,
+) -> Result<LaunchCheck, Error> {
     admin_copy::check_launchable(admin).map_err(Error::Blocked)?;
+    sweeps().map_err(|why| {
+        tracing::warn!(%why, "an earlier session's marker still awaits a sweep");
+        Error::UncleanSession(why)
+    })?;
     let matter = plan.matter();
     let held = set_aside::under_lock(data_dir, &matter, |open| {
         let found = record::read(data_dir, &matter);

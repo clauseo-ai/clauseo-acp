@@ -208,6 +208,18 @@ impl Machine for FakeMachine {
         Ok(())
     }
 
+    fn deny_remote_logon(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.call(format!("deny_remote_logon {}", rid(group)))?;
+        self.state.remote_denied.insert(group.clone());
+        Ok(())
+    }
+
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.call(format!("remove_remote_logon_deny {}", rid(group)))?;
+        self.state.remote_denied.remove(group);
+        Ok(())
+    }
+
     fn new_password(&mut self) -> Password {
         self.passwords += 1;
         Password::new(format!("password {}", self.passwords))
@@ -460,6 +472,11 @@ impl Machine for FakeMachine {
         self.call(format!("register_stop_task {}", rid(owner)))?;
         self.state.stop_task = Some(owner.clone());
         Ok(())
+    }
+
+    fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError> {
+        assert!(!self.acting.get(), "the admin copy is locked as admin");
+        self.call(format!("lock_admin_copy {}", rid(group)))
     }
 
     fn held_users(

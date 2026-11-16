@@ -1,5 +1,5 @@
-//! `open_external`'s link check and confirm, its words against their review home, and the Rust-only
-//! opener with no confirm.
+//! `open_external`'s link check and confirm (when it asks is in `ask.rs`), its words against their
+//! review home, and the Rust-only opener with no confirm.
 
 use super::*;
 
@@ -7,7 +7,10 @@ use super::*;
 fn web_links_name_their_host_in_ascii() {
     let link = check_link("https://www.sci.gov.in/judgments?q=1#top").unwrap();
     assert_eq!(link.destination, Destination::Web("www.sci.gov.in".into()));
-    assert_eq!(link.url, "https://www.sci.gov.in/judgments?q=1#top");
+    assert_eq!(
+        link.url.as_str(),
+        "https://www.sci.gov.in/judgments?q=1#top"
+    );
 
     let link = check_link("http://www.example.com:8080/x").unwrap();
     assert_eq!(
@@ -30,7 +33,7 @@ fn web_links_name_their_host_in_ascii() {
         link.destination,
         Destination::Web("xn--pple-43d.com".into())
     );
-    assert_eq!(link.url, "https://xn--pple-43d.com/");
+    assert_eq!(link.url.as_str(), "https://xn--pple-43d.com/");
 
     // Upper case and spaces around are the url crate's to tidy; the host is what shows.
     let link = check_link("HTTPS://Example.COM").unwrap();
@@ -168,6 +171,7 @@ fn a_bad_scheme_is_refused_before_any_confirm() {
         &Clock::new(),
         Language::En,
         "file:///Applications/Calculator.app",
+        None,
     );
     assert_eq!(code(refused), ErrorCode::CommandInvalid);
     assert_eq!(confirm.shown(), []);
@@ -184,6 +188,7 @@ fn a_declined_confirm_opens_nothing_and_is_unauthorized() {
         &Clock::new(),
         Language::En,
         "https://example.com/a",
+        Some("example.org"),
     );
     let error = declined.unwrap_err();
     assert_eq!(error.code(), ErrorCode::TransportUnauthorized);
@@ -202,13 +207,14 @@ fn an_accepted_confirm_opens_the_link_it_named() {
         &Clock::new(),
         Language::En,
         "https://example.com/a",
+        Some("example.org"),
     )
     .unwrap();
     assert_eq!(
         confirm.shown(),
         [LinkWords {
             title: "Open this link in your browser?".into(),
-            message: "The link goes to example.com.".into(),
+            message: "The link goes to example.com.\n\nFull address: https://example.com/a".into(),
             ok: "Open link".into(),
             cancel: "Cancel".into(),
         }]
@@ -229,6 +235,7 @@ fn the_confirm_speaks_the_apps_language() {
         &Clock::new(),
         Language::Hi,
         "mailto:clerk@court.example",
+        None,
     )
     .unwrap();
     let shown = confirm.shown();
@@ -239,6 +246,96 @@ fn the_confirm_speaks_the_apps_language() {
     );
     assert_eq!(shown[0].ok, words::HI.mail_ok);
     assert_eq!(shown[0].cancel, words::HI.cancel);
+}
+
+/// The message for `url` in English, as the confirm shows it.
+fn web_message(url: &str) -> String {
+    LinkWords::new(&check_link(url).unwrap(), Language::En).message
+}
+
+/// Below the host line that decides, the whole link: ASCII, with a letter outside ASCII
+/// percent-encoded, an international host in its `xn--` form, and no control or bidi mark.
+#[test]
+fn the_full_address_is_ascii_with_no_control_or_bidi_mark() {
+    assert_eq!(
+        web_message("https://example.com/क़ानून"),
+        "The link goes to example.com.\n\nFull address: \
+         https://example.com/%E0%A4%95%E0%A4%BC%E0%A4%BE%E0%A4%A8%E0%A5%82%E0%A4%A8"
+    );
+    // The url crate drops CR, LF and tab; any other control, and the bidi override, is %XX.
+    assert_eq!(
+        web_message("https://example.com/?q=a\u{1}b\u{202E}c\r\nd\te\u{7f}"),
+        "The link goes to example.com.\n\nFull address: \
+         https://example.com/?q=a%01b%E2%80%AEcde%7F"
+    );
+    assert_eq!(
+        web_message("https://аpple.com/x"),
+        "The link goes to xn--pple-43d.com.\n\nFull address: https://xn--pple-43d.com/x"
+    );
+    // Whatever it is given, the line holds no control, space or letter outside ASCII.
+    assert_eq!(
+        link::shown_address("https://a.example/\r\n\t\u{7f} x\u{202e}\u{2066}é"),
+        "https://a.example/%0D%0A%09%7F%20x%E2%80%AE%E2%81%A6%C3%A9"
+    );
+}
+
+/// A long link shows its start (scheme and host) and its end, the middle cut to `…`.
+#[test]
+fn a_long_full_address_keeps_its_head_and_tail() {
+    let url = format!("https://example.com/{}/end", "a".repeat(300));
+    let shown = link::shown_address(&url);
+    assert_eq!(shown.chars().count(), link::MAX_ADDRESS_SHOWN);
+    assert_eq!(shown.matches('…').count(), 1);
+    let (head, tail) = shown.split_once('…').unwrap();
+    assert!(head.starts_with("https://example.com/aaa"), "{head}");
+    assert!(tail.ends_with("aaa/end"), "{tail}");
+    assert_eq!((head.len(), tail.len()), (100, 99));
+    assert!(web_message(&url).ends_with(&format!("Full address: {shown}")));
+    // At the limit, nothing is cut.
+    let at_limit = format!("https://example.com/{}", "b".repeat(180));
+    assert_eq!(at_limit.len(), link::MAX_ADDRESS_SHOWN);
+    assert_eq!(link::shown_address(&at_limit), at_limit);
+}
+
+/// A host spelled in the path is only the full address: the line that decides names the real
+/// host.
+#[test]
+fn a_look_alike_in_the_path_leaves_the_host_line_alone() {
+    let message = web_message("https://evil.example/www.indiacode.nic.in/x");
+    let (decides, full) = message.split_once("\n\n").unwrap();
+    assert_eq!(decides, "The link goes to evil.example.");
+    assert_eq!(
+        full,
+        "Full address: https://evil.example/www.indiacode.nic.in/x"
+    );
+}
+
+/// A mailto link's message is as it was: who it writes to, and no full address.
+#[test]
+fn a_mailto_link_shows_no_full_address() {
+    let link = check_link("mailto:clerk@court.example?subject=Filing").unwrap();
+    for (language, expected) in [
+        (
+            Language::En,
+            "Your email app will open a new message to clerk@court.example.",
+        ),
+        (
+            Language::Hi,
+            "आपका ईमेल ऐप clerk@court.example के लिए नया संदेश खोलेगा।",
+        ),
+    ] {
+        assert_eq!(LinkWords::new(&link, language).message, expected);
+    }
+}
+
+/// In Hindi the full address follows H11-08's Hindi words.
+#[test]
+fn the_full_address_speaks_the_apps_language() {
+    let link = check_link("https://example.com/a").unwrap();
+    assert_eq!(
+        LinkWords::new(&link, Language::Hi).message,
+        "यह कड़ी example.com पर जाती है।\n\nपूरा पता: https://example.com/a"
+    );
 }
 
 /// One confirm at a time, and none for a moment after a decline: a page cannot stack confirms
@@ -252,7 +349,7 @@ fn confirms_come_one_at_a_time_and_pause_after_a_decline() {
     // While one is open, a second is refused before anything is drawn.
     let pass = gate.enter(clock.now()).unwrap();
     let confirm = FakeConfirm::new(true);
-    let busy = block_on(open_external(
+    let busy = block_on(open_confirmed(
         &confirm,
         &opener,
         &gate,
@@ -266,7 +363,7 @@ fn confirms_come_one_at_a_time_and_pause_after_a_decline() {
     // Declined, the next is refused until AFTER_DECLINE has passed.
     let declining = FakeConfirm::new(false);
     let run = |confirm: &FakeConfirm| {
-        block_on(open_external(
+        block_on(open_confirmed(
             confirm,
             &opener,
             &gate,
@@ -306,6 +403,7 @@ fn the_confirms_words_are_the_reviewed_copy() {
             ("H11-05", table.mail_title),
             ("H11-06", table.mail_message),
             ("H11-07", table.mail_ok),
+            ("H11-08", table.web_address),
         ] {
             assert!(registry.contains(id), "registry-h11.tsx has no {id}");
             let quoted = format!("\"{text}\"");

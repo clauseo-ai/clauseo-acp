@@ -56,6 +56,29 @@
   .room-status-tools[data-lead] > .room-dot {
     display: none;
   }
+  /* the agent's model and effort, after the plan, each parted by its dot: the plan's quiet trigger (live.css's
+     .room-plan) in the value's own name, a small chevron after it that turns over while its menu is open */
+  .room-status-menu {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    flex: none;
+  }
+  .room-status-menu[data-lead] > .room-dot {
+    display: none;
+  }
+  .room-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s0-5);
+  }
+  .room-pick-chevron {
+    flex: none;
+    transition: transform var(--dur-quick) var(--ease-arrive);
+  }
+  .room-pick[data-popup-open] .room-pick-chevron {
+    transform: rotate(180deg);
+  }
   .room-status[data-fit="wrapped"] .room-status-tools {
     flex: 0 1 auto;
     min-width: 0;

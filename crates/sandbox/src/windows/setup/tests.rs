@@ -3,7 +3,7 @@
 //! extend and re-run (`extend.rs`), the profile resets they owe (`resets.rs`) and the top-up to
 //! [`MIN_FREE_AFTER_RUN`] free users (`top_up.rs`); and `--remove` over the same fake
 //! (`remove.rs`, `remove_ledger.rs`, its seam in `remove_fake.rs`); and the network step
-//! (`network.rs`, S15 PR7).
+//! (`network.rs`, S15 PR7) and the group's Remote Desktop deny (`remote_logon.rs`).
 
 use std::path::PathBuf;
 
@@ -11,6 +11,7 @@ use super::*;
 use crate::windows::acl_plan::Rights;
 use crate::windows::fence::{MatterFolders, RegisteredMatter};
 
+mod admin_lock;
 mod create;
 mod extend;
 mod fake;
@@ -21,9 +22,11 @@ mod network;
 mod owner;
 mod registered;
 mod remains;
+mod remote_logon;
 mod remove;
 mod remove_fake;
 mod remove_ledger;
+mod remove_markers;
 mod remove_set_aside;
 mod resets;
 mod rollback;
@@ -71,7 +74,7 @@ fn fresh_calls() -> Vec<String> {
         "group",
     ]
     .into_iter()
-    .chain(["create_group"])
+    .chain(["create_group", "deny_remote_logon 1000"])
     .map(str::to_owned)
     .collect();
     let mut recorded = Vec::new();

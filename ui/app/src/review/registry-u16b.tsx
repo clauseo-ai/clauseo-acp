@@ -1,9 +1,9 @@
-// U16b's copy review entries (RO-02 to RO-17, RO-33): snooze, Done and the Snoozed shelf in the real rail over
+// U16b's copy review entries (RO-02 to RO-17, RO-33, and the rail triage's UC-129 to UC-132): snooze, Done and the Snoozed shelf in the real rail over
 // FakeTransport, apart from registry.tsx to keep that file under the size limit. The host lists Sharma v. State of Delhi
 // open, with a conversation waiting, one with an answer ready, one snoozed and three done; Joshi v. Joshi snoozed whole;
 // and a conversation of Kapoor's snoozed. Each state is taken as the lawyer would: the pointer to a row (its buttons
 // shown with the focus, as the keyboard has them), a fold or a menu opened, a time chosen. The snooze menu's states
-// (before and after 5:00 pm, with and without Before the next date) stand alone, its times worked out for 4:00 pm and
+// (before and after 5:00 pm) stand alone, its times worked out for 4:00 pm and
 // 6:00 pm today, so the page shows each whatever the hour it's opened at.
 import type { ReactNode } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
@@ -12,7 +12,7 @@ import type { TriageLateKey } from "@clauseo/components/lib/words-triage-late.ts
 import { t } from "@clauseo/components/lib/words.ts";
 import type { Entry } from "./entry.ts";
 import { MenuAt, RoomTriage, type Act } from "./triage-states.tsx";
-import { triageLateWords, triageWords, type WordsRef } from "./words.ts";
+import { triageLateWords, triageWords, uiWords, type WordsRef } from "./words.ts";
 
 /** The rail open beside the work, every row in view. */
 const RAIL = { width: 1280, height: 1100 } as const;
@@ -35,6 +35,14 @@ const MARKED: readonly Act[] = [
 const MATTER_MENU: readonly Act[] = [
   { press: '[aria-label="Actions for Sharma v. State of Delhi"]' },
   { focus: '[role="menuitem"]' },
+];
+const MATTER_DONE: readonly Act[] = [
+  { press: '[aria-label="Actions for Sharma v. State of Delhi"]' },
+  { item: "Mark all conversations done" },
+];
+const REMOVING: readonly Act[] = [
+  { press: '[aria-label="Actions for Sharma v. State of Delhi"]' },
+  { item: "Remove from the list" },
 ];
 
 /** Several lines of one id, joined with " / " as the approved page writes them; Hindi is later for all. */
@@ -72,14 +80,14 @@ export const U16B: Entry[] = [
   )),
   entry("RO-05", wl("Until {when}"), () => <RoomTriage acts={SHELF} />),
   entry("RO-06", wl("Whole matter"), () => <RoomTriage acts={SHELF} />),
-  // the snooze menu: before 5:00 pm with Before the next date, after 5:00 pm without
-  entry("RO-07", wl("Snooze until"), () => <MenuAt hour={16} nextIn={8} />),
+  // the snooze menu: before 5:00 pm, and after
+  entry("RO-07", wl("Snooze until"), () => <MenuAt hour={16} />),
   entry(
     "RO-08",
     joined([wl("Tomorrow {time}"), wl("Monday {time}"), wl("Choose a day and time")]),
     () => <MenuAt hour={18} />,
   ),
-  entry("RO-09", wl("Before the next date"), () => <MenuAt hour={16} nextIn={8} />),
+  // RO-09, retired: Before the next date went with the next date (a matter is a name, a client and a folder)
   // in the row's place after a snooze, with Undo; a snoozed conversation in its matter, its words under the pointer
   entry("RO-10", joined([w("Snoozed until {when}"), undo]), () => <RoomTriage acts={SNOOZED} />),
   entry("RO-11", w("Snoozed until {when}"), () => (
@@ -93,10 +101,22 @@ export const U16B: Entry[] = [
     <RoomTriage acts={ARM} />
   )),
   entry("RO-14", joined([w("Marked as done"), undo]), () => <RoomTriage acts={MARKED} />),
-  // a matter's menu
-  entry("RO-15", joined([wl("Snooze until"), wl("Mark all done")]), () => (
-    <RoomTriage acts={MATTER_MENU} />
+  // a matter's menu; its Mark all done is UC-129's now
+  entry("RO-15", wl("Snooze until"), () => <RoomTriage acts={MATTER_MENU} />),
+  // the rail triage (D-051, D-054): the matter's menu says what it marks; the line beneath the row, which stays; the
+  // confirm before Remove from the list
+  entry("UC-129", wl("Mark all conversations done"), () => <RoomTriage acts={MATTER_MENU} />),
+  entry("UC-130", joined([w("All conversations marked as done"), undo]), () => (
+    <RoomTriage acts={MATTER_DONE} />
   )),
+  entry("UC-131", uiWords("Remove {name} from the list?"), () => <RoomTriage acts={REMOVING} />),
+  entry(
+    "UC-132",
+    uiWords(
+      "The matter and its conversations leave the list and Recent. Its folder and papers stay where they are.",
+    ),
+    () => <RoomTriage acts={REMOVING} />,
+  ),
   // the Done fold, folded, then open with its explanation behind the info icon
   entry("RO-16", w("Done"), () => <RoomTriage />),
   entry(

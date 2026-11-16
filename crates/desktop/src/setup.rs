@@ -51,6 +51,8 @@ mod keys;
 mod leave;
 mod login_check;
 mod network;
+pub(crate) mod pdf_tools;
+mod python_path;
 mod readers;
 mod refresh;
 mod refusal;
@@ -74,9 +76,12 @@ pub(crate) use confirm::NativeSetupConfirm;
 pub(crate) use events::SetupEvents;
 pub(crate) use hook::{SetupHook, plans_of};
 pub(crate) use host_calls::CellHost;
+#[cfg(any(target_os = "macos", windows))]
+pub(crate) use host_calls::SetupHost;
 pub(crate) use keys::{KeyNotes, KeySlot};
 pub(crate) use login_check::{DesktopLoginCheck, ReusedLogins};
 pub(crate) use network::NetworkSlot;
+pub(crate) use python_path::PythonSlot;
 pub(crate) use readers::{LeaveReaders, SwappableReaders};
 pub(crate) use start::{BackendCell, HostSide, SetupParts, SetupStart, spawn};
 #[cfg(test)]

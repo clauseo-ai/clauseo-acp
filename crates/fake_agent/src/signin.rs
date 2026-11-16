@@ -22,7 +22,15 @@
 //!   when set and not empty, else `$HOME/.codex`.
 //! - Stdout carries only the lines this module prints, each flushed as it is written.
 //!   Diagnostics go to stderr.
-//! - The one wait is `FAKE_SIGNIN=ok-after:<ms>`, which sleeps before the marker is written.
+//! - Claude's `auth status` and Codex's `login status` and `app-server` also write into their
+//!   config folders what the real CLIs write there (`first_meet`), so a test can tell when one
+//!   ran on the lawyer's own folders.
+//! - The waits are `FAKE_SIGNIN=ok-after:<ms>`, which sleeps before the marker is written, and
+//!   `FAKE_SIGNIN=slow-save:<ms>`, which sleeps in the middle of writing Codex's login file.
+//! - `FAKE_CODEX_PORT` makes Codex's browser login listen on `127.0.0.1:<port>` as Codex does,
+//!   answering one request at a time: `GET /cancel` prints `Login cancelled` and exits 1 with
+//!   no write (see [`codex_browser_login`]). `FAKE_CODEX_BIND_GATE` (and `FAKE_STATUS_GATE`, for
+//!   Codex's `login status`) names a file it waits for before it binds (or answers).
 //! - File changes go through [`crate::write`], as the rest of the crate's do.
 //!
 //! # Depends on
@@ -42,6 +50,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use self::app_server::{adapter, app_server};
+use self::codex_login::codex_browser_login;
 use crate::write;
 use crate::{EXIT_LOAD, EXIT_OK, diagnostic, park_forever};
 
@@ -77,7 +86,7 @@ const CLAUDE_PASTE_PROMPT: &str = "Paste code here if prompted >";
 const CLAUDE_SUCCESS: &str = "Login successful.";
 /// The line `FAKE_SIGNIN=cancel` prints, for either CLI.
 const CANCEL_LINE: &str = "OAuth error: access_denied";
-/// The line Codex's browser login prints; the callback it listens on is never bound.
+/// The line Codex's browser login prints. The callback is bound only with `FAKE_CODEX_PORT`.
 const CODEX_CALLBACK_LINE: &str =
     "Starting local login server on http://127.0.0.1:1455/auth/callback";
 /// The line `login --device-auth` prints: the device URL and the code.
@@ -94,6 +103,11 @@ const CODEX_SUCCESS: &str = "Successfully logged in";
 const CODEX_STATUS_IN: &str = "Logged in using ChatGPT";
 /// The line `codex login status` prints when the marker is not there.
 const CODEX_STATUS_OUT: &str = "Not logged in";
+/// The variable that makes Codex's `login status` pause this many milliseconds, then write
+/// [`STATUS_FINISHED`] in its home before it answers.
+const STATUS_PAUSE_VAR: &str = "FAKE_STATUS_PAUSE_MS";
+/// The file a paused status leaves in its home once it finished.
+const STATUS_FINISHED: &str = "fake-status-finished";
 /// The line `codex logout` prints.
 const CODEX_LOGOUT_LINE: &str = "Successfully logged out";
 /// The line `auth logout` prints.
@@ -168,6 +182,10 @@ pub(crate) enum Script {
     /// `codex.js` behaves as codex-acp's adapter for every command ([`Mode::CodexAdapter`]):
     /// what the engine sees if the adapter sits where it looks for the CLI.
     Adapter,
+    /// Codex's browser login takes its callback at once and saves Codex's login file as Codex
+    /// does, truncating it and writing it in place, with this many milliseconds between the two
+    /// halves; then it exits 0. A `/cancel` meanwhile waits behind the save, unanswered.
+    SlowSave(u64),
 }
 
 impl Script {
@@ -194,6 +212,13 @@ impl Script {
                         .ok()
                         .map(Self::OkAfter)
                 })
+                .or_else(|| {
+                    value
+                        .strip_prefix("slow-save:")?
+                        .parse()
+                        .ok()
+                        .map(Self::SlowSave)
+                })
                 .unwrap_or(Self::OkAfter(0)),
         }
     }
@@ -201,6 +226,7 @@ impl Script {
 
 /// Runs the sign-in `mode` with `args`, the arguments after the script, and returns the exit code.
 pub(crate) fn run(mode: Mode, args: &[OsString]) -> i32 {
+    parent::end_with_parent();
     if mode == Mode::CodexAdapter {
         return adapter().unwrap_or_else(|error| {
             stderr_write(&diagnostic(format_args!("{error}")));
@@ -248,9 +274,25 @@ fn session(mode: Mode, args: &[OsString]) -> io::Result<i32> {
     else {
         return Ok(usage(mode));
     };
+    first_meet(mode, &args, &folder, &home)?;
     match mode {
         Mode::Claude => claude(&args, &script, &folder),
         Mode::Codex | Mode::CodexAdapter => codex(&args, &script, &folder),
+    }
+}
+
+/// The writes the real CLI makes into its config folder on this command ([`first_meet`]'s module).
+fn first_meet(mode: Mode, args: &[&str], folder: &Path, home: &Path) -> io::Result<()> {
+    let mut command = args.strip_prefix(&["--cli"]).unwrap_or(args);
+    while let ["-c", _, rest @ ..] = command {
+        command = rest;
+    }
+    match (mode, command) {
+        (Mode::Claude, ["auth", "status", ..]) => {
+            first_meet::claude_status(std::env::var_os("CLAUDE_CONFIG_DIR"), home)
+        }
+        (Mode::Codex, ["login", "status"] | ["app-server"]) => first_meet::codex_run(folder),
+        _ => Ok(()),
     }
 }
 
@@ -405,16 +447,6 @@ fn codex(args: &[&str], script: &Script, folder: &Path) -> io::Result<i32> {
     }
 }
 
-/// Codex's browser login. It prints where its callback listens, and binds nothing there.
-fn codex_browser_login(script: &Script, folder: &Path) -> io::Result<i32> {
-    if matches!(script, Script::PortBusy) {
-        say(CODEX_PORT_BUSY_LINE)?;
-        return Ok(FAILED);
-    }
-    say(CODEX_CALLBACK_LINE)?;
-    complete(script, || codex_plant(script, folder), CODEX_SUCCESS)
-}
-
 /// A Codex login's marker: [`MARKER`], or under `app-server-error` Codex's own login file.
 fn codex_plant(script: &Script, folder: &Path) -> io::Result<()> {
     if *script == Script::AppServerError {
@@ -439,6 +471,16 @@ fn codex_device_login(script: &Script, folder: &Path) -> io::Result<i32> {
 /// `login status`: exit 0 with the signed-in line when the marker is there, else exit 1 with
 /// `Not logged in`; on stderr, as Codex 0.162.1 prints them.
 fn codex_status(folder: &Path) -> i32 {
+    // A status the quit must wait for: it pauses, answers as below, and leaves a file saying it
+    // finished (the tests' proof it was not killed).
+    let pause = std::env::var(STATUS_PAUSE_VAR)
+        .ok()
+        .and_then(|ms| ms.parse::<u64>().ok());
+    codex_login::wait_for_gate(codex_login::STATUS_GATE_VAR);
+    if let Some(ms) = pause {
+        crate::run::effects::pause(std::time::Duration::from_millis(ms));
+        write::write(folder.join(STATUS_FINISHED), b"").unwrap_or_default();
+    }
     if marker_method(folder).is_some() {
         stderr_write(&format!("{CODEX_STATUS_IN}\n"));
         EXIT_OK
@@ -551,5 +593,8 @@ fn stderr_write(text: &str) {
 }
 
 mod app_server;
+mod codex_login;
+mod first_meet;
+mod parent;
 #[cfg(test)]
 mod tests;

@@ -7,6 +7,7 @@ import type { IconProps } from "@clauseo/components/icons/icon.tsx";
 import {
   IconAbout,
   IconAppearance,
+  IconCommand,
   IconConversation,
   IconLanguage,
   IconPlanLimit,
@@ -17,6 +18,8 @@ import {
 } from "@clauseo/components/icons/icons.tsx";
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
 import { cw } from "@clauseo/components/lib/words-connectors.ts";
+import { frame } from "@clauseo/components/lib/words-frame.ts";
+import { mw } from "@clauseo/components/lib/words-mcp-tools.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { uw } from "@clauseo/components/lib/words-update.ts";
 import type { DisplayStore } from "../room/display-store.ts";
@@ -30,6 +33,7 @@ import type {
   ToolsSettingsView,
 } from "../transport/protocol.ts";
 import { APP_VERSION } from "./version.ts";
+import type { NotSetUp } from "./plan-setup.ts";
 import { lockKey, type LiveSettings } from "./use-settings.ts";
 import { hashId } from "./use-hash-section.ts";
 import { About } from "./sections/about.tsx";
@@ -42,6 +46,8 @@ import { carriesUpdate } from "../store/update.ts";
 import { ConnectorsSection } from "./sections/connectors-load.tsx";
 import { PlansSection } from "./sections/plans-load.tsx";
 import { carriesSetup } from "./sections/plans-shown.ts";
+import { ToolsSection } from "./sections/mcp-tools-load.tsx";
+import { toolsShown } from "./sections/tools-model.ts";
 import { WorkspaceSection } from "./sections/workspace-load.tsx";
 import { carriesProtectionWire } from "./sections/workspace-shown.ts";
 import { connectorsNote } from "./sections/connectors-note.ts";
@@ -52,6 +58,7 @@ export const SECTION_ORDER = [
   "plans",
   "usage",
   "connectors",
+  "tools",
   "matters",
   "workspace",
   "language",
@@ -72,6 +79,8 @@ export type SectionContext = {
   display: Display;
   /** Every agent's limits, from the window's limits store: Plan and usage's note reads them. */
   limits: LimitsView;
+  /** Whether the setup wire says a plan isn't signed in (plan-setup.ts): Plan and usage shows no billing for it. */
+  notSetUp: NotSetUp;
   /** The release date the host reports (`YYYY-MM-DD`), or null: About's line reads it. */
   releaseDate: string | null;
   /** Whether a firm's policy locks this setting. */
@@ -86,6 +95,10 @@ export type SectionContext = {
   /** The lawyer's choice of a tool's switch: one patch, unless the key is locked or already holds the value. The
    * connectors' switch (`connectors`, U15) reads both from the connectors' state, since ToolsSettingsView has none. */
   chooseTool: (key: keyof ToolsPatch, value: boolean) => void;
+  /** Whether a firm's policy locks the anonymous counts' switch (`privacy.counts`). */
+  countsLocked: () => boolean;
+  /** The lawyer's choice of the anonymous counts' switch: one patch, unless locked or already holding the value. */
+  chooseCounts: (value: boolean) => void;
 };
 
 export type SectionEntry = {
@@ -120,7 +133,7 @@ export const SECTIONS: readonly SectionEntry[] = [
     name: "Plan and usage",
     icon: IconPlanLimit,
     lead: "What each plan has left, and when it resets.",
-    note: (ctx, lang) => usageNote(ctx.limits, lang),
+    note: (ctx, lang) => usageNote(ctx.limits, lang, ctx.notSetUp),
     Body: Usage,
   },
   {
@@ -131,6 +144,20 @@ export const SECTIONS: readonly SectionEntry[] = [
     note: (ctx, lang) => connectorsNote(ctx.connectors, lang),
     shown: (ctx) => ctx.connectors.connectors.length > 0,
     Body: ConnectorsSection,
+  },
+  {
+    // UC-169 on: the lawyer's own MCP servers (tools-model.ts), from the empty list until the host sends one; the
+    // lead is the plain line on what a tool can reach. No side note, so the list stays out of the first load
+    id: "tools",
+    name: (lang) => mw(lang, "Tools"),
+    icon: IconCommand,
+    lead: (lang) =>
+      mw(
+        lang,
+        "Tools run on this computer with the same access you have: your files, your programs and the internet. Add only tools you trust.",
+      ),
+    shown: (ctx) => toolsShown(ctx.transport),
+    Body: ToolsSection,
   },
   {
     // UC: this computer's protection, where the transport carries its wire; built now, live once R17 PR-B admits
@@ -154,9 +181,13 @@ export const SECTIONS: readonly SectionEntry[] = [
     name: "Appearance",
     icon: IconAppearance,
     lead: "How Clauseo looks on this computer.",
+    // the Theme control's choice, in its words: Follow the computer, not the light it gives now (D-067)
     note: (ctx, lang) =>
       st(lang, "{theme}, text size {n}", {
-        theme: st(lang, ctx.display.theme === "night" ? "Night" : "Day"),
+        theme:
+          ctx.settings.ui.theme === "system"
+            ? frame(lang, "Follow the computer")
+            : st(lang, ctx.settings.ui.theme === "dark" ? "Night" : "Day"),
         n: ctx.display.textSize,
       }),
     Body: Appearance,
@@ -194,15 +225,18 @@ export function contextOf(
   limits: LimitsView = {},
   releaseDate: string | null = null,
   connectors: ConnectorsState = NO_CONNECTORS,
+  notSetUp: NotSetUp = () => false,
 ): SectionContext {
   const locked = (key: keyof UiSettings) => settings.locked.includes(lockKey(key));
   const toolLocked = (key: keyof ToolsSettingsView) => settings.locked.includes(`tools.${key}`);
+  const countsLocked = () => settings.locked.includes("privacy.counts");
   return {
     store,
     transport,
     settings,
     display,
     limits,
+    notSetUp,
     releaseDate,
     connectors,
     locked,
@@ -219,6 +253,12 @@ export function contextOf(
       }
       if (toolLocked(key) || settings.tools === undefined || settings.tools[key] === value) return;
       store.setTools({ [key]: value });
+    },
+    countsLocked,
+    chooseCounts: (value) => {
+      if (countsLocked() || settings.privacy === undefined || settings.privacy.counts === value)
+        return;
+      store.setPrivacy({ counts: value });
     },
   };
 }

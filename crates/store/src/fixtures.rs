@@ -104,6 +104,7 @@ pub fn matter_row() -> MatterRow {
         last_opened: None,
         forgotten: None,
         skill_packs: None,
+        agent_prefs: None,
     }
 }
 

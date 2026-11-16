@@ -5,9 +5,10 @@
 //! **The status check** (`check_status`, at start and when R20 asks):
 //! - a recorded `reused` (for Codex also "a missing file with a home `auth.json`") is checked
 //!   first: "At a later start, a recorded `reused` whose login still holds is `Reused` with no
-//!   question." Claude holds when detection still finds a `claude.ai` login with the accepted
-//!   email (else `ReusedChanged`, or `ReusedSignedOut` when it is signed out) and the status
-//!   under the session's environment is signed in (else the run-time fallback). Codex holds while
+//!   question." Claude holds when detection still finds a login (a stat, and on macOS the
+//!   Keychain query; else `ReusedSignedOut`, but a query that could not tell leaves the state)
+//!   and the status under the session's environment is signed in (else the run-time fallback).
+//!   Codex holds while
 //!   the two names are one file (`reuse::codex_link_holds`; else `CodexLinkSplit`, or
 //!   `ReusedSignedOut` when the lawyer's file is gone) and Codex's own status, through its CLI,
 //!   confirms the account (`codex::confirm`; signed out is `ReusedSignedOut` too).
@@ -19,7 +20,11 @@
 //!   `account: null`, a JSON-RPC error, or an account that is not a `ChatGPT` one.
 //! - otherwise Clauseo's own login: "A Clauseo-owned login, once made, wins over reuse."
 //! - otherwise, unless `no-reuse` is there, detection (`super::detect`): `LoginFound`, or
-//!   `SignedOut` with what was seen.
+//!   `SignedOut` with what was seen. Detection is a stat for both agents (plus, for Claude on
+//!   macOS, an attributes-only Keychain query), so `LoginFound` has no email; "Use it" confirms
+//!   through the agent's own status under the reused environment. A reused login that later
+//!   shows another account is not flagged: the agent runs as the lawyer, and switching accounts
+//!   is their own doing.
 //!
 //! **Reuse stops** ([`stop`]) with the reason in `found`, and never with a logout: "With no
 //! reason … it writes `no-reuse`, so the next start does not reuse again without asking. With a
@@ -31,12 +36,17 @@ use clauseo_process::Timer;
 use crate::signin::codex::Confirmation;
 use crate::signin::detect::{self, Detected};
 use crate::signin::env::{RunKind, Vendor};
-use crate::signin::job::SigninJob;
+use crate::signin::job::{SigninJob, Task};
 use crate::signin::marker::{self, LoginSource};
 use crate::signin::{
     Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, Unconfirmed, claude,
-    codex, reuse,
+    codex, keychain_lock, reuse,
 };
+use crate::status::Identity;
+
+mod status_job;
+
+pub(crate) use status_job::{quick_check, start_check};
 
 /// Whether the agent's login is the lawyer's, reused, by Clauseo's record: `login-source` says
 /// `reused`, or for Codex there is no marker and the home holds a login file. No logout runs
@@ -107,6 +117,11 @@ pub(crate) async fn stop<T: Timer + Send + Sync>(
 /// tell).
 pub(crate) async fn check<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
     match job.vendor {
+        // A background check runs no Claude while the keychain is locked (`keychain_lock`).
+        Vendor::Claude if job.task == Task::Status && keychain_lock::locked(&job.config) => {
+            tracing::warn!(agent = %job.ticket.agent, "claude status: keychain locked; not run");
+            None
+        }
         Vendor::Claude => check_claude(job).await,
         Vendor::Codex => check_codex(job).await,
     }
@@ -118,11 +133,15 @@ async fn check_claude<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Sign
         marker::read_source(&job.config.data_dir, &job.ticket.agent)
     {
         let found = detect::claude(job, cancel).await?;
+        // A login still found holds, whatever account it is now: the agent runs as the
+        // lawyer, and switching accounts is their own doing. A Keychain query that could not
+        // tell (a timeout, another exit, no start) keeps the reuse: the state stays as it is.
+        if found.could_not_tell {
+            tracing::warn!(agent = %job.ticket.agent, "reused claude login: could not tell; kept");
+            return None;
+        }
         return match &found.state {
-            SigninState::LoginFound { email: now, .. } if *now == email => {
-                claude_session(job, email, found, false).await
-            }
-            SigninState::LoginFound { .. } => Some(stop(job, Some(Found::ReusedChanged)).await),
+            SigninState::LoginFound { .. } => claude_session(job, email, found, false).await,
             _ => Some(stop(job, Some(Found::ReusedSignedOut)).await),
         };
     }
@@ -142,7 +161,9 @@ async fn check_claude<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Sign
 /// report `loggedIn: true`." Signed in: `Reused` (with `record`, `login-source` is written
 /// first). Signed out while detection found the login, the run-time fallback: "S18 logs
 /// `claude_reuse_fallback` and offers Clauseo's own sign-in" (the note, then reuse stops with no
-/// reason, so it is not offered again until "Look for my Claude Code login").
+/// reason, so it is not offered again until "Look for my Claude Code login"). The state says
+/// `ReuseUnusable` rather than `ReuseOff`, so the card tells the lawyer why "Use it" did not
+/// take.
 async fn claude_session<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     email: Option<String>,
@@ -152,7 +173,12 @@ async fn claude_session<T: Timer + Send + Sync>(
     let reused = RunKind::Reused { home: &job.home };
     let Some(session) = claude::status_as(job, &job.ticket.cancel, reused).await? else {
         job.note(SigninNote::ClaudeReuseFallback);
-        return Some(stop(job, None).await);
+        return Some(match stop(job, None).await {
+            SigninState::SignedOut { .. } => SigninState::SignedOut {
+                found: Some(Found::ReuseUnusable),
+            },
+            failed => failed,
+        });
     };
     if record {
         // Cancelled or replaced while status ran: no record of a reuse nobody chose to keep.
@@ -167,7 +193,7 @@ async fn claude_session<T: Timer + Send + Sync>(
         }
     }
     let plan = session.plan.or(found.identity.plan);
-    Some(reused_signed_in(job, email, plan))
+    Some(reused_signed_in(job, session.email.or(email), plan))
 }
 
 async fn check_codex<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
@@ -209,7 +235,7 @@ async fn check_codex<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Signi
             found: Some(Found::ReuseOff),
         });
     }
-    Some(detect::codex(job, cancel).await?.state)
+    Some(detect::codex(job, cancel)?.state)
 }
 
 /// Codex's own confirmation under `kind` in the home, for the status check: asked once more when
@@ -251,14 +277,15 @@ pub(crate) async fn find_login<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Op
 }
 
 /// `use_found_login` (the lawyer's "Use it"): "R20 writes Claude's env, or S18 makes Codex's
-/// link; then `login-source` `reused` with the accepted email; then `SignedIn { source: Reused
-/// }`." Detection runs again first, and "Use it" goes on only when its email is the one the
-/// lawyer was shown, `None` (a login with no email, an API key say) equal to `None`; a read
-/// that got no answer is "could not tell", never `None`. Otherwise nothing is linked or recorded
-/// and the new detection is the state (`LoginFound` again, or what was seen): an account other
-/// than the one shown is never reused on a choice the lawyer made about another.
-/// Detection that could not tell ends the job: `signin.cancelled` when it was cancelled (or the
-/// job replaced), else `signin.failed`.
+/// link; then `login-source` `reused`; then `SignedIn { source: Reused }`." Detection runs
+/// again first, and "Use it" goes on while it still finds a login and its email equals the one
+/// shown. That does not tie "Use it" to an account: detection is a stat of each agent's login
+/// file (on macOS, for Claude, also a Keychain query) and gives no email, so `None` is compared
+/// with `None`, and a different account signed in between "found" and "Use it" is reused. That
+/// is accepted: the agent runs as the lawyer, and switching accounts is their own doing. A login
+/// gone in between is not reused: the new detection is the state. Detection that could not tell
+/// ends the job: `signin.cancelled` when it was cancelled (or the job replaced), else
+/// `signin.failed`.
 pub(crate) async fn use_found<T: Timer + Send + Sync>(job: &SigninJob<T>) -> SigninState {
     let cancel = &job.ticket.cancel;
     let shown = match job.shared.signin.state(&job.ticket.agent) {
@@ -267,7 +294,7 @@ pub(crate) async fn use_found<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Sig
     };
     let found = match job.vendor {
         Vendor::Claude => detect::claude(job, cancel).await,
-        Vendor::Codex => detect::codex(job, cancel).await,
+        Vendor::Codex => detect::codex(job, cancel),
     };
     if !job.shared.signin.is_live(&job.ticket) {
         return job.failed(SigninCode::Cancelled);
@@ -289,14 +316,19 @@ pub(crate) async fn use_found<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Sig
                     job.failed(SigninCode::Failed)
                 }
             }),
-        Vendor::Codex => use_codex(job, email, found).await,
+        Vendor::Codex => use_codex(job, email).await,
     }
 }
 
 /// How Codex's link step ended.
 enum Linked {
-    /// The link and the `reused` record are made.
-    Done,
+    /// The link and the `reused` record are made, and Codex's own status confirmed the account.
+    Done(Identity),
+    /// Codex's own status through the link said signed out (an API-key login, say): the link
+    /// was removed again and nothing recorded.
+    SignedOut,
+    /// Codex's own status through the link gave no answer: the link was removed again.
+    NoAnswer,
     /// The job was cancelled or replaced: nothing is left linked or recorded.
     Stopped,
     /// The link could not be made: the fallback runs.
@@ -305,18 +337,22 @@ enum Linked {
     RecordFailed,
 }
 
-/// Codex's "Use it": the link (`reuse::link_reused_login`), then the record. "Another volume, or
-/// any link error: Clauseo's own sign-in, logged" (the `codex_link_failed` note, then the
-/// browser sign-in).
+/// Codex's "Use it": the link (`reuse::link_reused_login`), Codex's own confirmation through
+/// it, then the record. Detection only stats the lawyer's file, so this confirmation is where
+/// the email and plan come from, and where a login that is no `ChatGPT` one (an API key) is
+/// turned down: `SignedOut { found: ReusedSignedOut }`. "Another volume, or any link error:
+/// Clauseo's own sign-in, logged" (the `codex_link_failed` note, then the browser sign-in).
 async fn use_codex<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     email: Option<String>,
-    found: Detected,
 ) -> SigninState {
     match link_and_record(job, email.clone()).await {
-        Linked::Done => reused_signed_in(job, email, found.identity.plan),
+        Linked::Done(identity) => reused_signed_in(job, identity.email.or(email), identity.plan),
+        Linked::SignedOut => SigninState::SignedOut {
+            found: Some(Found::ReusedSignedOut),
+        },
         Linked::Stopped => job.failed(SigninCode::Cancelled),
-        Linked::RecordFailed => job.failed(SigninCode::Failed),
+        Linked::NoAnswer | Linked::RecordFailed => job.failed(SigninCode::Failed),
         Linked::LinkFailed => {
             // The lock is let go by now: the browser sign-in takes it for its own run.
             job.note(SigninNote::CodexLinkFailed);
@@ -325,12 +361,15 @@ async fn use_codex<T: Timer + Send + Sync>(
     }
 }
 
-/// The link and the record, under the lock on Codex's login files. The job must still be the
-/// agent's and not cancelled right before the link and again right before the record. Cancelled
-/// or replaced before the link: nothing was done, nothing is undone. After it: Clauseo's own
-/// name goes again (`remove_file` of the home's name, never the lawyer's), and no `reused` is
-/// written. A newer job's Codex login or `use_different_account` waits for this lock, so it
-/// never runs while this step could still leave the files linked.
+/// The link, the confirmation and the record, under the lock on Codex's login files. The job
+/// must still be the agent's and not cancelled right before the link and again right before the
+/// record. Cancelled or replaced before the link: nothing was done, nothing is undone. After it
+/// (during the confirmation included): Clauseo's own name goes again (`remove_file` of the
+/// home's name, never the lawyer's), and no `reused` is written. The confirmation is Codex's
+/// own status in the home, as a reused session sees it (`RunKind::Reused`): a definite "signed
+/// out", or no answer, removes the link too. A newer job's Codex login or
+/// `use_different_account` waits for this lock, so it never runs while this step could still
+/// leave the files linked.
 async fn link_and_record<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     email: Option<String>,
@@ -349,17 +388,33 @@ async fn link_and_record<T: Timer + Send + Sync>(
     if linked.is_err() {
         return Linked::LinkFailed;
     }
+    let reused = RunKind::Reused { home: &job.home };
+    let confirmed = codex::confirm(job, &job.ticket.cancel, reused, &job.home).await;
     if !hub.is_live(&job.ticket) {
         drop(reuse::unlink_reused_login(&job.home));
         return Linked::Stopped;
     }
-    let source = LoginSource::Reused { email };
+    let identity = match confirmed {
+        Confirmation::Confirmed(identity) => identity,
+        Confirmation::SignedOut => {
+            drop(reuse::unlink_reused_login(&job.home));
+            return Linked::SignedOut;
+        }
+        Confirmation::Unknown => {
+            drop(reuse::unlink_reused_login(&job.home));
+            return Linked::NoAnswer;
+        }
+    };
+    // The email Codex confirmed, else the one shown (detection's stat gives none).
+    let source = LoginSource::Reused {
+        email: identity.email.clone().or(email),
+    };
     if marker::write_source(&job.config.data_dir, &job.ticket.agent, &source).is_err() {
         // The link alone would read as reused; it goes, and nothing is reused.
         drop(reuse::unlink_reused_login(&job.home));
         return Linked::RecordFailed;
     }
-    Linked::Done
+    Linked::Done(identity)
 }
 
 /// `use_different_account` ("Sign in with a different account"): "writes `no-reuse` and starts

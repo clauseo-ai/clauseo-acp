@@ -1,0 +1,56 @@
+# Restores the pnpm store from main's cache, under the key and path actions/setup-node's
+# `cache: pnpm` used, so the entries setup-node saved stay valid: node-cache-<OS>-<arch>-pnpm-
+# <hashFiles of ui/pnpm-lock.yaml>, the path `pnpm store path --silent` prints in ui/. The cache
+# version hashes the path string, so it must be the same string setup-node passed.
+#
+# - Restores only. The job saves at its end with ./.github/actions/cache-save-main, which writes on
+#   main's scheduled and on-demand runs only (setup-node saved on every ref):
+#
+#     - uses: ./.github/actions/cache-save-main
+#       if: success() && steps.pnpm-store.outputs.hit != 'true'
+#       with:
+#         path: ${{ steps.pnpm-store.outputs.path }}
+#         key: ${{ steps.pnpm-store.outputs.key }}
+#
+# - Runs after pnpm/action-setup and actions/setup-node (with `package-manager-cache: false`), so
+#   pnpm is on PATH. A miss, or the cache service down, leaves an empty store: `pnpm install`
+#   downloads as before.
+
+name: Restore the pnpm store
+description: Restores ui's pnpm store from main's cache under setup-node's key; saves nothing.
+
+outputs:
+  path:
+    description: The pnpm store path.
+    value: ${{ steps.key.outputs.path }}
+  key:
+    description: The cache key.
+    value: ${{ steps.key.outputs.key }}
+  hit:
+    description: "\"true\" when the key itself was restored."
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: The pnpm store's path and key
+      id: key
+      shell: bash
+      env:
+        LOCK_HASH: ${{ hashFiles('ui/pnpm-lock.yaml') }}
+      run: |
+        set -euo pipefail
+        # pnpm on Windows may end its line with CR.
+        path=$(cd ui && pnpm store path --silent | tr -d '\r')
+        # setup-node's key has Node's process.arch (x64, arm64); RUNNER_ARCH is X64 or ARM64.
+        arch=$(printf '%s' "$RUNNER_ARCH" | tr '[:upper:]' '[:lower:]')
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "key=node-cache-$RUNNER_OS-$arch-pnpm-$LOCK_HASH" >> "$GITHUB_OUTPUT"
+        echo "pnpm store: $path, key node-cache-$RUNNER_OS-$arch-pnpm-$LOCK_HASH"
+
+    - name: Restore the pnpm store
+      id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.path }}
+        key: ${{ steps.key.outputs.key }}

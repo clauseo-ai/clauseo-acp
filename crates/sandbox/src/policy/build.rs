@@ -89,6 +89,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         .map(|name| PathRule::Subpath(matter.join(name)))
         .chain(parts.git.into_iter().map(PathRule::Subpath))
         .chain(parts.git_dirs.into_iter().map(PathRule::Subpath))
+        .chain(parts.bare.into_iter().map(PathRule::Subpath))
         .chain(outermost(parts.nested, &matter))
         .chain(over_cap.iter().cloned().map(PathRule::Literal))
         .collect();

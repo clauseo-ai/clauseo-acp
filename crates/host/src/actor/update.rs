@@ -118,6 +118,8 @@ pub(super) fn start(
         app_version,
         #[cfg(feature = "test-support")]
         fail_close,
+        // Read by start-up before the seams reach here (`last_exit.rs`).
+        last_run_unclean: _,
     } = seams;
     let mut host = UpdateHost {
         updater,
@@ -454,7 +456,7 @@ pub(super) fn answer(actor: &Actor, reply: Reply<QueryResult>) {
         || UpdateView {
             current: actor.update.current.clone(),
             state: UpdateState::Managed {
-                by: ManagedBy::Package,
+                by: ManagedBy::Unavailable,
             },
             mode: mode_in_force(actor).mode,
             checked_at: None,

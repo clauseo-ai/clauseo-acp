@@ -1,19 +1,32 @@
 //! Which Chrome a session's browser runs (S27, "Which Chrome"; decision record 0029). The host
 //! looks on the launch-prep thread, never on the actor, and fills `{browser_executable}` with
-//! what it found. None found is `BrowserNotInstalled`. Before it looks, the launch prep asks
-//! the firm's Chrome and Edge policy (`super::rd_policy`), so nothing here runs when that blocks.
+//! what it found. None found is `BrowserNotInstalled`. On macOS and Linux the launch prep asks
+//! the firm's Chrome and Edge policy (`super::rd_policy`) before it looks, so nothing here runs
+//! when that blocks; on Windows it asks each browser's own policy over [`windows_installed`].
 //!
-//! In this order:
-//! 1. Google Chrome installed on the machine: on macOS
+//! On macOS, in this order:
+//! 1. Google Chrome installed on the machine:
 //!    `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, then the same under
-//!    `~/Applications`; on Windows `%ProgramFiles%`, `%ProgramFiles(x86)%`, then `%LOCALAPPDATA%`,
-//!    each with `\Google\Chrome\Application\chrome.exe`.
-//! 2. On Windows only, Microsoft Edge (`%ProgramFiles(x86)%`, then `%ProgramFiles%`, with
-//!    `\Microsoft\Edge\Application\msedge.exe`), only while [`EDGE_ALLOWED`] is true.
-//! 3. Chrome for Testing that Clauseo downloaded into `<app data>/browsers/chrome-<version>/`,
+//!    `~/Applications`.
+//! 2. Chrome for Testing that Clauseo downloaded into `<app data>/browsers/chrome-<version>/`,
 //!    the highest version first, with the binary where the Chrome for Testing zip puts it.
-//!    Skipped on Windows ARM64, where only a slow emulated x64 build exists.
-//! 4. Otherwise none.
+//! 3. Otherwise none.
+//!
+//! On Windows, in this order, and only from Program Files:
+//! 1. Microsoft Edge (`%ProgramFiles(x86)%`, then `%ProgramFiles%`, with
+//!    `\Microsoft\Edge\Application\msedge.exe`), while [`EDGE_ALLOWED`] is true.
+//! 2. Google Chrome (`%ProgramFiles%`, then `%ProgramFiles(x86)%`, with
+//!    `\Google\Chrome\Application\chrome.exe`).
+//! 3. Otherwise none.
+//!
+//! Never a per-user Chrome (`%LOCALAPPDATA%`) and never Chrome for Testing on Windows: the guard
+//! drives the browser over a `DevTools` pipe, and Chrome's own sandbox cannot start a browser from
+//! a per-user folder, whose ACL lacks ALL APPLICATION PACKAGES (a Windows 11 test of Chrome for
+//! Testing showed "cannot access executable"; a per-user Chrome install sits under the same
+//! folder rules, so it is taken to fail the same way, not tried). Program Files installs work.
+//! A per-user Chrome is still looked for, to tell the lawyer why it is not used
+//! ([`WindowsBrowsers::per_user_chrome`], `BrowserPerUserChromeOnly`) rather than to install
+//! what they already have.
 //!
 //! On Linux (development and CI only) the host takes `/usr/bin/google-chrome`, then
 //! `/usr/bin/chromium`.
@@ -22,9 +35,17 @@
 
 use std::path::{Path, PathBuf};
 
-/// Whether Microsoft Edge may stand in for Chrome on Windows. False until G17 item 4 shows it
-/// works with agent-browser (its issues #177 and #1867; agent-browser does not detect Edge).
-pub const EDGE_ALLOWED: bool = false;
+use clauseo_settings::chromium_policy::Browser;
+
+/// Whether the host takes Microsoft Edge on Windows, where it is the first browser looked for.
+/// It was false while G17 item 4 had not shown that Edge works with agent-browser (its issues
+/// #177 and #1867). That reason was agent-browser's, not the sandbox's or the guard's:
+/// agent-browser's own search never finds Edge, but it launches any Chromium it is given as
+/// `AGENT_BROWSER_EXECUTABLE_PATH`, which the host passes. Edge comes first since a Windows 11
+/// test showed it starts over the guard's `DevTools` pipe from Program Files, where Edge always
+/// installs itself; Chrome may be a per-user install, which cannot. Off, Windows has only a
+/// Program Files Chrome.
+pub const EDGE_ALLOWED: bool = true;
 
 /// The folder under the app data folder that holds Chrome for Testing downloads.
 pub const BROWSERS_DIR: &str = "browsers";
@@ -41,7 +62,7 @@ pub enum Platform {
     MacX64,
     /// Windows on x64.
     WindowsX64,
-    /// Windows on ARM64: no Chrome for Testing.
+    /// Windows on ARM64.
     WindowsArm64,
     /// Linux, for development and CI.
     Linux,
@@ -71,14 +92,20 @@ impl Platform {
         }
     }
 
+    /// Windows, x64 or ARM64.
+    pub fn is_windows(self) -> bool {
+        matches!(self, Self::WindowsX64 | Self::WindowsArm64)
+    }
+
     /// Chrome for Testing's name for this platform in its version list and its zip
-    /// (`chrome-<name>.zip`), or `None` where Clauseo downloads no Chrome for Testing.
+    /// (`chrome-<name>.zip`), or `None` where Clauseo downloads no Chrome for Testing: macOS
+    /// only. Never on Windows, where it would sit in a per-user folder that Chrome's sandbox
+    /// cannot start a piped browser from (the module doc), so the download is refused there.
     pub fn cft_name(self) -> Option<&'static str> {
         match self {
             Self::MacArm64 => Some("mac-arm64"),
             Self::MacX64 => Some("mac-x64"),
-            Self::WindowsX64 => Some("win64"),
-            Self::WindowsArm64 | Self::Linux | Self::Other => None,
+            Self::WindowsX64 | Self::WindowsArm64 | Self::Linux | Self::Other => None,
         }
     }
 
@@ -95,8 +122,7 @@ impl Platform {
         match self {
             Self::MacArm64 => Some(mac("chrome-mac-arm64")),
             Self::MacX64 => Some(mac("chrome-mac-x64")),
-            Self::WindowsX64 => Some(Path::new("chrome-win64").join("chrome.exe")),
-            Self::WindowsArm64 | Self::Linux | Self::Other => None,
+            Self::WindowsX64 | Self::WindowsArm64 | Self::Linux | Self::Other => None,
         }
     }
 }
@@ -116,7 +142,7 @@ pub struct ChromeRoots {
     pub program_files: Option<PathBuf>,
     /// Windows: `%ProgramFiles(x86)%`.
     pub program_files_x86: Option<PathBuf>,
-    /// Windows: `%LOCALAPPDATA%`.
+    /// Windows: `%LOCALAPPDATA%`, only to find a per-user Chrome that is never taken.
     pub local_app_data: Option<PathBuf>,
     /// Clauseo's app data folder, which holds `browsers/`.
     pub app_data: PathBuf,
@@ -143,9 +169,26 @@ impl ChromeRoots {
         }
     }
 
-    /// The places to look, in order, before Chrome for Testing; Edge's only when
-    /// `edge_allowed`.
-    fn installed(&self, edge_allowed: bool) -> Vec<PathBuf> {
+    /// Windows' places for Microsoft Edge, in order: `%ProgramFiles(x86)%` (where Edge installs
+    /// itself), then `%ProgramFiles%`. None on any other machine.
+    pub fn edge(&self) -> Vec<PathBuf> {
+        if !self.platform.is_windows() {
+            return Vec::new();
+        }
+        let edge_exe = Path::new("Microsoft")
+            .join("Edge")
+            .join("Application")
+            .join("msedge.exe");
+        [&self.program_files_x86, &self.program_files]
+            .into_iter()
+            .flatten()
+            .map(|base| base.join(&edge_exe))
+            .collect()
+    }
+
+    /// The places to look for Chrome, in order: on macOS before Chrome for Testing, on Windows
+    /// after Edge and from Program Files only.
+    fn installed(&self) -> Vec<PathBuf> {
         let chrome_app = Path::new("Applications")
             .join("Google Chrome.app")
             .join("Contents")
@@ -155,10 +198,6 @@ impl ChromeRoots {
             .join("Chrome")
             .join("Application")
             .join("chrome.exe");
-        let edge_exe = Path::new("Microsoft")
-            .join("Edge")
-            .join("Application")
-            .join("msedge.exe");
         match self.platform {
             Platform::MacArm64 | Platform::MacX64 => [Some(&self.root), self.home.as_ref()]
                 .into_iter()
@@ -166,20 +205,11 @@ impl ChromeRoots {
                 .map(|base| base.join(&chrome_app))
                 .collect(),
             Platform::WindowsX64 | Platform::WindowsArm64 => {
-                let chrome = [
-                    &self.program_files,
-                    &self.program_files_x86,
-                    &self.local_app_data,
-                ]
-                .into_iter()
-                .flatten()
-                .map(|base| base.join(&chrome_exe));
-                let edge = [&self.program_files_x86, &self.program_files]
+                [&self.program_files, &self.program_files_x86]
                     .into_iter()
                     .flatten()
-                    .filter(|_| edge_allowed)
-                    .map(|base| base.join(&edge_exe));
-                chrome.chain(edge).collect()
+                    .map(|base| base.join(&chrome_exe))
+                    .collect()
             }
             Platform::Linux => ["google-chrome", "chromium"]
                 .into_iter()
@@ -198,11 +228,78 @@ pub fn find(roots: &ChromeRoots) -> Option<PathBuf> {
 
 /// [`find`] with the Edge switch given, so its test covers both values.
 fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
+    if roots.platform.is_windows() {
+        return windows_installed_with(roots, edge_allowed)
+            .usable
+            .into_iter()
+            .next()
+            .map(|(_, path)| path);
+    }
     roots
-        .installed(edge_allowed)
+        .installed()
         .into_iter()
         .find(|path| is_file(path))
         .or_else(|| chrome_for_testing(roots))
+        .or_else(|| {
+            edge_allowed
+                .then(|| roots.edge())
+                .into_iter()
+                .flatten()
+                .find(|path| is_file(path))
+        })
+}
+
+/// What Windows has: the browsers the host can take, and a Chrome it found but cannot use.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WindowsBrowsers {
+    /// Each browser installed, in the order the host takes them, with whose policy it reads:
+    /// Edge (while [`EDGE_ALLOWED`]), then Google Chrome, each from Program Files only and at
+    /// most once.
+    pub usable: Vec<(Browser, PathBuf)>,
+    /// A Google Chrome installed for this user only,
+    /// `%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe`: present but not usable (the
+    /// module doc). Never taken; with nothing usable, the lawyer is told why
+    /// (`BrowserPerUserChromeOnly`).
+    pub per_user_chrome: Option<PathBuf>,
+}
+
+/// On Windows, the browsers installed ([`WindowsBrowsers`]). The launch prep takes the first
+/// usable one the firm's policy leaves on (`super::rd_policy`). Empty on any other machine. File
+/// system calls: off the actor.
+pub fn windows_installed(roots: &ChromeRoots) -> WindowsBrowsers {
+    windows_installed_with(roots, EDGE_ALLOWED)
+}
+
+/// [`windows_installed`] with the Edge switch given.
+fn windows_installed_with(roots: &ChromeRoots, edge_allowed: bool) -> WindowsBrowsers {
+    if !roots.platform.is_windows() {
+        return WindowsBrowsers::default();
+    }
+    let edge = edge_allowed
+        .then(|| roots.edge())
+        .into_iter()
+        .flatten()
+        .find(|path| is_file(path))
+        .map(|path| (Browser::Edge, path));
+    let chrome = roots
+        .installed()
+        .into_iter()
+        .find(|path| is_file(path))
+        .map(|path| (Browser::Chrome, path));
+    let per_user_chrome = roots
+        .local_app_data
+        .as_ref()
+        .map(|base| {
+            base.join("Google")
+                .join("Chrome")
+                .join("Application")
+                .join("chrome.exe")
+        })
+        .filter(|path| is_file(path));
+    WindowsBrowsers {
+        usable: edge.into_iter().chain(chrome).collect(),
+        per_user_chrome,
+    }
 }
 
 /// The highest-versioned Chrome for Testing under `<app data>/browsers/` whose binary is there.

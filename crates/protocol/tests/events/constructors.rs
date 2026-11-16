@@ -29,10 +29,15 @@ fn a_checkpoint_names_a_thread_and_turn_only_where_its_kind_has_them() {
             turn.map(turn_id),
         )
     };
-    let none = "CheckpointRecorded: an import or restore checkpoint names no thread or turn";
+    let none =
+        "CheckpointRecorded: an import, restore or revisions checkpoint names no thread or turn";
     let both = "CheckpointRecorded: a turn's or an undo's checkpoint names its thread and turn";
     let orphan = "CheckpointRecorded: a checkpoint that names a turn names its thread";
-    for kind in [CheckpointKind::Import, CheckpointKind::Restore] {
+    for kind in [
+        CheckpointKind::Import,
+        CheckpointKind::Restore,
+        CheckpointKind::Revisions,
+    ] {
         assert_eq!(refusal(checkpoint(kind, Some(2), None)), none);
         assert_eq!(refusal(checkpoint(kind, None, Some(3))), none);
         assert_eq!(refusal(checkpoint(kind, Some(2), Some(3))), none);

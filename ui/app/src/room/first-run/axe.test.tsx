@@ -36,7 +36,7 @@ test("axe: the sign-in gate and the key panel in the composer have no violation"
   await mountFirstRun({ first: [install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })] });
   expect(byId("signin")).not.toBeNull();
   expect(await violations()).toEqual([]);
-  await press("Use an API key or my firm's account");
+  await press("Use an API key instead");
   expect(byId("signin-key")).not.toBeNull();
   expect(await violations()).toEqual([]);
 });

@@ -71,13 +71,13 @@ test("each field on its own: a worth without a read time, and a read time withou
   expect(line(r, "connectors-as-of")).toBe("As of 4:29 pm.");
 });
 
-test("a pasted key says Using your firm's key.; an account, or an older host's, keeps Ready to search.", async () => {
+test("a pasted key says Using your key.; an account, or an older host's, keeps Ready to search.", async () => {
   let r = await open(stateOf({ status: balanceOf({ credits: 10_000 }, "api_key") }));
-  expect(r.text()).toContain("Using your firm's key.");
+  expect(r.text()).toContain("Using your key.");
   expect(r.text()).not.toContain("Ready to search.");
   await r.play(stateOf({ status: balanceOf({ credits: 10_000 }, "account") }));
   expect(r.text()).toContain("Ready to search.");
-  expect(r.text()).not.toContain("Using your firm's key.");
+  expect(r.text()).not.toContain("Using your key.");
   await r.play(stateOf({ status: SIGNED_IN }));
   expect(r.text()).toContain("Ready to search.");
 });

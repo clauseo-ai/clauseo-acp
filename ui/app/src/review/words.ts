@@ -3,7 +3,11 @@
 // the Hindi words in at once, as the app has them once its lazy chunk lands: each ref reads its Hindi when made
 import "@clauseo/components/lib/words-hi.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
-import { errorSentence, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
+import {
+  errorSentence,
+  type ErrorKey,
+  type MARK_KEYS,
+} from "@clauseo/components/lib/words-errors.ts";
 import { errorHindi } from "@clauseo/components/lib/words-errors.hi.ts";
 import { fw, type FindKey } from "@clauseo/components/lib/words-find.ts";
 import { fr, type FolderKey } from "@clauseo/components/lib/words-folder.ts";
@@ -22,6 +26,7 @@ import { fl, type FirstLaunchKey } from "@clauseo/components/lib/words-first-lau
 import { rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
 import { roomHindi } from "@clauseo/components/lib/words-room.hi.ts";
 import { rdt, type ReaderKey } from "@clauseo/components/lib/words-reader.ts";
+import { refusal, type RefusalKey } from "@clauseo/components/lib/words-refusals.ts";
 import { brk, type BreakKey } from "@clauseo/components/lib/words-breaks.ts";
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { startup, type StartupKey } from "@clauseo/components/lib/words-startup.ts";
@@ -142,8 +147,11 @@ export const planCardWords = (key: PlanCardKey): WordsRef => ({
 });
 
 /** An error sentence of words-errors.ts. The one sentence it shares with words-thread.ts is that file's, and is
- * registered through threadWords. */
-export const errorWords = (key: Exclude<ErrorKey, ThreadKey>): WordsRef => ({
+ * registered through threadWords; the Word blackline's are words-versions.ts's (MARK_KEYS), registered through
+ * versionWords. */
+export const errorWords = (
+  key: Exclude<ErrorKey, ThreadKey | (typeof MARK_KEYS)[number]>,
+): WordsRef => ({
   file: "lib/words-errors.ts",
   key,
   text: (lang) => errorSentence(lang, key),
@@ -162,6 +170,14 @@ export const uiWords = (key: UiKey): WordsRef => ({
   key,
   text: (lang) => ui(lang, key),
   later: ui.hi[key] === null,
+});
+
+/** The line under a step's row that Claude's own checks refused (words-refusals.ts). */
+export const refusalLineWords = (key: RefusalKey): WordsRef => ({
+  file: "lib/words-refusals.ts",
+  key,
+  text: (lang) => refusal(lang, key),
+  later: refusal.hi[key] === null,
 });
 
 /** A string of the judgment reader and Word's lines (words-reader.ts), such as Open in Word. */

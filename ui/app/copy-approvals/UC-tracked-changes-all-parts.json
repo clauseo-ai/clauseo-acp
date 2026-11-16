@@ -1,0 +1,35 @@
+{
+  "UC-304": {
+    "en": "In a header or footer",
+    "hi": "हेडर या फ़ुटर में",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "tracked-changes-all-parts (en provisional, for the orchestrator)",
+    "note": "Where a tracked change outside the document's main text is, beside its kind's label (tracked changes in headers, footers, notes and comments)"
+  },
+  "UC-305": {
+    "en": "In a footnote or endnote",
+    "hi": "फ़ुटनोट या एंडनोट में",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "tracked-changes-all-parts (en provisional, for the orchestrator)",
+    "note": "Where a tracked change outside the document's main text is, beside its kind's label (tracked changes in headers, footers, notes and comments)"
+  },
+  "UC-306": {
+    "en": "In a comment",
+    "hi": "टिप्पणी में",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "tracked-changes-all-parts (en provisional, for the orchestrator)",
+    "note": "Where a tracked change outside the document's main text is, beside its kind's label (tracked changes in headers, footers, notes and comments)"
+  }
+}

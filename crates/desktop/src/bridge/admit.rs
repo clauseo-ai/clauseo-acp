@@ -15,12 +15,19 @@
 //! `RemoveSandboxSetup`, come from both: the settings window's protection section and the
 //! main window's protection notice. Neither carries a field, and the host holds each answer
 //! until the set-up (with its administrator prompt) ends.
+//! The browser's `InstallBrowser`, `CancelBrowserInstall` and `RecheckBrowserPolicy` (0029)
+//! are `main`'s alone: its tool line offers them.
 //! Of the unsafe-site override's two (0053, PR 2), `main` sends
 //! `AllowBlockedSite` from a block's notice and `RevokeAllowedSite`, and the settings window
 //! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
 //! agent shows or runs, may lift a block.
+//! The network signal `SetNetwork` (D-050) is `main`'s alone: its webview hears `online` and
+//! `offline`. The lawyer's MCP server commands (Settings › Tools) are the settings window's
+//! alone: each server is a program that runs with the lawyer's access.
 
-use clauseo_protocol::{ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource};
+use clauseo_protocol::{
+    ConfigValue, ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource,
+};
 
 use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 
@@ -51,13 +58,15 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             | HostCommand::RetryProtection {}
             | HostCommand::RemoveSandboxSetup {}
             // The allowed sites' list (0053, PR 2) takes one back; allowing is main's.
-            | HostCommand::RevokeAllowedSite { .. } => Ok(()),
+            | HostCommand::RevokeAllowedSite { .. }
+            // Tools: the lawyer's own MCP servers, each a program that runs as the lawyer.
+            | HostCommand::Mcp(_) => Ok(()),
             HostCommand::Connector(connector) => connector_settings(connector),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
                  set_privacy_settings, set_skill_pack, refresh_limits, set_update_mode, \
-                 check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site \
-                 and the connector commands",
+                 check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site, \
+                 the MCP server commands and the connector commands",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -67,10 +76,10 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
 /// Whether `main` may send `command`: an allow-list, one arm per host command and no
 /// catch-all, so a command the host adds does not compile here until the bridge rules on it
 /// (`docs/decisions/0019-app-stream-to-the-window.md`). Refuses what goes another way
-/// (`AnswerPermission`), what may not come from the window at all (`SetMode`,
-/// `SetConfigOption`), and a `CreateMatter`, `RelocateMatter` or `ScanFolder` whose folder
-/// ref this run's `pick_folder` did not issue. `CancelScan` always passes: it starts nothing,
-/// and cancelling a scan that is not running does nothing.
+/// (`AnswerPermission`), what may not come from the window at all (`SetMode`, a
+/// `SetConfigOption` that is not a choice), and a `CreateMatter`, `RelocateMatter` or
+/// `ScanFolder` whose folder ref this run's `pick_folder` did not issue. `CancelScan` always
+/// passes: it starts nothing, and cancelling a scan that is not running does nothing.
 fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
     match command {
         HostCommand::CreateMatter { source, .. } => picked_source(bridge, source),
@@ -112,6 +121,9 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // it after the lawyer agrees, and its Cancel button the cancel. No field to check.
         | HostCommand::InstallBrowser {}
         | HostCommand::CancelBrowserInstall {}
+        // The browser row's "Try again" when the firm's browser policy was not read (0029):
+        // a read on the host, which runs one at a time. No field to check.
+        | HostCommand::RecheckBrowserPolicy {}
         // R23: the rail card's update actions, "Restart to update" (now or after the answer),
         // taking a scheduled install back, and "Check again"; settings may not install (0037).
         | HostCommand::InstallUpdate { .. }
@@ -123,15 +135,32 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // 0053, PR 2: a block's notice offers "Allow this site", and its undo takes it back.
         // The host allows only the host of a notice it sent, and refuses while policy forbids.
         | HostCommand::AllowBlockedSite { .. }
-        | HostCommand::RevokeAllowedSite { .. } => Ok(()),
+        | HostCommand::RevokeAllowedSite { .. }
+        // The room's tracked changes in a Word file: a matter, a path inside it that the host
+        // resolves and refuses unless it is a `.docx`, and change ids. Writes as a restore does.
+        | HostCommand::DecideRevisions(_)
+        // The pickers: a choice of a config option, which the host takes only for a model or
+        // effort option of the thread's (`turn/picks.rs`), refusing every other.
+        | HostCommand::SetConfigOption {
+            value: ConfigValue::Select(_),
+            ..
+        }
+        // D-050: the window's `online`/`offline` events, a flag; it only arms or takes back
+        // the host's offline watch on running turns.
+        | HostCommand::SetNetwork { .. } => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),
-        // A mode or option can widen what the agent may do without asking (Claude's
-        // bypassPermissions), an escalation 0001 puts behind a native dialog drawn by Rust.
-        // That path does not exist yet, and the window never sends either.
-        HostCommand::SetMode { .. } | HostCommand::SetConfigOption { .. } => Err(invalid(
-            "modes and config options are not settable from the window yet",
+        // A mode, or an option like it, can widen what the agent may do without asking
+        // (Claude's bypassPermissions), an escalation 0001 puts behind a native dialog drawn by
+        // Rust. That path does not exist yet, and the window never sends either. A model or
+        // effort option is always a choice, never on or off.
+        HostCommand::SetMode { .. } => Err(invalid("modes are not settable from the window yet")),
+        HostCommand::SetConfigOption {
+            value: ConfigValue::Boolean(_),
+            ..
+        } => Err(invalid(
+            "only the model and effort options are settable from the window, and they are choices",
         )),
         // The tool switches live in the settings window only; the main window shows the
         // tools and offers to open Settings, so it has no caller (least privilege).
@@ -154,6 +183,12 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         )),
         // R24: the room's hint and the balance only; the rest is the settings window's.
         HostCommand::Connector(connector) => connector_main(connector),
+        // A lawyer's MCP server is a program that runs with the lawyer's access: added, changed
+        // and turned on in the settings window only, never from the window that shows agent
+        // output.
+        HostCommand::Mcp(_) => Err(invalid(
+            "the MCP servers are changed from the settings window only",
+        )),
     }
 }
 

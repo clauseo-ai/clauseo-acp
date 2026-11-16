@@ -36,7 +36,9 @@ use crate::windows::private_dir::owner;
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 use crate::windows::test_acl::{Place, elevated_tests_enabled, entries, protected};
-use crate::windows::test_pool::{Impersonating, TestUser, low_restricted_token, open};
+use crate::windows::test_pool::{
+    Impersonating, TestUser, clock, low_restricted_token, open, report,
+};
 
 /// `FILE_ALL_ACCESS`, as the SDDL's `FA` writes it.
 const FA: u32 = 0x001F_01FF;
@@ -351,8 +353,11 @@ fn elevated_a_low_pool_token_reads_the_bundle_and_cannot_write_it() {
     let data = place.at("data");
     let user = TestUser::new();
     let desktop = current_user_sid().unwrap();
+    let started = clock();
     let bundle = ensure_with(&data, &desktop, std::slice::from_ref(&user.sid)).unwrap();
+    report("ca bundle written", started);
     let token = low_restricted_token(&user);
+    let started = clock();
     let (write, read) = {
         let _as_pool = Impersonating::start(&token);
         (
@@ -360,6 +365,7 @@ fn elevated_a_low_pool_token_reads_the_bundle_and_cannot_write_it() {
             open(&bundle.path, GENERIC_READ.0),
         )
     };
+    report("ca bundle opened as the pool user", started);
     assert_eq!(
         write,
         Err(5),

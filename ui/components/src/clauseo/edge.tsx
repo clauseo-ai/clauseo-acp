@@ -159,10 +159,10 @@ export function EdgePrompt({
           );
   const kept =
     kind === "off"
-      ? w.v(
-          "Outside the Safe workspace, Clauseo can reach any file on this computer without asking.",
-        )
-      : w.v("Clauseo works inside this matter's folder and asks before going beyond it.");
+      ? w.v("Outside the Safe workspace, Clauseo can read any file you can open.")
+      : w.v(
+          "Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
+        );
   const allow = (
     <Button
       kind={kind === "off" ? "quiet" : "tone"}

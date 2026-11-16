@@ -20,7 +20,7 @@ export type StepParts = Pick<
   | "blockOf"
   | "blockLine"
   | "needsInstaller"
-  | "firmInstall"
+  | "firmPolicy"
   | "repairLine"
   | "repairPage"
   | "openInstallerPage"
@@ -31,7 +31,7 @@ export const stepWords = (lang: Lang, pw: StepParts["pw"]) => ({
   ask: fl(lang, "Windows asks once for permission to set up the Safe workspace."),
   unknown: pw(
     lang,
-    "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+    "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
   ),
   setUp: pw(lang, "Set up the Safe workspace"),
   waiting: pw(lang, "Choose Yes in the window Windows shows."),
@@ -57,6 +57,6 @@ export function repairOf(
       ...(block === null ? [] : [block]),
       parts.repairLine(lang, state.view, state.managedBy),
     ],
-    page: parts.firmInstall(state.view, state.managedBy) ? null : parts.repairPage(display),
+    page: parts.firmPolicy(state.view, state.managedBy) ? null : parts.repairPage(display),
   };
 }

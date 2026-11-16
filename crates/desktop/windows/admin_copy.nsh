@@ -388,7 +388,7 @@ Var ClauseoAdminTimedOut
       StrCpy $R2 ""
     ${EndIf}
     ${If} $R2 != ""
-      MessageBox MB_OK|MB_ICONINFORMATION "$(adminCopyAsk)"
+      MessageBox MB_OK|MB_ICONINFORMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyAsk)"
       ; ShellExecuteExW "runas" on this installer, as the uninstall hook starts --remove:
       ; SEE_MASK_NOCLOSEPROCESS (0x40) for the exit code, SEE_MASK_FLAG_NO_UI (0x400) for no
       ; error box of Windows' own (the consent prompt still shows), SEE_MASK_NOZONECHECKS
@@ -481,29 +481,29 @@ Var ClauseoAdminTimedOut
       DetailPrint "$(adminCopyDone)"
     ${ElseIf} $R6 = 1
       DetailPrint "$(adminCopyFailed)"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyFailed)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyFailed)"
     ${ElseIf} $R6 = 2
       DetailPrint "$(adminCopyOtherAccount)"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyOtherAccount)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyOtherAccount)"
     ${ElseIf} $R6 = 4
       DetailPrint "$(adminCopyDeclined)"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyDeclined)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyDeclined)"
     ${ElseIf} $R6 = 5
       DetailPrint "$(adminCopyNewerKept)"
     ${ElseIf} $R6 = 6
       DetailPrint "$(adminCopyAppRunning)"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyAppRunning)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyAppRunning)"
       SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}
     ${ElseIf} $R6 = 7
       DetailPrint "$(adminCopyStillRunning)"
     ${ElseIf} $R6 = 8
       DetailPrint "$(setupExeRemoved)"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(setupExeRemoved)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(setupExeRemoved)"
       SetErrorLevel ${CLAUSEO_EXIT_SETUP_EXE_REMOVED}
     ${ElseIf} $R6 = 9
       ; Only reached interactively: /S and /P skip the prompt above (adminCopySkippedSilent, 22).
       DetailPrint "$(adminCopyBlocked)"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyBlocked)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyBlocked)"
     ${EndIf}
   ${EndIf}
   Pop $R9
@@ -540,7 +540,7 @@ Var ClauseoAdminTimedOut
     ${IfNot} ${Silent}
     ${AndIf} $PassiveMode <> 1
     ${AndIf} $UpdateMode <> 1
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyAppRunning)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyAppRunning)"
     ${EndIf}
   ${Else}
     !insertmacro CLAUSEO_RECORD_CHECK ""
@@ -592,7 +592,7 @@ Var ClauseoAdminTimedOut
     ${IfNot} ${Silent}
     ${AndIf} $PassiveMode <> 1
     ${AndIf} $UpdateMode <> 1
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(setupExeRemoved)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(setupExeRemoved)"
     ${EndIf}
   ${Else}
     DetailPrint "$(adminCopyMachineFailed)"
@@ -600,7 +600,7 @@ Var ClauseoAdminTimedOut
       SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_FAILED}
     ${ElseIf} $PassiveMode <> 1
     ${AndIf} $UpdateMode <> 1
-      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyMachineFailed)"
+      MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(adminCopyMachineFailed)"
     ${EndIf}
   ${EndIf}
 !macroend

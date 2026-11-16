@@ -2,20 +2,32 @@
 //! skills' source files, their budgets, the words they must never hold, the version lock, and
 //! the skills index Codex gets. Nothing is written; the lock test reads `assets/skills/`.
 
+#[path = "legal/budgets.rs"]
+mod budgets;
+#[path = "legal/claude_shell.rs"]
+mod claude_shell;
+#[path = "legal/codex_pdf.rs"]
+mod codex_pdf;
 #[path = "legal/index.rs"]
 mod index;
+#[path = "legal/rules.rs"]
+mod rules;
+#[path = "legal/subagents.rs"]
+mod subagents;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use clauseo_profile::RenderedSkill;
-use clauseo_profile::instructions::{LEGAL, TOOLS, word_count};
-use clauseo_profile::placeholders::{CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER};
+use clauseo_profile::instructions::{LEGAL, word_count};
+use clauseo_profile::placeholders::{
+    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+};
 use clauseo_profile::skills::builtin::{ASSETS, BUILTIN, RETIRED_BUILTINS, sources};
 use clauseo_profile::skills::frontmatter::{self, MetaValue};
 use clauseo_profile::skills::stetdoc::STETDOC;
 use clauseo_profile::skills::{SKILL_MD, is_skill_name, render};
-use clauseo_profile::{BrowserSidecars, ClauseoProfile, Instructions, ProfilePaths};
+use clauseo_profile::{BrowserSidecars, ClauseoProfile, ProfilePaths};
 use clauseo_settings::Locations;
 use sha2::{Digest as _, Sha256};
 
@@ -128,27 +140,6 @@ fn skill_mds() -> Vec<(&'static str, &'static str)> {
 }
 
 #[test]
-fn legal_word_budget() {
-    let legal = word_count(LEGAL);
-    assert!(legal <= 1200, "the legal part has {legal} words");
-    let whole = ClauseoProfile::new(paths_under(Path::new("/data")), None).instructions();
-    assert_eq!(
-        whole,
-        Instructions::tools()
-            .with_connectors()
-            .with_part(LEGAL)
-            .compose("")
-    );
-    assert!(whole.ends_with(&format!("\n\n{}", LEGAL.trim())));
-    assert_eq!(
-        word_count(&whole),
-        word_count(TOOLS) + word_count(LEGAL),
-        "only {{author}} is filled, with one word"
-    );
-    assert!(word_count(&whole) <= 1500, "{} words", word_count(&whole));
-}
-
-#[test]
 fn legal_sections_in_order() {
     let found: Vec<&str> = LEGAL
         .lines()
@@ -166,19 +157,55 @@ fn legal_names_matter_brief() {
     assert!(!LEGAL.contains("{work_folder}/matter-brief.md"));
 }
 
+/// D-045: Codex's Seatbelt blocks what `mdls`, `mdfind`, `open`, `qlmanage` and `osascript` need,
+/// even approved. Codex on macOS is told in one sentence; elsewhere never, and Claude has its own.
 #[test]
-fn the_launch_instructions_hold_only_tokens_the_host_fills() {
-    let text = ClauseoProfile::new(paths_under(Path::new("/data")), None).instructions();
-    assert!(text.contains(WORK_FOLDER) && text.contains(MATTER_NOTES));
-    assert!(!text.contains("{author}"));
-    let filled = clauseo_profile::placeholders::fill(
-        &text,
-        &IN_INSTRUCTIONS,
-        &[(WORK_FOLDER, "W"), (MATTER_NOTES, "M"), (CONNECTORS, "")],
-    )
-    .unwrap();
-    assert!(!filled.contains("{work_folder}") && !filled.contains("{matter_notes}"));
-    assert!(!filled.contains(CONNECTORS));
+fn only_codex_on_macos_is_told_which_commands_never_run() {
+    use clauseo_profile::instructions::{CODEX_REFUSAL, CODEX_SHELL_OFFLINE, codex_shell};
+    use clauseo_protocol::AgentKind;
+    let line = codex_shell(true).unwrap();
+    assert_eq!(codex_shell(false), None);
+    assert_eq!(line.matches(". ").count(), 0, "one sentence: {line}");
+    for command in [
+        "mdls",
+        "mdfind",
+        "open",
+        "qlmanage",
+        "osascript",
+        "stetdoc",
+        "textutil",
+        "python3",
+    ] {
+        assert!(line.contains(&format!("`{command}`")), "{command}");
+    }
+    let profile = launch_profile(&std::env::temp_dir().join("d045-codex-line"));
+    let mac = profile.codex_instructions_for(true);
+    // Every Codex session's offline line, then its refusal line, come first, macOS or not.
+    let shared = format!(
+        "{}\n\n{}\n\n{}",
+        profile.instructions_for(AgentKind::Codex),
+        CODEX_SHELL_OFFLINE.trim(),
+        CODEX_REFUSAL.trim()
+    );
+    assert_eq!(mac, format!("{shared}\n\n{line}"));
+    assert_eq!(profile.codex_instructions_for(false), shared);
+    let codex = profile.codex_keys_without_index(Some(AgentKind::Codex));
+    assert_eq!(
+        codex["developer_instructions"],
+        profile.codex_instructions().as_str()
+    );
+    assert_eq!(
+        profile.codex_instructions().contains(line),
+        cfg!(target_os = "macos")
+    );
+    assert!(!profile.instructions().contains("osascript"));
+    let claude = serde_json::to_string(&profile.session_meta(Some(AgentKind::Claude))).unwrap();
+    assert!(!claude.contains(line), "{claude}");
+    assert!(
+        profile
+            .codex_keys_without_index(Some(AgentKind::Claude))
+            .is_empty()
+    );
 }
 
 /// R24's connectors paragraph (decision D6): at most 80 words, between the tools part and R22's
@@ -208,7 +235,12 @@ fn the_connectors_paragraph_goes_only_where_the_host_puts_it() {
         clauseo_profile::placeholders::fill(
             &text,
             &IN_INSTRUCTIONS,
-            &[(WORK_FOLDER, "W"), (MATTER_NOTES, "M"), (CONNECTORS, part)],
+            &[
+                (WORK_FOLDER, "W"),
+                (MATTER_NOTES, "M"),
+                (CONNECTORS, part),
+                (BROWSER, ""),
+            ],
         )
         .unwrap()
     };
@@ -219,7 +251,9 @@ fn the_connectors_paragraph_goes_only_where_the_host_puts_it() {
     let tools = TOOLS
         .trim()
         .replace("{author}", "Clauseo")
-        .replace("{work_folder}", "W");
+        .replace("{work_folder}", "W")
+        .replace("{browser}", "")
+        .replace("{stetdoc}", "");
     for (filled, part) in [(&with, PARAGRAPH), (&without, CONNECTORS_NONE)] {
         let expected = format!("{tools}\n\n{}\n\n## Identity", part.trim());
         assert!(filled.starts_with(&expected), "{filled}");
@@ -279,11 +313,12 @@ fn the_rendered_frontmatter_is_name_and_description_alone() {
         assert!(text.starts_with(&frontmatter::render(skill.name(), &front.description)));
         assert!(!text.contains("metadata:"));
         // R24 gave the research skill's case-law line conditional wording (version 2), then
-        // the brief's "and citations" (version 3).
-        let version = if skill.name() == "legal-research" {
-            "3"
-        } else {
-            "1"
+        // the brief's "and citations" (version 3), then no browser in its tools (version 4).
+        // The matter brief's check before its read (D-044) is its version 2.
+        let version = match skill.name() {
+            "legal-research" => "4",
+            "matter-brief" => "2",
+            _ => "1",
         };
         assert_eq!(skill.entry().version, version, "{}", skill.name());
     }
@@ -463,7 +498,10 @@ fn versions_lock() {
     let skills = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/skills");
     let lock = std::fs::read_to_string(skills.join("versions.lock")).unwrap();
     let mut current = Vec::new();
-    for (name, text) in skill_mds() {
+    // The browser's skill is pinned beside the three, at agent-browser's version.
+    let browser = clauseo_profile::skills::builtin::AGENT_BROWSER;
+    let browser_text = clauseo_profile::skills::builtin::AGENT_BROWSER_SKILL;
+    for (name, text) in skill_mds().into_iter().chain([(browser, browser_text)]) {
         let (front, _) = frontmatter::parse(text).unwrap();
         let MetaValue::Scalar(version) = front.clauseo["version"].clone() else {
             panic!("{name}: version is not a scalar");

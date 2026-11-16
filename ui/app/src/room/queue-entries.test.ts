@@ -125,6 +125,11 @@ test("held: after Stop the step's time, after a failure its code, after a restar
     ),
   );
   expect(heldPick()(failed.view)).toEqual({ kind: "failed", at: 8000, code: "agent.exited" });
+  // a turn too long for the model to read is no failure: the hold names no stop
+  const tooLong = viewOf(
+    reset([queued(5, 2, "Q"), step(4, { stop: "too_long", ts: 8500 })], heldHeader),
+  );
+  expect(heldPick()(tooLong.view)).toEqual({ kind: "held" });
   const restarted = viewOf(reset([queued(5, 2, "Q")], heldHeader));
   expect(heldPick()(restarted.view)).toEqual({ kind: "held" });
   // a turn that ended well before the restart names no stop either

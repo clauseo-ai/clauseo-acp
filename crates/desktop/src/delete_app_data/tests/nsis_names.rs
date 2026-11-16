@@ -92,7 +92,18 @@ fn the_installer_scripts_use_only_known_nsis_variables() {
         // `Var DeleteAppDataCheckboxState` (line 427): the "delete app data" box, which the
         // uninstall hook reads.
         "DeleteAppDataCheckboxState",
+        // `Var PassiveMode` (line 80): 1 under /P; repair mode sets it at the end of the install so
+        // the template skips the finish page and closes (hooks.nsh, CLAUSEO_REPAIR_RELAUNCH).
+        "PassiveMode",
     ];
+    // The hooks' own variables, each declared by a `Var` line in hooks.nsh or admin_copy.nsh.
+    const HOOK_VARS: &[&str] = &["ClauseoRepair", "ClauseoAdminTimedOut"];
+    for name in HOOK_VARS {
+        let declared = ["windows/hooks.nsh", "windows/admin_copy.nsh"]
+            .iter()
+            .any(|file| read(file).lines().any(|line| line == format!("Var {name}")));
+        assert!(declared, "no `Var {name}`");
+    }
     // Registers $0-$9 and $R0-$R9 need no declaration.
     let digit = |s: &str| s.len() == 1 && s.bytes().all(|b| b.is_ascii_digit());
     let register = |name: &str| digit(name) || name.strip_prefix('R').is_some_and(digit);
@@ -107,7 +118,8 @@ fn the_installer_scripts_use_only_known_nsis_variables() {
                 checked += 1;
                 let known = register(name)
                     || NSIS_CONSTANTS.contains(&name)
-                    || TEMPLATE_VARS.contains(&name);
+                    || TEMPLATE_VARS.contains(&name)
+                    || HOOK_VARS.contains(&name);
                 assert!(
                     known,
                     "{file}:{}: ${name} is not an NSIS variable: {line}",

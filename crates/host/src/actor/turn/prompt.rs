@@ -1,6 +1,15 @@
-//! Step 5: the prompt, with the undo note (the files put back since the last turn) first.
+//! Step 5: the prompt, with the notes first: the offline-shell note a steer could not deliver
+//! (`shell_network.rs`), then the undo note (the files put back since the last turn).
+//!
+//! The note is added here, after `SendPrompt` checked the question alone, so a Codex prompt is
+//! checked against Codex's cap again as it will be sent (`codex_cap::refuse`): over
+//! it, the turn ends failed with `prompt.too_long` before anything reaches the agent, the queue
+//! held, and the note kept for the next prompt.
+//!
+//! The undo note is held aside while its prompt is out, and put back unless the agent took that
+//! prompt (`note.rs`); the offline-shell note is spent once sent, or once the agent is gone.
 
-use clauseo_protocol::{ContentBlock, ErrorCode, StreamId, ThreadId, TurnId, ViewEntry};
+use clauseo_protocol::{ContentBlock, ErrorCode, ThreadId, TurnId};
 use futures::future::{AbortHandle, Abortable, join};
 
 use super::super::Actor;
@@ -9,11 +18,11 @@ use super::agents::Stage;
 use super::key_retry;
 use super::{AgentReply, BeforePrompt, End, TurnInput, TurnPhase, current, end, spawn, state};
 use crate::agent::{codex, leftovers};
-use crate::undo_note::{self, NoteInput};
+use crate::log_file::LIFECYCLE;
 
 /// Step 5: the prompt, with the undo note first.
 pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    let note = take_note(actor, thread);
+    let note = super::note::text(actor, thread);
     let agent = state(actor, thread)
         .and_then(|state| state.agent.as_deref())
         .filter(|agent| agent.stage == Stage::Attached)
@@ -30,6 +39,10 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             ))
         });
     let Some(((id, check), (client, descendants), fence, session)) = agent else {
+        // The undo note stays: no prompt reached the agent.
+        if let Some(state) = state(actor, thread) {
+            state.offline_owed = false;
+        }
         if let Some(current) = current(actor, thread) {
             current.phase = TurnPhase::Prompting;
         }
@@ -41,24 +54,47 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         end::end_turn(actor, thread, end);
         return;
     };
-    let retry = key_retry::for_call(actor, thread);
     let Some(current) = current(actor, thread) else {
         return;
     };
     current.phase = TurnPhase::Prompting;
+    let mut content = Vec::with_capacity(current.prompt.len() + 1);
+    if let Some(text) = note {
+        content.push(ContentBlock::Text { text });
+    }
+    content.extend(current.prompt.iter().cloned());
+    let cancelled = current.cancelled;
+    // The text exactly as it goes out, the note in: over Codex's cap, nothing is sent.
+    if let Err(error) = super::codex_cap::refuse(actor, thread, &content) {
+        tracing::warn!(
+            %thread,
+            %turn,
+            error = %crate::log_file::Cause(&error),
+            "a Codex prompt with its undo note was refused before it was sent"
+        );
+        let end = if cancelled {
+            End::cancelled(None)
+        } else {
+            End::failed(error.code(), Some(error.to_string()), None)
+        };
+        end::end_turn(actor, thread, end);
+        return;
+    }
+    super::note::sent(actor, thread, turn);
+    let retry = key_retry::for_call(actor, thread);
+    let Some(current) = super::current(actor, thread) else {
+        return;
+    };
     let stopped = std::rc::Rc::clone(&current.stopped);
-    // The prompt goes out: the case-law relay's turn caps start again (R24).
+    super::state::prompt_sent(actor, thread);
+    // The prompt goes out: the case-law relay's turn caps start again (R24), and while the
+    // window says the computer is offline, the turn is watched (`offline.rs`).
     super::launch_checks::relay::turn_started(actor, thread);
+    super::offline::turn_started(actor, thread);
     let Some(current) = super::current(actor, thread) else {
         return;
     };
     let retry = retry.unless_stopped(stopped);
-    let blocks = current.prompt.clone();
-    let mut content = Vec::with_capacity(blocks.len() + 1);
-    if let Some(text) = note {
-        content.push(ContentBlock::Text { text });
-    }
-    content.extend(blocks);
     let (abort, registration) = AbortHandle::new_pair();
     current.prompt_call = Some(abort);
     let before = BeforePrompt::default();
@@ -80,6 +116,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             if let Err(error) = checked {
                 return AgentReply::PromptRefused { turn, error };
             }
+            tracing::info!(target: LIFECYCLE, %thread, %turn, "prompt sent");
             let result = retry
                 .run(&client, || client.prompt(&session, turn, content.clone()))
                 .await;
@@ -100,46 +137,4 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             let _gone = post.try_send(Input::Turn(input));
         }
     });
-}
-
-/// The undo note's text for the next prompt, and the note cleared for the turn starting now.
-fn take_note(actor: &mut Actor, thread: ThreadId) -> Option<String> {
-    ensure_note(actor, thread);
-    let state = state(actor, thread)?;
-    let undone = state.note.replace(Vec::new()).unwrap_or_default();
-    let restored = std::mem::take(&mut state.restored);
-    let paths = undo_note::paths_since_last_turn([
-        NoteInput::Undone { restored: &undone },
-        NoteInput::Restored { paths: &restored },
-    ]);
-    undo_note::note_text(&paths)
-}
-
-/// Reads the note from the loaded state the first time it is needed: the files undone since
-/// the last turn's step.
-pub(super) fn ensure_note(actor: &mut Actor, thread: ThreadId) {
-    if state(actor, thread).is_none_or(|state| state.note.is_some()) {
-        return;
-    }
-    let paths = actor
-        .loaded(StreamId::Thread(thread))
-        .and_then(|loaded| loaded.state.as_thread())
-        .map(|state| {
-            let inputs = state.entries().values().filter_map(|entry| {
-                if matches!(entry, ViewEntry::Step(_)) {
-                    Some(NoteInput::TurnStarted)
-                } else if let ViewEntry::Marker(marker) = entry
-                    && let clauseo_protocol::MarkerKind::StepUndone { restored, .. } = &marker.kind
-                {
-                    Some(NoteInput::Undone { restored })
-                } else {
-                    None
-                }
-            });
-            undo_note::paths_since_last_turn(inputs)
-        })
-        .unwrap_or_default();
-    if let Some(state) = state(actor, thread) {
-        state.note = Some(paths);
-    }
 }

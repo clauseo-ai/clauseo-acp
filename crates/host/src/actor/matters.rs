@@ -3,7 +3,9 @@
 //! worker thread, started and opened on
 //! first use (relinking a deleted `matter.json` once, when no other matter claims the folder). A
 //! refused folder gets one code per reason (`refusal`), and an import of a forgotten matter's
-//! folder brings that matter back (`matter_details.rs`). `RelocateMatter` is in `relocate.rs`.
+//! folder brings that matter back (`matter_details.rs`); a listed matter's folder, one being made
+//! and one whose marker names a matter this install does not know are answered in `answer.rs`.
+//! `RelocateMatter` is in `relocate.rs`.
 //!
 //! A matter's worker starts lazily: at start-up the host only lists matters, and the first
 //! turn or undo of a matter starts its thread and opens it. Most matters are not touched in a
@@ -20,17 +22,18 @@ use clauseo_protocol::{
     MatterSource, Title,
 };
 
-use super::commands::{AfterCommand, CommandCtx};
+use super::commands::CommandCtx;
 use super::input::{Input, MatterTag};
 use super::{Actor, MatterEntry, Tag, turn};
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::{
-    Claim, Claimed, MatterJob, MatterReply, MatterWorker, Registry, Relink, check_registry, made,
-    matter_settings,
+    Claim, Claimed, Held, MatterJob, MatterReply, MatterWorker, Registry, Relink, check_registry,
+    made, matter_settings,
 };
 use crate::pipeline::Failure;
 
+mod answer;
 mod made;
 pub(super) mod picked;
 pub(super) mod probe;
@@ -49,6 +52,9 @@ pub(crate) struct PendingMatter {
     worker: MatterWorker<MatterTag>,
     /// Set by shutdown to end an import early.
     cancel: Arc<AtomicBool>,
+    /// The import was issued again under the id its folder's marker names (`answer.rs`): that
+    /// marker is the lawyer's, never removed by `recheck_marker`.
+    adopted: bool,
 }
 
 /// A create's client and next date.
@@ -61,21 +67,35 @@ pub(super) fn start_worker(
 ) -> Result<MatterWorker<MatterTag>, Error> {
     let post = actor.post.clone();
     MatterWorker::start(
-        matter_settings(actor.effective.data_dir()),
+        (matter, Arc::clone(&actor.clock)),
+        settings_of(actor),
         Box::new(move |tag, reply| {
             let _gone = post.try_send(Input::Matter { matter, tag, reply });
         }),
     )
 }
 
-/// The worker of a known matter, started and sent its open on first use.
+/// The matters' settings of this host: [`matter_settings`], with the host's placeholder probe
+/// and, if a test set one, its trash.
+pub(crate) fn settings_of(actor: &Actor) -> clauseo_matters::Settings {
+    let base = matter_settings(actor.effective.data_dir());
+    clauseo_matters::Settings {
+        probe: Arc::clone(&actor.folder_probes.placeholder),
+        trash: actor.folder_probes.trash.clone().unwrap_or(base.trash),
+        ..base
+    }
+}
+
+/// The worker of a known matter, started and sent its open on first use, and started again
+/// when its thread has ended ([`MatterWorker::is_alive`]).
 pub(crate) fn matter_worker(
     actor: &mut Actor,
     matter: MatterId,
 ) -> Result<&MatterWorker<MatterTag>, Error> {
-    let started = match actor.check_matter(matter)?.worker {
-        Some(_) => None,
-        None => Some((start_worker(actor, matter)?, registry(actor, matter))),
+    let started = if live_worker(actor, matter)? {
+        None
+    } else {
+        Some((start_worker(actor, matter)?, registry(actor, matter)))
     };
     let entry = actor
         .matters
@@ -102,27 +122,39 @@ pub(crate) fn matter_worker(
         .ok_or_else(|| Error::Internal(format!("matter {matter} has no worker")))
 }
 
-/// What a folder for `matter` is checked against: the folders import refuses, every other
-/// registered matter's folder (forgotten ones too: their folders bring them back), and the
-/// folders other commands are making matters of.
+/// Whether known matter `matter` has a worker whose thread runs. A thread that ended is logged
+/// here; the caller starts a new worker in its place, and the old one is joined as it drops.
+pub(super) fn live_worker(actor: &Actor, matter: MatterId) -> Result<bool, Error> {
+    match &actor.check_matter(matter)?.worker {
+        Some(worker) if worker.is_alive() => Ok(true),
+        Some(_) => {
+            tracing::warn!(%matter, "a matter's worker had stopped; a new one starts");
+            Ok(false)
+        }
+        None => Ok(false),
+    }
+}
+
+/// What a folder for `matter` is checked against by a locate or a relink: the folders import
+/// refuses, and the other claimed folders (`claimed_folders`) without their commands, so a
+/// folder being made refuses too.
 pub(super) fn registry(actor: &Actor, matter: MatterId) -> Registry {
-    let rows = actor
-        .matters
-        .values()
-        .chain(actor.forgotten.values())
-        .map(|entry| (entry.row.id, PathBuf::from(&entry.row.folder_path)));
-    let claimed = actor.claims.values().cloned();
+    let others = claimed_folders(actor)
+        .into_iter()
+        .filter(|claimed| claimed.matter != matter)
+        .map(|claimed| Claimed {
+            command: None,
+            ..claimed
+        })
+        .collect();
     Registry {
         refused: refused_folders(actor),
-        others: rows
-            .chain(claimed)
-            .filter(|(id, _)| *id != matter)
-            .collect(),
+        others,
     }
 }
 
 /// The folders import refuses: the configured ones and the data folder.
-fn refused_folders(actor: &Actor) -> Vec<PathBuf> {
+pub(super) fn refused_folders(actor: &Actor) -> Vec<PathBuf> {
     let mut refused = actor.refused_folders.clone();
     refused.push(actor.effective.data_dir().to_path_buf());
     refused
@@ -175,6 +207,7 @@ pub(super) fn begin_matter(
         details,
         worker,
         cancel,
+        adopted: false,
     }))
 }
 
@@ -183,10 +216,13 @@ pub(super) fn begin_matter(
 /// commit. A new folder's parent is canonicalised and the folder looked for off the actor
 /// (`probe.rs`), as either may hang on a network share; the create goes on when that answers
 /// (`begin_create`). A folder that is, holds or sits inside another matter's folder (listed,
-/// forgotten or being made; `registry`) is refused with `matter.folder_is_matter`, naming the
+/// forgotten or being made; `registry`) is refused (`matter.folder_inside_matter`,
+/// `matter.folder_holds_matter` or, the same folder, `matter.folder_is_matter`), naming the
 /// matter when it is listed: for an import on its worker, after the place check, so a drive root
 /// or the home folder is named for what it is even when a matter sits below it; for a new folder
-/// on the actor once its probe answers, since only its parent exists.
+/// on the actor once its probe answers, since only its parent exists. A folder that is a listed
+/// matter's own folder (an import), one another command is making, or one whose marker names a
+/// matter this install does not know is answered otherwise (`answer.rs`).
 pub(super) fn create_matter(
     actor: &mut Actor,
     ctx: &CommandCtx,
@@ -222,7 +258,12 @@ pub(super) fn begin_create(
     let registry = if import {
         Ok(Some(registry))
     } else {
-        check_registry(&folder, &registry, false).map(|()| None)
+        match check_registry(&folder, &registry, false) {
+            // Another create or import is making this folder: this one gets its answer.
+            Ok(Held::Making(other)) if answer::join(actor, id, other) => return,
+            Ok(_) => Ok(None),
+            Err(error) => Err(error),
+        }
     };
     let begun = registry.and_then(|import| {
         begin_matter(
@@ -295,31 +336,33 @@ pub(super) fn registered(
 /// The folders a new matter's folder must not be, hold or sit inside: every listed matter's,
 /// every one being made or relocated to, and every forgotten matter's (whose own folder still
 /// brings it back).
-fn claimed_folders(actor: &Actor) -> Vec<Claimed> {
+pub(super) fn claimed_folders(actor: &Actor) -> Vec<Claimed> {
     let claimed = |claim| {
         move |entry: &MatterEntry| Claimed {
             matter: entry.row.id,
             folder: PathBuf::from(&entry.row.folder_path),
             claim,
+            command: None,
         }
     };
     let listed = actor.matters.values().map(claimed(Claim::Listed));
     let forgotten = actor.forgotten.values().map(claimed(Claim::Forgotten));
-    let making = actor
-        .commands
-        .values()
-        .filter_map(|command| command.matter.as_deref())
-        .map(|pending| Claimed {
+    let making = actor.commands.iter().filter_map(|(id, command)| {
+        command.matter.as_deref().map(|pending| Claimed {
             matter: pending.new.id,
             folder: pending.new.folder.clone(),
             claim: Claim::Making,
-        });
+            command: Some(*id),
+        })
+    });
     // A folder a relocate in flight is moving a matter to counts as one being made. `actor.claims`
-    // also holds the creates, so they are listed twice: harmless.
-    let relocating = actor.claims.values().map(|(matter, folder)| Claimed {
+    // also holds the creates, so they are listed twice: harmless. A create's claim names a matter
+    // not on the list yet (a relocate's names a listed one), so it carries its command to join.
+    let relocating = actor.claims.iter().map(|(id, (matter, folder))| Claimed {
         matter: *matter,
         folder: folder.clone(),
         claim: Claim::Making,
+        command: (!actor.matters.contains_key(matter)).then_some(*id),
     });
     listed
         .chain(making)
@@ -337,14 +380,15 @@ fn refusal(actor: &Actor, error: Error, folder: &Path) -> Error {
 }
 
 /// What [`refusal`] tells the refused folders apart by, taken from the actor, so the
-/// `FolderSupport` query names a refusal off the actor as create does (`picked.rs`).
-struct RefusalNames {
+/// `FolderSupport` query (`picked.rs`) and the folder scan (`scan.rs`) name a refusal off
+/// the actor as create does.
+pub(super) struct RefusalNames {
     home: Option<PathBuf>,
     data_dir: PathBuf,
 }
 
 impl RefusalNames {
-    fn of(actor: &Actor) -> Self {
+    pub(super) fn of(actor: &Actor) -> Self {
         Self {
             home: actor.home.clone(),
             data_dir: actor.effective.data_dir().to_path_buf(),
@@ -352,7 +396,12 @@ impl RefusalNames {
     }
 
     /// [`refusal`]'s code for `error`; `listed` says whether a matter is on the list.
-    fn refusal(&self, error: Error, folder: &Path, listed: impl Fn(&MatterId) -> bool) -> Error {
+    pub(super) fn refusal(
+        &self,
+        error: Error,
+        folder: &Path,
+        listed: impl Fn(&MatterId) -> bool,
+    ) -> Error {
         let Error::Matters(failure) = &error else {
             return error;
         };
@@ -371,7 +420,7 @@ impl RefusalNames {
                 ErrorCode::MatterFolderIsHome
             }
             Refusal::Listed(entry) if entry.as_path() == self.data_dir => {
-                ErrorCode::MatterFolderInMattersRoot
+                ErrorCode::MatterFolderInClauseoData
             }
             Refusal::Listed(_) => ErrorCode::MatterFolderIsSystem,
             // Named only when on the list: a marker from another data folder or computer names a
@@ -405,57 +454,7 @@ pub(super) fn on_matter_reply(
         actor.work.matter_jobs = actor.work.matter_jobs.saturating_sub(1);
     }
     match tag {
-        MatterTag::Create(id) => {
-            let pending = actor
-                .commands
-                .get_mut(&id)
-                .and_then(|command| command.matter.take());
-            let Some(pending) = pending else {
-                return;
-            };
-            let outcome = CommandOutcome::MatterCreated { matter };
-            let minted = pending.new.id;
-            let folder = pending.new.folder.clone();
-            let committed = match made(reply) {
-                Err(Error::Matters(clauseo_matters::Error::FolderRefused {
-                    reason: Refusal::AlreadyMatter(known),
-                    ..
-                })) if super::matter_details::is_forgotten(actor, known) => {
-                    let details = pending.details.clone();
-                    command_ctx(actor, id).and_then(|ctx| {
-                        super::matter_details::unforget(actor, &ctx, known, &folder, details)
-                    })
-                }
-                Err(error) => Err(error),
-                Ok((import, support)) => {
-                    // Made on disk from here: a failure discards it before the answer.
-                    let opened = super::counting::matter_created(import.1.as_ref(), folder);
-                    let sent = matter_commit(actor, *pending, import, Some((id, outcome)))
-                        .and_then(|(draft, entry)| {
-                            let after = AfterCommand::Matter(Box::new(entry));
-                            actor.send_commit(draft, Tag::Command { id, outcome, after })
-                        });
-                    match sent {
-                        Ok(_) => {
-                            // Kept once the commit is sent, so a matter discarded before it has
-                            // no entry; a store failure after it drops it in the discard.
-                            super::query::on_folder_support(actor, minted, support);
-                            super::counting::on_commit(actor, id, opened);
-                        }
-                        Err(error) => {
-                            made::discard(actor, Some(id), minted, error, made::Stage::Commit);
-                        }
-                    }
-                    return;
-                }
-            };
-            if let Err(error) = committed {
-                let error = refusal(actor, error, &folder);
-                made::not_created(Some(minted), &error, "worker");
-                made::recheck_marker(actor, minted, folder);
-                actor.finish_command(id, Err(error));
-            }
-        }
+        MatterTag::Create(id) => answer::create_replied(actor, matter, id, reply),
         MatterTag::Scratch => {
             let Some(pending) = actor.scratch.take() else {
                 return;
@@ -476,8 +475,17 @@ pub(super) fn on_matter_reply(
             }
         }
         MatterTag::Open => super::matter_details::opened(matter, reply),
-        MatterTag::Relocate { command, folder } => {
-            super::relocate::located(actor, matter, command, &folder, reply);
+        MatterTag::Relocate {
+            command,
+            folder,
+            created,
+        } => {
+            let answer = if created {
+                CommandOutcome::MatterCreated { matter }
+            } else {
+                CommandOutcome::Done
+            };
+            super::relocate::located(actor, matter, (command, answer), &folder, reply);
         }
         MatterTag::Turn(job) => turn::matter_reply(actor, matter, job, reply),
         MatterTag::Restore(ask) => {
@@ -493,9 +501,16 @@ pub(super) fn on_matter_reply(
         MatterTag::Query(answer) => {
             let _gone = answer.send(super::query::matter_answer(reply));
         }
-        MatterTag::Papers(answer) => super::papers::answer(actor, matter, reply, answer),
+        MatterTag::Revisions(ask) => turn::on_decided(actor, &ask, reply),
+        MatterTag::Papers {
+            reply: answer,
+            folder,
+        } => {
+            super::papers::answer(actor, matter, reply, answer, &folder);
+        }
         MatterTag::Discard => made::discarded(actor, matter, &reply),
         MatterTag::CameBack(check) => turn::came_back_reply(actor, check, reply),
+        MatterTag::Blackline(ask) => super::query::blackline::sides_written(ask, reply),
     }
 }
 

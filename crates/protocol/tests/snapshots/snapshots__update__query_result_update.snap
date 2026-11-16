@@ -8,7 +8,7 @@ expression: answer
     "current": "0.4.0",
     "state": {
       "managed": {
-        "by": "package"
+        "by": "unavailable"
       }
     },
     "mode": "auto"

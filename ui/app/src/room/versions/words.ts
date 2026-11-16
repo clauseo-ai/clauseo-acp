@@ -14,12 +14,22 @@ import { clock } from "@clauseo/components/lib/words.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { listOf, vt } from "@clauseo/components/lib/words-versions.ts";
-import type { ThreadId, Timestamp } from "../../transport/protocol.ts";
+import type {
+  BlacklineNotice,
+  FileChange,
+  FileChoice,
+  FolderPlace,
+  SkippedFileReason,
+  ThreadId,
+  Timestamp,
+} from "../../transport/protocol.ts";
+import { serviceName } from "../sync-services.ts";
 import { clockOf } from "../when.ts";
 import { changedSince, type Ask, type Done, type Snapshot, type Unsaved } from "./state.ts";
 import { fileName, namesOf } from "@clauseo/components/lib/words-core.ts";
 
-/** A conversation's name as list_threads gives it; one without a title is a new conversation. */
+/** A conversation's name as the rail gives it (conversations.ts's titleOf); one without a title is a new
+ * conversation. */
 export const conversationOf = (lang: Lang, s: Snapshot, thread: ThreadId): string =>
   s.titles.get(thread) || mt(lang, "New conversation");
 
@@ -61,7 +71,9 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
   const failed = ask.failed === null ? null : errorWords(lang, ask.failed);
   if (ask.act === "restore") {
     const { changes, added_since, kept } = ask.preview;
-    const name = namesOf([...changes.map((c) => c.path), ...added_since, ...kept]);
+    // undoing a restore: the files it added go (an older host's answer names none)
+    const removes = ask.undoes === null ? [] : (ask.preview.removes ?? []);
+    const name = namesOf([...changes.map((c) => c.path), ...added_since, ...kept, ...removes]);
     const changed = changes.map((c) => name(c.path));
     const papers = listOf(lang, changed);
     // one name stands in the line's own quotes; several are each quoted, and "and" joins them outside the quotes
@@ -70,7 +82,18 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
         lang,
         paths.map((p) => `'${name(p)}'`),
       );
+    const removed =
+      removes.length === 0
+        ? null
+        : removes.length === 1
+          ? vt(lang, "'{papers}', added by the restore, will be removed.", {
+              papers: name(removes[0] ?? ""),
+            })
+          : vt(lang, "{papers}, added by the restore, will be removed.", {
+              papers: quoted(removes),
+            });
     const stays = [
+      changed.length === 0 ? null : removed,
       added_since.length === 0
         ? null
         : added_since.length === 1
@@ -86,19 +109,28 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
               papers: quoted(kept),
             }),
     ].filter((x) => x !== null);
+    // undoing a restore names the restore it takes back, by when it was made
+    const undone = ask.undoes === null ? undefined : versionOf(s, ask.undoes);
     return {
       kind: "confirm",
       act: "restore",
       title:
-        v.day === cal.today
-          ? vt(lang, "Restore the matter to how it was at {time} today?", { time: timeOf(lang, v) })
-          : vt(lang, "Restore the matter to how it was at {time} on {date}?", {
-              time: timeOf(lang, v),
-              date: cal.words(lang, v.day, "date"),
-            }),
+        undone !== undefined
+          ? vt(lang, "Undo the restore at {time}?", { time: whenOf(lang, cal, undone) })
+          : v.day === cal.today
+            ? vt(lang, "Restore the matter to how it was at {time} today?", {
+                time: timeOf(lang, v),
+              })
+            : vt(lang, "Restore the matter to how it was at {time} on {date}?", {
+                time: timeOf(lang, v),
+                date: cal.words(lang, v.day, "date"),
+              }),
       body:
         changed.length === 0
-          ? vt(lang, "Nothing will change. The matter already stands as it did then.")
+          ? removed === null
+            ? vt(lang, "Nothing will change. The matter already stands as it did then.")
+            : // the removals alone: the dialog still says the act can be undone
+              `${removed} ${vt(lang, "You can undo this.")}`
           : changed.length === 1
             ? vt(lang, "1 document will change: {papers}. You can undo this.", { papers })
             : vt(lang, "{n} documents will change: {papers}. You can undo this.", {
@@ -109,18 +141,48 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
       edited: [],
       editedHead: null,
       failed,
+      ...(undone === undefined ? {} : { confirm: vt(lang, "Undo the restore") }),
     };
   }
-  const meta = s.timeline.meta.get(ask.id);
-  const files = meta?.step?.files ?? [];
+  const since = new Map<string, Version | undefined>();
+  for (const [path, by] of changedSince(s.timeline, ask.id)) since.set(path, versionOf(s, by));
+  return undoAskOf(lang, cal, {
+    v,
+    files: s.timeline.meta.get(ask.id)?.step?.files ?? [],
+    choices: ask.choices,
+    since,
+    edited: ask.edited ?? new Set<string>(),
+    failed,
+  });
+}
+
+/** What an undo dialog asks about one turn's step: Versions' (askOf), and the thread's Undo for a step with a file
+ * that may hold the lawyer's own edits (thread-undo.tsx), so both say the same. */
+export type StepUndo = {
+  /** The version the step made: when, and who made it. */
+  v: Pick<Version, "day" | "at" | "who">;
+  files: readonly FileChange[];
+  choices: ReadonlyMap<string, FileChoice>;
+  /** Each file a newer version changed again, with that version where the timeline holds it. */
+  since: ReadonlyMap<string, Version | undefined>;
+  /** The files the host says the folder's copy differs from the version's now (PreviewUndo). */
+  edited: ReadonlySet<string>;
+  /** Why the act just failed, in words, when no file can be named. */
+  failed: string | null;
+};
+
+/** The undo dialog's words for a step. */
+export function undoAskOf(lang: Lang, cal: Calendar, u: StepUndo): RestoreAsk {
+  const { v, files, choices, since, edited, failed } = u;
   const name = namesOf(files.map((f) => f.path));
-  const back = files.filter((f) => ask.choices.get(f.path) === "undo").map((f) => name(f.path));
-  const since = changedSince(s.timeline, ask.id);
-  // the rows: each file kept by default, a file changed again since saying by whom and when, one that may hold the
-  // lawyer's own edits saying so
-  const rows = files.filter((f) => f.may_include_lawyer_edits || since.has(f.path));
-  const sinceOnly = rows.every((f) => since.has(f.path));
-  const mayOnly = rows.every((f) => !since.has(f.path));
+  const back = files.filter((f) => choices.get(f.path) === "undo").map((f) => name(f.path));
+  // edited: the host says the folder's copy differs from the version's now, though no newer version shows it
+  const later = (path: string) => since.has(path) || edited.has(path);
+  // the rows: each file kept by default, a file changed again since saying by whom and when (or since when, where only
+  // the host saw it), one that may hold the lawyer's own edits saying so
+  const rows = files.filter((f) => f.may_include_lawyer_edits || later(f.path));
+  const sinceOnly = rows.every((f) => later(f.path));
+  const mayOnly = rows.every((f) => !later(f.path));
   const n = rows.length;
   const papers = listOf(lang, back);
   return {
@@ -160,20 +222,26 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
               : vt(lang, "{n} documents may hold your own edits.", { n })
             : vt(lang, "Choose for each document."),
     edited: rows.map((f) => {
-      const by = since.get(f.path);
-      const later = by === undefined ? undefined : versionOf(s, by);
+      const newer = since.get(f.path);
       return {
         id: f.path,
         title: name(f.path),
         at:
-          later === undefined
-            ? vt(lang, "Changed during the answer, though Clauseo didn't say it was changing it.")
-            : later.who.kind === "clauseo"
-              ? vt(lang, "Changed by Clauseo at {time}", { time: timeOf(lang, later) })
+          newer === undefined
+            ? edited.has(f.path)
+              ? v.day === cal.today
+                ? vt(lang, "Changed since {time} today", { time: timeOf(lang, v) })
+                : vt(lang, "Changed since {time} on {date}", {
+                    time: timeOf(lang, v),
+                    date: cal.words(lang, v.day, "date"),
+                  })
+              : vt(lang, "Changed during the answer, though Clauseo didn't say it was changing it.")
+            : newer.who.kind === "clauseo"
+              ? vt(lang, "Changed by Clauseo at {time}", { time: timeOf(lang, newer) })
               : vt(lang, "Changed by you, outside Clauseo, at {time}", {
-                  time: timeOf(lang, later),
+                  time: timeOf(lang, newer),
                 }),
-        choice: ask.choices.get(f.path) ?? "keep",
+        choice: choices.get(f.path) ?? "keep",
       };
     }),
     failed,
@@ -212,6 +280,60 @@ export function doneLine(lang: Lang, cal: Calendar, s: Snapshot, done: Done): st
   }
 }
 
+/**  The lines under the band for what the room last did: doneLine's, then, after an undo, one for
+ * each file it kept because Clauseo had no earlier copy (cantUndoWords). An undo that put none
+ * back says only those: it has no paper to name as gone back. */
+export function doneLines(
+  lang: Lang,
+  cal: Calendar,
+  s: Snapshot,
+  done: Done,
+  place: FolderPlace | undefined,
+): { text: string; kept: boolean }[] {
+  const kept = done.kind === "undidChange" ? (done.kept ?? []) : [];
+  const own =
+    done.kind === "undidChange" && done.papers.length === 0 && kept.length > 0
+      ? []
+      : [{ text: doneLine(lang, cal, s, done), kept: false }];
+  return [
+    ...own,
+    ...kept.map((f) => ({ text: cantUndoWords(lang, f.path, f.reason, place), kept: true })),
+  ];
+}
+
+/**  Why an undo left a file as it is: Clauseo had no earlier copy of it. A file that was only in
+ * the cloud, or in a folder Clauseo couldn't read when the folder syncs with a cloud service, says
+ * where its earlier copy may be, by the folder's sync service where the room knows one
+ * (sync-services.ts); any other (over the size cap, a folder not synced, a reason not known) says
+ * only that Clauseo kept no copy. */
+export function cantUndoWords(
+  lang: Lang,
+  path: string,
+  reason: SkippedFileReason,
+  place: FolderPlace | undefined,
+): string {
+  const file = fileName(path);
+  const synced = typeof place === "object" && "synced" in place;
+  if (reason !== "cloud_only" && !(reason === "unread_folder" && synced))
+    return vt(
+      lang,
+      "Clauseo can't undo the change to {file}. It didn't keep a copy of it before, so there's no earlier copy to bring back.",
+      { file },
+    );
+  const service = serviceName(place);
+  return service === null
+    ? vt(
+        lang,
+        "Clauseo can't undo the change to {file}. It was only online before, so there's no earlier copy here. Your cloud service's version history may have the earlier one.",
+        { file },
+      )
+    : vt(
+        lang,
+        "Clauseo can't undo the change to {file}. It was only in {service} before, so there's no earlier copy here. {service}'s version history has the earlier one.",
+        { file, service },
+      );
+}
+
 /** A moment's clock time in the language: "4:31 pm", or "शाम 4:31". */
 const timeOfTs = (lang: Lang, s: Snapshot, ts: Timestamp) => clock(lang, at(s, ts));
 
@@ -220,6 +342,45 @@ export const failedLine = (lang: Lang, code: string): BandNotice => ({
   tone: "failed",
   text: errorWords(lang, code),
 });
+
+/** What the lawyer should know about a marked-up document, by the host's notice, said over the sheet: a part not
+ * shown (the rest is), hidden text shown like the rest, numbers that may differ from Word's; anything else, and a
+ * notice this version doesn't know, says only that some of it may look different in Word. */
+export function noticeLine(lang: Lang, notice: BlacklineNotice): string {
+  switch (notice) {
+    case "part_not_shown":
+      return vt(lang, "Part of this document couldn't be marked up. The rest is below.");
+    case "hidden_text":
+      return vt(lang, "This document has text that Word hides. It's shown here like the rest.");
+    case "numbers_may_differ":
+      return vt(lang, "Some numbers here may not match the ones Word shows.");
+    case "changes_outside_text":
+      return vt(
+        lang,
+        "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.",
+      );
+    case "may_differ":
+    case "unknown":
+      return vt(lang, "Some of this may look different in Word.");
+  }
+}
+
+/** The Word tool's refusals that say why, each with its own sentence (words-errors.ts). */
+const MARK_REFUSALS: readonly string[] = [
+  "blackline.no_word_tool",
+  "blackline.nested_table",
+  "blackline.cannot_compare",
+  "blackline.not_readable",
+  "blackline.too_large",
+  "blackline.format_unknown",
+];
+
+/** Why a Word document's changes couldn't be marked up, by the code (words-errors.ts's sentence): the Word tool
+ * missing says to reinstall, and a refusal of the Word tool's own says why (a table inside a table, a version it can't
+ * read, one too large); any other failure, the host's or the transport's, says only that it couldn't be done (the
+ * sheet that says the file changed stands under it). */
+export const markFailedLine = (lang: Lang, code: string): string =>
+  errorWords(lang, MARK_REFUSALS.includes(code) ? code : "blackline.failed");
 
 /** The not-saved line: which paper Clauseo changed and when, that the change couldn't be kept as a version, and that
  * the paper stands as Clauseo left it. A change on another day says its day. */

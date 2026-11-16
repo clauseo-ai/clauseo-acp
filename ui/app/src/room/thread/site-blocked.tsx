@@ -10,11 +10,13 @@
 // far it was allowed and its buttons go. `blocklist.override_off` says its words and the buttons
 // go; so does `blocklist.notice_expired` (the host no longer keeps the notice); any other refusal,
 // `command.invalid` included, says its code's words and keeps the buttons. Where the firm doesn't
-// allow it, the override_off words stand in the buttons' place. `blocklist.allow_not_saved` is no
-// refusal: the site is allowed until Clauseo closes, so the notice says it's allowed and adds the
-// code's words as a quiet line.
+// allow it, the override_off words stand in the buttons' place. Both firm-only states offer "Copy
+// details for IT" instead (blocklist/it-details.ts: the code, the site and Clauseo's version).
+// `blocklist.allow_not_saved` is no refusal: the site is allowed until Clauseo closes, so the
+// notice says it's allowed and adds the code's words as a quiet line.
 import { lazy, Suspense, use, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
+import { CopyForIt } from "@clauseo/components/clauseo/copy-for-it.tsx";
 import { NoticeCard } from "@clauseo/components/clauseo/limit-note.tsx";
 import { IconTick, IconWebsite } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
@@ -27,6 +29,7 @@ import { blockedSitesOf, useBlockedSites, type BlockedNotice } from "../../store
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AllowScope, StreamId, TurnId } from "../../transport/protocol.ts";
 import { ALLOW_NOT_SAVED, allowSite } from "../blocklist/allow.ts";
+import { blocklistItDetails } from "../blocklist/it-details.ts";
 import { SourcesTransport } from "./sources.ts";
 
 const THREAD = "thread:";
@@ -130,6 +133,8 @@ export function SiteBlocked({
     setAsked(true);
   };
   const buttons = state === "blocked" || state === "refused";
+  // the firm forbids overriding the list: only its IT can change that
+  const firmOnly = state === "override-off" || state === "no-override";
   return (
     <div className="contents" data-testid="site-blocked" data-state={state}>
       <NoticeCard
@@ -182,6 +187,12 @@ export function SiteBlocked({
                 {bl(lang, "Always allow")}
               </Button>
             </>
+          ) : firmOnly ? (
+            <CopyForIt
+              lang={lang}
+              text={blocklistItDetails.overrideOff(lang, site.host)}
+              testId="site-blocked-it"
+            />
           ) : undefined
         }
       />

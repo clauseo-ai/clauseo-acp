@@ -129,6 +129,28 @@ fn folder_not_a_matter_is_its_own_code_and_not_retryable() {
     assert!(index(code) < index(ErrorCode::Unknown));
 }
 
+/// `matter.folder_permission`: its string, not retryable (the lawyer changes a privacy setting
+/// first), its row in the record, and its place before `unknown`.
+#[test]
+fn folder_permission_is_its_own_code_and_not_retryable() {
+    let code = ErrorCode::MatterFolderPermission;
+    assert_eq!(code.as_str(), "matter.folder_permission");
+    assert_eq!(
+        "matter.folder_permission".parse::<ErrorCode>().ok(),
+        Some(code)
+    );
+    assert!(!code.is_retryable());
+    assert!(!HostError::new(code, "no access").retryable());
+    let row = rows(RECORD)
+        .into_iter()
+        .find(|row| row.code == "matter.folder_permission")
+        .expect("0003 has a row for matter.folder_permission");
+    assert_eq!(row.retryable, Some(false));
+    assert_eq!(row.meaning, code.meaning());
+    let index = |wanted| ErrorCode::ALL.iter().position(|code| *code == wanted);
+    assert!(index(code) < index(ErrorCode::Unknown));
+}
+
 #[test]
 fn display_writes_the_code_text() {
     assert_eq!(

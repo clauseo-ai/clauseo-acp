@@ -31,3 +31,16 @@ pub(crate) fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result
 pub(crate) fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     std::fs::create_dir_all(path)
 }
+
+/// `OpenOptions::open` with `append` and `create`: the file (made if missing), open to append.
+pub(crate) fn append(path: impl AsRef<Path>) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path)
+}
+
+/// `File::create`: the file truncated (or made), open to write.
+pub(crate) fn create(path: impl AsRef<Path>) -> io::Result<std::fs::File> {
+    std::fs::File::create(path)
+}

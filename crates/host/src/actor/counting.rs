@@ -301,9 +301,11 @@ pub(super) fn outcome(stop: StopReason, failure: Option<ErrorCode>) -> AnswerOut
         StopReason::EndTurn => AnswerOutcome::Done,
         StopReason::Cancelled | StopReason::NotAllowed => AnswerOutcome::StoppedByLawyer,
         StopReason::AtLimit => AnswerOutcome::Limit,
-        StopReason::MaxTokens | StopReason::MaxTurnRequests | StopReason::Refusal => {
-            AnswerOutcome::AgentStopped
-        }
+        StopReason::MaxTokens
+        | StopReason::MaxTurnRequests
+        | StopReason::Refusal
+        | StopReason::OutsideMatter
+        | StopReason::TooLong => AnswerOutcome::AgentStopped,
         StopReason::Failed | StopReason::Unknown => AnswerOutcome::Error,
     }
 }

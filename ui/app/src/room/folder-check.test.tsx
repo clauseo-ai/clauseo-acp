@@ -42,12 +42,19 @@ const NAME = "Mehta v. Mehta";
 /** The check's answer for one pick: a reading, a refusal (thrown), or one the test settles later. */
 type Check = PickedFolderSupport | HostError | Promise<PickedFolderSupport>;
 
-/** Today's host, picking `folders` in turn, its FolderSupport answering `checks` in turn. */
-function checking(checks: Check[], folders = ["ref-a", "ref-b"]) {
+/** Today's host, picking `folders` in turn, its FolderSupport answering `checks` in turn; on Windows, where the
+ * displays' backslashes are the separator, unless `platform` says otherwise. */
+function checking(
+  checks: Check[],
+  folders = ["ref-a", "ref-b"],
+  platform: FakeHost["platform"] = "windows",
+  display = (folder: string) => `D:\\Matters\\${folder}`,
+) {
   let list: MatterSummary[] = [A];
   let picks = 0;
   let asked = 0;
   const h: FakeHost = {
+    platform,
     query: (query: HostQuery) => {
       if (typeof query === "object" && "folder_support" in query) {
         const check = checks[asked++] ?? {};
@@ -65,7 +72,7 @@ function checking(checks: Check[], folders = ["ref-a", "ref-b"]) {
     },
     pickFolder: () => {
       const folder = folders[picks++] ?? "ref-z";
-      return { folder, display: `D:\\Matters\\${folder}` };
+      return { folder, display: display(folder) };
     },
   };
   return h;
@@ -140,10 +147,10 @@ test("a network drive: the warning's title, name, body and why, with Choose anot
   expect(warning()?.getAttribute("aria-label")).toBe(fr("en", "This folder is on a network drive"));
   expect(warning()?.textContent).toBe(
     fr("en", "On a network drive") +
-      fr("en", "Claude asks before every change. Codex can't work here."),
+      fr("en", "Claude asks before every change. ChatGPT can't work here."),
   );
   expect(warning()?.querySelector(".room-info")?.getAttribute("aria-label")).toBe(
-    fr("en", "Clauseo can't keep Claude and Codex inside a folder on a network drive."),
+    fr("en", "Clauseo can't keep Claude and ChatGPT inside a folder on a network drive."),
   );
   expect(byId("folder-choose")?.textContent).toBe(fr("en", "Choose another folder"));
   expect(byId("folder-anyway")?.textContent).toBe(fr("en", "Create anyway"));
@@ -163,7 +170,7 @@ test("a drive without file permissions: its own title, name and why, the same bu
   expect(warning()?.querySelector(".room-info")?.getAttribute("aria-label")).toBe(
     fr(
       "en",
-      "Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
+      "Clauseo can't keep Claude and ChatGPT inside a folder on this drive. USB drives often don't keep permissions.",
     ),
   );
   expect(byId("folder-choose")).not.toBeNull();
@@ -270,19 +277,88 @@ test("Create waits at most 5 s for a check that doesn't answer, then makes the m
   expect(created(transport)).toEqual([existing("ref-a")]);
 });
 
-test("a parent Create's picker gives on a network drive: the warning, then Create anyway makes it there without asking again", async () => {
-  const transport = await mount(checking([{ support: "network" }]));
+// FR24 (draft): on macOS and Linux a folder whose name has a backslash, where Claude can't start, warns at once from
+// the picked folder's display, with the same two buttons; never on Windows, where `\` is the separator, nor for a
+// plain path
+const SLASHED = (folder: string) =>
+  folder === "ref-a" ? "Documents/Clauseo\\ Test\\ Matter" : `Documents/${folder}`;
+/** The file manager the warning names: Finder on the Mac, "your file manager" on Linux. */
+const FILES = { mac: "Finder", linux: "your file manager" } as const;
+const BACKSLASH_SAYS = (platform: "mac" | "linux") =>
+  "This folder's name has a backslash (\\)." +
+  `Claude can't work in a folder like this; ChatGPT can. Rename it in ${FILES[platform]} first, or choose another folder.`;
+
+test.each(["mac", "linux"] as const)(
+  "on %s, a folder whose name has a backslash: its warning, then Choose another folder picks again",
+  async (platform) => {
+    const transport = await mount(checking([{}, {}], ["ref-a", "ref-b"], platform, SLASHED));
+    await openForm();
+    await press("matter-existing");
+    expect(warning()?.dataset["kind"]).toBe("backslash");
+    expect(warning()?.getAttribute("aria-label")).toBe(
+      fr("en", "This folder's name has a backslash"),
+    );
+    expect(warning()?.textContent).toBe(BACKSLASH_SAYS(platform));
+    expect(fr("en", "This folder's name has a backslash (\\).")).toBe(
+      "This folder's name has a backslash (" + String.fromCharCode(92) + ").",
+    );
+    expect(warning()?.querySelector(".room-info")).toBeNull();
+    expect(byId("folder-choose")?.textContent).toBe(fr("en", "Choose another folder"));
+    expect(byId("folder-anyway")?.textContent).toBe(fr("en", "Create anyway"));
+    expect(byId("create-matter")).toBeNull();
+    await press("folder-choose");
+    expect(transport.only("pick_folder")).toHaveLength(2);
+    expect(warning()).toBeNull();
+    await press("create-matter");
+    expect(created(transport)).toEqual([existing("ref-b")]);
+  },
+);
+
+test.each(["mac", "linux"] as const)(
+  "on %s, Create anyway makes the matter in the folder with a backslash",
+  async (platform) => {
+    const transport = await mount(checking([{}], ["ref-a"], platform, SLASHED));
+    await openForm();
+    await press("matter-existing");
+    await press("folder-anyway");
+    expect(created(transport)).toEqual([existing("ref-a")]);
+  },
+);
+
+// a folder above the one picked has the backslash: the warning names the nearest such folder
+test.each(["mac", "linux"] as const)(
+  "on %s, a folder above the one picked has a backslash: the warning names it",
+  async (platform) => {
+    const above = () => "Documents/x\\y/Old\\Work/Acme Traders";
+    const transport = await mount(checking([{}], ["ref-a"], platform, above));
+    await openForm();
+    await press("matter-existing");
+    expect(warning()?.dataset["kind"]).toBe("backslash");
+    expect(warning()?.getAttribute("aria-label")).toBe(
+      "A folder in this folder's path has a backslash",
+    );
+    expect(warning()?.textContent).toBe(
+      'The folder "\u2068Old\\Work\u2069" in this folder\'s path has a backslash (\\).' +
+        `Claude can't work in a folder like this; ChatGPT can. Rename that folder in ${FILES[platform]} first, or choose another folder.`,
+    );
+    await press("folder-anyway");
+    expect(created(transport)).toEqual([existing("ref-a")]);
+  },
+);
+
+test("no backslash warning on Windows, nor for a plain path on macOS or Linux", async () => {
+  await mount(checking([{}], ["ref-a"], "windows", () => "D:\\Matters\\Clauseo\\ Test"));
   await openForm();
-  await press("create-matter");
-  expect(checked(transport)).toEqual([
-    { folder_support: { source: { new_folder: { folder: "ref-a" } } } },
-  ]);
-  expect(warning()?.dataset["kind"]).toBe("network");
-  expect(created(transport)).toEqual([]);
-  expect(dialog()?.textContent).toContain(`D:\\Matters\\ref-a\\${NAME}`);
-  await press("folder-anyway");
-  expect(transport.only("pick_folder")).toHaveLength(1);
-  expect(created(transport)).toEqual([
-    { create_matter: { name: NAME, source: { new_folder: { folder: "ref-a" } } } },
-  ]);
+  await press("matter-existing");
+  expect(warning()).toBeNull();
+  expect(byId("create-matter")).not.toBeNull();
+  for (const platform of ["mac", "linux"] as const) {
+    await act(async () => root?.unmount());
+    host?.remove();
+    await mount(checking([{}], ["ref-a"], platform, () => "Documents/Clauseo Test Matter"));
+    await openForm();
+    await press("matter-existing");
+    expect(warning()).toBeNull();
+    expect(byId("create-matter")).not.toBeNull();
+  }
 });

@@ -2,6 +2,8 @@
 //! `VS_FIXEDFILEINFO`, read from the bytes alone, with no Windows call (and so no new DLL in
 //! the setup exe), and the image's `Machine` (its CPU type). The refresh reads both from the
 //! staged copy once its signature has verified (`version.rs` compares the version).
+//! [`plain_machine`] also tells a hybrid image apart: one whose load config (data directory 10)
+//! names CHPE metadata, which holds code for ARM64 and x64 both.
 //!
 //! The walk: the DOS header's `e_lfanew`, the PE signature, the optional header (PE32 or PE32+),
 //! data directory 2 (resources), the section that maps it, the resource tree's `RT_VERSION` (16)
@@ -22,10 +24,32 @@ pub const MACHINE_X64: u16 = 0x8664;
 pub const MACHINE_ARM64: u16 = 0xAA64;
 /// `IMAGE_FILE_MACHINE_I386`.
 pub const MACHINE_X86: u16 = 0x014C;
+/// `IMAGE_FILE_MACHINE_ARM64EC`: [`plain_machine`]'s name for a hybrid image headed x64.
+pub const MACHINE_ARM64EC: u16 = 0xA641;
+/// `IMAGE_FILE_MACHINE_ARM64X`: [`plain_machine`]'s name for a hybrid image headed ARM64.
+pub const MACHINE_ARM64X: u16 = 0xA64E;
+/// `CHPEMetadataPointer`'s offset in a PE32+ load config, and in a PE32 one.
+const CHPE_AT: [usize; 2] = [200, 124];
 
 /// The image's COFF `Machine`, or `None` when it isn't a PE image.
 pub fn machine(image: &[u8]) -> Option<u16> {
     Pe::parse(image).map(|pe| pe.machine)
+}
+
+/// The image's CPU type with hybrids told apart: its COFF `Machine`, except that an image whose
+/// load config names CHPE metadata is [`MACHINE_ARM64EC`] when headed x64 and
+/// [`MACHINE_ARM64X`] when headed ARM64 (Windows heads them so). `None` when it isn't a PE
+/// image, or its load config can't be read.
+pub fn plain_machine(image: &[u8]) -> Option<u16> {
+    let pe = Pe::parse(image)?;
+    if !pe.hybrid()? {
+        return Some(pe.machine);
+    }
+    Some(match pe.machine {
+        MACHINE_X64 => MACHINE_ARM64EC,
+        MACHINE_ARM64 => MACHINE_ARM64X,
+        other => other,
+    })
 }
 
 /// The image's `FILEVERSION` as its four parts, or `None` when it has no readable one.
@@ -68,6 +92,10 @@ struct Pe<'a> {
     machine: u16,
     /// The resource directory's RVA (0 when absent).
     resources: usize,
+    /// The load config's RVA (0 when absent).
+    load_config: usize,
+    /// Whether the optional header is PE32+.
+    plus: bool,
     /// The section table's offset, and its number of sections.
     table: usize,
     sections: usize,
@@ -89,14 +117,21 @@ impl<'a> Pe<'a> {
         let optional_size = usize::from(u16_at(bytes, header.checked_add(20)?)?);
         // Data directories start 96 bytes into a PE32 optional header, 112 into a PE32+ one;
         // the resource directory is the third, 8 bytes each.
-        let directories = match u16_at(bytes, optional)? {
-            0x10B => optional.checked_add(96)?,
-            0x20B => optional.checked_add(112)?,
+        let plus = match u16_at(bytes, optional)? {
+            0x10B => false,
+            0x20B => true,
             _ => return None,
         };
+        let directories = optional.checked_add(if plus { 112 } else { 96 })?;
         let count = usize_at(bytes, directories.checked_sub(4)?)?;
         let resources = if count > 2 {
             usize_at(bytes, directories.checked_add(16)?)?
+        } else {
+            0
+        };
+        // The load config is the eleventh.
+        let load_config = if count > 10 {
+            usize_at(bytes, directories.checked_add(80)?)?
         } else {
             0
         };
@@ -104,6 +139,8 @@ impl<'a> Pe<'a> {
             bytes,
             machine,
             resources,
+            load_config,
+            plus,
             table: optional.checked_add(optional_size)?,
             sections,
         })
@@ -119,6 +156,26 @@ impl<'a> Pe<'a> {
             let inside = rva >= start && rva - start < size;
             inside.then(|| raw.checked_add(rva - start)).flatten()
         })
+    }
+
+    /// Whether the load config names CHPE metadata (`CHPEMetadataPointer` non-zero); `false`
+    /// when there is no load config or it is too short to hold the field, `None` when it can't
+    /// be read.
+    fn hybrid(&self) -> Option<bool> {
+        if self.load_config == 0 {
+            return Some(false);
+        }
+        let at = self.offset(self.load_config)?;
+        let size = usize_at(self.bytes, at)?;
+        let [wide, narrow] = CHPE_AT;
+        let (field, width) = if self.plus { (wide, 8) } else { (narrow, 4) };
+        if size < field + width {
+            return Some(false);
+        }
+        let pointer = self
+            .bytes
+            .get(at.checked_add(field)?..at.checked_add(field + width)?)?;
+        Some(pointer.iter().any(|byte| *byte != 0))
     }
 
     /// The first `RT_VERSION` resource's data.

@@ -64,6 +64,10 @@ export function LivePlan({
         <ToolbarPlan plan={{ ...nameOnlyLine(kind, entry.freshness), testId: "plan" }} />
       </>
     );
+  // the card's way to Plan and usage, where the host can open Settings
+  const open = transport.openSettings;
+  const openUsage =
+    open === undefined ? null : () => void open.call(transport, "usage").catch(() => {});
   // times against this render's clock: the host sends a new view at each shown reset, nothing ticks here
   const line = planLine(w.lang, kind, entry, now);
   if (line === null) return marker;
@@ -93,7 +97,7 @@ export function LivePlan({
                       </div>
                     }
                   >
-                    <LivePlanCard kind={kind} />
+                    <LivePlanCard kind={kind} onSettings={openUsage} />
                   </Suspense>
                 ),
                 cardLabel: lim(w.lang, "Show the plan's limits"),

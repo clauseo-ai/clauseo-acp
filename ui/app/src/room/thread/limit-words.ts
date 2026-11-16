@@ -23,9 +23,9 @@ export function planNameOf(agent: AgentName): string {
 export const stopTimeOf = (entry: LimitStopEntry): Timestamp | null =>
   typeof entry.ts === "number" && Number.isFinite(entry.ts) ? entry.ts : null;
 
-/** The toolbar's at-limit words: "Limit reached until 6:10 pm", its day form, or that the reset wasn't given. */
+/** The toolbar's at-limit words: "Limit reached until 6:10 pm", its day form, or the limit alone when the reset wasn't given. */
 export function atLimitWords(lang: Lang, resets: Timestamp | undefined, now: number): string {
-  if (resets === undefined) return lim(lang, "Limit reached. Reset not given.");
+  if (resets === undefined) return lim(lang, "Limit reached");
   const { day, time } = whenOf(lang, resets, now);
   return day === null
     ? lim(lang, "Limit reached until {time}", { time })

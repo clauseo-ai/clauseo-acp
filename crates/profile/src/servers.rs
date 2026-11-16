@@ -1,17 +1,91 @@
-//! The MCP servers the profile adds: `browser`, agent-browser's MCP server behind S27's guard,
-//! then `case-law`, the paid case-law connector through the host's relay (R24).
+//! The MCP servers the profile adds: `browser`, agent-browser's MCP server behind S27's guard
+//! (Codex only, [`browser_mcp`]), then `case-law`, the paid case-law connector through the
+//! host's relay (R24).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use clauseo_protocol::AgentKind;
+
 use crate::paths::ProfilePaths;
 use crate::placeholders::{
-    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, PROXY_PORT, RELAY_PORT,
-    RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR, STREAM_PORT,
+    BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, MATTER_DOWNLOADS, RELAY_PORT,
+    RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR,
 };
 
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
 pub const BROWSER: &str = "browser";
+
+/// Whether an agent of `kind` gets the `browser` MCP entry ([`browser`]): Codex only.
+///
+/// In a Codex turn the shell `agent-browser` cannot work: an approved command still runs under
+/// Seatbelt, because Clauseo's permission profile has deny entries, with no network, and
+/// Chrome's own sandbox cannot nest in it. Codex starts a local stdio MCP server as a plain
+/// child instead, with no Seatbelt and no permission profile (codex 0.162.1
+/// `codex-mcp/src/rmcp_client.rs:1216-1238`, `rmcp-client/src/stdio_server_launcher.rs:262-288`),
+/// so the guard, which refuses every tool off agent-browser's `core` profile and every argument
+/// naming a file, is what holds the browser to its own folder there. Claude has no browser
+/// for launch ([`no_browser`]).
+///
+/// Not on Windows ([`no_browser`]).
+pub fn browser_mcp(kind: Option<AgentKind>) -> bool {
+    browser_mcp_on(kind, cfg!(windows))
+}
+
+/// [`browser_mcp`] as it is on Windows when `windows` is true, and elsewhere when it is false.
+pub fn browser_mcp_on(kind: Option<AgentKind>, windows: bool) -> bool {
+    kind == Some(AgentKind::Codex) && !windows
+}
+
+/// Whether an agent of `kind` gets no browser at all, neither the entry nor the shell command,
+/// for launch (decision record 0030):
+///
+/// - Codex on Windows. Clauseo gives Codex's shell the unelevated restricted-token sandbox there
+///   (`windows.sandbox = "unelevated"`), whose only network block is proxy variables that leave
+///   loopback out (codex 0.162.1 `windows-sandbox-rs/src/env.rs:126-170`, applied at
+///   `spawn_prep.rs:141-143`; the firewall rules exist only in the elevated setup).
+///   agent-browser's daemon port and Chrome's debugging port are unauthenticated, so with the
+///   entry a shell command Codex runs without a prompt could drive the unfenced guard's browser
+///   past its filter. The way back is the elevated sandbox or an authenticated daemon.
+/// - Claude on every OS. On macOS and Linux, whether or not its sandbox ends up on, the shell
+///   command would
+///   have to run outside Claude Code's sandbox (`excludedCommands`), and Claude Code's exclusion
+///   check strips `env` and reworks `VAR=` prefixes before it matches, so
+///   `PATH=<a folder Claude writes> agent-browser …` would run Claude's own program unsandboxed,
+///   and quoting (`-q "upload"`, `e"v"al`, a tab) would run unsandboxed past the ask rules too.
+///   On Windows, where Claude Code has no sandbox, the shell command ran on deny rules alone,
+///   and no deny list is complete: brace expansion (`{upload,}`), globs (`upl?ad`), a variable
+///   (`S=eval; agent-browser $S`), `${IFS}`, `cmd //c`, `xargs`, `npx`, `.exe` and letter case
+///   each spell a refused command no rule sees (security review round 4 of #1014).
+///   The way back is Clauseo's own `agent-browser` shim, after launch.
+///
+/// So no agent has a browser on Windows, and only Codex, through its guarded entry, on macOS and
+/// Linux.
+pub fn no_browser(kind: Option<AgentKind>) -> bool {
+    no_browser_on(kind, cfg!(windows))
+}
+
+/// [`no_browser`] as it is on Windows when `windows` is true, and elsewhere when it is false.
+pub fn no_browser_on(kind: Option<AgentKind>, windows: bool) -> bool {
+    match kind {
+        Some(AgentKind::Codex) => windows,
+        Some(AgentKind::Claude) => true,
+        None => false,
+    }
+}
+
+/// Whether any agent gets the `agent-browser` shell command on this OS: none, on any OS, for
+/// launch (Claude has no browser, [`no_browser`]; Codex has the `browser` entry instead,
+/// [`browser_mcp`]). The app copies the command into `<data>/tools`, and renders the browser's
+/// skill, only when it is true, so it copies nothing now.
+pub fn shell_browser() -> bool {
+    shell_browser_on(cfg!(windows))
+}
+
+/// [`shell_browser`] as it is on Windows when `windows` is true, and elsewhere when it is false.
+pub fn shell_browser_on(windows: bool) -> bool {
+    !no_browser_on(Some(AgentKind::Claude), windows)
+}
 
 /// The case-law connector's reserved server name (R24): a `mcp.servers.case-law` entry in the
 /// settings or a policy source is dropped (`clauseo_settings::RESERVED_MCP_SERVERS`).
@@ -33,12 +107,17 @@ pub struct ProfileServer {
 
 /// The `browser` entry. The command is `clauseo-mcp`; its `browser-guard` runs agent-browser's
 /// `mcp --tools core` with `--cwd` the session's browser state folder (`{browser_dir}`, one
-/// token the host fills with a native path) and `--cdp-port {cdp_port}`, plus
-/// `--daemon-port {daemon_port}` on Windows. It derives from `--cwd` and the proxy every other
-/// folder and proxy variable agent-browser needs (downloads, screenshots, `HOME`, `TMPDIR` or
-/// `TEMP`, and the Windows socket folder). The entry carries five variables, six on macOS and
-/// Linux with the host's socket folder (`{socket_dir}`). A sidecar path that is no UTF-8 is
-/// written lossily: the host's launch would then fail, which is no worse than a missing browser.
+/// token the host fills with a native path), `--downloads` the matter's downloads folder
+/// (`{matter_downloads}`, where the files the browser saves are delivered) and
+/// `--cdp-port {cdp_port}`, plus `--daemon-port {daemon_port}` on Windows. It derives from
+/// `--cwd` every other folder agent-browser needs (screenshots, its run profile, Chrome's
+/// download staging, `HOME`, `TMPDIR` or `TEMP`, and the Windows socket folder), and fixes the
+/// idle timeout. The entry carries four variables, five on macOS and Linux with the host's
+/// socket folder (`{socket_dir}`): no proxy, so Chrome goes direct, as Claude's shell browser
+/// does; the egress allowlist belongs to the parked Safe workspace (an entry holding
+/// `{proxy_port}` would get the session's proxy, and the host opens one only then). A sidecar
+/// path that is no UTF-8 is written lossily: the host's launch would then fail, which is no
+/// worse than a missing browser.
 pub fn browser(paths: &ProfilePaths) -> ProfileServer {
     browser_for(paths, cfg!(windows))
 }
@@ -52,6 +131,8 @@ fn browser_for(paths: &ProfilePaths, windows: bool) -> ProfileServer {
         agent_browser,
         "--cwd".to_owned(),
         BROWSER_DIR.to_owned(),
+        "--downloads".to_owned(),
+        MATTER_DOWNLOADS.to_owned(),
         "--cdp-port".to_owned(),
         CDP_PORT.to_owned(),
     ];
@@ -64,18 +145,10 @@ fn browser_for(paths: &ProfilePaths, windows: bool) -> ProfileServer {
             "AGENT_BROWSER_CONFIG".to_owned(),
             paths.browser_config.to_string_lossy().into_owned(),
         ),
-        (
-            "AGENT_BROWSER_PROXY".to_owned(),
-            format!("http://127.0.0.1:{PROXY_PORT}"),
-        ),
         ("AGENT_BROWSER_SESSION".to_owned(), SESSION_ID.to_owned()),
         (
             "AGENT_BROWSER_EXECUTABLE_PATH".to_owned(),
             BROWSER_EXECUTABLE.to_owned(),
-        ),
-        (
-            "AGENT_BROWSER_STREAM_PORT".to_owned(),
-            STREAM_PORT.to_owned(),
         ),
     ]);
     if !windows {

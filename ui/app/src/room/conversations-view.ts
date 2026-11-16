@@ -8,7 +8,8 @@ import type {
   ThreadStatus,
   Timestamp,
 } from "../transport/protocol.ts";
-import { agentFor, planOptions } from "./agent.ts";
+import { agentFor } from "./agent.ts";
+import type { DraftPicks } from "./conversations-agents.ts";
 import type { AgentSummary, ThreadInfo } from "./host-next.ts";
 
 /** A thread as a row knows it: the list's summary, with H6's marks where given. */
@@ -55,6 +56,8 @@ export type ConversationsView = {
   options: readonly { value: AgentId; label: string }[];
   /** The agent the draft would run: the lawyer's choice, else agent.ts's order. */
   agent: AgentId;
+  /** The draft's model and effort picks, by plan; none for a thread. */
+  picks: DraftPicks;
   /** The lawyer's last move to a conversation (New conversation, a row pressed, a retry): its key, and a number that
    * grows with each, so the work puts the focus in the field once per move. Null after the room moved by itself. */
   focus: { key: string; n: number } | null;
@@ -80,6 +83,7 @@ export const newestFirst = (a: Known, b: Known) => {
 export const noMatter = (
   agents: readonly AgentSummary[],
   canRetry: boolean,
+  options: ConversationsView["options"],
 ): ConversationsView => ({
   matter: null,
   phase: "loading",
@@ -91,8 +95,9 @@ export const noMatter = (
   archived: false,
   plan: undefined,
   agents,
-  options: planOptions(agents),
+  options,
   agent: agentFor({ chosen: null, setting: null, threads: [], agents }),
+  picks: {},
   focus: null,
   canRetry,
   retried: null,

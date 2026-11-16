@@ -5,6 +5,7 @@ import { createDisplayStore, DEFAULT_UI } from "../room/display-store.ts";
 import { nextHostOf, type MatterInfo } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
+import { provideTools, type ToolsCommands } from "../settings/sections/tools-model.ts";
 import type { FakeBlocklistHost } from "../transport/fake-blocklist.ts";
 import type { FakeUpdateHost } from "../transport/fake-update.ts";
 import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
@@ -14,6 +15,7 @@ import type {
   SettingsView,
   SetupCommand,
   SetupEvent,
+  PrivacySettings,
   ToolsSettingsView,
 } from "../transport/protocol.ts";
 
@@ -35,6 +37,7 @@ export function SettingsOver({
   limits,
   releaseDate = null,
   tools,
+  privacy,
   connectors,
   setup,
   plans,
@@ -42,6 +45,7 @@ export function SettingsOver({
   blocklist,
   update,
   matters = [],
+  mcpTools,
 }: {
   section: SectionId;
   lang: Lang;
@@ -50,6 +54,8 @@ export function SettingsOver({
   releaseDate?: string | null;
   /** The tools' switches the host sends (SettingsView.tools, Privacy's switches); none when left out. */
   tools?: ToolsSettingsView;
+  /** The privacy switches the host sends (SettingsView.privacy, Privacy's counts switch); none when left out. */
+  privacy?: PrivacySettings;
   /** The connectors' state the app feed's catch-up carries (U15); none when left out. */
   connectors?: ConnectorsState;
   /** The setup wire (UD2's Plans); none when left out, and Plans doesn't show. */
@@ -64,6 +70,8 @@ export function SettingsOver({
   update?: FakeUpdateHost;
   /** The matters the app feed's first frames list, for the allowed sites' matter names. */
   matters?: MatterInfo[];
+  /** Settings › Tools' commands (tools-fake.ts); none when left out, and Tools doesn't show. */
+  mcpTools?: ToolsCommands;
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
@@ -76,6 +84,7 @@ export function SettingsOver({
                 ui: { ...DEFAULT_UI, language: lang },
                 locked,
                 ...(tools === undefined ? {} : { tools }),
+                ...(privacy === undefined ? {} : { privacy }),
                 ...(plans === undefined ? {} : { plans }),
               },
             };
@@ -106,6 +115,7 @@ export function SettingsOver({
           }),
     });
     if (limits !== undefined) transport.limitsChanged(limits);
+    if (mcpTools !== undefined) provideTools(transport, mcpTools);
     const store = createDisplayStore({
       storage: null,
       matchMedia: null,

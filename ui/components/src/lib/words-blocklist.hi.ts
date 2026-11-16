@@ -48,4 +48,8 @@ export const HI = {
   Remove: "हटाएँ",
   // the Remove button's accessible name
   "Remove {host}": "{host} हटाएँ",
+  // the lead line of a note for IT ("Copy details for IT", room/blocklist/it-details.ts), where the
+  // firm forbids overriding the list (new, provisional)
+  "Clauseo blocked a site on its unsafe-site list, and the firm's policy has turned off allowing it.":
+    "Clauseo ने अपनी असुरक्षित वेबसाइटों की सूची की एक वेबसाइट अवरुद्ध की, और फ़र्म की नीति ने उसे अनुमति देना बंद कर रखा है।",
 } as const;

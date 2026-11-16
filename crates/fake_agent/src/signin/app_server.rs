@@ -70,7 +70,16 @@ fn reply(line: &str, folder: &Path) -> Option<String> {
             "platformOs": std::env::consts::OS,
             "userAgent": "fake_agent codex-cli",
         }}),
-        "account/read" => json!({"jsonrpc": "2.0", "id": id, "result": account_read(folder)}),
+        "account/read" => {
+            // A read the quit must wait for: `FAKE_APP_SERVER_PAUSE_MS` holds the answer.
+            let pause = std::env::var("FAKE_APP_SERVER_PAUSE_MS")
+                .ok()
+                .and_then(|ms| ms.parse::<u64>().ok());
+            if let Some(ms) = pause {
+                crate::run::effects::pause(std::time::Duration::from_millis(ms));
+            }
+            json!({"jsonrpc": "2.0", "id": id, "result": account_read(folder)})
+        }
         _ => json!({"jsonrpc": "2.0", "id": id, "error": {
             "code": -32601, "message": format!("method not found: {method}"),
         }}),

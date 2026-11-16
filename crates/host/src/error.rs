@@ -45,7 +45,7 @@ impl Error {
     /// The code a client sees for this failure.
     pub fn code(&self) -> ErrorCode {
         match self {
-            Self::Invalid(_) => ErrorCode::CommandInvalid,
+            Self::Invalid(invalid) => HostError::invalid_command_code(invalid),
             Self::Refused(error) => error.code(),
             Self::Store(error) => error.code(),
             Self::Matters(error) => error.code(),
@@ -53,6 +53,7 @@ impl Error {
             Self::Acp(error) => error.code(),
             Self::Settings(clauseo_settings::Error::Locked { .. }) => ErrorCode::SettingsLocked,
             Self::Settings(clauseo_settings::Error::Refused { .. }) => ErrorCode::SettingsRefused,
+            Self::Settings(clauseo_settings::Error::Mcp { refusal, .. }) => mcp_code(*refusal),
             Self::Reducer(_) | Self::Settings(_) | Self::Closed | Self::Internal(_) => {
                 ErrorCode::Internal
             }
@@ -110,6 +111,14 @@ impl Error {
         }
     }
 
+    /// An agent's RPC error's `data`, for classifying only (`clauseo_acp::Error::rpc_data`).
+    pub(crate) fn rpc_data(&self) -> Option<&str> {
+        let Self::Acp(error) = self else {
+            return None;
+        };
+        error.rpc_data()
+    }
+
     /// A state check's refusal with `code` and a detail for logs.
     pub(crate) fn refused(code: ErrorCode, message: impl Into<String>) -> Self {
         Self::Refused(HostError::new(code, message))
@@ -140,6 +149,25 @@ impl From<Error> for HostError {
             | Error::Closed
             | Error::Internal(_) => error.to_wire(),
         }
+    }
+}
+
+/// The code of a refusal of the lawyer's MCP servers (`HostCommand::Mcp`).
+fn mcp_code(refusal: clauseo_settings::McpRefusal) -> ErrorCode {
+    use clauseo_settings::McpRefusal;
+    match refusal {
+        McpRefusal::NameEmpty => ErrorCode::McpNameEmpty,
+        McpRefusal::NameTaken => ErrorCode::McpNameTaken,
+        McpRefusal::NameReserved => ErrorCode::McpNameReserved,
+        McpRefusal::NameInvalid => ErrorCode::McpNameInvalid,
+        McpRefusal::CommandInvalid => ErrorCode::McpCommandInvalid,
+        McpRefusal::CommandNotFound => ErrorCode::McpCommandNotFound,
+        McpRefusal::UrlInvalid => ErrorCode::McpUrlInvalid,
+        McpRefusal::HeaderNameInvalid => ErrorCode::McpHeaderNameInvalid,
+        McpRefusal::EnvNameInvalid => ErrorCode::McpEnvNameInvalid,
+        McpRefusal::Unknown => ErrorCode::McpServerUnknown,
+        // `McpRefusal` is non-exhaustive: a rule this host does not know is a bug here.
+        _ => ErrorCode::Internal,
     }
 }
 

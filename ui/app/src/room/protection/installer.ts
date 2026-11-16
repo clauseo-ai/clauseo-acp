@@ -40,7 +40,8 @@ export const repairPage = (
 let pending: Promise<void> | null = null;
 
 /** Opens the page through open_external, then quits Clauseo through quit_app, but only when the
- * page opened (the lawyer accepted the confirm). A decline (`transport.unauthorized`) or any other
+ * page opened (the lawyer accepted the confirm, which this open always asks for: a plain web link
+ * otherwise opens unasked, and one click would quit Clauseo, stopping its installs). A decline (`transport.unauthorized`) or any other
  * refusal says nothing and quits nothing. Resolves when the quit has been asked, or nothing was. */
 export function openInstallerPage(transport: HostTransport, url: string): Promise<void> {
   pending ??= openThenQuit(transport, url).finally(() => {
@@ -53,7 +54,7 @@ async function openThenQuit(transport: HostTransport, url: string): Promise<void
   let opened = false;
   await quietly(
     "open_external",
-    transport.openExternal(url).then(() => {
+    transport.openExternal(url, undefined, true).then(() => {
       opened = true;
     }),
   );

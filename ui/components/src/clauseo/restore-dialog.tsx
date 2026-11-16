@@ -70,6 +70,9 @@ export type RestoreAsk =
       editedHead: string | null;
       /** Optional: why the act just failed, when no file can be named: said in the dialog, which offers Try again. */
       failed?: string | null;
+      /** Optional: the act's own words, such as "Undo the restore" for a restore that undoes another; by default Undo or
+       * Restore, by the act. */
+      confirm?: string;
     }
   | { kind: "word"; act?: RestoreAct; files: readonly string[] };
 
@@ -232,7 +235,7 @@ export function RestoreDialog({
                     data-disabled={waiting !== null || held ? "" : undefined}
                     onClick={() => waiting === null && !held && onRestore()}
                   >
-                    {ask.act === "undo" ? w.t("Undo") : w.ui("Restore")}
+                    {ask.confirm ?? (ask.act === "undo" ? w.t("Undo") : w.ui("Restore"))}
                   </Button>
                 )}
               </div>

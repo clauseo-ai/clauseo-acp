@@ -79,7 +79,9 @@ impl Inbound {
                         elicitation_id: CompactString::from(&*complete.elicitation_id.0),
                     },
                     Err(error) => {
-                        map::invalid(None, Some("elicitation/complete"), error.to_string())
+                        let text = error.to_string();
+                        crate::diagnose::undecoded("elicitation/complete", &text);
+                        map::invalid(None, Some("elicitation/complete"), text)
                     }
                 };
                 self.shared.emit(event).await;
@@ -92,8 +94,59 @@ impl Inbound {
                 let warning = ProtocolWarning::MalformedLine { bytes };
                 self.shared.emit(map::warning_event(None, warning)).await;
             }
+            crate::line::SKIPPED_UPDATE_METHOD => self.skipped_update(&message.params).await,
             // `$/cancel_request` and extension notifications: nothing to do.
             _ => {}
+        }
+    }
+
+    /// A `session/update` the line reader dropped over the line cap, from the marker that stands
+    /// in for it (`line/oversize.rs`). A `tool_call_update` whose start showed its session,
+    /// `toolCallId` and `status` becomes that status alone, as if the agent had sent it, so the
+    /// call shows how it ended, with no output. One that was or may have been a
+    /// `tool_call_update` but showed no status becomes [`AcpEvent::UpdateSkipped`]. Another
+    /// kind gives nothing (the reader logged it). Only what the line itself claimed passes on:
+    /// its own session, tool call and status.
+    async fn skipped_update(&mut self, params: &Value) {
+        let text = |key| params.get(key).and_then(Value::as_str);
+        let tool_call_update = text("kind").map(|kind| kind == crate::line::TOOL_CALL_UPDATE);
+        match (
+            tool_call_update,
+            text("sessionId"),
+            text("toolCallId"),
+            text("status"),
+        ) {
+            (Some(false), ..) => {}
+            (Some(true), Some(session), Some(tool_call), Some(status)) => {
+                let update = serde_json::json!({
+                    "sessionId": session,
+                    "update": {
+                        "sessionUpdate": crate::line::TOOL_CALL_UPDATE,
+                        "toolCallId": tool_call,
+                        "status": status,
+                    },
+                });
+                self.session_update(update).await;
+            }
+            (_, session, tool_call, _) => {
+                let session = session.and_then(|session| AgentSessionId::new(session).ok());
+                let origin = session
+                    .as_ref()
+                    .map_or(crate::event::Origin::Idle, |session| {
+                        let state = self.shared.state();
+                        let known = state.sessions.get(session.as_str());
+                        known.map_or(crate::event::Origin::Idle, |known| known.origin)
+                    });
+                let acp_tool_call_id = tool_call
+                    .filter(|_| session.is_some())
+                    .map(CompactString::from);
+                let event = AcpEvent::UpdateSkipped {
+                    session,
+                    origin,
+                    acp_tool_call_id,
+                };
+                self.shared.emit(event).await;
+            }
         }
     }
 
@@ -130,7 +183,9 @@ impl Inbound {
         let notification = match serde_json::from_value::<acp::SessionNotification>(params) {
             Ok(notification) => notification,
             Err(error) => {
-                let event = map::invalid(session, Some(name), error.to_string());
+                let text = error.to_string();
+                crate::diagnose::undecoded("session/update", &text);
+                let event = map::invalid(session, Some(name), text);
                 return self.shared.emit(event).await;
             }
         };
@@ -184,8 +239,15 @@ impl Inbound {
         let event = {
             let mut state = self.shared.state();
             let key = state.next_key();
+            let origin_of = |session: &AgentSessionId| {
+                state
+                    .sessions
+                    .get(session.as_str())
+                    .map_or(crate::event::Origin::Idle, |s| s.origin)
+            };
             match request {
                 Request::Permission(request) => {
+                    let origin = origin_of(&request.session);
                     let pending = PendingPermission {
                         session: CompactString::from(request.session.as_str()),
                         options: request
@@ -198,6 +260,7 @@ impl Inbound {
                     state.permissions.insert(key, pending);
                     AcpEvent::PermissionRequested {
                         session: request.session,
+                        origin,
                         key,
                         acp_tool_call_id: request.acp_tool_call_id,
                         options: request.options,
@@ -206,12 +269,14 @@ impl Inbound {
                     }
                 }
                 Request::Elicitation(request) => {
+                    let origin = origin_of(&request.session);
                     let url = matches!(request.request, ElicitationRequest::Url { .. });
                     state
                         .elicitations
                         .insert(key, PendingElicitation { url, responder });
                     AcpEvent::ElicitationRequested {
                         session: request.session,
+                        origin,
                         key,
                         elicitation_id: request.elicitation_id,
                         acp_tool_call_id: request.acp_tool_call_id,
@@ -252,8 +317,11 @@ fn permission(params: Value) -> Result<PermissionRequest, agent_client_protocol:
         .and_then(|call| call.get("rawInput"))
         .filter(|input| !input.is_null())
         .cloned();
-    let request = acp::RequestPermissionRequest::deserialize(params)
-        .map_err(|error| invalid_params(&error.to_string()))?;
+    let request = acp::RequestPermissionRequest::deserialize(params).map_err(|error| {
+        let text = error.to_string();
+        crate::diagnose::undecoded("session/request_permission", &text);
+        invalid_params(&text)
+    })?;
     let session = AgentSessionId::new(&request.session_id.0)
         .map_err(|error| invalid_params(&format!("sessionId: {error}")))?;
     let mut options = Vec::with_capacity(request.options.len());
@@ -326,8 +394,11 @@ struct CheckedElicitation {
 /// Checks an `elicitation/create`. Refuses (-32602) one that does not decode, has a mode other
 /// than form or URL, or is scoped to a request instead of a session.
 fn elicitation(params: Value) -> Result<CheckedElicitation, agent_client_protocol::Error> {
-    let request = acp::CreateElicitationRequest::deserialize(params)
-        .map_err(|error| invalid_params(&error.to_string()))?;
+    let request = acp::CreateElicitationRequest::deserialize(params).map_err(|error| {
+        let text = error.to_string();
+        crate::diagnose::undecoded("elicitation/create", &text);
+        invalid_params(&text)
+    })?;
     let message = request.message;
     let (scope, elicitation_id, request) = match request.mode {
         acp::ElicitationMode::Form(form) => {

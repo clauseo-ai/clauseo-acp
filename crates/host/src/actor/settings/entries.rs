@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use clauseo_protocol::{AgentId, EnvName, HostEvent, PlanProvider, PlanView};
+use clauseo_protocol::{AgentId, AgentKind, EnvName, HostEvent, PlanProvider, PlanView};
 use clauseo_settings as settings;
 use clauseo_settings::{AgentLaunch, EntryWrite, Plan, SystemFiles};
 
@@ -21,7 +21,8 @@ use super::view;
 use crate::error::Error;
 
 /// `set_agent_launch`: writes `agents.<agent>` as `launch` and sends `SettingsChanged`, or
-/// answers [`EntryWrite::LeftAlone`] with nothing written or sent.
+/// answers [`EntryWrite::LeftAlone`] with nothing written or sent. Either way, an agent with a
+/// kind and an entry in force has a plan whose limits are read from now on (`limits/plans.rs`).
 pub(in crate::actor) fn set_agent_launch(
     actor: &mut Actor,
     agent: &AgentId,
@@ -36,6 +37,16 @@ pub(in crate::actor) fn set_agent_launch(
             %agent,
             "an agent's settings entry is the lawyer's or the firm's own and was left alone"
         ),
+    }
+    let entry = actor
+        .effective
+        .settings()
+        .agents
+        .contains_key(agent.as_str());
+    if let Some(kind) = AgentKind::of(agent)
+        && entry
+    {
+        super::super::limits::plan_added(actor, kind);
     }
     Ok(written)
 }

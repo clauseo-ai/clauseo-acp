@@ -1,7 +1,7 @@
 # Nightly fuzzing of the parsers that read input we don't control: agent stdout (acp), the wire
 # types (protocol), matter folders and their history (matters), the store's SQLite file (store),
-# settings files (settings) and reducer snapshots (reducer). The targets, seeds and how to run
-# them locally are in fuzz/README.md.
+# settings files (settings), reducer snapshots (reducer) and the tracked-changes scan of a .docx
+# (host). The targets, seeds and how to run them locally are in fuzz/README.md.
 #
 # - Runs only on the schedule and by hand (workflow_dispatch, which needs write access). No pull
 #   request or push event, so nothing a fork can open or push starts it.

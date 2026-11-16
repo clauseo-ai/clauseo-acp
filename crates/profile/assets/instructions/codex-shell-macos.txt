@@ -1,0 +1,1 @@
+Codex's sandbox blocks macOS services even for a command the lawyer approves, so never run `mdls`, `mdfind`, `open` or `qlmanage`, or `osascript` to control another app, and never ask the lawyer to approve them; read documents with `stetdoc` for Word files, `textutil`, or `python3` (it has python-docx, openpyxl and pypdf) for .docx, .xlsx and .pdf files.

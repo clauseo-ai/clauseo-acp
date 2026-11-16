@@ -34,6 +34,7 @@ use std::rc::Rc;
 use clauseo_protocol::MatterId;
 
 use super::super::accounts::{self, Kind};
+use super::super::answers::DENY_REMOTE_INTERACTIVE_RIGHT;
 use super::super::around::Around;
 use super::super::lock::{Acquired, Held, SetupMutex};
 use super::super::machine::{MachineError, ProfileDir};
@@ -41,7 +42,7 @@ use super::super::outcome::cause_of;
 use super::super::owner::Owner;
 use super::super::record_values::CopyOwner;
 use super::super::windows_machine::{Acting, Names};
-use super::super::{admin_member, args, ffi, processes, profile, record_write};
+use super::super::{admin_member, args, ffi, preflight, processes, profile, record_write};
 use super::{FolderOwner, Removal, acting_token, owners};
 use crate::windows::acl::object::Object;
 use crate::windows::acl_plan::in_folder;
@@ -50,7 +51,7 @@ use crate::windows::ledger::{self, LEDGER_FILE, Ledger, ledger_path};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pool::MachineRecord;
 use crate::windows::private_dir::resolve_folder;
-use crate::windows::refresh::{self, SystemTask};
+use crate::windows::refresh;
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp;
@@ -220,8 +221,11 @@ impl Removal for WindowsRemoval {
     }
 
     fn unregister_stop_task(&mut self) -> Result<(), MachineError> {
-        refresh::unregister_task(SystemTask::Stop)
-            .map_err(|error| MachineError::Other(error.to_string()))
+        for task in refresh::POOL_TASKS {
+            refresh::unregister_task(task)
+                .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))?;
+        }
+        Ok(())
     }
 
     fn invoker(&self) -> Option<&Sid> {
@@ -305,6 +309,14 @@ impl Removal for WindowsRemoval {
         accounts::delete_group(&self.group_name(group)?)
     }
 
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError> {
+        // A group under the name must be the record's; with none, the deny goes by its SID.
+        if accounts::sid_of(&self.names.group, Kind::Group)?.is_some() {
+            self.group_name(group)?;
+        }
+        preflight::remove_right(group, DENY_REMOTE_INTERACTIVE_RIGHT)
+    }
+
     fn as_owner<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> Result<T, MachineError> {
         if self.acting.get() {
             return Ok(f(self));
@@ -358,6 +370,18 @@ impl Removal for WindowsRemoval {
             })
     }
 
+    fn clear_markers(&mut self) -> Result<usize, MachineError> {
+        if !self.acting.get() {
+            return Err(MachineError::Other(
+                "the unclean-session markers are removed only as their owner".to_owned(),
+            ));
+        }
+        let Some(folder) = &self.checked else {
+            return Ok(0);
+        };
+        clear_markers_in(folder)
+    }
+
     fn admins_ledger(
         &mut self,
         data_dir: &Path,
@@ -396,4 +420,18 @@ impl Removal for WindowsRemoval {
             Err(error) => Err(kind_of("a matter's folder check", &error)),
         }
     }
+}
+
+/// Removes every unclean-session marker in `folder`'s run folder, as whoever this thread acts
+/// as; how many. A run folder that is missing holds none.
+fn clear_markers_in(folder: &Path) -> Result<usize, MachineError> {
+    use crate::windows::runner::marker::{marker_path, remove_marker, unclean_sessions};
+    let other = |error: std::io::Error| {
+        MachineError::Other(format!("the unclean-session markers ({})", error.kind()))
+    };
+    let sessions = unclean_sessions(folder).map_err(other)?;
+    for session in &sessions {
+        remove_marker(&marker_path(folder, &session.id)).map_err(other)?;
+    }
+    Ok(sessions.len())
 }

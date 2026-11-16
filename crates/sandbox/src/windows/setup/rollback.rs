@@ -1,9 +1,10 @@
 //! A failed set-up's rollback (D-B7). Users this run made come off in the uninstall order: their
 //! `LocalLow` deny, their profile, their account. Then the group goes, only if this run made it
-//! and it is empty. Then the record is written to what really remains: every SID it held before,
-//! each made user still there (or gone but named by a ledger entry), and a group this run made
-//! that is still there, so no account or group is left that the record doesn't name. Every other
-//! deny stays (D12). Nothing that existed before the run is removed.
+//! and it is empty, its Remote Desktop deny taken off just before (a user right is keyed by SID,
+//! and would outlive the group). Then the record is written to what really remains: every SID
+//! it held before, each made user still there (or gone but named by a ledger entry), and a group
+//! this run made that is still there, so no account or group is left that the record doesn't
+//! name. Every other deny stays (D12). Nothing that existed before the run is removed.
 //!
 //! A re-run's new passwords for the recorded users can't be undone, so the rollback writes them
 //! to `secrets.bin` (keeping the blobs of the users not reset), and the pool still works. The
@@ -169,15 +170,18 @@ fn local_low(profile: &Path) -> PathBuf {
     profile.join("AppData").join("LocalLow")
 }
 
-/// Deletes the group this run made when it has no members left; whether it is gone. A group
+/// Deletes the group this run made when it has no members left; whether it is gone. Its
+/// Remote Desktop deny comes off first, so no right is left keyed to a SID nothing has. A group
 /// that still has members (kept users this run put in it) stays and is recorded, which is not a
-/// failure; a failed count or delete keeps it and is.
+/// failure; a failed count, deny or delete keeps it and is.
 fn delete_group(machine: &mut impl Machine, run: &Run, left: &mut Vec<String>) -> bool {
     let Some(group) = &run.group else {
         return false;
     };
     let result = match machine.group_members(group) {
-        Ok(0) => machine.delete_group(group),
+        Ok(0) => machine
+            .remove_remote_logon_deny(group)
+            .and_then(|()| machine.delete_group(group)),
         Ok(_) => return false,
         Err(error) => Err(error),
     };

@@ -29,7 +29,7 @@ pub fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
 
 /// The file's id: (device, inode). `None` for a symbolic link.
 #[cfg(unix)]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+pub(crate) fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
     use std::os::unix::fs::MetadataExt as _;
 
     let meta = std::fs::symlink_metadata(path)?;
@@ -46,7 +46,7 @@ fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
     unsafe_code,
     reason = "CreateFileW and GetFileInformationByHandle are the OS's file-id calls; std has no stable one"
 )]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+pub(crate) fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 
@@ -77,7 +77,7 @@ fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
             None,
         )
     }
-    .map_err(io::Error::from)?;
+    .map_err(win32_io_error)?;
     // SAFETY: `raw` is a valid handle CreateFileW just returned, owned by nothing else; the
     // `OwnedHandle` closes it once, when dropped.
     let handle = unsafe { OwnedHandle::from_raw_handle(raw.0) };
@@ -85,13 +85,28 @@ fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
     // SAFETY: `handle` is open for the call's duration, and `info` is a valid, writable
     // BY_HANDLE_FILE_INFORMATION.
     unsafe { GetFileInformationByHandle(HANDLE(handle.as_raw_handle()), &raw mut info) }
-        .map_err(io::Error::from)?;
+        .map_err(win32_io_error)?;
     drop(handle);
     if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
         return Ok(None);
     }
     let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
     Ok(Some((u64::from(info.dwVolumeSerialNumber), index)))
+}
+
+/// The Win32 error inside `error` as an io error whose `raw_os_error()` is the Win32 code. A
+/// Win32 error's HRESULT is `0x8007xxxx` (`FACILITY_WIN32`), and its low 16 bits are the code.
+/// `io::Error::from` keeps the whole HRESULT (`0x80070002`), which is no Win32 code and whose
+/// kind std does not know, so a missing file would not read as missing. Any other HRESULT
+/// keeps `io::Error::from`.
+#[cfg(windows)]
+fn win32_io_error(error: windows::core::Error) -> io::Error {
+    let hr = error.code().0;
+    if (hr.cast_unsigned() & 0xFFFF_0000) == 0x8007_0000 {
+        io::Error::from_raw_os_error(hr & 0xFFFF)
+    } else {
+        io::Error::from(error)
+    }
 }
 
 #[cfg(test)]

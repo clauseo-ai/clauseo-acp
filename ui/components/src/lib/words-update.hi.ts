@@ -17,6 +17,23 @@ export const HI = {
   "Installing the update…": "अपडेट इंस्टॉल हो रहा है…",
   "Clauseo was updated from {from} to {current}.": "Clauseo को {from} से {current} में अपडेट किया गया।",
   "Got it": "ठीक है",
+  // the notice after Clauseo closed unexpectedly (room/crash-notice.tsx), once per unclean exit
+  "Last session": "पिछला सत्र",
+  "Clauseo closed unexpectedly.": "Clauseo अचानक बंद हो गया।",
+  "Your conversations are kept.": "आपकी बातचीत सुरक्षित है।",
+  "{action} may not have finished.": "{action} शायद पूरा नहीं हुआ।",
+  "{action} in {matter} may not have finished.": "{matter} में {action} शायद पूरा नहीं हुआ।",
+  // a restore's own sentences: बहाली is feminine, so its verb agrees (the English reads the same)
+  "{restore} may not have finished.": "{restore} शायद पूरी नहीं हुई।",
+  "{restore} in {matter} may not have finished.": "{matter} में {restore} शायद पूरी नहीं हुई।",
+  "Undo of 1 file": "1 फ़ाइल का अनडू",
+  "Undo of {count} files": "{count} फ़ाइलों का अनडू",
+  "Restore of 1 file": "1 फ़ाइल की बहाली",
+  "Restore of {count} files": "{count} फ़ाइलों की बहाली",
+  "A restore": "एक बहाली",
+  "Accepting tracked changes": "ट्रैक किए गए बदलाव स्वीकार करना",
+  "Rejecting tracked changes": "ट्रैक किए गए बदलाव अस्वीकार करना",
+  "Versions has the earlier copies.": "पिछली प्रतियाँ Versions में हैं।",
   // R23-12 onwards: Settings, Updates
   "Clauseo {version}": "Clauseo {version}",
   "Last checked {time}": "पिछली जाँच {time}",
@@ -33,10 +50,12 @@ export const HI = {
     "Clauseo अपडेट की जाँच नहीं कर सका। फिर से प्रयास करें।",
   // who manages updates, where Clauseo doesn't update itself
   "Your firm manages updates for Clauseo.": "आपकी फ़र्म Clauseo के अपडेट संभालती है।",
-  "Clauseo is installed for everyone on this computer, so whoever looks after it installs updates.":
-    "Clauseo इस कंप्यूटर पर सभी के लिए इंस्टॉल है, इसलिए इसकी देखरेख करने वाले व्यक्ति अपडेट इंस्टॉल करते हैं।",
-  "Clauseo can't update itself from where it's installed. Ask whoever looks after this computer.":
-    "Clauseo जहाँ इंस्टॉल है, वहाँ से वह ख़ुद को अपडेट नहीं कर सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+  "Clauseo is installed for everyone on this computer, so it doesn't update itself. To update, run the new installer from an administrator account.":
+    "Clauseo इस कंप्यूटर पर सभी के लिए इंस्टॉल है, इसलिए वह ख़ुद को अपडेट नहीं करता। अपडेट करने के लिए, किसी व्यवस्थापक खाते से नया इंस्टॉलर चलाएँ।",
+  "Clauseo can't update itself from where it's installed. To update, install the new version over this one.":
+    "Clauseo जहाँ इंस्टॉल है, वहाँ से वह ख़ुद को अपडेट नहीं कर सकता। अपडेट करने के लिए, नया संस्करण इसी के ऊपर इंस्टॉल करें।",
   "Updates come through the package manager that installed Clauseo.":
     "अपडेट उसी पैकेज मैनेजर से आते हैं जिससे Clauseo इंस्टॉल हुआ था।",
+  "This version of Clauseo doesn't update itself. To update, install the new version over this one. Your matters and settings stay.":
+    "Clauseo का यह संस्करण अपने आप अपडेट नहीं होता। अपडेट करने के लिए, नया संस्करण इसी के ऊपर इंस्टॉल करें। आपके मामले और सेटिंग्स बने रहते हैं।",
 } satisfies Hindi<string>;

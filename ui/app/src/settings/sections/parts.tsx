@@ -11,6 +11,7 @@ import { useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 export function Group({
   title,
   note,
+  foot,
   aside,
   children,
   plate = true,
@@ -18,6 +19,8 @@ export function Group({
   /** The head; a group whose one setting names itself goes without. */
   title?: string;
   note?: string;
+  /** Optional: a line under what it holds. */
+  foot?: string;
   /** Optional: words at the head's end, such as "Updated at 4:29 pm". */
   aside?: ReactNode;
   children: ReactNode;
@@ -40,6 +43,11 @@ export function Group({
       )}
       {note !== undefined && <p className="set-group-note">{w.say(note)}</p>}
       {plate ? <div className="set-plate">{children}</div> : children}
+      {foot !== undefined && (
+        <p className="set-group-note" data-testid="group-foot">
+          {w.say(foot)}
+        </p>
+      )}
     </section>
   );
 }

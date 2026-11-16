@@ -325,7 +325,14 @@ fn low_disk_and_unsupported_machines_download_nothing() {
     };
     fails_with("cft-disk", &low, BrowserInstallFailure::DiskSpace);
     assert_eq!(low.calls(), Vec::<&str>::new());
-    for platform in [Platform::Linux, Platform::WindowsArm64, Platform::Other] {
+    // Windows x64 too: Chrome for Testing would sit in a per-user folder, which Chrome's sandbox
+    // cannot start a piped browser from, so the host refuses it there (`chrome.rs`).
+    for platform in [
+        Platform::Linux,
+        Platform::WindowsX64,
+        Platform::WindowsArm64,
+        Platform::Other,
+    ] {
         let dir = TempDir::new("cft-unsupported");
         let tools = Fake::working();
         let (result, _) = run_with(&job(dir.path(), platform), &tools, &Cancel::new());
@@ -430,10 +437,10 @@ fn curl_exits_map_to_codes() {
     }
 }
 
-/// A real download from Google with the system tools, on macOS or Windows x64 only. By hand:
+/// A real download from Google with the system tools, on macOS only. By hand:
 /// `cargo test -p clauseo-host --lib real_download -- --ignored --nocapture`.
 #[test]
-#[ignore = "downloads about 200 MB from Google; run by hand on macOS or Windows"]
+#[ignore = "downloads about 200 MB from Google; run by hand on macOS"]
 fn real_download() {
     let dir = TempDir::new("cft-real");
     let job = Job {

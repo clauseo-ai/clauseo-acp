@@ -348,7 +348,7 @@ test("the room's line says what the workspace does, or Not protected for as long
   );
   const lines = [...document.querySelectorAll(".ws-line")];
   expect(lines[0]?.textContent).toBe(
-    "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
+    "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
   );
   expect(lines[1]?.textContent).toContain("Not protected");
   expect(lines[0]?.textContent).not.toContain("Not protected");

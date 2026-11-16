@@ -11,8 +11,8 @@
 //   the lock block names that Word document. Word holds it open, with its owner file
 //   `~$tition.docx` beside it.
 //
-// Both matters start with papers, so each spec waits for the matter's first read before its own
-// turn (finishFirstRead).
+// Both matters start with papers, so each spec presses Read the papers and waits for the first
+// read before its own turn (finishFirstRead).
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";

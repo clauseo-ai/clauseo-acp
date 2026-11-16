@@ -27,12 +27,21 @@ fn the_outer_instance_reads_its_own_sid_from_its_token() {
 fn the_per_user_installer_asks_once_by_starting_itself_elevated_and_never_in_update_or_silent() {
     let code = hook_code();
     let post = macro_body(&code, "NSIS_HOOK_POSTINSTALL");
-    // The mode block's last lines; only the set-up program check (setup_exe_missing.rs) follows.
+    // The mode block's last lines: the ask, then repair mode's relaunch (repair.rs); only the
+    // set-up program check (setup_exe_missing.rs) follows. The ask only with the Safe workspace on
+    // (safe_workspace_off.rs).
     let end = post.iter().rposition(|line| line == "!endif").unwrap() + 1;
-    let tail: Vec<&str> = post[end - 3..end].iter().map(String::as_str).collect();
+    let tail: Vec<&str> = post[end - 6..end].iter().map(String::as_str).collect();
     assert_eq!(
         tail,
-        ["!else", &format!("!insertmacro {ASK}"), "!endif"],
+        [
+            "!else",
+            "!ifdef CLAUSEO_SAFE_WORKSPACE",
+            &format!("!insertmacro {ASK}"),
+            "!endif",
+            "!insertmacro CLAUSEO_REPAIR_RELAUNCH",
+            "!endif"
+        ],
         "{post:?}"
     );
     let admin = admin_code();
@@ -65,7 +74,7 @@ fn the_per_user_installer_asks_once_by_starting_itself_elevated_and_never_in_upd
             "StrCpy $R2 \"\"",
             "${EndIf}",
             "${If} $R2 != \"\"",
-            "MessageBox MB_OK|MB_ICONINFORMATION \"$(adminCopyAsk)\"",
+            "MessageBox MB_OK|MB_ICONINFORMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyAsk)\"",
         ],
     );
     let calls: Vec<usize> = (0..body.len())
@@ -152,12 +161,13 @@ fn the_installers_exit_codes_are_their_own() {
             &("TEMP_FAILED".to_owned(), 25)
         ]
     );
-    // Each code once: #638's 20 and 21, these, and the per-machine uninstaller's 26.
+    // Each code once: #638's 20 and 21, these, the per-machine uninstaller's 26, and the
+    // installers' 28 when Clauseo.exe is gone (app_exe_missing.rs).
     let mut values: Vec<u32> = codes.iter().map(|(_, value)| *value).collect();
     values.sort_unstable();
     values.dedup();
     assert_eq!(values.len(), codes.len(), "{codes:?}");
-    assert_eq!(values, [20, 21, 22, 23, 24, 25, 26, 27], "{codes:?}");
+    assert_eq!(values, [20, 21, 22, 23, 24, 25, 26, 27, 28], "{codes:?}");
     // Clear of NSIS's 0 to 2, of #638's 20 and 21 (packaging-setup-exe-missing), of the codes
     // Intune and SCCM read as success or retry, and of the elevated instance's 99 and 100 + code.
     let taken = [0, 1, 2, 20, 21, 99, 1223, 1618, 1641, 1707, 3010];
@@ -249,28 +259,28 @@ fn every_exit_code_of_adopt_has_its_outcome() {
             "DetailPrint \"$(adminCopyDone)\"",
             "${ElseIf} $R6 = 1",
             "DetailPrint \"$(adminCopyFailed)\"",
-            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyFailed)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyFailed)\"",
             "${ElseIf} $R6 = 2",
             "DetailPrint \"$(adminCopyOtherAccount)\"",
-            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyOtherAccount)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyOtherAccount)\"",
             "${ElseIf} $R6 = 4",
             "DetailPrint \"$(adminCopyDeclined)\"",
-            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyDeclined)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyDeclined)\"",
             "${ElseIf} $R6 = 5",
             "DetailPrint \"$(adminCopyNewerKept)\"",
             "${ElseIf} $R6 = 6",
             "DetailPrint \"$(adminCopyAppRunning)\"",
-            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyAppRunning)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyAppRunning)\"",
             "SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}",
             "${ElseIf} $R6 = 7",
             "DetailPrint \"$(adminCopyStillRunning)\"",
             "${ElseIf} $R6 = 8",
             "DetailPrint \"$(setupExeRemoved)\"",
-            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(setupExeRemoved)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(setupExeRemoved)\"",
             "SetErrorLevel ${CLAUSEO_EXIT_SETUP_EXE_REMOVED}",
             "${ElseIf} $R6 = 9",
             "DetailPrint \"$(adminCopyBlocked)\"",
-            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyBlocked)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyBlocked)\"",
             "${EndIf}",
         ],
     );
@@ -361,21 +371,20 @@ fn the_words_about_the_admin_copy_are_the_provisional_ones() {
             "adminCopyDeclined",
             "Clauseo is installed, but the Safe workspace isn't set up, because permission was \
              refused when Windows asked. Clauseo works without it. To set it up, run this \
-             installer again and choose Yes. If Windows asks for an administrator's password, ask \
-             whoever looks after this computer to enter it.",
+             installer again and choose Yes. If Windows asks for an administrator's password, \
+             enter the password of an administrator account on this computer.",
         ),
         (
             "adminCopyBlocked",
             "Clauseo is installed, but the Safe workspace isn't set up, because your Windows \
-             account isn't allowed to approve this change. To set it up, ask whoever looks after \
-             this computer to run this installer with an administrator account, or to install \
-             Clauseo for all users.",
+             account isn't allowed to approve this change. To set it up, run this installer again \
+             from an administrator account, or install Clauseo for all users.",
         ),
         (
             "adminCopyFailed",
             "Clauseo is installed, but the Safe workspace couldn't be set up. Clauseo works \
-             without it. Run this installer again to try once more. If it still isn't set up, ask \
-             whoever looks after this computer.",
+             without it. Run this installer again to try once more. If it still isn't set up, \
+             Settings > Safe workspace in Clauseo says what's stopping it.",
         ),
         (
             "adminCopyOtherAccount",
@@ -385,8 +394,7 @@ fn the_words_about_the_admin_copy_are_the_provisional_ones() {
         (
             "adminCopyMachineFailed",
             "Clauseo is installed, but the Safe workspace couldn't be set up on this computer. \
-             Clauseo works without it. Whoever looks after this computer can run this installer \
-             again to set it up.",
+             Clauseo works without it. Run this installer again to set it up.",
         ),
         (
             "adminCopyNewerKept",

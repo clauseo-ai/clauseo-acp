@@ -8,7 +8,13 @@ use std::path::PathBuf;
 
 use serde_json::json;
 
-use super::command::recursive_roots;
+use super::ShellKind;
+use super::command;
+
+/// [`command::recursive_roots`] of a line from a tool whose shell is not known.
+fn recursive_roots(line: &str, windows: bool) -> Vec<PathBuf> {
+    command::recursive_roots(line, windows, ShellKind::Unknown)
+}
 use super::search::{literal_root, pattern_roots};
 
 use super::tests::{check, layout, text};
@@ -216,4 +222,173 @@ fn a_recursive_commands_operands_and_the_working_folder_are_its_roots() {
         recursive_roots(r"Get-ChildItem -Recurse C:\p", true),
         paths(&[".", r"C:\p"])
     );
+}
+
+/// Every spelling PowerShell takes for `-Recurse` makes its walkers walk: any prefix of the
+/// name, its alias `-s`, `-Depth` from `-de`, with an attached value, after an en dash, em dash
+/// or horizontal bar, in any case; `-d` alone (`-Directory`) does not.
+#[test]
+fn every_powershell_spelling_of_recurse_walks() {
+    let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
+    let mut spellings: Vec<String> = (1..="recurse".len())
+        .map(|end| format!("-{}", "recurse".get(..end).unwrap_or_default()))
+        .collect();
+    spellings.extend(
+        [
+            "-RECURSE",
+            "-Rec",
+            "-s",
+            "-S",
+            "-de",
+            "-dep",
+            "-dept",
+            "-depth",
+            "-Depth",
+            "-DE",
+            "-Recurse:$true",
+            "-r:$false",
+            "-Depth:3",
+            "-s:$true",
+        ]
+        .map(str::to_owned),
+    );
+    spellings.extend(
+        ["\u{2013}", "\u{2014}", "\u{2015}"]
+            .iter()
+            .flat_map(|dash| {
+                ["r", "Recurse", "Depth", "s:$true"].map(|name| format!("{dash}{name}"))
+            }),
+    );
+    // A word after another dash stays a starting folder too (a folder may be named so).
+    let roots_of = |spelling: &str, path: &str| {
+        let mut want = vec![".", path];
+        if !spelling.starts_with('-') {
+            want.insert(1, spelling);
+        }
+        paths(&want)
+    };
+    for spelling in &spellings {
+        for command in ["gci", "Get-ChildItem", "GCI", "dir", "Remove-Item", "cpi"] {
+            for windows in [true, false] {
+                let line = format!("{command} {spelling} /p");
+                assert_eq!(
+                    recursive_roots(&line, windows),
+                    roots_of(spelling, "/p"),
+                    "{line}"
+                );
+            }
+        }
+        let line = format!(r"Get-ChildItem {spelling} C:\p");
+        assert_eq!(
+            recursive_roots(&line, true),
+            roots_of(spelling, r"C:\p"),
+            "{line}"
+        );
+    }
+    assert_eq!(
+        recursive_roots("Get-ChildItem -Depth 2 -Path:/p", false),
+        paths(&[".", "2", "/p"])
+    );
+    for line in [
+        "gci -d /p",
+        "Get-ChildItem -Directory /p",
+        "gci /p",
+        "gci -Force /p",
+    ] {
+        assert!(recursive_roots(line, false).is_empty(), "{line}");
+    }
+}
+
+/// `ls`, `cp` and `rm` take PowerShell's short spellings only in a line known to be
+/// PowerShell (a `pwsh -Command` script, or a line running a cmdlet); in Bash `sort -r`, `ls -r`
+/// and `tail -s` do not walk. `-Recurse` in full makes any command walk.
+#[test]
+fn powershell_short_spellings_apply_only_to_powershell() {
+    let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
+    for line in [
+        "sort -r memo.txt",
+        "ls -r /p",
+        "ls -s /p",
+        "tail -s 5 x.log",
+        "rm -s /p",
+        "cp -s /p /q",
+        "bash -c 'ls -r /p'",
+        "ls -dep /p",
+    ] {
+        assert!(recursive_roots(line, false).is_empty(), "{line}");
+    }
+    for line in [
+        r#"pwsh -NoProfile -Command "ls -r /p""#,
+        "powershell -Command \"rm \u{2013}Recurse:$true /p\"",
+        "Set-Location /q; ls -r /p",
+        "Write-Output x; rm -Depth 3 /p",
+    ] {
+        let roots = recursive_roots(line, false);
+        assert!(roots.contains(&PathBuf::from("/p")), "{line}: {roots:?}");
+    }
+    for line in ["anything -recurse /p", "Get-Item -Recurse:$false /p"] {
+        assert_eq!(recursive_roots(line, false), paths(&[".", "/p"]), "{line}");
+    }
+    assert_eq!(
+        recursive_roots("x \u{2014}RECURSE /p", false),
+        paths(&[".", "\u{2014}RECURSE", "/p"])
+    );
+}
+
+/// Told the tool, the fence reads its line as that shell does: from PowerShell's tool `ls`,
+/// `cp`, `rm`, `rmdir` and `dir` take PowerShell's spellings with no cmdlet beside them; from
+/// Bash's, `ls -r` and GNU's `dir -r` sort in reverse and `dir -R` walks, while a script
+/// given to `pwsh -Command` is still PowerShell's, and from PowerShell's a `bash -c` script
+/// is Bash's.
+#[test]
+fn the_tools_shell_decides_how_its_line_is_read() {
+    let roots = |line: &str, shell| command::recursive_roots(line, false, shell);
+    let walks = |line: &str, shell| roots(line, shell).contains(&PathBuf::from("/p"));
+    for line in [
+        "ls -r /p",
+        "dir -r /p",
+        "cp -Recurse:$true /p /q",
+        "rm -s /p",
+        "rmdir \u{2013}r /p",
+        "gci -de 2 /p",
+        "ls -r /q; pwsh -c 'x'; ls -r /p",
+        "bash -c 'ls -R /p'",
+    ] {
+        assert!(walks(line, ShellKind::PowerShell), "PowerShell: {line}");
+    }
+    for line in [
+        "ls -r /p",
+        "dir -r /p",
+        "gci -r /p",
+        "rm -s /p",
+        "bash -c 'ls -r /p'",
+    ] {
+        assert!(!walks(line, ShellKind::Posix), "Bash: {line}");
+    }
+    for line in [
+        "dir -R /p",
+        "ls -lR /p",
+        r#"pwsh -NoProfile -Command "ls -r /p""#,
+        "find /p",
+        "x -Recurse /p",
+    ] {
+        assert!(walks(line, ShellKind::Posix), "Bash: {line}");
+    }
+    assert!(!walks(
+        "pwsh -c 'Write-Output x'; bash -c 'ls -r /p'",
+        ShellKind::PowerShell
+    ));
+    assert!(walks("dir -r /p", ShellKind::Unknown));
+    assert!(!walks("ls -r /p", ShellKind::Unknown));
+    assert_eq!(
+        ShellKind::of_tool(Some("PowerShell")),
+        ShellKind::PowerShell
+    );
+    assert_eq!(
+        ShellKind::of_tool(Some("powershell")),
+        ShellKind::PowerShell
+    );
+    assert_eq!(ShellKind::of_tool(Some("Bash")), ShellKind::Posix);
+    assert_eq!(ShellKind::of_tool(Some("exec_command")), ShellKind::Unknown);
+    assert_eq!(ShellKind::of_tool(None), ShellKind::Unknown);
 }

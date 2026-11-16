@@ -47,7 +47,10 @@ documents with 3 changed).
 - The matter folder holds one thing of Clauseo's: `.clauseo/matter.json`, version 1:
   `{"version": 1, "matter_id": "<uuid>", "created_at": <milliseconds since the Unix epoch>}`, written
   by temp file and rename. Readers accept any `version` (or none) and ignore keys they do not know;
-  they need `matter_id` and `created_at`. A later format that drops either uses a new file name. Opening a
+  they need `matter_id` and `created_at`. A later format that drops either uses a new file name. An
+  import keeps a `matter.json` naming the matter it imports, byte for byte, and renames one that
+  does not read to `.clauseo/matter.old-<UTC stamp>.json` before writing its own (decision record
+  0022). Opening a
   matter whose folder is gone fails with `matter.folder_missing`; one whose folder has no
   `matter.json`, has one that does not read, or has one naming another matter fails with
   `matter.folder_not_a_matter` (`matter.folder_missing` before 2026-11-07, decision record 0003).
@@ -74,8 +77,9 @@ documents with 3 changed).
   trailer, so the tip is the previous checkpoint; a later version may put a commit without one
   there, and a writer still builds on the tip. Nothing rewrites the timeline: undo and restore add
   commits.
-- No empty commits. A checkpoint whose tree equals the tip's tree reuses the last checkpoint's id
-  instead of committing, when the tip's tree is that checkpoint's tree; otherwise it commits.
+- No empty commits. A checkpoint whose tree equals the tip's tree, and whose skip record (below)
+  equals the tip's, reuses the last checkpoint's id instead of committing, when the tip's tree is
+  that checkpoint's tree; otherwise it commits.
 - Author and committer are `Clauseo <>` (name `Clauseo`, empty email), at the checkpoint's time in
   whole seconds, offset `+0000`. The host passes the time; Clauseo reads no clock.
 - Every file is stored as mode `100644`. Symlinks and other non-regular files are not versioned.
@@ -92,12 +96,93 @@ documents with 3 changed).
 
   `Clauseo-Checkpoint` is the `CheckpointId` the host minted; the commit id never leaves `matters`
   and `store`. `Clauseo-Kind` is one of `import`, `before-turn`, `after-turn`, `outside-edits`,
-  `undo`, `restore`. `Clauseo-Thread` and `Clauseo-Turn` are present when the checkpoint has them
+  `undo`, `restore`, `revisions` (tracked changes of a Word file accepted or rejected, no thread or
+  turn). `Clauseo-Thread` and `Clauseo-Turn` are present when the checkpoint has them
   (turn checkpoints, and an undo's when the host passes them). Writers emit them in that order.
   Readers take the message's last paragraph, accept the trailers in any order, ignore keys they do
   not know, read a kind they do not know as `Unknown`, and need only `Clauseo-Checkpoint`; a commit
   without one is not a checkpoint. Writers never reuse an id; a reader that finds one id on two
   commits takes the later. The summary line is for people and is never parsed.
+- What was in the folder at a turn's start (orchestrator, 2026-11-11, stage D; found on a
+  Windows laptop, where an agent's read of a OneDrive placeholder downloaded it, the room called it
+  a new paper, and Undo would have deleted it). Undo deletes a file only when the history proves it
+  was absent when the step began; the stat cache cannot prove that (it is rebuilt without skipped
+  files, or lost), so each checkpoint commit records it.
+  - **The skip record.** Every checkpoint commit has `Clauseo-Skips`, after the trailers above:
+    `none` when its walk skipped no file and listed every folder, otherwise the id of a blob
+    holding the record. No tree names the blob; it is stored and made durable like the commit's
+    other objects, and kept, since Clauseo never prunes. The blob is UTF-8 text, a header line
+    `clauseo-skips 1`, then one line per entry sorted by path bytes:
+
+    ```
+    clauseo-skips 1
+    skipped cloud-only 18 1700000000.000000000 notes.txt
+    unread Sub
+    ```
+
+    `skipped <reason> <size> <mtime seconds>.<nanoseconds> <path>` is a file not versioned (over
+    the cap, or cloud-only and never versioned), with its size and mtime as the stat cache keeps
+    them; `unread <folder>` is a folder that did not list (not downloaded, permission denied), of
+    which nothing is known. The path runs to the end of the line (no control character). A header,
+    or any line, a reader cannot read makes the whole record unreadable (a path left out would look
+    absent); a reason it does not know reads as unknown. A commit
+    without `Clauseo-Skips`, or whose record does not read, has no record: nothing about its
+    walk's skips is known.
+  - **Reuse.** A checkpoint reuses the last one only when the tree **and** the record are
+    unchanged (a new placeholder, or a skipped file's new size or mtime, makes a checkpoint with no
+    file changed), so the checkpoint a turn starts at records the folder as the turn found it.
+  - **Files read for the first time.** A file the last commit's record (for a tip with none, the
+    stat cache) has as skipped that a walk reads was there before: never an added file. A file new
+    to the folder with the size and mtime of a skipped file the walk no longer finds is that file
+    moved or renamed, and counts the same; so does one with the size and mtime of a `stale` file
+    the walk no longer finds. Writers add one line per such file after `Clauseo-Skips`, each list
+    sorted by path bytes:
+
+    ```
+    Clauseo-Baseline: cloud-only notes.txt
+    Clauseo-Was-Skipped: over-size-cap Exhibits/scan 2.pdf
+    ```
+
+    The value is the reason (`cloud-only`, `over-size-cap`; one a reader does not know reads as
+    unknown), one space, then the path exactly as in the tree (spaces kept, a last one included;
+    readers trim only line breaks). A walk knows each reason; one kept from the cache under a
+    folder that did not list, or a tip with no record, is told by its size against the cap.
+    `Clauseo-Baseline` is read with the size and mtime it was skipped with, so unchanged: in the
+    commit's tree, but not a change (no `FilesChanged` names it). That a sync client keeps both
+    when it downloads a file is assumed, not verified (OneDrive included); one that does not makes
+    the file `Clauseo-Was-Skipped` instead, listed but still kept by undo. A versioned file that
+    was cloud-only and not read (`stale` in the record), read with the size and mtime it had then,
+    is a baseline too: its content is what the folder held (a colleague's edit in the cloud, say).
+    `Clauseo-Was-Skipped` is read otherwise, or moved: a change (listed as added, never a rename's
+    new name).
+  - **Diffs.** Any diff of two checkpoints (a step's, undo's, "edited since", a compare either
+    way round) reads the first-read trailers of the checkpoints after the earlier up to the later:
+    each baseline is compared from its content at the checkpoint that read it, so one unchanged
+    since is no change. A compare with the folder does the same, and takes a file the folder holds
+    unchanged since the last commit's record skipped it as its baseline too.
+  - **Undo.** Undo deletes a path (an added file, a rename's new name) only when the step's
+    first checkpoint has a record and the path is neither a skipped file in it nor under one of
+    its unread folders, nor named by the step's first-read trailers, and the start record has no
+    unread folder at all: a file the step added may have come out of one (it may list for a while
+    and stop again), so then every added file is kept, as `unread_folder`. It never writes a path those trailers name, nor one the start record has as
+    `stale` (its content then unknown). Any other file is kept, no delete and no write, and
+    reported (`Undone::unversioned`, `StepUndone.unversioned`) with why: the skip reason,
+    `unread_folder`, or `unknown` (no record: a step from before this, whose added files are all
+    kept, the agent's own included). Modified and deleted files have earlier blobs and are put
+    back as ever.
+  - **Where a delete goes** (orchestrator, 2026-11-13, after the Windows dry run lost a lawyer's
+    file to Undo). Undo's deletes, and those of a restore that takes back a restore, go to the
+    OS's trash first, so the lawyer can take the file back from there: on macOS the Trash,
+    through `NSFileManager`'s `trashItemAtURL` only (never Finder, which asks for Automation
+    permission); on Windows the Recycle Bin, through `IFileOperation` with no UI, tried only on
+    a fixed drive and refused when the shell would delete for good. A file the trash cannot take
+    (a share, a removable drive, a failed move) is deleted, but only when the history holds it
+    as the folder has it: the save before the write-back (the `outside-edits` checkpoint, whose
+    failure fails the undo or restore before any delete) committed it, and the tip's tree has
+    that blob. Otherwise it stays and the undo fails. One warning per write-back gives the
+    count and the failure's kind, never a path. Linux keeps the plain delete. Tests set a folder
+    as the trash (`Settings::trash`), so no run fills the machine's Trash.
+  - An older Clauseo reading a newer history ignores these keys and undoes as it did.
 - There is no `Clauseo-Seq` trailer: the commit is written before the host logs
   `CheckpointRecorded`, so the `seq` is not known yet, and the parent chain already orders the
   timeline. Opening a matter walks the first-parent chain from the ref and rebuilds the map from
@@ -109,7 +194,16 @@ documents with 3 changed).
 - Never versioned and never listed, by name, ASCII-case-insensitively on every OS (the same folder may
   sync between Windows and macOS): files matching `~$*`, `*.tmp` (which covers `~WRL*.tmp` and
   Clauseo's own `.clauseo-<n>.tmp` temp files), `Thumbs.db`, `desktop.ini`, `.DS_Store`,
-  `.~lock.*#`; and any file or folder named `.git` or `.clauseo`, with everything under it.
+  `.~lock.*#`, macOS's AppleDouble files `._*` (FAT, exFAT, SMB and NAS shares); a file named
+  `.git` or `.clauseo`; and any folder whose name starts with `.`
+  (`.git`, `.clauseo`, `.claude`, `.codex`, `.agents`, `.github`), with everything under it, at any
+  depth. Other dot-files (`.gitignore`) are papers. The rule is
+  `clauseo_protocol::is_excluded_path`.
+  A history written before a folder was covered keeps its files in old trees, but every reader
+  (changes, versions, compare, undo, restore, a logged turn's files) leaves them out, so they are
+  never reported deleted and never written or deleted by undo. A skip record never lists such a
+  path (one read from an older record is dropped), and a paper an old step moved out of such a
+  folder (same blob) is kept by undo, not deleted.
 - A file over the per-file size cap (512 MB by default; the stat cache keeps 32-bit sizes, so a cap of
   4 GiB or more acts as `u32::MAX` bytes) is never read and is not in the tree. A file that grows over
   the cap leaves the tree and is reported as skipped, never as deleted; so does one found over it
@@ -236,6 +330,17 @@ form; ext4 (Linux) and NTFS (Windows) keep each form a separate file.
   the matter's, which joins a turn's paths and frees a folder for the guard's "outside" reads)
   and the folder `Matter::relink` writes `matter.json` into; folding there would cover a sibling
   spelled in the other form.
+
+### Security
+
+- Clauseo never opens a matter's own `.git`. It is only ever a name, refused by the sandbox and the
+  fence (decision record 0038).
+- Clauseo never spawns `git`, or any tool a repository configures, as the lawyer.
+- The shadow `history.git` lives outside the matter folder, in Clauseo's data area, and is opened
+  only with gix's isolated options: no system, global, user or `GIT_*` environment config, and no
+  hooks, filters, diff drivers or fsmonitor. The test
+  `recorded_worktree_ignores_the_global_system_and_user_config` (in
+  `crates/matters/src/history/tests/repo.rs`) pins that.
 
 ### `ARCHITECTURE.md`
 

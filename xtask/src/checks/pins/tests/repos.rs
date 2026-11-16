@@ -27,6 +27,7 @@ use std::path::Path;
 pub(super) const TOOLS: &[Tool] = &[Tool {
     name: "cargo-fake",
     version: "5.6.7",
+    bin_sha256: &[],
 }];
 
 /// The binaries the cases pin.

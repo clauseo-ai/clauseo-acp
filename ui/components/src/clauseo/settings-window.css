@@ -68,15 +68,26 @@
     background: var(--tile-hover);
     box-shadow: var(--e0);
   }
-  /* a section's icon in its own 16 px column, its name and note beside it */
+  /* a section's icon in its own column, its name and note beside it. The icon is 16 px at text size 16 and grows with
+     the text (--k), centred on the name's first line, whose height follows the text size too (D-074) */
+  .set-nav-row {
+    --set-nav-icon: calc(var(--size-icon) * var(--k));
+  }
   .set-nav-row:has(.set-nav-icon) {
-    grid-template-columns: var(--size-icon) minmax(0, 1fr);
+    grid-template-columns: var(--set-nav-icon) minmax(0, 1fr);
     column-gap: var(--s2);
   }
   .set-nav-icon {
     grid-row: 1 / span 2;
-    padding-top: var(--s0-5);
+    align-self: start;
+    display: flex;
+    align-items: center;
+    height: calc(var(--lh-ui) * var(--k));
     color: var(--muted);
+  }
+  .set-nav-icon > svg {
+    width: var(--set-nav-icon);
+    height: var(--set-nav-icon);
   }
   .set-nav-row[aria-current="page"] .set-nav-icon {
     color: var(--primary);

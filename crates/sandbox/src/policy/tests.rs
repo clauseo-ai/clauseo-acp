@@ -456,3 +456,57 @@ fn classify_orders_link_hidden_read_only_outside() {
         PathClass::Outside
     );
 }
+
+/// A path of 260 characters or more, which `dunce` leaves in Windows' verbatim form, is under
+/// and the same as its plain form, either way round; a share's verbatim form is not under a
+/// drive path, nor a plain path under another.
+#[test]
+fn a_long_verbatim_path_is_under_its_plain_form() {
+    let mut matter = String::from(r"C:\Users\a\Documents\Matters\");
+    while matter.len() < 280 {
+        matter.push_str(r"A long folder name\");
+    }
+    let matter = matter.trim_end_matches('\\').to_owned();
+    let verbatim = format!(r"\\?\{matter}");
+    let (long, plain) = (Path::new(&verbatim), Path::new(&matter));
+    assert!(under(long, plain));
+    assert!(under(plain, long));
+    assert!(same(long, plain));
+    assert!(same(plain, long));
+    let share = format!(r"\\?\UNC\server\c$\{}", matter.get(3..).unwrap_or_default());
+    assert!(!under(Path::new(&share), plain));
+    assert!(!under(Path::new(r"D:\x"), Path::new(r"C:\x")));
+}
+
+/// The bug's own shape on Windows: a deep verbatim file is under its shorter, plain matter; so
+/// is the matter's folder named through this machine's admin share (a `.git` link's or a
+/// `gitdir:` line's target, canonical), but not through another server's share.
+#[cfg(windows)]
+#[test]
+fn a_deep_verbatim_file_and_the_local_admin_share_are_under_the_plain_matter() {
+    let folder = r"C:\Users\a\Documents\Matters\Smith v Jones";
+    let mut file = format!(r"\\?\{folder}\");
+    while file.len() < 300 {
+        file.push_str(r"A long folder name\");
+    }
+    file.push_str("brief.docx");
+    let matter = Path::new(folder);
+    assert!(!Path::new(&file).starts_with(matter));
+    assert!(under(Path::new(&file), matter));
+    assert!(!under(
+        Path::new(&file),
+        Path::new(r"C:\Users\a\Documents\Other")
+    ));
+    let tail = r"Users\a\Documents\Matters\Smith v Jones\realgit";
+    for local in ["localhost", "127.0.0.1", "."] {
+        let through = format!(r"\\?\UNC\{local}\c$\{tail}");
+        assert!(under(Path::new(&through), matter), "{through}");
+    }
+    for other in [
+        format!(r"\\?\UNC\server\c$\{tail}"),
+        format!(r"\\?\UNC\localhost\d$\{tail}"),
+        format!(r"\\?\UNC\localhost\share\{tail}"),
+    ] {
+        assert!(!under(Path::new(&other), matter), "{other}");
+    }
+}

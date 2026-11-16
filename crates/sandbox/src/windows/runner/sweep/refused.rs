@@ -19,8 +19,6 @@ pub(super) const EXIT_POLL: Duration = Duration::from_millis(100);
 pub(super) struct Refused<'a, T> {
     pub(super) found: &'a Seen,
     pub(super) process: T,
-    /// Its creation time, when the sweep read it.
-    pub(super) started: Option<u64>,
     /// Why the kill failed.
     pub(super) error: io::Error,
 }

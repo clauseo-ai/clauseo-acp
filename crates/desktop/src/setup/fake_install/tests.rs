@@ -58,6 +58,12 @@ impl SetupAgents for Real {
         self.call("sign_in");
         Ok(())
     }
+    fn sign_in_switching(&self, _: &AgentId, _: Method) -> Result<(), SigninError> {
+        Ok(())
+    }
+    fn own_login(&self, _: &AgentId) -> Option<clauseo_agents::OwnLogin> {
+        None
+    }
     fn cancel_sign_in(&self, _: &AgentId) -> Result<(), SigninError> {
         Ok(())
     }
@@ -77,6 +83,9 @@ impl SetupAgents for Real {
         Ok(())
     }
     fn use_different_account(&self, _: &AgentId) -> Result<(), SigninError> {
+        Ok(())
+    }
+    fn use_different_account_switching(&self, _: &AgentId) -> Result<(), SigninError> {
         Ok(())
     }
     fn signin_state(&self, _: &AgentId) -> Option<SigninState> {
@@ -100,7 +109,12 @@ impl SetupAgents for Real {
 fn fake(hold: Duration) -> (FakeInstall, Arc<Real>, mpsc::UnboundedReceiver<AgentsEvent>) {
     let real = Arc::new(Real::default());
     let agents = BTreeSet::from([claude()]);
-    let (fake, events) = FakeInstall::new(Arc::clone(&real) as Arc<dyn SetupAgents>, &agents, hold);
+    let (fake, events) = FakeInstall::new(
+        Arc::clone(&real) as Arc<dyn SetupAgents>,
+        &agents,
+        &BTreeSet::new(),
+        hold,
+    );
     (fake, real, events)
 }
 
@@ -213,7 +227,7 @@ fn s18_s_install_states_for_a_scripted_agent_are_dropped() {
     ]);
     let real: Arc<dyn SetupAgents> = Arc::new(Real::default());
     let agents = BTreeSet::from([claude()]);
-    let (_fake, source) = super::wrap_with(real, s18, agents, Duration::ZERO);
+    let (_fake, source) = super::wrap_with(real, s18, &agents, &BTreeSet::new(), Duration::ZERO);
     let all: Vec<_> = futures::executor::block_on(source.collect());
     let said: Vec<_> = all
         .into_iter()
@@ -224,4 +238,31 @@ fn s18_s_install_states_for_a_scripted_agent_are_dropped() {
         .collect();
     assert!(said.contains(&(codex(), InstallState::Missing { download_bytes: 2 })));
     assert!(!said.contains(&(claude(), InstallState::Missing { download_bytes: 1 })));
+}
+
+/// `E2E_FAKE_INSTALLED`: the agent starts `Ready` with no install run, S18 not asked, and a
+/// press says `Ready` again.
+#[test]
+fn an_installed_agent_starts_ready_with_no_install_run() {
+    let real = Arc::new(Real::default());
+    let (fake, mut events) = FakeInstall::new(
+        Arc::clone(&real) as Arc<dyn SetupAgents>,
+        &BTreeSet::new(),
+        &BTreeSet::from([claude()]),
+        Duration::from_secs(3600),
+    );
+    assert_eq!(states(&mut events, 1), [ready()]);
+    assert_eq!(fake.state(&claude()), Some(ready()));
+    assert_eq!(
+        fake.installed(&claude()),
+        None,
+        "no entry is written for it"
+    );
+    fake.install(&claude());
+    assert_eq!(states(&mut events, 1), [ready()]);
+    assert!(
+        real.calls().is_empty(),
+        "S18 is not asked: {:?}",
+        real.calls()
+    );
 }

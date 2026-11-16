@@ -23,7 +23,7 @@ import { SettingsOver } from "./states-settings.tsx";
 import { errorWords, type WordsRef } from "./words.ts";
 
 /** A string of the unsafe-site list's parts (words-blocklist.ts). */
-const words = (key: BlocklistKey): WordsRef => ({
+export const words = (key: BlocklistKey): WordsRef => ({
   file: "lib/words-blocklist.ts",
   key,
   text: (lang) => bl(lang, key),
@@ -105,7 +105,7 @@ const roomOf = (scene: Scene): ReactNode => {
   return scene.press === undefined ? over : <PressInOrder press={scene.press}>{over}</PressInOrder>;
 };
 
-const room = (id: string, ref: WordsRef, scene: keyof typeof SCENES): Entry => ({
+export const room = (id: string, ref: WordsRef, scene: keyof typeof SCENES): Entry => ({
   id,
   words: ref,
   screen: scene.startsWith("confirm") ? "room/site-allow-confirm" : "room/site-blocked",

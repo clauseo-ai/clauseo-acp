@@ -71,6 +71,7 @@ fn an_update_keeps_a_missing_field_clears_a_null_one_and_sets_a_value() {
             next_date: FieldChange::Keep,
             skill_packs: FieldChange::Keep,
             pinned: None,
+            agent_prefs: FieldChange::Keep,
         }
     );
     assert_eq!(
@@ -81,6 +82,7 @@ fn an_update_keeps_a_missing_field_clears_a_null_one_and_sets_a_value() {
             next_date: FieldChange::Set("2027-01-04".parse::<Date>().unwrap()),
             skill_packs: FieldChange::Keep,
             pinned: Some(false),
+            agent_prefs: FieldChange::Keep,
         }
     );
     let set = decode(r#","client":"Acme","next_date":null,"pinned":true"#);
@@ -92,6 +94,7 @@ fn an_update_keeps_a_missing_field_clears_a_null_one_and_sets_a_value() {
             next_date: FieldChange::Clear,
             skill_packs: FieldChange::Keep,
             pinned: Some(true),
+            agent_prefs: FieldChange::Keep,
         }
     );
     round_trips(&set);
@@ -152,6 +155,7 @@ fn an_update_keeps_a_missing_skill_packs_clears_a_null_one_and_sets_a_list() {
         next_date: FieldChange::Keep,
         skill_packs: FieldChange::Keep,
         pinned: None,
+        agent_prefs: FieldChange::Keep,
     };
     let encoded = serde_json::to_string(&keep).unwrap();
     assert!(!encoded.contains("skill_packs"), "{encoded}");
@@ -166,6 +170,7 @@ fn an_update_keeps_a_missing_skill_packs_clears_a_null_one_and_sets_a_list() {
             next_date: FieldChange::Keep,
             skill_packs: change,
             pinned: None,
+            agent_prefs: FieldChange::Keep,
         };
         round_trips(&command);
         assert!(command.validate().is_ok());

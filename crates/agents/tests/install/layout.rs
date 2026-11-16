@@ -145,13 +145,15 @@ fn no_install_folder_holds_a_link() {
     for installed in [a, b] {
         assert!(!installed.folder.join("node_modules/.bin").exists());
     }
-    // After Ready the install's downloads and npm's cache are gone.
+    // After Ready the installs' downloads and each agent's npm cache are gone.
     let downloads = fx.data.path().join("agents/downloads");
     let left: Vec<_> = std::fs::read_dir(&downloads)
         .map(|dir| dir.flatten().map(|e| e.path()).collect())
         .unwrap_or_default();
     assert_eq!(left, Vec::<std::path::PathBuf>::new());
-    assert!(!fx.data.path().join("agents/npm-cache").exists());
+    for agent in ["agent-a", "agent-b"] {
+        assert!(!fx.data.path().join("agents/npm-cache").join(agent).exists());
+    }
 }
 
 #[cfg(unix)]
@@ -165,11 +167,11 @@ mod node_20 {
     use std::time::Duration;
 
     use crate::support::{
-        A_PACKAGES, BASE, Fixture, NODE_VERSION, SharedTimer, agent_a, agent_b, node_entry,
-        node_path, platform, real_node, snapshot,
+        A_PACKAGES, B_PACKAGES, BASE, Fixture, NODE_VERSION, SharedTimer, agent_a, agent_b,
+        node_entry, node_path, platform, real_node, snapshot, tarball_path,
     };
     use crate::write;
-    use clauseo_agents::InstallState;
+    use clauseo_agents::{InstallState, NodeEntry};
 
     /// A Node archive wrapping the real Node: `bin/node` a script that execs it, and an
     /// `npm-cli.js` that requires the real one.
@@ -380,6 +382,123 @@ mod node_20 {
             std::fs::read_to_string(&cli).unwrap(),
             "require('./no-such-npm-file');\n"
         );
+    }
+
+    /// The fixture for two installs that need the downloaded Node, with no usable Node of the
+    /// user's: the wrapper archive routed, and `stall` held mid-file once.
+    fn node_fixture(label: &str, stall: impl FnOnce(&NodeEntry) -> String) -> (Fixture, usize) {
+        let mut fx = Fixture::new(label);
+        let fake = fx.data.path().join("fake-node20");
+        write::write_executable(&fake.join("bin/node"), "#!/bin/sh\necho v20.11.0\n").unwrap();
+        write::write(&fake.join("lib/node_modules/npm/bin/npm-cli.js"), "").unwrap();
+        fx.config.node_search.path = Some(fake.join("bin").into_os_string());
+        let archive = wrapper_archive();
+        let len = archive.len();
+        let entry = node_entry(Some(&archive));
+        fx.registry.route(&node_path(&entry), archive);
+        let held = stall(&entry);
+        fx.registry
+            .then(&held, clauseo_agents::testing::Behaviour::Stall);
+        fx.config.snapshot = snapshot(BASE, entry, 10_000);
+        (fx, len)
+    }
+
+    /// Both agents ran from the one runtime, fetched once, and its archive is gone.
+    fn both_on_one_node(fx: &Fixture, agents: &clauseo_agents::Agents) {
+        let runtime = fx
+            .data
+            .path()
+            .join("agents/runtime")
+            .join(format!("node-v{NODE_VERSION}-{}", platform().node_name()));
+        for agent in [agent_a(), agent_b()] {
+            let node = agents.installed(&agent).unwrap().node;
+            assert_eq!(node, runtime.join("bin/node"), "{agent}");
+        }
+        let node_requests = fx
+            .registry
+            .requests()
+            .iter()
+            .filter(|r| r.path == node_path_of(fx))
+            .count();
+        assert_eq!(node_requests, 1, "Node is fetched once");
+        let archive = format!("node-v{NODE_VERSION}-{}.tar.gz", platform().node_name());
+        let left = fx.data.path().join("agents/downloads").join(archive);
+        assert!(!left.exists(), "Node's archive goes once both are done");
+    }
+
+    /// `.lock-node` is held for Node alone: A unpacks Node right after its archive and gives the
+    /// lock up, so with A's own package held mid-file, B (started then) installs to `Ready` from
+    /// A's Node meanwhile.
+    #[test]
+    fn b_installs_from_a_s_node_while_a_s_packages_still_download() {
+        let (fx, _) = node_fixture("node-early", |_| tarball_path("adapter-a"));
+        let (agents, events) = fx.start();
+        events.first_states();
+        agents.install(&agent_a());
+        fx.registry.wait_for_stalls(1);
+        agents.install(&agent_b());
+        let (_, last) = events.until_end(&agent_b());
+        assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+        assert!(
+            matches!(
+                agents.state(&agent_a()),
+                Some(InstallState::Downloading { .. })
+            ),
+            "{:?}",
+            agents.state(&agent_a())
+        );
+        fx.registry.release();
+        let (_, last) = events.until_end(&agent_a());
+        assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+        both_on_one_node(&fx, &agents);
+    }
+
+    /// While A downloads Node (held mid-file), B, started then, fetches no Node: its own
+    /// packages download (its progress counts no Node), and it waits for A's Node showing its
+    /// finished download, not `Installing`, which goes out only once A has Node in place.
+    #[test]
+    fn b_waits_for_a_s_node_showing_its_finished_download() {
+        let (fx, archive_len) = node_fixture("node-once", node_path);
+        let (agents, events) = fx.start();
+        events.first_states();
+        agents.install(&agent_a());
+        fx.registry.wait_for_stalls(1);
+        agents.install(&agent_b());
+        let packages_b = u64::try_from(
+            B_PACKAGES
+                .iter()
+                .map(|n| fx.tarballs[n].len())
+                .sum::<usize>(),
+        )
+        .unwrap();
+        let mut seen = events.until(
+            &agent_b(),
+            |s| matches!(s, InstallState::Downloading { received, total } if received == total),
+        );
+        for (id, state) in &seen {
+            if let (true, InstallState::Downloading { total, .. }) = (*id == agent_b(), state) {
+                assert_eq!(*total, packages_b, "B's progress counts no Node");
+            }
+        }
+        fx.registry.release();
+        let (rest, last) = events.until_end(&agent_a());
+        assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+        seen.extend(rest);
+        if !matches!(agents.state(&agent_b()), Some(InstallState::Ready { .. })) {
+            let (rest, last) = events.until_end(&agent_b());
+            assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+            seen.extend(rest);
+        }
+        let node_done = seen.iter().position(|(id, s)| {
+            *id == agent_a()
+                && matches!(s, InstallState::Downloading { received, .. }
+                    if *received >= u64::try_from(archive_len).unwrap())
+        });
+        let b_installing = seen
+            .iter()
+            .position(|(id, s)| *id == agent_b() && *s == InstallState::Installing);
+        assert!(node_done.is_some() && b_installing > node_done, "{seen:?}");
+        both_on_one_node(&fx, &agents);
     }
 
     fn node_path_of(fx: &Fixture) -> String {

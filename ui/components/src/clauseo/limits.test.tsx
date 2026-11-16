@@ -193,4 +193,37 @@ describe("the plan's card", () => {
       document.querySelector(".plan-card-updated")?.classList.contains("plan-card-stale"),
     ).toBe(true);
   });
+
+  test("each window says its share as the numeral with its word, close in primary, and opens Plan and usage", async () => {
+    const opened: string[] = [];
+    await mount(
+      <PlanCard
+        {...card}
+        windows={card.windows.map((w, i) => ({ ...w, close: i === 0 }))}
+        settings={{ label: "Plan and usage", onOpen: () => opened.push("usage") }}
+      />,
+    );
+    const tiles = document.querySelectorAll<HTMLElement>(".plan-window");
+    expect(txt(tiles[0]?.querySelector(".plan-numeral"))).toBe("18%");
+    expect(txt(tiles[0]?.querySelector(".plan-window-word"))).toBe("left");
+    expect(tiles[0]?.dataset["state"]).toBe("close");
+    expect(tiles[1]?.dataset["state"]).toBe("plenty");
+    const go = document.querySelector<HTMLButtonElement>('[data-testid="plan-settings"]');
+    expect(txt(go)).toBe("Plan and usage");
+    await act(async () => go?.click());
+    expect(opened).toEqual(["usage"]);
+  });
+
+  test("a language that doesn't lead with the numeral keeps its words whole; no Settings, no way there", async () => {
+    await mount(
+      <PlanCard
+        {...card}
+        windows={[{ ...card.windows[0]!, leftText: "बाकी 18%" }]}
+        settings={null}
+      />,
+    );
+    expect(document.querySelector(".plan-numeral")).toBeNull();
+    expect(txt(document.querySelector(".plan-window-word"))).toBe("बाकी 18%");
+    expect(document.querySelector('[data-testid="plan-settings"]')).toBeNull();
+  });
 });

@@ -36,7 +36,8 @@ impl Delivery {
 }
 
 open_data_enum! {
-    /// Where a steered message went. `turn` is always the turn that answers the message.
+    /// Where a steered message went. `turn` is the turn that answers the message, except for
+    /// `NotSent`, which no turn answers.
     ///
     /// A one-key object; a kind from a newer Clauseo decodes to `Unknown`.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +57,14 @@ open_data_enum! {
             /// The new turn.
             turn: TurnId,
         },
+        /// Never delivered: a turn ended before the agent was seen to take it in, and it is not
+        /// sent on its own. Claude's adapter accepts a steer into a queue of its own and may
+        /// drop it unread; the host counts it delivered only once Claude's transcript shows it.
+        NotSent = "not_sent" {
+            /// The turn whose end left it unsent: the turn it was sent into, or the running
+            /// turn a steer the host held waited behind.
+            turn: TurnId,
+        },
         _ =>
         /// An outcome from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -70,12 +79,15 @@ open_data_enum! {
         SteerOutcome::SentNow {
             turn: TurnId::new(uuid::Uuid::from_u128(0x0190_0000_0000_7000_8000_0000_0000_0007)).unwrap(),
         },
+        SteerOutcome::NotSent {
+            turn: TurnId::new(uuid::Uuid::from_u128(0x0190_0000_0000_7000_8000_0000_0000_0007)).unwrap(),
+        },
     ];
 }
 
 open_unit_enum! {
-    /// Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `AtLimit` and
-    /// `Failed`.
+    /// Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `OutsideMatter`,
+    /// `AtLimit`, `Failed` and `TooLong`.
     pub enum StopReason {
         /// The agent finished. Only this ending moves the thread's queue on.
         EndTurn,
@@ -92,10 +104,20 @@ open_unit_enum! {
         /// as `Cancelled` (the queue holds); only the words differ. Never on a turn that had not
         /// started.
         NotAllowed,
+        /// The agent cancelled it right after the host refused, unasked, a permission request
+        /// into Clauseo's data folder (another matter's or Clauseo's own files); no Stop came
+        /// after that refusal. Every rule treats it as `Cancelled` (the queue holds); only the
+        /// words differ. Never on a turn that had not started.
+        OutsideMatter,
         /// The account's usage limit stopped it; a `TurnStoppedAtLimit` explains it.
         AtLimit,
         /// It failed; a `TurnFailed` before it says why.
         Failed,
+        /// The model refused the turn as too long to read: the question by itself, or the
+        /// conversation with it (decision 0057). A stop, not a failure: no `TurnFailed` comes
+        /// before it, the answer so far is kept, and the queue holds, as for every stop but
+        /// `EndTurn`.
+        TooLong,
     }
     test mod stop_reason;
 }
@@ -247,6 +269,9 @@ open_unit_enum! {
         OverSizeCap,
         /// A cloud placeholder whose content is not on this computer.
         CloudOnly,
+        /// In a folder that did not list when the turn began (not downloaded, or no
+        /// permission), so nothing in it was versioned. Only an undo's kept files say this.
+        UnreadFolder,
     }
     test mod skipped_file_reason;
 }

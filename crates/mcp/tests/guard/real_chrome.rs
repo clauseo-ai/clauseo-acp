@@ -5,15 +5,20 @@
 //! these helpers.
 //!
 //! Inputs: `CLAUSEO_TEST_AGENT_BROWSER`, the agent-browser binary (CI's Linux job downloads the
-//! pinned one); `CLAUSEO_TEST_CHROME`, a Chrome, else `/usr/bin/google-chrome` or
-//! `/usr/bin/chromium`. Without agent-browser or a Chrome the tests say so on stderr and pass;
+//! pinned one); `CLAUSEO_TEST_CHROME`, a Chrome's executable, else `/usr/bin/google-chrome` or
+//! `/usr/bin/chromium` on Linux and `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
+//! on macOS. Without agent-browser or a Chrome the tests say so on stderr and pass;
 //! with `CLAUSEO_TEST_AGENT_BROWSER` set, a missing Chrome fails them. With `CI` set Chrome runs
 //! with `--no-sandbox` (a wrapper script adds it): CI runs the tests under `no_new_privs`,
-//! where Chrome's setuid sandbox cannot start.
+//! where Chrome's setuid sandbox cannot start. That is this test harness only: the guard never
+//! passes `--no-sandbox` and refuses a Chrome whose sandbox cannot start (`chrome/sandbox.rs`);
+//! it never sees the wrapper's arguments, only the wrapper's path as Chrome's.
 //!
-//! Linux only: the process checks read `/proc`.
+//! Linux and macOS (W1's pipe on fds 3 and 4, and the peer check, against a real Chrome on
+//! each): the process checks read `/proc` on Linux and `ps` on macOS
+//! (`support::process_table`). `--no-sandbox` is Linux's alone: macOS's sandbox starts in CI.
 
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", target_os = "macos"))]
 #![expect(
     clippy::disallowed_methods,
     reason = "the real-Chrome test times its steps and waits for Chrome's downloads and exit"
@@ -33,6 +38,8 @@ use crate::write;
 pub(crate) use session::{Session, processes};
 use session::{group_of, stderr_within};
 
+#[path = "real_chrome/close.rs"]
+mod close;
 #[path = "real_chrome/idle.rs"]
 mod idle;
 #[path = "real_chrome/session.rs"]
@@ -54,9 +61,14 @@ pub(crate) fn binaries() -> Option<(PathBuf, PathBuf)> {
     let chrome = std::env::var_os("CLAUSEO_TEST_CHROME")
         .map(PathBuf::from)
         .or_else(|| {
-            ["/usr/bin/google-chrome", "/usr/bin/chromium"]
+            let defaults: &[&str] = if cfg!(target_os = "macos") {
+                &["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+            } else {
+                &["/usr/bin/google-chrome", "/usr/bin/chromium"]
+            };
+            defaults
+                .iter()
                 .map(PathBuf::from)
-                .into_iter()
                 .find(|path| path.is_file())
         })
         .expect("CLAUSEO_TEST_AGENT_BROWSER is set but no Chrome was found");
@@ -64,29 +76,33 @@ pub(crate) fn binaries() -> Option<(PathBuf, PathBuf)> {
 }
 
 /// The Chrome the guard starts: `chrome` itself, or a script that runs it, adding
-/// `--no-sandbox` under `CI`, and with `quiet` sending its stderr to `/dev/null` (so the guard
-/// never sees the endpoint and stays in its wait for it).
+/// `--no-sandbox` under `CI` on Linux, and with `quiet` giving it a `DevTools` pipe that never
+/// brings a command (so it never answers the guard's `Browser.getVersion` and the guard stays in
+/// its wait for the answer).
 fn chrome_for(scratch: &Scratch, chrome: &Path, quiet: bool) -> PathBuf {
-    let ci = std::env::var_os("CI").is_some();
+    let ci = cfg!(target_os = "linux") && std::env::var_os("CI").is_some();
     if !ci && !quiet {
         return chrome.to_owned();
     }
     let wrapper = scratch.path().join("chrome-wrapper.sh");
     let quoted = chrome.to_str().unwrap().replace('\'', r"'\''");
+    // Test harness only, never production: the guard itself never passes `--no-sandbox`.
     let sandbox = if ci { " --no-sandbox" } else { "" };
-    // Chrome keeps the guard's stderr pipe open on fd 3, so the guard sees no end, only no line.
-    let stderr = if quiet { " 3>&2 2>/dev/null" } else { "" };
-    write::write(
-        &wrapper,
-        format!("#!/bin/sh\nexec '{quoted}'{sandbox} \"$@\"{stderr}\n"),
-    )
-    .unwrap();
+    // Quiet: Chrome reads from a pipe whose writer, `sleep`, never writes (in Chrome's process
+    // group, so it goes with Chrome), and keeps the guard's end of its read pipe open on fd 5,
+    // so the guard's write never fails and its wait sees no end, only no answer.
+    let script = if quiet {
+        format!("exec 5<&3\nsleep 100000 | exec '{quoted}'{sandbox} \"$@\" 3<&0 0</dev/null\n")
+    } else {
+        format!("exec '{quoted}'{sandbox} \"$@\"\n")
+    };
+    write::write(&wrapper, format!("#!/bin/sh\n{script}")).unwrap();
     write::set_mode(&wrapper, 0o755).unwrap();
     wrapper
 }
 
 /// A loopback port free now, standing in for one the host claimed: the tests run at once, so
-/// each needs its own debugging and stream ports.
+/// each needs its own debugging port.
 fn free_port() -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     listener.local_addr().unwrap().port().to_string()
@@ -98,28 +114,27 @@ pub(crate) fn command(
     binaries: &(PathBuf, PathBuf),
     proxy: &PageProxy,
 ) -> Command {
-    command_with(scratch, binaries, proxy, false).0
+    command_with(scratch, binaries, proxy, false)
 }
 
-/// [`command`], with Chrome's stderr hidden from the guard if `quiet`; and its debugging port.
+/// [`command`], with a Chrome that never answers on its pipe if `quiet`.
 fn command_with(
     scratch: &Scratch,
     binaries: &(PathBuf, PathBuf),
     proxy: &PageProxy,
     quiet: bool,
-) -> (Command, String) {
-    let cdp = free_port();
-    let command = command_on(scratch, binaries, proxy, quiet, [&cdp, &free_port()]);
-    (command, cdp)
+) -> Command {
+    command_on(scratch, binaries, proxy, quiet, &free_port())
 }
 
-/// [`command_with`] on the given debugging and stream ports.
+/// [`command_with`] on the given debugging port (the guard still takes `--cdp-port`, but Chrome
+/// gets a pipe, no port; and no stream port, which the guard no longer takes).
 fn command_on(
     scratch: &Scratch,
     binaries: &(PathBuf, PathBuf),
     proxy: &PageProxy,
     quiet: bool,
-    [cdp, stream]: [&str; 2],
+    cdp: &str,
 ) -> Command {
     let mcp = ["mcp", "--tools", "core"].map(OsStr::new);
     let args = guard_args(scratch, &binaries.0, &mcp)
@@ -129,7 +144,6 @@ fn command_on(
     command
         .args(args)
         .envs(host_env(scratch))
-        .env("AGENT_BROWSER_STREAM_PORT", stream)
         .env(
             "AGENT_BROWSER_PROXY",
             format!("http://127.0.0.1:{}", proxy.port),
@@ -138,12 +152,12 @@ fn command_on(
             "AGENT_BROWSER_EXECUTABLE_PATH",
             chrome_for(scratch, &binaries.1, quiet),
         );
-    // The guard ends a Chrome that has not printed its endpoint after 15 s (`START_WAIT`). On the
+    // The guard ends a Chrome that has not answered on its pipe after 15 s (`START_WAIT`). On the
     // loaded CI runner that once ended the first start of
     // a_killed_guards_reaper_leaves_the_next_run_alone (run 42316209734, job 128229376708: its
     // first open failed and the test ended after 15.07 s), where Chrome takes about 1 s on an
     // idle machine; 45 s here, so a test with two starts still ends within nextest's 120 s. A
-    // quiet Chrome never prints its endpoint, so the test's 60 s wait for it to listen ended at
+    // quiet Chrome never answers, and the test's 60 s wait for it to start once ended at
     // the guard's 15 s: in run 42261112174 Chrome had not listened by then, the guard killed it,
     // and the test waited out its 60 s in vain. For it the guard waits past the test.
     let start_ms = if quiet { "90000" } else { "45000" };
@@ -162,7 +176,7 @@ pub(crate) fn request(guard: &mut Guard, id: u64, method: &str, params: &Value) 
         }
         let result = reply["result"].clone();
         if reply.get("error").is_some() || result["isError"] == json!(true) {
-            // The guard's notes say why (a start that timed out, a port that stayed taken): run
+            // The guard's notes say why (a start that timed out, a browser that exited): run
             // 42316209734 failed here with the error reply alone.
             let stderr = stderr_within(guard, Duration::from_secs(5));
             panic!("{method}: {reply}\nthe guard's stderr:\n{stderr}");
@@ -351,37 +365,45 @@ fn a_killed_parent_leaves_no_chrome_and_no_daemon() {
     drop(parent);
 }
 
-/// The guard is killed with SIGKILL while it waits for Chrome's endpoint (Chrome's stderr hidden
-/// from it, so the wait lasts), once Chrome and its helpers run: nothing of Chrome is left, the
-/// crashpad handlers included, and the profile is gone. Before the reaper learnt Chrome's pid at
-/// its start, all of Chrome was left.
+/// The guard is killed with SIGKILL while it waits for Chrome's answer on its pipe (a pipe that
+/// never brings Chrome a command, so the wait lasts), once Chrome and its helpers run: nothing
+/// of Chrome is left, the crashpad handlers included, and the profile is gone. Before the reaper
+/// learnt Chrome's pid at its start, all of Chrome was left.
 #[test]
 fn a_guard_killed_while_chrome_starts_leaves_no_chrome() {
     let Some(binaries) = binaries() else { return };
     let scratch = Scratch::new("real_kill_start");
     let proxy = PageProxy::start();
-    let (command, cdp) = command_with(&scratch, &binaries, &proxy, true);
+    let command = command_with(&scratch, &binaries, &proxy, true);
     let mut guard = Guard::start(command);
     // The first call starts Chrome (the guard's lazy start); its answer never comes.
     guard.send(&json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
         "params": {"name": "agent_browser_open", "arguments": {"url": "http://page.test/"}}}));
-    guard.stderr_until("Chrome started; waiting for it to listen");
+    guard.stderr_until("started; waiting for its answer on its DevTools pipe");
     let started = Instant::now();
-    // 60 s: on the loaded CI runner Chrome once took over 10 s to listen (.config/nextest.toml).
-    let listening = (0..1200).any(|_| {
-        let up = std::net::TcpStream::connect(format!("127.0.0.1:{cdp}")).is_ok();
+    // 60 s: on the loaded CI runner Chrome once took over 10 s to start (.config/nextest.toml).
+    // Up once its group holds the wrapper's shell, its `sleep`, the browser and at least one
+    // helper (a zygote).
+    let up = (0..1200).any(|_| {
+        let up = chrome_group(&scratch).is_some_and(|group| {
+            session::group_members(group)
+                .iter()
+                .filter(|process| !process.zombie)
+                .count()
+                >= 4
+        });
         if !up {
             std::thread::sleep(Duration::from_millis(50));
         }
         up
     });
     eprintln!(
-        "Chrome listening after its start: {:.2} s",
+        "Chrome and a helper running after its start: {:.2} s",
         started.elapsed().as_secs_f64()
     );
-    if !listening {
+    if !up {
         let stderr = stderr_within(&mut guard, Duration::from_secs(2));
-        panic!("Chrome never listened on {cdp}; the guard's stderr:\n{stderr}");
+        panic!("Chrome's helpers never started; the guard's stderr:\n{stderr}");
     }
     let session = Session::find(&scratch);
     eprintln!("running before the kill: {}", left_in(scratch.path()).len());
@@ -394,8 +416,20 @@ fn a_guard_killed_while_chrome_starts_leaves_no_chrome() {
     drop(guard);
 }
 
+/// The process group of the Chrome running with the scratch folder's profile, if one runs.
+fn chrome_group(scratch: &Scratch) -> Option<i32> {
+    let flag = format!(
+        "--user-data-dir={}",
+        scratch.cwd().join("chrome-profile-").display()
+    );
+    processes()
+        .into_iter()
+        .find(|process| process.has_arg_starting(&flag))
+        .map(|process| process.group)
+}
+
 /// The code owner's repro (M1) with the real agent-browser and Chrome: guard A is killed once its
-/// daemon runs, and guard B starts at once on the same `--cwd` and ports, as an MCP reconnect
+/// daemon runs, and guard B starts at once on the same `--cwd` and port, as an MCP reconnect
 /// does. A's reaper ends A's run alone: B's profile and staging folder stay, and B's daemon
 /// (`run-<B's pid>-<hex>.sock`) still serves B. Before, A's reaper deleted B's profile.
 #[test]
@@ -403,9 +437,8 @@ fn a_killed_guards_reaper_leaves_the_next_run_alone() {
     let Some(binaries) = binaries() else { return };
     let scratch = Scratch::new("real_rerun");
     let proxy = PageProxy::start();
-    let ports = [free_port(), free_port()];
-    let ports = [ports[0].as_str(), ports[1].as_str()];
-    let mut first = Guard::start(command_on(&scratch, &binaries, &proxy, false, ports));
+    let port = free_port();
+    let mut first = Guard::start(command_on(&scratch, &binaries, &proxy, false, &port));
     handshake(&mut first);
     call(
         &mut first,
@@ -418,7 +451,7 @@ fn a_killed_guards_reaper_leaves_the_next_run_alone() {
         nix::sys::signal::Signal::SIGKILL,
     )
     .unwrap();
-    let mut next = Guard::start(command_on(&scratch, &binaries, &proxy, false, ports));
+    let mut next = Guard::start(command_on(&scratch, &binaries, &proxy, false, &port));
     handshake(&mut next);
     call(
         &mut next,

@@ -1,6 +1,7 @@
-//! Limits on the commands script in the page could call in a loop: one link confirm at a time,
-//! and none for a moment after a decline, so a page cannot stack confirms or re-open one the
-//! moment it is cancelled; one `open_file` at a time, and at most one a second.
+//! Limits on the commands script in the page could call in a loop: one `open_external` at a time,
+//! none for a moment after a declined confirm, so a page cannot stack confirms or re-open one the
+//! moment it is cancelled, and none for a moment after a link opened with no confirm; one
+//! `open_file` at a time, and at most one a second.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -12,7 +13,8 @@ use crate::bridge::lock;
 /// How long after a declined confirm another is refused.
 pub(crate) const AFTER_DECLINE: Duration = Duration::from_secs(1);
 
-/// The least time between two `open_file` calls.
+/// The least time between two `open_file` calls, and after a link `open_external` opened with no
+/// confirm.
 pub(crate) const BETWEEN_OPENS: Duration = Duration::from_secs(1);
 
 /// The clock the gates read: [`now`] in the app, a hand-moved one in tests.
@@ -83,7 +85,7 @@ impl Drop for Pass<'_> {
 /// The gates of `open_external` and `open_file`, managed app state.
 #[derive(Debug, Default)]
 pub(crate) struct OpenGates {
-    /// `open_external`'s confirm.
+    /// `open_external`, its confirm included.
     pub(crate) links: Gate,
     /// `open_file`.
     pub(crate) files: Gate,

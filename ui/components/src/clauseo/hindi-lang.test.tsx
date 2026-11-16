@@ -201,9 +201,6 @@ test("in the Hindi interface, an English question keeps the page's Hindi face an
 const toolbar: RoomToolbarProps = {
   title: "",
   titleHint: "",
-  nextDate: "",
-  caseNo: "",
-  court: "",
   history: [],
   canUndo: false,
   onUndo: () => {},

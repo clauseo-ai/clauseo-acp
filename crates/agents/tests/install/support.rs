@@ -22,14 +22,15 @@ use clauseo_agents::testing::{
     Lookups, TempDir, TestRegistry, instant, millis_since, npm_tarball, resolve_all_to, trace,
 };
 use clauseo_agents::{
-    AgentEntry, AgentSizes, Agents, AgentsConfig, AgentsEvent, Clock, InstallState, NodeArchive,
-    NodeEntry, NodeSearch, Platform, Snapshot,
+    AgentEntry, AgentSizes, Agents, AgentsConfig, Clock, NodeArchive, NodeEntry, NodeSearch,
+    Platform, Snapshot,
 };
 use clauseo_process::{
     LaunchSpec, Launched, Launcher, ManualTimer, PassthroughLauncher, SpawnOptions, Timer,
 };
 use clauseo_protocol::AgentId;
 
+pub(crate) use crate::events::{Events, states_of};
 use crate::write;
 
 /// The fixture's registry base.
@@ -49,6 +50,11 @@ pub(crate) fn agent_a() -> AgentId {
 pub(crate) fn agent_b() -> AgentId {
     AgentId::new("agent-b").unwrap()
 }
+
+/// `dep-a`'s stand-in for Codex's bundled ripgrep, below the package folder.
+pub(crate) const SAC_RG: &str = "vendor/x86_64-pc-windows-msvc/codex-path/rg.exe";
+/// Its bytes.
+pub(crate) const FAKE_RG: &[u8] = b"a stand-in for codex's rg.exe\n";
 
 /// The registry path of package `name`'s tarball.
 pub(crate) fn tarball_path(name: &str) -> String {
@@ -97,6 +103,9 @@ pub(crate) fn tarballs() -> BTreeMap<&'static str, Vec<u8>> {
     for name in A_PACKAGES.into_iter().chain(B_PACKAGES) {
         let files: Vec<(&str, &[u8])> = if name.starts_with("adapter-") {
             vec![("dist/index.js", script)]
+        } else if name == "dep-a" {
+            // Codex's Windows layout, for the Smart App Control tests (`sac.rs`).
+            vec![("index.js", b"module.exports = 1;\n"), (SAC_RG, FAKE_RG)]
         } else {
             vec![("index.js", b"module.exports = 1;\n")]
         };
@@ -218,6 +227,22 @@ pub(crate) struct SharedTimer {
     armed: Arc<Mutex<Vec<Duration>>>,
 }
 
+/// The install's poll for npm's process tree to end: a real 50 ms here, not a manual firing, so
+/// a tree the OS has not reaped yet costs the test no firing, and the poll's 10 s cap is 10 s of
+/// real time, as in the app (a poll that ended at once would spend the cap before the OS reaps).
+pub(crate) const TREE_POLL: Duration = Duration::from_millis(50);
+/// The poll of a try waiting for another install's `.lock-node` (`install/locks.rs`'s
+/// `LOCK_POLL`): real time too, so a wait for the other install's Node costs the test no firing.
+pub(crate) const LOCK_POLL: Duration = Duration::from_millis(150);
+/// The waits between the retries of a temp folder's removal (`npm.rs`'s `REMOVE_WAITS`): real
+/// time too, so a removal an antivirus holds a moment is retried without the test firing it.
+const REMOVE_WAITS: [Duration; 4] = [
+    Duration::from_millis(200),
+    Duration::from_millis(400),
+    Duration::from_millis(600),
+    Duration::from_millis(800),
+];
+
 impl Timer for SharedTimer {
     fn after(&self, duration: Duration) -> impl Future<Output = ()> + Send {
         trace(format_args!("timer: a {duration:?} wait armed"));
@@ -225,7 +250,20 @@ impl Timer for SharedTimer {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(duration);
-        self.manual.after(duration)
+        let (manual, real) =
+            if duration == TREE_POLL || duration == LOCK_POLL || REMOVE_WAITS.contains(&duration) {
+                (None, Some(clauseo_process::AsyncIoTimer.after(duration)))
+            } else {
+                (Some(self.manual.after(duration)), None)
+            };
+        async move {
+            if let Some(wait) = manual {
+                wait.await;
+            }
+            if let Some(wait) = real {
+                wait.await;
+            }
+        }
     }
 }
 
@@ -252,6 +290,18 @@ impl SharedTimer {
             .into_iter()
             .filter(|wait| INSTALL_WAITS.contains(wait))
             .collect()
+    }
+
+    /// Blocks until a wait of one of `among` is armed (passing over the others), ends it and
+    /// says which it was.
+    pub(crate) fn fire_first_of(&self, among: &[Duration]) -> Duration {
+        loop {
+            let armed = futures::executor::block_on(self.manual.next_armed());
+            if among.contains(&armed) {
+                assert!(self.manual.fire(), "the {armed:?} wait was dropped");
+                return armed;
+            }
+        }
     }
 
     /// Blocks until a wait of `duration` is armed (passing over the others), then ends it.
@@ -335,7 +385,7 @@ impl Fixture {
         });
         trace(format_args!("fixture: Agents::start"));
         let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
-        (agents, Events(events))
+        (agents, Events::new(events))
     }
 
     /// Starts `Agents` on the fixture with a launcher that calls `before` with each spec just
@@ -350,7 +400,7 @@ impl Fixture {
         });
         trace(format_args!("fixture: Agents::start, hooked"));
         let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
-        (agents, Events(events))
+        (agents, Events::new(events))
     }
 
     /// Starts `Agents` on the fixture with a launcher that adds `extra` to each spec's variables
@@ -362,7 +412,7 @@ impl Fixture {
         });
         trace(format_args!("fixture: Agents::start, adding env"));
         let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
-        (agents, Events(events))
+        (agents, Events::new(events))
     }
 
     /// The requests made for package `name`'s tarball.
@@ -445,87 +495,6 @@ pub(crate) fn user_node_search() -> NodeSearch {
     let mut search = NodeSearch::none();
     search.path = Some(program.parent().unwrap().as_os_str().to_owned());
     search
-}
-
-/// The events' receiver, read by blocking.
-pub(crate) struct Events(pub(crate) async_channel::Receiver<AgentsEvent>);
-
-impl Events {
-    /// The next event.
-    pub(crate) fn next(&self) -> (AgentId, InstallState) {
-        let event = futures::executor::block_on(self.0.recv()).expect("the events closed");
-        let AgentsEvent::Install { agent, state } = event else {
-            panic!("an event of another kind: {event:?}");
-        };
-        trace_state(&agent, &state);
-        (agent, state)
-    }
-
-    /// Events up to and including the first of `agent`'s for which `done` holds.
-    pub(crate) fn until(
-        &self,
-        agent: &AgentId,
-        done: impl Fn(&InstallState) -> bool,
-    ) -> Vec<(AgentId, InstallState)> {
-        let mut seen = Vec::new();
-        loop {
-            let (id, state) = self.next();
-            let last = id == *agent && done(&state);
-            seen.push((id, state));
-            if last {
-                return seen;
-            }
-        }
-    }
-
-    /// Events up to `agent`'s `Ready` or `Failed`, and that last state.
-    pub(crate) fn until_end(
-        &self,
-        agent: &AgentId,
-    ) -> (Vec<(AgentId, InstallState)>, InstallState) {
-        let seen = self.until(agent, |state| {
-            matches!(state, InstallState::Ready { .. } | InstallState::Failed(_))
-        });
-        let last = seen.last().unwrap().1.clone();
-        (seen, last)
-    }
-
-    /// Both agents' first states, A's then B's.
-    pub(crate) fn first_states(&self) -> (InstallState, InstallState) {
-        let (a, first) = self.next();
-        let (b, second) = self.next();
-        assert_eq!((a, b), (agent_a(), agent_b()));
-        (first, second)
-    }
-
-    /// Every event already sent, without waiting.
-    pub(crate) fn drain(&self) -> Vec<(AgentId, InstallState)> {
-        std::iter::from_fn(|| self.0.try_recv().ok())
-            .filter_map(|event| match event {
-                AgentsEvent::Install { agent, state } => Some((agent, state)),
-                _ => None,
-            })
-            .collect()
-    }
-}
-
-/// Traces `agent`'s new state by its kind (`Downloading`, `Ready`, …), not its fields.
-fn trace_state(agent: &AgentId, state: &InstallState) {
-    let text = format!("{state:?}");
-    let kind = text
-        .split(|ch: char| !ch.is_alphanumeric())
-        .next()
-        .unwrap_or_default();
-    trace(format_args!("event: {agent} {kind}"));
-}
-
-/// `agent`'s states among `events`.
-pub(crate) fn states_of(events: &[(AgentId, InstallState)], agent: &AgentId) -> Vec<InstallState> {
-    events
-        .iter()
-        .filter(|(id, _)| id == agent)
-        .map(|(_, state)| state.clone())
-        .collect()
 }
 
 /// Every symbolic link or junction under `dir`, not following any.

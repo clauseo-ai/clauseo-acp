@@ -156,6 +156,7 @@ pub(crate) fn restore_request(
         outside_edits: cid(outside),
         checkpoint: cid(checkpoint),
         at: at(checkpoint),
+        undoes: None,
     }
 }
 

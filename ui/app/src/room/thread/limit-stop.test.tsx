@@ -230,7 +230,7 @@ test("paused without the stop's time: the toolbar's at-limit words, its day form
       local(1, 9, 0),
       lim("en", "Limit reached until {day} {time}", { day: "Tuesday", time: "9:00 am" }),
     ],
-    [undefined, lim("en", "Limit reached. Reset not given.")],
+    [undefined, lim("en", "Limit reached")],
   ];
   for (const [resets, words] of cases) {
     h = await mountRoom();
@@ -375,7 +375,5 @@ test("the plan's name: ChatGPT for Codex, Claude for Claude or an agent not know
   expect(planNameOf({ kind: "codex", name: null })).toBe("ChatGPT");
   expect(planNameOf({ kind: undefined, name: "Gemini" })).toBe("Gemini");
   expect(planNameOf({ kind: undefined, name: " " })).toBe("Claude");
-  expect(atLimitWords("hi", undefined, NOW.getTime())).toBe(
-    lim("hi", "Limit reached. Reset not given."),
-  );
+  expect(atLimitWords("hi", undefined, NOW.getTime())).toBe(lim("hi", "Limit reached"));
 });

@@ -1,6 +1,6 @@
 //! `folder_state` in the app rows (0023): a matter whose folder `ListMatters` read as missing
 //! stays `missing` in every later `MattersChanged` row and in a new subscription's first frames,
-//! and a relocate sends it `found` again.
+//! and a relocate sends it `found` again, with `PapersChanged`.
 
 use clauseo_protocol::{FieldChange, FolderState, HostCommand, HostEvent, MatterId};
 
@@ -47,6 +47,7 @@ fn pin(matter: MatterId, pinned: bool) -> HostCommand {
         next_date: FieldChange::Keep,
         skill_packs: FieldChange::Keep,
         pinned: Some(pinned),
+        agent_prefs: FieldChange::Keep,
     }
 }
 
@@ -74,10 +75,15 @@ fn a_folder_a_list_found_missing_stays_missing_in_app_rows_until_a_relocate() {
     let (_late, first) = subscribe_app(&host);
     assert_eq!(states(&first, matter), [FolderState::Missing], "{first:?}");
 
-    // A relocate to where the folder went sends it found.
+    // A relocate to where the folder went sends it found, and has the app list its papers
+    // there (decision record 0055).
     let folder = host.folder_ref(&moved);
     host.ok(HostCommand::RelocateMatter { matter, folder });
-    let sent = [next(&mut sub)];
+    let sent = [next(&mut sub), next(&mut sub)];
+    assert!(
+        sent.contains(&HostEvent::PapersChanged { matter }),
+        "{sent:?}"
+    );
     assert_eq!(states(&sent, matter), [FolderState::Found], "{sent:?}");
     assert_eq!(listed(&host, matter), FolderState::Found);
     host.settle();

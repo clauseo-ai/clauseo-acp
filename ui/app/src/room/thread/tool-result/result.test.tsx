@@ -3,6 +3,7 @@
 // forms, its fold at 12 lines and its cap; an error turning the row to Failed with the folded line unchanged; every
 // hostile output as literal text, no element, link or picture; a blob read once, on the press, its reading words only
 // past 400 ms; the parser loaded on the first press and not before; and opening one row rendering that row alone.
+import { readFileSync } from "node:fs";
 import axe from "axe-core";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -28,9 +29,9 @@ vi.mock("./parse.ts", async (original) => {
   const real = await original<typeof import("./parse.ts")>();
   return {
     ...real,
-    readOutput: (raw: string) => {
+    readOutput: (raw: string, max?: number) => {
       parser.calls += 1;
-      return real.readOutput(raw);
+      return real.readOutput(raw, max);
     },
   };
 });
@@ -77,7 +78,8 @@ async function mount(calls: ToolCallEntry[], blobs: Record<string, string | Erro
       const got = read === undefined ? undefined : blobs[read.hash];
       if (got === undefined) throw new Error(`not scripted: ${JSON.stringify(q)}`);
       if (got instanceof Error) throw { code: "store.io", message: got.message, retryable: false };
-      return { blob: { offset: 0, end: got.length, text: got } };
+      const text = got.slice(read!.offset, read!.offset + read!.len);
+      return { blob: { offset: read!.offset, end: read!.offset + text.length, text } };
     },
   };
   const transport = new FakeTransport(host);
@@ -200,6 +202,7 @@ test("each form: MCP text, pretty JSON in the code face, a plain string, raw tex
   expect(m.block(6)!.textContent).toBe(
     "The page has two figures.2 pictures aren't shown here.1 more item isn't shown here.",
   );
+  expect(m.block(6)!.querySelector("img")).toBeNull();
   expect(m.text(7)).toBe("ok");
   // the text sits in one element, pre-wrap by its class, dir="auto", inside <bdi>
   const t = m.rows()[1]!.querySelector('[data-testid="tool-result-text"]')!;
@@ -320,6 +323,128 @@ test("a blob is read only on the press, once, its first 64 KB; never when past 6
   expect(m.block(2)!.textContent).not.toContain("store.io");
   // the preview is never shown
   expect(el!.textContent).not.toContain('{"result":{"cont');
+});
+
+test("a screenshot is drawn as a picture scaled to the column, inline or from a blob past 64 KB read whole in 1 MB reads; a blob without one still says too large", async () => {
+  const m = await mount(
+    [F.called(F.MCP_SHOT), F.called({ blob: F.BLOB_SHOT }), F.called({ blob: F.BLOB_LARGE })],
+    { [F.BLOB_SHOT.hash]: F.BLOB_SHOT_TEXT },
+  );
+  await settle();
+  await m.click(m.press(0));
+  expect(m.text(0)).toBe("Took a screenshot.");
+  const small = m.block(0)!.querySelectorAll("img");
+  expect(small).toHaveLength(1);
+  expect(small[0]!.getAttribute("src")).toBe(`data:image/png;base64,${F.PNG}`);
+  expect(small[0]!.getAttribute("alt")).toBe("");
+  expect(small[0]!.className).toBe("step-row-result-image");
+  expect(m.block(0)!.textContent).toBe("Took a screenshot.");
+  expect(m.reads()).toEqual([]);
+
+  await m.click(m.press(1));
+  const len = 1_048_576;
+  expect(m.reads()).toEqual([
+    { call: "query", query: { read_blob: { hash: F.BLOB_SHOT.hash, offset: 0, len } } },
+    { call: "query", query: { read_blob: { hash: F.BLOB_SHOT.hash, offset: len, len } } },
+  ]);
+  const big = m.block(1)!.querySelectorAll<HTMLImageElement>('[data-testid="tool-result-image"]');
+  expect(big).toHaveLength(1);
+  expect(big[0]!.getAttribute("src")).toBe(`data:image/png;base64,${F.pngOf(1_500_000)}`);
+  expect(big[0]!.className).toBe("step-row-result-image");
+  // no words: neither the too-large line nor a picture counted as not shown
+  expect(m.block(1)!.textContent).toBe("");
+  // shown again, nothing is read again
+  await m.click(m.press(1));
+  await m.click(m.press(1));
+  expect(m.block(1)!.querySelectorAll("img")).toHaveLength(1);
+  expect(m.reads()).toHaveLength(2);
+
+  await m.click(m.press(2));
+  expect(m.block(2)!.textContent).toBe("This result is too large to show here.");
+  expect(m.block(2)!.querySelector("img")).toBeNull();
+  expect(m.reads()).toHaveLength(2);
+
+  // scaled by its class: never wider than the column, a bounded height, its shape kept
+  const css = readFileSync(
+    `${import.meta.dirname}/../../../../../components/src/clauseo/steps.css`,
+    "utf8",
+  );
+  const rule = /\.step-row-result-image \{([^}]*)\}/.exec(css)![1]!;
+  expect(rule).toContain("max-width: 100%;");
+  expect(rule).toContain("max-height: var(--step-picture-max);");
+  expect(rule).toContain("height: auto;");
+  const result = await axe.run(el!, { rules: { region: { enabled: false } } });
+  expect(result.violations.map((v) => v.id)).toEqual([]);
+});
+
+test("codex's real screenshot shapes are drawn: keys sorted (data before type), and text past the preview on a screenshot call", async () => {
+  const m = await mount(
+    [
+      F.called({ blob: F.BLOB_SHOT_SORTED }),
+      F.called({ blob: F.BLOB_SHOT_LONG }, { raw_input: F.SHOT_INPUT }),
+      // the same blob on a call that isn't a screenshot: its preview shows no picture, so it is never read
+      F.called(
+        { blob: F.BLOB_SHOT_LONG },
+        { raw_input: { inline: '{"server":"x","tool":"read"}' } },
+      ),
+    ],
+    {
+      [F.BLOB_SHOT_SORTED.hash]: F.BLOB_SHOT_SORTED_TEXT,
+      [F.BLOB_SHOT_LONG.hash]: F.BLOB_SHOT_LONG_TEXT,
+    },
+  );
+  expect(F.BLOB_SHOT_SORTED.preview).not.toContain('"type":"image"');
+  expect(F.BLOB_SHOT_LONG.preview).not.toMatch(/image|"data"/);
+  await settle();
+  await m.click(m.press(0));
+  expect(m.text(0)).toBe(F.SHOT_PATH);
+  expect(m.block(0)!.querySelectorAll('[data-testid="tool-result-image"]')).toHaveLength(1);
+  expect(m.block(0)!.textContent).toBe(F.SHOT_PATH);
+  await m.click(m.press(1));
+  expect(m.block(1)!.querySelectorAll('[data-testid="tool-result-image"]')).toHaveLength(1);
+  expect(m.text(1)).toContain("warning: www");
+  await m.click(m.press(2));
+  expect(m.block(2)!.textContent).toBe("This result is too large to show here.");
+  // one read each for the two drawn (both under 1 MB), none for the third
+  expect(m.reads().map((r) => (r.query as { read_blob: { hash: string } }).read_blob.hash)).toEqual(
+    [F.BLOB_SHOT_SORTED.hash, F.BLOB_SHOT_LONG.hash],
+  );
+});
+
+test("Claude's screenshot, sent as content blocks (text, then the image in a blob of its own), offers the press and is drawn", async () => {
+  const m = await mount(
+    [
+      F.called({ blob: F.CLAUDE_SHOT_RAW }, F.CLAUDE_SHOT),
+      F.called(undefined, F.CLAUDE_SHOT_SMALL),
+      // content without a picture still offers no press, as before
+      F.called({ inline: "[]" }, { content: [{ text: { text: { inline: "Read 42 lines." } } }] }),
+    ],
+    { [F.CLAUDE_SHOT_BLOB.hash]: F.CLAUDE_SHOT_DATA },
+  );
+  await settle();
+  expect(m.press(0).textContent).toBe("Show the result");
+  expect(m.press(1).textContent).toBe("Show the result");
+  expect(m.rows()[2]!.querySelector(".step-row-press")).toBeNull();
+  expect(m.reads()).toEqual([]);
+  await m.click(m.press(0));
+  const len = 1_048_576;
+  // the image's own blob, whole, in 1 MB reads; never the Anthropic-shaped rawOutput
+  expect(m.reads()).toEqual([
+    { call: "query", query: { read_blob: { hash: F.CLAUDE_SHOT_BLOB.hash, offset: 0, len } } },
+    { call: "query", query: { read_blob: { hash: F.CLAUDE_SHOT_BLOB.hash, offset: len, len } } },
+  ]);
+  expect(m.text(0)).toBe(F.SHOT_PATH);
+  const img = m.block(0)!.querySelectorAll('[data-testid="tool-result-image"]');
+  expect(img).toHaveLength(1);
+  expect(img[0]!.getAttribute("src")).toBe(`data:image/png;base64,${F.CLAUDE_SHOT_DATA}`);
+  expect(img[0]!.className).toBe("step-row-result-image");
+  expect(m.block(0)!.textContent).toBe(F.SHOT_PATH);
+  await m.click(m.press(1));
+  expect(m.block(1)!.querySelector("img")!.getAttribute("src")).toBe(
+    `data:image/png;base64,${F.PNG}`,
+  );
+  expect(m.block(1)!.textContent).toBe("Took a screenshot.");
+  expect(m.reads()).toHaveLength(2);
 });
 
 test("the reading words show only once a blob's read has taken 400 ms, the press held while they do", async () => {

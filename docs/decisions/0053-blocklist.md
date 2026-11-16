@@ -101,7 +101,9 @@ the core (protocol, host, desktop bridge and proxy, below); its UI comes after.
   `<resources>/blocklist/blocklist-v1.txt.gz` and `blocklist-v1.txt.gz.minisig` (the desktop
   reads `app.path().resource_dir()` joined with `blocklist`); stage F's release workflow
   downloads `current` before the build and maps it there in `bundle.resources`. A dev build
-  without it runs with no list until the first fetch succeeds.
+  without it runs with no list until the first fetch succeeds. Launch builds carry no snapshot
+  either: the release workflow's block-list switch is off while nothing enforces the list (0035,
+  "The block-list snapshot"), and the Safe workspace turns it back on.
 
 ### How the list reaches the proxy
 
@@ -337,6 +339,25 @@ the core (protocol, host, desktop bridge and proxy, below); its UI comes after.
 ## Status
 
 proposed
+
+Off in the plain build (Rohan, 2026-11-10): only a session's egress proxy reads the list, and a
+proxy opens only for the guarded browser entry (`BROWSER_MCP`, parked) or the Safe workspace
+(parked, 0051). With neither, the host starts no `clauseo-blocklist` thread: no load, no fetch at
+start and none every 6 hours (`blocklist::needed`). The code stays; either one turns it back on.
+Release builds bundle no snapshot meanwhile (2026-11-11): the release workflow's switch,
+`bundle_blocklist`, is off (0035, "The block-list snapshot"): its `blocklist` job runs as a no-op and
+no build downloads or bundles the snapshot. Nothing reads the resource folder's
+`blocklist/` while no thread runs, so its absence logs nothing.
+
+Remote MCP servers (PR B, 2026-11-11; iris's call: revisit after launch). A lawyer's remote MCP
+server is reached by the adapter's own MCP client, not through Clauseo. At Tier C the adapter
+runs with no proxy of Clauseo's in its environment (`actor/turn/agents/launch.rs`, only the
+browser entry reaches the session proxy), and in the plain build the list is not loaded at all
+(`blocklist::needed` is false without a sandbox). So neither remote-MCP traffic nor any other
+traffic of the adapter's is checked against the list. For now remote servers come only from
+settings a lawyer edits by hand or a firm's policy sets; Settings › Tools does not offer them
+yet. Revisit when the UI opens remote servers or the sandbox tiers ship: a launch-time check
+would go in `agent/loads/lawyer.rs` (`servers`), reading `BlockListSeams::current`.
 
 ## Date
 

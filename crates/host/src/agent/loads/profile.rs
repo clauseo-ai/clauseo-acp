@@ -3,15 +3,20 @@
 //!
 //! - Claude ([`claude_options`]): `disallowedTools` always holds `WebSearch` and `WebFetch`
 //!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
-//!   `WebSearch` (not on a Bedrock login, which has none) and one `WebFetch(domain:…)` per seed
-//!   site, and `mcp__case-law` only in a session that got the `case-law` entry (any hook rule
-//!   for that server is dropped otherwise); in forced ask (`agent/forced_ask.rs`) there is no
-//!   `allowedTools` at all, the hook's included. `additionalDirectories` gains the work folder and
-//!   the matter notes folder, after any hook entries. `settings` gains
-//!   `disableSkillShellExecution: true` always, and `skipWebFetchPreflight: true` on a Bedrock,
+//!   `WebSearch` (not on a Bedrock login, which has none), a bare `WebFetch` (every page fetched
+//!   unasked) and one `WebFetch(domain:…)` per seed site, and `mcp__case-law__<tool>` per
+//!   search and read tool (`case_law::UNASKED_TOOLS`) only in a session that got the
+//!   `case-law` entry (any hook rule for that server is dropped otherwise), and before it
+//!   `mcp__<name>` for each of the lawyer's servers that runs without asking
+//!   (`agent/mcp_trust.rs`); in forced ask (`agent/forced_ask.rs`) there is no `allowedTools`
+//!   at all, the hook's included. `additionalDirectories` gains the work folder and the matter
+//!   notes folder, after any hook entries. `settings` gains `disableSkillShellExecution: true`
+//!   always, and `skipWebFetchPreflight: true` on a Bedrock,
 //!   Vertex or Foundry login, and always `permissions.deny` gains the data folder's rules
 //!   (`agent/data_fence.rs`), after any the hook put there; in forced ask it also gains the
-//!   `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`. These are flag
+//!   `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`, over Claude Code's
+//!   own sandbox, which the settings gain before it on macOS and Linux (`agent/loads/sandbox.rs`;
+//!   none on Windows). These are flag
 //!   settings: they outrank the user's settings, and Claude Code merges every source's
 //!   `permissions.deny`, so no user rule takes one out.
 //! - Codex ([`codex_keys`]): of the hook's keys only `developer_instructions`
@@ -33,7 +38,9 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
 
-use clauseo_profile::placeholders::{self, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER};
+use clauseo_profile::placeholders::{
+    self, BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+};
 use clauseo_protocol::{
     AgentKind, ClauseoTool, ErrorCode, ToolAvailability, ToolState, ToolsUnavailableReason,
 };
@@ -112,6 +119,10 @@ pub(crate) struct Folders<'a> {
     /// (`clauseo_profile::instructions::connectors_part`), else the sentence that says there is no
     /// case-law database, which [`Folders::of`] starts with: a caller that never says gets that.
     pub(crate) connectors: &'a str,
+    /// `{browser}`: the browser part (`clauseo_profile::instructions::browser_part`), the
+    /// `agent-browser` rules in a session with the shell tool, else the sentence that says it
+    /// has no browser, which [`Folders::of`] starts with.
+    pub(crate) browser: &'a str,
 }
 
 impl<'a> Folders<'a> {
@@ -130,7 +141,15 @@ impl<'a> Folders<'a> {
             work: text(work, WORK_FOLDER)?,
             notes: text(notes, MATTER_NOTES)?,
             connectors: clauseo_profile::instructions::connectors_part(false),
+            browser: clauseo_profile::instructions::browser_part(
+                clauseo_profile::instructions::BrowserPart::Off,
+            ),
         })
+    }
+
+    /// The same folders, with `{browser}` filled by `browser`.
+    pub(crate) fn with_browser(self, browser: &'a str) -> Self {
+        Self { browser, ..self }
     }
 
     /// The same folders, with `{connectors}` filled by `connectors`.
@@ -148,16 +167,35 @@ pub(crate) struct ClaudeKeys<'a> {
     pub(crate) login: Login,
     /// The session's folders.
     pub(crate) folders: Folders<'a>,
-    /// The hosts seeded as `WebFetch(domain:…)` rules.
+    /// The hosts seeded as `WebFetch(domain:…)` rules, beside the bare `WebFetch` that already
+    /// covers them: kept as the record of the trusted sites (R21's list).
     pub(crate) seed_sites: &'a [&'a str],
     /// The session runs in forced ask (`agent/forced_ask.rs`): no `allowedTools` at all, the
     /// hook's included, and the forced-ask `permissions.ask` rules in the flag settings.
     pub(crate) forced_ask: bool,
     /// The data folder's deny rules (`RunFolders::data_deny`).
     pub(crate) data: &'a crate::agent::data_fence::LaunchDeny,
-    /// The session gets the `case-law` entry (R24): `allowedTools` gains `mcp__case-law`
-    /// (decision D7). Without it, any hook rule for a `case-law` server is dropped.
+    /// The session gets the `case-law` entry (R24): `allowedTools` gains
+    /// `mcp__case-law__<tool>` per `case_law::UNASKED_TOOLS` (decision D7), never `recharge`.
+    /// Without it, any hook rule for a `case-law` server is dropped.
     pub(crate) case_law: bool,
+    /// The session has the browser as a shell tool: `allowedTools` gains agent-browser's page
+    /// subcommands, `disallowedTools` its denied flags, subcommands and file or JavaScript
+    /// commands, and `permissions.ask` the options that still ask
+    /// (`clauseo_profile::claude::agent_browser_allowed`, `agent_browser_denied`,
+    /// `agent_browser_ask`). Without it, any hook rule naming agent-browser is dropped, so a
+    /// session without the browser has none.
+    pub(crate) browser: bool,
+    /// Claude Code's own sandbox (`agent::loads::sandbox`), on macOS and Linux; none on
+    /// Windows, where commands keep asking.
+    pub(crate) sandbox: Option<&'a super::sandbox::ClaudeSandbox>,
+    /// The matter folder: Claude's `Edit` is denied its `.clauseo` folder (`matter.json`, the
+    /// marker that finds a moved matter folder again). None in a test that is about other keys.
+    pub(crate) matter: Option<&'a Path>,
+    /// The lawyer's servers whose tools run without asking (`agent/mcp_trust.rs`):
+    /// `allowedTools` gains `mcp__<name>` for each, before case law's. None go in forced ask,
+    /// where there is no `allowedTools` at all.
+    pub(crate) trusted_servers: &'a [String],
 }
 
 /// Adds [`ClaudeKeys`] to `claudeCode.options` (see the module doc).
@@ -168,6 +206,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         if keys.login != Login::Bedrock {
             push_new(&mut allowed, "WebSearch");
         }
+        push_new(&mut allowed, "WebFetch");
         for site in keys.seed_sites {
             push_new(&mut allowed, &format!("WebFetch(domain:{site})"));
         }
@@ -178,8 +217,20 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         allowed.retain(|rule| !rule.as_str().is_some_and(is_web_rule));
     }
     allowed.retain(|rule| !rule.as_str().is_some_and(super::case_law::is_case_law_rule));
+    for server in keys.trusted_servers {
+        push_new(&mut allowed, &crate::agent::mcp_trust::claude_rule(server));
+    }
     if keys.case_law {
-        push_new(&mut allowed, super::case_law::CLAUDE_ALLOW);
+        for rule in super::case_law::claude_allow() {
+            push_new(&mut allowed, &rule);
+        }
+    }
+    let names_browser = |rule: &Value| rule.as_str().is_some_and(|r| r.contains("agent-browser"));
+    allowed.retain(|rule| !names_browser(rule));
+    disallowed.retain(|rule| !names_browser(rule));
+    if keys.browser {
+        allowed.extend(clauseo_profile::claude::agent_browser_allowed().map(Value::String));
+        disallowed.extend(clauseo_profile::claude::agent_browser_denied().map(Value::String));
     }
     if !disallowed.is_empty() {
         options.insert("disallowedTools".to_owned(), Value::Array(disallowed));
@@ -199,35 +250,134 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     if keys.login != Login::FirstParty {
         settings.insert("skipWebFetchPreflight".to_owned(), Value::Bool(true));
     }
-    deny_data_folder(&mut settings, keys.data);
+    deny_data_folder(&mut settings, keys.data, keys.sandbox.is_some());
+    if keys.browser {
+        browser_ask_settings(&mut settings);
+    }
+    if let Some(matter) = keys.matter {
+        deny_matter_marker(&mut settings, matter);
+    }
+    // Before forced ask, whose `autoAllowBashIfSandboxed: false` must win.
+    if let Some(sandbox) = keys.sandbox {
+        super::sandbox::sandbox_settings(&mut settings, sandbox);
+    }
     if keys.forced_ask {
         forced_ask_settings(&mut settings);
     }
     options.insert("settings".to_owned(), Value::Object(settings));
 }
 
-/// `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`), and
-/// `permissions.allow` the Read of the built-in skills' folder, each after any the hook put
-/// there. A hook value at `permissions`, `deny` or `allow` of another type is replaced. With no
-/// spelling (a unit test's keys) nothing changes.
+/// The size past which a launch's settings shed the data folder's variable forms from its shell
+/// rules (`data_fence::windows_shell_deny_rules_without_variables`): about 1.8 MiB, under the
+/// 2 MiB settings file Claude Code reads (`agent::launch_settings`), which refuses a larger one.
+pub(crate) const SHED_AT: usize = 1_887_436;
+
+/// `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`; on Windows also its
+/// `Bash` and `PowerShell` rules, `data_fence::windows_shell_deny_rules`, without the variable
+/// forms when all of them would take the settings past [`SHED_AT`], counting the allow rules),
+/// and `permissions.allow` the Read of the built-in skills' folder and the own folders' listing
+/// and reading (`data_fence::claude_allow_rules`), each after any the hook put there. The own
+/// folders' glob denies go in only without Claude's shell sandbox (`sandboxed`, `keys.sandbox`:
+/// on Windows, or with the sandbox `Off`). A hook value at `permissions`, `deny` or `allow` of
+/// another type is replaced. With no spelling (a unit test's keys) nothing changes.
 fn deny_data_folder(
     settings: &mut Map<String, Value>,
     data: &crate::agent::data_fence::LaunchDeny,
+    sandboxed: bool,
 ) {
     if data.spellings.is_empty() {
         return;
     }
     let mut permissions = take_object(settings, "permissions");
     let mut deny = take_array(&mut permissions, "deny");
-    for rule in crate::agent::data_fence::claude_deny_rules(data) {
+    for rule in crate::agent::data_fence::claude_deny_rules(data, sandboxed) {
         push_new(&mut deny, &rule);
     }
-    permissions.insert("deny".to_owned(), Value::Array(deny));
     let mut allow = take_array(&mut permissions, "allow");
     for rule in crate::agent::data_fence::claude_allow_rules(data) {
         push_new(&mut allow, &rule);
     }
+    if cfg!(windows) {
+        let var = |name: &str| std::env::var_os(name);
+        let spent = json_len(&*settings) + json_len(&deny) + json_len(&allow);
+        let shell = shell_rules_within(data, &var, spent, SHED_AT);
+        // A set, not `push_new`: a busy data folder gives a few thousand of these.
+        let mut known: std::collections::HashSet<String> = deny
+            .iter()
+            .filter_map(|rule| rule.as_str().map(str::to_owned))
+            .collect();
+        for rule in shell {
+            if known.insert(rule.clone()) {
+                deny.push(Value::String(rule));
+            }
+        }
+    }
+    permissions.insert("deny".to_owned(), Value::Array(deny));
     permissions.insert("allow".to_owned(), Value::Array(allow));
+    settings.insert("permissions".to_owned(), Value::Object(permissions));
+}
+
+/// The data folder's Windows shell rules for a launch whose other settings take `spent` bytes as
+/// JSON: all of them, or without the variable forms
+/// (`data_fence::windows_shell_deny_rules_without_variables`) when all of them would take the
+/// settings past `budget` ([`SHED_AT`]), logged with fixed fields only.
+pub(crate) fn shell_rules_within(
+    data: &crate::agent::data_fence::LaunchDeny,
+    var: &dyn Fn(&str) -> Option<OsString>,
+    spent: usize,
+    budget: usize,
+) -> Vec<String> {
+    let shell = crate::agent::data_fence::windows_shell_deny_rules(data, var);
+    let total = spent + json_len(&shell);
+    if total <= budget {
+        return shell;
+    }
+    tracing::warn!(
+        settings_bytes = total,
+        budget,
+        shed = "vars",
+        "Claude's settings outgrew their budget; the data folder's variable forms are shed"
+    );
+    crate::agent::data_fence::windows_shell_deny_rules_without_variables(data, var)
+}
+
+/// `value`'s length as JSON (0 if it can't be written, which a map of JSON values never is).
+fn json_len(value: &impl serde::Serialize) -> usize {
+    serde_json::to_string(value).map_or(0, |text| text.len())
+}
+
+/// `permissions.ask` gains agent-browser's allowed commands that still ask
+/// (`clauseo_profile::claude::agent_browser_ask`: a `file://` URL, an option that loads page
+/// JavaScript, `-p`), after any the hook put there; the commands that read or write a local file
+/// or run page JavaScript are denied instead (`agent_browser_denied`). A hook value at
+/// `permissions` or `ask` of another type is replaced.
+fn browser_ask_settings(settings: &mut Map<String, Value>) {
+    let mut permissions = take_object(settings, "permissions");
+    let mut ask = take_array(&mut permissions, "ask");
+    for rule in clauseo_profile::claude::agent_browser_ask() {
+        push_new(&mut ask, &rule);
+    }
+    permissions.insert("ask".to_owned(), Value::Array(ask));
+    settings.insert("permissions".to_owned(), Value::Object(permissions));
+}
+
+/// `permissions.deny` gains `Edit` of the matter's `.clauseo` folder and all in it, after any
+/// rules already there. A matter folder that is not UTF-8 gets none (no rule could name it).
+fn deny_matter_marker(settings: &mut Map<String, Value>, matter: &Path) {
+    let Some(text) = matter.to_str() else {
+        return;
+    };
+    let base = crate::agent::data_fence::rule_path(text, cfg!(windows));
+    let marker = super::sandbox::MATTER_MARKER;
+    let mut permissions = take_object(settings, "permissions");
+    let mut deny = take_array(&mut permissions, "deny");
+    for rule in [
+        format!("Edit({base}/{marker})"),
+        format!("Edit({base}/{marker}/**)"),
+    ] {
+        push_new(&mut deny, &rule);
+    }
+    permissions.insert("deny".to_owned(), Value::Array(deny));
     settings.insert("permissions".to_owned(), Value::Object(permissions));
 }
 
@@ -285,6 +435,11 @@ pub(crate) fn codex_keys(
     }
     if let Some(Value::String(text)) = keys.get_mut("developer_instructions") {
         *text = fill_instructions(text, folders)?;
+        if !web_search.on {
+            // The offline-shell line offers no web search to a session without it.
+            let offline = clauseo_profile::instructions::codex_shell_offline;
+            *text = text.replace(offline(true), offline(false));
+        }
     }
     let search = if web_search.on { "live" } else { "disabled" };
     keys.insert("web_search".to_owned(), Value::from(search));
@@ -295,7 +450,8 @@ pub(crate) fn codex_keys(
     Ok(keys)
 }
 
-/// `_meta.systemPrompt.append` with its tokens filled, when it is a string.
+/// `_meta.systemPrompt.append` with its tokens filled, when it is a string, and so each
+/// subagent's `prompt` under `claudeCode.options.agents`.
 pub(crate) fn fill_meta(meta: &mut Map<String, Value>, folders: Folders<'_>) -> Result<(), Error> {
     if let Some(Value::String(text)) = meta
         .get_mut("systemPrompt")
@@ -304,11 +460,23 @@ pub(crate) fn fill_meta(meta: &mut Map<String, Value>, folders: Folders<'_>) -> 
     {
         *text = fill_instructions(text, folders)?;
     }
+    if let Some(Value::Object(agents)) = meta
+        .get_mut("claudeCode")
+        .and_then(|claude| claude.get_mut("options"))
+        .and_then(|options| options.get_mut("agents"))
+    {
+        for agent in agents.values_mut() {
+            if let Some(Value::String(text)) = agent.get_mut("prompt") {
+                *text = fill_instructions(text, folders)?;
+            }
+        }
+    }
     Ok(())
 }
 
-/// The instructions with `{work_folder}`, `{matter_notes}` and `{connectors}` filled, in one
-/// pass. An unfillable token is a host bug: `agent.launch_failed`, naming it in the log.
+/// The instructions with `{work_folder}`, `{matter_notes}`, `{connectors}` and `{browser}`
+/// filled, in one pass. An unfillable token is a host bug: `agent.launch_failed`, naming it in
+/// the log.
 pub(crate) fn fill_instructions(text: &str, folders: Folders<'_>) -> Result<String, Error> {
     placeholders::fill(
         text,
@@ -317,6 +485,7 @@ pub(crate) fn fill_instructions(text: &str, folders: Folders<'_>) -> Result<Stri
             (WORK_FOLDER, folders.work),
             (MATTER_NOTES, folders.notes),
             (CONNECTORS, folders.connectors),
+            (BROWSER, folders.browser),
         ],
     )
     .map_err(|unfilled| {

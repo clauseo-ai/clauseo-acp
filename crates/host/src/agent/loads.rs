@@ -17,12 +17,26 @@ pub(crate) mod browser;
 pub(crate) mod case_law;
 mod codex;
 #[cfg(test)]
+mod codex_entry_tests;
+pub(crate) mod lawyer;
+#[cfg(test)]
+mod lawyer_tests;
+#[cfg(test)]
 mod layering_tests;
 pub(crate) mod profile;
 #[cfg(test)]
+mod profile_keys_tests;
+#[cfg(test)]
 mod profile_tests;
+pub(crate) mod sandbox;
+#[cfg(test)]
+mod sandbox_tests;
+pub(crate) mod subagents;
+#[cfg(test)]
+mod subagents_tests;
 #[cfg(test)]
 mod tests;
+pub(crate) mod tls_roots;
 
 pub use codex::codex_hook_config;
 
@@ -30,8 +44,6 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use clauseo_acp::McpServer;
-use clauseo_settings::Effective;
 use serde_json::{Map, Value};
 
 /// Claude Code's `settingSources` for every Clauseo session: the user settings only. For a
@@ -55,13 +67,22 @@ pub(crate) const CLAUDE_SETTING_SOURCES: &[&str] = &["user"];
 /// live). claude.ai connectors stay off too, since [`CLAUDE_AI_MCP_VAR`] is still `false`.
 pub(crate) const CLAUDE_MANAGED_SETTING_SOURCES: &[&str] = &["user"];
 
-/// The permission mode Clauseo runs every Claude session in: Claude Code's `default` ("Manual":
-/// ask before each change). The window cannot pick another mode yet (the desktop bridge refuses
-/// `SetMode`), so this is Clauseo's choice at every session start. Its cost: a mode the
-/// lawyer reached inside a session (accept edits, from a plan-exit option) goes back to
-/// `default` when the session is next loaded, the safer side. Re-applying the thread's last
-/// logged mode instead cannot tell such a choice from a mode the user's settings started a
-/// session in: both are logged as `ModeChanged`.
+/// The permission mode Clauseo starts every Claude session in outside forced ask: Claude Code's
+/// `auto` (Rohan, 2026-11-11: a first read of a matter's papers never asks; decision records
+/// 0025 and 0030). Claude Code's classifier then reviews each tool call that would ask in
+/// `default` and lets the safe ones through; deny rules still come first, so the data fence's
+/// (`data_fence.rs`) still refuse, and the guard's `PreToolUse` hook still runs before each
+/// write. Undo per turn is the lawyer's way back. When auto is not available (the agent offers
+/// none, refuses the switch, or moves off it at once: the CLI's account or model gate),
+/// [`CLAUDE_FALLBACK_MODE`] runs instead, with one notice (`actor/turn/session/claude_mode.rs`).
+/// A forced-ask session starts in [`forced_ask::ASK_MODE`](super::forced_ask::ASK_MODE)
+/// instead ([`claude_mode`]).
+///
+/// The window cannot pick another mode yet (the desktop bridge refuses `SetMode`), so this is
+/// Clauseo's choice at every session start. Its cost: a mode the lawyer reached inside a session
+/// goes back to this one when the session is next loaded. Re-applying the thread's last logged
+/// mode instead cannot tell such a choice from a mode the user's settings started a session in:
+/// both are logged as `ModeChanged`.
 ///
 /// claude-agent-acp 0.89.1 starts a session in the mode it reads itself: an explicit one (only
 /// its own re-creations pass one), else a resumed transcript's, else `permissions.defaultMode`
@@ -72,10 +93,37 @@ pub(crate) const CLAUDE_MANAGED_SETTING_SOURCES: &[&str] = &["user"];
 /// as the adapter's own). So neither `_meta` route can set it: the host sends
 /// `session/set_mode` with this mode before the first prompt when the session started in
 /// another (`actor/turn/session.rs`), and [`session_meta`] takes bypass off the table.
-pub(crate) const CLAUDE_MODE: &str = "default";
+pub(crate) const CLAUDE_MODE: &str = "auto";
+
+/// The mode a Claude session outside forced ask runs in when [`CLAUDE_MODE`] is not available:
+/// `acceptEdits`. Claude Code 2.1.293 then approves, unasked, `Edit`, `Write` and
+/// `NotebookEdit` and the Bash commands `mkdir`, `touch`, `rm`, `rmdir`, `mv`, `cp` and `sed`
+/// whose paths are inside the working directory or `additionalDirectories`; everything else
+/// asks as in `default`. claude-agent-acp 0.89.1 falls back to the same mode itself when the
+/// model cannot run auto (`session-mode.js:46-53`, `:98-102`).
+pub(crate) const CLAUDE_FALLBACK_MODE: &str = "acceptEdits";
+
+/// The mode a Claude session starts in and is switched to before its first prompt:
+/// [`CLAUDE_MODE`], or `default` in forced ask
+/// ([`forced_ask::ASK_MODE`](super::forced_ask::ASK_MODE)), where Claude asks before every
+/// change. Never `bypassPermissions`.
+pub(crate) fn claude_mode(forced_ask: bool) -> &'static str {
+    if forced_ask {
+        super::forced_ask::ASK_MODE
+    } else {
+        CLAUDE_MODE
+    }
+}
 
 /// The variable that, set to `false`, keeps claude.ai's connectors out of a Claude Code session.
 pub(crate) const CLAUDE_AI_MCP_VAR: &str = "ENABLE_CLAUDEAI_MCP_SERVERS";
+
+/// The Claude Code variable that, set, puts its `Bash` and `PowerShell` back in the session's
+/// folder after every call (Claude Code 2.1.293's `SBn()`, read from the process env on each
+/// call). Clauseo sets it to `1`, so every shell call starts in the matter's folder, which is
+/// where `crate::shell_writes` joins a call's relative targets: a `cd` in one call never moves
+/// where the next writes. Unset, the folder a call's `cd` reaches would carry to the next.
+pub(crate) const CLAUDE_SHELL_FOLDER_VAR: &str = "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR";
 
 /// Who decides which MCP servers a session gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,14 +168,19 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// value at `claudeCode`, `options` or `env` that is not an object is replaced.
 ///
 /// - `claudeCode.options.env.ENABLE_CLAUDEAI_MCP_SERVERS`: `"false"`.
+/// - [`CLAUDE_SHELL_FOLDER_VAR`] `"1"` in `claudeCode.options.env` (claude-agent-acp 0.89.1
+///   spreads it over its own env for the SDK's spawn of Claude Code, `acp-agent.js:7302-7304`)
+///   and, with `keys` (a Claude agent), in `claudeCode.options.settings.env` (flag settings,
+///   over a user's or project's). A hook value at `settings` or its `env` that is not an
+///   object is then replaced.
 /// - `claudeCode.options.allowDangerouslySkipPermissions`: `false`. claude-agent-acp 0.89.1 then
 ///   offers no bypass mode, nor the plan-exit options that switch to it, and never starts a
 ///   session in it: a settings `defaultMode` of `bypassPermissions` becomes `default`, and a
 ///   resumed transcript's `bypassPermissions` is rejected, falling back to the settings'
 ///   `defaultMode`, which may be `acceptEdits` (`acp-agent.js:7212-7219`,
 ///   `session-mode.js:22-35`, `permissions/modes.js` `resolvePermissionMode`). Whatever mode it
-///   then starts in (`acceptEdits`, `auto`, `plan`) is switched to [`CLAUDE_MODE`] after the
-///   start, since `_meta` cannot set it.
+///   then starts in (`default`, `auto`, `plan`, or `acceptEdits` in forced ask) is switched to
+///   [`claude_mode`] after the start, since `_meta` cannot set it.
 /// - `claudeCode.options.extraArgs`: `setting-sources` and [`MODE_FLAGS`] taken out, in both
 ///   forms the SDK turns into a flag (`{"setting-sources": "…"}` and
 ///   `{"setting-sources=…": null}`), since an extra flag goes after the SDK's own and would win.
@@ -138,7 +191,8 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   `extraArgs` (either makes Claude Code refuse to start there).
 /// - In every mode: no `mcpServers`. A hook cannot add servers through `_meta`.
 /// - With `keys` (a Claude agent): [`profile::claude_options`], before the guard's entry, so
-///   the guard's `hooks` and `disableAllHooks` go over whatever settings it merged.
+///   the guard's `hooks` and `disableAllHooks` go over whatever settings it merged; then
+///   [`subagents::subagent_meta`], which settles `agents` and the append's last part.
 /// - With a `guard` ([`GuardHook`]): [`guard_entry`] appended to
 ///   `claudeCode.options.settings.hooks.PreToolUse`, after any entries the hook put there, and
 ///   `settings.disableAllHooks: false`, so a user's own `disableAllHooks` (user settings load)
@@ -157,6 +211,7 @@ pub(crate) fn session_meta(
     let mut options = take_object(&mut claude, "options");
     let mut env = take_object(&mut options, "env");
     env.insert(CLAUDE_AI_MCP_VAR.to_owned(), Value::from("false"));
+    env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
     options.insert("env".to_owned(), Value::Object(env));
     options.insert(ALLOW_BYPASS_OPTION.to_owned(), Value::Bool(false));
     let (strict, sources) = match control {
@@ -177,6 +232,7 @@ pub(crate) fn session_meta(
     options.insert("settingSources".to_owned(), Value::from(sources.to_vec()));
     if let Some(keys) = keys {
         profile::claude_options(&mut options, keys);
+        subagents::subagent_meta(&mut meta, &mut options, keys.login, keys.web_search.on);
     }
     if let Some(entry) = guard.and_then(guard_entry) {
         let mut settings = take_object(&mut options, "settings");
@@ -189,6 +245,15 @@ pub(crate) fn session_meta(
         hooks.insert("PreToolUse".to_owned(), Value::Array(pre_tool_use));
         settings.insert("hooks".to_owned(), Value::Object(hooks));
         settings.insert("disableAllHooks".to_owned(), Value::Bool(false));
+        options.insert("settings".to_owned(), Value::Object(settings));
+    }
+    if keys.is_some() {
+        // Claude Code applies a settings `env` over the process env, so the variable goes in
+        // the flag settings too: a user's or project's settings `env` cannot undo it.
+        let mut settings = take_object(&mut options, "settings");
+        let mut settings_env = take_object(&mut settings, "env");
+        settings_env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
+        settings.insert("env".to_owned(), Value::Object(settings_env));
         options.insert("settings".to_owned(), Value::Object(settings));
     }
     claude.insert("options".to_owned(), Value::Object(options));
@@ -315,27 +380,6 @@ pub(crate) fn take_object(map: &mut Map<String, Value>, key: &str) -> Map<String
     match map.remove(key) {
         Some(Value::Object(inner)) => inner,
         _ => Map::new(),
-    }
-}
-
-/// The servers a session gets: under [`McpControl::Clauseo`] the enabled ones, in name order,
-/// as stdio servers; under [`McpControl::Managed`] none.
-pub(crate) fn mcp_servers(effective: &Effective, control: McpControl) -> Vec<McpServer> {
-    match control {
-        McpControl::Managed => Vec::new(),
-        McpControl::Clauseo => effective
-            .enabled_mcp_servers()
-            .map(|(name, server)| McpServer::Stdio {
-                name: name.to_owned(),
-                command: PathBuf::from(&server.command),
-                args: server.args.clone(),
-                env: server
-                    .env
-                    .iter()
-                    .map(|(name, value)| (name.clone(), value.clone()))
-                    .collect(),
-            })
-            .collect(),
     }
 }
 

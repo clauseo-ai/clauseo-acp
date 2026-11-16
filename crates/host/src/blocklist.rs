@@ -3,6 +3,8 @@
 //! published pair every interval over the host's own network, verifies it, applies the rollback
 //! rule, stores it and swaps it into the shared [`Current`] the egress proxy reads.
 //!
+//! - Only when something enforces the list ([`needed`]): the guarded browser entry or the Safe
+//!   workspace. The plain build has neither, so it starts no thread and makes no request.
 //! - The thread is its own `std::thread`, never the actor's pool. It starts once the host
 //!   serves (`actor.rs`'s `run`) and stops when the host thread ends: the [`Running`] guard's
 //!   drop disconnects its stop channel, and every wait is a `recv_timeout` on that channel, so
@@ -46,11 +48,13 @@ use crate::clock::Clock;
 pub(crate) mod allowed;
 mod disk;
 mod fetch;
+mod first_load;
 mod live;
 mod timing;
 mod updater;
 
 pub use allowed::AllowedSites;
+pub(crate) use first_load::FirstLoad;
 pub(crate) use live::{Fetching, Live};
 pub(crate) use updater::{Round, Updater};
 
@@ -83,6 +87,12 @@ pub struct BlockListSeams {
     pub(crate) update: BlockListUpdate,
     pub(crate) allowed: Arc<AllowedSites>,
     pub(crate) secrets: Option<Arc<dyn SecretStore>>,
+    /// The start-up load's signal, which launches wait on (`first_load.rs`).
+    pub(crate) first_load: FirstLoad,
+    /// Run on the updater's thread before its start-up load, for tests that hold it.
+    pub(crate) before_load: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Starts the updater as if something enforced the list ([`needed`]), for tests.
+    pub(crate) enforced: bool,
 }
 
 impl BlockListSeams {
@@ -95,7 +105,29 @@ impl BlockListSeams {
             update,
             allowed: Arc::default(),
             secrets: None,
+            first_load: FirstLoad::new(),
+            before_load: None,
+            enforced: false,
         }
+    }
+
+    /// These seams with `hook` run on the updater's thread before its start-up load, so a
+    /// test can hold the first load.
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn before_first_load(mut self, hook: impl Fn() + Send + Sync + 'static) -> Self {
+        self.before_load = Some(Arc::new(hook));
+        self
+    }
+
+    /// These seams with the updater started as if something enforced the list ([`needed`]):
+    /// for tests of the guarded browser's proxy, which their profile hook offers though no
+    /// shipped entry has one.
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn enforced(mut self) -> Self {
+        self.enforced = true;
+        self
     }
 
     /// These seams with `allowed`, the views the host publishes the lawyer's allowed sites to
@@ -217,11 +249,33 @@ pub(crate) fn allowed_sites(
     }
 }
 
-/// Takes the block list's seams out of `config`, with what the thread needs beside them.
-pub(crate) fn take(config: &mut crate::HostConfig) -> Option<Start> {
-    let seams = *config.wiring.blocklist.take()?;
+/// Whether the host fetches the list: only when something enforces it. Only a session's egress
+/// proxy reads it, and a proxy opens only for the Safe workspace (`HostConfig::with_sandbox`),
+/// once it returns: Codex's guarded browser entry (`clauseo_profile::servers::browser_mcp`)
+/// runs with no proxy. The plain build has none: no fetch at start and none every interval
+/// (stage E, 2026-11-10). The fetch code stays for when a proxy returns.
+pub(crate) fn needed(config: &crate::HostConfig) -> bool {
+    config.sandbox().is_some()
+        || config
+            .wiring
+            .blocklist
+            .as_ref()
+            .is_some_and(|seams| seams.enforced)
+}
+
+/// The block list's seams in `config`, with what the thread needs beside them, when [`needed`].
+/// The seams stay in the config's wiring too: each launch's proxy reads the same shared
+/// [`Current`] from there (`launch_checks/egress.rs`). When not needed, `None`: no thread,
+/// no load and no fetch, and the first load's teller is dropped so a wait for it ends at once.
+pub(crate) fn prepare(config: &crate::HostConfig) -> Option<Start> {
+    let seams = config.wiring.blocklist.as_deref()?;
+    if !needed(config) {
+        drop(seams.first_load.teller());
+        tracing::info!("block list: nothing enforces it in this build; not fetched");
+        return None;
+    }
     Some(Start {
-        seams,
+        seams: seams.clone(),
         data_dir: config.effective.data_dir().to_path_buf(),
         live: Live::new(Fetching::of(config.effective.settings())),
         clock: Arc::clone(&config.clock),

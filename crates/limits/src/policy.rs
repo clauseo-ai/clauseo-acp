@@ -23,6 +23,10 @@ use triggers::request_read;
 /// is one more arm in [`kind_rules`], which the compiler asks for.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct KindRules {
+    /// A focus, or a meter or the settings page shown (once on opening, then each minute while
+    /// it stays in view), reads when the last read started at least this long ago, in
+    /// milliseconds.
+    pub(crate) shown_after_ms: i64,
     /// A turn's end that a live signal came before reads when the last read started at least
     /// this long ago, in milliseconds.
     pub(crate) turn_read_after_ms: i64,
@@ -38,13 +42,17 @@ pub(crate) struct KindRules {
 /// The rules of `agent`'s kind.
 pub(crate) const fn kind_rules(agent: AgentKind) -> KindRules {
     match agent {
+        // Anthropic's usage endpoint answers 429 to polling at 30 to 60 s (claude-code#31637), so
+        // Claude keeps 2 minutes, its turn end's shorter age.
         AgentKind::Claude => KindRules {
+            shown_after_ms: 2 * 60 * 1000,
             turn_read_after_ms: 10 * 60 * 1000,
             turn_read_after_ms_no_live: 2 * 60 * 1000,
             live_rows: true,
             pauses_words: at_limit_words::CLAUDE_PAUSES,
         },
         AgentKind::Codex => KindRules {
+            shown_after_ms: 60 * 1000,
             turn_read_after_ms: 60 * 1000,
             turn_read_after_ms_no_live: 60 * 1000,
             live_rows: false,
@@ -176,6 +184,21 @@ impl Limits {
             },
             actions,
         )
+    }
+
+    /// A plan set up after [`Limits::new`]: `agent` joins, loading, after the agents it has,
+    /// with its read to start and the view to publish again. An agent it already has changes
+    /// nothing and returns no action.
+    pub fn add_agent(&mut self, agent: AgentKind, now: Timestamp) -> Vec<Action> {
+        if self.state(agent).is_some() {
+            return Vec::new();
+        }
+        let mut state = AgentState::loading(agent);
+        let mut actions = Vec::new();
+        request_read(&mut state, now, &mut actions);
+        self.agents.push(state);
+        actions.push(Action::ViewChanged);
+        actions
     }
 
     /// Takes one input at `now`.

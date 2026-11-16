@@ -4,6 +4,9 @@
 // dialog; Who without a time.
 import { act, StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
@@ -201,6 +204,72 @@ test("each paper stands in its own span, its name isolated, separated by a comma
   expect(spans.every((s) => s.querySelector("bdi") !== null)).toBe(true);
   expect(spans.every((s) => s.parentElement?.classList.contains("change-papers"))).toBe(true);
   expect(txt(document.querySelector(".change-papers"))).toBe(PAPERS.join(", "));
+});
+
+// a path 327 characters long, its folder name 200 characters with no break in it: the note's text column holds it and
+// wraps it, and its buttons stand in their own column beside the text, never over it
+const LONG = `C:\\Users\\Rohan\\Documents\\Matters\\${"a".repeat(200)}\\Deep Agreement, clause 4.1(b) tracked reply, final draft for the client file, rev 2 of 3.docx`;
+const liveCss = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "live.css"),
+  "utf8",
+).replace(/\/\*[\s\S]*?\*\//g, "");
+/** The declarations of the rule for exactly this selector, by property. */
+function declsOf(selector: string): Record<string, string> {
+  const at = liveCss.indexOf(`\n  ${selector} {`);
+  expect(at, selector).toBeGreaterThan(-1);
+  const out: Record<string, string> = {};
+  for (const line of liveCss.slice(at, liveCss.indexOf("}", at)).split("\n").slice(1)) {
+    const colon = line.indexOf(":");
+    if (colon > 0)
+      out[line.slice(0, colon).trim()] = line
+        .slice(colon + 1)
+        .replace(";", "")
+        .trim();
+  }
+  return out;
+}
+
+test("a long path breaks inside the note's text column; Open in Word and Undo stand in their own column, both enabled, and Undo calls its handler", async () => {
+  expect(LONG.length).toBe(327);
+  const onUndo = vi.fn();
+  const onOpen = vi.fn();
+  await mount(
+    <ChangeNote
+      papers={[LONG]}
+      testIds={{ ...NOTE_IDS, open: "open-in-word" }}
+      onUndo={onUndo}
+      open={{ label: "Open in Word", onOpen }}
+    />,
+  );
+  const path = byId("file-changed");
+  const text = document.querySelector(".change-text");
+  const actions = document.querySelector(".change-actions");
+  const open = byId("open-in-word");
+  const undo = byId("undo");
+  // the whole path, in the text column; neither button inside it
+  expect(txt(path)).toBe(LONG);
+  expect(text?.contains(path ?? null)).toBe(true);
+  expect(text?.contains(open ?? null)).toBe(false);
+  expect(text?.contains(undo ?? null)).toBe(false);
+  // the buttons sit in their own column, a sibling of the text column inside the note
+  expect(actions?.contains(open ?? null)).toBe(true);
+  expect(actions?.contains(undo ?? null)).toBe(true);
+  expect(actions?.parentElement).toBe(text?.parentElement);
+  expect(actions?.parentElement?.classList.contains("change-note")).toBe(true);
+  // the text column wraps, the button column keeps its size; the note wraps its columns onto lines
+  expect(declsOf(".change-text")).toMatchObject({ "min-width": "0", "overflow-wrap": "anywhere" });
+  expect(declsOf(".change-papers")).toMatchObject({ "min-width": "0" });
+  expect(declsOf(".change-actions")).toMatchObject({ "flex-shrink": "0", "flex-wrap": "wrap" });
+  expect(declsOf(".change-note")).toMatchObject({ "flex-wrap": "wrap" });
+  // both buttons present and enabled, and Undo calls its handler
+  for (const b of [open, undo]) {
+    expect(b).not.toBeNull();
+    expect(b?.hasAttribute("disabled")).toBe(false);
+    expect(b?.getAttribute("aria-disabled")).not.toBe("true");
+  }
+  await act(async () => undo?.click());
+  expect(onUndo).toHaveBeenCalledOnce();
+  expect(onOpen).not.toHaveBeenCalled();
 });
 
 test("Compare and Undo show only when given", async () => {

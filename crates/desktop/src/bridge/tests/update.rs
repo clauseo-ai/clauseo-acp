@@ -92,6 +92,7 @@ fn the_settings_window_s_restart_sends_the_settings_then_the_update() {
     block_on(bridge.open_stream(SETTINGS, channel)).unwrap();
     block_on(bridge.subscribe_app(SETTINGS)).unwrap();
     assert!(matches!(page.next_event(), HostEvent::SettingsChanged(_)));
+    assert!(matches!(page.next_event(), HostEvent::McpToolsChanged(_)));
     let window = bridge.window(SETTINGS).unwrap();
 
     let big = format!("{{\"update_changed\":\"{}\"}}", "x".repeat(300 * 1024));
@@ -116,6 +117,7 @@ fn the_settings_window_s_restart_sends_the_settings_then_the_update() {
         current.state == UpdateState::Checking || current.checked_at.is_some(),
         "{current:?}"
     );
-    // Then the new subscription's first frame.
+    // Then the new subscription's first frames.
     assert!(matches!(page.next_event(), HostEvent::SettingsChanged(_)));
+    assert!(matches!(page.next_event(), HostEvent::McpToolsChanged(_)));
 }

@@ -2,7 +2,7 @@
 // actions in a context menu, and, for the current matter, its conversations opened beneath it on one raised plane.
 import { ContextMenu } from "@base-ui/react/context-menu";
 import { Menu as BaseMenu } from "@base-ui/react/menu";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "../ui/button.tsx";
 import {
   MenuCheckboxItem,
@@ -33,6 +33,7 @@ import { tbt } from "../lib/words-toolbar.ts";
 import { Say } from "./say.tsx";
 import { ConversationList, type ConversationRowProps } from "./rail-conversations.tsx";
 import { RailMark } from "./rail-mark.tsx";
+import { RemoveConfirm } from "./rail-remove-confirm.tsx";
 import type { Triage } from "./rail-triage.tsx";
 import { MATTER_MARK, SNOOZED } from "./rail-marks.ts";
 import { matterStatus, type MatterState } from "./rail-words.ts";
@@ -75,7 +76,8 @@ export type MatterRowProps = {
   onOpen?: () => void;
   /** Its actions, from the context menu or, on the current matter, the chevron at its end. Each shows only with its
    * handler: Pin to the top with onPin, Locate folder with onLocate while the folder has moved, Show in Finder (or
-   * Explorer) with onReveal, Remove from the list with onRemove. With none of them, the row has no menu at all. */
+   * Explorer) with onReveal, Remove from the list with onRemove, which asks first (rail-remove-confirm.tsx) and is
+   * called only once the lawyer confirms. With none of them, the row has no menu at all. */
   onPin?: ((pinned: boolean) => void) | undefined;
   onLocate?: (() => void) | undefined;
   onReveal?: (() => void) | undefined;
@@ -95,10 +97,13 @@ export type MatterRowProps = {
   snoozed?: string | undefined;
   /** Optional (U16b): the current matter's done conversations, folded under its list (ConversationList's `done`). */
   conversationsDone?: { count: number; rows: () => ReactNode } | undefined;
-  /** Optional (U16b): Snooze until… and Mark all done in its menu, for its conversations not done. */
+  /** Optional (U16b): Snooze until… and Mark all conversations done in its menu, for its conversations not done. */
   triage?: Triage | undefined;
-  /** Optional (U16b): what stands in the row's place: the line after a snooze or Done, or the snooze picker. */
+  /** Optional (U16b): what stands in the row's place: the snooze picker. */
   replace?: ReactNode;
+  /** Optional: what stands beneath the row, which stays as it is: Locate folder beside a refusal, or the brief line
+   * with Undo after Snooze until or Mark all conversations done. */
+  below?: ReactNode;
 };
 
 /** A matter's actions: pin it to the top, show its folder in the computer's own file manager, or find a folder that
@@ -327,10 +332,15 @@ export function MatterRow({
   newConversationTestId,
   triage,
   replace,
+  below,
   conversationsDone,
   snoozed,
 }: MatterRowProps) {
   const w = useWords();
+  const under =
+    below === undefined || below === null ? null : <div className="room-matter-below">{below}</div>;
+  // Remove from the list asks first: nothing brings a removed matter back from the list
+  const [asking, setAsking] = useState(false);
   if (replace !== undefined && !(current && conversations !== undefined)) return <li>{replace}</li>;
   const status = matterStatus(w.lang, state, at, day);
   const actions: ActionProps = {
@@ -342,10 +352,14 @@ export function MatterRow({
     onPin,
     onLocate,
     onReveal,
-    onRemove,
+    onRemove: onRemove === undefined ? undefined : () => setAsking(true),
     triage,
   };
   const menu = hasActions(actions);
+  // beside the row, not inside it: the dialog's events, carried up React's tree, never reach the row's context menu
+  const confirm = onRemove !== undefined && (
+    <RemoveConfirm name={name} open={asking} onOpenChange={setAsking} onConfirm={onRemove} />
+  );
   const button = (
     <button
       type="button"
@@ -372,48 +386,64 @@ export function MatterRow({
   // its end, so they are reached by keyboard on every computer, not only by a context key
   if (current && (conversations !== undefined || menu)) {
     return (
-      <li className="room-house">
-        <div className="room-house-head">
-          {replace ?? button}
-          {menu && replace === undefined && (
-            <Menu>
-              <MenuTrigger
-                render={
-                  <Button
-                    kind="quiet"
-                    size="small"
-                    shape="icon"
-                    className="room-house-more data-popup-open:bg-press"
-                  />
-                }
-                aria-label={ui(w.lang, "Actions for {name}", { name })}
-              >
-                <IconMore size={16} />
-              </MenuTrigger>
-              <MenuPopup align="start">
-                <MatterActions {...actions} />
-              </MenuPopup>
-            </Menu>
+      <>
+        <li className="room-house">
+          <div className="room-house-head">
+            {replace ?? button}
+            {menu && replace === undefined && (
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      kind="quiet"
+                      size="small"
+                      shape="icon"
+                      className="room-house-more data-popup-open:bg-press"
+                    />
+                  }
+                  aria-label={ui(w.lang, "Actions for {name}", { name })}
+                >
+                  <IconMore size={16} />
+                </MenuTrigger>
+                <MenuPopup align="start">
+                  <MatterActions {...actions} />
+                </MenuPopup>
+              </Menu>
+            )}
+          </div>
+          {replace === undefined && under}
+          {conversations !== undefined && (
+            <ConversationList
+              matter={name}
+              conversations={conversations}
+              plan={conversationPlan}
+              newTestId={newConversationTestId}
+              done={conversationsDone}
+              {...(onNewConversation === undefined ? {} : { onNew: onNewConversation })}
+            />
           )}
-        </div>
-        {conversations !== undefined && (
-          <ConversationList
-            matter={name}
-            conversations={conversations}
-            plan={conversationPlan}
-            newTestId={newConversationTestId}
-            done={conversationsDone}
-            {...(onNewConversation === undefined ? {} : { onNew: onNewConversation })}
-          />
-        )}
-      </li>
+        </li>
+        {confirm}
+      </>
     );
   }
-  if (!menu) return <li>{button}</li>;
+  if (!menu)
+    return (
+      <li>
+        {button}
+        {under}
+      </li>
+    );
   return (
-    <ContextMenu.Root>
-      <ContextMenu.Trigger render={<li />}>{button}</ContextMenu.Trigger>
-      <RowContextMenu {...actions} />
-    </ContextMenu.Root>
+    <>
+      <ContextMenu.Root>
+        <ContextMenu.Trigger render={<li />}>
+          {button}
+          {under}
+        </ContextMenu.Trigger>
+        <RowContextMenu {...actions} />
+      </ContextMenu.Root>
+      {confirm}
+    </>
   );
 }

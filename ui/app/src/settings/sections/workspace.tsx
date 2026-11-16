@@ -4,12 +4,15 @@
 // permission set it up, always through its confirm); or Not protected with why, and "Set up the
 // Safe workspace" or "Set up again" where a set-up with no Windows prompt fixes it. Design B: a
 // block says its reason's line (blocked.ts); where the repair is the installer, its line stands in
-// the button's place, with "Get the installer" on a personal install (installer.ts). The waiting
+// the button's place, with "Get the installer" without a firm's policy (installer.ts). The waiting
 // line stands in the button's place while a command runs, and a refusal's words under the block.
+// While the firm's policy is active (firmPolicy, blocked.ts), a block only the firm can act on, or a
+// sandbox.blocked refusal, adds "Copy details for IT" (it-details.ts) under them.
 // Where the host doesn't answer the query yet (`command.invalid`, before R17 PR-B admits this
 // window) the section says so quietly. A matter's own state (a full pool, protection switched off)
 // is the room's, never shown here. No timers: the view is read when the window opens, after each
 // command and on each protection_changed.
+import { CopyForIt } from "@clauseo/components/clauseo/copy-for-it.tsx";
 import { ProtectionConfirm } from "@clauseo/components/clauseo/protection-confirm.tsx";
 import { IconSafeWorkspace } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
@@ -27,15 +30,21 @@ import { named1385, whyOf } from "../../room/protection/detail.ts";
 import {
   blockLine,
   blockOf,
-  firmInstall,
+  firmPolicy,
   needsInstaller,
   repairLine,
   setUpFixes,
 } from "../../room/protection/blocked.ts";
 import { openInstallerPage, repairPage } from "../../room/protection/installer.ts";
+import { itDetails } from "../../room/protection/it-details.ts";
 import type { SectionContext } from "../sections.tsx";
 import { Managed } from "./parts.tsx";
 import { removeSetUp, setUpAgain } from "./workspace-commands.ts";
+
+/** Whether the host enforces the firm's sandbox.allow_unprotected_auto = false. It doesn't yet: the key only fills
+ * ProtectionView.unprotected_auto_allowed, so UC-76's line would promise what nothing does. Set to true with the host
+ * follow-up that keeps an unprotected agent in its ask modes under that policy. */
+const FIRM_NO_AUTO_ENFORCED: boolean = false;
 
 /** The block's state, as data-state says it. */
 type Status =
@@ -68,13 +77,11 @@ const dayOf = (at: number, lang: Lang): string =>
  * one, takes the generic line. */
 function cantKey(cause: Cause): SettingsKey {
   const why = whyOf(cause);
-  if (why === "os")
-    return "The Safe workspace isn't available on Linux yet, so Clauseo asks before changing anything outside a matter's folder.";
-  if (why === "windows_arm")
-    return "The Safe workspace isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.";
+  if (why === "os") return "The Safe workspace isn't available on Linux yet.";
+  if (why === "windows_arm") return "The Safe workspace isn't available on Windows on ARM yet.";
   if (why === "not_built")
-    return "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.";
-  return "This computer can't run the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.";
+    return "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update.";
+  return "This computer can't run the Safe workspace.";
 }
 
 export function Workspace({ ctx }: { ctx: SectionContext }) {
@@ -126,27 +133,22 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
             ? w.s("Set up with Windows' permission.")
             : w.s("Set up on {date}, with Windows' permission.", { date: dayOf(at, lang) })
           : status === "needs_set_up" || blockOf(cause) === "admin_copy_missing"
-            ? w.s(
-                "The Safe workspace isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.",
-              )
+            ? w.s("The Safe workspace isn't set up on this computer yet.")
             : status === "set_up_refused"
-              ? w.s(
-                  "Windows didn't allow the set-up, so Clauseo asks before changing anything outside a matter's folder.",
-                )
+              ? w.s("Windows didn't allow the set-up.")
               : status === "set_up_failed"
-                ? w.s(
-                    "The Safe workspace couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
-                  )
+                ? w.s("The Safe workspace couldn't be set up on this computer.")
                 : status === "blocked"
-                  ? pw(
-                      lang,
-                      "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
-                    )
+                  ? pw(lang, "Something on this computer stops the Safe workspace.")
                   : w.s(cantKey(cause ?? { name: "unknown", group: "cant", raw: null }));
   const repair = needsInstaller(cause);
-  const page = repair && !firmInstall(view, state.managedBy) ? repairPage(display) : null;
+  const policy = firmPolicy(view, state.managedBy);
+  const page = repair && !policy ? repairPage(display) : null;
   const block = blockLine(lang, cause);
   const failed = failedWords(lang, state);
+  const forIt = policy
+    ? (itDetails.blocked(lang, cause) ?? itDetails.refused(lang, state.failed, cause))
+    : null;
   const act = repair ? (
     page === null ? null : (
       <Button
@@ -238,6 +240,11 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
           {w.say(failed)}
         </p>
       )}
+      {forIt !== null && (
+        <div className="mt-s2">
+          <CopyForIt lang={lang} text={forIt} testId="protection-it" />
+        </div>
+      )}
       {off && view.required && (
         <p className="set-note" data-testid="protection-required">
           {w.say(
@@ -247,7 +254,7 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
           )}
         </p>
       )}
-      {off && !view.unprotected_auto_allowed && (
+      {FIRM_NO_AUTO_ENFORCED && off && !view.unprotected_auto_allowed && (
         <p className="set-note" data-testid="protection-no-auto">
           {w.say(w.s("Your firm doesn't allow Clauseo to work without asking on this computer."))}
         </p>

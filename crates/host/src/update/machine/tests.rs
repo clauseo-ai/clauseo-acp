@@ -55,6 +55,7 @@ fn offer(version: &str) -> Offer {
     Offer {
         version: version.to_owned(),
         handle: Opaque::new(version.to_owned()),
+        refetch: false,
     }
 }
 

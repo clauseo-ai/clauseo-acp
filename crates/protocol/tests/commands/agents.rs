@@ -15,10 +15,12 @@ fn list_agents_is_a_plain_string_and_answers_agents() {
         AgentSummary {
             id: AgentId::new("codex-acp").unwrap(),
             kind: Some(AgentKind::Codex),
+            config_options: Vec::new(),
         },
         AgentSummary {
             id: AgentId::new("fake-agent").unwrap(),
             kind: None,
+            config_options: Vec::new(),
         },
     ]);
     assert_eq!(

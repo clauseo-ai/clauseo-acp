@@ -33,8 +33,14 @@ const GREP_KEYS: [&str; 12] = [
 /// The search roots of a request's `rawInput`: for a search (an input with a string `pattern`
 /// or `glob`), its `path`, or the working folder (`.`) without one, and the folders its
 /// patterns may start in ([`pattern_roots`]): a Glob's `pattern`, a Grep's `glob`. Then the
-/// folders each recursive command in `rawInput.command` walks.
-pub(crate) fn search_roots(input: &Value, lines: &[&str], windows: bool) -> Vec<PathBuf> {
+/// folders each recursive command in `rawInput.command` walks, read as `shell` would
+/// ([`super::command::recursive_roots`]).
+pub(crate) fn search_roots(
+    input: &Value,
+    lines: &[&str],
+    windows: bool,
+    shell: super::ShellKind,
+) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let text = |key: &str| input.get(key).and_then(Value::as_str);
     if text("pattern").is_some() || text("glob").is_some() {
@@ -47,7 +53,7 @@ pub(crate) fn search_roots(input: &Value, lines: &[&str], windows: bool) -> Vec<
         }
     }
     for line in lines {
-        out.extend(super::command::recursive_roots(line, windows));
+        out.extend(super::command::recursive_roots(line, windows, shell));
         out.extend(super::command::glob_roots(line, windows));
     }
     out

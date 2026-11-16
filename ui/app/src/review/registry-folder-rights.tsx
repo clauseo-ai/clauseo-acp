@@ -1,18 +1,29 @@
 // Folder rights' copy review entries (FR-01 to FR-15, FR-20, FR-21): the room's notice for a matter folder Clauseo can't
 // fence or couldn't check, the text it opens for IT, the toolbar's Not protected, the reason on an Editing files card,
 // in the real room over FakeTransport, the host's folder_support set on the one matter; and New matter's warning for
-// a folder picked, the host's FolderSupport answering. Apart from registry.tsx to keep that file under the size
-// limit. The mode picker's off options (FR16, FR17) wait on a mode picker.
+// a folder picked, the host's FolderSupport answering; and on the Mac, Open Privacy settings and its line under a turn
+// macOS kept out of the matter's folder (FR-22, FR-23); and on macOS and Linux, a folder whose name has a backslash, in
+// New matter's warning and Locate's step (FR-24 to FR-26, drafts). Apart from registry.tsx to keep that file under
+// the size limit. The mode picker's off options (FR16, FR17) wait on a mode picker.
 import type { ReactNode } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { tbt } from "@clauseo/components/lib/words-toolbar.ts";
-import { TURN, uuid } from "../testing/stream-script.ts";
+import { PRIVACY_KEYS } from "@clauseo/components/lib/words-errors.ts";
+import { step, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
+import { LocateWarning } from "../room/locate-warning.tsx";
 import type { FolderSupportKind, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER, NEW_MATTER, roomHost, threadHost, type Step } from "./hosts.ts";
-import { RoomAfter, RoomFocusing, RoomOver, RoomPressing } from "./states.tsx";
-import { folderCardWords, folderWords as w, matterWords, uiWords, type WordsRef } from "./words.ts";
+import { RoomAfter, RoomFocusing, RoomOver } from "./states.tsx";
+import {
+  errorWords,
+  folderCardWords,
+  folderWords as w,
+  matterWords,
+  uiWords,
+  type WordsRef,
+} from "./words.ts";
 
 /** Several lines of one id, joined with " / " as the approved page writes them. */
 const joined = (parts: readonly WordsRef[]): WordsRef => ({
@@ -33,9 +44,11 @@ const room = (kind: FolderSupportKind) => () =>
   roomHost([{ ...MATTER, folder_display: "D:\\Matters\\Acme Traders", folder_support: kind }]);
 const INFO = '[data-testid="folder-notice"] .room-info';
 
-/** New matter over a host whose picker gives a folder on the approved page's drive and whose check reads `kind`. */
+/** New matter over a host whose picker gives a folder on the approved page's drive and whose check reads `kind`; on
+ * Windows, where the drive's backslashes are the separator. */
 const picking = (kind: FolderSupportKind) => () =>
   new FakeTransport({
+    platform: "windows",
     query: (query) =>
       typeof query === "object" && "folder_support" in query
         ? { folder_support: { support: kind } }
@@ -55,12 +68,54 @@ const holding = () =>
     pickFolder: () => new Promise(() => {}),
   });
 const warned = (kind: FolderSupportKind) => () => <RoomAfter host={picking(kind)} steps={PICKED} />;
+/** New matter on a Mac whose picker gives a folder whose name has a backslash: its warning under the folder line. */
+const slashed = () => (
+  <RoomAfter
+    host={() =>
+      new FakeTransport({
+        platform: "mac",
+        query: (query) =>
+          typeof query === "object" && "folder_support" in query
+            ? { folder_support: {} }
+            : { matters: [MATTER] },
+        pickFolder: () => ({ folder: "review-folder", display: "Documents/Rathi\\ Steels" }),
+      })
+    }
+    steps={PICKED}
+  />
+);
+/** Locate's step for a folder picked whose name has a backslash, shown by itself: its buttons do nothing here. */
+const locateStep = () => (
+  <LocateWarning
+    held={{
+      display: "Documents/Rathi\\ Steels",
+      again: async () => {},
+      anyway: async () => {},
+    }}
+    onClose={() => {}}
+  />
+);
+const BACKSLASH = [
+  w("This folder's name has a backslash (\\)."),
+  w(
+    "Claude can't work in a folder like this; ChatGPT can. Rename it in Finder first, or choose another folder.",
+  ),
+];
 const entry = (id: string, words: WordsRef, render: () => ReactNode): Entry => ({
   id,
   words,
   screen: "room/folder-rights",
   render,
 });
+
+/** A turn macOS kept out of the matter's folder: the question, and its stop with matter.folder_permission. */
+const kept = () =>
+  threadHost({
+    entries: [
+      userMessage(5, 1, "What does clause nine of the lease say about notice?"),
+      step(9, { stop: "failed", failure: "matter.folder_permission" }),
+    ],
+  });
 
 /** A pending Editing files card in a folder whose permissions can't change. */
 const EDITING: ViewEntry[] = [
@@ -101,30 +156,20 @@ export const FOLDER_RIGHTS: Entry[] = [
     joined([w("Clauseo asks before each edit"), w("Clauseo asks before each edit in this folder")]),
     () => <RoomOver host={room("cant_change_permissions")} />,
   ),
-  // behind its info icon
+  // behind its info icon: why it asks, and where it needn't (IT sweep)
   entry(
     "FR-02",
     w(
-      "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and Codex inside the matter. Some edits won't go through.",
+      "Clauseo can't add its protection to this folder, so it asks before each edit. In a folder you made yourself on this computer, such as one in Documents, it doesn't need to ask.",
     ),
     () => <RoomFocusing host={room("cant_change_permissions")} focus={INFO} />,
   ),
-  entry("FR-03", w("What to tell IT"), () => <RoomOver host={room("cant_change_permissions")} />),
+  // FR-03, retired: What to tell IT left the notice (IT sweep)
   // Close, the cross's tooltip and name: the existing word
   entry("FR-04", uiWords("Close"), () => (
     <RoomFocusing host={room("cant_change_permissions")} focus='[data-testid="folder-close"]' />
   )),
-  // What to tell IT open: the text for IT, the matter's folder in it, selected, and Copy
-  entry(
-    "FR-05",
-    joined([
-      w(
-        'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and Codex, which it runs, can write only inside it.',
-      ),
-      w("Copy"),
-    ]),
-    () => <RoomPressing host={room("cant_change_permissions")} press="folder-it" />,
-  ),
+  // FR-05, retired: the text for IT and its Copy left with FR-03 (IT sweep)
   // the reason under "Editing files" on the card, and behind its info icon
   entry(
     "FR-06",
@@ -146,8 +191,8 @@ export const FOLDER_RIGHTS: Entry[] = [
   entry(
     "FR-08",
     joined([
-      w("Claude asks before every change. Codex can't work here."),
-      w("Clauseo can't keep Claude and Codex inside a folder on a network drive."),
+      w("Claude asks before every change. ChatGPT can't work here."),
+      w("Clauseo can't keep Claude and ChatGPT inside a folder on a network drive."),
     ]),
     warned("network"),
   ),
@@ -161,10 +206,10 @@ export const FOLDER_RIGHTS: Entry[] = [
     "FR-12",
     joined([
       w("On a network drive."),
-      w("Claude asks before every change. Codex can't work here."),
+      w("Claude asks before every change. ChatGPT can't work here."),
       w("This matter's folder is on a network drive"),
       w(
-        "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
+        "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside a folder on a network drive.",
       ),
     ]),
     () => <RoomFocusing host={room("network")} focus={INFO} />,
@@ -174,10 +219,10 @@ export const FOLDER_RIGHTS: Entry[] = [
     "FR-15",
     joined([
       w("No file permissions."),
-      w("Claude asks before every change. Codex can't work here."),
+      w("Claude asks before every change. ChatGPT can't work here."),
       w("This matter's folder is on a drive that doesn't keep file permissions"),
       w(
-        "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
+        "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside this folder, and USB drives often don't keep file permissions.",
       ),
     ]),
     () => <RoomFocusing host={room("no_permissions")} focus={INFO} />,
@@ -191,9 +236,9 @@ export const FOLDER_RIGHTS: Entry[] = [
   entry(
     "FR-14",
     joined([
-      w("Claude asks before every change. Codex can't work here."),
+      w("Claude asks before every change. ChatGPT can't work here."),
       w(
-        "Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
+        "Clauseo can't keep Claude and ChatGPT inside a folder on this drive. USB drives often don't keep permissions.",
       ),
     ]),
     warned("no_permissions"),
@@ -208,4 +253,13 @@ export const FOLDER_RIGHTS: Entry[] = [
   entry("FR-21", matterWords("Opening the folder picker…"), () => (
     <RoomAfter host={holding} steps={PICKED} />
   )),
+  // matter.folder_permission's stop on the Mac (room/thread/privacy-settings.tsx): the button, then the line under it
+  entry("FR-22", errorWords(PRIVACY_KEYS.button), () => <RoomOver host={kept} />),
+  entry("FR-23", errorWords(PRIVACY_KEYS.line), () => <RoomOver host={kept} />),
+  // on macOS and Linux, New matter's warning for a folder whose name has a backslash: its title and body, then its name
+  // (draft); its buttons are FR-09 and FR-10
+  entry("FR-24", joined([...BACKSLASH, w("This folder's name has a backslash")]), slashed),
+  // Locate's step for such a folder: the same title and body, Choose another folder (FR-09), and Locate anyway (draft)
+  entry("FR-25", joined(BACKSLASH), locateStep),
+  entry("FR-26", w("Locate anyway"), locateStep),
 ];

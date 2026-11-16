@@ -646,5 +646,125 @@
     "at": "2026-11-03",
     "by": "Rohan",
     "note": "Rohan, via the orchestrator (UTC #261)"
+  },
+  "UTC-89": {
+    "en": "Ran {program} on {name}.",
+    "hi": "{name} पर {program} चलाया गया।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "a task named by the program and the paper it ran on, where the agent gave no words of its own (D-017)"
+  },
+  "UTC-90": {
+    "en": "Ran {program}.",
+    "hi": "{program} चलाया गया।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "a task named by its program alone (D-017)"
+  },
+  "UTC-91": {
+    "en": "Tried to run {program} on {name}.",
+    "hi": "{name} पर {program} चलाने की कोशिश की गई।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the failed form of UTC-89, with the error's last line under it (D-017)"
+  },
+  "UTC-92": {
+    "en": "Tried to run {program}.",
+    "hi": "{program} चलाने की कोशिश की गई।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the failed form of UTC-90 (D-017)"
+  },
+  "UTC-93": {
+    "en": "Running {program} on {name}.",
+    "hi": "{name} पर {program} चल रहा है।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the live form of UTC-89 (D-017)"
+  },
+  "UTC-94": {
+    "en": "Running {program}.",
+    "hi": "{program} चल रहा है।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the live form of UTC-90 (D-017)"
+  },
+  "UTC-95": {
+    "en": "Show the command",
+    "hi": "कमांड दिखाएँ",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the task's command folded under its plain words, as \"Show the result\" (D-017, D-016)"
+  },
+  "UTC-96": {
+    "en": "Hide the command",
+    "hi": "कमांड छिपाएँ",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the press once the command shows (D-017, D-016)"
+  },
+  "UTC-97": {
+    "en": "Searched {site} for '{query}'.",
+    "hi": "{site} पर '{query}' खोजा गया।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "a web search limited to one site, its site: operator said in words (D-028)"
+  },
+  "UTC-98": {
+    "en": "Tried to search {site} for '{query}'.",
+    "hi": "{site} पर '{query}' खोजने की कोशिश की गई।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the failed form of UTC-97 (D-028)"
+  },
+  "UTC-99": {
+    "en": "Searching {site} for '{query}'.",
+    "hi": "{site} पर '{query}' खोजा जा रहा है।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the live form of UTC-97 (D-028)"
+  },
+  "UTC-100": {
+    "en": "Run {program} on {name}.",
+    "hi": "{name} पर {program} चलाना।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "a task's permission prompt in plain words, under \"Clauseo asks before going on.\" (D-016)"
+  },
+  "UTC-101": {
+    "en": "Run {program}.",
+    "hi": "{program} चलाना।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the same with no paper named (D-016)"
+  },
+  "UTC-102": {
+    "en": "Copy",
+    "hi": "कॉपी करें",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "under a finished answer and on each of its code blocks (D-026)"
+  },
+  "UTC-103": {
+    "en": "Copied",
+    "hi": "कॉपी हो गया",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Copy's words for two seconds once it copied (D-026)"
   }
 }

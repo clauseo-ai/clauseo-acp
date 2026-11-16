@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use super::{command, search};
+use super::{ShellKind, command, search};
 
 /// Keys whose text Claude Code's own tools write or run, or treat as a pattern, not as a path:
 /// read elsewhere (`command`, a Glob's `pattern`, a Grep's `glob`) or not at all.
@@ -77,18 +77,44 @@ pub(crate) fn candidates_words(raw_input: Option<&Value>, windows: bool) -> Vec<
         .collect()
 }
 
-/// The folders a request may search the whole of ([`search::search_roots`]). Without repeats.
-pub(crate) fn candidates_roots(raw_input: Option<&Value>, windows: bool) -> Vec<PathBuf> {
+/// The folders a request may search the whole of ([`search::search_roots`]), its command read
+/// as `shell`, the shell of the tool that sent it. Without repeats.
+pub(crate) fn candidates_roots(
+    raw_input: Option<&Value>,
+    windows: bool,
+    shell: ShellKind,
+) -> Vec<PathBuf> {
     let Some(input) = raw_input else {
         return Vec::new();
     };
     let mut out: Vec<PathBuf> = Vec::new();
-    for root in search::search_roots(input, &command_lines(input), windows) {
+    for root in search::search_roots(input, &command_lines(input), windows, shell) {
         if !out.contains(&root) {
             out.push(root);
         }
     }
     out
+}
+
+/// The command names of `rawInput.command` ([`command::command_names`]): a string as one
+/// line; an array (a program and its arguments) quoted back into one, so an argument such as
+/// `echo`'s `curl` is never taken for a command, while `bash -lc '<script>'` still is read.
+pub(crate) fn command_names(raw_input: Option<&Value>, windows: bool) -> Vec<String> {
+    let line = match raw_input.and_then(|input| input.get("command")) {
+        Some(Value::String(line)) => line.clone(),
+        Some(Value::Array(words)) => {
+            let quoted = words.iter().filter_map(Value::as_str).map(|word| {
+                match (word.contains('\''), word.contains('"')) {
+                    (false, _) => format!("'{word}'"),
+                    (true, false) => format!("\"{word}\""),
+                    (true, true) => word.to_owned(),
+                }
+            });
+            quoted.collect::<Vec<_>>().join(" ")
+        }
+        _ => return Vec::new(),
+    };
+    command::command_names(&line, windows)
 }
 
 /// `rawInput.command`'s command lines: the string, or each string of an array, as Codex sends

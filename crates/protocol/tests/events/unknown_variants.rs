@@ -114,7 +114,8 @@ fn permission_about() {
 #[test]
 fn stop_reason() {
     use StopReason::{
-        AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, NotAllowed, Refusal,
+        AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, NotAllowed, OutsideMatter,
+        Refusal, TooLong,
     };
     let cases = [
         (EndTurn, "end_turn"),
@@ -123,8 +124,10 @@ fn stop_reason() {
         (Refusal, "refusal"),
         (Cancelled, "cancelled"),
         (NotAllowed, "not_allowed"),
+        (OutsideMatter, "outside_matter"),
         (AtLimit, "at_limit"),
         (Failed, "failed"),
+        (TooLong, "too_long"),
     ];
     unit_enum(&StopReason::ALL, &cases, StopReason::Unknown);
     let names: Vec<_> = StopReason::ALL
@@ -160,6 +163,22 @@ fn pack_skip_reason() {
 #[test]
 fn notice_kind() {
     decodes_in_both(r#""context_not_restored""#, &NoticeKind::ContextNotRestored);
+    decodes_in_both(
+        r#""auto_mode_unavailable""#,
+        &NoticeKind::AutoModeUnavailable,
+    );
+    decodes_in_both(
+        r#""outside_matter_blocked""#,
+        &NoticeKind::OutsideMatterBlocked,
+    );
+    decodes_in_both(
+        r#""shell_network_blocked""#,
+        &NoticeKind::ShellNetworkBlocked,
+    );
+    decodes_in_both(
+        r#""shell_network_blocked_no_web_search""#,
+        &NoticeKind::ShellNetworkBlockedNoWebSearch,
+    );
     let pack = PackId::new("nda-kit").unwrap();
     let skipped = NoticeKind::SkillPackNotLoaded {
         pack,
@@ -202,7 +221,7 @@ fn deliverable() {
 
 #[test]
 fn checkpoint_kind() {
-    use CheckpointKind::{AfterTurn, BeforeTurn, Import, OutsideEdits, Restore, Undo};
+    use CheckpointKind::{AfterTurn, BeforeTurn, Import, OutsideEdits, Restore, Revisions, Undo};
     let cases = [
         (Import, "import"),
         (BeforeTurn, "before_turn"),
@@ -210,6 +229,7 @@ fn checkpoint_kind() {
         (OutsideEdits, "outside_edits"),
         (Undo, "undo"),
         (Restore, "restore"),
+        (Revisions, "revisions"),
     ];
     unit_enum(&CheckpointKind::ALL, &cases, CheckpointKind::Unknown);
 }
@@ -250,6 +270,7 @@ fn skipped_file_reason() {
     let cases = [
         (SkippedFileReason::OverSizeCap, "over_size_cap"),
         (SkippedFileReason::CloudOnly, "cloud_only"),
+        (SkippedFileReason::UnreadFolder, "unread_folder"),
     ];
     unit_enum(&SkippedFileReason::ALL, &cases, SkippedFileReason::Unknown);
 }
@@ -373,6 +394,7 @@ fn steer_outcome() {
         (SteerOutcome::Injected { turn }, "injected"),
         (SteerOutcome::Requeued { turn }, "requeued"),
         (SteerOutcome::SentNow { turn }, "sent_now"),
+        (SteerOutcome::NotSent { turn }, "not_sent"),
     ];
     for (value, key) in &cases {
         let json = format!(r#"{{"{key}":{{"turn":"{}"}}}}"#, v7_text(7));
@@ -388,7 +410,10 @@ fn steer_outcome() {
         r#"invalid type: string "not-a-uuid", expected 16 bytes"#,
     );
     let names = SteerOutcome::VARIANT_NAMES;
-    assert_eq!(names, ["Injected", "Requeued", "SentNow", "Unknown"]);
+    assert_eq!(
+        names,
+        ["Injected", "Requeued", "SentNow", "NotSent", "Unknown"]
+    );
 }
 
 #[test]

@@ -257,7 +257,8 @@ fn a_prerelease_sorts_below_its_release() {
 #[test]
 fn an_exe_for_another_cpu_never_replaces_this_copy() {
     let key = key();
-    // A validly signed arm64 exe, newer, on an x64 copy: kept out.
+    // A validly signed arm64 exe, newer, on an x64 copy on an x64 machine: kept out (the one
+    // move to ARM64, on an ARM64 machine, is `machine/tests.rs`'s).
     let arm64 = image_for(pe_version::MACHINE_ARM64, [1, 4, 0, 0], b"arm64");
     let mut fake = Fake::new(&old(), &arm64, &key, &good_for(&arm64));
     let exit = run_on(&mut fake, &key.public(), pe_version::MACHINE_X64);

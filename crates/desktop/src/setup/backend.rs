@@ -17,10 +17,16 @@
 //!   an agent's install is `Ready`; an agent not installed shows `SignedOut`. A queue newly held
 //!   for an agent's sign-in (`agent.auth_required`) checks its status again
 //!   (`recheck_sign_in`), one at a time per agent.
+//! - **One sign-in at a time.** Installs run side by side, one per agent, each published as it
+//!   goes; sign-ins do not. A sign-in press (`StartSignIn`, `UseDeviceCode`,
+//!   `UseDifferentAccount`) while another agent's sign-in is going is kept as a pending press,
+//!   shown `Queued` (`pending.rs`), and the pump starts it once that sign-in ends, with no new
+//!   command. Status checks, sign-outs and searches never wait.
 //! - **Confirms.** `SetFirmEndpoint` asks the lawyer first; a decline runs nothing and answers
-//!   `transport.unauthorized`. `RetryAgentInstall` is `command.invalid` unless the install is
-//!   `Failed`, `Waiting` or `Paused`: a missing agent is installed only through `InstallAgent`
-//!   or a pending sign-in. `OpenSignInPage` opens the `DeviceCode`
+//!   `transport.unauthorized`. So does a Codex sign-in over Clauseo's own login (`switch.rs`),
+//!   whose decline answers `Done`. `RetryAgentInstall` is `command.invalid` unless the install
+//!   is `Failed`, `Waiting` or `Paused`: a missing agent is installed only through
+//!   `InstallAgent` or a pending sign-in. `OpenSignInPage` opens the `DeviceCode`
 //!   state's page and does nothing in any other state. `SignOut` on a `Reused` login answers
 //!   `command.invalid` and runs no logout.
 //! - **Leaving a reused login** (piece B, `leave.rs`): `StopUsingLogin`, `UseDifferentAccount`,
@@ -39,7 +45,7 @@ use clauseo_agents::{
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
 use futures::{Stream, StreamExt as _};
 
-use super::admit::{key_stored, sign_in_barred};
+use super::admit::sign_in_barred;
 use super::compose::Compose;
 use super::confirm::{Ask, SetupConfirm};
 use super::host_calls::SetupHost;
@@ -53,10 +59,11 @@ use crate::open::{Opener, open_url_unconfirmed};
 
 pub(crate) use self::count::SetupCounts;
 use self::count::Tally;
+use self::entry::log_published;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
-use self::parts::{checked_endpoint, invalid, network_first, plan_method, retry};
-use self::pending::Press;
+use self::parts::{invalid, network_first, plan_method, retry};
+use self::pending::{Kept, Press};
 pub(crate) use self::seam::SetupAgents;
 use self::write::write_entry;
 pub(crate) use self::write::write_entry_as;
@@ -96,7 +103,7 @@ pub(crate) struct AgentsBackend {
     pub(crate) rechecks: Mutex<BTreeSet<AgentId>>,
     /// The sign-ins pressed before their agent was installed, one per agent (`pending.rs`):
     /// memory only, so none outlives a quit.
-    pub(crate) pending: Mutex<BTreeMap<AgentId, Press>>,
+    pub(crate) pending: Mutex<BTreeMap<AgentId, Kept>>,
     /// Piece B's: the limits readers, the reused logins, the waiters and the settings read.
     pub(crate) wiring: Wiring,
     /// Where the pump's usage counts go (`count.rs`).
@@ -158,6 +165,9 @@ impl AgentsBackend {
                 use_system_proxy, ..
             } => retry(self, &agent, use_system_proxy)?,
             SetupCommand::StartSignIn { console, .. } => {
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
+                    return Ok(());
+                };
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
@@ -166,13 +176,7 @@ impl AgentsBackend {
                     tracing::info!(%agent, "sign-in joined: the kept press started meanwhile");
                     return Ok(());
                 }
-                if !pending::keep_press(self, &agent, Press::SignIn(method)) {
-                    agents
-                        .sign_in(&agent, method)
-                        .map_err(|error| signin_error(&error))?;
-                    tracing::info!(%agent, method = ?method, "sign-in started");
-                    self.replaced(&agent);
-                }
+                pending::keep_or_start(self, &agent, Press::SignIn(method), switch)?;
             }
             SetupCommand::CancelSignIn { .. } => {
                 self.compose.cancelling(&agent);
@@ -192,46 +196,35 @@ impl AgentsBackend {
                     .map_err(|error| signin_error(&error))?;
             }
             SetupCommand::UseDeviceCode { .. } => {
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
+                    return Ok(());
+                };
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
-                if !pending::keep_press(self, &agent, Press::SignIn(Method::DeviceCode)) {
-                    agents
-                        .sign_in(&agent, Method::DeviceCode)
-                        .map_err(|error| signin_error(&error))?;
-                    tracing::info!(%agent, method = ?Method::DeviceCode, "sign-in started");
-                    self.replaced(&agent);
-                }
+                pending::keep_or_start(self, &agent, Press::SignIn(Method::DeviceCode), switch)?;
             }
             SetupCommand::OpenSignInPage { .. } => {
                 if let Some(SigninState::DeviceCode { url, .. }) = agents.signin_state(&agent) {
                     open_url_unconfirmed(&*self.opener, &url)?;
                 }
             }
-            SetupCommand::SignOut { .. } => {
-                self.refuse_reused(&agent)?;
-                agents
-                    .sign_out(&agent)
-                    .map_err(|error| signin_error(&error))?;
-                self.replaced(&agent);
-            }
+            SetupCommand::SignOut { .. } => pending::sign_out(self, &agent)?,
             SetupCommand::UseFoundLogin { .. } => {
                 let hold = leave::hold_reads(self, &agent).await;
                 self.use_found(&agent, hold)?;
             }
             SetupCommand::UseDifferentAccount { .. } => {
                 self.refuse_start(&agent)?;
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
+                    return Ok(());
+                };
                 if self.reused(&agent) {
                     leave::leave_first(self, &agent, leave::After::Rule).await?;
                 }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
-                if !pending::keep_press(self, &agent, Press::DifferentAccount) {
-                    agents
-                        .use_different_account(&agent)
-                        .map_err(|error| signin_error(&error))?;
-                    self.replaced(&agent);
-                }
+                pending::keep_or_start(self, &agent, Press::DifferentAccount, switch)?;
             }
             SetupCommand::StopUsingLogin { .. } => {
                 if !self.reused(&agent) {
@@ -250,7 +243,9 @@ impl AgentsBackend {
                 })?;
                 self.replaced(&agent);
             }
-            SetupCommand::SetAgentKey { key, .. } => self.set_key(&agent, key, key_write).await?,
+            SetupCommand::SetAgentKey { key, .. } => {
+                key_endpoint::set_key(self, &agent, key, key_write).await?;
+            }
             SetupCommand::ClearAgentKey { .. } => {
                 let hold = leave::hold_reads(self, &agent).await;
                 let then = self.key_trigger(&agent);
@@ -260,102 +255,9 @@ impl AgentsBackend {
                 leave::restart_for_login(self, &agent).await;
             }
             SetupCommand::SetFirmEndpoint { url, .. } => {
-                self.set_endpoint(&agent, info, url).await?;
+                key_endpoint::set_endpoint(self, &agent, info, url).await?;
             }
         }
-        Ok(())
-    }
-
-    /// `SetAgentKey`: refused while policy blocks the agent, for a key the keychain would
-    /// refuse (`command.invalid`), and from `main` while a key is there; a reused login is left
-    /// first (the leave order), but only once the key is known to be taken: `main`'s first key
-    /// on a reused login reads the keychain first, and a read that fails refuses it, so no
-    /// refusal ever follows a leave (the security review's M5), and a computer with no keychain
-    /// refuses any key before it (review N1). The reads are held while the
-    /// key is written, then the agents restart with it and the limits read it.
-    async fn set_key(
-        &self,
-        agent: &AgentId,
-        key: clauseo_protocol::Secret,
-        key_write: KeyWrite,
-    ) -> Result<(), HostError> {
-        self.refuse_blocked(agent)?;
-        KeyCache::check(agent, &key)?;
-        self.keys.refuse_unavailable(agent)?;
-        // `main`'s first key leaves no login for a key that is there already. One marked
-        // unreadable goes on to the keychain's check, which reads it again.
-        if key_write == KeyWrite::OnlyIfAbsent && self.keys.in_memory(agent) {
-            return Err(key_stored(agent));
-        }
-        let left = self.reused(agent);
-        if left
-            && key_write == KeyWrite::OnlyIfAbsent
-            && self.keys.probe(agent, self.key_trigger(agent)).await?
-        {
-            return Err(key_stored(agent));
-        }
-        if left {
-            leave::leave_first(self, agent, leave::After::Command).await?;
-        }
-        let hold = leave::hold_reads(self, agent).await;
-        let then = self.key_trigger(agent);
-        let stored = self.keys.set(agent, key, key_write, then).await;
-        drop(hold);
-        if let Err(error) = stored {
-            if left {
-                leave::restart_if_usable(self, agent).await;
-            }
-            return Err(error);
-        }
-        self.end_sign_in(agent);
-        leave::restart_for_login(self, agent).await;
-        Ok(())
-    }
-
-    /// `SetFirmEndpoint`: every check before the confirm, so a refused endpoint asks nothing and
-    /// a page cannot write its own words into the dialog: `signin.policy_unreadable` while
-    /// policy is unreadable for a firm plan, `settings.locked` for a plan policy sets, and
-    /// `command.invalid` for an address the settings crate would refuse. Then the confirm, then
-    /// the endpoint alone written, the plan's provider and variables kept.
-    async fn set_endpoint(
-        &self,
-        agent: &AgentId,
-        info: &AgentInfo,
-        url: Option<String>,
-    ) -> Result<(), HostError> {
-        self.refuse_blocked(agent)?;
-        if info.plan_locked {
-            return Err(HostError::new(
-                ErrorCode::SettingsLocked,
-                format!("the firm's policy sets plans.{agent}"),
-            ));
-        }
-        let url = url.as_deref().map(checked_endpoint).transpose()?;
-        let name = info.name.clone();
-        self.ask(Ask::Endpoint {
-            name,
-            url: url.clone(),
-        })
-        .await?;
-        let left = url.is_some() && self.reused(agent);
-        if left {
-            leave::leave_first(self, agent, leave::After::Command).await?;
-        }
-        let firm = url.is_some() || info.provider;
-        let hold = leave::hold_reads(self, agent).await;
-        let set = self.host.set_endpoint(agent.clone(), url).await;
-        drop(hold);
-        if let Err(error) = set {
-            if left {
-                leave::restart_if_usable(self, agent).await;
-            }
-            return Err(error);
-        }
-        self.compose.set_firm(agent, firm);
-        if firm {
-            self.end_sign_in(agent);
-        }
-        leave::restart_for_login(self, agent).await;
         Ok(())
     }
 
@@ -496,7 +398,8 @@ impl AgentsBackend {
     }
 
     /// Follows `Agents`' events until they end: installs out as `AgentInstallProgress` (and the
-    /// entry written on `Ready`), sign-ins through [`Compose`], `OpenUrl` opened, notes logged.
+    /// entry written on `Ready`), sign-ins through [`Compose`] (then `pending::run_next`),
+    /// `OpenUrl` opened, notes logged.
     pub(crate) async fn pump(&self, source: impl Stream<Item = AgentsEvent>) {
         let mut source = std::pin::pin!(source);
         let mut checked = BTreeSet::new();
@@ -514,6 +417,7 @@ impl AgentsBackend {
                     lock(&self.rechecks).remove(&agent);
                     tally.signin(&*self.counts, &self.compose, &agent, &state);
                     leave::signin_event(self, &agent, state).await;
+                    pending::run_next(self);
                 }
                 AgentsEvent::OpenUrl { agent, url } => {
                     if let Err(error) = open_url_unconfirmed(&*self.opener, &url) {
@@ -521,10 +425,12 @@ impl AgentsBackend {
                     }
                 }
                 AgentsEvent::SigninNote { agent, note } => events::note(&agent, note),
+                AgentsEvent::Python { state } => entry::python_event(self, &state),
                 // A job that ended with no state (a status check that could not tell): an
                 // `auth_required` re-check of it is over, so the next hold may ask again.
                 AgentsEvent::SigninUnchanged { agent } => {
                     lock(&self.rechecks).remove(&agent);
+                    pending::run_next(self);
                 }
                 _ => {}
             }
@@ -532,8 +438,8 @@ impl AgentsBackend {
     }
 
     /// One install state: sent to the windows; on `Ready` the entry written, then a pending
-    /// sign-in run (`pending.rs`) or else the status checked (once per agent); an agent with no
-    /// sign-in state yet shown signed out.
+    /// sign-in run (`pending.rs`) or else the status checked (once per agent; not over a press
+    /// still waiting for another sign-in); an agent with no sign-in state yet shown signed out.
     async fn install_event(
         &self,
         agent: &AgentId,
@@ -543,16 +449,19 @@ impl AgentsBackend {
         let Some(info) = self.known.get(agent) else {
             return;
         };
-        if let Some(progress) = progress(state, &info.hosts) {
+        let before = lock(&self.wiring.applied).installed.contains(agent);
+        if let Some(progress) = progress(state, &info.hosts, before) {
             self.events.publish(SetupEvent::AgentInstallProgress {
                 agent: agent.clone(),
                 state: progress,
             });
+            log_published(agent, state);
         }
         if matches!(state, InstallState::Ready { .. }) {
             write_entry(self, agent).await;
-            let started = pending::run_press(self, agent);
-            if checked.insert(agent.clone()) && !started {
+            let ran = pending::run_press(self, agent);
+            let fresh = ran != pending::Ran::Waits && checked.insert(agent.clone());
+            if fresh && ran == pending::Ran::Nothing {
                 super::status_timing::asked(agent, "installed");
                 if let Err(error) = self.agents.check_status(agent) {
                     tracing::warn!(%agent, %error, "no status check");
@@ -568,9 +477,18 @@ impl AgentsBackend {
     /// `agent.auth_required` (`start::follow_sign_in_holds`), so a login that is gone shows as
     /// gone. At most one at a time per agent: none while a sign-in of it is going (its own end
     /// says how it stands) or while the last one asked for has sent no state yet; and S18 runs
-    /// one job per agent, so a check asked while another job runs starts none.
+    /// one job per agent, so a check asked while another job runs starts none. With a key in
+    /// memory, the provider refused that key: the key's line says so (`refused`), since the
+    /// status check reads only the plan login and the key's line would stand unchanged.
     pub(crate) fn recheck_sign_in(&self, agent: &AgentId) {
-        if !self.known.contains_key(agent) || self.agents.sign_in_going(agent) {
+        if !self.known.contains_key(agent) {
+            return;
+        }
+        if self.keys.in_memory(agent) {
+            tracing::info!(%agent, "auth required: the key in memory was refused");
+            self.compose.key_refused(agent);
+        }
+        if self.agents.sign_in_going(agent) {
             return;
         }
         if !lock(&self.rechecks).insert(agent.clone()) {
@@ -590,9 +508,11 @@ impl AgentsBackend {
 
 mod count;
 mod entry;
+mod key_endpoint;
 mod parts;
 mod pending;
 mod seam;
+mod switch;
 #[cfg(test)]
 mod tests;
 mod write;

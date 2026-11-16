@@ -1,0 +1,371 @@
+# agent-browser-build: our build of agent-browser, upstream's source at the commit
+# crates/desktop/agent-browser.toml pins plus the patches in crates/desktop/agent-browser/patches/
+# (crates/desktop/agent-browser/README.md), for the four release targets that take it: both
+# Windows triples, each native on its own runner (ARM64 included), and both macOS triples on
+# macos-15 (x86_64 cross-compiled, as release.yml builds the app). Linux keeps upstream's binary
+# for now, so there is no Linux leg. Each leg runs crates/desktop/sidecars/agent-browser-build.mjs,
+# which checks the source archive's SHA-256 against the pin, applies the patches, runs the patched
+# source's own `cargo test --locked`, then `cargo build --release --locked` with the
+# reproducibility settings its header lists (and crt-static on Windows). A Windows leg checks the
+# exe for VC++ runtime imports (pe-crt-imports.mjs). Each leg uploads the binary with its build
+# record (agent-browser-<triple>.json).
+#
+# With `publish` (dispatched from main), `attest` signs the build provenance of the binaries and
+# their records, and `publish` makes this repository's GitHub release named by the pin's
+# patched_tag, as a pre-release that is never marked latest (the updater reads releases/latest),
+# holding the four binaries, the records and SHA256SUMS (over both). The release's sidecar fetch
+# (crates/desktop/sidecars/agent-browser.mjs) downloads from it; the pin's sha256 lines are pasted
+# from the build logs or SHA256SUMS in a follow-up commit. Nothing is signed or notarised here:
+# release.yml signs the sidecars as before (sign-windows signs every PE in
+# crates/desktop/binaries/; the macOS build leg codesigns Contents/Helpers/clauseo-agent-browser
+# with the app's identity and the hardened runtime before bundling).
+#
+# Jobs: resolve -> build (four legs) -> attest -> publish, and `intel` beside attest.
+# - `resolve` (contents: read) refuses a `ref` that is not a full 40-hex commit SHA, checks it out,
+#   reads the pin's patched_tag and refuses one not of the form agent-browser-v<X.Y.Z>-clauseo.<n>.
+#   Every later job takes the SHA and the tag from its outputs, so all of them see one commit.
+# - `build` (contents: read) runs the dispatched commit's scripts, with no secret and no write.
+# - `intel` (contents: read) runs the x86_64 macOS build on an Intel runner; a report, not a gate.
+# - `attest` runs no repository code: it downloads the artifacts and attests them (OIDC).
+# - `publish` runs in the environment agent-browser-publish (main only, a required reviewer, who
+#   approves the SHA and the tag `resolve` shows). It checks out nothing and runs only its own
+#   inline shell: it checks the tag's pattern again, each binary's attestation (this workflow,
+#   refs/heads/main), refuses when the release or the tag exists, creates the tag through the API
+#   at the resolved SHA (the ruleset lets only this tag pattern be created; another ruleset forbids
+#   moving or deleting it), then the release with --verify-tag and never --clobber.
+#
+# Manual only, dispatched from main with the commit whose pin and patches to build:
+#   gh workflow run agent-browser-build.yml --ref main -f ref=<40-hex commit SHA> -f publish=true
+# Run it when the pin or a patch changes, with patched_tag counted up first; publishing an
+# existing tag fails. Every action is pinned by commit SHA, with its tag in a comment, copied
+# from release.yml and python-runtime.yml; every job has its own `permissions:`.
+
+name: agent-browser-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The full 40-hex commit SHA of this repository whose pin and patches to build.
+        type: string
+        required: true
+      publish:
+        description: Publish the four builds as the pre-release named by the pin's patched_tag (main only).
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: agent-browser-build
+  cancel-in-progress: false
+
+jobs:
+  # The one commit every job builds, checks out or tags, and the tag its pin names.
+  resolve:
+    name: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # checkout
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: The ref is a full commit SHA
+        id: sha
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::ref must be a full 40-hex lowercase commit SHA, not a branch, tag or short SHA"
+            exit 1
+          fi
+          echo "sha=$REF" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      - name: The pin's patched_tag
+        id: tag
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          [ "$head" = "$SHA" ] || { echo "::error::checked out $head, not $SHA"; exit 1; }
+          tag=$(node crates/desktop/sidecars/agent-browser-build.mjs tag)
+          if ! [[ "$tag" =~ ^agent-browser-v[0-9]+\.[0-9]+\.[0-9]+-clauseo\.[0-9]+$ ]]; then
+            echo "::error::the pin's patched_tag '$tag' is not agent-browser-v<X.Y.Z>-clauseo.<n>"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "### agent-browser $tag from $SHA" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: resolve
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read # checkout
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, ext: .exe }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, ext: .exe }
+          - { target: aarch64-apple-darwin, runner: macos-15, ext: "" }
+          - { target: x86_64-apple-darwin, runner: macos-15, ext: "" }
+    env:
+      TARGET: ${{ matrix.target }}
+      OUT: ${{ github.workspace }}/agent-browser-out
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      # rust-toolchain.toml's channel, minimal, with the target; the script builds with it by
+      # RUSTUP_TOOLCHAIN, as the source it builds sits outside this checkout.
+      - name: Install the pinned Rust toolchain and the target
+        run: |
+          channel=$(node crates/desktop/sidecars/agent-browser-build.mjs toolchain)
+          rustup toolchain install "$channel" --profile minimal --target "$TARGET"
+
+      - name: Build agent-browser from the pinned source and the patches
+        run: node crates/desktop/sidecars/agent-browser-build.mjs build --target "$TARGET" --out "$OUT"
+
+      - name: The exe imports no VC++ runtime DLL (crt-static)
+        if: runner.os == 'Windows'
+        run: node .github/scripts/pe-crt-imports.mjs "$OUT/agent-browser-$TARGET.exe"
+
+      - name: Summary
+        run: |
+          {
+            echo "### agent-browser ($TARGET)"
+            echo '```json'
+            cat "$OUT/agent-browser-$TARGET.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Also after a failed step, so a binary built before its tests failed still reaches the Intel
+      # check. The leg stays red, and attest and publish need every leg green; with no binary at
+      # all, if-no-files-found fails this step.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: agent-browser-${{ matrix.target }}
+          path: |
+            ${{ env.OUT }}/agent-browser-${{ matrix.target }}${{ matrix.ext }}
+            ${{ env.OUT }}/agent-browser-${{ matrix.target }}.json
+          if-no-files-found: error
+
+  # Requested by stage E: the only real Intel check of the macOS x86_64 helper. The build leg
+  # cross-compiles it on Apple silicon, exactly as release.yml does, so the binary tested here is
+  # the one we ship; its own cargo tests ran there under Rosetta 2. This job runs that binary on an
+  # Intel runner (macos-15-intel, GitHub's last Intel image, until August 2027): its type, the
+  # linker's ad-hoc signature (the real signing stays in release.yml), the version against the
+  # pin's patched_tag, and the daemon with streaming off as Clauseo's guard runs it, with a control
+  # run that streaming on does listen. A report, not a gate: nothing needs it, and
+  # continue-on-error keeps a red run from failing the workflow. It checks out nothing. It runs
+  # even when another build leg failed (`!cancelled()`): it needs only the x86_64 artifact, and
+  # its download fails the job when that leg failed too.
+  intel:
+    name: intel check (x86_64-apple-darwin)
+    needs: [resolve, build]
+    if: ${{ !cancelled() && needs.resolve.result == 'success' }}
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: agent-browser-x86_64-apple-darwin
+          path: ${{ runner.temp }}/ab
+
+      - name: The shipped x86_64 binary on Intel
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+          AB_DIR: ${{ runner.temp }}/ab
+        run: |
+          set -euo pipefail
+          [ "$(uname -m)" = x86_64 ] || { echo "::error::runner is $(uname -m), not x86_64"; exit 1; }
+          ab="$AB_DIR/agent-browser-x86_64-apple-darwin"
+          chmod +x "$ab"
+          file "$ab"
+          file "$ab" | grep -q 'x86_64' || { echo "::error::not an x86_64 binary"; exit 1; }
+          codesign -dv "$ab" 2>&1 || true
+          want="${TAG#agent-browser-v}"
+          got=$("$ab" --version)
+          echo "version: $got (want $want)"
+          printf '%s\n' "$got" | grep -qF -- "$want" || { echo "::error::version is not $want"; exit 1; }
+
+          # Session files go where upstream's get_socket_dir puts them when this is set.
+          export AGENT_BROWSER_SOCKET_DIR="$RUNNER_TEMP/ab-sock"
+          mkdir -p "$AGENT_BROWSER_SOCKET_DIR"
+          # agent-browser's own TCP listeners only (-a: the -i and -c filters must both hold); the
+          # Chrome it starts here may listen on a debugging port, which does not count.
+          listeners() { lsof -nP -a -iTCP -sTCP:LISTEN -c agent-browser || true; }
+
+          echo "--- streaming off, as Clauseo's guard runs it"
+          AGENT_BROWSER_STREAM_DISABLED=1 "$ab" --session ci-intel open about:blank
+          off=$(listeners)
+          printf '%s\n' "$off"
+          ls -la "$AGENT_BROWSER_SOCKET_DIR"
+          stream_off=no
+          [ -e "$AGENT_BROWSER_SOCKET_DIR/ci-intel.stream" ] && stream_off=yes
+          AGENT_BROWSER_STREAM_DISABLED=1 "$ab" --session ci-intel close || true
+
+          echo "--- control: streaming on, so lsof must see a listener"
+          "$ab" --session ci-control open about:blank
+          on=$(listeners)
+          printf '%s\n' "$on"
+          stream_on=no
+          [ -e "$AGENT_BROWSER_SOCKET_DIR/ci-control.stream" ] && stream_on=yes
+          "$ab" --session ci-control close || true
+
+          {
+            echo "### Intel check, $TAG"
+            echo "- streaming off: listeners: $([ -z "$off" ] && echo none || echo SOME); .stream file: $stream_off"
+            echo "- control, streaming on: listeners: $([ -n "$on" ] && echo seen || echo none); .stream file: $stream_on"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ -n "$on" ] || { echo "::error::the control showed no listener, so the off check proves nothing"; exit 1; }
+          [ -z "$off" ] || { echo "::error::agent-browser listened on TCP with streaming off"; exit 1; }
+          [ "$stream_off" = no ] || { echo "::error::a .stream file exists with streaming off"; exit 1; }
+
+  # Runs no repository code, so the OIDC token that signs never meets the build's code. Behind
+  # the same environment as publish: no attestation naming this workflow exists until the
+  # reviewer has checked the commit (each run asks for two approvals, this one and publish's).
+  attest:
+    name: attest
+    needs: build
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: agent-browser-publish
+    permissions:
+      id-token: write # the Sigstore signing certificate of the attestation
+      attestations: write # stores the attestation on the repository
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: agent-browser-*
+          path: dist
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*/agent-browser-*
+
+  # A pre-release, never latest: a latest release would become the updater's releases/latest.
+  # Checks out nothing: every step is an action or this file's own shell.
+  publish:
+    name: publish
+    needs: [resolve, attest]
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: agent-browser-publish
+    concurrency:
+      group: agent-browser-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write # creates the tag and the release
+      attestations: read # gh attestation verify reads the binaries' attestations
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: agent-browser-*
+          path: ${{ runner.temp }}/artifacts
+          merge-multiple: true
+
+      - name: Check the tag, the binaries and their attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          ARTIFACTS: ${{ runner.temp }}/artifacts
+          DIST: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          # The pin's macOS and Windows urls name this repository's releases; a fork's run
+          # publishes nothing.
+          if [ "$GITHUB_REPOSITORY" != clauseo-ai/clauseo-acp ]; then
+            echo "::error::the pin downloads from clauseo-ai/clauseo-acp, not $GITHUB_REPOSITORY"
+            exit 1
+          fi
+          if ! [[ "$TAG" =~ ^agent-browser-v[0-9]+\.[0-9]+\.[0-9]+-clauseo\.[0-9]+$ ]]; then
+            echo "::error::the tag '$TAG' is not agent-browser-v<X.Y.Z>-clauseo.<n>"
+            exit 1
+          fi
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::the commit '$SHA' is not a full 40-hex SHA"
+            exit 1
+          fi
+          mkdir -p "$DIST"
+          binaries=(agent-browser-x86_64-pc-windows-msvc.exe agent-browser-aarch64-pc-windows-msvc.exe
+            agent-browser-aarch64-apple-darwin agent-browser-x86_64-apple-darwin)
+          for binary in "${binaries[@]}"; do
+            record="${binary%.exe}.json"
+            for file in "$binary" "$record"; do
+              [ -f "$ARTIFACTS/$file" ] || { echo "::error::$file was not built"; exit 1; }
+              gh attestation verify "$ARTIFACTS/$file" --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/agent-browser-build.yml" \
+                --source-ref refs/heads/main
+              cp "$ARTIFACTS/$file" "$DIST/"
+            done
+          done
+          (cd "$DIST" && sha256sum -- "${binaries[@]}" agent-browser-*.json > SHA256SUMS)
+          cat "$DIST/SHA256SUMS"
+
+      # Immutable: refuse when the release or the tag exists. Creating the tag through the API at
+      # the resolved commit is the guard against a race, since GitHub refuses a ref that exists
+      # (422); a tag left by a failed run makes the next run refuse too, until an admin removes it.
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          DIST: ${{ runner.temp }}/dist
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::The release $TAG exists; a published build is never replaced. Count up patched_tag in crates/desktop/agent-browser.toml."
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo "::error::The tag $TAG exists; a published build is never replaced. Count up patched_tag in crates/desktop/agent-browser.toml."
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$SHA" > /dev/null
+          cd "$DIST"
+          {
+            echo "agent-browser for macOS and Windows: upstream vercel-labs/agent-browser plus our patches, built by agent-browser-build.yml from $SHA. See crates/desktop/agent-browser/README.md."
+            echo
+            echo "Each file's build provenance is attested: \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
+            echo
+            echo '```'
+            cat SHA256SUMS
+            echo '```'
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --prerelease --latest=false --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" \
+            agent-browser-*-msvc.exe agent-browser-*-apple-darwin agent-browser-*.json SHA256SUMS

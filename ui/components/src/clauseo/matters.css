@@ -34,6 +34,23 @@
   .room-find-key {
     flex: none;
   }
+  /* a found row: its words wrap inside the rail, a long word or address broken where it must be, never pushing the
+     rail wider */
+  .room-find-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .room-find-row > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  /* a snippet in three lines at most: one long answer can't fill the rail */
+  .room-find-said {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+  }
   /* a found word inside a snippet or a file name */
   .room-find-hit {
     @apply text-primary font-chip;
@@ -258,6 +275,10 @@
   .room-conv-ask {
     @apply text-small font-chip text-primary;
   }
+  /* an answer ready, a failure or Answering.: said under the title, muted, below the hand's weight */
+  .room-conv-said {
+    @apply text-small text-muted;
+  }
   .room-conv-more {
     position: absolute;
     top: 0;
@@ -349,6 +370,13 @@
     flex: 1 1 var(--mat-queue-text-min);
     min-width: 0;
     padding: var(--s1-5) 0;
+  }
+  /* when a message goes, under its words across the slip: quiet, as the head's line */
+  .queue-when {
+    @apply text-small text-muted;
+    flex: 1 0 100%;
+    margin-top: calc(-1 * var(--s1));
+    padding-bottom: var(--s1);
   }
   .queue-acts {
     position: relative;
@@ -488,6 +516,25 @@
   }
   .steer-mark-text {
     @apply text-ui-loose font-accepted text-primary;
+  }
+  /* words the agent hasn't taken in yet: a slip like a queued message's, where the mark would stand */
+  .steer-wait {
+    margin: var(--s1) 0;
+    padding: var(--s1-5) var(--s0-5) var(--s0-5) var(--s4);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    box-shadow: var(--e0);
+  }
+  .steer-wait-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s0-5) var(--s3);
+  }
+  .steer-wait-when {
+    @apply text-small text-muted;
+    flex: 1 1 var(--mat-queue-text-min);
+    min-width: 0;
   }
   .steer-note {
     max-width: var(--measure);

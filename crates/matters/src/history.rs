@@ -50,6 +50,23 @@ impl Oid {
         }
         text
     }
+
+    /// The id 40 lowercase hex digits name.
+    pub(crate) fn from_hex(hex: &str) -> Option<Self> {
+        let bytes = hex.as_bytes();
+        if bytes.len() != 40 {
+            return None;
+        }
+        let mut id = [0_u8; 20];
+        for (byte, pair) in id.iter_mut().zip(bytes.chunks(2)) {
+            let text = std::str::from_utf8(pair).ok()?;
+            if text.bytes().any(|b| b.is_ascii_uppercase()) {
+                return None;
+            }
+            *byte = u8::from_str_radix(text, 16).ok()?;
+        }
+        Some(Self(id))
+    }
 }
 
 impl fmt::Debug for Oid {
@@ -143,6 +160,9 @@ pub(crate) trait HistoryStore: Sized {
     /// an [`Error::History`] naming it and `path`, returned after the last byte, so `out`
     /// must be a staging place (a temp file, a buffer) its caller drops on an error.
     fn read_blob(&self, blob: Oid, path: &str, out: &mut dyn Write) -> Result<u64, Error>;
+
+    /// Stores `data` as a blob (zlib level 1) unless it is already there; returns its id.
+    fn write_blob(&mut self, data: &[u8]) -> Result<Oid, Error>;
 
     /// The size of blob `blob` in bytes, from its header.
     fn blob_len(&self, blob: Oid) -> Result<u64, Error>;

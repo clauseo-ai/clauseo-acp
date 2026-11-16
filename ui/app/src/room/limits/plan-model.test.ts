@@ -94,8 +94,8 @@ describe("the toolbar's line by the share used", () => {
       `Limit reached until ${day} 6:10 pm`,
     );
     const { resets_at: _, ...bare } = meter(100);
-    expect(meterLine("en", bare, NOW)).toBe("Limit reached. Reset not given.");
-    expect(meterLine("hi", bare, NOW)).toBe(lim("hi", "Limit reached. Reset not given."));
+    expect(meterLine("en", bare, NOW)).toBe("Limit reached");
+    expect(meterLine("hi", bare, NOW)).toBe(lim("hi", "Limit reached"));
   });
 
   test("tone near under 75% (the agent warned) is close; tone at_limit is reached whatever the share", () => {

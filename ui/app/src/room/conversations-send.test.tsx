@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 // A new conversation's first send refused, in the real room (room.tsx over FakeTransport): a refused create_thread keeps
-// the draft and its words; a refused send_prompt keeps the words, and the next Enter asks the same thread again.
+// the draft and its words; a refused send_prompt keeps the words, and the next Enter asks the same thread again. A first
+// question over the host's cap on a prompt's text makes no thread and sends nothing.
 import { afterEach, expect, test } from "vitest";
 import { uuid } from "../testing/stream-script.ts";
 import type { HostCommand, HostError, ThreadId, ThreadSummary } from "../transport/protocol.ts";
 import { defaultOutcome, mountRoom, THE_MATTER, type Harness } from "./thread/harness.ts";
+import { MAX_PROMPT_TEXT_BYTES } from "./thread/prompt-cost.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -79,4 +81,17 @@ test("send_prompt refused: the words stay, and the next Enter asks the same thre
   expect(h.sent("create_thread")).toHaveLength(1);
   expect(h.sent("send_prompt").map((p) => p.thread)).toEqual([MADE, MADE]);
   expect(kinds().slice(0, 3)).toEqual(["create_thread", "send_prompt", "send_prompt"]);
+});
+
+test("a first question over the cap makes no thread and sends nothing; the draft keeps its words", async () => {
+  h = await mountRoom({ threads: [thread(T1, { title: "Lease notice" })] });
+  await h.click(h.one("new-conversation"));
+  const over = "a".repeat(MAX_PROMPT_TEXT_BYTES + 1);
+  await h.type(over);
+  await h.key({ key: "Enter", keyCode: 13 });
+  await h.settle();
+  expect(kinds()).toEqual([]);
+  expect(newRow()?.getAttribute("aria-current")).toBe("true");
+  expect(field()?.value).toBe(over);
+  expect(h.one("error")?.dataset["code"]).toBe("prompt.too_long");
 });

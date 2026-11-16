@@ -28,7 +28,7 @@ const IDLE_NOTE: &str = "stopped Chrome and agent-browser, keeping the profile";
 
 /// A guard in front of `daemon_stub`, with the idle stop at `idle_ms` when given.
 #[cfg(unix)]
-fn guard(scratch: &Scratch, idle_ms: Option<u64>) -> Guard {
+pub(crate) fn guard(scratch: &Scratch, idle_ms: Option<u64>) -> Guard {
     let mut command = guard_command(scratch, &example("daemon_stub"), &no_args());
     if let Some(ms) = idle_ms {
         command.env(IDLE_KNOB, ms.to_string());
@@ -38,16 +38,16 @@ fn guard(scratch: &Scratch, idle_ms: Option<u64>) -> Guard {
 
 /// The profile the guard's last Chrome was given (`chrome_stub` records it).
 #[cfg(unix)]
-fn profile_of(scratch: &Scratch, guard: &Guard) -> PathBuf {
+pub(crate) fn profile_of(scratch: &Scratch, guard: &Guard) -> PathBuf {
     let file = scratch.path().join(format!("profile-of-{}", guard.pid()));
     PathBuf::from(std::fs::read_to_string(file).unwrap())
 }
 
 /// A call `daemon_stub` never answers: in flight until the guard answers it.
 #[cfg(unix)]
-fn held_call(id: &str) -> Value {
+pub(crate) fn held_call(id: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
-        "params": {"name": "stub_hold", "arguments": {}}})
+        "params": {"name": "agent_browser_wait_for_text", "arguments": {"text": "stub_hold"}}})
 }
 
 /// The handshake and `tools/list` start nothing: no Chrome, no profile, no daemon, and on
@@ -130,8 +130,94 @@ fn the_idle_stop_ends_chrome_and_the_daemon_and_the_next_call_restarts() {
 }
 
 #[cfg(unix)]
-fn write_marker(profile: &std::path::Path) {
+pub(crate) fn write_marker(profile: &std::path::Path) {
     crate::write::write(profile.join("marker"), "kept").unwrap();
+}
+
+/// A tool call to `agent_browser_close` with `id`.
+#[cfg(unix)]
+fn close_call(id: &str) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+        "params": {"name": "agent_browser_close", "arguments": {}}})
+}
+
+/// A close that agent-browser answers with an error stops Chrome and the daemon too.
+#[cfg(unix)]
+#[test]
+fn a_close_answered_with_an_error_still_stops_chrome() {
+    let scratch = Scratch::new("lazy_close_error");
+    let mut guard = guard(&scratch, None);
+    guard.call("open");
+    let first = session_pids(&scratch);
+    guard.send(&close_call("stub-error-close"));
+    let reply = guard.read();
+    assert_eq!(reply["id"], "stub-error-close", "{reply}");
+    assert!(reply.get("error").is_some(), "{reply}");
+    guard.stderr_until("agent_browser_close: stopped Chrome and agent-browser");
+    assert!(within(|| !alive(first[1])), "Chrome {} is left", first[1]);
+    assert!(
+        within(|| !alive(first[0])),
+        "the daemon {} is left",
+        first[0]
+    );
+    assert_eq!(
+        profiles(&scratch.cwd()).len(),
+        1,
+        "the close deleted the profile"
+    );
+    let (status, _) = guard.finish();
+    assert_eq!(status.code(), Some(0));
+    assert_nothing_left(&scratch, first);
+}
+
+/// `agent_browser_close`'s reply goes to the agent, then the guard stops Chrome and the daemon
+/// as the idle stop does, keeping the profile; a close while stopped is answered by the guard
+/// and starts nothing; the next call starts both again on the same profile.
+#[cfg(unix)]
+#[test]
+fn a_close_stops_chrome_and_the_daemon_and_keeps_the_profile() {
+    let scratch = Scratch::new("lazy_close");
+    let mut guard = guard(&scratch, None);
+    guard.call("open");
+    let first = session_pids(&scratch);
+    let profile = profile_of(&scratch, &guard);
+    write_marker(&profile);
+    guard.send(&close_call("close-1"));
+    let reply = guard.read();
+    assert_eq!(reply["id"], "close-1", "{reply}");
+    guard.stderr_until("agent_browser_close: stopped Chrome and agent-browser");
+    assert!(within(|| !alive(first[1])), "Chrome {} is left", first[1]);
+    assert!(
+        within(|| !alive(first[0])),
+        "the daemon {} is left",
+        first[0]
+    );
+    assert!(
+        profile.join("marker").is_file(),
+        "the close deleted the profile"
+    );
+    let chrome_pid = scratch.path().join("chrome.pid");
+    let stopped = std::fs::read_to_string(&chrome_pid).unwrap();
+    guard.send(&close_call("close-2"));
+    let reply = guard.read();
+    assert_eq!(reply["id"], "close-2", "{reply}");
+    assert_eq!(reply["result"]["isError"], false, "{reply}");
+    // The Chrome stand-in writes its pid at each start (`chrome_stub`), before any reply.
+    assert_eq!(
+        std::fs::read_to_string(&chrome_pid).unwrap(),
+        stopped,
+        "a close while stopped started Chrome"
+    );
+    guard.call("again");
+    let mut pids = [0, 0];
+    assert!(within(|| {
+        pids = session_pids(&scratch);
+        pids[1] != first[1] && alive(pids[1])
+    }));
+    assert_eq!(profile_of(&scratch, &guard), profile, "a new profile");
+    let (status, _) = guard.finish();
+    assert_eq!(status.code(), Some(0));
+    assert_nothing_left(&scratch, pids);
 }
 
 /// Chrome's first death: the call in flight gets an error, the daemon is ended, the guard stays
@@ -201,8 +287,8 @@ fn a_guard_killed_while_stopped_leaves_nothing() {
     drop(guard);
 }
 
-/// A SIGKILL of the guard during a lazy restart, while the new Chrome has not listened yet: the
-/// reaper, told the new Chrome's pid before the wait, ends it.
+/// A SIGKILL of the guard during a lazy restart, while the new Chrome has not answered on its
+/// pipe yet: the reaper, told the new Chrome's pid before the wait, ends it.
 #[cfg(unix)]
 #[test]
 fn a_guard_killed_during_a_lazy_restart_leaves_nothing() {
@@ -214,7 +300,7 @@ fn a_guard_killed_during_a_lazy_restart_leaves_nothing() {
     assert!(within(|| !alive(first[1])), "the first Chrome is left");
     scratch.chrome_mode("silent");
     guard.send_call("again");
-    guard.stderr_until("Chrome started; waiting for it to listen");
+    guard.stderr_until("started; waiting for its answer on its DevTools pipe");
     let mut chrome = 0;
     assert!(within(|| {
         chrome = pid_in(&scratch.path().join("chrome.pid"));
@@ -234,34 +320,6 @@ fn a_guard_killed_during_a_lazy_restart_leaves_nothing() {
         assert!(within(|| left().is_empty()), "left behind: {:?}", left());
     }
     drop(guard);
-}
-
-/// The first call waits for a claimed debugging port another process still holds (a dying run's
-/// Chrome after an MCP reconnect), and starts once it is free, rather than the guard exiting.
-#[cfg(unix)]
-#[test]
-fn the_first_call_waits_for_a_busy_debugging_port() {
-    use std::net::{Ipv4Addr, TcpListener};
-    let scratch = Scratch::new("lazy_port_wait");
-    // A port of its own, so the other tests' starts never wait on this one.
-    let port = "61151";
-    let holder = TcpListener::bind((Ipv4Addr::LOCALHOST, 61_151)).unwrap();
-    let mut args = crate::support::guard_args(&scratch, &example("daemon_stub"), &no_args());
-    let at = args.iter().position(|arg| arg == "--cdp-port").unwrap();
-    args[at + 1] = port.into();
-    let mut command = std::process::Command::new(crate::support::GUARD);
-    command.args(args).envs(crate::support::host_env(&scratch));
-    let mut guard = Guard::start(command);
-    guard.send_call("open");
-    guard.stderr_until("is taken; waiting up to 15 s for it");
-    drop(holder);
-    let answer = guard.read();
-    assert_eq!(answer["id"], "open", "{answer}");
-    assert!(answer.get("error").is_none(), "{answer}");
-    let pids = session_pids(&scratch);
-    let (status, _) = guard.finish();
-    assert_eq!(status.code(), Some(0));
-    assert_nothing_left(&scratch, pids);
 }
 
 /// The run's Chrome record through the host's API: none before the first call, the running

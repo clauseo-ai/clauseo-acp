@@ -7,9 +7,6 @@ use clauseo_protocol::Timestamp;
 use crate::model::AgentState;
 use crate::policy::{Action, kind_rules};
 
-/// A window shown again reads when the last read started at least 5 minutes ago.
-const SHOWN_AFTER_MS: i64 = 5 * 60 * 1000;
-
 /// A "try again" within this long of the last read's start starts no read, whatever window
 /// sent it (the Settings window's loop must not launch one reader after another).
 const TRY_AGAIN_AFTER_MS: i64 = 10_000;
@@ -80,9 +77,11 @@ pub(crate) fn request_read(state: &mut AgentState, now: Timestamp, actions: &mut
     actions.push(Action::Read(state.agent));
 }
 
-/// A window got focus, or a meter or the settings page opened.
+/// A window got focus, or a meter or the settings page was shown: reads past the agent kind's
+/// `shown_after_ms`.
 pub(crate) fn shown(state: &mut AgentState, now: Timestamp, actions: &mut Vec<Action>) {
-    let _ = read_if_older(state, SHOWN_AFTER_MS, now, actions);
+    let min_age = kind_rules(state.agent).shown_after_ms;
+    let _ = read_if_older(state, min_age, now, actions);
 }
 
 /// A "try again" starts a read unless the last one started less than [`TRY_AGAIN_AFTER_MS`]

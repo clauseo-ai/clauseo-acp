@@ -25,11 +25,12 @@ use crate::bridge::Bridge;
 use crate::counts::{CountsState, UiCount};
 use crate::frame::Frame;
 use crate::open::{AppData, NativeLinkConfirm, NativeOpener, OpenGates, OpenedFile, RevealTarget};
+use crate::smart_app_control::SmartAppControl;
 
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 24] = [
+pub(crate) const COMMANDS: [&str; 25] = [
     "dispatch",
     "query",
     "open_stream",
@@ -53,6 +54,7 @@ pub(crate) const COMMANDS: [&str; 24] = [
     "count_ui",
     "setup",
     "quit_app",
+    "open_privacy_settings",
     "page_marks",
 ];
 
@@ -110,6 +112,9 @@ pub(crate) struct DisplayInfo {
     /// `…/releases/tag/v{version}`, a test build `…/releases/tag/test-v{version}`, and a dry build
     /// shows no button.
     pub(crate) release_mode: ReleaseMode,
+    /// Windows' Smart App Control state, read once per run (`smart_app_control.rs`): the page
+    /// shows a one-time note in `evaluation`. `None` on macOS and Linux, or when unreadable.
+    pub(crate) smart_app_control: Option<SmartAppControl>,
 }
 
 /// The release mode of this build, as release.yml sets `CLAUSEO_RELEASE_MODE` for its cargo build.
@@ -150,8 +155,8 @@ pub(crate) fn release_mode(env: Option<&str>, e2e: bool) -> ReleaseMode {
 /// `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
 /// window, everything but `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`,
 /// `SetSkillPack`, `RefreshLimits`, `SetUpdateMode`, `CheckForUpdate` and the connector
-/// commands but `DismissCaseLawHint`; from `main`, `SetMode`, `SetConfigOption`,
-/// `SetToolSettings`, `SetPrivacySettings`, `SetUpdateMode`, `SetSkillPack` and every
+/// commands but `DismissCaseLawHint`; from `main`, `SetMode`, a `SetConfigOption` that is not
+/// a choice, `SetToolSettings`, `SetPrivacySettings`, `SetUpdateMode`, `SetSkillPack` and every
 /// connector command but `DismissCaseLawHint` and `RefreshBalance` (`OpenPayLink` among them;
 /// `src/bridge/admit.rs`).
 #[tauri::command]
@@ -228,7 +233,8 @@ pub(crate) async fn unsubscribe<R: Runtime>(
 
 /// Subscribes the window's channel to the app-wide events, those of no stream (today
 /// `settings_changed`). It starts with nothing: subscribe, then read the current state with
-/// `query`. Subscribing again restarts it; a new `open_stream` drops it.
+/// `query`. Subscribing again restarts it; a new `open_stream` drops it. For `main` it also
+/// carries desktop's `window_full_screen`, read here first so the feed starts with it.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn subscribe_app<R: Runtime>(
@@ -236,6 +242,13 @@ pub(crate) async fn subscribe_app<R: Runtime>(
     bridge: State<'_, Bridge>,
 ) -> Result<(), HostError> {
     crate::ipc::timed("subscribe_app", async {
+        // `main`'s full-screen value as it is now, so the feed starts with it even before the
+        // window's first resize (`window_events::on_main_resized` keeps it after).
+        if webview.label() == crate::MAIN_WINDOW
+            && let Ok(full) = webview.window().is_fullscreen()
+        {
+            bridge.window_full_screen(full);
+        }
         bridge.subscribe_app(webview.label()).await
     })
     .await
@@ -270,7 +283,7 @@ pub(crate) async fn answer_permission<R: Runtime>(
     option: AgentChoiceId,
 ) -> Result<(), HostError> {
     crate::ipc::timed("answer_permission", async {
-        let confirm = crate::dialogs::NativeConfirm::new(app);
+        let confirm = crate::dialogs::NativeConfirm::new(app, &bridge);
         bridge
             .answer_permission(&confirm, thread, request, option)
             .await
@@ -289,15 +302,20 @@ pub(crate) async fn display_info<R: Runtime>(_app: AppHandle<R>) -> Result<Displ
             release_date: RELEASE_DATE,
             test_build: cfg!(feature = "e2e"),
             release_mode: release_mode(RELEASE_MODE_ENV, cfg!(feature = "e2e")),
+            smart_app_control: crate::smart_app_control::state(),
         })
     })
     .await
 }
 
-/// Opens an https, http or mailto `url` in the default browser or mail app, after a native
-/// confirm that names where it goes, in the app's language. Any other link is
-/// `command.invalid`; declined, nothing opens and the call fails with `transport.unauthorized`.
-/// One confirm at a time: `command.conflict` while one is open, and for a second after a decline.
+/// Opens an https, http or mailto `url` in the default browser or mail app. `shown` is the
+/// link's visible text, when it has one. A plain web link opens at once. A mailto link, a link to
+/// an address or an international host, one whose `shown` text names another site or could hide
+/// one, and any link with `always_ask` open only after a native confirm that names where it goes,
+/// in the app's language (`open::needs_confirm`). A link with a user name or password, and any
+/// other scheme, is `command.invalid`; declined, nothing opens and the call fails with
+/// `transport.unauthorized`. One at a time: `command.conflict` while one is in progress, for a
+/// second after a decline, and for a second after a link opened with no confirm.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn open_external<R: Runtime>(
@@ -305,6 +323,8 @@ pub(crate) async fn open_external<R: Runtime>(
     bridge: State<'_, Bridge>,
     gates: State<'_, OpenGates>,
     url: String,
+    shown: Option<String>,
+    always_ask: Option<bool>,
 ) -> Result<(), HostError> {
     crate::ipc::timed("open_external", async {
         // The link is checked before anything else, the settings read included.
@@ -319,6 +339,11 @@ pub(crate) async fn open_external<R: Runtime>(
             &crate::open::now,
             language,
             &link,
+            if always_ask == Some(true) {
+                crate::open::Ask::Always
+            } else {
+                crate::open::Ask::IfMisleading(shown.as_deref())
+            },
         )
         .await
     })
@@ -377,7 +402,8 @@ pub(crate) async fn reveal<R: Runtime>(
 
 /// Opens the settings window, or brings it forward when it is open (`settings_window.rs`), at
 /// `section` when one is named (`"connectors"`: the room's case-law hint and banner;
-/// `"protection"`: UC's first-run button, R17). An
+/// `"protection"`: UC's first-run button, R17; `"usage"`: the toolbar's plan card, U12;
+/// `"privacy"`: the first screen's "What's sent", UD1). An
 /// unknown section is refused as the arguments decode. Granted to `main` only.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
@@ -406,6 +432,20 @@ pub(crate) async fn quit_app<R: Runtime>(app: AppHandle<R>) -> Result<(), HostEr
     crate::ipc::timed("quit_app", async {
         app.exit(0);
         Ok(())
+    })
+    .await
+}
+
+/// Opens macOS's Files and Folders privacy pane (`open::PRIVACY_FILES_AND_FOLDERS`), for the
+/// Open Privacy settings button under `matter.folder_permission`. No arguments: the URL is fixed
+/// here, so the page opens nothing else with it. `command.invalid` off macOS. Granted to
+/// `main` only.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn open_privacy_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), HostError> {
+    crate::ipc::timed("open_privacy_settings", async {
+        let mac = cfg!(target_os = "macos");
+        crate::open::open_privacy_settings(&NativeOpener::new(app), mac)
     })
     .await
 }

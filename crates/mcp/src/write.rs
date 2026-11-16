@@ -8,6 +8,7 @@
     reason = "the guard makes its child's folders here alone; clippy.toml bans std's writes elsewhere"
 )]
 
+use std::ffi::OsStr;
 use std::io;
 use std::path::Path;
 
@@ -107,27 +108,122 @@ pub(crate) fn remove_dir(path: &Path) -> io::Result<()> {
     std::fs::remove_dir(path)
 }
 
-/// A finished download into the downloads folder (`browser_guard/downloads.rs`): moves the file
-/// `from` to `to` within one file system, failing with `AlreadyExists` rather than replacing
-/// anything at `to` (`fs::rename` replaces a file on every OS). On Unix `fs::hard_link`, which
-/// never replaces, then `fs::remove_file` of `from` (or, if that fails, of the new link, so
-/// the file keeps one name and the move can be tried again); on Windows `MoveFileExW` without
-/// `MOVEFILE_REPLACE_EXISTING` (`write/windows.rs`). A file system without hard links refuses
-/// the Unix move every time; the file then stays where it is.
-pub(crate) fn move_new(from: &Path, to: &Path) -> io::Result<()> {
+/// A folder opened once, for the download mover (`browser_guard/downloads.rs`): every look and
+/// change below names a file relative to it, never by the folder's path again, so a link swapped
+/// in for the folder after [`Folder::open`] is never followed. On Unix it is a handle
+/// (`write/unix.rs`: `open(O_DIRECTORY|O_NOFOLLOW)`, then `fstatat`, `linkat`, `openat`).
+/// On Windows it is still the path, checked for a link or reparse point at the open and again
+/// right before each change, which leaves a window between the check and the change: no agent
+/// has a browser on Windows, so the guard does not run there. It needs the handle form (a folder
+/// handle opened with `FILE_FLAG_OPEN_REPARSE_POINT`, then `NtCreateFile` or
+/// `SetFileInformationByHandle` relative to it) before Windows gets a browser.
+pub(crate) struct Folder {
+    #[cfg(unix)]
+    dir: std::os::fd::OwnedFd,
+    #[cfg(windows)]
+    path: std::path::PathBuf,
+}
+
+impl Folder {
+    /// Opens `folder`, refusing a link (on Windows a reparse point, junctions included) or
+    /// anything but a folder at its name.
+    pub(crate) fn open(folder: &Path) -> io::Result<Folder> {
+        #[cfg(unix)]
+        {
+            unix::open_folder(folder).map(|dir| Folder { dir })
+        }
+        #[cfg(windows)]
+        {
+            refuse_a_link(folder)?;
+            Ok(Folder {
+                path: folder.to_owned(),
+            })
+        }
+    }
+
+    /// Whether `name` exists in the folder, as anything, a link included.
+    pub(crate) fn has(&self, name: &OsStr) -> bool {
+        #[cfg(unix)]
+        {
+            unix::exists_in(&self.dir, name)
+        }
+        #[cfg(windows)]
+        {
+            std::fs::symlink_metadata(self.path.join(name)).is_ok()
+        }
+    }
+
+    /// Moves the file `from` into the folder as `name`, within one file system, failing with
+    /// `AlreadyExists` rather than replacing anything there (`fs::rename` replaces a file on
+    /// every OS). On Unix a hard link made through the handle (`linkat`), then `fs::remove_file`
+    /// of `from` (or, if that fails, `unlinkat` of the new link, so the file keeps one name and
+    /// the move can be tried again); on Windows `MoveFileExW` without
+    /// `MOVEFILE_REPLACE_EXISTING` (`write/windows.rs`). A file system without hard links
+    /// refuses the Unix move every time; the file then stays where it is. Another drive fails
+    /// with `CrossesDevices`.
+    pub(crate) fn move_new(&self, from: &Path, name: &OsStr) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            unix::move_new_into(from, &self.dir, name)
+        }
+        #[cfg(windows)]
+        {
+            refuse_a_link(&self.path)?;
+            windows::move_new(from, &self.path.join(name))
+        }
+    }
+
+    /// Makes the file `name` in the folder, new: the note of held-back downloads.
+    pub(crate) fn create_new(&self, name: &OsStr) -> io::Result<std::fs::File> {
+        #[cfg(unix)]
+        {
+            unix::create_new_in(&self.dir, name)
+        }
+        #[cfg(windows)]
+        {
+            refuse_a_link(&self.path)?;
+            std::fs::File::create_new(self.path.join(name))
+        }
+    }
+}
+
+/// `Err` unless `folder` is a real folder, read without following a link (`symlink_metadata`,
+/// whose `is_symlink` covers junctions).
+#[cfg(windows)]
+fn refuse_a_link(folder: &Path) -> io::Result<()> {
+    let kind = std::fs::symlink_metadata(folder)?.file_type();
+    if kind.is_symlink() || !kind.is_dir() {
+        return Err(io::Error::other("the folder is no longer a real folder"));
+    }
+    Ok(())
+}
+
+/// Makes the folder `path` if it is missing, then insists it is a real folder, not a link or a
+/// file: the guard's folders, the downloads folder among them (`browser_guard.rs`). On Unix the
+/// folder is made and checked relative to its parent, opened once (`write/unix.rs`: `mkdirat`,
+/// then `openat(O_DIRECTORY|O_NOFOLLOW)`), so a link at its name is never followed. On Windows,
+/// where the guard does not run yet (see [`Folder`]), `fs::create_dir`, then
+/// `symlink_metadata` of the path.
+pub(crate) fn make_folder(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
-        std::fs::hard_link(from, to)?;
-        if let Err(error) = std::fs::remove_file(from) {
-            // `to` is the link just made, which nothing else had.
-            drop(std::fs::remove_file(to));
-            return Err(error);
-        }
-        Ok(())
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(io::Error::other("not a folder's path"));
+        };
+        unix::make_folder_in(parent, name)
     }
     #[cfg(windows)]
     {
-        windows::move_new(from, to)
+        match std::fs::create_dir(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+        if std::fs::symlink_metadata(path)?.is_dir() {
+            Ok(())
+        } else {
+            Err(io::Error::other("it exists and is not a folder"))
+        }
     }
 }
 

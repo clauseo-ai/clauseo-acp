@@ -19,11 +19,10 @@ use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
 use crate::browser::{BrowserLaunch, UnsupportedLaunch};
 use crate::clock::{Clock, SystemClock};
+use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::ids::{IdSource, RandomV7};
 use crate::search::SearchSeams;
 use crate::update::{NoUpdater, Updater};
-
-use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
 
 mod idle;
@@ -33,6 +32,8 @@ mod profile_hook;
 pub use profile_hook::{NoProfile, ProfileHook};
 mod parts;
 pub(crate) use parts::{ConfigParts, UpdateSeams};
+#[cfg(feature = "test-support")]
+pub use parts::{WithMatterTrash, WithPlaceholderProbe};
 mod sandbox;
 pub use sandbox::{Detect, Sandbox};
 mod egress;
@@ -42,7 +43,8 @@ pub use egress::{DEFAULT_TREE_WAIT, EgressProxy};
 mod session;
 pub use session::SessionKey;
 mod wiring;
-pub(crate) use wiring::{LaunchWiring, PackReadHook};
+pub(crate) use wiring::{LaunchWiring, PackReadHook, Stetdoc};
+pub(crate) mod mcp;
 
 pub use crate::actor::turn::PackRequest;
 
@@ -115,6 +117,7 @@ impl HostConfig {
                 app_version: env!("CARGO_PKG_VERSION").to_owned(),
                 #[cfg(feature = "test-support")]
                 fail_close: false,
+                last_run_unclean: false,
             },
             idle: IdleStop::default(),
             sandbox: None,
@@ -131,7 +134,7 @@ impl HostConfig {
         self
     }
 
-    /// The updater (default: [`NoUpdater`], managed by a package, so nothing is checked).
+    /// The updater (default: [`NoUpdater`], updates unavailable, so nothing is checked).
     /// The host checks and downloads through it on its own pool (decision record 0037).
     pub fn with_updater(mut self, updater: Arc<dyn Updater>) -> Self {
         self.update.updater = updater;
@@ -490,8 +493,7 @@ impl HostConfig {
 
     /// The sign-in hook (decision record 0048, ruling 2): asked off the actor at every Codex
     /// launch, with a bounded wait, whether Clauseo's Codex home shares the lawyer's login file
-    /// (`agent/login_link.rs`). Unset (the default), nothing is checked: no split check and no
-    /// guard.
+    /// (`agent/login_link.rs`). Unset (the default), nothing is checked: no split check, no guard.
     pub fn with_login_check(mut self, check: Arc<dyn LoginCheck + Send + Sync>) -> Self {
         self.wiring.sign_in.check = Some(check);
         self

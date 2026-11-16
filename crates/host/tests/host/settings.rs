@@ -72,11 +72,11 @@ pub(crate) fn decode(item: &EncodedEvent) -> HostEvent {
 }
 
 /// The tool switches' defaults, as `clauseo-settings` has them: web search on, the browser on
-/// only where it is on by default (macOS).
+/// only where it is on by default (macOS and Windows).
 fn tool_defaults() -> ToolsSettingsView {
     ToolsSettingsView {
         web_search: true,
-        browser: cfg!(target_os = "macos"),
+        browser: cfg!(any(target_os = "macos", windows)),
     }
 }
 
@@ -425,7 +425,8 @@ fn an_unknown_principal_may_not_subscribe_to_the_app() {
 const SMALL_CAPACITY: usize = 4;
 
 /// The font size of each `SettingsChanged` in `events`; the whole lists a catch-up carries after
-/// it (`MattersChanged` and `ThreadsChanged` with `all`) are skipped, anything else fails.
+/// it (`MattersChanged` and `ThreadsChanged` with `all`, and `McpToolsChanged`) are skipped,
+/// anything else fails.
 fn font_sizes(events: &[HostEvent]) -> Vec<u8> {
     events
         .iter()
@@ -433,14 +434,15 @@ fn font_sizes(events: &[HostEvent]) -> Vec<u8> {
             HostEvent::SettingsChanged(view) => Some(view.ui.font_size),
             HostEvent::MattersChanged(changed) if changed.all => None,
             HostEvent::ThreadsChanged(changed) if changed.all => None,
+            HostEvent::McpToolsChanged(_) => None,
             other => panic!("unexpected {other:?}"),
         })
         .collect()
 }
 
-/// The catch-up's frames on a host with only the Scratch matter: the settings, the matter list
-/// and the Scratch matter's thread list.
-const CATCH_UP_FRAMES: usize = 3;
+/// The catch-up's frames on a host with only the Scratch matter: the settings, the matter list,
+/// the Scratch matter's thread list and the MCP tools view.
+const CATCH_UP_FRAMES: usize = 4;
 
 #[test]
 fn a_slow_app_subscriber_is_caught_up_with_the_current_settings() {

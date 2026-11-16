@@ -14,10 +14,8 @@ export const nothing = (): void => undefined;
 /** The matter's head: its name as filed, and the line under it. */
 export const MATTER_HEAD = {
   title: "Acme Traders v. State",
-  titleHint: "District Court, Example. CS 12 of 2024. For Acme Traders",
-  nextDate: "9 November 2026",
-  caseNo: "CS 12 of 2024",
-  court: "District Court, Example",
+  titleHint: "Acme Traders",
+  subtitle: "For Acme Traders",
 };
 
 /** The plan's meter in the toolbar: plenty of it left, and close to the limit. */
@@ -185,7 +183,19 @@ export const PINNED: readonly MatterRowProps[] = [
 
 export const RAIL_GROUPS: readonly RailGroup[] = [
   {
-    when: "Today",
+    when: "Needs you",
+    matters: [
+      {
+        name: "Coral Finance v. Kumar",
+        note: "Loan recovery, for the lender",
+        hint: "Coral Finance",
+        state: "ready",
+        onOpen: nothing,
+      },
+    ],
+  },
+  {
+    when: "Working",
     matters: [
       {
         name: "Acme Traders v. State",
@@ -197,6 +207,11 @@ export const RAIL_GROUPS: readonly RailGroup[] = [
         conversations: CONVERSATIONS,
         onNewConversation: nothing,
       },
+    ],
+  },
+  {
+    when: "Other matters",
+    matters: [
       {
         name: "Harbour Trust",
         note: "Trust deed",
@@ -205,11 +220,6 @@ export const RAIL_GROUPS: readonly RailGroup[] = [
         at: "6:10 pm",
         onOpen: nothing,
       },
-    ],
-  },
-  {
-    when: "Tomorrow",
-    matters: [
       {
         name: "Bluebell Mills v. Union of India",
         note: "Customs writ",
@@ -220,28 +230,15 @@ export const RAIL_GROUPS: readonly RailGroup[] = [
       },
     ],
   },
-  {
-    when: "No date",
-    matters: [
-      {
-        name: "Coral Finance v. Kumar",
-        note: "Loan recovery, for the lender",
-        hint: "Coral Finance",
-        state: "ready",
-        onOpen: nothing,
-      },
-    ],
-  },
 ];
 
-/** Every matter, with its client and case number, for finding one by name, client or number. */
+/** Every matter, with its client, for finding one by name or client. */
 export const FIND_ALL: readonly FindableRow[] = [
   {
     name: "Acme Traders v. State",
     note: "Recovery suit, for the plaintiff",
     hint: "Acme Traders v. State",
     client: "Acme Traders",
-    caseNo: "CS 12 of 2024",
     onOpen: nothing,
   },
   {
@@ -249,7 +246,6 @@ export const FIND_ALL: readonly FindableRow[] = [
     note: "Trust deed",
     hint: "Harbour Trust",
     client: "A. Rao",
-    caseNo: "OS 40 of 2023",
     onOpen: nothing,
   },
   {
@@ -257,7 +253,6 @@ export const FIND_ALL: readonly FindableRow[] = [
     note: "Loan recovery, for the lender",
     hint: "Coral Finance",
     client: "Coral Finance Co.",
-    caseNo: "CS 3 of 2025",
     onOpen: nothing,
   },
 ];
@@ -288,6 +283,10 @@ export const CHECKING = {
 /** Asking before a change: the paper and the papers Clauseo changed. */
 export const PERMISSION_PAPER = "Notice to the bank";
 export const CHANGED = ["Notice to the bank.docx", "Draft reply"];
+
+/** A paper's path 327 characters long, with a 200-character folder name that has no break in it: the change note's text
+ * wraps it inside its column, and the note's buttons stay beside or under it. */
+export const LONG_PAPER = `C:\\Users\\Rohan\\Documents\\Matters\\${"a".repeat(200)}\\Deep Agreement, clause 4.1(b) tracked reply, final draft for the client file, rev 2 of 3.docx`;
 
 /** An accepted earlier exchange: its question, its reply and what it made. */
 export const EARLIER = {

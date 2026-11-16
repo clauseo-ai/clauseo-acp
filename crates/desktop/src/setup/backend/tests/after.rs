@@ -30,7 +30,7 @@ const OLD_KEY: &str = "sk-ant-api03-STORED-KEY-0001";
 const NEW_KEY: &str = "sk-ant-api03-NEW-KEY-0002";
 
 const CHANGED: SigninState = SigninState::SignedOut {
-    found: Some(Found::ReusedChanged),
+    found: Some(Found::ReusedFailed),
 };
 
 const OUT: SigninState = SigninState::SignedOut { found: None };
@@ -52,7 +52,7 @@ fn reused_claude(key: bool) -> Rig {
 fn leave_at_first_try(rig: &Rig) {
     lock(&rig.agents.answers).insert("stop_using_login", CHANGED);
     let agent = claude();
-    let leave = auto_leave(&rig.backend, &agent, Some(Found::ReusedChanged));
+    let leave = auto_leave(&rig.backend, &agent, Some(Found::ReusedFailed));
     assert_eq!(rig.pumped(leave), Ok(()));
 }
 
@@ -116,7 +116,7 @@ fn an_automatic_leave_with_nothing_usable_stays_held_and_shows_signed_out() {
     let calls = rig.host.calls();
     assert!(calls.contains(&HostCall::StopAgents(claude())));
     assert_eq!(restarts(&rig, &claude()), 0, "held for the next login");
-    let found = Some(clauseo_protocol::FoundLogin::ReusedChanged);
+    let found = Some(clauseo_protocol::FoundLogin::ReusedFailed);
     assert_eq!(
         shown(&rig, &claude()),
         Some(SignIn::SignedOut { found }),
@@ -130,7 +130,7 @@ fn leave_at_a_try_again(rig: &Rig) {
     lock(&rig.agents.answers).insert("stop_using_login", CHANGED);
     let mut script = rig.timer.script();
     let agent = claude();
-    let leave = auto_leave(&rig.backend, &agent, Some(Found::ReusedChanged));
+    let leave = auto_leave(&rig.backend, &agent, Some(Found::ReusedFailed));
     let drive = async {
         script.asked(retry(5)).await;
         assert_eq!(restarts(rig, &claude()), 0, "held while it tries");
@@ -147,7 +147,7 @@ fn a_try_again_that_finishes_with_nothing_usable_does_not_restart() {
     let rig = reused_claude(false);
     leave_at_a_try_again(&rig);
     assert_eq!(restarts(&rig, &claude()), 0, "held for the next login");
-    let found = Some(clauseo_protocol::FoundLogin::ReusedChanged);
+    let found = Some(clauseo_protocol::FoundLogin::ReusedFailed);
     assert_eq!(shown(&rig, &claude()), Some(SignIn::SignedOut { found }));
 }
 
@@ -227,7 +227,7 @@ fn an_endpoint_through_the_settings_during_an_automatic_leave_waits_for_its_end(
     lock(&rig.agents.answers).insert("stop_using_login", CHANGED);
     let mut script = rig.timer.script();
     let agent = claude();
-    let leave = auto_leave(&rig.backend, &agent, Some(Found::ReusedChanged));
+    let leave = auto_leave(&rig.backend, &agent, Some(Found::ReusedFailed));
     let drive = async {
         script.asked(retry(5)).await;
         apply_settings(&rig.backend, endpoint_arrives()).await;
@@ -281,7 +281,7 @@ fn an_endpoint_landing_after_an_automatic_leave_read_its_facts_restarts_once() {
     lock(&rig.agents.answers).insert("stop_using_login", CHANGED);
     let (reached, go) = rig.backend.wiring.leaves.arm_pause("auto.free");
     let agent = claude();
-    let leave = auto_leave(&rig.backend, &agent, Some(Found::ReusedChanged));
+    let leave = auto_leave(&rig.backend, &agent, Some(Found::ReusedFailed));
     let drive = async {
         // The leave has read its facts (nothing usable, so it keeps the hold) and waits to free.
         reached.await.expect("the leave reaches its free");

@@ -1,7 +1,6 @@
 //! The sweep through a fake process list: who is killed, what fails closed, the job's processes
-//! kept past the first act by the job's pid list and the creation-time rule, the second listing,
-//! and the end sweeper's creation-time cutoff, the children of what it killed, and its second
-//! pass.
+//! kept past the first act by the job's pid list and the creation-time rule, and the second
+//! listing.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -26,8 +25,6 @@ struct Proc {
     /// Its DACL shuts its user out: the opening list can't read its user, and only the service's
     /// list names it.
     hidden: bool,
-    /// The pid that created it, as the snapshot gives it.
-    parent: u32,
 }
 
 fn proc(owner: Owner, image: &'static str) -> Proc {
@@ -37,7 +34,6 @@ fn proc(owner: Owner, image: &'static str) -> Proc {
         in_job: false,
         started: 100,
         hidden: false,
-        parent: 4,
     }
 }
 
@@ -70,10 +66,6 @@ struct Fake {
     /// Opening a hidden process with `WRITE_DAC` and granting itself works (no `OWNER RIGHTS`
     /// entry): its next open succeeds.
     regrant: bool,
-    /// The opening list's nth call (from 1) finds these processes started meanwhile.
-    appear: BTreeMap<usize, Vec<(u32, Proc)>>,
-    /// How many times the opening list was read.
-    lists: usize,
     /// This pid exits by itself after this many pauses.
     exits_after: BTreeMap<u32, u32>,
     /// Every pause the sweep made, in order.
@@ -83,10 +75,6 @@ struct Fake {
 impl Processes for Fake {
     type Process = u32;
     fn list(&mut self) -> io::Result<Vec<Seen>> {
-        self.lists += 1;
-        for (pid, proc) in self.appear.remove(&self.lists).unwrap_or_default() {
-            self.procs.insert(pid, proc);
-        }
         Ok(self
             .procs
             .iter()
@@ -98,7 +86,6 @@ impl Processes for Fake {
                 } else {
                     p.owner.clone()
                 },
-                parent: Some(p.parent),
             })
             .collect())
     }
@@ -112,13 +99,11 @@ impl Processes for Fake {
                 pid: *pid,
                 image: p.image.to_owned(),
                 owner: p.owner.clone(),
-                parent: None,
             })
             .chain([Seen {
                 pid: 0,
                 image: "System Idle Process".to_owned(),
                 owner: Owner::None,
-                parent: None,
             }])
             .collect())
     }
@@ -321,10 +306,10 @@ fn what_a_killed_process_started_is_killed_in_the_next_round() {
 }
 
 #[test]
-fn the_first_act_and_the_end_sweeper_keep_only_their_own_pid() {
+fn the_first_act_keeps_only_its_own_pid() {
     // The inner's first act: a process in the job is killed too. Nothing but the inner should
     // be in it yet, and one there would have been started from the inner's process by one that
-    // opened it before the shut. The end sweeper reads no job.
+    // opened it before the shut.
     let mut fake = machine();
     fake.procs.insert(10, pool_proc("inner.exe"));
     fake.procs.insert(11, agent());
@@ -337,12 +322,11 @@ fn the_first_act_and_the_end_sweeper_keep_only_their_own_pid() {
           (agent.exe)"
         ]
     );
+    // Any process created before the inner, a runner of an earlier session's among them, goes.
     let mut fake = machine();
-    fake.procs.insert(30, pool_proc("sweeper.exe"));
-    fake.procs.insert(31, pool_proc("task.exe"));
-    let (got, lines) = run(&mut fake, &[30], Point::Sweeper);
-    assert_eq!(got, Ok(vec![31]));
-    assert!(lines[0].contains("sweep (end sweeper) killed"), "{lines:?}");
+    fake.procs.insert(10, pool_proc("inner.exe"));
+    fake.procs.insert(30, pool_proc("clauseo-sandbox-run.exe"));
+    assert_eq!(run(&mut fake, &[10], Point::Start).0, Ok(vec![30]));
 }
 
 #[test]
@@ -372,7 +356,7 @@ fn a_process_that_shut_its_dacl_is_found_by_the_service_list_and_fails_the_first
 
 #[test]
 fn past_the_first_act_a_failure_is_logged_once_and_the_rest_are_swept() {
-    for point in [Point::Tick, Point::End, Point::Sweeper] {
+    for point in [Point::Tick, Point::End] {
         let mut fake = machine();
         fake.procs.insert(
             12,
@@ -484,13 +468,7 @@ fn a_job_list_that_cant_be_read_fails_the_sweep() {
     let got = run(&mut fake, &[], Point::Tick).0;
     assert_eq!(got, Err(SweepError::JobList("6".to_owned())));
     assert_eq!(fake.killed, Vec::<u32>::new());
-    // The end sweeper never reads one.
-    let mut fake = machine();
-    fake.procs.insert(31, pool_proc("task.exe"));
-    fake.job_list_fails = true;
-    assert_eq!(run(&mut fake, &[30], Point::Sweeper).0, Ok(vec![31]));
-    assert_eq!(fake.job_reads, 0);
 }
 
-mod end;
+mod escapees;
 mod refused;

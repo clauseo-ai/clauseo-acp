@@ -13,11 +13,13 @@
 //! on a click posts `SC_MAXIMIZE` or `SC_RESTORE` to the window, as Windows' own button does.
 //! A subclass of the top-level window moves it when the client area or the DPI changes.
 //! Everything is best effort: if a call fails, the page's button still works, without Snap
-//! Layouts.
+//! Layouts. The main window's system-menu Quit lives beside it (`quit_item.rs` here).
 #![expect(
     unsafe_code,
-    reason = "FFI to the Win32 window, subclass, capture and mouse-tracking APIs"
+    reason = "FFI to the Win32 window, subclass, capture, mouse-tracking and system menu APIs"
 )]
+
+pub(super) mod quit_item;
 
 use std::cell::Cell;
 use std::ptr;

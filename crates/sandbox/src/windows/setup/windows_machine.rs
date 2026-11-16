@@ -18,6 +18,7 @@ use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::accounts::{self, Kind};
+use super::answers::DENY_REMOTE_INTERACTIVE_RIGHT;
 use super::lock::{Acquired, Held, SETUP_MUTEX, SetupMutex};
 use super::machine::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, owned,
@@ -29,6 +30,7 @@ use super::registered::registered;
 use super::{ffi, journal, logon, password, preflight, profile};
 use crate::SetupError;
 use crate::windows::acl;
+use crate::windows::admin_copy;
 use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
@@ -36,7 +38,7 @@ use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
-use crate::windows::refresh::{self, SystemTask};
+use crate::windows::refresh;
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
@@ -248,6 +250,16 @@ impl Machine for WindowsMachine {
         accounts::delete_group(&self.group_name(group)?)
     }
 
+    fn deny_remote_logon(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.group_name(group)?;
+        preflight::add_right(group, DENY_REMOTE_INTERACTIVE_RIGHT)
+    }
+
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.group_name(group)?;
+        preflight::remove_right(group, DENY_REMOTE_INTERACTIVE_RIGHT)
+    }
+
     fn new_password(&mut self) -> Password {
         password::generate().unwrap_or_else(|| {
             // The account calls refuse an empty password, so this fails the step that uses it.
@@ -413,8 +425,21 @@ impl Machine for WindowsMachine {
     }
 
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
-        refresh::register_task(SystemTask::Stop, owner)
-            .map_err(|error| MachineError::Other(error.to_string()))
+        for task in refresh::POOL_TASKS {
+            refresh::register_task(task, owner)
+                .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))?;
+        }
+        Ok(())
+    }
+
+    fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError> {
+        let other = |error: std::io::Error| MachineError::Other(error.to_string());
+        let program_files = admin_copy::os::program_files().map_err(other)?;
+        let (dir, exe) = (
+            admin_copy::admin_dir(&program_files),
+            admin_copy::admin_exe(&program_files),
+        );
+        admin_copy::os::lock_down_tree(&dir, &exe, Some(group)).map_err(other)
     }
 
     fn held_users(

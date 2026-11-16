@@ -39,7 +39,9 @@ fn an_undo_over_a_document_word_holds_with_no_owner_file_is_refused() {
         held_open_at(&fx.folder, &fx.file("Invoice.docx")),
         Some((path("Invoice.docx"), HeldOpen::SharingViolation))
     );
-    let plan = matter.preview_restore(cid(1), RestoreFiles::All).unwrap();
+    let plan = matter
+        .preview_restore(cid(1), RestoreFiles::All, None)
+        .unwrap();
     assert_eq!(plan.locked, [path("Invoice.docx")], "{plan:?}");
 
     let err = undo(&mut matter, (1, 3), &["Invoice.docx"], (4, 5)).unwrap_err();

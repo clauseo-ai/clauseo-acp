@@ -8,11 +8,10 @@
 )]
 
 use std::fmt::Write as _;
-use std::io::Write as _;
 use std::iter::once;
 use std::os::windows::ffi::OsStrExt as _;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::time::Instant;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSidToSidW};
@@ -28,11 +27,29 @@ use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
 use super::acl_bytes::{Acl, flags, kind, mask, sid, sid_text};
 use super::sids::Sid;
+use crate::windows::setup::Password;
+use crate::windows::setup::account_list::names_starting;
+use crate::windows::setup::accounts::{self, Kind};
+use crate::windows::setup::password::generate;
 
 /// `SE_GROUP_INTEGRITY`.
 const SE_GROUP_INTEGRITY: u32 = 0x20;
 /// The test accounts' prefix: `ClauseoSbTC` and six hex digits.
 const PREFIX: &str = "ClauseoSbTC";
+
+/// The time now, for [`report`]. The elevated tests time their steps for the CI log.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the elevated tests time their steps for the CI log; the core never reads a clock"
+)]
+pub(crate) fn clock() -> Instant {
+    Instant::now()
+}
+
+/// Prints `step` with the time since `started`, for the CI log (`--no-capture` shows it).
+pub(crate) fn report(step: &str, started: Instant) {
+    eprintln!("[elevated] {step}: {:?}", started.elapsed());
+}
 
 /// `bytes` random bytes as lowercase hex.
 pub(crate) fn random_hex(bytes: usize) -> String {
@@ -44,77 +61,40 @@ pub(crate) fn random_hex(bytes: usize) -> String {
     })
 }
 
-/// Runs PowerShell's `script`, `input` on its standard input; its trimmed standard output.
-/// Panics when it fails.
-fn powershell(script: &str, input: &str) -> String {
-    run_powershell(script, input).unwrap()
-}
-
-/// [`powershell`], its failure as its standard error.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the elevated tests make and delete their accounts with PowerShell"
-)]
-fn run_powershell(script: &str, input: &str) -> Result<String, String> {
-    let mut child = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| error.to_string())?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(input.as_bytes())
-            .map_err(|error| error.to_string())?;
-    }
-    let output = child
-        .wait_with_output()
-        .map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-}
-
 /// A local account in `Users`, deleted on drop. It is never given a profile. The elevated tests
 /// run one at a time, so a new one first deletes what a killed earlier run left.
 pub(crate) struct TestUser {
     pub(crate) name: String,
-    password: String,
+    password: Password,
     pub(crate) sid: Sid,
 }
 
 impl TestUser {
-    /// Makes `ClauseoSbTC<6 hex>` with a random password, given on PowerShell's standard input.
+    /// Makes `ClauseoSbTC<6 hex>` in `Users`, with a random password, as the set-up makes its
+    /// pool users (`NetUserAdd`, then `NetLocalGroupAddMembers` by SID).
     pub(crate) fn new() -> TestUser {
-        powershell(
-            &format!("Get-LocalUser -Name '{PREFIX}*' | Remove-LocalUser"),
-            "",
-        );
+        let started = clock();
+        for leftover in names_starting(PREFIX, Kind::User).unwrap() {
+            accounts::delete_user(&leftover).unwrap();
+        }
         let name = format!("{PREFIX}{}", random_hex(3));
-        let password = format!("Aa1!{}", random_hex(12));
-        let sid = powershell(
-            &format!(
-                "$p = [Console]::In.ReadLine() | ConvertTo-SecureString -AsPlainText -Force; \
-                 New-LocalUser -Name '{name}' -Password $p -AccountNeverExpires | Out-Null; \
-                 Add-LocalGroupMember -SID 'S-1-5-32-545' -Member '{name}'; \
-                 (Get-LocalUser -Name '{name}').SID.Value"
-            ),
-            &format!("{password}\n"),
-        );
-        TestUser {
+        let password = generate().unwrap();
+        let sid = accounts::create_user(&name, &password).unwrap();
+        // Made before the group is set, so a failure there still deletes the account on drop.
+        let user = TestUser {
             name,
             password,
-            sid: Sid::parse(&sid).unwrap(),
-        }
+            sid,
+        };
+        accounts::add_member(&accounts::users_group().unwrap(), &user.sid).unwrap();
+        report(&format!("test user {} made", user.name), started);
+        user
     }
 }
 
 impl Drop for TestUser {
     fn drop(&mut self) {
-        let script = format!("Remove-LocalUser -Name '{}'", self.name);
-        if let Err(error) = run_powershell(&script, "") {
+        if let Err(error) = accounts::delete_user(&self.name) {
             eprintln!("{} wasn't deleted: {error}", self.name);
         }
     }
@@ -151,6 +131,7 @@ impl Drop for BinarySid {
 
 /// `user` logged on (`LOGON32_LOGON_INTERACTIVE`): its own Medium primary token.
 pub(crate) fn log_on(user: &TestUser) -> Owned {
+    let started = clock();
     let name: Vec<u16> = user.name.encode_utf16().chain(once(0)).collect();
     let password: Vec<u16> = user.password.encode_utf16().chain(once(0)).collect();
     let mut logon = HANDLE::default();
@@ -167,6 +148,7 @@ pub(crate) fn log_on(user: &TestUser) -> Owned {
         )
     }
     .unwrap();
+    report(&format!("log_on {}", user.name), started);
     Owned(logon)
 }
 

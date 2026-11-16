@@ -12,7 +12,7 @@ import { agentText, step, userMessage } from "../testing/stream-script.ts";
 import type { EntryId, ViewEntry } from "../transport/protocol.ts";
 import { entryIdOf, type StreamView } from "../store/view.ts";
 import { stoppedLine, streamFailedLine } from "./break-lines.ts";
-import { pickBreak, refillOf, RESTARTS, type Break } from "./thread-break.ts";
+import { pickBreak, refillOf, RESTARTS, takesMark, type Break } from "./thread-break.ts";
 import { clockTime } from "./thread/clock.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -107,7 +107,15 @@ test("with H10 faked: Restart for agent.exited, agent.launch_failed and thread.i
   );
   expect(exitedHost.textContent).toContain("Details");
   // a restart can't mend these, so no line: the step row says them
-  for (const code of ["agent.protocol_error", "agent.unsupported_version"])
+  for (const code of [
+    "agent.protocol_error",
+    "agent.unsupported_version",
+    "agent.service_error",
+    "agent.quiet",
+    "matter.folder_backslash",
+    "agent.folder_inaccessible",
+    "agent.unreachable",
+  ])
     expect(stoppedLine("en", brk(code), 0, { onRestart: () => {}, refused: null })).toBeNull();
   // and before H10 only agent.exited takes the line
   expect(stoppedLine("en", brk("agent.launch_failed"), 0, null)).toBeNull();
@@ -147,6 +155,84 @@ test("the stopped question comes back only before H10, only for the codes asking
   expect(refillOf(brk("agent.exited"), false, null)).toBeNull();
   expect(refillOf(brk("agent.protocol_error"), true, null)).toBeNull();
   expect(refillOf(brk("agent.unsupported_version"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.service_error"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.quiet"), true, null)).toBeNull();
+  expect(refillOf(brk("matter.folder_backslash"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.folder_inaccessible"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.unreachable"), true, null)).toBeNull();
+});
+
+test("agent.service_error (#1030): no Restart, no time mark, no working line, with H10 or without", () => {
+  const b = brk("agent.service_error");
+  expect(RESTARTS.has("agent.service_error")).toBe(false);
+  expect(takesMark(b.step)).toBe(false);
+  expect(stoppedLine("en", b, 0, null)).toBeNull();
+  expect(stoppedLine("en", b, 0, { onRestart: () => {}, refused: null })).toBeNull();
+  expect(errorWords("en", "agent.service_error", { kind: "codex", name: "codex-acp" })).toBe(
+    "ChatGPT had a problem on its side. Try again.",
+  );
+});
+
+test("agent.quiet (D-050's backstop): no Restart, no time mark, no working line, with H10 or without", () => {
+  const b = brk("agent.quiet");
+  expect(RESTARTS.has("agent.quiet")).toBe(false);
+  expect(takesMark(b.step)).toBe(false);
+  expect(stoppedLine("en", b, 0, null)).toBeNull();
+  expect(stoppedLine("en", b, 0, { onRestart: () => {}, refused: null })).toBeNull();
+  expect(errorWords("en", "agent.quiet", { kind: "codex", name: "codex-acp" })).toBe(
+    "ChatGPT stopped answering. Try again.",
+  );
+  expect(errorWords("en", "agent.quiet", { kind: undefined, name: null })).toBe(
+    "The AI stopped answering. Try again.",
+  );
+});
+
+// a folder Claude can't start in: the host's refusal (a backslash in the path, on macOS or Linux) and Claude's own
+// "Can't access working directory". Their sentences say Try again, which stands under the answer for any failed turn
+test.each([
+  [
+    "matter.folder_backslash",
+    "Claude can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
+  ],
+  [
+    "agent.folder_inaccessible",
+    "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+  ],
+] as const)("%s: no Restart, no time mark, no working line, with H10 or without", (code, said) => {
+  const b = brk(code);
+  expect(RESTARTS.has(code)).toBe(false);
+  expect(takesMark(b.step)).toBe(false);
+  expect(stoppedLine("en", b, 0, null)).toBeNull();
+  expect(stoppedLine("en", b, 0, { onRestart: () => {}, refused: null })).toBeNull();
+  expect(errorWords("en", code)).toBe(said);
+  expect(errorWords("en", code, { kind: "codex", name: "codex-acp" })).toBe(
+    said.replace("Claude", "ChatGPT"),
+  );
+  expect(errorWords("en", code, { kind: undefined, name: null })).toBe(
+    said.replace("Claude", "The AI"),
+  );
+});
+
+test("agent.unreachable (offline truth): no Restart, no time mark, no working line, with H10 or without", () => {
+  const b = brk("agent.unreachable");
+  expect(RESTARTS.has("agent.unreachable")).toBe(false);
+  expect(takesMark(b.step)).toBe(false);
+  expect(stoppedLine("en", b, 0, null)).toBeNull();
+  expect(stoppedLine("en", b, 0, { onRestart: () => {}, refused: null })).toBeNull();
+  const lines = [
+    [{ kind: "claude", name: "claude-acp" }, "Claude", "Claude"],
+    [{ kind: "codex", name: "codex-acp" }, "ChatGPT", "ChatGPT"],
+    [{ kind: undefined, name: "gemini" }, "gemini", "gemini"],
+    [{ kind: undefined, name: null }, "the AI", "AI"],
+  ] as const;
+  for (const [agent, en, hi] of lines) {
+    expect(errorWords("en", "agent.unreachable", agent)).toBe(
+      `Clauseo couldn't reach ${en}. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.`,
+    );
+    expect(errorWords("hi", "agent.unreachable", agent)).toBe(
+      `Clauseo, ${hi} तक नहीं पहुँच सका। अब तक का उत्तर रखा गया है। फिर से कोशिश करें। अगर ऐसा बार-बार हो, तो अपनी फ़र्म की IT टीम से पूछें।`,
+    );
+  }
 });
 
 test("a stream that failed: its line and code; Try again only for a retryable code, and it calls retry", () => {

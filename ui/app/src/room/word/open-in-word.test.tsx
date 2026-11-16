@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom "Open in Word" over FakeTransport: a .doc or .docx the wall lists
-// opens through open_file with its file ref, from its tile (a press, Enter or Space, with the hint
-// on hover and keyboard focus and the label for screen readers) and from a change note naming it
-// while the changes stand; never for a .pdf, a .txt or a paper the wall doesn't list. A second
+// opens through open_file with its file ref, from its tile (a press, Enter or Space, its words on
+// the face, its whole name in the tooltip on hover and keyboard focus) and from a change note naming
+// it while the changes stand; never for a paper the wall doesn't list. A .pdf's and a .txt's tile
+// opens them the same way, with the computer's default app, under Open it; a type the desktop
+// doesn't open (.zip) has no press. A second
 // press while an open is on its way sends nothing. A declined open is quiet; a failed one says why
 // under the note and under the tiles, by its code; a path too long for Word with Show in folder
 // beside it, revealing the matter's folder. An open Word started in Protected View says so in a
@@ -17,6 +19,7 @@ import { act } from "react";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { rdt } from "@clauseo/components/lib/words-reader.ts";
+import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import { MATTER, reset, step, uuid } from "../../testing/stream-script.ts";
 import type { FileChange, PaperSummary, ViewEntry } from "../../transport/protocol.ts";
@@ -50,6 +53,7 @@ const PAPERS = [
   paper(2, "Old notice.DOC"),
   paper(3, "Exhibit.pdf"),
   paper(4, "brief.txt"),
+  paper(5, "bundle.zip"),
 ];
 
 const file = (path: string): FileChange => ({
@@ -78,19 +82,29 @@ const faceOf = (name: string) =>
     .find((t) => t.querySelector(".tile-title")?.textContent === name)
     ?.querySelector<HTMLButtonElement>("button.tile-face") ?? null;
 const opened = () => h!.transport.only("open_file").map((c) => c.file);
+const titles = (faces: readonly Element[]) =>
+  faces.map((b) => b.querySelector(".tile-title")?.textContent);
 
-test("a .doc and a .docx tile open in Word, by their file refs; a .pdf and a .txt tile don't", async () => {
+test("a .doc and a .docx tile open in Word, a .pdf and a .txt tile with the default app, by their file refs; a .zip doesn't", async () => {
   h = await withPapers();
-  const word = h.all("open-in-word");
-  expect(word.map((b) => b.textContent)).toEqual(["Reply.docx", "Old notice.DOC"]);
-  expect(faceOf("Exhibit.pdf")?.dataset["testid"]).toBeUndefined();
-  expect(faceOf("brief.txt")?.dataset["testid"]).toBeUndefined();
-  await h.click(faceOf("Reply.docx"));
-  await h.click(faceOf("Old notice.DOC"));
-  await h.click(faceOf("Exhibit.pdf"));
-  await h.click(faceOf("brief.txt"));
-  await h.settle();
-  expect(opened()).toEqual([uuid(1, 8), uuid(2, 8)]);
+  expect(titles(h.all("open-in-word"))).toEqual(["Reply.docx", "Old notice.DOC"]);
+  expect(titles(h.all("open-file"))).toEqual(["Exhibit.pdf", "brief.txt"]);
+  expect(faceOf("bundle.zip")?.dataset["testid"]).toBeUndefined();
+  for (const name of ["Reply.docx", "Old notice.DOC", "Exhibit.pdf", "brief.txt", "bundle.zip"]) {
+    await h.click(faceOf(name));
+    await h.settle();
+  }
+  expect(opened()).toEqual([uuid(1, 8), uuid(2, 8), uuid(3, 8), uuid(4, 8)]);
+});
+
+test("a file's name stands whole in its two clamped lines where nothing needs cutting, read once", async () => {
+  h = await withPapers();
+  const title = faceOf("Exhibit.pdf")?.querySelector(".tile-title");
+  expect(title?.classList.contains("tile-name")).toBe(true);
+  expect(title?.querySelector(".tile-name-text")?.textContent).toBe("Exhibit.pdf");
+  expect(title?.querySelector(".tile-name-text")?.getAttribute("aria-hidden")).toBeNull();
+  // the whole name for assistive technology only while the eye's words are cut
+  expect(title?.querySelector(".sr-only")?.textContent).toBe("");
 });
 
 test("every tile carries its file type's glyph by extension, at 24 px, and the Word tiles still open in Word", async () => {
@@ -102,21 +116,27 @@ test("every tile carries its file type's glyph by extension, at 24 px, and the W
   expect(iconIn(faceOf("brief.txt"), IconFileGeneric, 24, "tile-glyph")).not.toBeNull();
   for (const name of ["Reply.docx", "Exhibit.pdf"])
     expect(glyph(name)?.getAttribute("aria-hidden")).toBe("true");
-  expect(h.all("open-in-word").map((b) => b.textContent)).toEqual(["Reply.docx", "Old notice.DOC"]);
+  // and its type's colour, for the wall to paint the glyph's tab: none for a plain file
+  const tone = (name: string) => faceOf(name)?.closest("li.tile")?.getAttribute("data-file");
+  expect(tone("Reply.docx")).toBe("word");
+  expect(tone("Old notice.DOC")).toBe("word");
+  expect(tone("Exhibit.pdf")).toBe("pdf");
+  expect(tone("brief.txt")).toBeNull();
+  expect(titles(h.all("open-in-word"))).toEqual(["Reply.docx", "Old notice.DOC"]);
 });
 
-test("a Word tile says it opens in Word to screen readers, and keeps its hint out of the title", async () => {
+test("a tile says what its press does on its face, in the language, and keeps its name's tooltip out of the title", async () => {
   h = await withPapers({ display: { language: "hi" } });
   const face = faceOf("Reply.docx");
-  const more = face?.getAttribute("aria-describedby");
-  expect(more).toBeTruthy();
-  expect(document.getElementById(more ?? "")?.textContent).toBe(rdt("hi", "Open in Word"));
+  expect(face?.querySelector(".tile-cue")?.textContent).toBe(rdt("hi", "Open in Word"));
+  expect(faceOf("Exhibit.pdf")?.querySelector(".tile-cue")?.textContent).toBe(mt("hi", "Open it"));
+  expect(faceOf("bundle.zip")?.querySelector(".tile-cue")).toBeNull();
   expect(face?.getAttribute("title")).toBeNull();
-  // a tile that isn't Word's keeps no description
-  expect(faceOf("Exhibit.pdf")?.getAttribute("aria-describedby")).toBeNull();
+  // the face's words say it: no description repeats them
+  expect(face?.getAttribute("aria-describedby")).toBeNull();
 });
 
-test("the hint shows on keyboard focus, in the tooltip, as on hover", async () => {
+test("the whole name shows on keyboard focus, in the tooltip, as on hover", async () => {
   h = await withPapers();
   const face = faceOf("Reply.docx");
   expect(tipText()).toBeNull();
@@ -124,7 +144,7 @@ test("the hint shows on keyboard focus, in the tooltip, as on hover", async () =
     face?.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
     face?.focus();
   });
-  await act(async () => vi.waitFor(() => expect(tipText()).toBe("Open in Word")));
+  await act(async () => vi.waitFor(() => expect(tipText()).toBe("Reply.docx")));
 });
 
 for (const language of ["en", "hi"] as const) {
@@ -135,7 +155,7 @@ for (const language of ["en", "hi"] as const) {
       face?.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
       face?.focus();
     });
-    const label = rdt(language, "Open in Word");
+    const label = "Reply.docx";
     const popup = () =>
       [...document.body.querySelectorAll<HTMLElement>("[data-side]")].find(
         (n) => n.textContent === label,
@@ -159,7 +179,7 @@ for (const language of ["en", "hi"] as const) {
 const tipText = () =>
   [...document.body.querySelectorAll('[role="tooltip"], [data-side]')]
     .map((n) => n.textContent)
-    .find((t) => t === "Open in Word") ?? null;
+    .find((t) => t === "Reply.docx") ?? null;
 
 test("Enter and Space on a focused Word tile open it: the face is a native button with nothing in the way", async () => {
   h = await withPapers();

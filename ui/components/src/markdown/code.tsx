@@ -1,7 +1,8 @@
 import { useContext } from "react";
+import { CopyButton } from "../ui/copy-button.tsx";
 import { TokenLines } from "./highlight/code-block.tsx";
 import { useHighlight } from "./highlight/use-highlight.ts";
-import { InertLinksContext } from "./host.ts";
+import { CodeCopyContext, InertLinksContext } from "./host.ts";
 
 /**
  * A fenced or indented code block: the `pre` component, given its code's text and language (to-react.ts). It shows
@@ -17,9 +18,27 @@ export function CodeBlock({ text = "", lang }: { text?: string; lang?: string | 
   const body = text.endsWith("\n") ? text.slice(0, -1) : text;
   const finished = !useContext(InertLinksContext);
   const lines = useHighlight(body, lang ?? "", finished);
-  return (
+  const words = useContext(CodeCopyContext);
+  const pre = (
     <pre data-clauseo="code" data-lang={lang} data-highlighted={lines ? "" : undefined}>
       <code>{lines ? <TokenLines lines={lines} /> : body}</code>
     </pre>
+  );
+  if (words === null) return pre;
+  // Copy in the block's own column at its top corner (thread.css), beside the code that scrolls and never over it,
+  // once its fence has closed: the code is whole by then
+  return (
+    <div data-clauseo="code-block">
+      {pre}
+      {finished && (
+        <CopyButton
+          className="code-copy mx-s1-5 my-s1 self-start"
+          testId="code-copy"
+          text={() => body}
+          label={words(false)}
+          done={words(true)}
+        />
+      )}
+    </div>
   );
 }

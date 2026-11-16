@@ -3,11 +3,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use clauseo_protocol::{ChangeKind, ContentId, Count, FileChange, MatterPath};
+use clauseo_protocol::{
+    ChangeKind, ContentId, Count, FileChange, MatterPath, Timestamp, ToolCallStatus, ToolKind,
+};
 
 use crate::Error;
 use crate::checkpoint::SizedFile;
+use crate::first_read::FirstReads;
 use crate::history::Oid;
+use crate::skip_record::SkipRecord;
+use crate::stat::{CacheEntry, find_by_path};
 
 /// The content id `ContentId` carries for `blob`.
 pub(crate) fn content_id(blob: Oid) -> Result<ContentId, Error> {
@@ -35,19 +40,25 @@ impl DiffFile for SizedFile {
 /// The changes from `old` to `new` (both sorted by path), sorted by path. A path that left the
 /// tree because it is now over the cap (in `over_cap`) is not a deletion. A deletion and an
 /// addition with the same blob are a rename; several are paired in path order.
+#[cfg(test)]
 pub(crate) fn diff(
     old: &[SizedFile],
     new: &[SizedFile],
     over_cap: &BTreeSet<&str>,
 ) -> Result<Vec<FileChange>, Error> {
-    diff_by(old, new, over_cap, &mut |file| Ok(file.size))
+    diff_by(old, new, over_cap, &BTreeSet::new(), &mut |file| {
+        Ok(file.size)
+    })
 }
 
 /// [`diff`] over any files, asking `size` for the size of only the files a change reports.
+/// An addition at a path of `not_renamed` (a file that was in the folder before, never
+/// versioned: `first_read.rs`) is never paired as a rename's new name.
 pub(crate) fn diff_by<F: DiffFile>(
     old: &[F],
     new: &[F],
     over_cap: &BTreeSet<&str>,
+    not_renamed: &BTreeSet<&str>,
     size_of: &mut dyn FnMut(&F) -> Result<u64, Error>,
 ) -> Result<Vec<FileChange>, Error> {
     let mut added: Vec<&F> = Vec::new();
@@ -89,6 +100,7 @@ pub(crate) fn diff_by<F: DiffFile>(
     for file in added {
         let from = by_blob
             .get_mut(&file.blob())
+            .filter(|_| !not_renamed.contains(file.path().as_str()))
             .and_then(|candidates| (!candidates.is_empty()).then(|| candidates.remove(0)));
         let blob = content_id(file.blob())?;
         let bytes = size(size_of(file)?);
@@ -153,12 +165,92 @@ fn size(bytes: u64) -> Count {
     Count::clamped(bytes)
 }
 
-/// `change`, flagged as possibly holding the lawyer's edits when no tool call named its path
-/// (for a rename: neither path).
-pub(crate) fn flag(change: FileChange, tools: &BTreeSet<MatterPath>) -> FileChange {
+/// What an after-turn checkpoint knew of the folder at the start of its step (the last commit),
+/// what its walk found and what the turn's shell commands named, to tell a file the agent made
+/// though no tool call named it (a document Bash wrote with pandoc) from one the lawyer may have
+/// saved meanwhile: see [`TurnStart::own`].
+pub(crate) struct TurnStart<'a> {
+    /// The files the turn's shell commands wrote, as paths in the matter.
+    pub(crate) commands: &'a BTreeSet<String>,
+    /// The last commit's skip record; `None` when it has none (written before records were).
+    pub(crate) record: Option<&'a SkipRecord>,
+    /// The last commit's tree.
+    pub(crate) tree: &'a [SizedFile],
+    /// What this checkpoint reads for the first time.
+    pub(crate) reads: &'a FirstReads,
+    /// The walk's entries, sorted by path bytes.
+    pub(crate) entries: &'a [CacheEntry],
+    /// The checkpoint's time: the turn's end.
+    pub(crate) at: Timestamp,
+}
+
+impl TurnStart<'_> {
+    /// Whether `change` adds a file a shell command of the turn wrote (its whole path), that
+    /// the step's start record proves absent (as undo needs it to delete the file:
+    /// [`SkipRecord::not_absent`]), not read for the first time, and last modified at or
+    /// before the checkpoint's time: the agent's, though no tool call named it. A file named by
+    /// nothing may be one the lawyer saved during the turn.
+    fn own(&self, change: &FileChange) -> bool {
+        let path = change.path();
+        let (ChangeKind::Added, Some(record)) = (change.change(), self.record) else {
+            return false;
+        };
+        if !self.commands.contains(path.as_str()) {
+            return false;
+        }
+        let in_tree = find_by_path(self.tree, path.as_str(), |file| file.path.as_str()).is_some();
+        if record.not_absent(path.as_str(), in_tree).is_some()
+            || self.reads.changed.iter().any(|file| file.path == *path)
+        {
+            return false;
+        }
+        find_by_path(self.entries, path.as_str(), |entry| entry.path.as_str()).is_some_and(
+            |entry| {
+                let mtime = i64::from(entry.stat.mtime.secs) * 1000
+                    + i64::from(entry.stat.mtime.nanos / 1_000_000);
+                mtime <= self.at.as_millis()
+            },
+        )
+    }
+
+    /// Whether `change` modifies a file a shell command of the turn wrote (its whole path: a
+    /// `stetdoc … --in-place` edit, `echo x >> notes.md`): the agent's, though no tool call
+    /// named it. Undo of a modified file puts its content back and never deletes it, so none of
+    /// [`TurnStart::own`]'s checks for an added file apply.
+    fn rewritten(&self, change: &FileChange) -> bool {
+        matches!(change.change(), ChangeKind::Modified)
+            && self.commands.contains(change.path().as_str())
+    }
+}
+
+/// Whether a place a tool call names counts as one the agent wrote, so the after-turn
+/// checkpoint leaves a change there unflagged (`tool_paths` of [`crate::Matter::after_turn`]):
+/// a path in the call's diff content (`in_diff`), whatever its kind, or a location of an `Edit`,
+/// `Delete` or `Move` call. A `Read`, `Search`, `Fetch`, `Think` or `Execute` call's location,
+/// and that of any other kind, is only a place it looked at or ran in: a file the lawyer saves
+/// during a turn that reads it stays flagged. Only a call that ended `Completed` wrote what it
+/// named: one still `Pending` or `InProgress` at the checkpoint (an ask the lawyer never
+/// answered, a Stop meanwhile), or one that ended `Cancelled` or `Failed`, wrote nothing, so a
+/// file the lawyer edited meanwhile stays flagged (a false warning, at worst). A shell call's
+/// writes are read from its command instead (`after_turn_named`'s `commands`), under the same
+/// rule (the host's `TurnPaths::shell_writes`).
+pub fn names_a_write(kind: ToolKind, status: ToolCallStatus, in_diff: bool) -> bool {
+    status == ToolCallStatus::Completed
+        && (in_diff || matches!(kind, ToolKind::Edit | ToolKind::Delete | ToolKind::Move))
+}
+
+/// `change`, flagged as possibly holding the lawyer's edits when no tool call wrote its path
+/// ([`names_a_write`]; for a rename: neither path) and no shell command of the turn wrote it,
+/// as a file the agent added (`start`: [`TurnStart::own`]) or modified
+/// ([`TurnStart::rewritten`]).
+pub(crate) fn flag(
+    change: FileChange,
+    tools: &BTreeSet<MatterPath>,
+    start: &TurnStart<'_>,
+) -> FileChange {
     let named = tools.contains(change.path())
         || matches!(change.change(), ChangeKind::Renamed { from } if tools.contains(from));
-    if named {
+    if named || start.own(&change) || start.rewritten(&change) {
         change
     } else {
         change.with_lawyer_edits()

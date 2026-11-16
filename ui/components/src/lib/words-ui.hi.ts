@@ -10,6 +10,10 @@ export const HI = {
   "Show in folder": "फ़ोल्डर में दिखाएँ",
   "Remove from the list": "सूची से हटाएँ",
   "The folder and its papers stay where they are.": "फ़ोल्डर और उसके दस्तावेज़ अपनी जगह पर रहते हैं।",
+  // UC-131, UC-132: the confirm before Remove from the list; {name} is the matter's name as filed (new; provisional)
+  "Remove {name} from the list?": "{name} को सूची से हटाएँ?",
+  "The matter and its conversations leave the list and Recent. Its folder and papers stay where they are.":
+    "यह मामला और इसकी बातचीत सूची और ‘हाल के’ से हट जाएँगी। इसका फ़ोल्डर और दस्तावेज़ अपनी जगह पर रहेंगे।",
   // the plan to ask with
   "Plan to ask with": "प्रश्न किस प्लान से पूछें",
   // restoring a version

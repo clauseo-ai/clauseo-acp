@@ -118,6 +118,13 @@ pub trait Machine {
     fn group_members(&mut self, group: &Sid) -> Result<usize, MachineError>;
     /// Deletes the group `group`.
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError>;
+    /// Grants the group `group` "Deny log on through Remote Desktop Services"
+    /// (`SeDenyRemoteInteractiveLogonRight`, `LsaAddAccountRights`), so no pool user signs in
+    /// over Remote Desktop; a right already held is `Ok`.
+    fn deny_remote_logon(&mut self, group: &Sid) -> Result<(), MachineError>;
+    /// Takes that right off the group `group` (`LsaRemoveAccountRights`, this right only); a
+    /// right not held is `Ok`.
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError>;
     /// A new random password for a pool user (`PR4e`'s generator).
     fn new_password(&mut self) -> Password;
     /// Makes the local account `name` with `password`, `UF_DONT_EXPIRE_PASSWD |
@@ -203,9 +210,13 @@ pub trait Machine {
     /// The record's `AdminCopyOwner`: who placed the admin copy, `None` when there is none.
     /// Read as this process.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
-    /// Registers, or replaces, the SYSTEM task `\Clauseo\SandboxStop` for the pool owner
-    /// `owner` (`refresh::register_task`, as `--adopt` does per user), as this process.
+    /// Registers, or replaces, the SYSTEM tasks `\Clauseo\SandboxStop` and
+    /// `\Clauseo\SandboxSweep` (`refresh::POOL_TASKS`) for the pool owner `owner`
+    /// (`refresh::register_task`, as `--adopt` does per user), as this process.
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    /// Locks the admin copy's folder and everything in it again, as `--adopt` does
+    /// (`admin_copy::os::lock_down_tree`), denying the pool's group `group`, as this process.
+    fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

@@ -83,9 +83,15 @@ function ConversationRow({
   const [openNow, setOpenNow] = useState(false);
   if (replace !== undefined) return <li className="room-conv-item">{replace}</li>;
   const status = current ? null : (snoozed ?? conversationStatus(w.lang, state, at, behind, day));
-  // only a question for the lawyer says its words on the row; every other status is its icon, with its words under the
-  // pointer and to assistive technology
-  const asks = status !== null && state === "question" && snoozed === undefined;
+  // what needs the lawyer, and what's answering or answered, says its words on the row under the title, plainly: a
+  // question or a permission in the hand's weight, an answer ready, a failure or Answering. muted; a stop, a wait
+  // behind another and a snooze are their icon, with their words under the pointer and to assistive technology
+  const asks =
+    status !== null && snoozed === undefined && (state === "question" || state === "permission");
+  const tells =
+    status !== null &&
+    snoozed === undefined &&
+    (state === "ready" || state === "working" || state === "failed");
   const finished = current && done ? tw(w.lang, "Done") : null;
   const hint = [title, plan ? agent : null, status ?? finished]
     .filter((x) => x !== null && x !== "")
@@ -130,12 +136,12 @@ function ConversationRow({
           )}
           {finished !== null && <RailMark mark={DONE} className="room-conv-mark" />}
         </span>
-        {asks && (
-          <span className="room-conv-ask">
+        {(asks || tells) && (
+          <span className={asks ? "room-conv-ask" : "room-conv-said"}>
             <Say>{status}</Say>
           </span>
         )}
-        {(finished !== null || (status !== null && !asks)) && (
+        {(finished !== null || (status !== null && !asks && !tells)) && (
           <span className="sr-only">
             <Say>{finished ?? status ?? ""}</Say>
           </span>

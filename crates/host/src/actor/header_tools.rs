@@ -12,7 +12,10 @@
 
 use std::collections::BTreeMap;
 
-use clauseo_protocol::{StreamHeader, StreamId, ThreadId, ToolState, ViewEntry, ViewPatchBody};
+use clauseo_protocol::{
+    ClauseoTool, StreamHeader, StreamId, ThreadId, ToolAvailability, ToolState,
+    ToolsUnavailableReason, ViewEntry, ViewPatchBody,
+};
 use clauseo_reducer::ViewChange;
 
 use super::Actor;
@@ -46,6 +49,16 @@ pub(crate) fn hold(actor: &mut Actor, thread: ThreadId, tools: Vec<ToolState>) {
     actor.header_tools.held.insert(thread, tools);
 }
 
+/// Whether `thread`'s session has web search, as its header shows it (the state its launch
+/// worked out); `tools.web_search` as it stands for a thread that shows none yet.
+pub(crate) fn web_search_on(actor: &Actor, thread: ThreadId) -> bool {
+    let shown = actor.header_tools.shown.get(&thread);
+    match shown.and_then(|tools| tools.iter().find(|s| s.tool == ClauseoTool::WebSearch)) {
+        Some(state) => state.availability == ToolAvailability::Available,
+        None => actor.effective.settings().tools.web_search,
+    }
+}
+
 /// `thread`'s session call answered: what [`hold`] kept shows in its header.
 pub(crate) fn show_held(actor: &mut Actor, thread: ThreadId) {
     if let Some(tools) = actor.header_tools.held.remove(&thread) {
@@ -57,6 +70,40 @@ pub(crate) fn show_held(actor: &mut Actor, thread: ThreadId) {
 /// the stream is released.
 pub(crate) fn forget(actor: &mut Actor, thread: ThreadId) {
     actor.header_tools.forget(thread);
+}
+
+/// A read of the firm's browser policy found it turns the browser off
+/// (`actor/browser_policy.rs`): every header, shown or held, whose browser was left out because
+/// that policy could not be read (`BrowserPolicyUnreadable`) now says why it truly is
+/// (`reason`: `BrowserBlockedByPolicy`, or on Windows `BrowserBlockedEdge` or
+/// `BrowserBlockedChrome`). Those sessions have no browser either way.
+pub(crate) fn policy_blocked(actor: &mut Actor, reason: ToolsUnavailableReason) {
+    let unreadable = ToolAvailability::Unavailable {
+        reason: ToolsUnavailableReason::BrowserPolicyUnreadable,
+    };
+    let reword = |tools: &mut Vec<ToolState>| {
+        let mut changed = false;
+        for state in tools.iter_mut() {
+            if state.tool == ClauseoTool::Browser && state.availability == unreadable {
+                state.availability = ToolAvailability::Unavailable { reason };
+                changed = true;
+            }
+        }
+        changed
+    };
+    for tools in actor.header_tools.held.values_mut() {
+        reword(tools);
+    }
+    let mut changed = Vec::new();
+    for (thread, tools) in &actor.header_tools.shown {
+        let mut tools = tools.clone();
+        if reword(&mut tools) {
+            changed.push((*thread, tools));
+        }
+    }
+    for (thread, tools) in changed {
+        show(actor, thread, tools);
+    }
 }
 
 /// Shows `tools` in `thread`'s header: kept for the thread and, when its stream is loaded, laid

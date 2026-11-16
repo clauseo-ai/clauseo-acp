@@ -126,7 +126,8 @@ pub(crate) fn move_no_replace_with(
     sync_dir(to.parent().unwrap_or(to))
 }
 
-/// Removes the file `path`; a missing one is fine. An old set-aside `allowed.json`.
+/// Removes the file `path`; a missing one is fine. An old set-aside `allowed.json`, a launch's
+/// Claude settings file.
 pub(crate) fn remove_old_file(path: &Path) -> io::Result<()> {
     match std::fs::remove_file(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -141,6 +142,15 @@ pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         other => other,
     }
+}
+
+/// The new file `path`, opened to write; anything already there, a link included, fails with
+/// `AlreadyExists` and is never followed. A Word blackline's copies (`matter_worker/sides.rs`).
+pub(crate) fn create_new_file(path: &Path) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
 }
 
 /// Removes the link or file `path` itself, never what a link points to: a leftover download's
@@ -171,6 +181,25 @@ pub(crate) fn make_private_dir(path: &Path) -> io::Result<()> {
 /// The temp file's name holds the process id and a count, so two writes (or two hosts sharing a
 /// data folder) never share one.
 pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    place_private_file(path, bytes, |temp, path| std::fs::rename(temp, path))
+}
+
+/// Writes `bytes` to the new file `path` atomically: a fresh temp file beside it (0600 on Unix,
+/// named as [`replace_private_file`] names it), written and synced, then moved to `path`
+/// without replacing anything there ([`move_file_no_replace`]): a file or link already at
+/// `path` fails with `AlreadyExists`, and the temp file is removed. A launch's Claude settings
+/// file (`agent/launch_settings.rs`).
+pub(crate) fn write_new_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    place_private_file(path, bytes, move_file_no_replace)
+}
+
+/// `bytes` written to a fresh private temp file beside `path`, then `place` moving it there;
+/// the temp file is removed when either fails.
+fn place_private_file(
+    path: &Path,
+    bytes: &[u8],
+    place: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNT: AtomicU64 = AtomicU64::new(0);
@@ -186,7 +215,7 @@ pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> 
         file.write_all(bytes)?;
         file.sync_all()
     });
-    let renamed = written.and_then(|()| std::fs::rename(&temp, path));
+    let renamed = written.and_then(|()| place(&temp, path));
     if renamed.is_err() {
         // What is left of the temp file is ours; the error that matters is the write's.
         drop(std::fs::remove_file(&temp));
@@ -267,6 +296,22 @@ pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
 pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+}
+
+/// Opens `path` for reading, never through a link at its last component: `O_NOFOLLOW` on Unix
+/// (the open fails on a link), and on Windows `FILE_FLAG_OPEN_REPARSE_POINT`, which opens the
+/// link itself, not what it points at. A read changes nothing; it lives here for the flags.
+pub(crate) fn open_read_nofollow(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, nix::libc::O_NOFOLLOW);
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0,
+    );
+    options.open(path)
 }
 
 /// Opens `path` for reading with a share mode that lets others read but not write or delete

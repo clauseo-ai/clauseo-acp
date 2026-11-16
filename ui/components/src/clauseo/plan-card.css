@@ -38,7 +38,7 @@
     align-items: baseline;
     justify-content: space-between;
     gap: var(--s1) var(--s3);
-    padding: var(--s4) var(--s4) var(--s2);
+    padding: var(--s3) var(--s3) var(--s2);
   }
   .plan-card-name {
     @apply text-ui stretch-voice font-chrome text-primary;
@@ -67,35 +67,50 @@
   .plan-card-try {
     margin-top: var(--s1);
   }
+  /* each window a raised tile, a compact sibling of Settings' Plan and usage (ui/app's settings/usage.css): its label
+     quiet, the share left as a numeral with its word beside it, the meter filled with what's left, the reset quiet */
   .plan-windows {
     display: grid;
-    gap: var(--s4);
-    padding: var(--s2) var(--s4) var(--s4);
+    gap: var(--s2);
+    padding: var(--s1) var(--s3) var(--s3);
+  }
+  .plan-window {
+    display: grid;
+    gap: var(--s1);
+    min-width: 0;
+    padding: var(--s2-5) var(--s3) var(--s3);
+    border-radius: var(--r-control);
+    background: var(--tile);
+    box-shadow: var(--e1);
   }
   .plan-window-meter {
     display: grid;
-    gap: var(--s1-5);
+    gap: var(--s1);
   }
-  .plan-window-line {
+  .plan-window-name {
+    @apply text-small stretch-voice text-muted;
+  }
+  .plan-window-used {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    justify-content: space-between;
-    column-gap: var(--s3);
+    gap: var(--s0-5) var(--s1-5);
   }
-  .plan-window-name {
-    @apply text-ui font-ui text-primary;
+  .plan-numeral {
+    @apply font-numeral text-numeral-word stretch-broad font-monument tracking-numeral-word text-primary;
   }
-  .plan-window-used {
-    @apply text-small-row stretch-wide font-chip text-primary;
+  .plan-window-word,
+  .plan-window-reset {
+    @apply text-small text-muted;
   }
-  .plan-window[data-stale] .plan-window-used {
-    @apply text-muted font-ui;
+  .plan-window[data-state="close"] :is(.plan-window-word, .plan-window-reset) {
+    @apply text-primary font-chip;
   }
   .plan-track {
     position: relative;
     display: block;
-    height: var(--lim-track-h);
+    height: var(--size-meter-h);
+    margin-block: var(--s0-5);
     border-radius: var(--r-meter);
     background: var(--inset);
     box-shadow: var(--set-in-lights);
@@ -106,13 +121,23 @@
     inset-block: 0;
     left: 0;
     border-radius: var(--r-meter);
+    background: var(--muted);
+  }
+  .plan-window[data-state="close"] .plan-fill {
     background: var(--primary);
+  }
+  /* out of date, the numeral goes muted (not Settings' flat-num, which falls under 4.5:1 on a tile) */
+  .plan-window[data-stale] .plan-numeral {
+    color: var(--muted);
   }
   .plan-window[data-stale] .plan-fill {
     background: var(--flat-num);
   }
-  .plan-window-reset {
-    @apply text-small text-muted;
+  /* the way to Plan and usage in Settings, under a hairline as the tool line's popover puts Open Settings */
+  .plan-card-go {
+    display: flex;
+    padding: var(--s2) var(--s3);
+    box-shadow: inset 0 var(--hairline) 0 var(--divide-mid);
   }
   .plan-card-prep {
     display: grid;

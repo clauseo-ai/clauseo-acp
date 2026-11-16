@@ -1,6 +1,6 @@
 // A conversation's context menu's and a matter's menu's two items (U16b), loaded later: Snooze (Snooze until, for a
 // matter), opening the snooze menu's times beside it (its chevron says so, with no "…"), and Mark as done (Mark all
-// done; Mark as not done for the open conversation once done).
+// conversations done, for a matter; Mark as not done for the open conversation once done).
 import { Menu as BaseMenu } from "@base-ui/react/menu";
 import type { ReactNode } from "react";
 import { useLayer } from "../ui/layer-context.ts";
@@ -18,7 +18,7 @@ export function TriageItems({
 }: {
   /** The snooze menu's times. */
   times: ReactNode;
-  /** Mark (all) done pressed; with `done`, Mark as not done. */
+  /** Mark as done (Mark all conversations done) pressed; with `done`, Mark as not done. */
   onDone: () => void;
   matter: boolean;
   /** The conversation is done already: its second item is Mark as not done. */
@@ -45,7 +45,7 @@ export function TriageItems({
         label={
           done
             ? twl(lang, "Mark as not done")
-            : twl(lang, matter ? "Mark all done" : "Mark as done")
+            : twl(lang, matter ? "Mark all conversations done" : "Mark as done")
         }
         icon={done ? <IconUndo size={16} /> : <IconTick size={16} />}
         onClick={onDone}

@@ -5,6 +5,7 @@
 //!
 //! Pure: built on every OS so its tests run everywhere.
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
@@ -94,6 +95,19 @@ impl CopyOwner {
 /// again. Outside [`MachineRecord`]. The next set-up resets each listed user of the pool, even
 /// one a matter holds, once no session is open (`resets.rs`), and takes it off the list.
 pub const RESET_SIDS: &str = "ResetSids";
+/// `ResetOwed` (`REG_MULTI_SZ`, a set-up value): the pool users a stop found while it couldn't
+/// take the set-up lock, which it adds here without the lock (read, merge, write, read back),
+/// since only the set-up lock guards [`RESET_SIDS`]. Only the stop task, as SYSTEM, writes it.
+/// The next stop that holds the lock folds it into `ResetSids` and deletes it, before it writes
+/// [`STOP_SEQUENCE`], so no marker clears with a reset still owed only here.
+pub const RESET_OWED: &str = "ResetOwed";
+/// `InstallId` (`REG_SZ`, a set-up value): 32 lowercase hex, 128 random bits the set-up writes
+/// with the first record of an install ([`new_install_id`]) and never again; `--remove` deletes
+/// it with the record. Each unclean-session marker records the id it was written under: one
+/// whose id isn't the current one belongs to a removed install, whose `Stop*` and `Sweep*`
+/// counters went with it, and is stale (`runner::unclean`). An install from before the id has
+/// none, and its markers none either.
+pub const INSTALL_ID: &str = "InstallId";
 /// `StopCompleted` (`REG_QWORD`, a `FILETIME`: 100 ns since 1601, UTC): when the last completed
 /// stop's last clean observation began (the pass that found no pool user's process, or the BITS
 /// enumeration, whichever began first), not when it was written; written only by a run that
@@ -119,18 +133,38 @@ pub const STOP_SEQUENCE: &str = "StopSequence";
 /// `StopSequence` and `StopCompleted` with the record and should clear the markers too, so no
 /// marker outlives its set-up.
 pub const STOP_NEXT: &str = "StopNext";
+/// `SweepCompleted` (`REG_QWORD`, a `FILETIME`): when the last completed sweep's walk began,
+/// written only by a `--sweep-tasks` run that ends 0, just before [`SWEEP_SEQUENCE`]. For
+/// diagnostics only. Deleted with the set-up's values.
+pub const SWEEP_COMPLETED: &str = "SweepCompleted";
+/// `SweepSequence` (`REG_QWORD`): the number the last completed sweep reserved from
+/// [`SWEEP_NEXT`], written after [`SWEEP_COMPLETED`] under the same set-up lock, only by a run
+/// that ends 0 and never lower than it was. Absent counts as 0. Deleted with the set-up's
+/// values, before [`SWEEP_NEXT`].
+pub const SWEEP_SEQUENCE: &str = "SweepSequence";
+/// `SweepNext` (`REG_QWORD`, 1 when absent): the number the next sweep reserves, under the
+/// set-up lock, before its walk, as [`STOP_NEXT`] is for the stop. A session's end reads it
+/// (without the lock, `pool_steps::sequence` says why) as the marker's `M`; the marker is
+/// clean once [`SWEEP_SEQUENCE`] `>= M`.
+pub const SWEEP_NEXT: &str = "SweepNext";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
-/// writes stay until `--remove` takes the admin copy away.
-pub const SETUP_VALUES: [&str; 9] = [
+/// writes stay until `--remove` takes the admin copy away. Each `…Sequence` comes before its
+/// `…Next`, so a marker read during a removal can only wait longer (`pool_steps::sequence`).
+pub const SETUP_VALUES: [&str; 14] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
     DATA_DIR,
     REMOVING,
     RESET_SIDS,
+    RESET_OWED,
+    INSTALL_ID,
     STOP_COMPLETED,
     STOP_SEQUENCE,
     STOP_NEXT,
+    SWEEP_COMPLETED,
+    SWEEP_SEQUENCE,
+    SWEEP_NEXT,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.
@@ -142,6 +176,23 @@ pub fn resets_with(listed: &[Sid], add: &[Sid]) -> Vec<Sid> {
         }
     }
     all
+}
+
+/// An install id ([`INSTALL_ID`]) from 16 random bytes: their lowercase hex.
+pub fn new_install_id(random: [u8; 16]) -> String {
+    random.iter().fold(String::new(), |mut hex, byte| {
+        // Writing to a String can't fail.
+        let _written = write!(hex, "{byte:02x}");
+        hex
+    })
+}
+
+/// Whether `text` is an install id: 32 lowercase hex.
+pub fn is_install_id(text: &str) -> bool {
+    text.len() == 32
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// `listed` (`ResetSids` as read) without `done`, the users a set-up has reset.
@@ -447,6 +498,23 @@ mod tests {
         // The stop task's marks go with the set-up's values, so `--remove` deletes them.
         assert_eq!(RESET_SIDS, "ResetSids");
         assert!(SETUP_VALUES.contains(&RESET_SIDS));
+        // And the resets a stop owed without the lock.
+        assert_eq!(RESET_OWED, "ResetOwed");
+        assert!(SETUP_VALUES.contains(&RESET_OWED));
+        // And the install's id, so a reinstall's markers can tell the last install's apart.
+        assert_eq!(INSTALL_ID, "InstallId");
+        assert!(SETUP_VALUES.contains(&INSTALL_ID));
+        let id = new_install_id([0xab; 16]);
+        assert_eq!(id, "ab".repeat(16));
+        assert!(is_install_id(&id));
+        for bad in [
+            "",
+            "AB".repeat(16).as_str(),
+            &"ab".repeat(15),
+            &"ab".repeat(17),
+        ] {
+            assert!(!is_install_id(bad), "{bad}");
+        }
         // So do its completion's.
         assert_eq!(
             (STOP_COMPLETED, STOP_SEQUENCE, STOP_NEXT),
@@ -455,6 +523,20 @@ mod tests {
         for name in [STOP_COMPLETED, STOP_SEQUENCE, STOP_NEXT] {
             assert!(SETUP_VALUES.contains(&name), "{name}");
         }
+        // And the sweep's, each sequence deleted before its next.
+        assert_eq!(
+            (SWEEP_COMPLETED, SWEEP_SEQUENCE, SWEEP_NEXT),
+            ("SweepCompleted", "SweepSequence", "SweepNext")
+        );
+        let at = |name| {
+            SETUP_VALUES
+                .iter()
+                .position(|value| *value == name)
+                .unwrap()
+        };
+        assert!(at(STOP_SEQUENCE) < at(STOP_NEXT));
+        assert!(at(SWEEP_COMPLETED) < at(SWEEP_SEQUENCE));
+        assert!(at(SWEEP_SEQUENCE) < at(SWEEP_NEXT));
     }
 
     #[test]

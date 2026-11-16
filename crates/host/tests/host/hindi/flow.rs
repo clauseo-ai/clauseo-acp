@@ -92,6 +92,7 @@ pub(crate) fn ask(handle: &HostHandle, work: &Path, wanted: Wanted) -> Asked {
     let thread = match host.ok(HostCommand::CreateThread {
         matter,
         agent: AgentId::new(wanted.agent).unwrap(),
+        config: None,
     }) {
         CommandOutcome::ThreadCreated { thread } => thread,
         other => panic!("CreateThread answered {other:?}"),

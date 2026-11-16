@@ -12,6 +12,13 @@ expression: "event(\"version_restored\")"
           "a.docx"
         ]
       }
-    }
+    },
+    "written": [
+      "a.docx"
+    ],
+    "removed": [
+      "b.docx"
+    ],
+    "more": 3
   }
 }

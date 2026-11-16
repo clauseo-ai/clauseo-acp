@@ -4,12 +4,16 @@
 //! `tests/users.rs`.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use super::*;
 use crate::windows::setup::record_values::{STOP_COMPLETED, STOP_NEXT, STOP_SEQUENCE};
 
 mod completed;
 mod jobs;
+mod lock;
+mod owed;
+mod record;
 mod sequence;
 mod users;
 
@@ -71,6 +75,12 @@ struct Fake {
     held: bool,
     /// The record's `ResetSids`.
     resets: Vec<Sid>,
+    /// The record's `ResetOwed`.
+    owed: Vec<Sid>,
+    /// How many of the next `ResetOwed` writes seem to go but don't land.
+    owed_lost: usize,
+    /// Why `ResetOwed`'s clearing fails, if it does.
+    owed_clear_fails: Option<&'static str>,
     /// The record's `REG_QWORD` values: `StopNext`, `StopCompleted`, `StopSequence`.
     values: BTreeMap<&'static str, u64>,
     /// The set-up lock's tries.
@@ -85,6 +95,8 @@ struct Fake {
     /// The task's end: terminating this pid kills the run there, as the Task Scheduler's end
     /// (or its time limit) kills the process.
     end_at: Option<u32>,
+    /// The sweep task's requests, each with how many snapshots were taken by then.
+    sweeps: Vec<usize>,
     done: Vec<String>,
     logged: Vec<(bool, String)>,
 }
@@ -111,12 +123,16 @@ impl Fake {
             marks: Marks::Written,
             held: false,
             resets: Vec::new(),
+            owed: Vec::new(),
+            owed_lost: 0,
+            owed_clear_fails: None,
             values: BTreeMap::new(),
             locks: 0,
             pool_reads: 0,
             pool_from: None,
             read_fails: None,
             end_at: None,
+            sweeps: Vec::new(),
             done: Vec::new(),
             logged: Vec::new(),
         }
@@ -175,7 +191,7 @@ fn seen(pid: u32, user: Option<Sid>) -> Process {
     }
 }
 
-impl Stopper for Fake {
+impl Gate for Fake {
     fn is_system(&mut self) -> Result<bool, Failed> {
         Ok(self.system)
     }
@@ -203,7 +219,9 @@ impl Stopper for Fake {
         }
         Ok(())
     }
+}
 
+impl Stopper for Fake {
     fn snapshot(&mut self) -> Result<Vec<Process>, Failed> {
         self.done.push("snapshot".to_owned());
         self.now += Duration::from_secs(1);
@@ -247,6 +265,50 @@ impl Stopper for Fake {
         self.done.push("pause".to_owned());
     }
 
+    fn mark_for_reset(&mut self, users: &[Sid]) -> Result<(), Failed> {
+        assert!(self.held, "marked under the set-up lock");
+        if self.marks == Marks::WriteFails {
+            return Err("RegSetValueExW failed (5)".to_owned());
+        }
+        self.resets = crate::windows::setup::record_values::resets_with(&self.resets, users);
+        self.done.push(format!("mark {}", users.len()));
+        Ok(())
+    }
+
+    fn read_owed(&mut self) -> Result<Vec<Sid>, Failed> {
+        Ok(self.owed.clone())
+    }
+
+    fn write_owed(&mut self, users: &[Sid]) -> Result<(), Failed> {
+        if users.is_empty() {
+            assert!(self.held, "cleared under the set-up lock, once folded");
+            if let Some(why) = self.owed_clear_fails {
+                return Err(why.to_owned());
+            }
+            self.done.push("clear owed".to_owned());
+        } else {
+            assert!(!self.held, "owed without the lock");
+            self.done.push(format!("owe {}", users.len()));
+            if self.owed_lost > 0 {
+                self.owed_lost -= 1;
+                return Ok(());
+            }
+        }
+        self.owed = users.to_vec();
+        Ok(())
+    }
+
+    fn request_sweep(&mut self) -> Result<(), Failed> {
+        self.sweeps.push(self.snapshots_taken());
+        Ok(())
+    }
+
+    fn log(&mut self, error: bool, line: &str) {
+        self.logged.push((error, line.to_owned()));
+    }
+}
+
+impl Bits for Fake {
     fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed> {
         self.done.push("jobs".to_owned());
         self.jobs.clone()
@@ -258,64 +320,6 @@ impl Stopper for Fake {
         }
         self.done.push(format!("cancel {at}"));
         Ok(())
-    }
-
-    fn lock(&mut self) -> Result<bool, Failed> {
-        assert!(!self.held, "taken once");
-        let busy = match self.marks {
-            Marks::ReserveBusy => true,
-            Marks::LockBusy => self.locks > 0,
-            Marks::Written | Marks::WriteFails | Marks::CompletionFails => false,
-        };
-        self.locks += 1;
-        self.held = !busy;
-        Ok(self.held)
-    }
-
-    fn unlock(&mut self) {
-        self.held = false;
-    }
-
-    fn mark_for_reset(&mut self, users: &[Sid]) -> Result<(), Failed> {
-        assert!(self.held, "marked under the set-up lock");
-        if self.marks == Marks::WriteFails {
-            return Err("RegSetValueExW failed (5)".to_owned());
-        }
-        self.resets = crate::windows::setup::record_values::resets_with(&self.resets, users);
-        self.done.push(format!("mark {}", users.len()));
-        Ok(())
-    }
-
-    fn now(&mut self) -> u64 {
-        filetime(self.now)
-    }
-
-    fn read_stop_value(&mut self, name: &'static str) -> Result<Option<u64>, Failed> {
-        assert!(self.held, "read under the set-up lock");
-        if self.read_fails == Some(name) {
-            return Err("the record's value isn't a REG_QWORD".to_owned());
-        }
-        if self.gone() {
-            return Ok(None);
-        }
-        Ok(self.values.get(name).copied())
-    }
-
-    fn write_stop_value(&mut self, name: &'static str, value: u64) -> Result<(), Failed> {
-        assert!(self.held, "written under the set-up lock");
-        if self.gone() {
-            return Err("the record's key is gone, so nothing was written".to_owned());
-        }
-        if self.marks == Marks::CompletionFails && name == STOP_COMPLETED {
-            return Err("RegSetValueExW failed (5)".to_owned());
-        }
-        self.values.insert(name, value);
-        self.done.push(format!("set {name}"));
-        Ok(())
-    }
-
-    fn log(&mut self, error: bool, line: &str) {
-        self.logged.push((error, line.to_owned()));
     }
 }
 
@@ -369,9 +373,11 @@ fn only_the_records_pool_users_processes_are_stopped_and_those_users_marked() {
     assert_eq!(
         line,
         "the sandbox's stop: 3 pool users, 2 found running, 3 processes stopped in 2 passes, \
-         0 left, 0 unknown, 0 BITS jobs cancelled, 0 not; 2 users marked for a profile reset \
-         (0 retried)"
+         0 left, 0 unknown, 0 BITS jobs cancelled, 0 not; the sweep task was requested; 2 \
+         users marked for a profile reset (0 retried)"
     );
+    // The sweep is asked for once, after the last pass.
+    assert_eq!(fake.sweeps, [2]);
     assert!(!line.contains("S-1-5"), "counts only: {line}");
 }
 

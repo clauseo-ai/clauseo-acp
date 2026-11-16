@@ -2,11 +2,15 @@
 // (U7). Pure: the live rows and the older pages read the same rules.
 //
 // A message that waits (queued) or was taken back (removed) shows nowhere in the transcript: the strip holds it. A steer
-// the agent took into the running answer (`injected`) is a mark inside that answer, where it arrived. A steer not yet
-// resolved while a turn runs is shown the same way: claude-agent-acp takes most steers in, so the mark is where it will
-// most likely stay, and should the host requeue it or send it now, it moves once, to head its own exchange. With no
-// turn running there is nothing for it to join, so it reads as a question. Every other sent message, a requeued or
-// sent-now steer among them, is a question that heads its turn's exchange.
+// the agent took into the running answer (`injected`) is a mark inside that answer, where it arrived: only then, once
+// the agent confirmed it. A steer not yet resolved is no mark, running turn or not: until the host says, nothing tells
+// that the agent took it (it may yet go next, requeued, should the answer end or stop first), so it stands where the
+// mark would, in the answer it was sent into, saying it sends when the agent finishes, with Send now (steer-rows.tsx).
+// It moves once it resolves: into the mark, or to head its own exchange. A steer the host never delivered (`not_sent`:
+// the answer stopped or ended, or the host restarted, first) stays in the same place, its words and that they were not
+// sent, whatever its status (the host ends a held steer's queued turn, so it may read removed); its words also come
+// back into the composer (steer-restore.ts).
+// Every other sent message, a requeued or sent-now steer among them, is a question that heads its turn's exchange.
 import type {
   EntryId,
   Timestamp,
@@ -14,37 +18,38 @@ import type {
   TurnId,
   UserMessageEntry,
 } from "../../transport/protocol.ts";
-import type { StreamView } from "../../store/view.ts";
-import { turnRunning } from "./live.ts";
 
-export type AskedAs = "hidden" | "mark" | "question";
+/** Where a user message shows: nowhere, as the mark of a steer taken in, as a steer still waiting on the agent's word
+ * (`waiting`, in the answer it was sent into), as a steer never sent (`not_sent`, in the same place), or as a
+ * question. */
+export type AskedAs = "hidden" | "mark" | "waiting" | "not_sent" | "question";
 
-/** Where a steer went: one of the three this version knows, "other" for an outcome from a newer Clauseo (a question,
+/** Where a steer went: one of the four this version knows, "other" for an outcome from a newer Clauseo (a question,
  * then), or null while unresolved or for a message that was no steer. */
-export type Outcome = "injected" | "requeued" | "sent_now" | "other" | null;
+export type Outcome = "injected" | "requeued" | "sent_now" | "not_sent" | "other" | null;
 
 export function outcomeOf(m: UserMessageEntry): Outcome {
   const s = m.steer;
   if (s === undefined) return null;
   if (typeof s === "string") return "other";
-  return s.injected !== undefined ? "injected" : s.requeued !== undefined ? "requeued" : "sent_now";
+  if (s.injected !== undefined) return "injected";
+  if (s.requeued !== undefined) return "requeued";
+  if (s.sent_now !== undefined) return "sent_now";
+  return s.not_sent !== undefined ? "not_sent" : "other";
 }
 
 /** The running turn a steer joined, when the agent took it in. */
 export const injectedTurn = (m: UserMessageEntry): TurnId | undefined =>
   typeof m.steer === "object" ? m.steer.injected?.turn : undefined;
 
-/** Whether a turn runs in the view: the `running` every caller of askedAs passes, the grouping (exchanges.ts) and the
- * rows, live or on an older page, alike. A steer not yet resolved is a mark while a turn runs, wherever its entry came
- * from, else a question. */
-export const runningIn = (v: StreamView | undefined): boolean =>
-  turnRunning(v?.header?.header?.status);
-
-export function askedAs(m: UserMessageEntry, running: boolean): AskedAs {
-  if (m.status === "queued" || m.status === "removed") return "hidden";
+/** How a user message shows: the grouping (exchanges.ts), the rows, live or on an older page, and the thread's break
+ * read the same rule. */
+export function askedAs(m: UserMessageEntry): AskedAs {
   const outcome = outcomeOf(m);
+  if (outcome === "not_sent") return "not_sent";
+  if (m.status === "queued" || m.status === "removed") return "hidden";
   if (outcome === "injected") return "mark";
-  if (outcome === null && m.delivery === "steer" && running) return "mark";
+  if (outcome === null && m.delivery === "steer") return "waiting";
   return "question";
 }
 
@@ -65,13 +70,15 @@ export type SteerNoteData = {
 };
 
 /** The notes of an answer's tool calls, one per steer, in the order of their first call. A steer shows its note only
- * once its answer has ended (`endedAt`, its step's time) and every call it moved finished at or before that time:
- * until then each call's row says it carries on in the background, and the note's "the answer uses what it found"
- * would not be true (an answer can use only what finished before it ended). `askedAt`: the steered message's time,
- * or undefined when the window lacks it (no note then: its first words name that time). */
+ * once the host confirmed the agent took it in (outcome `injected`): the note says the answer uses what it found, which
+ * is not true of words the agent never took. And only once its answer has ended (`endedAt`, its step's time) and every
+ * call it moved finished at or before that time: until then each call's row says it carries on in the background, and
+ * the note's "the answer uses what it found" would not be true (an answer can use only what finished before it
+ * ended). `steerOf`: the steered message, or undefined when the window lacks it (no note then: its first words name
+ * that message's time). */
 export function steerNotes(
   calls: readonly ToolCallEntry[],
-  askedAt: (steer: string) => Timestamp | undefined,
+  steerOf: (steer: string) => UserMessageEntry | undefined,
   endedAt: Timestamp | undefined,
 ): SteerNoteData[] {
   if (endedAt === undefined) return [];
@@ -85,7 +92,8 @@ export function steerNotes(
   }
   const out: SteerNoteData[] = [];
   for (const [steer, own] of bySteer) {
-    const at = askedAt(steer);
+    const m = steerOf(steer);
+    const at = m !== undefined && outcomeOf(m) === "injected" ? m.ts : undefined;
     const used = own.every((c) => {
       const done = backgroundOf(c)?.finished_at;
       return done !== undefined && done <= endedAt;

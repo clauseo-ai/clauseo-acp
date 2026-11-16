@@ -362,6 +362,7 @@ test("the first frame shows the host's last answer from localStorage, before the
     getSettings: () => new Promise(() => {}),
     setUiSettings: async () => {},
     setToolSettings: async () => {},
+    setPrivacySettings: async () => {},
     onSettingsChanged: () => () => {},
   };
   const { started } = harness({ host }, cached);
@@ -375,6 +376,7 @@ test("a get_settings answer that a settings_changed overtook is dropped", async 
     getSettings: () => new Promise((resolve) => (answer = resolve)),
     setUiSettings: async () => {},
     setToolSettings: async () => {},
+    setPrivacySettings: async () => {},
     onSettingsChanged: (listener) => {
       changed = listener;
       return () => {};

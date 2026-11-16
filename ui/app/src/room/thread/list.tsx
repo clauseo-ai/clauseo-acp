@@ -10,11 +10,13 @@ import { Thread } from "@clauseo/components/clauseo/thread.tsx";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { frd } from "@clauseo/components/lib/words-first-read.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
+import { CodeCopyContext } from "@clauseo/components/markdown/host.ts";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { EntryId, StreamId, Timestamp, TurnId, ViewEntry } from "../../transport/protocol.ts";
 import { firstReadMarks, isFirstReadTurn, subscribeMarks } from "../first-read/marks.ts";
+import { AnswerActions } from "./answer-actions.tsx";
 import { AnswerMeta } from "./answer-meta.tsx";
 import { CaseLawHintSlot } from "./case-law-hint.tsx";
 import { SiteBlockedSlot } from "./site-blocked.tsx";
@@ -23,8 +25,10 @@ import { exchangesPick, latestAsked } from "./exchanges.ts";
 import { sameIds } from "./ids.ts";
 import { useHasOlder, useQuestionWords } from "./live.ts";
 import { useJumpLanding, useJumpOrder } from "./jump-entry.ts";
+import { LowCreditSlot } from "./low-credit.tsx";
 import { useOlder } from "./older.ts";
 import { RowOf } from "./row-of.tsx";
+import { useRunningTurn } from "./running-turn.ts";
 import { SourcesTransport, webPick } from "./sources.ts";
 import { WebSources } from "./sources.tsx";
 import { SteerNotesOf } from "./steer-rows.tsx";
@@ -104,6 +108,8 @@ function Sections({
         <section
           className="step step-question"
           ref={latest ? nodes.slot("questionStep") : undefined}
+          // the pinned question's press moves the focus here (thread.tsx); never in the tab order
+          tabIndex={latest ? -1 : undefined}
           aria-label={askedRepeats ? undefined : askedName}
         >
           {question}
@@ -188,8 +194,8 @@ const LiveExchange = memo(
     ids: readonly EntryId[];
     asked: boolean;
     sentNow: EntryId | null;
-    /** Its turn, for the case-law hint the host may send for it (case-law-hint.tsx) and the
-     * unsafe-site list's notices (site-blocked.tsx). */
+    /** Its turn, for the case-law hint the host may send for it (case-law-hint.tsx), the
+     * running-low line (low-credit.tsx) and the unsafe-site list's notices (site-blocked.tsx). */
     turn: TurnId | null;
     stream: StreamId;
     paged: ReadonlyMap<EntryId, ViewEntry>;
@@ -235,8 +241,19 @@ const LiveExchange = memo(
             <>
               {answer}
               {notes && <SteerNotesOf ids={rest} stream={stream} paged={paged} />}
+              {step !== undefined && (
+                <AnswerActions
+                  ids={rest}
+                  step={step}
+                  question={question}
+                  stream={stream}
+                  paged={paged}
+                  latest={latest}
+                />
+              )}
               <SiteBlockedSlot stream={stream} turn={turn} />
               <CaseLawHintSlot stream={stream} turn={turn} />
+              <LowCreditSlot stream={stream} turn={turn} />
             </>
           )
         }
@@ -270,10 +287,17 @@ export type ThreadListProps = {
   transport: HostTransport;
   stream: StreamId | null;
   busy: boolean;
+  /** The turn the lawyer's latest question from here started, while it runs: a new one takes the view to the end. */
+  sent?: string | null;
 };
 
 /** The open thread: Thread's log and scroller, the older pages above, the live exchanges. */
-export const ThreadList = memo(function ThreadList({ transport, stream, busy }: ThreadListProps) {
+export const ThreadList = memo(function ThreadList({
+  transport,
+  stream,
+  busy,
+  sent = null,
+}: ThreadListProps) {
   const w = useWords();
   const store = useViewStore();
   const { nodes } = useRoom();
@@ -287,6 +311,8 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
   const pickShape = useMemo(() => exchangesPick(older.entries), [older.entries]);
   const { exchanges, paged } = useStreamPart(store, stream, pickShape);
   const asked = latestAsked(exchanges);
+  // the running-low line's turn boundaries (running-turn.ts)
+  useRunningTurn(transport, stream, exchanges.at(-1));
   const words = useQuestionWords(stream, asked, asked === null ? undefined : paged.get(asked));
   // UD2: the first read's prompt never shows, pinned either, by its turn (first-read/marks.ts)
   const pickTurn = useCallback(
@@ -301,37 +327,46 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
   const question =
     askedTurn !== null && isFirstReadTurn(askedTurn) ? frd(w.lang, "Clauseo's first read") : words;
   const landed = useStreamPart(store, stream, pickLanded);
+  // each code block in an answer offers Copy (D-026)
+  const copyWords = useCallback(
+    (copied: boolean) => th(w.lang, copied ? "Copied" : "Copy"),
+    [w.lang],
+  );
   return (
     // it rests once there is something to rest on: a reopened thread's view arrives after the mount, and the thread
-    // settles on its latest answer then. The log is busy until the first view lands and while an older page goes in,
+    // settles at its end then, and follows what comes in while the lawyer stays there; a question sent from here goes
+    // back to the end, and while Find's jump to an entry lands (reach) nothing follows it away. The log is busy until the first view lands and while an older page goes in,
     // so a screen reader doesn't read a whole reopened history, or a page put in above, as news
     <SourcesTransport value={transport}>
-      <Thread
-        question={question}
-        who={w.t("You")}
-        live={busy}
-        resting={!busy && exchanges.length > 0}
-        busy={(stream !== null && !landed) || older.loading}
-      >
-        {stream !== null &&
-          exchanges.map((g, i) => {
-            const b = i === 0 ? undefined : exchanges[i - 1];
-            return (
-              <LiveExchange
-                key={g.key}
-                ids={g.ids}
-                asked={g.asked}
-                sentNow={g.sentNow}
-                turn={g.turn}
-                stream={stream}
-                paged={paged}
-                latest={i === exchanges.length - 1}
-                beforeAsked={b?.asked === true ? b.ids[0] : undefined}
-                beforeStep={b?.ids.find((id) => id.startsWith(STEP))}
-              />
-            );
-          })}
-      </Thread>
+      <CodeCopyContext value={copyWords}>
+        <Thread
+          question={question}
+          who={w.t("You")}
+          resting={!busy && exchanges.length > 0}
+          sent={sent}
+          hold={reach !== null}
+          busy={(stream !== null && !landed) || older.loading}
+        >
+          {stream !== null &&
+            exchanges.map((g, i) => {
+              const b = i === 0 ? undefined : exchanges[i - 1];
+              return (
+                <LiveExchange
+                  key={g.key}
+                  ids={g.ids}
+                  asked={g.asked}
+                  sentNow={g.sentNow}
+                  turn={g.turn}
+                  stream={stream}
+                  paged={paged}
+                  latest={i === exchanges.length - 1}
+                  beforeAsked={b?.asked === true ? b.ids[0] : undefined}
+                  beforeStep={b?.ids.find((id) => id.startsWith(STEP))}
+                />
+              );
+            })}
+        </Thread>
+      </CodeCopyContext>
     </SourcesTransport>
   );
 });

@@ -546,6 +546,7 @@ fn step_without_files_changed() {
         checkpoint: log.fresh().unwrap(),
         restored: vec![crate::fixtures::doc_path(1).unwrap()],
         kept: vec![],
+        unversioned: Vec::new(),
     };
     let entries = state.entries().len();
     let out = push(&mut log, &mut state, undo);

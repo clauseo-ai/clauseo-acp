@@ -21,6 +21,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),
+        // Nothing is deleted: a scan only reads.
+        trash: Arc::new(clauseo_matters::OsTrash),
     };
     let mut out = std::io::stdout().lock();
     writeln!(out, "place: {:?}", place(&folder))?;

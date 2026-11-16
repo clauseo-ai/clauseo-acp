@@ -11,7 +11,7 @@ use clauseo_protocol::{
 
 use crate::observe::Events;
 use crate::queue::{held, hold_reason, settle, starts};
-use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, wait};
+use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, trace_to_stderr, wait};
 
 /// The prompt every test sends first.
 const ASKED: &str = "Look at the matter.";
@@ -33,6 +33,8 @@ struct Mid {
 }
 
 fn mid_turn(test: &str) -> Mid {
+    // A stop that hangs fails naming the step it stayed in (private#513).
+    trace_to_stderr();
     let dir = Dir::new(
         test,
         &[(FAKE, Scenario::Bundled("stop-mid-turn-then-load"))],
@@ -79,7 +81,7 @@ fn a_sign_in_again_stop_shows_sign_in_and_restart_sends_the_turn_once() {
         mut events,
         first,
     } = mid_turn("stop_for_sign_in");
-    wait(
+    host.wait_dumping(
         "stop_agents_for",
         host.handle.stop_agents_for(fake(), StopFor::SignInAgain),
     )
@@ -128,7 +130,8 @@ fn a_login_switch_stop_still_shows_switching_with_a_turn_put_back() {
         mut events,
         first,
     } = mid_turn("stop_for_switch");
-    wait("stop_agents", host.handle.stop_agents(fake())).unwrap();
+    host.wait_dumping("stop_agents", host.handle.stop_agents(fake()))
+        .unwrap();
     assert_eq!(
         events.until_turn_ended(first).stop,
         StopReason::Cancelled,
@@ -163,7 +166,8 @@ fn the_latest_stop_sets_the_shown_reason() {
         mut events,
         first,
     } = mid_turn("stop_for_latest");
-    wait("stop_agents", host.handle.stop_agents(fake())).unwrap();
+    host.wait_dumping("stop_agents", host.handle.stop_agents(fake()))
+        .unwrap();
     assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
     let again = put_back(&mut events, first);
     settle(&host, &mut events);
@@ -173,7 +177,7 @@ fn the_latest_stop_sets_the_shown_reason() {
     );
 
     // An account change over a login switch: the reason becomes `sign_in`.
-    wait(
+    host.wait_dumping(
         "stop_agents_for",
         host.handle.stop_agents_for(fake(), StopFor::SignInAgain),
     )
@@ -187,7 +191,7 @@ fn the_latest_stop_sets_the_shown_reason() {
     );
 
     // And back: a login switch again shows `switching`, the turn still held.
-    wait(
+    host.wait_dumping(
         "stop_agents_for",
         host.handle.stop_agents_for(fake(), StopFor::LoginSwitch),
     )

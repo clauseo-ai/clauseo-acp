@@ -3,9 +3,10 @@ import type { Lang } from "@clauseo/components/lib/display.ts";
 import { useEffect, useRef } from "react";
 import { markText } from "./mark.ts";
 import { REGISTRY } from "./registry.tsx";
+import { SCENES } from "./scenes.tsx";
 
 export function Cell({ id, lang }: { id: string; lang: Lang }) {
-  const entry = REGISTRY.find((e) => e.id === id);
+  const entry = REGISTRY.find((e) => e.id === id) ?? SCENES.find((e) => e.id === id);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (entry === undefined || root.current === null) return;

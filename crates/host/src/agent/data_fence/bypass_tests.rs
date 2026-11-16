@@ -10,7 +10,7 @@ use serde_json::json;
 
 use super::resolve::drive_form;
 #[cfg(unix)]
-use super::resolve::resolve_all;
+use super::resolve::{Disk, Found, resolve_all};
 use super::tests::{check, layout, text};
 use super::{LaunchDeny, claude_deny_rules, rule_path};
 #[cfg(unix)]
@@ -135,9 +135,11 @@ fn a_tilde_user_path_is_taken_from_a_home_not_the_working_folder() {
     #[cfg(unix)]
     if let Ok(Some(me)) = nix::unistd::User::from_uid(nix::unistd::getuid()) {
         let cwd = root.join("matter");
-        let found = resolve_all(Path::new(&format!("~{}/q", me.name)), &cwd, Some(root));
+        let net = crate::network_paths::NetEnv::current();
+        let tilde = format!("~{}/q", me.name);
+        let found = resolve_all(Path::new(&tilde), &cwd, Some(root), &Disk::real(&net));
         let home = dunce::canonicalize(&me.dir).unwrap_or(me.dir);
-        assert_eq!(found, [Some(home.join("q"))]);
+        assert_eq!(found, [Found::Path(home.join("q"))]);
     }
 }
 
@@ -158,7 +160,7 @@ fn a_glob_or_grep_pattern_into_the_data_folder_is_denied() {
 /// What Claude's home keeps across sessions, so across matters, is denied to its tools.
 #[test]
 fn claudes_cross_matter_records_are_denied() {
-    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![PathBuf::from("/d")]));
+    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![PathBuf::from("/d")]), false);
     for target in [
         "history.jsonl",
         "file-history/**",
@@ -193,4 +195,48 @@ fn a_local_share_path_is_put_in_its_drive_form() {
     }
     assert_eq!(rule_path(r"\\localhost\c$\Users\a", true), "//c/Users/a");
     assert_eq!(rule_path(r"\\?\C:\Users\a", true), "//c/Users/a");
+}
+
+/// A long path the walk gives in its verbatim form (`dunce` keeps `\\?\` past 260 characters)
+/// keys as its plain form, so it is compared with the data folder's and the own folders' keys.
+#[test]
+fn a_long_verbatim_path_keys_as_its_plain_form() {
+    let mut plain = String::from(r"C:\Users\a\AppData\Roaming\Clauseo\agents\");
+    while plain.len() < 280 {
+        plain.push_str(r"A long folder name\");
+    }
+    let verbatim = format!(r"\\?\{plain}");
+    for insensitive in [false, true] {
+        assert_eq!(
+            super::key(std::path::Path::new(&verbatim), insensitive),
+            super::key(std::path::Path::new(&plain), insensitive)
+        );
+    }
+    let share = format!(r"\\?\UNC\server\c$\{}", plain.get(3..).unwrap_or_default());
+    assert_ne!(
+        super::key(std::path::Path::new(&share), true),
+        super::key(std::path::Path::new(&plain), true)
+    );
+}
+
+/// The bug's own shape on Windows: a deep path the walk gives verbatim keys under the shorter,
+/// plain data folder's key, so the fence's text compare finds it.
+#[cfg(windows)]
+#[test]
+fn a_deep_verbatim_path_keys_under_the_shorter_plain_data_folder() {
+    let folder = r"C:\Users\a\AppData\Roaming\Clauseo";
+    let mut file = format!(r"\\?\{folder}\agents\");
+    while file.len() < 300 {
+        file.push_str(r"A long folder name\");
+    }
+    file.push_str("state.json");
+    for insensitive in [false, true] {
+        let data = super::key(std::path::Path::new(folder), insensitive);
+        assert!(super::key(std::path::Path::new(&file), insensitive).starts_with(&data));
+        let other = super::key(
+            std::path::Path::new(r"C:\Users\a\AppData\Roaming\Other"),
+            insensitive,
+        );
+        assert!(!super::key(std::path::Path::new(&file), insensitive).starts_with(&other));
+    }
 }

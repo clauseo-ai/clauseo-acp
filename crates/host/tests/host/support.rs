@@ -55,6 +55,29 @@ pub(crate) fn wait<T>(what: &str, fut: impl Future<Output = T>) -> T {
     within(fut).unwrap_or_else(|| panic!("timed out after {WATCHDOG:?} waiting for {what}"))
 }
 
+/// How long [`Running::wait_dumping`] gives the actor to answer its state dump.
+const DUMP_WAIT: Duration = Duration::from_secs(5);
+
+/// Sends the host's debug log to stderr, which nextest shows when the test fails: `clauseo_*`
+/// at DEBUG (the agent owner's steps, the listings, the stop waits), the ACP library off, as
+/// its frames carry prompts and paths. For tests that diagnose a hang with
+/// [`Running::wait_dumping`]. The subscriber is the process's global one: nextest runs each
+/// test in a process of its own, so it reaches no other test's output there.
+pub(crate) fn trace_to_stderr() {
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+    let targets = tracing_subscriber::filter::Targets::new()
+        .with_target("clauseo_host", tracing::Level::DEBUG)
+        .with_target("clauseo_process", tracing::Level::DEBUG)
+        .with_target("clauseo_acp", tracing::Level::INFO);
+    let fmt = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
+    // Another test in this process set one first (`cargo test`): keep it.
+    let _set = tracing_subscriber::registry()
+        .with(fmt)
+        .with(targets)
+        .try_init();
+}
+
 /// A scenario for an agent id: a bundled one by name, a file in `tests/scenarios/`, or one a
 /// test wrote itself (for a path only known at run time).
 #[derive(Debug, Clone)]
@@ -136,6 +159,30 @@ pub(crate) struct Running {
 }
 
 impl Running {
+    /// As [`wait`], and when the watchdog fires the test fails with the host's state: its turn
+    /// path (`HostHandle::state_for_test`: each agent's stage, owner step and fenced calls, the
+    /// stop waits, the listings running) and its clock. Ids, stages and counts only.
+    pub(crate) fn wait_dumping<T>(&self, what: &str, fut: impl Future<Output = T>) -> T {
+        if let Some(value) = within(fut) {
+            return value;
+        }
+        let state = futures::executor::block_on(async {
+            let answer = std::pin::pin!(self.handle.state_for_test());
+            let late = async_io::Timer::after(DUMP_WAIT);
+            match futures::future::select(answer, late).await {
+                Either::Left((Some(state), _)) => state,
+                Either::Left((None, _)) => "the host is gone\n".to_owned(),
+                Either::Right(_) => format!("the actor did not answer within {DUMP_WAIT:?}\n"),
+            }
+        });
+        let clock = format!(
+            "manual clock mono {:?}, {} timers armed",
+            clauseo_host::Clock::now(&self.clock).mono,
+            self.clock.armed()
+        );
+        panic!("timed out after {WATCHDOG:?} waiting for {what}\n{state}{clock}");
+    }
+
     /// Dispatches `command` under a fresh id.
     pub(crate) fn dispatch(&self, command: HostCommand) -> Result<CommandOutcome, HostError> {
         self.dispatch_as(command_id(), command)
@@ -210,6 +257,7 @@ impl Running {
         let outcome = self.ok(HostCommand::CreateThread {
             matter,
             agent: AgentId::new(agent).unwrap(),
+            config: None,
         });
         match outcome {
             CommandOutcome::ThreadCreated { thread } => thread,
@@ -363,3 +411,25 @@ pub(crate) fn matter_with_thread(
 #[path = "support_shutdown.rs"]
 mod shutdown;
 pub(crate) use shutdown::{shutdown_past_cancel, shutdown_stopping};
+
+/// A lawyer's MCP server's `env` as `session/new` carries it: `own`, then the `PATH` the host
+/// gives it (its program's folder first; any value here), under this process's name for it, and
+/// on Windows the variables `case_law::windows_env` adds when this process has them.
+pub(crate) fn lawyer_env(own: Vec<serde_json::Value>) -> serde_json::Value {
+    let mut env = own;
+    let path = std::env::vars_os()
+        .filter_map(|(name, _)| name.into_string().ok())
+        .find(|name| name.eq_ignore_ascii_case("PATH"))
+        .unwrap_or_else(|| "PATH".to_owned());
+    env.push(serde_json::json!({"name": path, "value": "{{any}}"}));
+    if cfg!(windows) {
+        env.push(serde_json::json!({"name": "SystemRoot", "value": "{{any}}"}));
+        env.push(serde_json::json!({"name": "windir", "value": "{{any}}"}));
+        for name in ["TEMP", "TMP", "PATHEXT"] {
+            if std::env::var(name).is_ok() {
+                env.push(serde_json::json!({"name": name, "value": "{{any}}"}));
+            }
+        }
+    }
+    serde_json::Value::Array(env)
+}

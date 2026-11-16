@@ -112,6 +112,13 @@ pub enum Error {
     /// written, and the caller shows the cause rather than run on a weaker tier in silence.
     #[error("the sandbox can't run: {0}")]
     Blocked(crate::Blocked),
+    /// Windows tier B found an earlier session's unclean-session marker still awaiting a sweep
+    /// of the pool users' scheduled tasks and BITS jobs, asked for one, and it didn't complete
+    /// within 15 s, or the markers or the record's sequence couldn't be read
+    /// (`windows::runner::unclean`, from `windows::clean_close::check_launch`). Nothing was
+    /// planned or written; a later launch checks again. Its message names no path.
+    #[error("the sandbox's clean-up after an earlier session isn't finished: {0}")]
+    UncleanSession(String),
 }
 
 impl Error {
@@ -132,7 +139,8 @@ impl Error {
             | Error::SetAside { .. }
             | Error::CleanClose(_)
             | Error::NetworkUnfiltered { .. }
-            | Error::ProtectedLink { .. } => None,
+            | Error::ProtectedLink { .. }
+            | Error::UncleanSession(_) => None,
         }
     }
 
@@ -141,7 +149,9 @@ impl Error {
     /// caller falls back to the tier it can get); a failed probe is unexpected, so it is
     /// `Internal`. Tier B's network set-up missing or stale is `sandbox.setup_required`, since
     /// running the set-up again fixes it; any other network refusal is a failed launch.
-    /// A block only an administrator can lift is `SandboxBlocked`, not retryable.
+    /// A block only an administrator can lift is `SandboxBlocked`, not retryable. An earlier
+    /// session's clean-up not yet finished is `SandboxCleaningUp`, retryable: a later launch
+    /// checks again.
     pub fn code(&self) -> ErrorCode {
         match self {
             Error::NetworkUnfiltered { cause } if cause.needs_setup() => {
@@ -157,6 +167,7 @@ impl Error {
             | Error::CleanClose(_)
             | Error::NetworkUnfiltered { .. } => ErrorCode::AgentLaunchFailed,
             Error::Blocked(_) => ErrorCode::SandboxBlocked,
+            Error::UncleanSession(_) => ErrorCode::SandboxCleaningUp,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
@@ -227,5 +238,10 @@ mod tests {
             changed.to_string().starts_with("the sandbox can't run: "),
             "{changed}"
         );
+        let unclean = Error::UncleanSession("the sweep didn't finish within 15 s".to_owned());
+        assert_eq!(unclean.code(), ErrorCode::SandboxCleaningUp);
+        assert_eq!(unclean.code().as_str(), "sandbox.cleaning_up");
+        assert!(unclean.code().is_retryable(), "a later launch checks again");
+        assert_eq!(unclean.cause(), None);
     }
 }

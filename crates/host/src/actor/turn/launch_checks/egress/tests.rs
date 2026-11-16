@@ -8,21 +8,44 @@ use clauseo_sandbox::ports::{ListenerFor, TIER_B_PORTS};
 use clauseo_sandbox::{Denial, DenialSink as _, HostRefusal, ProxyConfig, Upstream, start_proxy};
 
 use super::{CountDenials, proxy_config};
+use crate::actor::input::Input;
+use crate::config::SessionKey;
 
 fn agent(name: &str) -> AgentId {
     AgentId::new(name).unwrap()
 }
 
 fn config(name: &str) -> ProxyConfig {
-    proxy_config(&agent(name), Arc::new(CountDenials::default()), true)
+    proxy_config(
+        &agent(name),
+        Arc::new(CountDenials::default()),
+        (None, Arc::default()),
+        true,
+    )
 }
 
 /// The browser listener is asked for only by a launch that offers the browser.
 #[test]
 fn the_browser_listener_follows_the_launch() {
     let denials = || Arc::new(CountDenials::default());
-    assert!(proxy_config(&agent("claude-acp"), denials(), true).browser);
-    assert!(!proxy_config(&agent("claude-acp"), denials(), false).browser);
+    assert!(
+        proxy_config(
+            &agent("claude-acp"),
+            denials(),
+            (None, Arc::default()),
+            true
+        )
+        .browser
+    );
+    assert!(
+        !proxy_config(
+            &agent("claude-acp"),
+            denials(),
+            (None, Arc::default()),
+            false
+        )
+        .browser
+    );
 }
 
 /// A session's proxy is a tier-C launch's until R17 PR-E passes `ListenerFor::TierB` for a
@@ -78,4 +101,69 @@ fn the_denial_sink_counts_each_refusal() {
     });
     sink.denied(Denial::Dropped { count: 4 });
     assert_eq!(sink.count(), 5);
+}
+
+/// The config refuses from the block list it is given, the very `Current` the updater swaps;
+/// with none, an empty one.
+#[test]
+fn the_config_shares_the_block_list_it_is_given() {
+    let current = Arc::new(clauseo_blocklist::Current::default());
+    let denials = || Arc::new(CountDenials::default());
+    let shared = proxy_config(
+        &agent("claude-acp"),
+        denials(),
+        (Some(Arc::clone(&current)), Arc::default()),
+        true,
+    );
+    assert!(Arc::ptr_eq(&shared.block, &current));
+    let none = proxy_config(
+        &agent("claude-acp"),
+        denials(),
+        (None, Arc::default()),
+        true,
+    );
+    assert!(!Arc::ptr_eq(&none.block, &current));
+    assert!(none.block.get().is_unloaded());
+}
+
+/// A reporting sink posts each block-list refusal, the session's key and the host only, and
+/// nothing for any other refusal; it counts them all.
+#[test]
+fn the_sink_posts_each_blocked_site_and_nothing_else() {
+    let key = SessionKey {
+        matter: clauseo_protocol::MatterId::new(uuid::Uuid::now_v7()).unwrap(),
+        thread: clauseo_protocol::ThreadId::new(uuid::Uuid::now_v7()).unwrap(),
+        launch: 3,
+    };
+    let (post, inputs) = async_channel::unbounded();
+    let sink = CountDenials::reporting(key, post);
+    let generated = clauseo_blocklist::Generated::parse("2026-11-07T06:00:00Z").unwrap();
+    let blocked = || Denial::Blocked {
+        host: "evil.example".to_owned(),
+        port: 443,
+        listed: "evil.example".to_owned(),
+        tag: clauseo_blocklist::Tag::Phishing,
+        generated,
+    };
+    sink.denied(blocked());
+    sink.denied(Denial::Host {
+        host: "client-site.example".to_owned(),
+        port: 443,
+        why: HostRefusal::NotAllowed,
+        shared_hosting: false,
+    });
+    sink.denied(blocked());
+    assert_eq!(sink.count(), 3);
+    let mut posted = Vec::new();
+    while let Ok(input) = inputs.try_recv() {
+        let Input::SiteBlocked { session, site } = input else {
+            panic!("{input:?}");
+        };
+        assert_eq!(session, key);
+        assert_eq!(site.host, "evil.example");
+        assert_eq!(site.tag, clauseo_blocklist::Tag::Phishing);
+        assert_eq!(site.generated, generated);
+        posted.push(site);
+    }
+    assert_eq!(posted.len(), 2, "once per refusal");
 }

@@ -14,7 +14,8 @@ expression: "HostEvent::ProtectionViewChanged\n{\n    view: ProtectionView\n    
       "required": true,
       "unprotected_auto_allowed": false,
       "in_progress": "set_up",
-      "retry_asks_admin": true
+      "retry_asks_admin": true,
+      "data_fence_names_only": false
     }
   }
 }

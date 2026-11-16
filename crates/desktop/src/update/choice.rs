@@ -72,7 +72,7 @@ pub(super) struct E2eEnv {
 /// The updater a build gives the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Choice {
-    /// None: the host keeps `NoUpdater`, `managed` by `package`, and never checks.
+    /// None: the host keeps `NoUpdater`, `managed` by `unavailable`, and never checks.
     None,
     /// The plugin, over `tauri.conf.json`'s endpoints and pubkey.
     Config,
@@ -159,6 +159,7 @@ pub(super) fn updater<R: Runtime>(
         Choice::Fake(_) => return None,
     };
     let kind = super::install_kind::detect();
+    super::arch::log_per_machine(kind, super::arch::emulated_on_arm64());
     Some(Arc::new(super::plugin::PluginUpdater::new(
         app.clone(),
         source,

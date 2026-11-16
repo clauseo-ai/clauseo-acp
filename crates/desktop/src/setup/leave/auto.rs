@@ -1,5 +1,5 @@
 //! Automatic leaves (rulings 1 and 2, review H2): a split the host's check found, or a reuse S18
-//! ended by itself (`ReusedFailed`, `ReusedChanged`, `ReusedSignedOut` from its status check).
+//! ended by itself (`ReusedFailed`, `ReusedSignedOut` from its status check).
 //! Each runs on its own task ([`follow`]), never inside the pump, since the leave waits on what
 //! the pump hands over.
 //!

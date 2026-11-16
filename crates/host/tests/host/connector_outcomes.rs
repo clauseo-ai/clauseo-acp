@@ -13,7 +13,7 @@ use clauseo_protocol::{
 use crate::connector_rig::{
     Rig, Start, add, add_credits, add_key, case_law, refresh, remove, sign_out, status,
 };
-use crate::support::Dir;
+use crate::support::{Dir, wait};
 
 /// The error's kind, when the state shows one.
 fn error_kind(state: &ConnectorsState) -> Option<ConnectorErrorKind> {
@@ -43,6 +43,18 @@ fn pay_link_cleared(rig: &mut Rig) -> ConnectorsState {
     rig.state_until("the pay link cleared", |state| {
         case_law(state).is_some_and(|view| view.pay_url.is_none())
     })
+}
+
+/// Waits for the watch of `recharge` to poll the connector once. The watch takes its deadline
+/// from the clock before that first poll and after posting the pay link, so a test that moves
+/// the clock past the deadline waits for this first; a move before it would push the deadline.
+fn watch_polled(rig: &Rig, recharge: &str) {
+    let polls = format!("/v1/case-law/recharges/{recharge}");
+    wait("the watch's first poll", async {
+        while rig.fake.requests_to(&polls).is_empty() {
+            async_io::Timer::after(Duration::from_millis(5)).await;
+        }
+    });
 }
 
 /// A well-formed key the connector does not know is `sign_in_failed`; so is a sign-in the
@@ -171,7 +183,8 @@ fn the_watch_deadline_is_expired_until_the_next_recharge() {
     let mut rig = Rig::start(&dir, Start { signed_in: true });
     // Each poll answers at once, so the watch looks at its deadline every 2 s.
     rig.fake.set_wait_cap(Duration::ZERO);
-    open_recharge(&mut rig);
+    let (_, recharge) = open_recharge(&mut rig);
+    watch_polled(&rig, &recharge);
     rig.host.clock.advance(Duration::from_mins(16));
     let state = pay_link_cleared(&mut rig);
     assert_eq!(

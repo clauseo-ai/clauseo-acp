@@ -99,10 +99,13 @@ impl Events {
         (seen, last)
     }
 
-    /// The next sign-in state for the agent, `OpenUrl` skipped.
+    /// The next sign-in state for the agent, `OpenUrl` and the status check's `Checking`
+    /// skipped (`status_retry.rs` reads `Checking` with [`Events::next`]).
     pub(crate) fn state(&self) -> SigninState {
         loop {
-            if let Seen::State(state) = self.next() {
+            if let Seen::State(state) = self.next()
+                && state != SigninState::Checking
+            {
                 return state;
             }
         }

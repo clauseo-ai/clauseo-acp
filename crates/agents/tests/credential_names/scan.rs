@@ -2,13 +2,34 @@
 
 use std::path::{Path, PathBuf};
 
-/// Claude's credential file, never named.
+/// Claude's credential file, named only by `signin/reuse.rs` (detection's stat), never opened.
 const CLAUDE_FILE: &str = concat!(".credentials", ".json");
 
 /// Codex's login file, named only by `signin/reuse.rs`.
 const CODEX_FILE: &str = concat!("auth", ".json");
 
-/// The one file that may name [`CODEX_FILE`].
+/// Claude Code's own config files in the lawyer's home, never named: the global config
+/// (`~/.claude.json`, and the legacy `~/.claude/.config.json`) and the user settings
+/// (`~/.claude/settings.json`). They can hold an API key or a key helper, and detection runs the
+/// CLI with its own empty config folder so that neither Clauseo nor the CLI opens them.
+const CLAUDE_CONFIGS: [&str; 3] = [
+    concat!(".claude", ".json"),
+    concat!(".config", ".json"),
+    concat!("settings", ".json"),
+];
+
+/// Claude Code's default Keychain item on macOS, named only by `signin/reuse.rs`: detection
+/// asks `security` whether it exists (attributes only), and nothing else may address it.
+const KEYCHAIN_SERVICE: &str = concat!("Claude Code", "-credentials");
+
+/// The `security` command detection runs.
+const KEYCHAIN_QUERY: &str = "find-generic-password";
+
+/// The `security` flags that print the secret (`-w`, `-g`) and `-d` (which other `security`
+/// commands take to dump data): never in a file that runs [`KEYCHAIN_QUERY`].
+const SECRET_FLAGS: [&str; 3] = ["\"-w\"", "\"-g\"", "\"-d\""];
+
+/// The one file that may name [`CODEX_FILE`], [`CLAUDE_FILE`] and [`KEYCHAIN_SERVICE`].
 const REUSE: &str = "signin/reuse.rs";
 
 /// What `reuse.rs` may never call: an open or a read. Matched as text anywhere in a line.
@@ -231,8 +252,20 @@ fn copy_char(chars: &[char], i: usize, out: &mut String) -> usize {
 fn violations(rel: &str, code: &str) -> Vec<String> {
     let mut found = Vec::new();
     let lines: Vec<&str> = code.lines().collect();
+    let queries = code.contains(KEYCHAIN_QUERY);
     for (n, line) in lines.iter().copied().enumerate() {
         let at = format!("crates/agents/src/{rel}:{}", n + 1);
+        if rel != REUSE && line.contains(KEYCHAIN_SERVICE) {
+            found.push(format!("{at} names Claude's Keychain item outside {REUSE}"));
+        }
+        for flag in SECRET_FLAGS
+            .iter()
+            .filter(|flag| queries && line.contains(*flag))
+        {
+            found.push(format!(
+                "{at} passes {flag} in a file that runs {KEYCHAIN_QUERY}"
+            ));
+        }
         if escaped_dot(line) {
             found.push(format!("{at} spells a dot with an escape"));
         }
@@ -242,8 +275,16 @@ fn violations(rel: &str, code: &str) -> Vec<String> {
         {
             found.push(format!("{at} builds a file name from \"auth\" in pieces"));
         }
-        if line.contains(CLAUDE_FILE) {
-            found.push(format!("{at} names Claude's credential file"));
+        if rel != REUSE && line.contains(CLAUDE_FILE) {
+            found.push(format!(
+                "{at} names Claude's credential file outside {REUSE}"
+            ));
+        }
+        for config in CLAUDE_CONFIGS
+            .iter()
+            .filter(|config| line.contains(*config))
+        {
+            found.push(format!("{at} names Claude's config file {config}"));
         }
         if rel != REUSE && line.contains(CODEX_FILE) {
             found.push(format!("{at} names Codex's login file outside {REUSE}"));
@@ -425,11 +466,16 @@ fn the_scan_skips_comments_and_reads_literals() {
 }
 
 #[test]
-fn reuse_may_name_the_codex_file_but_never_open_it() {
+fn reuse_may_name_the_login_files_but_never_open_them() {
     let link = format!("write::hard_link(&user.join(\"{CODEX_FILE}\"), &home)?;");
     assert_eq!(violations(REUSE, &code_only(&link)), Vec::<String>::new());
-    let claude = format!("let p = \"{CLAUDE_FILE}\";");
-    assert_eq!(violations(REUSE, &code_only(&claude)).len(), 1);
+    let claude = format!("std::fs::symlink_metadata(home.join(\"{CLAUDE_FILE}\"))");
+    assert_eq!(violations(REUSE, &code_only(&claude)), Vec::<String>::new());
+    let elsewhere = format!("let p = \"{CLAUDE_FILE}\";");
+    assert_eq!(
+        violations("signin/detect.rs", &code_only(&elsewhere)).len(),
+        1
+    );
     for call in [
         "File::open(&p)",
         "std::fs::read(&p)",
@@ -443,4 +489,43 @@ fn reuse_may_name_the_codex_file_but_never_open_it() {
         violations(REUSE, &code_only("// File::open is never called")),
         Vec::<String>::new()
     );
+}
+
+#[test]
+fn the_scan_catches_claude_s_config_files() {
+    for config in CLAUDE_CONFIGS {
+        for rel in ["signin/detect.rs", "signin/reuse.rs", "signin/new.rs"] {
+            let code = format!("fn f(h: &Path) -> PathBuf {{ h.join(\"{config}\") }}");
+            assert_eq!(probe(rel, &code).len(), 1, "{rel}: {config}");
+            assert_eq!(
+                probe(rel, &format!("/// see {config}\nfn f() {{}}")),
+                [] as [String; 0]
+            );
+        }
+    }
+}
+
+/// The Keychain item's name stays in `reuse.rs`, and a file that runs `find-generic-password`
+/// never holds a flag that reads the secret (`-w`, `-g`) or `-d`, on the same line or any
+/// other.
+#[test]
+fn the_keychain_query_stays_in_reuse_and_never_reads_the_secret() {
+    let service = format!("const S: &str = \"{KEYCHAIN_SERVICE}\";");
+    assert_eq!(probe(REUSE, &service), Vec::<String>::new());
+    for rel in ["signin/claude.rs", "signin/detect.rs", "probe.rs"] {
+        assert_eq!(probe(rel, &service).len(), 1, "{rel}");
+    }
+    for flag in SECRET_FLAGS {
+        for rel in [REUSE, "probe.rs"] {
+            let same_line = format!("const A: [&str; 2] = [\"{KEYCHAIN_QUERY}\", {flag}];");
+            assert!(!probe(rel, &same_line).is_empty(), "{flag} in {rel}");
+            let apart = format!("const A: &str = \"{KEYCHAIN_QUERY}\";\nconst B: &str = {flag};");
+            assert!(!probe(rel, &apart).is_empty(), "{flag} apart in {rel}");
+        }
+        // Without the query the flag is someone else's (Claude's own `-w` is never ours).
+        assert_eq!(
+            probe("probe.rs", &format!("const B: &str = {flag};")),
+            Vec::<String>::new()
+        );
+    }
 }

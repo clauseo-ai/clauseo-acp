@@ -75,11 +75,13 @@ pub enum MultiSzError {
     /// A string that is not UTF-16.
     #[error("the list holds a string that is not UTF-16")]
     NotText,
-    /// A string that is not a SID in `Sid`'s form.
-    #[error("the list holds {0}")]
+    /// A string that is not a SID in `Sid`'s form. The message never holds it (nor the SID of
+    /// [`MultiSzError::Repeated`]): it can reach the Application log, which every local user
+    /// reads.
+    #[error("the list holds a string that isn't a SID")]
     NotASid(String),
     /// The same SID twice.
-    #[error("the list holds {0} twice")]
+    #[error("the list holds a SID twice")]
     Repeated(String),
 }
 
@@ -209,6 +211,15 @@ mod tests {
                 ),
                 "{bad:?}"
             );
+        }
+        // The message holds neither the string nor a SID.
+        for (bad, error) in [
+            (multi_sz(&[ONE, "S-1-5-021"]), "S-1-5-021"),
+            (multi_sz(&[ONE, ONE]), ONE),
+        ] {
+            let error_text = pool_sids_from_multi_sz(&bad).unwrap_err().to_string();
+            assert!(!error_text.contains(error), "{error_text}");
+            assert!(!error_text.contains("S-1-"), "{error_text}");
         }
         // A lone surrogate is not UTF-16.
         let mut broken = multi_sz(&[ONE]);

@@ -1,0 +1,145 @@
+{
+  "UC-600": {
+    "en": "Claude's built-in safety check stopped this: it looked like reaching files or systems Claude wasn't asked to use. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया: यह ऐसी फ़ाइलों या सिस्टम तक पहुँचने जैसा लगा, जिनके उपयोग के लिए Claude से नहीं कहा गया था। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: the action reached files or systems Claude wasn't asked to use (rule names such as Unauthorized Access). Replaces Claude Code's raw refusal text, which stays in the call's output"
+  },
+  "UC-601": {
+    "en": "Claude's built-in safety check stopped this: it looked like sending matter information somewhere outside. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया: यह मामले की जानकारी कहीं बाहर भेजने जैसा लगा। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: matter information sent outside (Data Exfiltration). Replaces Claude Code's raw refusal text, which stays in the call's output"
+  },
+  "UC-602": {
+    "en": "Claude's built-in safety check stopped this: it looked like a search for passwords or sign-in keys. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया: यह पासवर्ड या साइन-इन कुंजियाँ खोजने जैसा लगा। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: a search for passwords or sign-in keys (Credential Exploration). Replaces Claude Code's raw refusal text, which stays in the call's output"
+  },
+  "UC-603": {
+    "en": "Claude's built-in safety check stopped this: it looked like deleting or overwriting work in a way that can't be undone. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया: यह काम को इस तरह हटाने या उस पर दोबारा लिखने जैसा लगा, जिसे वापस नहीं लाया जा सकता। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: deleting or overwriting that can't be undone (Irreversible Local Destruction). Replaces Claude Code's raw refusal text, which stays in the call's output"
+  },
+  "UC-604": {
+    "en": "Claude's built-in safety check stopped this: it looked like getting around the checks on Claude's work. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया: यह Claude के काम पर होने वाली जाँचों से बचने जैसा लगा। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: getting around the checks on Claude's work (Undermining Oversight). Replaces Claude Code's raw refusal text, which stays in the call's output"
+  },
+  "UC-605": {
+    "en": "Claude's built-in safety check stopped this: it looked like changing how Claude itself is set up. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया: यह Claude की अपनी सेटिंग बदलने जैसा लगा। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: changing Claude's own setup (Self-Modification). Replaces Claude Code's raw refusal text, which stays in the call's output"
+  },
+  "UC-606": {
+    "en": "Claude's built-in safety check stopped this: it looked like changing something outside this matter. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया: यह इस मामले के बाहर कुछ बदलने जैसा लगा। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: changing something outside the matter (Production Deploy). Replaces Claude Code's raw refusal text, which stays in the call's output"
+  },
+  "UC-607": {
+    "en": "Claude's built-in safety check stopped this: it looked like following instructions hidden in a document or web page. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया: यह किसी दस्तावेज़ या वेब पेज में छिपे निर्देशों का पालन करने जैसा लगा। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: instructions hidden in a document or web page (Prompt Injection). Replaces Claude Code's raw refusal text, which stays in the call's output"
+  },
+  "UC-608": {
+    "en": "Claude's built-in safety check stopped this: it looked like running code from a source that isn't trusted. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया: यह किसी ऐसे स्रोत का कोड चलाने जैसा लगा, जिस पर भरोसा नहीं है। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: code from an untrusted source (Untrusted Code Execution). Replaces Claude Code's raw refusal text, which stays in the call's output"
+  },
+  "UC-609": {
+    "en": "Claude's built-in safety check stopped this: it looked like spending money or acting for you outside Clauseo. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया: यह पैसे ख़र्च करने या Clauseo के बाहर आपकी ओर से कुछ करने जैसा लगा। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: spending money or acting outside Clauseo (Financial Transaction). Replaces Claude Code's raw refusal text, which stays in the call's output"
+  },
+  "UC-610": {
+    "en": "Claude's built-in safety check stopped this. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच ने इसे रोक दिया। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: a rule name none of the others knows. Replaces Claude Code's raw refusal text, which stays in the call's output"
+  },
+  "UC-611": {
+    "en": "Claude's built-in safety check couldn't look at this just now, so it didn't run. Nothing was changed.",
+    "hi": "Claude की अपनी सुरक्षा जाँच अभी इसे देख नहीं सकी, इसलिए यह नहीं चला। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, when the safety check couldn't judge the call (busy, too long a transcript) and Claude Code didn't run it"
+  },
+  "UC-612": {
+    "en": "This tried to reach somewhere Clauseo keeps off limits here, such as Clauseo's own app data or another matter. Nothing was changed.",
+    "hi": "इसने ऐसी जगह तक पहुँचने की कोशिश की जिसे Clauseo यहाँ बंद रखता है, जैसे Clauseo का अपना ऐप डेटा या कोई दूसरा मामला। कुछ नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "Step row's why line, a call one of Clauseo's own deny rules refused (Clauseo's app data, another matter)"
+  }
+}

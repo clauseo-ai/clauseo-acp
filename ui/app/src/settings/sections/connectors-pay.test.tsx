@@ -186,7 +186,7 @@ test("the key: a password field; Add key sends add_api_key with the typed text, 
   const field = r.el.querySelector('[data-testid="connectors-key"]');
   expect(field?.textContent).toContain("API key");
   expect(field?.textContent).toContain(
-    "Your firm's key for Clauseo's case-law service. Kept on this computer.",
+    "Your key for Clauseo's case-law service. Kept on this computer.",
   );
   const input = await type(r, KEY);
   expect(input.getAttribute("autocomplete")).toBe("off");

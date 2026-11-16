@@ -9,12 +9,6 @@ use serde::Deserialize;
 
 use crate::signin::{Found, LoginFrom, SigninState};
 
-/// The `authMethod` of a Claude.ai plan login, the one kind Clauseo reuses.
-const CLAUDE_AI: &str = "claude.ai";
-
-/// The `apiProvider` of Anthropic's own API.
-const FIRST_PARTY: &str = "firstParty";
-
 /// The `authMethod` of no login.
 const NONE: &str = "none";
 
@@ -30,9 +24,6 @@ pub(crate) struct ClaudeStatus {
     /// `none` (research 42).
     #[serde(default)]
     pub(crate) auth_method: Option<String>,
-    /// `apiProvider`: `firstParty`, or a cloud provider set up in settings.
-    #[serde(default)]
-    pub(crate) api_provider: Option<String>,
     /// `email`.
     #[serde(default)]
     pub(crate) email: Option<String>,
@@ -63,34 +54,21 @@ pub(crate) fn parse_claude_status(stdout: &str) -> Option<ClaudeStatus> {
     })
 }
 
-/// Detection's verdict on Claude's status (the brief, "Detection"): exit 0 with `authMethod`
-/// `claude.ai` is reusable, giving `LoginFound { from: ClaudeCode, email }`; "any other
-/// signed-in `authMethod` (`third_party`, `api_key_helper`, `api_key`, `oauth_token`) is a
-/// login set up in the lawyer's `~/.claude/settings.json`: not reusable, `found:
-/// ClaudeSettings`". A `claude.ai` login whose `apiProvider` is set and not `firstParty` reads as
-/// set up in settings too. Anything else, a non-zero exit or output that does not parse
-/// included, is `SignedOut` with nothing found.
-pub(crate) fn claude_detection(exit: Option<i32>, status: Option<&ClaudeStatus>) -> SigninState {
-    let signed_out = |found| SigninState::SignedOut { found };
-    let Some(status) = status.filter(|status| exit == Some(0) && status.logged_in) else {
-        return signed_out(Some(Found::NoLogin));
-    };
-    match status.auth_method.as_deref() {
-        None | Some(NONE) => signed_out(Some(Found::NoLogin)),
-        Some(CLAUDE_AI) if first_party(status) => SigninState::LoginFound {
+/// Detection's verdict on Claude, from a stat alone: with the lawyer's
+/// `~/.claude/.credentials.json` a regular file, `LoginFound { from: ClaudeCode, email: None }`
+/// (detection starts no CLI, so it knows no email); else `SignedOut { found: NoLogin }`.
+/// `Found::ClaudeSettings` is no longer told apart: telling needs Claude Code itself.
+pub(crate) fn claude_detection(file_present: bool) -> SigninState {
+    if file_present {
+        SigninState::LoginFound {
             from: LoginFrom::ClaudeCode,
-            email: status.email.clone(),
-        },
-        Some(_) => signed_out(Some(Found::ClaudeSettings)),
+            email: None,
+        }
+    } else {
+        SigninState::SignedOut {
+            found: Some(Found::NoLogin),
+        }
     }
-}
-
-/// Whether the status names Anthropic's own API, or no provider at all.
-fn first_party(status: &ClaudeStatus) -> bool {
-    status
-        .api_provider
-        .as_deref()
-        .is_none_or(|provider| provider == FIRST_PARTY)
 }
 
 /// The account behind a Claude status in Clauseo's own folder, once signed in: exit 0 and
@@ -129,44 +107,20 @@ pub(crate) fn codex_logged_in(exit: Option<i32>, said_logged_in: bool) -> bool {
     exit == Some(0) && said_logged_in
 }
 
-/// Detection's verdict on Codex, before `account/read`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CodexDetect {
-    /// `login status` did not say signed in: nothing found.
-    SignedOut,
-    /// Signed in and the lawyer's login file is there: a file-mode login, reusable.
-    Reusable,
-    /// Signed in and no file: a keyring or Windows secrets login, not reusable.
-    Keyring,
-}
-
-impl CodexDetect {
-    /// "Exit 0, then a stat (never an open) of `~/.codex/auth.json`: present is a file-mode
-    /// login, reusable; absent is a keyring or Windows secrets login, not reusable". `file_present`
-    /// is that stat's answer, and `logged_in` [`codex_logged_in`]'s (exit 0 and the signed-in
-    /// line).
-    pub(crate) fn classify(logged_in: bool, file_present: bool) -> CodexDetect {
-        match (logged_in, file_present) {
-            (false, _) => CodexDetect::SignedOut,
-            (true, true) => CodexDetect::Reusable,
-            (true, false) => CodexDetect::Keyring,
+/// Detection's verdict on Codex, from a stat alone: with the lawyer's login file a regular
+/// file there, `LoginFound { from: Codex, email: None }` (no email: detection reads neither the
+/// file nor Codex's `account/read`, and `login status` writes `~/.codex/tmp`; the reused
+/// confirm after "Use it" gives the email and plan); else `SignedOut { found: NoLogin }`.
+/// `Found::CodexKeyring` is no longer told apart: telling needs Codex's CLI.
+pub(crate) fn codex_detection(file_present: bool) -> SigninState {
+    if file_present {
+        SigninState::LoginFound {
+            from: LoginFrom::Codex,
+            email: None,
         }
-    }
-
-    /// The state: `LoginFound { from: Codex, email }` for a reusable login (`email` from
-    /// `account/read`), `SignedOut { found: CodexKeyring }` for a keyring one, else `SignedOut`.
-    pub(crate) fn state(self, email: Option<String>) -> SigninState {
-        match self {
-            CodexDetect::SignedOut => SigninState::SignedOut {
-                found: Some(Found::NoLogin),
-            },
-            CodexDetect::Reusable => SigninState::LoginFound {
-                from: LoginFrom::Codex,
-                email,
-            },
-            CodexDetect::Keyring => SigninState::SignedOut {
-                found: Some(Found::CodexKeyring),
-            },
+    } else {
+        SigninState::SignedOut {
+            found: Some(Found::NoLogin),
         }
     }
 }

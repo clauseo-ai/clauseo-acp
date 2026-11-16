@@ -8,8 +8,12 @@ use super::AgentsBackend;
 use super::launch;
 
 /// Writes `agent`'s `agents.<id>` entry from its install, for the login's source as S18
-/// last said ([`AgentsBackend`]'s).
+/// last said ([`AgentsBackend`]'s). The host starts a new plan's first read as it writes the
+/// entry, before the readers hear of it: a hold taken first (at the call, not awaited, so no
+/// running read is waited for) keeps that read unlaunched until the entry is set, and dropping
+/// it at the end lets it go. A leave holds the reads across its own write already.
 pub(crate) async fn write_entry(backend: &AgentsBackend, agent: &AgentId) {
+    let _reads = AgentKind::of(agent).map(|kind| backend.wiring.readers.hold(kind));
     let source = match backend.compose.s18(agent) {
         Some(SigninState::SignedIn {
             source: Source::Reused,

@@ -12,7 +12,8 @@
 //! `policy.json`. Decision record `docs/decisions/0009-policy-layer.md` fixes the policy
 //! sources, paths, formats and the merge rule. It also reads one value of Chrome's, Edge's
 //! and Chromium's own policy, `RemoteDebuggingAllowed` ([`chromium_policy`]), for the host's
-//! browser.
+//! browser. It finds the MCP servers a lawyer already set up in Claude Desktop, Claude Code and
+//! Codex, as import candidates ([`mcp_import`]); nothing it finds is written.
 //!
 //! # Interface
 //!
@@ -78,8 +79,9 @@
 //! - Policy fails closed per key: a policy value for a known key that does not type is a
 //!   warning and still locks the key, at its default (an agent: with no entry), or off for a
 //!   security key.
-//! - The MCP server names `browser` and `case-law` ([`RESERVED_MCP_SERVERS`]) are Clauseo's own:
-//!   an entry of either name, in any case, in `settings.json` or a policy is left out with a
+//! - The MCP server names `browser` and `case-law` (Clauseo's own) and `ide`, `claude-in-chrome`
+//!   and `computer-use` (Claude Code's built-ins) are reserved ([`RESERVED_MCP_SERVERS`]):
+//!   an entry of any of them, in any case, in `settings.json` or a policy is left out with a
 //!   warning; the rest of the list loads.
 //! - A key that `settings.json` or `policy.json` sets twice keeps its last value, valid or not:
 //!   a last value that does not type puts the key back at its default, with a warning.
@@ -99,9 +101,15 @@
 //! - `mcp.servers` is one key: a policy value replaces the user's whole list, with each
 //!   server's `enabled`, and an invalid one locks the list empty. An entry with a bad name, a
 //!   name holding `__` or ending in `_` (Claude splits `mcp__<server>__<tool>` at the first
-//!   `__` after `mcp__`), a reserved name (`browser`, `case-law`, in any case), a relative
-//!   `command` or a value that does not type is left out with a warning; `enabled` is `false`
-//!   unless set.
+//!   `__` after `mcp__`), a reserved name ([`RESERVED_MCP_SERVERS`], in any case), a `command`
+//!   that is a relative path (a bare name such as `npx` stays), a remote `url` that is not
+//!   `https` (or `http` to this computer), a bad header name or a value that does not type is
+//!   left out with a warning; `enabled` is `false`
+//!   unless set. The lawyer's own servers change one at a time through
+//!   [`Effective::save_mcp_server`], [`Effective::remove_mcp_server`] and
+//!   [`Effective::set_mcp_server_enabled`] ([`McpRefusal`] for each rule); their values sit in
+//!   the OS keychain ([`MCP_KEYCHAIN_SERVICE`], [`keychain_account`]), which the host writes,
+//!   and the file holds `{"keychain": true}` in each one's place.
 //! - Tests read and write no real folder: every input is injected.
 //!
 //! # Depends on
@@ -123,6 +131,8 @@ mod json;
 mod leaf;
 mod locations;
 mod lock_reason;
+mod mcp;
+pub mod mcp_import;
 mod network;
 mod plans;
 pub mod policy;
@@ -148,20 +158,28 @@ pub use locations::{
     SETTINGS_FILE,
 };
 pub use lock_reason::{LockCause, LockReason, SourceKind};
-pub use plans::{PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, secret_shaped, web_address_ok};
+pub use mcp::{
+    MCP_KEYCHAIN_SERVICE, MCP_NAME_MAX, MCP_VALUE_NAME_MAX, McpRefusal, McpValueKind, check_name,
+    check_server, command_ok, env_name_ok, header_name_ok, keychain_account, url_ok,
+};
+pub use plans::{
+    PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, launch_is_clauseos, secret_shaped,
+    web_address_ok,
+};
 pub use policy::{
     FilePolicy, PolicyRead, PolicySource, PolicyStatus, PolicyValues, SourceError,
     system_policy_sources,
 };
 pub use privacy::PrivacyPatch;
 pub use schema::{
-    AgentLaunch, BrowserSettings, Density, FontSize, InstallSettings, Language, Lite,
-    MattersSettings, McpServerLaunch, McpSettings, Motion, NetworkSettings, Plan, PlanProvider,
-    PrivacySettings, SandboxSettings, Settings, SkillsExtra, SkillsSettings, Theme, ToolsSettings,
-    UiSettings, UpdateMode, UpdateSettings, json_schema,
+    AgentLaunch, BrowserSettings, Density, FontSize, InstallSettings, KeychainRef, Language, Lite,
+    MattersSettings, McpServerLaunch, McpSettings, McpTransport, McpValue, Motion, NetworkSettings,
+    Plan, PlanProvider, PrivacySettings, SandboxSettings, Saved, Settings, SkillsExtra,
+    SkillsSettings, Theme, ToolsSettings, UiSettings, UpdateMode, UpdateSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use tools::ToolsPatch;
 pub use ui::UiPatch;
 pub use update::UpdateChoice;
+pub use user::user_sets;
 pub use warning::{Origin, Position, Warning, WarningKind};

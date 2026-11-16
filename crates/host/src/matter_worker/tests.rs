@@ -1,14 +1,19 @@
-use std::path::PathBuf;
 use std::sync::mpsc;
 
-use clauseo_matters::{CheckpointOutcome, DEFAULT_MARKER, NewMatter, TurnMeta};
+use clauseo_matters::{CheckpointOutcome, DEFAULT_MARKER, NewMatter, Place, TurnMeta};
 use clauseo_protocol::{CheckpointId, MatterId, ThreadId, Timestamp, TurnId};
 use uuid::Uuid;
 
 use super::{MatterJob, MatterReply, MatterWorker, Registry, Relink, matter_settings};
 use crate::agent::folder_support::CheckSource;
+use crate::pipeline::tests::support::TempDir;
 use crate::sent::TurnPaths;
 use crate::write;
+
+/// The OS clock, for a worker's pacing.
+fn clock() -> std::sync::Arc<dyn crate::clock::Clock> {
+    std::sync::Arc::new(crate::clock::SystemClock)
+}
 
 /// A valid v7 UUID, distinct per `n`.
 fn v7(n: u32) -> Uuid {
@@ -19,21 +24,14 @@ fn v7(n: u32) -> Uuid {
     uuid::Builder::from_unix_timestamp_millis(1_790_000_000_000, &random).into_uuid()
 }
 
-/// `<temp>/clauseo-host-unit-<name>-<pid>`, emptied first.
-fn test_dir(name: &str) -> PathBuf {
-    let path =
-        std::env::temp_dir().join(format!("clauseo-host-unit-{name}-{}", std::process::id()));
-    write::remove_dir_all(&path).unwrap();
-    write::create_dir_all(&path).unwrap();
-    path
-}
-
 #[test]
 fn create_then_checkpoints_on_the_matter_thread() {
-    let root = test_dir("matter-worker");
+    let dir = TempDir::new("matter-worker");
+    let root = dir.path();
     let folder = root.join("matter");
     let (tx, rx) = mpsc::channel::<(u32, MatterReply, Option<String>)>();
     let worker = MatterWorker::<u32>::start(
+        (MatterId::new(v7(2)).unwrap(), clock()),
         matter_settings(&root.join("data")),
         Box::new(move |tag, reply| {
             let name = std::thread::current().name().map(str::to_owned);
@@ -135,7 +133,54 @@ fn create_then_checkpoints_on_the_matter_thread() {
     assert_eq!(paths, ["notes.txt"]);
 
     worker.stop().unwrap();
-    write::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn a_listing_says_where_the_folder_lives_from_the_matter_thread() {
+    let dir = TempDir::new("papers-place");
+    let root = dir.path();
+    let folder = root.join("matter");
+    let brief = folder.join("brief.txt");
+    let (tx, rx) = mpsc::channel::<(MatterReply, Option<String>)>();
+    let worker = MatterWorker::<u32>::start(
+        (MatterId::new(v7(2)).unwrap(), clock()),
+        matter_settings(&root.join("data")),
+        Box::new(move |_tag, reply| {
+            let name = std::thread::current().name().map(str::to_owned);
+            tx.send((reply, name)).unwrap();
+        }),
+    )
+    .unwrap();
+    let create = MatterJob::Create {
+        new: NewMatter {
+            id: MatterId::new(v7(2)).unwrap(),
+            folder,
+            created_at: Timestamp::new(1_790_000_000_000).unwrap(),
+            marker: DEFAULT_MARKER,
+            checkpoint: CheckpointId::new(v7(1)).unwrap(),
+        },
+        check: CheckSource::Windows,
+    };
+    worker.send(create, 1).unwrap();
+    let (created, _) = rx.recv().unwrap();
+    assert!(
+        matches!(created, MatterReply::Created(Ok(_))),
+        "{created:?}"
+    );
+    // Saved after the import, so the listing finds it in the folder as it is now.
+    write::write_file(&brief, b"Clause 4\n").unwrap();
+    worker.send(MatterJob::ListPapers { limit: 10 }, 2).unwrap();
+    // The place is asked beside the listing, on the matter's thread (it stats the folder, so
+    // never on the actor): a temp folder no cloud service syncs is local.
+    let (listed, name) = rx.recv().unwrap();
+    assert_eq!(name.as_deref(), Some("clauseo-matter"));
+    let MatterReply::Papers(Ok((papers, place))) = listed else {
+        panic!("{listed:?}")
+    };
+    assert_eq!(place, Place::Local);
+    let paths: Vec<&str> = papers.papers.iter().map(|p| p.path.as_str()).collect();
+    assert_eq!(paths, ["brief.txt"]);
+    worker.stop().unwrap();
 }
 
 #[test]
@@ -143,6 +188,7 @@ fn a_job_before_any_matter_is_an_internal_error() {
     let (tx, rx) = mpsc::channel();
     let root = std::env::temp_dir();
     let worker = MatterWorker::<()>::start(
+        (MatterId::new(v7(2)).unwrap(), clock()),
         matter_settings(&root),
         Box::new(move |(), reply| tx.send(reply).unwrap()),
     )
@@ -173,6 +219,7 @@ fn a_job_before_any_matter_is_an_internal_error() {
 fn worker(root: &std::path::Path) -> (MatterWorker<u32>, mpsc::Receiver<MatterReply>) {
     let (tx, rx) = mpsc::channel::<MatterReply>();
     let worker = MatterWorker::<u32>::start(
+        (MatterId::new(v7(2)).unwrap(), clock()),
         matter_settings(&root.join("data")),
         Box::new(move |_tag, reply| tx.send(reply).unwrap()),
     )
@@ -197,13 +244,14 @@ fn open_with_relink(id: MatterId, folder: &std::path::Path, at: Timestamp) -> Ma
 
 #[test]
 fn the_first_open_spends_the_relink_whatever_it_finds() {
-    let root = test_dir("relink-spent");
+    let dir = TempDir::new("relink-spent");
+    let root = dir.path();
     let folder = root.join("matter");
     let away = root.join("away");
     let marker = folder.join(".clauseo/matter.json");
     let at = Timestamp::new(1_790_000_000_000).unwrap();
     let id = MatterId::new(v7(2)).unwrap();
-    let (made, replies) = worker(&root);
+    let (made, replies) = worker(root);
     let new = NewMatter {
         id,
         folder: folder.clone(),
@@ -227,7 +275,7 @@ fn the_first_open_spends_the_relink_whatever_it_finds() {
 
     // A deleted marker in the recorded folder is written again by the first open.
     write::remove_file(&marker).unwrap();
-    let (relinks, replies) = worker(&root);
+    let (relinks, replies) = worker(root);
     relinks.send(open_with_relink(id, &folder, at), 0).unwrap();
     let reply = replies.recv().unwrap();
     assert!(matches!(reply, MatterReply::Opened(Ok(_))), "{reply:?}");
@@ -237,7 +285,7 @@ fn the_first_open_spends_the_relink_whatever_it_finds() {
     // A first open that finds no folder spends it: when the folder comes back without its
     // marker, a later open does not write one.
     write::rename(&folder, &away).unwrap();
-    let (spent, replies) = worker(&root);
+    let (spent, replies) = worker(root);
     spent.send(open_with_relink(id, &folder, at), 0).unwrap();
     let reply = replies.recv().unwrap();
     let MatterReply::Opened(Err(error)) = reply else {
@@ -276,9 +324,12 @@ fn the_first_open_spends_the_relink_whatever_it_finds() {
 #[test]
 fn tool_paths_resolve_outside_spellings_into_the_matter() {
     use super::tool_paths;
+    use crate::sent::Places;
     use clauseo_protocol::MatterPath;
+    use std::path::PathBuf;
 
-    let root = test_dir("tool-paths");
+    let dir = TempDir::new("tool-paths");
+    let root = dir.path();
     let real = root.join("real");
     write::create_dir_all(&real.join("notes")).unwrap();
     write::write_file(&real.join("brief.txt"), b"Clause 4\n").unwrap();
@@ -287,7 +338,7 @@ fn tool_paths_resolve_outside_spellings_into_the_matter() {
     write::symlink(&real, &link).unwrap();
     let matter = |path: &str| MatterPath::new(path).unwrap();
     let text = |path: PathBuf| path.display().to_string();
-    let paths = TurnPaths {
+    let paths = TurnPaths::edited(Places {
         inside: [matter("kept.txt")].into(),
         outside: [
             text(link.join("brief.txt")),
@@ -297,9 +348,9 @@ fn tool_paths_resolve_outside_spellings_into_the_matter() {
             text(root.join("gone").join("a.txt")),
         ]
         .into(),
-    };
+    });
     // The matter folder as the lawyer picked it, through the link.
-    let found = tool_paths(&link, paths);
+    let found = tool_paths(&link, &paths);
     assert_eq!(
         found,
         [
@@ -309,5 +360,4 @@ fn tool_paths_resolve_outside_spellings_into_the_matter() {
         ]
         .into()
     );
-    write::remove_dir_all(&root).unwrap();
 }

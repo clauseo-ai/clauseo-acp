@@ -59,6 +59,10 @@ pub(crate) struct Updater {
     off_noted: Cell<bool>,
     /// When (Unix seconds) "the list is stale" was last logged.
     stale_noted: Cell<Option<i64>>,
+    /// Told once the start-up load has offered the bundled snapshot (`first_load.rs`).
+    first_load: Cell<Option<futures::channel::oneshot::Sender<()>>>,
+    /// The test hook run before the start-up load.
+    before_load: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl Updater {
@@ -70,6 +74,7 @@ impl Updater {
         clock: Arc<dyn Clock>,
     ) -> Self {
         let clients = Clients::new(seams.update.https_only);
+        let first_load = Cell::new(seams.first_load.teller());
         Self {
             current: seams.current,
             bundled_folder: seams.bundled,
@@ -81,6 +86,8 @@ impl Updater {
             bundled_time: std::sync::OnceLock::new(),
             off_noted: Cell::new(false),
             stale_noted: Cell::new(None),
+            first_load,
+            before_load: seams.before_load,
         }
     }
 
@@ -89,10 +96,14 @@ impl Updater {
         self.update.interval
     }
 
-    /// Loads and verifies the bundled and the stored pair, and offers the stored one, then the
-    /// bundled one, with the bundled time as the floor: the newer verified one is in use, and a
-    /// stored copy older than the bundled one is ignored. With neither the list stays unloaded.
+    /// Loads and verifies the bundled pair and offers it at once, telling the launches waiting
+    /// for the first load (`first_load.rs`); then loads the stored pair and offers it, with the
+    /// bundled time as the floor: the newer verified one is in use, and a stored copy older than
+    /// the bundled one is ignored. With neither the list stays unloaded.
     pub(crate) fn load_at_start(&self) {
+        if let Some(hook) = &self.before_load {
+            hook();
+        }
         let bundled = self
             .bundled_folder
             .as_deref()
@@ -100,11 +111,14 @@ impl Updater {
         let floor = bundled.as_ref().and_then(BlockList::generated);
         // Only this thread sets it, once; a second call keeps the first floor.
         let floor = *self.bundled_time.get_or_init(|| floor);
-        if let Some(stored) = self.load_from(&self.store_folder, "stored") {
-            self.current.offer(stored, floor);
-        }
         if let Some(bundled) = bundled {
             self.current.offer(bundled, floor);
+        }
+        if let Some(tell) = self.first_load.take() {
+            let _nobody_waits = tell.send(());
+        }
+        if let Some(stored) = self.load_from(&self.store_folder, "stored") {
+            self.current.offer(stored, floor);
         }
         let list = self.current.get();
         if let Some(generated) = list.generated() {

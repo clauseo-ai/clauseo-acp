@@ -22,7 +22,8 @@ fn data_spellings(data: &Path) -> Vec<PathBuf> {
 
 /// Claude's data folder deny rules for this launch: every entry of `data` that is not the
 /// session's own ([`own_folders`]), nor, for Claude, a `tool-results` folder in its project for
-/// the matter folder (`stored`, and the real path the agent works in).
+/// the matter folder (`stored`, and the real path the agent works in); and the own work and
+/// notes folders, which its allow rules let it list and read (`data_fence::own_allow_rules`).
 pub(super) fn launch_deny(
     run: &RunFolders,
     stored: &Path,
@@ -34,7 +35,9 @@ pub(super) fn launch_deny(
     let projects = claude_home.map_or_else(Vec::new, |home| {
         data_fence::claude_projects(home, &[&cwd, stored])
     });
-    data_fence::launch_deny(data_spellings(data), data, &own, &projects)
+    let mut deny = data_fence::launch_deny(data_spellings(data), data, &own, &projects);
+    deny.own_reads = data_fence::own_reads(data, &[&run.work, &run.notes]);
+    deny
 }
 
 /// The session's own folders, which Claude's deny rules leave out: its run folder, this
@@ -57,6 +60,15 @@ pub(super) fn run_dir(data: &Path) -> PathBuf {
     data.join("run")
 }
 
+/// `<data>/browser/run`: the parent of every session's browser folder, the guard's `--cwd`
+/// (`RunFolders::browser`). It sits in `<data>/browser`, which Codex's shell fence denies
+/// whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`), so a sandboxed shell cannot
+/// plant a link where the unfenced guard writes. Swept at start like `<data>/run`
+/// (`sweep.rs`).
+pub(super) fn browser_run_dir(data: &Path) -> PathBuf {
+    data.join(crate::browser::CONFIG_DIR).join("run")
+}
+
 /// `<data>/agent-state/<matter>/notes`.
 pub(super) fn notes_dir(data: &Path, matter: MatterId) -> PathBuf {
     data.join("agent-state")
@@ -68,5 +80,42 @@ pub(super) fn notes_dir(data: &Path, matter: MatterId) -> PathBuf {
 pub(super) fn remove_tree(folder: &Path) {
     if let Err(error) = crate::write::remove_tree(folder) {
         tracing::warn!(%error, "a session's run folder stays");
+    }
+}
+
+/// Removes this launch's run folder and its browser folder and all they hold, each when it
+/// is a real folder, with Claude's short temp folder the run folder names
+/// (`agent::claude_tmp`) and the run's Claude settings files (`agent::launch_settings`); the
+/// notes folder stays. Only the folders the host made: the paths as
+/// built (`<data>/run/<session id>`, `<data>/browser/run/<session id>`), never
+/// canonicalized, removed with `remove_dir_all`, which removes a link inside and never
+/// follows it. Called once the agent's process has exited, or when it never started. File
+/// system calls: off the actor.
+pub(super) fn remove_folders(run: &RunFolders) {
+    crate::agent::launch_settings::remove(&run.launch_settings);
+    let id = run.key.id();
+    let named = |folder: &Path, parents: &[&str]| {
+        let mut at = Some(folder);
+        let names = std::iter::once(id.as_str()).chain(parents.iter().copied());
+        names.into_iter().all(|name| {
+            let this = at.take();
+            at = this.and_then(Path::parent);
+            this.and_then(Path::file_name) == Some(std::ffi::OsStr::new(name))
+        })
+    };
+    for (folder, parents) in [
+        (&run.root, &["run"][..]),
+        (&run.browser, &["run", crate::browser::CONFIG_DIR][..]),
+    ] {
+        if !named(folder, parents) {
+            tracing::warn!("not a session folder the host made; it stays");
+            continue;
+        }
+        if folder == &run.root {
+            crate::agent::claude_tmp::remove_claude_tmp(folder);
+        }
+        if crate::write::is_real_dir(folder) {
+            remove_tree(folder);
+        }
     }
 }

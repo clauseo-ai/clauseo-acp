@@ -5,15 +5,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clauseo_protocol::{
-    ClauseoTool, StreamId, ToolState, ToolsUnavailableReason, ViewEntry, ViewPatchBody,
-};
+use clauseo_protocol::{StreamId, ToolState, ToolsUnavailableReason, ViewEntry, ViewPatchBody};
 use serde_json::json;
 
 use crate::profile_rig::{
-    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, codex_lines,
-    codex_lines_for, escaped, filled_browser, first_frame_tools, notes, path_text, settings,
-    template, tool, turn,
+    CLAUDE, CODEX, Hook, Seen, Wired, agent_lines, agents, browser_server, claude_servers,
+    claude_tools, codex_lines, codex_lines_for, escaped, filled_browser, first_frame_tools, notes,
+    path_text, settings, template, turn,
 };
 use crate::support::{Dir, FAKE, Scenario};
 use crate::write;
@@ -314,8 +312,17 @@ fn matter_notes_survives_session_end() {
     turn(&host, host.create_thread(matter, CLAUDE));
     let brief = notes(&dir, matter).join("matter-brief.md");
     write::write(&brief, b"# Matter brief\n\nParties: A v B.\n");
-    host.shutdown();
     let first_run = launcher.seen()[0].run.clone().expect("a run folder");
+    // Claude's flag settings went in a file named for the run (`agent::launch_settings`).
+    let run_id = first_run.file_name().unwrap().to_str().unwrap().to_owned();
+    let settings_file = dir
+        .data()
+        .join("launch-settings")
+        .join(format!("{run_id}.json"));
+    let written: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&settings_file).unwrap()).unwrap();
+    assert!(written["permissions"]["deny"].is_array(), "{written}");
+    host.shutdown();
 
     let host = dir.start_launching(1, launcher, |config| config);
     turn(&host, host.create_thread(matter, CLAUDE));
@@ -324,6 +331,7 @@ fn matter_notes_survives_session_end() {
         !first_run.exists(),
         "the first session's run folder is gone"
     );
+    assert!(!settings_file.exists(), "and its settings file");
     assert_eq!(
         std::fs::read_to_string(&brief).unwrap(),
         "# Matter brief\n\nParties: A v B.\n"
@@ -338,11 +346,15 @@ fn leftover_run_folders_are_swept_at_start_up() {
     let stale = dir.data().join("run").join("0190-stale-7");
     write::create_dir_all(&stale.join("work"));
     write::write(&stale.join("work").join("notes.md"), b"left over");
+    let stale_settings = dir.data().join("launch-settings").join("0190-stale-7.json");
+    write::create_dir_all(stale_settings.parent().unwrap());
+    write::write(&stale_settings, b"{}");
     let launcher = Wired::new(&dir);
     let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| config);
     let matter = host.create_matter("m", &dir.folder("m", &[]));
     turn(&host, host.create_thread(matter, FAKE));
     assert!(!stale.exists(), "the crash's run folder is swept");
+    assert!(!stale_settings.exists(), "and its settings file");
     let left: Vec<_> = std::fs::read_dir(dir.data().join("run"))
         .unwrap()
         .flatten()
@@ -382,10 +394,7 @@ fn the_header_shows_the_tools_and_a_relaunch_replaces_them() {
     turn(&host, thread);
     assert_eq!(
         first_frame_tools(&host, thread),
-        [
-            tool(ClauseoTool::WebSearch, None),
-            tool(ClauseoTool::Browser, Some(ToolsUnavailableReason::NoProxy)),
-        ]
+        claude_tools(Some(ToolsUnavailableReason::NoProxy))
     );
     host.shutdown();
 
@@ -395,7 +404,7 @@ fn the_header_shows_the_tools_and_a_relaunch_replaces_them() {
         &agent_lines(
             "hd-load",
             "session/load",
-            &json!({"sessionId": "sess-1", "mcpServers": [filled_browser()]}),
+            &json!({"sessionId": "sess-1", "mcpServers": claude_servers(&[filled_browser()])}),
             &[],
         ),
     );
@@ -411,13 +420,7 @@ fn the_header_shows_the_tools_and_a_relaunch_replaces_them() {
             .with_browser_executable(Some(PathBuf::from("/chrome")))
     });
     turn(&host, thread);
-    assert_eq!(
-        first_frame_tools(&host, thread),
-        [
-            tool(ClauseoTool::WebSearch, None),
-            tool(ClauseoTool::Browser, None)
-        ]
-    );
+    assert_eq!(first_frame_tools(&host, thread), claude_tools(None));
     host.shutdown();
 }
 
@@ -463,10 +466,7 @@ fn an_open_subscriber_gets_the_tools_once_the_session_starts() {
     let mut view = host.view(StreamId::Thread(thread), None);
     view.until_items(1);
     turn(&host, thread);
-    let shown = vec![
-        tool(ClauseoTool::WebSearch, None),
-        tool(ClauseoTool::Browser, Some(ToolsUnavailableReason::NoProxy)),
-    ];
+    let shown = claude_tools(Some(ToolsUnavailableReason::NoProxy));
     view.until("the header's tools", |view| {
         upserted_tools(view).last() == Some(&shown)
     });
@@ -520,8 +520,10 @@ fn tokens_are_filled_only_in_the_profiles_values() {
     let bin = dir.folder("bin", &[]);
     let alpha = bin.join("alpha").display().to_string();
     let literal = json!([{"name": "alpha", "command": "{{any}}",
-        "args": ["--out", "{work_folder}", "{matter_notes}/x"],
-        "env": [{"name": "WHERE", "value": "{browser_dir}|{work_folder}"}]}]);
+    "args": ["--out", "{work_folder}", "{matter_notes}/x"],
+    "env": crate::support::lawyer_env(vec![
+        json!({"name": "WHERE", "value": "{browser_dir}|{work_folder}"}),
+    ])}]);
     let new = template(
         &dir,
         "sc-new",

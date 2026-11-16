@@ -79,6 +79,8 @@ windows = { version = "0.62.2", features = [
   "Win32_System_Threading",
   "Win32_System_Diagnostics_ToolHelp",
 ] }
+# clauseo-matters: the `implement` macro of the Recycle Bin's progress sink names this crate.
+windows-core = "0.62.2"
 # clauseo-protocol: the host boundary types; xtask: the JSON it reads (features go on each
 # crate's own lines).
 serde = "1"
@@ -95,7 +97,7 @@ rmp-serde = "1.3.1"
 # clauseo-store: SQLite (its crate line turns on `bundled` and `blob`; the defaults keep `cache`
 # for `prepare_cached`), BLAKE3 blob hashes, zstd snapshots, and the request and reply channels
 # of its writer and reader threads.
-rusqlite = "0.40"
+rusqlite = "0.41"
 blake3 = "1.8.7"
 zstd = { version = "0.14.3", default-features = false }
 async-channel = { version = "2.5", default-features = false }
@@ -113,6 +115,9 @@ specta-typescript = "=0.0.12"
 tauri-specta = "=2.0.0-rc.25"
 # xtask's docs check, and protocol's doc-table tests (test-only there).
 pulldown-cmark = { version = "0.13.5", default-features = false }
+# Test-only: protocol's corpus test embeds the files of tests/corpus/added/ at compile time
+# (its crate bans reading files at run time). No `nightly` feature: see corpus.rs on rebuilds.
+include_dir = { version = "0.7.4", default-features = false }
 # fake_agent validates its scenarios against the SDK's v1 schema (schema 1.11.0). No features here:
 # a crate that needs one turns it on in its own line.
 agent-client-protocol = { version = "=3.3.0", default-features = false }
@@ -127,6 +132,11 @@ async-process = "2"
 # clauseo-process (it also uses the async-process, futures, memchr, nix and windows lines above):
 # the timer of its shutdown ladder.
 async-io = "2"
+# The open matter's folder watch (crates/host, decision record 0055): FSEvents and inotify, no
+# polling; macOS and Linux only.
+notify = { version = "8.2.2", default-features = false, features = [
+  "macos_fsevent",
+] }
 # clauseo-host: SHA-256 for the trust hash of the pre-write guard's Codex hook, as Codex 0.162.1
 # computes it with sha2 0.10 (crates/host/src/agent/loads/codex.rs). clauseo-connectors: the PKCE
 # S256 challenge. clauseo-sandbox: the admin copy's hash, which the refresh records, and its Windows
@@ -139,11 +149,15 @@ semver = "1.0.28"
 # clauseo-host: the pre-write guard compares a held file's name with a shell command's words in one
 # Unicode form on macOS, as APFS does (gix already builds it for clauseo-matters).
 unicode-normalization = "0.1.26"
+# clauseo-host: the Tools confirm writes out every invisible, blank or line-breaking character by
+# its Unicode general category and Default_Ignorable_Code_Point (2.3.0 is in the lock through url).
+icu_properties = "2.3.0"
 # clauseo-sandbox: Unicode full case folding (CaseFolding.txt C and F) for the policy's path keys on
 # macOS, as a case-insensitive APFS volume folds names.
 caseless = "0.2.2"
 # The Word round trip test (crates/host/tests/host/word_round_trip.rs) reads a .docx's zip entry
 # (deflate, from flate2) and its word/document.xml (quick-xml). Both are already in the lock.
+# clauseo-host's tracked-changes check (revisions/marks.rs) reads each .docx part with quick-xml.
 flate2 = "1.1.10"
 # clauseo-blocklist: the block list's minisign check, and clauseo-sandbox: the admin copy's
 # refresh checks the staged setup exe's signature against the updater key (its tests sign with a
@@ -157,6 +171,9 @@ quick-xml = "0.42.0"
 serde_json_lenient = "0.2"
 schemars = { version = "1.2", default-features = false }
 objc2-core-foundation = "0.3.2"
+# clauseo-matters: the Trash through NSFileManager (features on the crate's line). 0.3.2 is
+# already in the lock through tauri.
+objc2-foundation = { version = "0.3.2", default-features = false }
 # clauseo-settings: the key names in macOS managed preferences files, and its tests read the
 # sample MDM profile in docs/firm-it/ (S25). 1.10.1 is already in the lock through tauri; no serde
 # needed for plist::Value.
@@ -253,6 +270,17 @@ debug = "line-tables-only"
 incremental = true         # CI turns this off; set CARGO_INCREMENTAL=1 where incremental matters
 [profile.dev.package."*"]
 debug = false
+# xtask's expect-allowlist check parses every .rs file in the repo with syn 3 (span-locations), in
+# `cargo xtask check` and in two of xtask's tests. Unoptimized that took 4.2 s on an M-series Mac
+# and ran past nextest's 30 s on every first Windows try of checks::tests' real-repo tests; at
+# opt-level 3 it takes about 0.9 s, and each of those tests 2.5 s, not 6 s. A package override
+# also applies to the proc macros built on these crates (serde_derive, thiserror-impl and the
+# other derives every workspace crate uses), so a clean build is slower (`cargo build -p xtask`:
+# 5.2 s to 9 to 10 s). Edits that rebuild only workspace crates keep their time.
+[profile.dev.package."syn@3"]
+opt-level = 3
+[profile.dev.package.proc-macro2]
+opt-level = 3
 
 [profile.release] # CI artifacts only
 codegen-units = 1

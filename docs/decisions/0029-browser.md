@@ -15,6 +15,15 @@ agent-browser with an environment built from scratch and checks every tool call 
 
 Source lines below are agent-browser's, at tag v0.41.1, under `cli/src/`.
 
+Amended 2026-11-15 (route 2, PR W1): no browser has a DevTools TCP port on any system any more.
+The guard drives it over a DevTools pipe and relays that to agent-browser on a 127.0.0.1
+websocket with a 256-bit secret path and a peer check (only agent-browser's own processes). It
+hides itself (a protected DACL on Windows, which its children get too; PR_SET_DUMPABLE 0 on Linux)
+and tells agent-browser to start no stream server. On Windows the browser is Microsoft Edge, else
+a Program Files Google Chrome, never Chrome for Testing. Decision record 0060 has the attack, the
+spike results and the design. What this record says below about Chrome's debugging port, the
+claimed port and the `DevTools listening` line is history.
+
 ## Decision
 
 ### The guard (`crates/mcp`, the first S27 pull request)
@@ -41,24 +50,27 @@ passed exactly as given. Anything else exits 2 with a reason and the mode's usag
 | Variable | Value |
 |---|---|
 | `AGENT_BROWSER_CONFIG`, `AGENT_BROWSER_EXECUTABLE_PATH` | from the guard's environment, set by the host; each must be an existing file at an absolute path; on Windows a path starting with two slashes or backslashes (a network share or device path) or `\??` is refused before anything reads it |
-| `AGENT_BROWSER_PROXY` | from the guard's environment; exactly `http://127.0.0.1:<port>`, port 1 to 65535, no leading zero |
+| `AGENT_BROWSER_PROXY` | from the guard's environment when the host sets it; exactly `http://127.0.0.1:<port>`, port 1 to 65535, no leading zero. Optional: the plain client's Codex entry sends none, and the child then gets no proxy variable, no bypass and Chrome no `--proxy-server`, so Chrome goes direct, as Claude's shell browser does |
 | `AGENT_BROWSER_SESSION` | from the guard's environment; 1 to 64 of `A-Z a-z 0-9 _ -` |
-| `AGENT_BROWSER_PROXY_BYPASS` | `<-loopback>`, so loopback goes through the proxy too |
+| `AGENT_BROWSER_PROXY_BYPASS` | `<-loopback>`, so loopback goes through the proxy too; only with `AGENT_BROWSER_PROXY` |
 | `AGENT_BROWSER_ARGS` | `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` only. agent-browser no longer launches Chrome (next row); the value holds should it ever. Until the S27 launch fix it also carried `--remote-debugging-port=<--cdp-port>`, which broke every launch ("Chrome on the claimed port", below) |
 | `AGENT_BROWSER_CDP` | `ws://127.0.0.1:<--cdp-port>/devtools/browser/<id>`, the endpoint of the Chrome the guard started, read from Chrome's stderr; agent-browser connects to it instead of launching a Chrome |
 | `AGENT_BROWSER_IDLE_TIMEOUT_MS` | `600000` |
 | `AGENT_BROWSER_MAX_OUTPUT` | `25000` (characters; see below) |
 | `AGENT_BROWSER_DEFAULT_TIMEOUT` | `30000` |
 | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` (and lower case on Unix) | the validated proxy URL; no `NO_PROXY` |
-| `AGENT_BROWSER_DOWNLOAD_PATH`, `_SCREENSHOT_DIR` | `<cwd>/downloads`, `<cwd>/screenshots` |
+| `AGENT_BROWSER_DOWNLOAD_PATH`, `_SCREENSHOT_DIR` | the downloads folder (`--downloads`, else `<cwd>/downloads`), `<cwd>/screenshots` |
 | `AGENT_BROWSER_SOCKET_DIR` | Unix: from the guard's environment, the folder the host made for the session (below); Windows: `<cwd>\run`, whatever the environment says |
 | `AGENT_BROWSER_STREAM_PORT` | from the guard's environment, set by the host; a port from 1024 to 65535, no leading zero |
 | Unix: `HOME`, `TMPDIR` | `<cwd>/home`, `<cwd>/tmp` |
 | Windows: `TEMP`, `TMP` | `<cwd>\tmp` |
-| `PATH` | Unix `/usr/bin:/bin:/usr/sbin:/sbin`; Windows `<SystemRoot>\System32;<SystemRoot>`, `C:\Windows` when `SystemRoot` is absent |
-| Windows: `SystemRoot` | passed through, or `C:\Windows` when absent (Windows networking needs it) |
+| `PATH` | Unix `/usr/bin:/bin:/usr/sbin:/sbin`; Windows `<SystemRoot>\System32;<SystemRoot>` |
+| Windows: `SystemRoot` | the guard's own, or the Windows directory (`GetWindowsDirectoryW`; `C:\Windows` if that call fails). Winsock needs it |
+| Windows: `windir` | the guard's own, or the resolved `SystemRoot` |
+| Windows: `ComSpec` | the guard's own, or `cmd.exe` in the system directory (`GetSystemDirectoryW`; else `<SystemRoot>\System32`) |
+| Windows: `PATHEXT` | the guard's own, or `.COM;.EXE;.BAT;.CMD` |
 | Unix: `LANG` | passed through when present |
-| Windows: `windir`, `SystemDrive`, `ComSpec`, `PATHEXT`, `ProgramFiles`, `ProgramFiles(x86)`, `ProgramW6432`, `LOCALAPPDATA`, `APPDATA`, `USERPROFILE` | passed through when present, matched without ASCII case, first match wins, each emitted once under this spelling |
+| Windows: `SystemDrive`, `ProgramFiles`, `ProgramFiles(x86)`, `ProgramW6432`, `LOCALAPPDATA`, `APPDATA`, `USERPROFILE` | passed through when present, matched without ASCII case, first match wins, each emitted once under this spelling |
 
 A required variable that is missing or invalid exits 2 with a stderr line naming it; the guard
 never falls back. Whatever the guard's environment says, the fixed values above win. The guard
@@ -184,9 +196,41 @@ on Windows.
    `-32600` "Clauseo reserves the id clauseo-guard-close for itself." with that id, nothing
    forwarded.
 4. An object whose `method` is exactly `tools/call` (case-sensitive, as `mcp.rs:700-709`
-   matches) has `params.arguments` checked whatever the tool's name. Arguments that are absent
-   or not an object pass: agent-browser refuses a non-object before running anything
-   (`mcp.rs:3967-3975`). Keys match exactly, as agent-browser's do (`mcp.rs:2264-2308`).
+   matches) names a tool that is not on the allowlist, a missing or non-string name included.
+   Only 28 of the 29 tools of agent-browser v0.41.1's `core` profile pass (`ALLOWED_TOOLS`,
+   from `cli/src/mcp.rs:340-370` at the tag; `agent_browser_eval` is left out, as page
+   JavaScript is off for both agents), the profile the host starts it with
+   (`crates/profile/src/servers.rs:81`): the guard enforces the core profile itself, so an agent
+   that runs the guard with `--tools all` gains nothing, and a new or renamed tool is refused,
+   never let through. `agent_browser_tools_profiles` only prints the profiles and is on the list.
+   Every live view (the stream, dashboard and `inspect` tools, `agent_browser_stream_enable` to
+   `agent_browser_inspect`) gets "That browser feature isn't available in Clauseo."; any other
+   tool off the list, `agent_browser_batch` included (it is not in `core`, so no command inside a
+   batch needs a check), gets "That browser tool isn't one Clauseo offers.". Neither reaches
+   agent-browser; the macOS browser profile denies every inet bind anyway.
+5. An object whose `method` is exactly `tools/call` and whose tool passed rule 4 has
+   `params.arguments` checked. Arguments that are absent or not an object pass: agent-browser
+   refuses a non-object before running anything (`mcp.rs:3967-3975`). Keys match exactly, as
+   agent-browser's do (`mcp.rs:2264-2308`).
+   - **`allowedDomains`, first:** in any spelling (`allowedDomains`, `allowed_domains`,
+     `allowed-domains`, `--allowed-domains`, any case), as a key at any depth or as a string at
+     any depth that starts with `-` (`extraArgs` included, `--allowed-domains=x` too), gets
+     "Clauseo already controls which sites the browser may open; open the page without
+     allowedDomains." agent-browser turns it into `--allowed-domains` (`mcp.rs:4167-4180`),
+     which it cannot apply to a Chrome it reached over CDP (`actions.rs:3797-3801`), and the
+     failure stuck on its session: every later call failed the same way, a plain `open`
+     included, `agent_browser_close` too (stage C, and the release binary run with
+     `AGENT_BROWSER_CDP` set). Should agent-browser still answer a call with that refusal, its
+     error field (`structuredContent.response.error`, or a JSON-RPC `error.message`) being
+     exactly "--allowed-domains is not supported with --cdp because WebRTC containment cannot be
+     installed before existing page scripts run", the guard stops Chrome and agent-browser as its
+     idle stop does, keeping the profile, before that reply goes out; the reply and each request
+     in flight get the same sentence with "Clauseo restarted the browser, so the next call starts
+     clean." (`relay/pumps.rs`). Text that only holds the sentence (a page's thrown error comes
+     back as "Evaluation error: ...") stops nothing, and the guard stops the browser this way
+     once per run: a later refusal gets "The browser is stuck on a site restriction; close it with
+     agent_browser_close, then open the page again without allowedDomains. ...", and a close's
+     reply stops the browser whatever it says.
    - **Refused keys:** `session`, `namespace`, `idleTimeout`, `restore`, `restoreSave`, `restoreCheckUrl`, `restoreCheckText`, `restoreCheckFn`, `caCert`, `useSystemCa`, `clearCaCert`, `headed`, `screenshotDir`, `path`.
      Present with any value, even `false` or `null`. `path` on any tool: `screenshot.path` writes
      any file the process can reach (`screenshot.rs:626-649`), past the agent's own write
@@ -197,7 +241,9 @@ on Windows.
      files, so a hostile page could get `file:`, `chrome:` or `data:` pages opened.
      `webgpu: true` adds `--enable-unsafe-webgpu` (`chrome.rs:483-486`). Any other value, even
      `null`, is refused by the key's name.
-   - **`timeoutMs`:** refused unless a whole number up to 300000. The MCP server runs one call at
+   - **`timeoutMs`, `waitTimeoutMs`, `ms`, `readTimeoutMs`, `delayMs`:** each refused unless a
+     whole number up to 300000 ("a waitTimeoutMs other than a whole number up to 300000"), and
+     `delayMs`, waited between every two keystrokes, up to 1000. The MCP server runs one call at
      a time (`mcp.rs:586`), so a huge value would stall it and the guard's shutdown.
    - **`selector` on `agent_browser_screenshot`:** refused when it holds `/` or `\`, or ends in
      `.png`, `.jpg`, `.jpeg` or `.webp` in any case: "Clauseo does not allow a file path as the
@@ -225,11 +271,15 @@ on Windows.
      anything else (another flag, a `--flag=value`, a positional) is refused by the token's name
      before any `=`, and a non-array or a non-string entry as `extraArgs`. None of the allowed
      tokens takes a value, and agent-browser lets positional tokens through unexamined
-     (`mcp.rs:2679-2681`).
-   - **`extraArgs` tokens allowed:** `--json`, `--full`, `-i`, `--quiet`, `-q`, `--annotate`.
+     (`mcp.rs:2679-2681`). Each allowed token is a global flag, which the CLI reads wherever it
+     stands (`GLOBAL_BOOL_FLAGS`, `flags.rs:1298-1324`). `-i` and `--full` are not: on a
+     command that does not read them they become a positional (`screenshot <selector> -i` wrote a
+     file named `-i`, `commands.rs:906-929`; `read -i` fetched `https://-i`,
+     `commands.rs:2445-2452`), and the typed `interactive`, `full` and `fullPage` do their
+     work, as `annotate` does `--annotate`'s.
+   - **`extraArgs` tokens allowed:** `--json`, `--quiet`, `-q`.
    - **Any other string shaped like a flag:** a string at any depth of the arguments (except
-     inside `extraArgs`, and `agent_browser_eval`'s `script`, which travels on stdin, never
-     argv, `mcp.rs:3950-3957`) that is `-` or `--`, then a name of ASCII letters, digits and
+     inside `extraArgs`) that is `-` or `--`, then a name of ASCII letters, digits and
      inner dashes that starts with a letter and does not end in a dash, then optionally `=` and
      anything. agent-browser puts typed values into the CLI's argv, and "the CLI reads global
      flags anywhere in argv" (`mcp.rs:2659-2661`; the CLI's loop, `flags.rs:820-900`), so a
@@ -238,13 +288,60 @@ on Windows.
      `-Rohan` are refused; `-5`, `-10`, `-`, `--`, `---x`, `- item`, `--Select--` and `-Select-`
      (placeholder options on Indian government forms) pass. The rule is a shape, not a list of
      flag names, so a flag added upstream is refused too.
-5. A refused request is answered with its own id:
-   `{"jsonrpc":"2.0","id":<same>,"result":{"content":[{"type":"text","text":"Clauseo does not allow <name> in the browser."}],"isError":true}}`,
-   and never reaches the child. A refused notification (no `id`) is dropped unanswered.
-6. Everything else passes: other methods (`initialize`, `tools/list`, ...), other tools' calls,
-   and `allowedDomains`, which can only narrow.
+   - **Last, the pass list** (`filter/keys.rs`): a key not on the tool's list gets "This option
+     is not supported in Clauseo." (fixed: it never repeats the key) and never reaches agent-browser, so nothing passes by being unknown
+     and a key added upstream is refused until it is read. Every tool takes `extraArgs` and
+     `timeoutMs` (checked above), and its own keys below, from agent-browser v0.41.1's schemas
+     (`mcp.rs:832-1058`, `2044-2170`). Left off besides the keys refused by name: `webmcp`
+     on `agent_browser_open` (an experimental Chrome feature for tools a page offers, which
+     Clauseo does not offer) and `all` on `agent_browser_close` (every session in the socket
+     folder; the guard runs one). A unit test reads agent-browser's own `tools/list` reply and
+     fails on a key of its schemas that is neither passed nor refused.
+     - `agent_browser_tools_profiles`: none.
+     - `agent_browser_open`: `url`, `webgpu`.
+     - `agent_browser_read`: `filter`, `outline`, `raw`, `readTimeoutMs`.
+     - `agent_browser_snapshot`: `compact`, `delta`, `depth`, `full`, `includeUrls`, `interactive`, `selector`.
+     - `agent_browser_back`: none.
+     - `agent_browser_forward`: none.
+     - `agent_browser_reload`: none.
+     - `agent_browser_click`: `selector`, `human`, `newTab`.
+     - `agent_browser_fill`: `selector`, `text`.
+     - `agent_browser_type`: `selector`, `text`, `clear`, `delayMs`.
+     - `agent_browser_press`: `key`.
+     - `agent_browser_check`: `selector`.
+     - `agent_browser_uncheck`: `selector`.
+     - `agent_browser_select`: `selector`, `values`.
+     - `agent_browser_scroll`: `selector`, `direction`, `amount`.
+     - `agent_browser_wait_ms`: `ms`.
+     - `agent_browser_wait_for_selector`: `selector`, `waitTimeoutMs`.
+     - `agent_browser_wait_for_text`: `text`, `waitTimeoutMs`.
+     - `agent_browser_wait_for_load`: `state`, `waitTimeoutMs`.
+     - `agent_browser_screenshot`: `selector`, `annotate`, `format`, `fullPage`, `ifChanged`, `quality`, `threshold`.
+     - `agent_browser_get_text`: `selector`.
+     - `agent_browser_get_url`: none.
+     - `agent_browser_get_title`: none.
+     - `agent_browser_tab_new`: `url`, `label`.
+     - `agent_browser_tab_list`: none.
+     - `agent_browser_tab_switch`: `tab`.
+     - `agent_browser_tab_close`: `tab`.
+     - `agent_browser_close`: none.
+6. A refused request is answered with its own id:
+   `{"jsonrpc":"2.0","id":<same>,"result":{"content":[{"type":"text","text":"Clauseo does not allow <name> in the browser."}],"isError":true}}`
+   for rule 5, with the text of rule 4 in place of that sentence for a tool refusal (and the
+   `allowedDomains` and pass-list sentences above for theirs), and it never
+   reaches the child. A refused notification (no `id`) is dropped unanswered.
+7. Everything else passes: other methods (`initialize`, `tools/list`, ...) and calls to the
+   core tools that rule 5 does not refuse.
+8. The reply to a `tools/list` (from the running agent-browser or the one-shot) loses every tool
+   off the allowlist, and each tool kept loses from its input schema every key off its pass
+   list and the keys refused unless `false` (`advertised_tools`, `filter/schema.rs`), so
+   neither agent is offered `agent_browser_eval`, `allowedDomains`, `session`, `path` or any
+   other refused key; `extraArgs` is advertised as an `enum` of the allowed tokens, each time
+   key above with its `maximum` (300000, or 1000 for `delayMs`), and `agent_browser_read` as "Read the open tab as
+   agent-readable text." (title "Read page"), in place of agent-browser's text offering a `url`. The guard takes no agent argument: Codex and
+   Claude get the same filter and the same list.
 
-A unit test in `filter.rs` fails when the three lists above differ from the code's.
+A unit test in `filter.rs` fails when the lists above differ from the code's.
 
 ### Chrome on the claimed port (the S27 launch fix)
 
@@ -265,9 +362,10 @@ No Chrome switch makes it write the file for a fixed port, on any OS.
 connects to it (`AGENT_BROWSER_CDP`; `flags.rs:689`, `native/actions.rs:4334-4436`):
 - Chrome gets agent-browser's own headless flags (`chrome.rs:466-597`, less port 0) with the
   switches of "No background hosts" (below), the session's proxy with the `<-loopback>` bypass, the WebRTC flag, `--user-data-dir=<cwd>/
-  chrome-profile-<run id>` (below) and `--remote-debugging-port=<--cdp-port>`; on Linux, as root or in a
-  container, `--no-sandbox --disable-dev-shm-usage` (agent-browser's rule less its `CI` test,
-  which its child never saw). Its environment is agent-browser's less the `AGENT_BROWSER_*`
+  chrome-profile-<run id>` (below) and `--remote-debugging-port=<--cdp-port>`; on Linux
+  `--gpu-sandbox-failures-fatal` and, in a container, `--disable-dev-shm-usage`. Never `--no-sandbox`: agent-browser's rule adds it as
+  root or in a container, and the guard dropped that exception ("Chrome's sandbox, never
+  weakened", below). Its environment is agent-browser's less the `AGENT_BROWSER_*`
   names.
 - The profile is the run's own, made fresh at the run's first Chrome start, kept across the
   run's later starts ("Lazy start and the idle stop", below) and deleted on the guard's exit
@@ -321,7 +419,8 @@ connects to it (`AGENT_BROWSER_CDP`; `flags.rs:689`, `native/actions.rs:4334-443
 
 Behaviour that changes with it:
 - **`agent_browser_close` only disconnects** (`browser.rs:1648-1652`: `Browser.close` only for a
-  Chrome it launched). Tabs, cookies, storage and history live until the session ends, then go
+  Chrome it launched), so the guard stops its Chrome itself after the close's reply ("Lazy start
+  and the idle stop", below). Cookies, storage and history live until the session ends, then go
   with the profile. Before, each close deleted agent-browser's temp profile.
 - **agent-browser's own idle timeout** (10 minutes) ends its daemon, not Chrome; the guard's
   idle stop, at the same 10 minutes, ends both ("Lazy start and the idle stop", below).
@@ -338,7 +437,10 @@ Behaviour that changes with it:
   relay ends, so a Chrome that died between two polls while agent-browser ended (the agent
   closing its stdin at the same moment) still makes the guard exit 1: an agent that has gone gets
   no restart.
-- **Downloads** land in `<cwd>/downloads` as before, now moved there by the guard
+- **Downloads** land in the matter: the guard's `--downloads`, which the host fills with
+  `<matter folder>/downloads` (`{matter_downloads}`) and the guard makes; without the flag,
+  `<cwd>/downloads`, the run folder, where the agent never looked (stage C, 2026-11-11: three
+  PDFs saved there, the agent never told). Each file is moved there by the guard
   (`browser_guard/downloads.rs`): Chrome downloads into `<profile>/downloads-staging`, and every
   200 ms the guard moves each finished file (Chrome renames `*.crdownload`, or on Windows its
   first name `<guid>.tmp`, only when done: "Windows fixes from G17", below) into the downloads
@@ -362,6 +464,13 @@ Behaviour that changes with it:
   (`browser.rs:784`, `browser.rs:2563-2574`), and Chrome resets it when the client that set it
   disconnects. agent-browser's explicit `download` tool, with a path the agent picks, is not in
   `--tools core` and is unchanged.
+- **The agent is told** (`downloads/saved.rs`). Each delivered file is recorded under the name
+  the mover gave it, and the next tool result the guard relays carries `Saved <name> to
+  downloads/ in the matter.` An `agent_browser_open` of a URL Chrome saves rather than shows (a
+  PDF, with `plugins.always_open_pdf_externally`) fails in agent-browser with
+  `net::ERR_ABORTED`; the guard waits up to 5 s for the mover and answers that call as a success
+  naming the file, or saying the download is still in progress (no error) when a file is still
+  in staging then. With nothing in staging by then, the error goes on as it was.
 - **Launch options from the agent** (`extraArgs` and the like) have no effect: agent-browser
   launches nothing. `headed` and `webgpu` were refused already.
 
@@ -598,6 +707,107 @@ back. `real_chrome::idle::a_chrome_restarted_on_the_kept_profile_contacts_no_hos
 holds it for a restart: after the idle stop (15 s there) the next call starts Chrome on the kept
 profile, and in its 10 s idle the proxy sees only `page.test`.
 
+### Chrome's sandbox, never weakened (`browser_guard/chrome/sandbox.rs`)
+
+The rule: the guard never passes `--no-sandbox` or any other switch that turns off or loosens
+Chrome's own sandbox, refuses to start Chrome with one, and refuses the browser when the sandbox
+cannot start. There is no retry without the sandbox. Enforced in the launcher, with tests, not
+by convention.
+
+**The switches** (Chromium main, November 2026), matched as Chrome reads them: after `--`, `-`
+or `/`, whitespace trimmed (all Unicode whitespace, as Chrome on Windows trims it,
+`base/command_line.cc:654`), the name compared without case (Windows lowercases it,
+`base/command_line.cc`), any `=value`:
+- `sandbox/policy/switches.cc`: `no-sandbox`, `disable-gpu-sandbox`,
+  `disable-landlock-sandbox`, `disable-namespace-sandbox`, `disable-seccomp-filter-sandbox`,
+  `disable-setuid-sandbox`, `disable-webnn-compiler-sandbox`, `no-zygote-sandbox`,
+  `allow-sandbox-debugging`, `gpu-sandbox-allow-sysv-shm`, `allow-third-party-modules`,
+  `service-sandbox-type`;
+- `content/public/common/content_switches.cc`: `no-zygote`, `single-process`, `in-process-gpu`,
+  and the switches that put a program of the caller's choosing in front of or instead of a
+  sandboxed child: `renderer-cmd-prefix`, `utility-cmd-prefix`, `zygote-cmd-prefix`,
+  `gpu-launcher`, `browser-subprocess-path`;
+- earlier Chromium's `disable-gpu-appcontainer` and `disable-gpu-lpac`;
+- `--disable-features` naming any feature of `sandbox/policy/features.cc`, or any name with
+  `sandbox`, `sbox`, `appcontainer`, `lpac`, `seccomp`, `landlock` or `outofprocess` in it
+  (feature entries read as `base/feature_list.cc` does: `*` prefix, `<trial` and `:params`
+  off). `outofprocess` covers `AudioServiceOutOfProcess` (`content_features.cc`: disabled, the
+  audio service runs unsandboxed in the browser's process) and `UseOutOfProcessVideoEncoding`
+  (`media/base/media_switches.cc`);
+- `--enable-features` naming `NetworkServiceInProcess2` (`content_features.cc`, the network
+  service in the browser's process) or its old name `NetworkServiceInProcess`, or any name with
+  `inprocess` or `inbrowserprocess` in it (`RunVideoCaptureServiceInBrowserProcess`,
+  `UseUnexportableKeyServiceInBrowserProcess`). agent-browser's own feature list has the old
+  name, which current Chrome ignores; the guard dropped it;
+- `--gpu-sandbox-failures-fatal` with any value (`=no` turns it off); the guard passes it bare.
+
+**The GPU sandbox on Linux.** A GPU process whose seccomp sandbox cannot start (driver threads
+running before it) goes on unsandboxed with only a warning unless `--gpu-sandbox-failures-fatal`
+is passed (`sandbox/policy/linux/sandbox_linux.cc`; the browser forwards the switch to the GPU
+process, `gpu_process_host.cc`). The guard passes it on Linux, the only OS that reads it
+(with Chrome OS); there the GPU process ends instead of running unsandboxed.
+
+**Flags from `chrome://flags`.** The kept profile's `Local State` holds what `chrome://flags`
+turned on (`browser.enabled_labs_experiments` and its `_origin_lists`,
+`components/webui/flags/flags_ui_pref_names.cc`), which Chrome applies as switches at its next
+start, past the check above. Before each start the guard removes both keys; nothing else in
+`Local State` changes (`chrome/profile.rs`, `without_flags`).
+
+`launch` checks every argument it built and refuses to spawn on a match (a guard bug, not a
+host condition). The guard's own command line refuses (exit 2) agent-browser's arguments, and
+`AGENT_BROWSER_ARGS`, naming any of these anywhere in a value (`--args=...,--no-sandbox`).
+
+**What can reach Chrome's command line.** Only the guard's own constants, the proxy URL (checked
+to be `http://127.0.0.1:<port>`), the profile path and, since route 2 (decision record 0060), the
+`--remote-debugging-pipe` switch with, on Windows, the pipe's two handle values (no port). Nothing the agent sends:
+agent-browser only connects to the guard's Chrome (`AGENT_BROWSER_CDP`) and never launches one,
+so its `--args`, `AGENT_BROWSER_ARGS` (fixed to the WebRTC flag) and the config file (`{}`,
+written by the host) never reach Chrome; and the filter refuses every flag-shaped string in a
+tool call and every `extraArgs` token but six output flags (`filter.rs`).
+
+**The refusal.** Chrome's stderr, read until Chrome answers the guard's `Browser.getVersion` on
+its `DevTools` pipe (route 2, decision record 0060; before it, up to the endpoint line), is
+matched against the messages Chromium prints when the sandbox cannot start; a match seen with the
+answer still refuses, and a pipe that ends first waits up to 2 s for stderr to say why
+(`chrome/pipe.rs`). The reader goes on for that Chrome's life: a match after the start was
+accepted (or one that lost the race to the answer) stops Chrome and agent-browser, answers what
+is in flight with the refusal, and refuses every later call the same way, starting no browser
+again (`chrome/stderr.rs`, `relay.rs`). The messages:
+- Linux, `content/browser/zygote_host/zygote_host_impl_linux.cc`: "No usable sandbox!",
+  "Running as root without --no-sandbox is not supported", "Zygote process exited prematurely",
+  "Failed to receive boot message from zygote", "Failed to receive hello message from zygote";
+  `sandbox/linux/suid/sandbox.c`: "Failed to move to new namespace", "The setuid sandbox is not
+  running as root"; `sandbox/linux/suid/client/setuid_sandbox_host.cc`: "The SUID sandbox helper
+  binary" (missing, or not configured correctly); `sandbox/policy/linux/sandbox_linux.cc`:
+  "Failed to instantiate the setuid sandbox client"; `content/app/content_main_runner_impl.cc`:
+  "Zygote cannot be disabled if sandbox is enabled";
+- Windows, `sandbox/policy/win/sandbox_win.cc`: "Sandbox cannot access executable" (the
+  broker's other launch errors are debug-build logs only);
+- macOS, `sandbox/mac/seatbelt_exec.cc`: "SeatbeltExec" (a child cannot receive its profile).
+
+On a match, whether Chrome exits or goes on (Windows' broker leaves the browser running), the
+start fails with its own kind (`session::StartError::Sandbox`): the tool call gets exactly "The
+browser couldn't start its own protection on this computer, so Clauseo won't use it.", Chrome's
+tree is killed, and the guard exits 1, its stderr naming the fixed part Chrome printed (never the
+line, which can hold a path). A failed start ends the guard, so Chrome is never started again.
+On Linux as root (the effective user, `geteuid`) the guard refuses the same way without starting
+Chrome, which refuses its sandbox as root itself. In a container Chrome starts with its sandbox, with
+`--disable-dev-shm-usage` (shared memory files in the temp folder, not a small `/dev/shm`: no
+sandbox change); where the sandbox cannot start there, it is refused. Linux is not a tier 1
+platform. The host cannot tell the refusal apart yet: no protocol change.
+
+CI's real-Chrome tests run under `no_new_privs`, where the setuid sandbox cannot start, so a
+wrapper script there adds `--no-sandbox` (`tests/guard/real_chrome.rs`). That is the test
+harness, never production; the guard sees only the wrapper's path.
+
+Tests: `chrome/sandbox/tests.rs` (every switch in every spelling, the feature lists, a failure
+line per message, the host table), `chrome/tests.rs` (`chrome_args` on every OS, as root and in
+a container, has no weakening argument), `tests/guard/sandbox.rs` (a stand-in Chrome printing
+each message, exiting or not: the exact refusal, one launch, no agent-browser; an early exit
+with unknown text: the ordinary failed start, one launch; agent-browser arguments naming a switch
+refused), `chrome/tests.rs` also `--gpu-sandbox-failures-fatal` on Linux and the root refusal
+through `launch`, `chrome/profile/tests.rs` the `chrome://flags` reset.
+
 ### Lazy start and the idle stop (`browser_guard/session.rs`, the S27 release blocker)
 
 As first fixed, Chrome started with the guard: every session that loaded the browser server paid
@@ -635,6 +845,24 @@ agent's first tool call, and an idle browser stops.
   The next tool call starts both again as the first did. The guard looks at the idle time at
   least once a second. A test-only variable, `CLAUSEO_TEST_GUARD_IDLE_MS`, shortens the stop; it
   exists only in builds with the crate's `test-support` feature, which only its own tests enable.
+- **The stop at `agent_browser_close`** (B2, defence in depth). agent-browser only disconnects
+  from the guard's Chrome, so Chrome and its loopback debugging port lived on after the agent's
+  close until the idle stop (10 minutes) or the host's stop of an idle agent (5 minutes); Codex
+  closes at the end of every turn. Now, once agent-browser's reply to a close has gone to the
+  agent, the relay's thread stops the browser exactly as the idle stop does, keeping the profile,
+  so the port lives only from a turn's first browser call to its close. The stop runs after the
+  reply, never before it: its wait for Chrome's group (up to 5 s) does not delay the agent, and
+  the profile is only kept, never deleted, here. It is skipped when a request went to
+  agent-browser after the close (the agent browses again; the idle stop covers it) or the agent
+  has gone (the final stop follows). A close whose reply is an error stops the browser too. A
+  close while the browser is stopped starts nothing: the guard answers it with agent-browser
+  v0.41.1's own result (`relay.rs` `CLOSED_RESULT`, which the real-Chrome test
+  `a_close_while_stopped_starts_nothing_and_gets_agent_browsers_result` compares with the real
+  binary's); a close that waited on the state lock for a start in progress goes to the started browser and
+  stops it again. The guard's own close at stdin's end is unchanged. Cost: the next open is a
+  cold start, median 0.32 s against 0.02 s warm (max 0.34 s and 0.04 s, 10 runs each on
+  openclaw-gateway, Chromium 147, agent-browser v0.41.1, debug guard). Giving agent-browser a
+  pipe to Chrome instead of the port is for after the launch.
 - **Generations.** Each start and stop moves a counter on, and every report of a child's
   threads carries it, so a line or an exit from a browser the guard has already stopped is
   dropped and never answers a later call or ends the guard. Calls in flight are tracked by id;
@@ -803,9 +1031,10 @@ held back (fail closed).
 - **The mark is made sure of in staging, then the file moves.** Once the wait ends, the guard
   checks the mark in the staging folder, which Chrome made and the agent cannot reach, and writes
   one where needed; the move then keeps it: `MoveFileExW` within one volume renames the file with
-  its streams, the Unix hard link is the same inode with its attributes. Staging and the
-  downloads folder are both under the guard's `--cwd`, and `write::move_new` has no copy
-  fallback: a move across volumes fails and is retried, never made without the mark. Nothing is
+  its streams, the Unix hard link is the same inode with its attributes. `write::move_new` has
+  no copy fallback: a matter on another volume than the data folder gets no download (the
+  move fails with `CrossesDevices`; the file stays in staging and goes with the profile), and
+  the agent is told once that the file was not saved, never given it without the mark. Nothing is
   written after the move, so no write lands in the agent-writable downloads folder, follows a
   link planted there, or leaves a moment where the file is there unmarked.
 - **The zone rules (Windows).** A `Zone.Identifier` whose `ZoneId` is 1 (intranet), 2 (trusted),
@@ -868,7 +1097,7 @@ and the agent waited for it in vain.
   Windows still refuses; the profile's deletion at the guard's exit takes any left.
 
 **Why a block in the next result.** agent-browser 0.41.1's MCP tools have no download tool: a
-download starts from a click, an `open` or `eval`, and the click's result comes back before
+download starts from a click or an `open`, and the click's result comes back before
 Chrome names the file (up to one 200 ms poll later). The guard already reads every reply line to
 take its id off the in-flight list; adding one block to a tool call's result changes none of
 agent-browser's content, and needs no new message type the agent's client would have to know.
@@ -1018,7 +1247,11 @@ chrome-headless-shell none, so a false anywhere starts no browser at all, and th
 `BrowserBlockedByPolicy`. Nothing set, or a value Chrome would not take, does not block; a place
 that cannot be read (not missing: denied, failed or past a cap) means nothing is known, so with no
 false elsewhere the entry drops with its own `BrowserPolicyUnreadable`, read again at the next
-launch. The firm's Clauseo policy `browser.allow_when_remote_debugging_disabled` (policy only, a
+launch, or at once when the lawyer presses Try again (`HostCommand::RecheckBrowserPolicy`, main
+window only, off the actor, one read at a time, `Unreadable` after 10 s on the host clock;
+`HostEvent::BrowserPolicy` says what it found, a running session keeps its header, `Blocked`
+re-words the headers that said unreadable, and each later launch's read keeps that state). The
+firm's Clauseo policy `browser.allow_when_remote_debugging_disabled` (policy only, a
 security key, default false) overrides both. Each unread place and bad value is logged once per
 host, with no path (`docs/firm-it.md`, "Browser automation and RemoteDebuggingAllowed"). In
 order:
@@ -1070,6 +1303,8 @@ claims a `BrowserSession`:
 - `BrowserPorts { cdp, stream, daemon }`, each a stage C `PortClaim`: `cdp` and `stream` from
   `ports::claim_port()`, `daemon` on Windows only (below). No other session of this host is
   handed them while they are held. They fill `{cdp_port}`, `{stream_port}` and `{daemon_port}`.
+  (2026-11-15, record 0060: the stream port is gone. The host claims no `stream` port and the
+  profile passes no `AGENT_BROWSER_STREAM_PORT`; agent-browser's stream server is off.)
 - macOS and Linux: one `BrowserSocketDir` (`BrowserSocketDir::create()`), whose `path()`, the
   `/tmp/...` form, fills `{socket_dir}`; never `canonical()`, which on macOS is 8 bytes longer
   (`/private/tmp/...`) and counts against the socket path's 103 bytes.
@@ -1347,6 +1582,10 @@ the release fetches the pinned asset, checks its hash and writes it into the des
   (`connection.rs:198`, `is_agent_browser_process`, which wants the name to start with
   `agent-browser`) then skips its stale-daemon kill. On Windows the guard's Job Object (#329) covers
   that; on Unix the guard ends the daemon itself ("Chrome on the claimed port").
+- **Where it lives on macOS** (2026-11-09): `Clauseo.app/Contents/Helpers/clauseo-agent-browser`,
+  Apple's folder for nested helper code, not `Contents/MacOS`, which the agent's sandbox can reach
+  (0035, "Sidecars"). The desktop looks there first and, transitionally, beside the exe; the
+  fallback goes in the same change as stage C's J3 deny on `Contents/Helpers`.
 - **Windows ARM64** has no upstream build. `aarch64-pc-windows-msvc` takes the x64 asset, which
   Windows on ARM runs under x64 emulation; the pin says so in a comment.
 - **The license**: `LICENSES/Apache-2.0-agent-browser.txt`, a copy of upstream's `LICENSE` (upstream
@@ -1509,7 +1748,7 @@ The guard:
   Windows names); `ARCHITECTURE.md`'s row lists both.
 - `AGENT_BROWSER_CONFIG` and `AGENT_BROWSER_EXECUTABLE_PATH` must name existing files, and on
   Windows not network or device paths; the brief asked only for absolute paths. Windows also
-  gets `SystemRoot` set when absent.
+  gets `SystemRoot`, `windir`, `ComSpec` and `PATHEXT` set when absent.
 - Rules from the security review, beyond the brief: `newTab` and `webgpu` refused unless
   `false`, `timeoutMs` capped at 300000, a path-like screenshot `selector` refused, local and
   private `url` hosts refused, the reserved id refused, the flag shape narrowed and
@@ -1530,6 +1769,88 @@ The download (part 3):
   and starts nothing. A refusal needs a new error code and a user-facing string, and the
   running download's `BrowserInstall` events already say one is under way.
 
+### The plain client's Codex entry: the boundary and what is accepted
+
+Record 0030 has the entry; this is the browser's side of it.
+
+- **The boundary.** In the plain client Claude's shell and Claude's Chrome are unfenced, so the
+  boundary that matters is between Codex's sandboxed shell (Seatbelt on macOS, bubblewrap and
+  seccomp on Linux) and the guard and Chrome, which Codex starts unfenced. No path lets the shell
+  steer them without the lawyer:
+  - **The guard's folder** (B1). Its `--cwd`, and with it the downloads, screenshots, `HOME`,
+    temporary folder and Chrome's profile, is `<data>/browser/run/<session id>`
+    (`RunFolders::browser`), outside the run folder the shell may write. Codex's fence denies
+    `<data>/browser` whole, read and write (`agent/codex_fence.rs` `DATA_DENIED`), so the shell
+    cannot plant a link the guard would write through. The folder goes with the run folder at the
+    session's end (`RunFolders::remove`) and `<data>/browser/run` is set aside and deleted at
+    the first launch after a start, as `<data>/run` is (`sweep.rs`). The downloads mover also
+    refuses a downloads folder that is no longer a real folder right before each move.
+  - **The daemon socket and the debugging port** (B2). The host makes the socket folder
+    (`/tmp/clauseo-ab-<16 random>`, 0700) at the claim and adds it to the session's Codex fence
+    as a `deny` by exact path. The shell's own sandbox already refuses the connection:
+    Seatbelt's `(deny default)` (`codex-rs/sandboxing/src/seatbelt_base_policy.sbpl:8`) with no
+    network rule when network is off and no Unix socket is allowed (`seatbelt.rs:318-322,
+    381-382`); on Linux seccomp denies `connect` in the restricted mode
+    (`codex-rs/linux-sandbox/src/landlock.rs:201-203`) and bubblewrap unshares the network
+    (`bwrap.rs:304-306`), so loopback TCP is closed too.
+  - **`read`** (H1). agent-browser marks `agent_browser_read` read-only, so Codex runs it with
+    no prompt; the guard refuses its `url`, `llms` and `requireMd` keys, so it reads only the
+    page already open, through Chrome (agent-browser v0.41.1 `native/actions.rs:5964-5994`).
+- **No browser for Codex on Windows.** Clauseo gives Codex's shell the unelevated
+  restricted-token sandbox there (`windows.sandbox = "unelevated"`), whose only network block is
+  proxy variables that leave loopback out (codex 0.162.1 `windows-sandbox-rs/src/env.rs:126-170`,
+  applied at `spawn_prep.rs:141-143`); the firewall rules exist only in the elevated setup. Its
+  reads are not restricted, so the guard's port file and Chrome's command line are readable.
+  agent-browser's daemon and Chrome's debugging port take no password, so with the entry a shell
+  command Codex runs without a prompt could drive the unfenced browser past the filter and write
+  outside Codex's writable roots. So on Windows Codex gets neither the entry nor the shell tool
+  (`servers::no_browser`), no browser in its header (the app offers no browser action), and the
+  no-browser sentence. The way back is the elevated sandbox (its firewall) or an authenticated
+  daemon. Claude has no browser on Windows either (below), so no agent has one there.
+- **No browser for Claude on macOS and Linux, for launch** (2026-11-11, security review of
+  #940). Claude's shell `agent-browser` would have to run outside Claude Code's sandbox
+  (`excludedCommands`), and Claude Code 2.1.293's exclusion check reworks a command before it
+  matches: it strips `env` and rewrites `VAR=` prefixes, so `PATH=$CLAUDE_CODE_TMPDIR
+  agent-browser …` would run a program Claude wrote, unsandboxed, and quoting (`-q "upload"`,
+  `e"v"al`, a tab) would run unsandboxed and slip past the ask rules. So on macOS and Linux a
+  Claude session gets no browser, whether or not its sandbox ends up on (`servers::no_browser` is
+  true for Claude there): no entry, no `agent-browser` on its `PATH`, no `AGENT_BROWSER_*`
+  variables, no browser in its header (the app offers no browser action), and the no-browser
+  sentence ("You have no browser in this session."), so it reads pages with web fetch and `curl`.
+  The app copies no `agent-browser` into `<data>/tools` there, so no session gets that folder or
+  the browser's skill (`servers::shell_browser`): Codex's entry runs the bundled sidecar itself.
+  The agent-browser ask and allow rules stay in the code, with no session to apply to. Codex
+  keeps its guarded entry on macOS and Linux. The way back is
+  a Clauseo-owned shim, after launch (record 0030, "Claude's sandbox").
+- **No browser for Claude on Windows either, for launch** (2026-11-11, security review round 4
+  of #1014). Claude Code has no sandbox on Windows, so Claude's shell `agent-browser` ran on deny
+  rules alone, and a deny list cannot be complete: Bash rules match the command as written, so
+  brace expansion (`agent-browser {upload,} …`), a glob (`upl?ad`), a variable
+  (`S=eval; agent-browser $S`), `${IFS}`, `cmd //c`, `xargs`, `npx`, `agent-browser.exe` and
+  another letter case each spell a refused command that no rule sees; the match-anywhere denies
+  catch only the plain spellings. So `servers::no_browser` is true for Claude
+  on every OS: on Windows too it gets no entry, no `agent-browser` on its `PATH`, no
+  `AGENT_BROWSER_*` variables, no browser in its header and the no-browser sentence. No agent
+  gets the shell command anywhere now (`servers::shell_browser` is false), so the app copies
+  no `agent-browser` into `<data>/tools` and renders the browser's skill for no session; the
+  copy code stays for the way back. The Claude-only line Codex on Windows got
+  (`browser-claude-only.txt`) is gone with it, since a Claude conversation has no browser there
+  either. Claude's rule code (the allow and ask rules, the match-anywhere denies) stays,
+  dormant. The way back is the same Clauseo-owned shim.
+- **Accepted at Claude parity** (H2, M1, and no prompts). With no proxy, nothing stops Chrome
+  reaching loopback or private addresses after a redirect or a page's own navigation; the guard
+  checks only the address it is given. A page on `127.0.0.1:<debugging port>` could ask Chrome's
+  `/json/new?file:///…` for a `file://` tab and read it. Codex's "allow for this session" is per
+  tool, not per argument, and the host now answers the browser server's approvals itself
+  (`actor/turn/asks.rs`), as Claude's allow rules do for its shell browser, so prompt injection
+  could make either agent open a URL carrying text from the conversation. All of this is what
+  Claude's unfenced shell browser can do in the plain client, and it is accepted for launch.
+  `eval` is off in both agents (Codex: the guard refuses `agent_browser_eval`; Claude: a
+  deny rule, as for `wait --fn` and `get cdp-url`), which narrows H2 to redirects: the script
+  route is closed, and no lawyer is asked. The after-launch fix, for both agents' browsers, is
+  a guard-local proxy with an open allowlist that refuses private and loopback addresses after
+  the DNS lookup, with Chrome's `--proxy-bypass-list=<-loopback>` so loopback goes through it too.
+
 ## Consequences
 
 - An agent-browser bump re-reads its `tools/list` schema and `extraArgs` handling: a new typed
@@ -1538,12 +1859,16 @@ The download (part 3):
   number formatting reaching agent-browser (an integer beyond `u64` becomes a float).
 - A child line over 64 MiB ends the session: a page large enough to produce one fails rather
   than exhausting the guard's memory.
-- Chrome runs only from the first browser call until 10 minutes without one; a session that
-  never browses pays a one-shot agent-browser per handshake request and no Chrome. Cookies and
-  storage survive `agent_browser_close` and the idle stop until the session ends; open tabs do
-  not survive the idle stop.
-- The first call of a session, and the first after an idle stop, waits for Chrome's start
-  (about 1 s on iris) and up to 15 s more while a dying run still holds the debugging port.
+- Chrome runs only from the first browser call until the agent's `agent_browser_close` or 10
+  minutes without a call; a session that never browses pays a one-shot agent-browser per
+  handshake request and no Chrome. Cookies and storage survive `agent_browser_close` and the
+  idle stop until the session ends; open tabs survive neither.
+- The first call of a session, and the first after a close or an idle stop, waits for Chrome's
+  start (about 1 s on iris) and up to 15 s more while a dying run still holds the debugging port.
+- On Linux as root, and wherever Chrome's sandbox cannot start (a container without user
+  namespaces, a host with them disabled), there is no browser. A Chromium bump re-reads
+  `sandbox/policy/switches.cc`, `sandbox/policy/features.cc` and the failure messages in
+  `chrome/sandbox.rs`.
 - A Chrome crash costs the calls in flight and a restart; a second crash ends the browser server
   for the session (the guard exits 1).
 - The host has two read-only probes for a run folder: `runs_settled` (cleanup finished) and
@@ -1559,6 +1884,11 @@ The download (part 3):
   in a job takes Windows 10 or later.
 
 ## Not verified
+
+- The sandbox refusal ran against a stand-in Chrome printing Chromium's messages, not a real
+  Chrome failing to start its sandbox; the Windows and macOS messages were read from source, never
+  seen. A sandbox error printed after Chrome's endpoint (Windows, at a later child's launch) is
+  not watched for.
 
 - Windows: compiled with `cargo clippy --target x86_64-pc-windows-gnu`, never run.
   `CREATE_NO_WINDOW`, the case-insensitive pass-through on a real environment block, and the

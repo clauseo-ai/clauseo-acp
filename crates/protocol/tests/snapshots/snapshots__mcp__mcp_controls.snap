@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots/mcp.rs
+expression: "McpControl::ALL"
+---
+[
+  "lawyer",
+  "firm_list",
+  "firm_managed"
+]

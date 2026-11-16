@@ -1,0 +1,303 @@
+//! Reading stetdoc's answers into the wire's [`Revision`]s, and writing the edit batch.
+//!
+//! `check --json` gives each change's ids, kind, full author, block and date, by author;
+//! `view --revisions --full --all --json` gives the text and the place, in its `text` ledger,
+//! one line per change: `#2,3 insert C 2026-11-09 p4 "New para."` (the text JSON-escaped; a
+//! formatting change has none), with `in headers`, `in notes` or `in comments` after the block
+//! for a change outside the main text. The two are joined by ids: the ledger's are Word's change
+//! ids, the ones `check` gives (stetdoc 0.9.3 numbers by position only in the note about others'
+//! changes that its other views print, never in the ledger).
+
+use std::cmp::Ordering;
+use std::collections::HashMap;
+
+use clauseo_protocol::{
+    ErrorCode, MAX_REVISION_TEXT_CHARS, MAX_REVISIONS, MatterPath, Revision, RevisionDecision,
+    RevisionKind, RevisionPlace, Timestamp,
+};
+use serde::Deserialize;
+
+use crate::error::Error;
+
+/// Whether `path` names a Word document: it ends in `.docx`, in any case.
+pub(crate) fn is_docx(path: &MatterPath) -> bool {
+    std::path::Path::new(path.as_str())
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
+}
+
+/// The edit batch for `decision` on `ids`, in stetdoc's block text.
+pub(super) fn batch(decision: RevisionDecision, ids: &[u32]) -> String {
+    let op = match decision {
+        RevisionDecision::Accept => "accept",
+        RevisionDecision::Reject => "reject",
+    };
+    let ids: Vec<String> = ids.iter().map(u32::to_string).collect();
+    format!("@{op}\nids: {}\n", ids.join(", "))
+}
+
+#[derive(Deserialize)]
+struct Check {
+    #[serde(default)]
+    existing: Vec<ByAuthor>,
+}
+
+#[derive(Deserialize)]
+struct ByAuthor {
+    author: String,
+    #[serde(default)]
+    changes: Vec<Change>,
+}
+
+#[derive(Deserialize)]
+struct Change {
+    block: String,
+    #[serde(default)]
+    date: Option<String>,
+    ids: Vec<u32>,
+    kind: String,
+}
+
+#[derive(Deserialize)]
+struct View {
+    text: String,
+}
+
+/// stetdoc's answer that did not read as expected: `word.edit_failed`.
+fn unreadable(err: &serde_json::Error) -> Error {
+    // The class only: serde's message can quote authors or text (ADR 0047).
+    tracing::warn!(class = ?err.classify(), "stetdoc's revisions did not read");
+    Error::refused(ErrorCode::WordEditFailed, "stetdoc's answer did not read")
+}
+
+/// Every change id `check` names, however many, in chunks of at most `max` ids for one edit
+/// each: what Accept all and Reject all decide. A change's ids stay in one chunk (a replacement
+/// is a deletion and an insertion); changes go by their first id, ascending. Empty when the file
+/// has none.
+pub(super) fn all_chunks(check: &serde_json::Value, max: usize) -> Result<Vec<Vec<u32>>, Error> {
+    let check = Check::deserialize(check).map_err(|err| unreadable(&err))?;
+    let mut changes: Vec<Vec<u32>> = check
+        .existing
+        .into_iter()
+        .flat_map(|by| by.changes.into_iter().map(|change| change.ids))
+        .map(|mut ids| {
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        })
+        .filter(|ids| !ids.is_empty())
+        .collect();
+    changes.sort_unstable();
+    let mut seen = std::collections::HashSet::new();
+    let mut chunks: Vec<Vec<u32>> = Vec::new();
+    for mut ids in changes {
+        // An id two changes name is decided once.
+        ids.retain(|id| seen.insert(*id));
+        if ids.is_empty() {
+            continue;
+        }
+        match chunks.last_mut() {
+            Some(chunk) if chunk.len() + ids.len() <= max => chunk.extend(ids),
+            _ => chunks.push(ids),
+        }
+    }
+    Ok(chunks)
+}
+
+/// The revisions `check` and `view` describe, in document order (by block, then id), the first
+/// [`MAX_REVISIONS`], whether there were more, and how many there are.
+pub(super) fn revisions(
+    check: &serde_json::Value,
+    view: &serde_json::Value,
+) -> Result<(Vec<Revision>, bool, u32), Error> {
+    let unreadable = |err: serde_json::Error| unreadable(&err);
+    let check = Check::deserialize(check).map_err(unreadable)?;
+    let view = View::deserialize(view).map_err(unreadable)?;
+    let lines = &ledger(&view.text);
+    let mut revisions: Vec<Revision> = check
+        .existing
+        .into_iter()
+        .flat_map(|by| {
+            let author = cut(&by.author);
+            by.changes.into_iter().map(move |change| {
+                let mut ids = change.ids;
+                ids.sort_unstable();
+                let line = ids.iter().find_map(|id| lines.get(id));
+                Revision {
+                    kind: kind(&change.kind),
+                    author: author.clone(),
+                    at: change.date.as_deref().and_then(timestamp),
+                    block: change.block,
+                    place: line.and_then(|line| line.place),
+                    text: line.and_then(|line| line.text.as_deref()).map(cut),
+                    ids,
+                }
+            })
+        })
+        .collect();
+    revisions.sort_by(|a, b| {
+        block_order(&a.block, &b.block).then_with(|| a.ids.first().cmp(&b.ids.first()))
+    });
+    let total = u32::try_from(revisions.len()).unwrap_or(u32::MAX);
+    let truncated = revisions.len() > MAX_REVISIONS;
+    revisions.truncate(MAX_REVISIONS);
+    Ok((revisions, truncated, total))
+}
+
+/// What one ledger line says of its change besides what `check` does.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Line {
+    /// Its text, if it has any.
+    pub(super) text: Option<String>,
+    /// Where it is, when that is not the main text.
+    pub(super) place: Option<RevisionPlace>,
+}
+
+/// Each ledger line's text and place, by every id the line names.
+pub(super) fn ledger(ledger: &str) -> HashMap<u32, Line> {
+    let mut lines = HashMap::new();
+    for line in ledger.lines() {
+        let Some(rest) = line.strip_prefix('#') else {
+            continue;
+        };
+        let ids = rest.split(' ').next().unwrap_or_default();
+        // the fields before the text, which is the line's first quote on
+        let quote = line.find(" \"");
+        let head = quote.and_then(|at| line.get(..at)).unwrap_or(line);
+        let text = quote
+            .and_then(|at| line.get(at + 1..))
+            .and_then(|quoted| serde_json::from_str::<String>(quoted).ok());
+        let words: Vec<&str> = head.split(' ').collect();
+        let place = match words.as_slice() {
+            [.., "in", story] => Some(place(story)),
+            _ => None,
+        };
+        for id in ids.split(',').filter_map(|id| id.parse::<u32>().ok()) {
+            lines.insert(
+                id,
+                Line {
+                    text: text.clone(),
+                    place,
+                },
+            );
+        }
+    }
+    lines
+}
+
+/// stetdoc's story outside the main text as the wire's place: `headers` holds the headers and
+/// the footers, `notes` the footnotes and the endnotes.
+fn place(story: &str) -> RevisionPlace {
+    match story {
+        "headers" => RevisionPlace::HeaderFooter,
+        "notes" => RevisionPlace::Note,
+        "comments" => RevisionPlace::Comment,
+        _ => RevisionPlace::Unknown,
+    }
+}
+
+/// stetdoc's change kind as the wire's. Of 0.9.3's: `move`; `insertion` and `paragraph_`,
+/// `mark_`, `row_` and `cell_inserted`; `deletion` and the same `_deleted`; and as formatting
+/// `run_`, `paragraph_`, `section_`, `table_`, `row_` and `cell_format`, `grid_change` (a
+/// table's column widths), `cell_merged` and `numbering_change`.
+pub(super) fn kind(kind: &str) -> RevisionKind {
+    if kind.contains("move") {
+        RevisionKind::Move
+    } else if kind.contains("insert") {
+        RevisionKind::Insert
+    } else if kind.contains("deletion") || kind.contains("deleted") {
+        RevisionKind::Delete
+    } else if [
+        "format",
+        "style",
+        "property",
+        "properties",
+        "paragraph",
+        "run",
+        "section",
+        "table",
+        "number",
+        "grid",
+        "merged",
+    ]
+    .iter()
+    .any(|word| kind.contains(word))
+    {
+        RevisionKind::Format
+    } else {
+        RevisionKind::Unknown
+    }
+}
+
+/// `text` cut to [`MAX_REVISION_TEXT_CHARS`] characters.
+fn cut(text: &str) -> String {
+    text.chars().take(MAX_REVISION_TEXT_CHARS).collect()
+}
+
+/// Two block names in document order: their runs of digits compared as numbers (`p9` before
+/// `p10`), the rest as text.
+fn block_order(a: &str, b: &str) -> Ordering {
+    let key = |name: &str| -> Vec<(String, u64)> {
+        let mut parts = Vec::new();
+        let mut text = String::new();
+        let mut number: Option<u64> = None;
+        for c in name.chars() {
+            match (c.to_digit(10), number) {
+                (Some(digit), Some(n)) => {
+                    number = Some(n.saturating_mul(10).saturating_add(u64::from(digit)));
+                }
+                (Some(digit), None) => number = Some(u64::from(digit)),
+                (None, Some(n)) => {
+                    parts.push((std::mem::take(&mut text), n));
+                    number = None;
+                    text.push(c);
+                }
+                (None, None) => text.push(c),
+            }
+        }
+        parts.push((text, number.unwrap_or(0)));
+        parts
+    };
+    key(a).cmp(&key(b))
+}
+
+/// `YYYY-MM-DDTHH:MM:SSZ` (Word's `w:date`, as stetdoc prints it) as a timestamp; `None` for
+/// anything else.
+pub(super) fn timestamp(text: &str) -> Option<Timestamp> {
+    let bytes = text.as_bytes();
+    let field = |from: usize, len: usize| -> Option<i64> {
+        let part = text.get(from..from + len)?;
+        part.bytes()
+            .all(|b| b.is_ascii_digit())
+            .then(|| part.parse().ok())?
+    };
+    let fixed = [(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':')];
+    if bytes.len() != 20
+        || bytes.get(19) != Some(&b'Z')
+        || fixed.iter().any(|(at, b)| bytes.get(*at) != Some(b))
+    {
+        return None;
+    }
+    let (year, month, day) = (field(0, 4)?, field(5, 2)?, field(8, 2)?);
+    let (hour, minute, second) = (field(11, 2)?, field(14, 2)?, field(17, 2)?);
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 {
+        return None;
+    }
+    if second > 60 {
+        return None;
+    }
+    let days = days_from_civil(year, month, day);
+    let seconds = days * 86_400 + hour * 3_600 + minute * 60 + second;
+    Timestamp::new(seconds.checked_mul(1_000)?).ok()
+}
+
+/// Days from 1970-01-01 to the proleptic Gregorian date (Howard Hinnant's `days_from_civil`).
+const fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_index = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}

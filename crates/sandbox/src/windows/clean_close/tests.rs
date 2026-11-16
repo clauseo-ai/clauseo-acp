@@ -3,10 +3,11 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::MatterId;
+use clauseo_protocol::{ErrorCode, MatterId};
 
 use super::fake::{FakeJournal, found, journal_for};
 use super::*;
+use crate::Error;
 use crate::windows::FolderSupport;
 use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, Rights, Sid, plan};
 use crate::windows::admit::{PathKind, admit_with};
@@ -202,6 +203,32 @@ fn nothing_changed_since_a_clean_close_skips() {
     assert_eq!(check.path(), LaunchPath::Skipped);
     assert_eq!(check.targets(), &[]);
     assert_eq!(s.journal.handed.get(), 2, "the read went past the cursor");
+}
+
+#[test]
+fn a_marker_still_awaiting_a_sweep_refuses_the_launch_and_keeps_the_record() {
+    let s = Scene::new("clean-unclean");
+    assert_eq!(s.close(), Closed::Written);
+    let admin = crate::windows::admin_copy::fake::Fake::ready();
+    let mut asked = 0;
+    let mut sweeps = || {
+        asked += 1;
+        Err("an earlier session's sandbox sweep didn't finish within 15 s".to_owned())
+    };
+    let refused =
+        check_launch_awaiting(&admin, &mut sweeps, &s.data, &s.ledger, &s.plan, &s.journal);
+    let Err(Error::UncleanSession(why)) = refused else {
+        panic!("not refused for the marker: {refused:?}");
+    };
+    assert!(why.contains("15 s"), "{why}");
+    assert_eq!(asked, 1);
+    assert_eq!(
+        Error::UncleanSession(why).code(),
+        ErrorCode::SandboxCleaningUp
+    );
+    // Nothing else was read or removed: the next launch still finds the clean close.
+    assert!(s.record_exists());
+    assert_eq!(s.launch_path(), LaunchPath::Skipped);
 }
 
 #[test]

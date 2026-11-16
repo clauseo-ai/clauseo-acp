@@ -1,10 +1,8 @@
-//! The `cancel` row: what the host does on a cancel, and whether it leaves a suspended runner
-//! behind. The host closes the outer runner's stdin, then kills the outer 2 s later. The outer
-//! gives the agent 1 s, ends the job, waits up to 400 ms for it to empty, then may start a
-//! detached end sweeper (`clauseo-sandbox-run --sweep` as the pool user, created suspended, its
-//! DACL shut, then resumed), or skips it when less than 500 ms of the 2 s is left
-//! (`clauseo-sandbox-run: warning: no end sweeper: ...` on its stderr). A kill between the
-//! sweeper's creation and its resume would leave it suspended.
+//! The `cancel` row: what the host does on a cancel, and whether it leaves a runner behind.
+//! The host closes the outer runner's stdin, then kills the outer 2 s later. The outer gives the
+//! agent 1 s, ends the job, waits up to 400 ms for it to empty, then asks the Task Scheduler for
+//! the `SYSTEM` task `\Clauseo\SandboxSweep`, which a kill of the outer doesn't stop. It starts
+//! no process of the pool user at the end, so no runner process of that user may be left.
 //!
 //! The harness runs `probe wait` (it ignores its stdin's end) as A, closes stdin, waits 2 s,
 //! kills the outer, then looks at the runner processes of A's pool user right away and a few
@@ -16,15 +14,17 @@
 //! from a thread, far past a pipe's buffer, and closes it, as the host does on a cancel. The
 //! outer buffers what the agent's full pipe won't take (up to 16 MiB), so the harness's write
 //! ends, but the outer's own write to the agent stays blocked. Then the harness lets the ladder
-//! run: the outer must exit by itself within 3 s of the close, the job's end having released
-//! its blocked write; one still running then is killed. The harness looks over 3 s after the
+//! run: 3 s after the close (or at the outer's earlier exit) it looks once, and no runner process
+//! of the pool user may be left, the job's end having released the blocked write. The outer,
+//! living on, polls the sweep task's result for up to 20 s, so it must exit by itself within
+//! 25 s of the close; one still running then is killed. The harness looks over 3 s after the
 //! outer ended.
 
 use std::io::Write as _;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use super::cancel_verdict::{self, LADDER_MS};
+use super::cancel_verdict::{self, EXIT_MS, LADDER_MS};
 use super::checks::{started, values};
 use super::checks_pool::judge;
 use super::launch::pool_of;
@@ -58,8 +58,8 @@ fn runner_image(ctx: &Ctx<'_>) -> String {
         .to_owned()
 }
 
-/// The `cancel` row: no runner process of A's pool user is left suspended after the host-style
-/// cancel (`cancel_verdict::cancel`).
+/// The `cancel` row: no runner process of A's pool user is left after the host-style cancel
+/// (`cancel_verdict::cancel`).
 pub(crate) fn cancel(ctx: &Ctx<'_>) -> Result<String, String> {
     let pool = pool_of(ctx.manifest, "A")?;
     let image = runner_image(ctx);
@@ -96,15 +96,18 @@ pub(crate) fn cancel(ctx: &Ctx<'_>) -> Result<String, String> {
     judge(ctx, cancel_verdict::cancel(Ok(agent), &lines, &a.stderr))
 }
 
-/// The `stdin-unread-cancel` row: the outer exits by itself within [`LADDER_MS`] of the stdin's
-/// close while the agent's stdin write is blocked, and leaves no runner process of A's pool user
-/// (`cancel_verdict::stdin_unread`).
+/// The `stdin-unread-cancel` row: no runner process of A's pool user is left [`LADDER_MS`] after
+/// the stdin's close while the agent's stdin write is blocked, the outer exits by itself within
+/// [`EXIT_MS`], and nothing is left after it (`cancel_verdict::stdin_unread`).
 pub(crate) fn stdin_unread_cancel(ctx: &Ctx<'_>) -> Result<String, String> {
     let pool = pool_of(ctx.manifest, "A")?;
     let image = runner_image(ctx);
     let (mut a, agent) = match started(ctx, "A", &["sleep-noread"]) {
         Ok(running) => running,
-        Err(why) => return judge(ctx, cancel_verdict::stdin_unread(Err(&why), None, &[], &[])),
+        Err(why) => {
+            let verdict = cancel_verdict::stdin_unread(Err(&why), None, &[], &[], &[]);
+            return judge(ctx, verdict);
+        }
     };
     let mut stdin = a
         .take_stdin()
@@ -141,24 +144,32 @@ pub(crate) fn stdin_unread_cancel(ctx: &Ctx<'_>) -> Result<String, String> {
     };
     ctx.note(&format!(
         "harness: wrote 4 MiB the agent never reads to the outer's stdin and closed it, as the \
-         host does on a cancel; waiting up to {LADDER_MS} ms for the outer {} to exit",
+         host does on a cancel; looking {LADDER_MS} ms later, and waiting up to {EXIT_MS} ms \
+         for the outer {} to exit",
         a.pid()
     ));
-    let bound = Duration::from_millis(u64::try_from(LADDER_MS).unwrap_or(u64::MAX));
-    let exited = a
-        .exited_by(closed + bound)
+    if let Err(why) = win_pool::enable_debug_privilege() {
+        ctx.note(&format!("harness: SeDebugPrivilege not enabled: {why}"));
+    }
+    let early = a
+        .exited_by(closed + millis(LADDER_MS))
         .then(|| closed.elapsed().as_millis());
+    let ladder = look(&pool.sid, &image, closed.elapsed().as_millis());
+    let exited = early.or_else(|| {
+        a.exited_by(closed + millis(EXIT_MS))
+            .then(|| closed.elapsed().as_millis())
+    });
     if exited.is_none() {
         a.kill();
     }
     let ended = now();
-    if let Err(why) = win_pool::enable_debug_privilege() {
-        ctx.note(&format!("harness: SeDebugPrivilege not enabled: {why}"));
-    }
     let mut lines = Vec::new();
     for at in AFTER {
         sleep(Duration::from_millis(at).saturating_sub(ended.elapsed()));
         lines.extend(look(&pool.sid, &image, ended.elapsed().as_millis()));
+    }
+    for line in &ladder {
+        ctx.note(&format!("harness: at the ladder's end: {line}"));
     }
     a.drain(now() + DRAIN);
     for line in &lines {
@@ -167,9 +178,14 @@ pub(crate) fn stdin_unread_cancel(ctx: &Ctx<'_>) -> Result<String, String> {
     for line in &a.stderr {
         ctx.note(&format!("A stderr: {line}"));
     }
-    end_suspended(ctx, &lines);
-    let verdict = cancel_verdict::stdin_unread(Ok(agent), exited, &lines, &a.stderr);
+    end_suspended(ctx, &[ladder.as_slice(), lines.as_slice()].concat());
+    let verdict = cancel_verdict::stdin_unread(Ok(agent), exited, &ladder, &lines, &a.stderr);
     judge(ctx, verdict)
+}
+
+/// `ms` milliseconds as a [`Duration`].
+fn millis(ms: u128) -> Duration {
+    Duration::from_millis(u64::try_from(ms).unwrap_or(u64::MAX))
 }
 
 /// One look, `ms` after the kill (or the outer's exit): `look <ms> <n>` and a `runner` line per

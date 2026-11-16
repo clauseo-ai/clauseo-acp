@@ -68,6 +68,7 @@ fn settled(keys: &KeyCache) -> Vec<HostCall> {
         keys,
         [&claude(), &codex()],
         &std::collections::BTreeSet::new(),
+        &std::collections::BTreeSet::new(),
     ));
     rig.host.calls()
 }

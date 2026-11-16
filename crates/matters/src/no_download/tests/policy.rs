@@ -143,7 +143,9 @@ fn every_read_of_every_entry_point_runs_with_downloads_off_and_the_caller_keeps_
         write::append(&fx.file("a.txt"), b" lawyer").unwrap();
         matter.edited_since(cid(2), cid(3)).unwrap();
         check("edited_since");
-        matter.preview_restore(cid(1), RestoreFiles::All).unwrap();
+        matter
+            .preview_restore(cid(1), RestoreFiles::All, None)
+            .unwrap();
         check("preview_restore");
         matter
             .compare(CompareSide::Checkpoint(cid(1)), CompareSide::Folder)
@@ -175,6 +177,7 @@ fn every_read_of_every_entry_point_runs_with_downloads_off_and_the_caller_keeps_
                 outside_edits: cid(6),
                 checkpoint: cid(7),
                 at: at(7),
+                undoes: None,
             })
             .unwrap();
         check("restore");

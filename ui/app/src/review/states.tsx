@@ -234,6 +234,12 @@ export function RoomAfter({ host, steps }: { host: () => FakeTransport; steps: r
       for (const step of steps) {
         if ("press" in step) {
           document.querySelector<HTMLElement>(`[data-testid="${step.press}"]`)?.click();
+        } else if ("enter" in step) {
+          document
+            .querySelectorAll<HTMLInputElement>('[role="dialog"] input')
+            [step.enter]?.dispatchEvent(
+              new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+            );
         } else if ("find" in step) {
           const field = document.querySelector<HTMLInputElement>('[data-testid="find"]');
           if (field !== null) {
@@ -247,7 +253,7 @@ export function RoomAfter({ host, steps }: { host: () => FakeTransport; steps: r
           if (field !== undefined) {
             Reflect.set(HTMLInputElement.prototype, "value", step.type.text, field);
             field.dispatchEvent(new Event("input", { bubbles: true }));
-            // the lawyer moves on from the field, so a line that waits for that (the next date's) shows
+            // the lawyer moves on from the field, so a line that waits for that shows
             field.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
           }
         }

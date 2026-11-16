@@ -41,6 +41,7 @@ pub(crate) mod planted;
 pub(crate) mod plugins;
 pub(crate) mod tauri_config;
 pub(crate) mod toml_lines;
+pub(crate) mod unix_paths;
 
 pub(crate) use fix::Fix;
 
@@ -260,6 +261,7 @@ pub(crate) const ALL: &[StaticCheck] = &[
     file_size::CHECK,
     expect_allowlist::CHECK,
     pins::CHECK,
+    unix_paths::CHECK,
 ];
 
 /// The package name of the desktop crate. The checks find its directory through `Context::members`,

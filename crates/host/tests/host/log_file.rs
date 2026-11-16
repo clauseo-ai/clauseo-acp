@@ -168,10 +168,24 @@ fn the_log_holds_lifecycle_lines_and_no_matter_content() {
             "the log holds {needle:?}:\n{log}"
         );
     }
-    assert!(
-        log.contains("clauseo_host::lifecycle: agent launched"),
-        "no lifecycle line:\n{log}"
-    );
+    // A first turn's way to its first words, in order (D-022), each line once per launch or turn.
+    let mut from = 0;
+    for line in [
+        "launch prep started",
+        "launch prep done",
+        "agent launched",
+        "agent initialized",
+        "session attached",
+        "prompt sent",
+        "first update",
+        "first answer text",
+    ] {
+        let needle = format!("clauseo_host::lifecycle: {line}");
+        let at = log[from..]
+            .find(&needle)
+            .unwrap_or_else(|| panic!("no {line:?} line after byte {from}:\n{log}"));
+        from += at + needle.len();
+    }
     assert!(
         log.contains(
             "WARN clauseo_host::actor::turn::updates: the agent sent something unreadable"

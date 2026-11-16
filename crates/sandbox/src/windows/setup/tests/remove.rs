@@ -25,7 +25,7 @@ fn other() -> Sid {
 }
 
 /// The calls of a full removal of [`pool`]'s eight users by its owner, with no ledger, in order.
-fn full_removal() -> Vec<String> {
+pub(super) fn full_removal() -> Vec<String> {
     let users = 1..=MIN_FREE_AFTER_RUN;
     let strays: Vec<String> = users.clone().map(|n| format!("100{n}")).collect();
     let mut lines: Vec<String> = [
@@ -61,7 +61,9 @@ fn full_removal() -> Vec<String> {
             "owners_ledger",
             "group",
             "group_members 1000",
+            "remove_remote_logon_deny 1000",
             "delete_group 1000",
+            "clear_markers",
             "delete_record",
             "unlock",
         ]
@@ -259,6 +261,8 @@ fn the_steps_are_named_by_what_failed() {
         "remove" | "walk" => RemoveStep::LocalLow,
         "owners_ledger" => RemoveStep::Ledger,
         "group" | "group_members" | "delete_group" => RemoveStep::Group,
+        "remove_remote_logon_deny" => RemoveStep::RemoteLogon,
+        "clear_markers" => RemoveStep::Markers,
         "delete_record" => RemoveStep::Record,
         other => panic!("no step for {other}"),
     };
@@ -452,6 +456,8 @@ fn a_per_machine_removal_takes_the_whole_pool_off_whoever_asks() {
         let mut expected = full_removal();
         let at = expected.iter().position(|l| l == "owners_ledger").unwrap();
         expected[at] = "admins_ledger".to_owned();
+        // An administrator deletes nothing in the owner's folders: the markers stay.
+        expected.retain(|l| l != "clear_markers");
         assert_eq!(machine.lines(), expected, "{invoker:?}");
         assert_all_gone(&machine, &acl);
     }

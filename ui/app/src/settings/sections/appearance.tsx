@@ -1,7 +1,9 @@
 // Settings, Appearance: the light, the text size, lite and reduced motion, each one patch to the display store per
 // choice. The settings keep the room's spelling (light, dark; lite, full; reduced, full); the switches show the
 // design's (Day, Night; On, Off). Lite offers On and Off only until the host reports remote desktops (H7's
-// GetDisplayReport): "Automatic"'s line can't be true before then, so a stored "automatic" shows as Off.
+// GetDisplayReport): "Automatic"'s line can't be true before then, so a stored "automatic" shows as Off. Text size is
+// a native <select>, 14 to 20 (D-063): its label names it, a VoiceOver press opens it, and the keyboard works it as
+// the OS's own pop-up does.
 import { useId } from "react";
 import { TEXT_SIZES } from "@clauseo/components/lib/display.ts";
 import { Chip } from "@clauseo/components/ui/chip.tsx";
@@ -9,16 +11,14 @@ import { cn } from "@clauseo/components/lib/cn.ts";
 import { PREVIEW_PAPERS, useSettingsWords } from "@clauseo/components/lib/words-settings.ts";
 import { settingLabel, settingNote } from "@clauseo/components/ui/recipes-controls.ts";
 import { SegmentedSwitch } from "@clauseo/components/ui/segmented.tsx";
-import { Select, SelectLabel } from "@clauseo/components/ui/select.tsx";
+import { IconMore as IconChevron } from "@clauseo/components/icons/icons.tsx";
+import { selectTrigger } from "@clauseo/components/ui/recipes-overlays.ts";
 import { RadioSetting } from "@clauseo/components/ui/settings-row.tsx";
 import type { UiMotion, UiTheme } from "../../room/host-next.ts";
 import type { SectionContext } from "../sections.tsx";
 import { ChoiceRow, Group, Managed, PlateRow } from "./parts.tsx";
 
-type Size = `${(typeof TEXT_SIZES)[number]}`;
 type OnOff = "on" | "off";
-
-const SIZES = TEXT_SIZES.map((n) => ({ value: String(n) as Size, label: String(n) }));
 
 /** Reduced motion's switch, in the design's words, over the room's spelling. */
 const MOTION_SHOWN: Record<UiMotion, "system" | OnOff> = {
@@ -66,6 +66,8 @@ export function Appearance({ ctx }: { ctx: SectionContext }) {
   const motion = ctx.locked("motion");
   // each locked row's managed line, named by its control
   const managed = { theme: useId(), size: useId(), lite: useId(), motion: useId() };
+  const sizeId = useId();
+  const sizeNote = useId();
   return (
     <>
       <Group title={w.s("How it looks")} plate={false}>
@@ -86,28 +88,42 @@ export function Appearance({ ctx }: { ctx: SectionContext }) {
             ]}
           />
         </ChoiceRow>
-        <PlateRow disabled={size}>
-          <Select<Size>
-            value={String(ui.font_size) as Size}
-            options={SIZES}
-            disabled={size}
-            {...(size ? { describedBy: managed.size } : {})}
-            onValueChange={(v) => {
-              const n = TEXT_SIZES.find((x) => String(x) === v);
-              if (n !== undefined) ctx.choose("font_size", n);
-            }}
-            className="min-w-control-large"
-          >
-            <div className="set-choice-words">
-              <SelectLabel className={cn(settingLabel, "cursor-default")}>
-                {w.say(w.f("Text size"))}
-              </SelectLabel>
-              <p className={settingNote}>
-                {w.say(w.f("Every word on screen grows or shrinks with it."))}
-              </p>
-              {size && <Managed id={managed.size} />}
-            </div>
-          </Select>
+        <PlateRow className="set-choice" disabled={size}>
+          <div className="set-choice-words">
+            <label htmlFor={sizeId} className={cn(settingLabel, "block cursor-default")}>
+              {w.say(w.f("Text size"))}
+            </label>
+            <p id={sizeNote} className={settingNote}>
+              {w.say(w.f("Every word on screen grows or shrinks with it."))}
+            </p>
+            {size && <Managed id={managed.size} />}
+          </div>
+          <span className="relative inline-flex flex-none">
+            <select
+              id={sizeId}
+              value={String(ui.font_size)}
+              disabled={size}
+              aria-describedby={size ? `${sizeNote} ${managed.size}` : sizeNote}
+              onChange={(e) => {
+                const n = TEXT_SIZES.find((x) => String(x) === e.currentTarget.value);
+                if (n !== undefined) ctx.choose("font_size", n);
+              }}
+              className={cn(selectTrigger, "appearance-none min-w-control-large pe-s8")}
+              data-testid="text-size"
+            >
+              {TEXT_SIZES.map((n) => (
+                <option key={n} value={String(n)}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 end-s3 flex items-center text-muted"
+            >
+              <IconChevron size={16} />
+            </span>
+          </span>
         </PlateRow>
         <PlateRow disabled={lite}>
           <RadioSetting<OnOff>

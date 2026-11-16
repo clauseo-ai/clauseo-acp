@@ -24,6 +24,7 @@ fn matter() -> MatterSummary {
         client: None,
         next_date: None,
         skill_packs: None,
+        agent_prefs: None,
         pinned: false,
         last_opened: None,
         status: MatterStatus::Idle,
@@ -78,6 +79,10 @@ fn every_other_shown_field_is_a_change() {
         },
         MatterSummary {
             skill_packs: Some(PackList::default()),
+            ..matter()
+        },
+        MatterSummary {
+            agent_prefs: Some(clauseo_protocol::AgentPrefs::default()),
             ..matter()
         },
         MatterSummary {

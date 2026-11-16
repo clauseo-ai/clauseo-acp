@@ -4,9 +4,16 @@
 // conversation in the same matter.
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { mt } from "../lib/words-matters.ts";
-import { OtherConversationWait, QueueStrip, SteerHint, SteerMark, SteerNote } from "./queue.tsx";
+import {
+  OtherConversationWait,
+  QueueStrip,
+  SteerHint,
+  SteerMark,
+  SteerNote,
+  SteerWaiting,
+} from "./queue.tsx";
 import { QUEUE_CAP, type QueuedMessage } from "./queue-model.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -65,6 +72,27 @@ describe("the queue over the composer", () => {
     ).toBe(false);
     await press("Show fewer");
     expect(document.querySelectorAll(".queue-item")).toHaveLength(2);
+  });
+
+  test("each message says when it goes under its words, and says nothing of it while the queue is held", async () => {
+    const strip = (held: boolean) => (
+      <QueueStrip
+        items={messages(2)}
+        held={held ? { kind: "stopped", at: "4:32 pm" } : null}
+        when={mt("en", "Sends when {name} finishes", { name: "ChatGPT" })}
+        onEdit={none}
+        onRemove={none}
+        onSendNow={none}
+        onSendNext={none}
+      />
+    );
+    await mount(strip(false));
+    const whens = [...document.querySelectorAll(".queue-item .queue-when")].map(txt);
+    expect(whens).toEqual(["Sends when ChatGPT finishes", "Sends when ChatGPT finishes"]);
+    // after the words, beside Send now's row
+    expect(document.querySelector(".queue-item")?.lastElementChild?.className).toBe("queue-when");
+    await act(async () => root?.render(strip(true)));
+    expect(document.querySelectorAll(".queue-when")).toHaveLength(0);
   });
 
   test("Edit and Remove stand in the row's tab order before Send now, held together apart from it", async () => {
@@ -415,14 +443,18 @@ describe("steering the running answer", () => {
   test("Send now and Queue are quiet buttons on the line above the field, and Enter queues", async () => {
     await mount(
       <SteerHint
-        text={mt("en", "Send now gives your words to Clauseo while it writes.")}
+        text={mt(
+          "en",
+          "Enter sends your words when {name} finishes. Send now stops the answer and sends them.",
+          { name: "Claude" },
+        )}
         onSendNow={none}
         onQueue={none}
         full
       />,
     );
     expect(txt(document.querySelector(".steer-hint-text"))).toBe(
-      "Send now gives your words to Clauseo while it writes.",
+      "Enter sends your words when Claude finishes. Send now stops the answer and sends them.",
     );
     // Send now carries the send arrow, 16 px and hidden from assistive technology; the word names the button
     const sendNow = document.querySelector<HTMLButtonElement>(".steer-hint .mat-send-now");
@@ -438,6 +470,29 @@ describe("steering the running answer", () => {
     expect(queue?.className).not.toContain("bg-primary");
     // a full queue takes no more
     expect(queue?.disabled).toBe(true);
+  });
+
+  test("words the answer hasn't taken in wait as a slip saying when they go, with Send now", async () => {
+    const sent = vi.fn();
+    await mount(
+      <SteerWaiting
+        text="Deal with the notice first."
+        when={mt("en", "Sends when {name} finishes", { name: "Claude" })}
+        onSendNow={sent}
+        note={{ words: mt("en", "That message had already gone."), code: "thread.turn_not_queued" }}
+      />,
+    );
+    expect(document.querySelector(".steer-mark")).toBeNull();
+    expect(txt(document.querySelector(".steer-wait .steer-mark-text"))).toBe(
+      "Deal with the notice first.",
+    );
+    expect(txt(document.querySelector(".steer-wait-when"))).toBe(
+      "Sends when Claude finishes" + "That message had already gone.",
+    );
+    const sendNow = document.querySelector<HTMLButtonElement>(".steer-wait .queue-send");
+    expect(txt(sendNow)).toBe("Send now");
+    await act(async () => sendNow!.click());
+    expect(sent).toHaveBeenCalledTimes(1);
   });
 
   test("the lawyer's words stand in the answer, and a search moved aside is explained", async () => {

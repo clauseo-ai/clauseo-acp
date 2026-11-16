@@ -5,7 +5,6 @@
 //! none runs while the OS answers with proxies.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -13,9 +12,10 @@ use clauseo_agents::{Clock as _, SystemClock};
 use clauseo_process::{AsyncIoTimer, Timer as _};
 use url::Url;
 
-use super::super::super::ask::{Event, PROBE_CAP};
+use super::super::super::ask::PROBE_CAP;
 use super::super::super::{LookupTime, NetworkSlot, OsAnswer, ProxyEnv};
 use super::super::{Follower, NetworkFollow};
+use super::virtual_time::{HANG_GUARD, Virtual};
 use super::{OS_PROXY, claude, facts, hook_env, since};
 use crate::bridge::lock;
 use crate::setup::SetupHook;
@@ -54,48 +54,6 @@ impl Os {
             os.ended.fetch_add(1, Ordering::SeqCst);
             answer
         }
-    }
-}
-
-/// The longest a test waits in real time: a guard against a hang, never a budget check.
-const HANG_GUARD: Duration = Duration::from_secs(10);
-
-/// Virtual time for the lookups' budget and the probes: it moves only when a probe takes its
-/// time, or when every lookup left hangs (`hang`) and no probe is running, to the end of the
-/// wait. Else the lookups answer at once and are waited for.
-#[derive(Default)]
-struct Virtual {
-    now: Mutex<Duration>,
-    hang: AtomicBool,
-}
-
-impl Virtual {
-    fn advance(&self, by: Duration) {
-        *lock(&self.now) += by;
-    }
-}
-
-impl LookupTime for Virtual {
-    fn now(&self) -> Duration {
-        *lock(&self.now)
-    }
-
-    fn next(
-        &self,
-        events: &mpsc::Receiver<Event>,
-        until: Duration,
-        probing: usize,
-    ) -> Option<Event> {
-        if let Ok(event) = events.try_recv() {
-            return Some(event);
-        }
-        if probing > 0 || !self.hang.load(Ordering::SeqCst) {
-            let event = events.recv_timeout(HANG_GUARD);
-            return Some(event.expect("an answer or a probe result within the hang guard"));
-        }
-        let mut now = lock(&self.now);
-        *now = (*now).max(until);
-        None
     }
 }
 
@@ -208,7 +166,7 @@ fn a_hanging_lookup_with_the_proxy_unreachable_goes_direct_within_the_budget() {
     network.update(facts());
     assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY));
     os.set(OsAnswer::Proxy(OS_PROXY.to_owned()), HANG_GUARD * 3);
-    time.hang.store(true, Ordering::SeqCst);
+    time.hang(true);
     let (started, wall) = (time.now(), SystemClock.monotonic());
     assert_eq!(
         network.refresher()().and_then(|n| n.proxy),

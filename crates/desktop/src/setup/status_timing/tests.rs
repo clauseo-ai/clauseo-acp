@@ -68,3 +68,53 @@ fn a_status_check_logs_when_it_was_asked_and_when_its_state_came() {
     let published = lines.iter().filter(|l| l.contains("setup event")).count();
     assert_eq!(published, 2, "{text}");
 }
+
+/// Each sign-in state that reaches the windows with a kind other than the agent's last logs
+/// the change, old kind to new; the same kind again logs none. No email, no URL.
+#[test]
+fn a_sign_in_state_change_logs_its_old_and_new_kind() {
+    let lines = Lines::default();
+    let writer = lines.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || writer.clone())
+        .with_ansi(false)
+        .finish();
+    // An agent no other test publishes for: the last kinds are kept for the whole run.
+    let agent = AgentId::new("state-change-log-test").unwrap();
+    let found = || SetupEvent::SignInChanged {
+        agent: agent.clone(),
+        state: SignIn::LoginFound {
+            from: LoginFrom::Codex,
+            email: Some("test@example.com".to_owned()),
+        },
+    };
+    tracing::subscriber::with_default(subscriber, || {
+        let events = SetupEvents::default();
+        events.publish(SetupEvent::SignInChanged {
+            agent: agent.clone(),
+            state: SignIn::Checking,
+        });
+        events.publish(found());
+        events.publish(found());
+    });
+    let text = String::from_utf8(lock(&lines.0).clone()).unwrap();
+    assert!(!text.contains("test@example.com"), "{text}");
+    let changes: Vec<&str> = text
+        .lines()
+        .filter(|line| line.contains("sign-in state changed"))
+        .collect();
+    assert_eq!(changes.len(), 2, "{text}");
+    for (line, (from, to)) in changes
+        .iter()
+        .zip([("", "checking"), ("checking", "login_found")])
+    {
+        for field in [
+            TARGET,
+            "agent=\"state-change-log-test\"",
+            &format!("from=\"{from}\""),
+            &format!("to=\"{to}\""),
+        ] {
+            assert!(line.contains(field), "{field} in {line}");
+        }
+    }
+}

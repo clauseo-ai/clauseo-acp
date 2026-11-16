@@ -6,8 +6,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::*;
 
-/// The record's reads: the first at the start, the second at the reservation, the third at
-/// the completion.
+/// The record's reads: the first at the start, the second at the reservation, the third at the
+/// first mark (a run that found nothing has none) or else at the completion.
 const AT_COMPLETION: usize = 2;
 /// The reservation's read of the record.
 const AT_RESERVATION: usize = 1;
@@ -76,7 +76,7 @@ fn a_record_gone_or_changed_at_the_completion_writes_nothing() {
 }
 
 #[test]
-fn a_reservation_that_fails_stops_nothing() {
+fn a_reservation_that_fails_with_the_lock_taken_stops_nothing() {
     let nothing_done = |fake: &mut Fake, exit: StopExit, case: &str| {
         fake.snapshots = vec![Ok(busy())];
         fake.jobs = Ok(vec![Some(sid(1010))]);
@@ -90,9 +90,6 @@ fn a_reservation_that_fails_stops_nothing() {
             "{case}: {line}"
         );
     };
-    let mut fake = Fake::new(&[1010]);
-    fake.marks = Marks::ReserveBusy;
-    nothing_done(&mut fake, StopExit::NotReserved, "the lock stays held");
     let mut fake = Fake::new(&[1010]);
     fake.pool_from = Some((AT_RESERVATION, Ok(None)));
     nothing_done(&mut fake, StopExit::NotReserved, "the record is gone");

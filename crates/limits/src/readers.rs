@@ -31,6 +31,7 @@ use paths::{CLAUDE_ID, CODEX_ID};
 #[cfg(feature = "live-tap")]
 #[doc(hidden)]
 pub use tap::StdoutTap;
+pub use time::parse_rfc3339;
 
 /// How a read ended.
 #[derive(Debug, Clone, PartialEq)]

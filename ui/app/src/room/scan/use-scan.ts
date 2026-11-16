@@ -7,13 +7,9 @@
 // one wait Create makes; nothing polls.
 import { useEffect, useRef, useState } from "react";
 import { toHostError } from "../../transport/host-transport.ts";
-import type {
-  FolderRefId,
-  FolderScanned,
-  HostError,
-  SyncService,
-} from "../../transport/protocol.ts";
+import type { FolderRefId, FolderScanned, HostError } from "../../transport/protocol.ts";
 import type { Matters } from "../matters.ts";
+import { serviceName } from "../sync-services.ts";
 
 /** How long Create waits for the scan's first event: the folder check's own wait (folder-check.tsx's CHECK_WAIT_MS). */
 export const PLACE_WAIT_MS = 5000;
@@ -30,21 +26,9 @@ export type Scan = {
   stopped: boolean;
 };
 
-/** Each service by its owner's name; "other" has none, so no synced notice, and cloud-only files are kept "online".
- * A service this version doesn't know reads as other. */
-const SERVICES: Partial<Record<SyncService, string>> = {
-  one_drive: "OneDrive",
-  google_drive: "Google Drive",
-  icloud: "iCloud Drive",
-  dropbox: "Dropbox",
-  box: "Box",
-};
-
-export function serviceOf(scanned: FolderScanned | null): string | null {
-  const place = scanned?.place;
-  if (place === undefined || typeof place !== "object" || place.synced === undefined) return null;
-  return SERVICES[place.synced.service] ?? null;
-}
+/** The service that syncs the scanned folder, by its owner's name (sync-services.ts); null for none with a name. */
+export const serviceOf = (scanned: FolderScanned | null): string | null =>
+  serviceName(scanned?.place);
 
 /** Whether the folder is synced by a service with a name to show: the notice shows, and Create waits for "Got it". */
 export const isSynced = (scanned: FolderScanned | null): boolean => serviceOf(scanned) !== null;

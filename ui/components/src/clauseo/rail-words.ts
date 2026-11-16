@@ -85,8 +85,8 @@ export function matterStatus(lang: Lang, state: MatterState, at: string, day = "
         ? frame(lang, "Paused until {time}", { time })
         : frame(lang, "Paused until {day} {time}", { day, time });
     case "limit":
-      // the reset, as the limit's words say it: today's time, another day's with its day, or that none was given
-      if (at === "") return lim(lang, "Limit reached. Reset not given.");
+      // the reset, as the limit's words say it: today's time, another day's with its day, or the limit alone when none was given
+      if (at === "") return lim(lang, "Limit reached");
       return day === ""
         ? lim(lang, "Limit reached until {time}", { time })
         : lim(lang, "Limit reached until {day} {time}", { day, time });

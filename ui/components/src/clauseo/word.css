@@ -179,6 +179,11 @@
     @apply text-small font-chip text-quiet;
     display: block;
   }
+  /* where a change outside the main text is, after its kind: "Added · In a header or footer" */
+  .rd-change-kind > span + .rd-change-place::before {
+    content: "·";
+    margin: 0 var(--s1-5);
+  }
   .rd-change:not([data-state="pending"]) .rd-change-run {
     color: var(--muted);
   }

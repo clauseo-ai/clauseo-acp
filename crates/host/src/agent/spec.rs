@@ -9,11 +9,24 @@ use clauseo_settings::AgentLaunch;
 
 use crate::error::Error;
 
-/// The spec for `agent`, run in `cwd` (the matter folder).
-///
-/// The env map holds the `inherited` environment (the host's own, read at launch) minus every
-/// `GIT_*` and `SSH_*` variable, the names in [`DROPPED_INHERITED`], and every name an agent,
-/// hook or forced variable also names, then the
+/// [`launch_env`] made into a spec run in `cwd` (the matter folder), for tests.
+#[cfg(test)]
+pub(crate) fn launch_spec(
+    agent: &AgentLaunch,
+    hook_env: BTreeMap<OsString, OsString>,
+    forced: BTreeMap<OsString, OsString>,
+    dropped: &[&str],
+    inherited: impl Iterator<Item = (OsString, OsString)>,
+    cwd: PathBuf,
+    path_prepend: &[PathBuf],
+) -> Result<LaunchSpec, Error> {
+    let env = launch_env(agent, hook_env, forced, dropped, inherited, path_prepend);
+    spec_of(agent, env, cwd)
+}
+
+/// The whole environment of `agent`'s launch. It holds the `inherited` environment (the host's
+/// own, read at launch) minus every `GIT_*` and `SSH_*` variable, the names in
+/// [`DROPPED_INHERITED`], and every name an agent, hook or forced variable also names, then the
 /// agent's variables minus those the hook or `forced` names, then the hook's minus those
 /// `forced` names, then `forced`: what the host sets for the agent's kind (a Codex agent's
 /// mode, home and config, `agent/codex.rs`; a Claude agent's home, `agent/home.rs`), which
@@ -43,17 +56,20 @@ use crate::error::Error;
 /// every inherited key or token stays out of the stderr tail. Never `Debug`-print the spec: it
 /// holds those secrets.
 ///
-/// `path_prepend` (`HostConfig::with_agent_path_prepend`, stetdoc's folder) goes first on the
-/// merged `PATH` ([`prepend_path`]).
-pub(crate) fn launch_spec(
+/// `path_prepend` goes first on the merged `PATH`, in its order ([`prepend_path`]): stetdoc's
+/// folder (`HostConfig::with_agent_path_prepend`), the shell browser's folder for a session
+/// that has it, then the profile hook's ([`session_path`]).
+///
+/// The launch then edits it for the agent's shells (`agent/shell_path.rs`) and makes the spec
+/// with [`spec_of`].
+pub(crate) fn launch_env(
     agent: &AgentLaunch,
     mut hook_env: BTreeMap<OsString, OsString>,
     forced: BTreeMap<OsString, OsString>,
     dropped: &[&str],
     inherited: impl Iterator<Item = (OsString, OsString)>,
-    cwd: PathBuf,
-    path_prepend: Option<&Path>,
-) -> Result<LaunchSpec, Error> {
+    path_prepend: &[PathBuf],
+) -> BTreeMap<OsString, OsString> {
     let drops = |name: &OsStr| {
         clauseo_process::is_node_env(name)
             || dropped.iter().any(|drop| same(OsStr::new(drop), name))
@@ -64,10 +80,12 @@ pub(crate) fn launch_spec(
         .iter()
         .map(|(name, value)| (OsString::from(name), OsString::from(value)))
         .filter(|(name, _)| !names(&hook_env, name) && !names(&forced, name) && !drops(name))
+        .filter(|(name, _)| !is_agent_browser(name))
         .collect();
     let mut env: BTreeMap<OsString, OsString> = inherited
         .filter(|(name, _)| {
             !is_dropped_inherited(name)
+                && !is_agent_browser(name)
                 && !drops(name)
                 && !names(&hook_env, name)
                 && !names(&forced, name)
@@ -77,9 +95,18 @@ pub(crate) fn launch_spec(
     env.extend(own);
     env.extend(hook_env);
     env.extend(forced);
-    if let Some(folder) = path_prepend {
-        prepend_path(&mut env, folder);
+    if !path_prepend.is_empty() {
+        prepend_path(&mut env, path_prepend);
     }
+    env
+}
+
+/// The spec of `agent`'s command and arguments, with `env` as its whole environment, in `cwd`.
+pub(crate) fn spec_of(
+    agent: &AgentLaunch,
+    env: BTreeMap<OsString, OsString>,
+    cwd: PathBuf,
+) -> Result<LaunchSpec, Error> {
     let args = agent.args.iter().map(OsString::from).collect();
     Ok(LaunchSpec::new(
         PathBuf::from(&agent.command),
@@ -89,29 +116,71 @@ pub(crate) fn launch_spec(
     )?)
 }
 
-/// Puts `folder` first on `env`'s `PATH`: the one the merge kept (the hook's, else the agent's
-/// settings, else the inherited one), found ignoring ASCII case and written back under its own
-/// name (`Path` on Windows stays `Path`), or a new `PATH` holding only `folder`. A folder
-/// that cannot be joined (it holds the separator) is left out with a warning.
+/// Puts `folders` first on `env`'s `PATH`, in their order: the one the merge kept (the hook's,
+/// else the agent's settings, else the inherited one), found ignoring ASCII case and written
+/// back under its own name (`Path` on Windows stays `Path`), or a new `PATH` holding only
+/// `folders`. A folder that cannot be joined (it holds the separator) is left out, with a
+/// warning that counts them.
 #[expect(
     clippy::disallowed_methods,
-    reason = "the agent's PATH value is split once, to put stetdoc's folder first; nothing is looked up on it"
+    reason = "the agent's PATH value is split once, to put stetdoc's and the hook's folders first; nothing is looked up on it"
 )]
-pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folder: &Path) {
+pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folders: &[PathBuf]) {
     let name = env
         .keys()
         .find(|key| same(key, OsStr::new("PATH")))
         .cloned()
         .unwrap_or_else(|| OsString::from("PATH"));
+    let (joinable, left_out): (Vec<&PathBuf>, Vec<&PathBuf>) = folders
+        .iter()
+        .partition(|folder| std::env::join_paths([folder]).is_ok());
+    if !left_out.is_empty() {
+        tracing::warn!(
+            left_out = left_out.len(),
+            "folders that hold the PATH separator cannot go on the agent's PATH"
+        );
+    }
+    if joinable.is_empty() {
+        return;
+    }
     let rest = env.get(&name).cloned().unwrap_or_default();
-    let parts = std::iter::once(folder.to_path_buf())
+    let parts = joinable
+        .into_iter()
+        .cloned()
         .chain(std::env::split_paths(&rest).filter(|part| !part.as_os_str().is_empty()));
     match std::env::join_paths(parts) {
         Ok(joined) => {
             env.insert(name, joined);
         }
-        Err(error) => tracing::warn!(%error, "the stetdoc folder cannot go on the agent's PATH"),
+        Err(error) => tracing::warn!(%error, "the folders cannot go on the agent's PATH"),
     }
+}
+
+/// The inherited variables a session drops when the profile hook puts folders on its `PATH`
+/// (Clauseo's Python runtime, decision record 0048): either could stop that Python starting, or
+/// point it at another Python's modules.
+pub(crate) const PYTHON_VARS: [&str; 2] = ["PYTHONHOME", "PYTHONPATH"];
+
+/// A session's `PATH` folders, in order: `prepend` (stetdoc's) first, then the absolute ones
+/// of `hook` (`ProfileHook::agent_path`); and whether any of the hook's went on, which drops
+/// [`PYTHON_VARS`]. A relative folder is skipped: it would resolve against the matter folder,
+/// which the agent can write. Only a count is logged, never a folder.
+pub(crate) fn session_path(prepend: Option<&Path>, hook: Vec<PathBuf>) -> (Vec<PathBuf>, bool) {
+    let given = hook.len();
+    let hook: Vec<PathBuf> = hook.into_iter().filter(|dir| dir.is_absolute()).collect();
+    if hook.len() < given {
+        tracing::warn!(
+            skipped = given - hook.len(),
+            "relative folders from the profile hook left off the agent's PATH"
+        );
+    }
+    let any = !hook.is_empty();
+    let path = prepend
+        .map(Path::to_path_buf)
+        .into_iter()
+        .chain(hook)
+        .collect();
+    (path, any)
 }
 
 /// The prefixes of the inherited variables no agent gets: `GIT_*` would point its git at another
@@ -135,6 +204,20 @@ fn is_dropped_inherited(name: &OsStr) -> bool {
     }) || DROPPED_INHERITED
         .iter()
         .any(|drop| same(OsStr::new(drop), name))
+}
+
+/// The prefix of agent-browser's variables. An agent gets only the ones the host sets for a
+/// session with the browser (`agent::loads::browser::shell_env`, through the hook's map): none
+/// inherited from the app's own environment or set in an agent's settings, so an
+/// `AGENT_BROWSER_CDP` or `AGENT_BROWSER_HEADED` there never reaches agent-browser.
+pub(crate) const AGENT_BROWSER_PREFIX: &str = "AGENT_BROWSER_";
+
+/// Whether `name` is one of agent-browser's variables ([`AGENT_BROWSER_PREFIX`]), ignoring ASCII
+/// case (Windows does).
+fn is_agent_browser(name: &OsStr) -> bool {
+    name.as_encoded_bytes()
+        .get(..AGENT_BROWSER_PREFIX.len())
+        .is_some_and(|start| start.eq_ignore_ascii_case(AGENT_BROWSER_PREFIX.as_bytes()))
 }
 
 /// Whether `map` holds `name`, ignoring ASCII case.

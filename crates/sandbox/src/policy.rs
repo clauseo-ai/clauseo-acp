@@ -12,6 +12,8 @@ mod names;
 mod store;
 
 pub use links::LINK_RULES_MAX;
+pub(crate) use names::opens_as;
+pub use names::{hfs_ignorable, strip_hfs_ignorables};
 pub use store::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
 };
@@ -49,10 +51,18 @@ pub const INSTRUCTIONS_AT_ANY_DEPTH: &str = "CLAUDE.md";
 /// [`names::name_key`], Unicode canonical caseless matching, the folding APFS documents for its
 /// case-insensitive volumes (`DATA/x` is under `data`, an NFD name matches its NFC form; the
 /// pairs checked against this Mac's volume are in the tests). Elsewhere the comparison is exact:
-/// NTFS and Linux file systems keep NFC and NFD names as two files.
+/// NTFS and Linux file systems keep NFC and NFD names as two files. When either side is in
+/// Windows' verbatim form (`dunce` keeps `\\?\` on a path of 260 characters or more, and on
+/// this machine's admin share), both are compared in it with that share read as its drive
+/// ([`crate::windows::acl_plan::compared`]), so a deep file in a shorter matter, or the matter
+/// named through `\\localhost\c$`, is under it; the paths themselves are never changed.
 pub(crate) fn under(path: &Path, prefix: &Path) -> bool {
+    let verbatim_form = |p: &Path| p.as_os_str().as_encoded_bytes().starts_with(br"\\?\");
     if path.starts_with(prefix) {
         true
+    } else if verbatim_form(path) || verbatim_form(prefix) {
+        use crate::windows::acl_plan::compared;
+        compared(path).starts_with(compared(prefix))
     } else if cfg!(target_os = "macos") {
         let mut names = path.components();
         prefix.components().all(|want| {

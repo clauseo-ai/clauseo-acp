@@ -202,12 +202,12 @@ fn a_pick_before_documents_answers_is_checked_as_after() {
         let inside = host.folder_ref(&inside);
         host.refused(
             create("Inside", MatterSource::NewFolder { folder: inside }),
-            ErrorCode::MatterFolderInMattersRoot,
+            ErrorCode::MatterFolderInClauseoData,
         );
         let data = host.folder_ref(dir.data());
         host.refused(
             create("Data", MatterSource::ExistingFolder { folder: data }),
-            ErrorCode::MatterFolderInMattersRoot,
+            ErrorCode::MatterFolderInClauseoData,
         );
     };
     refusals(&host);

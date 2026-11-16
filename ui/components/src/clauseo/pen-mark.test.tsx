@@ -5,7 +5,7 @@ import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { DEFAULT_DISPLAY, showDisplay, type Display } from "../lib/display.ts";
-import { inkLookup } from "./ink-lookup.ts";
+import { inkPoints } from "./ink-lookup.ts";
 import { PenMark } from "./pen-mark.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 import { WorkingLine, WorkingTime } from "./working-line.tsx";
@@ -221,36 +221,62 @@ test("a check and a series with no expected time have no pill, in the row or bes
   expect(document.querySelector(".working-time")?.textContent).toMatch(/Expected by/);
 });
 
-test("each frame reads the nib's place from the table: the path is walked at setup only", async () => {
+test("the page's geometry is never walked: no getPointAtLength at setup, in a frame, or for a second pen", async () => {
+  // Blink measures the whole path again on every read (0.9 ms each for the pen's ink in Chrome): the 2,380 reads of the
+  // old table held the first run's "Setting up" off the screen for about 8 s on the Windows VM (webview-stall).
   // happy-dom puts the geometry on SVGGeometryElement, so the stubs above do not reach a path: stub the path's own
   const path = SVGPathElement.prototype as unknown as Record<string, unknown>;
   const walk = vi.fn((k: number) => ({ x: k, y: 0 }));
+  const total = vi.fn(() => 1000);
   path["getPointAtLength"] = walk;
-  path["getTotalLength"] = () => 1000;
+  path["getTotalLength"] = total;
   try {
     await mount(<PenMark />);
     const nib = () => document.querySelector(".pen-mark > g > g")?.getAttribute("transform");
-    const setup = walk.mock.calls.length;
-    expect(setup).toBeGreaterThan(0);
     const start = nib();
     for (let i = 1; i <= 20; i++) tick(performance.now() + 40 * i);
     expect(nib()).not.toBe(start);
-    expect(walk.mock.calls.length).toBe(setup);
+    await act(async () => root?.render(<RoomScopeProvider>{null}</RoomScopeProvider>));
+    await act(async () =>
+      root?.render(
+        <RoomScopeProvider>
+          <PenMark />
+        </RoomScopeProvider>,
+      ),
+    );
+    expect(walk).not.toHaveBeenCalled();
+    // one length a pen, for the dash
+    expect(total).toHaveBeenCalledTimes(2);
   } finally {
     delete path["getPointAtLength"];
     delete path["getTotalLength"];
   }
 });
 
-test("the table reads the ink between its ends, and clamps outside them", () => {
-  const straight = inkLookup((k) => ({ x: k, y: 2 * k }), 330, 540);
-  expect(straight(400)).toEqual({ x: 400, y: 800 });
-  expect(straight(401.1).x).toBeCloseTo(401.1, 9);
-  expect(straight(330)).toEqual({ x: 330, y: 660 });
-  expect(straight(540)).toEqual({ x: 540, y: 1080 });
-  expect(straight(-5000)).toEqual(straight(330));
-  expect(straight(1e6)).toEqual(straight(540));
+test("the ink's points follow the path's length, and clamp outside it", () => {
+  // a straight cubic whose controls bunch toward its start: by length, not by the curve's own parameter
+  const straight = inkPoints("M 0 0 c 1 0 2 0 30 0");
+  expect(straight.length).toBeCloseTo(30, 9);
+  expect(straight.at(12.5).x).toBeCloseTo(12.5, 9);
+  expect(straight.at(12.5).y).toBe(0);
+  expect(straight.at(-5)).toEqual({ x: 0, y: 0 });
+  expect(straight.at(1e6)).toEqual({ x: 30, y: 0 });
 
-  const curved = inkLookup((k) => ({ x: k, y: Math.sin(k) }), 330, 540);
-  expect(curved(400.1).y).toBeCloseTo(Math.sin(400.1), 1);
+  // two straight cubics around a corner, the second relative to the first's end
+  const corner = inkPoints("M 5 5 c 0 0 10 0 10 0 c 0 0 0 10 0 10");
+  expect(corner.length).toBeCloseTo(20, 9);
+  expect(corner.at(15).x).toBeCloseTo(15, 9);
+  expect(corner.at(15).y).toBeCloseTo(10, 9);
+
+  // a quarter of a circle by its usual cubic: the length within 0.1% of pi/2, a point halfway on the circle
+  const r = 100;
+  const h = 0.5523 * r;
+  const arc = inkPoints(`M ${r} 0 c 0 ${h} ${h - r} ${r} ${-r} ${r}`);
+  expect(Math.abs(arc.length / ((Math.PI * r) / 2) - 1)).toBeLessThan(0.001);
+  const mid = arc.at(arc.length / 2);
+  expect(Math.hypot(mid.x, mid.y)).toBeCloseTo(r, 0);
+  expect(mid.x).toBeCloseTo(mid.y, 0);
+
+  expect(() => inkPoints("M 0 0 l 10 10")).toThrow(/only relative cubics/);
+  expect(() => inkPoints("c 1 2 3 4 5 6")).toThrow(/start with M/);
 });

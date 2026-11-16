@@ -459,7 +459,7 @@ fn the_hook_shows_no_box_when_the_data_folder_is_gone_and_no_path_through_a_link
     assert_eq!(body[silent + 3], "${If} $R6 = 2");
     assert_eq!(
         body[silent + 4],
-        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(deleteAppDataFailedUnnamed)\""
+        "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(deleteAppDataFailedUnnamed)\""
     );
     assert_eq!(body[silent + 5], "${ElseIf} $R8 == \"\"");
     let deletion = line_with(body, &["${If} $DeleteAppDataCheckboxState = 1"]);
@@ -494,7 +494,10 @@ fn the_hooks_exit_codes_and_words_are_the_apps() {
     for (key, register) in [("deleteAppDataFailed", "$R9"), ("deleteAppDataKept", "$R8")] {
         line_with(
             &code,
-            &["MessageBox MB_OK|MB_ICONEXCLAMATION", &format!("$({key})")],
+            &[
+                "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST",
+                &format!("$({key})"),
+            ],
         );
         // The path stands alone after a blank line.
         let line = english
@@ -507,7 +510,7 @@ fn the_hooks_exit_codes_and_words_are_the_apps() {
     line_with(
         &code,
         &[
-            "MessageBox MB_OK|MB_ICONEXCLAMATION",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST",
             "$(deleteAppDataKeptFailed)",
         ],
     );

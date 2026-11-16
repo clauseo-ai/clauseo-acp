@@ -531,6 +531,18 @@ impl HostHandle {
         self.exit.clone().await.unwrap_or(HostExit::Stopped)
     }
 
+    /// The turn path's state for a test whose wait timed out: per thread its agent's stage,
+    /// owner step and fenced calls, its launch being prepared, its turn's phase and its queue,
+    /// then the `stop_agents` calls waiting and the listings running. Ids, stages and counts
+    /// only: no path and no prompt text. `None` when the host is gone; it never answers while
+    /// the actor is blocked, so a caller bounds the wait.
+    #[cfg(feature = "test-support")]
+    pub async fn state_for_test(&self) -> Option<String> {
+        let (reply, answer) = oneshot::channel();
+        self.internal.try_send(Input::StateForTest(reply)).ok()?;
+        answer.await.ok()
+    }
+
     /// Ends the host thread at once, with no flush and no graceful stop, as a crash would.
     /// Returns once the store is closed, so a new [`Host::start`] on the same folder works.
     #[cfg(feature = "test-support")]

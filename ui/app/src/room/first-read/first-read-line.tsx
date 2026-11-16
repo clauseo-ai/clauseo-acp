@@ -1,6 +1,7 @@
 // The first read's line under the composer's field (UD2): "Reading 24 files." before a file, "Reading 24 files. Now
 // Board minutes.docx." with the latest read tool call's file, "Read 24 files." once answered, and after a Stop
-// "Clauseo stopped. The answer so far is kept." with Restart. `n` is the matter's files as the read started
+// "Clauseo stopped. The answer so far is kept." with Restart. While it reads the line keeps one line beside its clock:
+// the file's name gives way in its middle, "matter-bri….md", its extension kept (FileFit; limits.css). `n` is the matter's files as the read started
 // (ListPapers). The turn is the first read's only when marks.ts holds it: nothing here matches the prompt's text. Stop
 // is the composer's own, which sends `cancel` for the thread. In the thread's chunk (list.tsx), with its words.
 import { useState } from "react";
@@ -11,11 +12,46 @@ import { th } from "@clauseo/components/lib/words-thread.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { MatterId, ThreadId } from "../../transport/protocol.ts";
-import { readLine, type ReadState } from "./read-state.ts";
+import { Say } from "@clauseo/components/clauseo/say.tsx";
+import { readLine, readLineParts, type ReadState } from "./read-state.ts";
 
 /** Restart, until H10: the first-read prompt sent again in its thread. RestartAgent replaces this one line. */
 const restart = (transport: HostTransport, matter: MatterId, thread: ThreadId) =>
   late(import("./first-read-start.ts")).then((m) => m.restartFirstRead(transport, matter, thread));
+
+/** A file's name that gives way in its middle: its stem cut with an ellipsis, its extension (".md") kept whole, its
+ * whole name on hover. Isolated, so a name in another script never reorders the sentence round it. */
+export function FileFit({ name }: { name: string }) {
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 && name.length - dot <= 6 ? name.slice(dot) : "";
+  return (
+    <bdi className="lim-field-name" title={name}>
+      <span className="lim-field-stem">
+        <Say>{ext === "" ? name : name.slice(0, dot)}</Say>
+      </span>
+      {ext !== "" && (
+        <span className="lim-field-ext">
+          <Say>{ext}</Say>
+        </span>
+      )}
+    </bdi>
+  );
+}
+
+/** The reading line's words, the file's name fitted to the line. */
+function ReadingWords({ before, name, after }: { before: string; name: string; after: string }) {
+  return (
+    <>
+      <span className="lim-field-words">
+        <Say>{before}</Say>
+      </span>
+      <FileFit name={name} />
+      <span className="lim-field-words">
+        <Say>{after}</Say>
+      </span>
+    </>
+  );
+}
 
 export function FirstReadLine({
   transport,
@@ -34,11 +70,19 @@ export function FirstReadLine({
   // pressed, until the new turn's question takes the line back to reading
   const [pressed, setPressed] = useState(false);
   if (state.kind !== "stopped" && pressed) setPressed(false);
+  const parts = readLineParts(lang, state, papers);
   return (
     <div className="contents" data-testid="first-read" data-state={state.kind}>
       <FieldNotice
         wait={state.kind === "reading"}
-        lead={readLine(lang, state, papers)}
+        oneLine={state.kind === "reading"}
+        lead={
+          parts.name === null ? (
+            readLine(lang, state, papers)
+          ) : (
+            <ReadingWords before={parts.before} name={parts.name} after={parts.after} />
+          )
+        }
         action={
           state.kind === "stopped" ? (
             <Button

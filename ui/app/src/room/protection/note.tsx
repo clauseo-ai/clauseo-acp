@@ -2,14 +2,17 @@
 // (components' protection.tsx), its retry through the set-up confirm where Windows' administrator
 // prompt follows (setup.tsx), the waiting line in the button's place and a refusal's words under
 // the body. Design B: a block says its reason's line (blocked.ts), and where the repair is the
-// installer the retry gives way to its line and, on a personal install, "Get the installer". When
-// the matter becomes protected the note closes. While the firm requires the Safe workspace
-// (ProtectionView.required) the body says the firm's line for the cause (required-words.ts), never
-// that Clauseo works without it, and the note waits for a press: the firm's notice already says it
-// in the composer. The firm's notice (required.tsx) rides in the same chunk.
+// installer the retry gives way to its line and, without a firm's policy, "Get the installer". While
+// the firm's policy is active (firmPolicy, blocked.ts), a block only the firm can act on, or a
+// sandbox.blocked refusal, adds "Copy details for IT" (it-details.ts). When the matter becomes protected the note closes. While the firm requires the
+// Safe workspace (ProtectionView.required) the body says the firm's line for the cause
+// (required-words.ts), never that Clauseo works without it, and the note waits for a press: the
+// firm's notice already says it in the composer. The firm's notice (required.tsx) rides in the
+// same chunk.
 import { NotProtectedNote, type NoteWhy } from "@clauseo/components/clauseo/protection.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
-import { blockLine, blockOf, firmInstall, needsInstaller, repairLine } from "./blocked.ts";
+import { itDetails } from "./it-details.ts";
+import { blockLine, blockOf, firmPolicy, needsInstaller, repairLine } from "./blocked.ts";
 import { openInstallerPage, repairPage } from "./installer.ts";
 import { useEffect, useState } from "react";
 import type { MatterId } from "../../transport/protocol.ts";
@@ -93,7 +96,8 @@ export function ProtectionNote({
   const repair = needsInstaller(cause);
   const retry = !repair && canRetry(cause);
   const block = blockLine(lang, cause);
-  const page = repair && !firmInstall(state.view, state.managedBy) ? repairPage(display) : null;
+  const policy = firmPolicy(state.view, state.managedBy);
+  const page = repair && !policy ? repairPage(display) : null;
   const extra = [
     ...(block === null ? [] : [block]),
     ...(repair ? [repairLine(lang, state.view, state.managedBy)] : []),
@@ -110,6 +114,12 @@ export function ProtectionNote({
         waiting={retry ? waitingWords(lang, state, cause) : null}
         failed={retry ? failedWords(lang, state) : null}
         extra={extra}
+        forIt={
+          policy
+            ? (itDetails.blocked(lang, cause) ??
+              (retry ? itDetails.refused(lang, state.failed, cause) : null))
+            : null
+        }
         onGetInstaller={page === null ? undefined : () => void openInstallerPage(transport, page)}
         onClose={close}
         onProtect={retry ? press : undefined}

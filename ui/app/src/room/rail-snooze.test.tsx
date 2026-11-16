@@ -4,7 +4,7 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { MatterInfo, ThreadInfo } from "./host-next.ts";
+import type { ThreadInfo } from "./host-next.ts";
 import { LISTS, MATTERS } from "./rail-needs-rig.ts";
 import { railView } from "./rail-lists.ts";
 import {
@@ -13,6 +13,7 @@ import {
   B,
   C,
   conversations,
+  D,
   focusWindow,
   hover,
   item,
@@ -47,15 +48,10 @@ afterEach(async () => {
 const MIDNIGHT = Date.UTC(2026, 10, 3);
 const HOUR = 3_600_000;
 const T_LIST = thread(10, A, { title: "List of dates" });
-const withA = (more: ThreadInfo[], next?: string) => {
+const withA = (more: ThreadInfo[]) => {
   const lists = new Map(LISTS);
   lists.set(A.matter, [...(lists.get(A.matter) ?? []), ...more]);
-  const matters =
-    next === undefined
-      ? MATTERS
-      : () =>
-          MATTERS().map((m): MatterInfo => (m.matter === A.matter ? { ...m, next_date: next } : m));
-  return { lists, matters };
+  return { lists, matters: MATTERS };
 };
 
 /** The snooze menu of Bail conditions (List of dates is the open one), open: its items' words. */
@@ -92,18 +88,18 @@ test("a snoozed row comes back at the first render after its time, and not befor
   lists.set(B.matter, [{ ...T_ASK, snoozed_until: NOW + HOUR }]);
   await mount({ lists });
   // B's one conversation snoozed: the matter is snoozed whole, on the shelf, out of Needs you
-  expect(names(needs())).toEqual([C.name]);
+  expect(names(needs())).toEqual([D.name, C.name]);
   const shelf = rail()?.querySelector('[data-testid="rail-shelf"]');
   expect(shelf?.querySelector(".room-fold-count")?.textContent).toBe("1");
   expect(shelf?.textContent).toContain("Next back 6:00\u00a0pm");
   vi.setSystemTime(NOW + HOUR - 1);
   await focusWindow();
-  expect(names(needs())).toEqual([C.name]);
+  expect(names(needs())).toEqual([D.name, C.name]);
   // the time comes with nothing drawn: nothing changes until the next render
   vi.setSystemTime(NOW + HOUR);
-  expect(names(needs())).toEqual([C.name]);
+  expect(names(needs())).toEqual([D.name, C.name]);
   await focusWindow();
-  expect(names(needs())).toEqual([B.name, C.name]);
+  expect(names(needs())).toEqual([D.name, B.name, C.name]);
   expect(rail()?.querySelector('[data-testid="rail-shelf"]')).toBeNull();
 });
 
@@ -111,14 +107,15 @@ test("the wake: the reducer clearing a snooze brings the row back to Needs you w
   const lists = new Map(LISTS);
   lists.set(B.matter, [{ ...T_ASK, snoozed_until: NOW + 5 * HOUR }, thread(11, B)]);
   const transport = await mount({ lists });
-  expect(names(needs())).toEqual([C.name]);
+  expect(names(needs())).toEqual([D.name, C.name]);
   await act(async () => {
     transport.appEvent({
       threads_changed: { matter: B.matter, threads: [T_ASK], removed: [], all: false },
     });
   });
-  expect(names(needs())).toEqual([B.name, C.name]);
-  const row = needs()?.querySelector('[data-testid="matter-row"]');
+  expect(names(needs())).toEqual([D.name, B.name, C.name]);
+  // under D, the pinned matter whose question came first
+  const row = needs()?.querySelectorAll('[data-testid="matter-row"]')[1];
   expect(row?.getAttribute("data-state")).toBe("permission");
   expect(row?.querySelector(".room-matter-where")?.textContent).toBe(T_ASK.title);
 });
@@ -142,15 +139,6 @@ test("the menu at 4:59 pm offers 6:00 pm, and at 5:00 pm 9:00 pm in its place", 
     "Monday 9:00 am",
     "Choose a day and time",
   ]);
-});
-
-test("Before the next date shows only with the matter's next date more than a day away", async () => {
-  await mount(withA([T_LIST], "2026-11-11"));
-  // 9:00 am the day before, its day and time beneath
-  expect(await menuOf()).toContain("Before the next dateTuesday 10 November, 9:00 am");
-  await unmount();
-  await mount(withA([T_LIST], "2026-11-04"));
-  expect((await menuOf()).some((i) => i?.startsWith("Before the next date"))).toBe(false);
 });
 
 test("a snooze: one snooze_thread with its time, the line in the row's place until the pointer leaves, then the row with its alarm clock", async () => {

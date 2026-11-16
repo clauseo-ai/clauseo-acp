@@ -1,0 +1,16 @@
+{"scenario":"own-turn-after-background","description":"claude-agent-acp: a steer during a running Bash call; Claude Code backgrounds the command and prompt 1 ends end_turn; when the command finishes the agent starts a turn of its own (no session/prompt): a tool call, text, and the cost-bearing usage_update its SDK result sends","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"_meta":{"claudeCode":{"promptQueueing":true}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[]}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-bash-1","title":"Run the build","kind":"execute","status":"in_progress"}}}
+{"expect":{"method":"_session/steering","as":"steer","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}],"_meta":{"steering":{"idleBehavior":"promptRequired"}}}}}
+{"respond":{"to":"steer","result":{"outcome":"injected"},"raw":true}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-bash-1","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Running it in the background."}}}}
+{"update":{"update":{"sessionUpdate":"usage_update","used":1520,"size":200000,"cost":{"amount":0.0123,"currency":"USD"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-read-2","title":"Read build.log","kind":"read","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-own-1","content":{"type":"text","text":"The build finished: 3 warnings."}}}}
+{"update":{"update":{"sessionUpdate":"usage_update","used":1520,"size":200000,"cost":{"amount":0.0123,"currency":"USD"}}}}

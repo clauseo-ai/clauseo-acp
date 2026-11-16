@@ -5,17 +5,43 @@
 //! - `Offline`: `Waiting`, then 30 s on the timer and again, with no try counted, until it
 //!   works or is paused.
 //! - `Blocked` and `DiskFull` stop at once: a retry would meet the same proxy or disk.
-//! - Anything else counts as a try; the third is `Failed`, after waits of 2 s and then 8 s.
+//! - Anything else counts as a try; the third is `Failed`, after waits of 2 s and then 8 s. A
+//!   sharing or lock error in `npm ci` or the rename is first retried in place (`npm`).
+//!
+//! Each try starts by emptying the agent's npm cache ([`empty_npm_cache`]), so tries cut short
+//! never pile up its copies of the tarballs; except a try whose set-up is kept from one that
+//! failed only its rename, which renames it alone (`kept`). Every way to `Ready` then removes
+//! the install's downloads and its npm cache ([`files::clean_up`]); a failed try keeps both.
 //! - A pause ends the job quietly where it is: `pause` has already sent `Paused`.
+//!
+//! Two agents install at once (decision 0033, "Two installs at once"), so a job holds the lock
+//! files in `agents/` ([`Locks`], `write::AgentsLock`) for what it shares: `.lock` shared for
+//! the whole job (an older Clauseo takes it exclusive), its agent's `.lock-<id>` exclusive for
+//! the whole job, `.lock-node` exclusive while a try checks, fetches and unpacks the downloaded
+//! Node and shared while its npm runs from it (a try that finds `.lock-node` held fetches no
+//! Node and waits for the holder before its npm), and `.lock-python` while it installs Python.
+//! Only `.lock-node` is ever waited for; every other lock is taken or the job stops, so no two
+//! jobs wait on each other.
 //!
 //! Every wait and every npm run is raced against the job's [`Cancel`], and every event goes
 //! through [`Shared::emit_job`], which drops it once the job is paused.
 
 mod files;
+mod kept;
+mod locks;
 mod npm;
+mod python;
+mod ready;
+mod try_error;
 
-use std::fs::File;
-use std::io;
+pub(crate) use files::{empty_npm_cache, remove_legacy_shared, written};
+#[cfg(test)]
+pub(crate) use kept::MARKER;
+pub(crate) use kept::marked_for;
+pub(crate) use locks::Locks;
+use try_error::Next;
+pub(crate) use try_error::TryError;
+
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
@@ -28,14 +54,14 @@ use futures::future::{Either, select};
 use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
 use crate::disk;
-use crate::download::{FetchError, FetchKind, write_kind};
-use crate::log::{InstallLog, redact};
-use crate::node::{self, FoundNode, NotUsed, UserSearch};
+use crate::log::InstallLog;
+use crate::node::{self, FoundNode};
 use crate::platform::Libc;
-use crate::receipt::{install_folder, read_receipt, script_path, write_receipt};
 use crate::state::{Failure, FailureKind, InstallState, Installed};
 use crate::worker::{Shared, Ticket};
-use crate::write::ExtractError;
+use crate::write::{self, AgentsLock, Mode};
+
+pub(crate) use ready::{ready_install, runtime_check, runtime_ready};
 
 /// The most tries one install makes.
 const TRIES: u32 = 3;
@@ -54,121 +80,24 @@ pub(crate) struct Job<T> {
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) timer: Arc<T>,
     pub(crate) shared: Arc<Shared>,
-    /// The job lock: held for the whole job, so jobs run one after another.
+    /// The agent's turn lock: held for the whole job, so the agent's jobs run one after another.
     pub(crate) turn: Arc<Mutex<()>>,
     /// The OS's proxy, when a retry asked for it.
     pub(crate) system_proxy: Option<String>,
-    /// The lock on `agents/.lock` while the job works: `None` until taken, and given up before
-    /// the job's last event, so the next job (here or in another process) never meets it.
-    pub(crate) data_lock: Mutex<Option<File>>,
+    /// The lock files the job holds while it works, each given up before the job's last
+    /// event, so the next job (here or in another process) never meets them.
+    pub(crate) locks: Locks,
 }
 
-/// The job thread's body: waits for the job lock, then works unless paused meanwhile.
+/// The job thread's body: waits for its agent's turn, then works unless paused meanwhile.
 pub(crate) fn run<T: Timer + Send + Sync>(job: &Job<T>) {
     let _turn = job.turn.lock().unwrap_or_else(PoisonError::into_inner);
     if job.ticket.cancel.is_cancelled() {
         return;
     }
     futures::executor::block_on(job.work());
-    // Given up before the job lock, so the next job here never finds it held.
+    // Given up before the turn lock, so the next job here never finds them held.
     job.release_lock();
-}
-
-/// How a try ended badly, and what the job does next.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Next {
-    /// Wait 30 s and try again, no try counted.
-    Offline,
-    /// Stop now as `Blocked`.
-    Blocked,
-    /// Stop now as `DiskFull`.
-    DiskFull,
-    /// Count a try; the third is `Failed`.
-    Retry,
-    /// Stop now as `Failed`: a retry cannot help.
-    Stop,
-    /// Paused: end quietly.
-    Cancelled,
-}
-
-/// A try that did not finish: what comes next, and the log's lines for it.
-#[derive(Debug)]
-pub(crate) struct TryError {
-    next: Next,
-    host: Option<String>,
-    status: Option<u16>,
-    /// Redacted.
-    detail: String,
-}
-
-impl TryError {
-    /// A failure no retry can help: the job stops now as `Failed`, with `detail` redacted.
-    pub(crate) fn stop(detail: &str, config: &AgentsConfig) -> TryError {
-        TryError::new(Next::Stop, detail, config)
-    }
-
-    /// A try to count, with `detail` redacted.
-    pub(crate) fn retry(detail: &str, config: &AgentsConfig) -> TryError {
-        TryError::new(Next::Retry, detail, config)
-    }
-
-    fn new(next: Next, detail: &str, config: &AgentsConfig) -> TryError {
-        TryError {
-            next,
-            host: None,
-            status: None,
-            detail: redact(detail, &config.data_dir),
-        }
-    }
-
-    pub(crate) fn cancelled() -> TryError {
-        TryError {
-            next: Next::Cancelled,
-            host: None,
-            status: None,
-            detail: String::new(),
-        }
-    }
-
-    /// A local file error: a full disk, else a try to count.
-    pub(crate) fn io(what: &str, err: &io::Error, config: &AgentsConfig) -> TryError {
-        let next = match write_kind(err) {
-            FetchKind::DiskFull => Next::DiskFull,
-            _ => Next::Retry,
-        };
-        TryError::new(next, &format!("{what}: {err}"), config)
-    }
-
-    pub(crate) fn extract(err: &ExtractError, config: &AgentsConfig) -> TryError {
-        match err {
-            ExtractError::Io(err) => TryError::io("unpacking Node failed", err, config),
-            other => TryError::retry(&other.to_string(), config),
-        }
-    }
-
-    /// npm's `ENOSPC` is a full disk; any other npm failure is a try to count.
-    pub(crate) fn npm(detail: &str, enospc: bool, config: &AgentsConfig) -> TryError {
-        let next = if enospc { Next::DiskFull } else { Next::Retry };
-        TryError::new(next, detail, config)
-    }
-}
-
-impl From<FetchError> for TryError {
-    fn from(err: FetchError) -> TryError {
-        let next = match err.kind {
-            FetchKind::Offline => Next::Offline,
-            FetchKind::Blocked => Next::Blocked,
-            FetchKind::DiskFull => Next::DiskFull,
-            FetchKind::Cancelled => Next::Cancelled,
-            FetchKind::Integrity | FetchKind::Failed => Next::Retry,
-        };
-        TryError {
-            next,
-            host: err.host,
-            status: err.status,
-            detail: err.detail,
-        }
-    }
 }
 
 /// The Node a try uses.
@@ -206,37 +135,32 @@ impl Run {
 }
 
 impl<T> Job<T> {
-    /// Checks the data folder and the bundle are absolute, then takes `agents/.lock`. Another
-    /// process holding it (another Clauseo installing) fails the job at once: the single-instance
-    /// plugin makes that rare, and a retry once it is done works.
+    /// Checks the data folder and the bundle are absolute, then takes `agents/.lock` shared and
+    /// the agent's `.lock-<id>` exclusive. Another process holding either (an older Clauseo
+    /// installing anything, or another Clauseo installing this agent) fails the job at once: the
+    /// single-instance plugin makes that rare, and a retry once it is done works.
     fn take_lock(&self) -> Result<(), TryError> {
         let config = &self.config;
         check_paths(config)?;
-        match crate::write::try_lock_agents(&config.data_dir) {
-            Ok(Some(file)) => {
-                *self
-                    .data_lock
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner) = Some(file);
-                Ok(())
-            }
-            Ok(None) => Err(TryError::new(
-                Next::Stop,
-                "another Clauseo is installing an agent now; try again once it is done",
-                config,
-            )),
-            Err(err) => Err(TryError::io("locking the agents folder", &err, config)),
-        }
+        let busy = |what: &str| {
+            let detail =
+                format!("another Clauseo is installing {what} now; try again once it is done");
+            TryError::new(Next::Stop, &detail, config)
+        };
+        let lock = |lock, mode| {
+            write::try_lock(&config.data_dir, lock, mode)
+                .map_err(|err| TryError::io("locking the agents folder", &err, config))
+        };
+        let all = lock(AgentsLock::All, Mode::Shared)?.ok_or_else(|| busy("an agent"))?;
+        let own = lock(AgentsLock::Agent(&self.ticket.agent), Mode::Exclusive)?
+            .ok_or_else(|| busy(&format!("{}", self.ticket.agent)))?;
+        self.locks.hold_job(all, own);
+        Ok(())
     }
 
-    /// Gives up `agents/.lock`, if held.
+    /// Gives up every lock the job holds.
     fn release_lock(&self) {
-        drop(
-            self.data_lock
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .take(),
-        );
+        self.locks.release_all();
     }
 }
 
@@ -292,7 +216,9 @@ impl<T: Timer + Send + Sync> Job<T> {
         };
         let (launcher, timer) = (&*self.launcher, &*self.timer);
         if let Some(installed) = ready_install(config, launcher, timer, agent, &search).await {
-            self.ready(installed, 0);
+            // Finished already (a try cut short after its receipt, say): what it fetched goes.
+            clean_up_finished(config, agent);
+            self.ready(installed, 0).await;
             return;
         }
         let user = search.found;
@@ -302,9 +228,12 @@ impl<T: Timer + Send + Sync> Job<T> {
                 return;
             }
             run.attempts += 1;
-            let err = match self.attempt(user.as_ref(), &mut run).await {
+            let attempted = self.attempt(user.as_ref(), &mut run).await;
+            // Whatever the try's end, it holds Node no longer.
+            self.locks.release_node();
+            let err = match attempted {
                 Ok(installed) => {
-                    self.ready(installed, run.tries + 1);
+                    self.ready(installed, run.tries + 1).await;
                     return;
                 }
                 Err(err) => err,
@@ -328,7 +257,7 @@ impl<T: Timer + Send + Sync> Job<T> {
                     let kind = match err.next {
                         Next::Blocked => FailureKind::Blocked,
                         Next::DiskFull => FailureKind::DiskFull,
-                        _ => FailureKind::Failed,
+                        _ => err.failed_kind(),
                     };
                     return self.fail(kind, &err, &run, user.as_ref());
                 }
@@ -339,7 +268,7 @@ impl<T: Timer + Send + Sync> Job<T> {
                         .and_then(|n| BACKOFF.get(n).copied())
                         .filter(|_| run.tries < TRIES);
                     let Some(backoff) = backoff else {
-                        return self.fail(FailureKind::Failed, &err, &run, user.as_ref());
+                        return self.fail(err.failed_kind(), &err, &run, user.as_ref());
                     };
                     push_error(&mut run.log, &err);
                     if !self.wait(backoff).await {
@@ -368,46 +297,162 @@ impl<T: Timer + Send + Sync> Job<T> {
                     config,
                 ));
             }
-            None => {
-                let dir = node::runtime_dir(&config.data_dir, config.snapshot.node(), platform);
-                NodeChoice::Runtime {
-                    fetch: !runtime_check(config, &*self.launcher, &*self.timer)
-                        .await
-                        .usable(),
-                    dir,
-                }
-            }
+            None => self.runtime_node().await?,
         };
+        // A finished set-up whose rename failed: only the rename runs again.
+        // The earlier try's downloads and npm cache stay until this `Ready`, as a full try's do.
+        if let Some(installed) = kept::finish_kept(self, &node)
+            .await
+            .map_err(TryError::in_setup)?
+        {
+            self.locks.release_node();
+            clean_up_finished(config, &self.ticket.agent);
+            return Ok(installed);
+        }
+        // A try cut short left its npm cache behind; this one starts with none, so a run of
+        // interrupted tries never holds more than one try's cache.
+        empty_npm_cache(&config.data_dir, &self.ticket.agent);
         let node_needed = matches!(node, NodeChoice::Runtime { fetch: true, .. });
         self.check_disk(node_needed)?;
         let fetched = files::fetch_all(self, &node, run)?;
-        let installed = npm::install(self, &node, &fetched, run).await?;
-        files::clean_up(config, &fetched);
+        let installed = npm::install(self, &node, &fetched, run)
+            .await
+            .map_err(TryError::in_setup);
+        // Node's archive goes with the clean-up only once no try holds Node.
+        self.locks.release_node();
+        let installed = installed?;
+        files::clean_up(config, &self.ticket.agent, fetched.downloaded());
         Ok(installed)
     }
 
-    /// `DiskFull` when the free space at the data folder is below the need. A free space that
-    /// cannot be read is not checked.
+    /// The downloaded Node for this try (`.lock-node`, [`Locks`]). With the lock free, the
+    /// runtime is checked under it, held exclusive, and when it is not usable this try keeps the
+    /// lock and fetches and unpacks Node (`fetch`), so no other try fetches it twice or races
+    /// its unpack. With the lock held (another try fetching Node, here or in another process, or
+    /// an npm running from it) this try fetches no Node and waits for that holder before its npm
+    /// ([`Job::use_node`]).
+    async fn runtime_node(&self) -> Result<NodeChoice, TryError> {
+        let config = &self.config;
+        let dir = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
+        let lock = locks::try_held(config, AgentsLock::Node, Mode::Exclusive)?;
+        let Some(lock) = lock else {
+            tracing::info!(
+                agent = %self.ticket.agent,
+                "agent install: another install holds the downloaded Node; this one fetches none"
+            );
+            return Ok(NodeChoice::Runtime { dir, fetch: false });
+        };
+        let fetch = !runtime_check(config, &*self.launcher, &*self.timer)
+            .await
+            .usable();
+        if fetch {
+            self.locks.hold_node(lock);
+        }
+        Ok(NodeChoice::Runtime { dir, fetch })
+    }
+
+    /// Unpacks Node's checked archive at `archive` into this try's runtime folder (`node`,
+    /// fetched by this try under `.lock-node`, held exclusive since its check), then gives the
+    /// lock up: right after Node's download, before the agent's own packages, so another try
+    /// waits for Node alone. A failed unpack is the set-up's failure, as npm's is.
+    pub(crate) fn unpack_node(
+        &self,
+        node: &NodeChoice,
+        archive: &std::path::Path,
+    ) -> Result<(), TryError> {
+        let config = &self.config;
+        let (NodeChoice::Runtime { dir, fetch: true }, Some(entry)) =
+            (node, config.snapshot.node_archive(config.platform))
+        else {
+            return Err(npm::missing_archive(config));
+        };
+        node::install_runtime(
+            archive,
+            config.snapshot.node(),
+            entry,
+            dir,
+            config.platform.os,
+        )
+        .map_err(|err| TryError::extract(&err, config).in_setup())?;
+        self.locks.release_node();
+        Ok(())
+    }
+
+    /// Holds `.lock-node` shared for this try's npm runs, waiting while another try holds it
+    /// exclusive (fetching or unpacking Node), and gives up any exclusive hold this try took to
+    /// fetch Node first (it is unpacked by then). Then the runtime must be complete: one another
+    /// try was to fetch and did not is this try's error, and its next try fetches Node itself.
+    pub(crate) async fn use_node(&self) -> Result<(), TryError> {
+        let config = &self.config;
+        self.locks.release_node();
+        locks::wait_for(self, AgentsLock::Node, Mode::Shared, |file| {
+            self.locks.hold_node(file);
+        })
+        .await?;
+        if !runtime_ready(config) {
+            self.locks.release_node();
+            return Err(TryError::retry(
+                "the downloaded Node another install was fetching is not ready",
+                config,
+            )
+            .not_setup());
+        }
+        Ok(())
+    }
+
+    /// `DiskFull` when the free space at the data folder is below this try's need and every
+    /// other running try's remaining need (`worker/space.rs`). A free space that cannot be
+    /// read is not checked.
     fn check_disk(&self, node_needed: bool) -> Result<(), TryError> {
-        let (need, free) = self.space(node_needed);
-        match free {
-            Some(free) if free < need => Err(TryError::new(
+        let need = self.need(node_needed);
+        crate::worker::space::check_space(
+            &self.shared,
+            &self.config,
+            &self.ticket,
+            need,
+            node_needed,
+        )
+        .map_err(|(need, free)| {
+            let free = free.unwrap_or(0);
+            TryError::new(
                 Next::DiskFull,
                 &format!("{} MB free, {} MB needed", free / MB, need.div_ceil(MB)),
                 &self.config,
-            )),
-            _ => Ok(()),
-        }
+            )
+        })
     }
 
-    /// The bytes this install needs, and the bytes free at the data folder.
-    fn space(&self, node_needed: bool) -> (u64, Option<u64>) {
+    /// The bytes this install needs, its agent's part and Python's (0 when Python is installed
+    /// or this platform has none).
+    fn need(&self, node_needed: bool) -> (u64, u64) {
         let config = &self.config;
-        let need = config
-            .snapshot
-            .need_bytes(&self.ticket.agent, config.platform, node_needed)
-            .unwrap_or(0);
-        (need, disk::free_bytes(&config.data_dir).ok())
+        let need = |python| {
+            config
+                .snapshot
+                .need_bytes(&self.ticket.agent, config.platform, node_needed, python)
+                .unwrap_or(0)
+        };
+        let agent = need(false);
+        let python = if crate::python::needed(config) {
+            need(true).saturating_sub(agent)
+        } else {
+            0
+        };
+        (agent, python)
+    }
+
+    /// The bytes this install needs with every other running try's remaining need, and the
+    /// bytes free: a `DiskFull` failure's figures.
+    fn space(&self, node_needed: bool) -> (u64, Option<u64>) {
+        let (agent, python) = self.need(node_needed);
+        let need = agent
+            .saturating_add(python)
+            .saturating_add(crate::worker::space::others_left(
+                &self.shared,
+                &self.config,
+                &self.ticket,
+            ));
+        (need, disk::free_for(&self.config))
     }
 
     /// Sends `state` unless the job is paused; `false` when it is.
@@ -415,17 +460,37 @@ impl<T: Timer + Send + Sync> Job<T> {
         self.shared.emit_job(&self.ticket, state, None, ends)
     }
 
-    /// Sends the job's last state, `Ready`, after `tries` tries.
-    fn ready(&self, installed: Installed, tries: u32) {
-        self.release_lock();
+    /// Sends the agent's `Ready`, after `tries` tries. When this platform has Python and it is
+    /// not installed, the job goes on to install it under the same locks ([`python::step`]),
+    /// and ends with Python's state instead; nothing Python meets changes the agent's `Ready`.
+    async fn ready(&self, installed: Installed, tries: u32) {
         self.shared.set_tries(&self.ticket.agent, tries);
         let version = installed.version.clone();
-        self.shared.emit_job(
-            &self.ticket,
-            InstallState::Ready { version },
-            Some(installed),
-            true,
-        );
+        let state = InstallState::Ready { version };
+        // Python is one for the computer: a job reaching `Ready` while another installs it
+        // ends here, and that job reports Python.
+        // Checked again once claimed: a job that finished Python just before needs no second.
+        let config = &self.config;
+        if !crate::python::needed(config)
+            || !self.shared.claim_python(&self.ticket)
+            || !crate::python::needed(config)
+        {
+            self.release_lock();
+            self.shared
+                .emit_job(&self.ticket, state, Some(installed), true);
+            return;
+        }
+        if !self
+            .shared
+            .emit_job(&self.ticket, state, Some(installed), false)
+        {
+            return;
+        }
+        let Some(python) = python::step(self).await else {
+            return;
+        };
+        self.release_lock();
+        self.shared.end_python_job(&self.ticket, python);
     }
 
     /// Sends the job's last state, `Failed` of `kind`, with its log.
@@ -488,113 +553,16 @@ fn finish_log(log: &mut InstallLog, run: &Run, kind: FailureKind) {
     log.push(format!("result: {} after {} tries", kind.word(), run.tries));
 }
 
-/// Whether the downloaded Node is unpacked and complete.
-pub(crate) fn runtime_ready(config: &AgentsConfig) -> bool {
-    let Some(archive) = config.snapshot.node_archive(config.platform) else {
-        return false;
-    };
-    let dir = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
-    node::runtime_valid(&dir, archive, config.platform.os)
-}
-
-/// What the start's check of the downloaded Node found.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RuntimeCheck {
-    /// Not unpacked, or its receipt is missing or for another archive.
-    Absent,
-    /// It answers `--version` with v22 or later.
-    Good,
-    /// `--version` took too long or would not start: not proof of a bad Node, so it is kept and
-    /// checked again at the next install or start.
-    Unsure,
-    /// A clear bad answer (a non-zero exit, no version, or one below 22): fetched again.
-    Bad,
-}
-
-impl RuntimeCheck {
-    /// Whether the runtime is used as it is.
-    pub(crate) fn usable(self) -> bool {
-        matches!(self, RuntimeCheck::Good | RuntimeCheck::Unsure)
-    }
-}
-
-/// Checks the downloaded Node: unpacked and complete, then `--version` through the launcher, so
-/// a runtime cut short by a power cut is fetched again.
-pub(crate) async fn runtime_check<T: Timer>(
-    config: &AgentsConfig,
-    launcher: &dyn Launcher,
-    timer: &T,
-) -> RuntimeCheck {
-    if !runtime_ready(config) {
-        return RuntimeCheck::Absent;
-    }
-    let dir = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
-    let program = node::runtime_program(&dir, config.platform.os);
-    match node::check_node(&program, launcher, timer).await {
-        Ok(_) => RuntimeCheck::Good,
-        Err(NotUsed::TimedOut | NotUsed::LaunchFailed(_)) => RuntimeCheck::Unsure,
-        Err(_) => RuntimeCheck::Bad,
-    }
-}
-
-/// `agent`'s finished install: a valid receipt in its `<hash>` folder, run with a Node this
-/// start would choose anyway. The receipt's Node is kept when it is the downloaded runtime and
-/// usable ([`RuntimeCheck::usable`]), or the Node the `PATH` search finds now, or one that
-/// search could not finish checking. Otherwise the receipt is rewritten (atomically) to name the
-/// Node found now, else the usable runtime, and stays ready: the adapter runs on any v22 or
-/// later. With neither, `None`, and the install is redone. A receipt never makes a program run
-/// that this start would not choose (the data folder is trusted at rest, but a receipt marks
-/// completeness, not which program may run).
-pub(crate) async fn ready_install<T: Timer>(
-    config: &AgentsConfig,
-    launcher: &dyn Launcher,
-    timer: &T,
-    agent: &AgentId,
-    user: &UserSearch,
-) -> Option<Installed> {
-    let entry = config.snapshot.agent(agent)?;
-    let hash = config.snapshot.install_hash(agent, config.platform)?;
-    let folder = install_folder(&config.data_dir, agent, &hash);
-    let mut receipt = read_receipt(&folder, agent, &hash, config.platform)?;
-    let runtime = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
-    let runtime = node::runtime_program(&runtime, config.platform.os);
-    let mut runtime_usable = None;
-    let keep = if receipt.node == runtime {
-        let usable = runtime_check(config, launcher, timer).await.usable();
-        runtime_usable = Some(usable);
-        usable
-    } else {
-        user.found
-            .as_ref()
-            .is_some_and(|found| found.program == receipt.node)
-            || user.timed_out.contains(&receipt.node)
-    };
-    if !keep {
-        let (program, version) = if let Some(found) = &user.found {
-            (found.program.clone(), found.version.clone())
-        } else {
-            let usable = match runtime_usable {
-                Some(usable) => usable,
-                None => runtime_check(config, launcher, timer).await.usable(),
-            };
-            if !usable {
-                return None;
-            }
-            (
-                runtime.clone(),
-                format!("v{}", config.snapshot.node().version()),
-            )
-        };
-        receipt.node = program;
-        receipt.node_version = version;
-        // A receipt that will not be rewritten now is rewritten at the next start.
-        drop(write_receipt(&folder, &receipt));
-    }
-    tracing::info!(%agent, "agent start: {}", receipt.node_line(&runtime));
-    Some(Installed {
-        node: receipt.node.clone(),
-        script: script_path(&folder, entry),
-        folder,
-        version: receipt.version,
-    })
+/// The clean-up after `Ready` ([`files::clean_up`]) for a `Ready` that fetched nothing itself:
+/// a kept set-up renamed alone, or an install a job finds finished at its start.
+/// Every package tarball the install may have put in `downloads/` goes, with the npm cache, and
+/// Node's archive once the runtime is unpacked (another agent's install may still want it
+/// otherwise) and `.lock-node` is free. Only with the agent's `.lock-<id>` held.
+fn clean_up_finished(config: &AgentsConfig, agent: &AgentId) {
+    let with_node = runtime_ready(config);
+    files::clean_up(
+        config,
+        agent,
+        &files::install_downloads(config, agent, with_node),
+    );
 }

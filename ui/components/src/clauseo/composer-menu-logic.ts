@@ -115,3 +115,6 @@ export const FACE = [
   "overflowWrap",
   "hyphens",
 ] as const;
+
+/** How long typing stops before the live region says a narrowed count or "No results": one, not one per key. */
+export const SAY_AFTER_MS = 300;

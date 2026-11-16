@@ -77,13 +77,28 @@ open_unit_enum! {
         /// The browser only: the firm turned off Chrome's or Edge's remote debugging
         /// (`RemoteDebuggingAllowed` false), which Clauseo's browser needs, and its Clauseo
         /// policy does not allow Clauseo's browser anyway
-        /// (`browser.allow_when_remote_debugging_disabled`).
+        /// (`browser.allow_when_remote_debugging_disabled`). On Windows: Edge and Chrome are
+        /// both installed and both blocked (`DeveloperToolsAvailability` 2 blocks there too), and
+        /// that opt-in does not lift it.
         BrowserBlockedByPolicy,
         /// The browser only: a place the firm's Chrome, Edge or Chromium `RemoteDebuggingAllowed`
         /// can be set could not be read (not missing: denied or failed), so Clauseo does not know
         /// whether remote debugging is allowed; none says false, and the firm's Clauseo policy does
         /// not allow Clauseo's browser anyway. Checked again at the next launch.
         BrowserPolicyUnreadable,
+        /// The browser only, on Windows: Microsoft Edge is the one browser installed that Clauseo
+        /// can use, and the firm's Edge policy blocks it (`RemoteDebuggingAllowed` false or
+        /// `DeveloperToolsAvailability` 2). Clauseo's own opt-in cannot lift it there: a browser
+        /// so blocked refuses Clauseo's pipe. Edge and Chrome both blocked is
+        /// `BrowserBlockedByPolicy`.
+        BrowserBlockedEdge,
+        /// The browser only, on Windows: the same for Google Chrome, when it is the one browser
+        /// installed for everyone on the computer.
+        BrowserBlockedChrome,
+        /// The browser only, on Windows: no Edge and no Chrome installed for everyone, only a
+        /// Google Chrome installed for this user (`%LOCALAPPDATA%`), which cannot start under
+        /// Clauseo's browser guard.
+        BrowserPerUserChromeOnly,
     }
     test mod tools_unavailable_reason;
 }

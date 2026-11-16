@@ -55,6 +55,9 @@ converted document. From there they can call any IPC command the page can reach.
   an exit without the stop. The worst script can do with it is quit the app, which closing the
   window already allows. The Get the installer button calls it once the release page opened, so
   no agent's Job Object is left while the elevated installer runs (design B)
+- `built`: `open_privacy_settings` takes no arguments and only `main` is granted it: it opens
+  macOS's Files and Folders privacy pane, a URL fixed in Rust, and nothing else (`command.invalid`
+  off macOS). The worst script can do with it is show that pane
 - `built`: No global Tauri object and a frozen prototype (`tauri-config` check); no asset protocol
   (`tauri-config` check, and `deny.toml` bans tauri's `protocol-asset` feature); no devtools in
   release builds (`deny.toml` bans the feature; Tauri turns devtools on in debug builds)

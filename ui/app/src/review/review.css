@@ -8,6 +8,7 @@
 @import "../settings/usage.css";
 @import "../settings/privacy.css";
 @import "../settings/connectors.css";
+@import "../settings/tools.css";
 @import "../settings/plans.css";
 @import "../settings/workspace.css";
 @source "../room";
@@ -195,9 +196,65 @@
 }
 .review-confirm p {
   margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 .review-confirm-buttons {
   display: flex;
   justify-content: flex-end;
   gap: var(--s2);
+}
+/* the release notes' first-open block on GitHub's release page (registry-release-notes.tsx) */
+.review-notes-ground {
+  min-height: 100vh;
+  padding: var(--s4);
+  background: var(--ground);
+}
+.review-notes {
+  display: grid;
+  gap: var(--s3);
+  max-width: 760px;
+  color: var(--primary);
+}
+.review-notes h2,
+.review-notes p,
+.review-notes ul {
+  margin: 0;
+}
+.review-notes ul {
+  display: grid;
+  gap: var(--s2);
+  padding-inline-start: var(--s4);
+}
+/* the Mac's menu bar, one menu opened under its title (registry-mn.tsx) */
+.review-menu {
+  min-width: 260px;
+  padding: var(--s2);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  color: var(--primary);
+  box-shadow: var(--e-hand);
+}
+.review-menu-title {
+  margin: 0 0 var(--s1);
+  padding: 0 var(--s2);
+}
+.review-menu ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.review-menu li[role="menuitem"] {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding: var(--s0-5) var(--s2);
+}
+.review-menu li[role="separator"] {
+  margin: var(--s1) var(--s2);
+  border-top: var(--hairline) solid var(--outline-lite);
+}
+.review-menu kbd {
+  font: inherit;
+  color: var(--muted);
 }

@@ -126,11 +126,11 @@ test("a pick sends one scan_folder with the picked ref; the counts and the file 
   expect(text("scan")).toContain("Reading the folder. Now \u2068Board minutes.docx\u2069.");
   expect(byId("scan")?.hasAttribute("data-done")).toBe(false);
   await play(transport, scanned({ files: 1, bytes: 400_000 }));
-  expect(text("scan")).toContain("1 file, 1 MB");
+  expect(text("scan")).toContain("1 file, 400 KB");
   expect(text("scan")).toContain("Reading the folder.");
   // another folder's event changes nothing
   await play(transport, scanned({ folder: "ref-other", files: 99 }));
-  expect(text("scan")).toContain("1 file, 1 MB");
+  expect(text("scan")).toContain("1 file, 400 KB");
   await play(transport, scanned({ files: 30, bytes: 52_000_000, done: true }));
   expect(text("scan")).toContain("30 files, 52 MB");
   expect(text("scan")).not.toContain("Reading the folder");
@@ -138,9 +138,16 @@ test("a pick sends one scan_folder with the picked ref; the counts and the file 
   expect(byId("scan-stop")).toBeNull();
 });
 
-test("an empty folder reads 0 files, 0 MB", async () => {
-  await pick(await mount(scanning([scanned({ files: 0, bytes: 0, done: true })])));
-  expect(text("scan")).toContain("0 files, 0 MB");
+test("D-072: an empty folder says it's empty, never 0 files, 0 MB; while none is found yet, only the reading line", async () => {
+  const transport = await pick(await mount(scanning([scanned({ files: 0, bytes: 0 })])));
+  expect(text("scan")).toBe("Reading the folder.Stop");
+  await play(transport, scanned({ files: 0, bytes: 0, done: true }));
+  expect(text("scan")).toBe("The folder is empty.");
+});
+
+test("D-072: a small folder says its size in KB, not a rounded-up MB", async () => {
+  await pick(await mount(scanning([scanned({ files: 200, bytes: 6_000, done: true })])));
+  expect(text("scan")).toBe("200 files, 6 KB");
 });
 
 test("Stop sends cancel_scan and drops the pick: the lines go, the folder line is as before, and no create takes the folder", async () => {

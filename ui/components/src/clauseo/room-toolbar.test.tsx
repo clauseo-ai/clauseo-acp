@@ -17,10 +17,7 @@ let root: Root | null = null;
 
 const toolbar: Omit<RoomToolbarProps, "plan"> = {
   title: "Acme Ltd v. State",
-  titleHint: "Delhi High Court. CS 12/2026. Acme",
-  nextDate: "3 March 2027",
-  caseNo: "CS 12/2026",
-  court: "Delhi High Court",
+  titleHint: "Acme",
   history: [],
   canUndo: false,
   onUndo: () => {},
@@ -117,6 +114,11 @@ test("a stale plan with a card mutes its fill, inside the press where the meter 
   const { look: _, ...fresh } = stale;
   await mount(fresh);
   expect(fill()?.hasAttribute("data-muted")).toBe(false);
+  // plenty left: the muted fill, as Settings' tiles and the plan's card draw it; primary from the close band on
+  expect(fill()?.classList.contains("bg-muted")).toBe(true);
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount({ ...fresh, left: 0.1, status: "Close to the limit" });
   expect(fill()?.classList.contains("bg-primary")).toBe(true);
 });
 
@@ -296,7 +298,10 @@ test("the caption wiring reaches the buttons: each press calls its handler, and 
 });
 
 test("nativeLights marks the corner lights for macOS's own, and only then", async () => {
+  // a window smaller than its screen: happy-dom's window fills its screen, which reads as macOS's full screen
+  const height = vi.spyOn(window.screen, "height", "get").mockReturnValue(window.innerHeight + 100);
   await mount(null, { platform: "mac", nativeLights: true });
+  height.mockRestore();
   expect(parts().lights?.hasAttribute("data-native")).toBe(true);
   await remount({ platform: "mac" });
   expect(parts().lights?.hasAttribute("data-native")).toBe(false);

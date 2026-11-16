@@ -1,9 +1,9 @@
 //! `--remove`'s last step (S15 tier B, "Admin copy" in 0049): once no tier-B owner is left on
 //! the machine, the admin copy goes too. In `refresh::TEARDOWN`'s order: the record's four
 //! admin-copy values (`ADMIN_VALUES`, so no launcher trusts the copy from here on), then the
-//! SYSTEM tasks `\Clauseo\SandboxRefresh` and `\Clauseo\SandboxStop` ([`unregister_task`]),
-//! then the refresh's staging ([`remove_staging`], taken back if it shuts Administrators out),
-//! then everything in
+//! SYSTEM tasks `\Clauseo\SandboxRefresh`, `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
+//! ([`unregister_task`]), then the refresh's staging ([`remove_staging`], taken back if it
+//! shuts Administrators out), then everything in
 //! `%ProgramFiles%\Clauseo\Sandbox\`, then the folder. Only the uninstaller's
 //! `--remove --uninstall` runs it: the app's in-app removal keeps all of these.
 //!
@@ -73,6 +73,7 @@ pub(super) fn teardown_name(step: Teardown) -> &'static str {
         Teardown::AdminValues => "admin_values",
         Teardown::Task(SystemTask::Refresh) => "refresh_task",
         Teardown::Task(SystemTask::Stop) => "stop_task",
+        Teardown::Task(SystemTask::Sweep) => "sweep_task",
         Teardown::Staging => "staging",
         Teardown::AdminFolder => "admin_folder",
     }
@@ -138,7 +139,7 @@ pub(super) fn clear(
         if running && same_path(&path, exe) {
             continue;
         }
-        remove_taking_back(&mut NtfsLockDown, &path)?;
+        remove_taking_back(&mut teardown(), &path)?;
     }
     if !running {
         return std::fs::remove_dir(dir);
@@ -167,7 +168,13 @@ pub(crate) fn unregister_task(task: SystemTask) -> Result<(), MachineError> {
 pub(crate) fn remove_staging() -> Result<(), MachineError> {
     let program_files = os::program_files().map_err(|e| other(&e))?;
     let staging = admin_copy::admin_dir(&program_files).join(admin_copy::STAGING);
-    remove_taking_back(&mut NtfsLockDown, &staging).map_err(|e| other(&e))
+    remove_taking_back(&mut teardown(), &staging).map_err(|e| other(&e))
+}
+
+/// The take-back the teardown deletes through: what it takes back is deleted at once, so its
+/// lock names no group.
+fn teardown() -> NtfsLockDown {
+    NtfsLockDown::new(None)
 }
 
 /// The name the running copy is renamed to in its own folder: one nothing starts.

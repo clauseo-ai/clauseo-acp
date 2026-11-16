@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The rail, rendered with invented matters: date groups and Pinned, each status's words and dot, the current matter's
-// conversations, finding a matter by name, client or case number, and the first launch with no matters.
+// conversations, finding a matter by name or client, and the first launch with no matters.
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test } from "vitest";
@@ -66,21 +66,21 @@ const trust: MatterRowProps = {
 };
 
 describe("the rail's matters", () => {
-  test("pinned matters stand above the date groups, and empty groups don't show", async () => {
+  test("pinned matters stand under the other groups, above the last (the rest), and empty groups don't show", async () => {
     const groups: RailGroup[] = [
-      { when: "Tomorrow", matters: [bharat] },
-      { when: "Next week", matters: [] },
-      { when: "No date", matters: [trust] },
+      { when: "Needs you", matters: [bharat] },
+      { when: "Working", matters: [] },
+      { when: "Other matters", matters: [trust] },
     ];
     await mount(<Rail open groups={groups} pinned={[{ ...acme, pinned: true }]} scratch={{}} />);
     expect([...document.querySelectorAll(".room-when")].map((h) => h.textContent)).toEqual([
+      "Needs you",
       "Pinned",
-      "Tomorrow",
-      "No date",
+      "Other matters",
     ]);
     expect(rows().map((r) => r.querySelector(".room-matter-name")?.textContent)).toEqual([
-      acme.name,
       bharat.name,
+      acme.name,
       trust.name,
       "Scratch matter",
     ]);
@@ -161,7 +161,7 @@ describe("the rail's matters", () => {
   });
 
   test("with no matters, the rail says so in one sentence, and only that", async () => {
-    await mount(<Rail open groups={[{ when: "No date yet", matters: [] }]} scratch={{}} />);
+    await mount(<Rail open groups={[{ when: "Matters", matters: [] }]} scratch={{}} />);
     expect(txt(document.body)).toContain("No matters yet");
     expect(txt(document.body)).toContain("Add a matter's folder.");
     expect(txt(document.body)).not.toContain("reads its papers");
@@ -170,7 +170,7 @@ describe("the rail's matters", () => {
   });
 
   test("while no list is known (empty false) the rail says nothing of no matters, and without scratch it has no foot row", async () => {
-    await mount(<Rail open groups={[{ when: "No date yet", matters: [] }]} empty={false} />);
+    await mount(<Rail open groups={[{ when: "Matters", matters: [] }]} empty={false} />);
     expect(txt(document.body)).not.toContain("No matters yet");
     expect(txt(document.body)).not.toContain("Add a matter's folder.");
     expect(document.querySelector("[data-kind=scratch]")).toBeNull();
@@ -185,7 +185,7 @@ describe("the rail's matters", () => {
       <Rail
         open
         groups={[{ when: "Today", matters: [acme] }]}
-        find={{ all: [{ ...acme, client: "", caseNo: "" }], recent: [] }}
+        find={{ all: [{ ...acme, client: "" }], recent: [] }}
         onEscape={() => (escaped += 1)}
         testIds={{ find: "find" }}
       />,
@@ -214,7 +214,7 @@ describe("the rail's matters", () => {
         open
         groups={[
           {
-            when: "No date yet",
+            when: "Matters",
             matters: [
               { ...acme, id: "m1", testIds: { row: "matter-row" } },
               { ...acme, id: "m2", testIds: { row: "matter-row" } },
@@ -258,13 +258,13 @@ describe("the rail's matters", () => {
     expect(limits.map((r) => txt(r.querySelector(".min-w-0")))).toEqual([
       "Limit reached until 6:10 pm",
       "Limit reached until Tuesday 9:00 am",
-      "Limit reached. Reset not given.",
+      "Limit reached",
     ]);
     for (const r of limits) {
       expect(r.querySelector(".room-mark:not([data-waits])")).not.toBeNull();
       expect(r.querySelector(".text-muted")).not.toBeNull();
     }
-    expect(matterStatus("hi", "limit", "")).toBe("सीमा पूरी। रीसेट का समय नहीं बताया गया।");
+    expect(matterStatus("hi", "limit", "")).toBe("सीमा पूरी");
   });
 
   test("a working matter with no end time says Answering.", () => {
@@ -438,8 +438,8 @@ describe("the current matter's conversations", () => {
 
 describe("finding a matter", () => {
   const all: FindableRow[] = [
-    { ...acme, client: "Acme Ltd", caseNo: "CC No. 1001/2024" },
-    { ...trust, client: "Asha Rao", caseNo: "OS 77/2023" },
+    { ...acme, client: "Acme Ltd" },
+    { ...trust, client: "Asha Rao" },
   ];
   const find = { all, recent: [acme] };
 
@@ -468,12 +468,12 @@ describe("finding a matter", () => {
 
   test("with no recent matters, the field focused and empty keeps the date groups", async () => {
     await mount(
-      <Rail open groups={[{ when: "No date yet", matters: [trust] }]} find={{ all, recent: [] }} />,
+      <Rail open groups={[{ when: "Matters", matters: [trust] }]} find={{ all, recent: [] }} />,
     );
     const input = document.querySelector<HTMLInputElement>(".room-find input");
     await act(async () => input?.focus());
     expect([...document.querySelectorAll(".room-when")].map((h) => h.textContent)).toEqual([
-      "No date yet",
+      "Matters",
     ]);
   });
 
@@ -491,11 +491,7 @@ describe("finding a matter", () => {
 
   test("the label and the no-match line say only what the search covers", async () => {
     const cases = [
-      [
-        undefined,
-        "Find a matter by its name, client or case number",
-        "Search covers names, clients and case numbers.",
-      ],
+      [undefined, "Find a matter by its name or client", "Search covers names and clients."],
       ["name", "Find a matter by its name", "Search covers names."],
       ["nameClient", "Find a matter by its name or client", "Search covers names and clients."],
     ] as const;
@@ -515,7 +511,7 @@ describe("finding a matter", () => {
   });
 });
 
-test("a conversation's status ends its line as the matters' icon, on a yellow disc only for a question or a permission", async () => {
+test("a conversation's status ends its line as the matters' icon, on a yellow disc only for a question or a permission, and says what needs the lawyer", async () => {
   await mount(
     <Rail
       open
@@ -557,7 +553,11 @@ test("a conversation's status ends its line as the matters' icon, on a yellow di
   }
   // the words still reach assistive technology
   expect(txt(conv("d"))).toContain("Stopped at 4:31 pm");
-  // a permission's words, as every state's but a question's, only in the tooltip and the accessible name
-  expect(conv("f")?.querySelector(".room-conv-ask")).toBeNull();
-  expect(txt(conv("f"))).toContain("Needs your permission");
+  // said plainly under the title: a permission as a question, in the hand's weight; an answer ready muted; a stop and a
+  // wait behind another only in the tooltip and the accessible name
+  expect(txt(conv("f")?.querySelector(".room-conv-ask"))).toBe("Needs your permission");
+  expect(txt(conv("b")?.querySelector(".room-conv-ask"))).toBe("A question for you");
+  expect(txt(conv("c")?.querySelector(".room-conv-said"))).toBe("Answer ready");
+  expect(conv("d")?.querySelector(".room-conv-ask, .room-conv-said")).toBeNull();
+  expect(conv("e")?.querySelector(".room-conv-ask, .room-conv-said")).toBeNull();
 });

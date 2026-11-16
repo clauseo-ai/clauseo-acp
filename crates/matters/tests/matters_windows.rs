@@ -135,6 +135,9 @@ mod windows {
                 limits: Limits::DEFAULT,
                 retention: Retention::KeepAll,
                 probe: Arc::new(OsProbe),
+                trash: Arc::new(clauseo_matters::FolderTrash::new(
+                    self.dir.path().join("trash"),
+                )),
             }
         }
 
@@ -200,6 +203,7 @@ mod windows {
             outside_edits: cid(n),
             checkpoint: cid(n + 1),
             at: at(n),
+            undoes: None,
         }
     }
 
@@ -323,8 +327,10 @@ mod windows {
         let plain = case.file("plain.txt");
         assert!(!OsProbe.is_cloud_only(&plain, &plain.symlink_metadata().unwrap()));
 
+        // The tree is unchanged, but the skip record gained cloud.docx, so a checkpoint with no
+        // changed file is made (decision 0007): Undo's record of what was there at the start.
         let checkpoint = matter.before_turn(&meta(2)).unwrap();
-        assert_eq!(checkpoint.outcome, CheckpointOutcome::Reused(cid(1)));
+        assert_eq!(checkpoint.outcome, CheckpointOutcome::Created(cid(2)));
         assert!(checkpoint.changes.is_empty(), "{:?}", checkpoint.changes);
         assert_eq!(
             checkpoint.skipped,
@@ -470,8 +476,9 @@ mod windows {
         case.write("~$brief.txt", "owner file: open in Word");
         let held = hold(&case.file("brief.txt"));
 
-        let (matter, preview) =
-            within_deadline(matter, |m| m.preview_restore(cid(1), RestoreFiles::All));
+        let (matter, preview) = within_deadline(matter, |m| {
+            m.preview_restore(cid(1), RestoreFiles::All, None)
+        });
         let plan = preview.expect("the preview answers while the file is held");
         assert_eq!(plan.locked, [path("brief.txt")], "{plan:?}");
         assert_eq!(written(&plan), ["brief.txt"], "{plan:?}");
@@ -491,8 +498,9 @@ mod windows {
         );
 
         // Word closed the document; its owner file left behind is stale (no Word runs).
-        let (mut matter, preview) =
-            within_deadline(matter, |m| m.preview_restore(cid(1), RestoreFiles::All));
+        let (mut matter, preview) = within_deadline(matter, |m| {
+            m.preview_restore(cid(1), RestoreFiles::All, None)
+        });
         let plan = preview.unwrap();
         assert!(plan.locked.is_empty(), "{plan:?}");
         assert_eq!(written(&plan), ["brief.txt"], "{plan:?}");
@@ -515,8 +523,9 @@ mod windows {
         case.write("added.txt", "added since the import\n");
         let held = hold(&case.file("added.txt"));
 
-        let (mut matter, preview) =
-            within_deadline(matter, |m| m.preview_restore(cid(1), RestoreFiles::All));
+        let (mut matter, preview) = within_deadline(matter, |m| {
+            m.preview_restore(cid(1), RestoreFiles::All, None)
+        });
         let plan = preview.expect("the preview answers while the file is held");
         assert_eq!(plan.locked, [path("added.txt")], "{plan:?}");
         assert!(plan.writes.is_empty(), "{plan:?}");

@@ -1,12 +1,14 @@
-// The plan's card, opened from the plan in the toolbar. Every window the plan has, the 5-hour and the weekly, each
-// with how much is left and when it resets, its bar filled with what's left as the toolbar's meter is, how fresh the
-// figures are, what happens at the limit, whether preparing ahead is paused, and Manage plan. All of it in concrete:
+// The plan's card, opened from the plan in the toolbar: a compact sibling of Settings' Plan and usage. Every window the
+// plan has, the 5-hour and the weekly, each a raised tile with its label, the share left as a numeral, its bar filled
+// with what's left as the toolbar's meter is, and when it resets; how fresh the figures are, what happens at the limit,
+// whether preparing ahead is paused, Manage plan, and the way to Plan and usage in Settings. All of it in concrete:
 // the plan's figures are information, not a warning, and a limit is never red. Parts hold no strings: the words come
 // in already in the language.
 import { Meter as BaseMeter } from "@base-ui/react/meter";
 import type { ReactNode } from "react";
-import { IconOpen } from "../icons/icons.tsx";
+import { IconOpen, IconPlanLimit } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
+import { Button } from "../ui/button.tsx";
 import { Say } from "./say.tsx";
 
 /** One window of the plan: "5-hour limit", "18% left", "Resets 6:10 pm". left is the share left, 0 to 100, the bar
@@ -18,6 +20,8 @@ export type PlanWindow = {
   leftText: string;
   reset: string;
   valueText: string;
+  /** Optional: close to the limit, by the toolbar's band. The words and the fill take primary, never amber, never red. */
+  close?: boolean;
 };
 
 export type PlanCardProps = {
@@ -36,28 +40,49 @@ export type PlanCardProps = {
   foot: string | null;
   /** Optional: Manage plan or Manage billing, the vendor's own page. Left out until the host can open it (H11). */
   manage?: { label: string; href: string } | null;
+  /** Optional: Plan and usage in Settings, opened at its section. Left out where the host can't open Settings. */
+  settings?: { label: string; onOpen: () => void } | null;
   /** Optional: a test id on the card's body. */
   testId?: string;
 };
 
+/** "98% left" as the numeral and the rest beside it, as Settings' tiles say it; the whole line as words where the
+ * language doesn't lead with the numeral. */
+function splitLeft(left: number, text: string): { numeral: string; rest: string } {
+  const numeral = `${left}%`;
+  return text.startsWith(numeral)
+    ? { numeral, rest: text.slice(numeral.length).trim() }
+    : { numeral: "", rest: text };
+}
+
 function WindowRow({ w, stale }: { w: PlanWindow; stale: boolean }) {
+  const left = w.left === null ? null : splitLeft(w.left, w.leftText);
   return (
-    <div className="plan-window" data-stale={stale ? "" : undefined}>
+    <div
+      className="plan-window"
+      data-state={w.close === true ? "close" : "plenty"}
+      data-stale={stale ? "" : undefined}
+    >
       <BaseMeter.Root
         value={w.left ?? 0}
         aria-valuetext={w.valueText}
         className="plan-window-meter"
       >
-        <span className="plan-window-line">
-          <BaseMeter.Label className="plan-window-name">
-            <Say>{w.name}</Say>
-          </BaseMeter.Label>
-          {w.left !== null && (
-            <span className="plan-window-used">
-              <Say>{w.leftText}</Say>
+        <BaseMeter.Label className="plan-window-name">
+          <Say>{w.name}</Say>
+        </BaseMeter.Label>
+        {left !== null && (
+          <span className="plan-window-used">
+            {left.numeral !== "" && (
+              <span className="plan-numeral">
+                <Say>{left.numeral}</Say>
+              </span>
+            )}{" "}
+            <span className="plan-window-word">
+              <Say>{left.rest}</Say>
             </span>
-          )}
-        </span>
+          </span>
+        )}
         {w.left !== null && (
           <BaseMeter.Track className="plan-track">
             <BaseMeter.Indicator className="plan-fill" />
@@ -83,6 +108,7 @@ export function PlanCard({
   preparing,
   foot,
   manage,
+  settings,
   testId,
 }: PlanCardProps) {
   return (
@@ -143,6 +169,14 @@ export function PlanCard({
               <IconOpen size={14} />
             </a>
           )}
+        </div>
+      )}
+      {settings != null && (
+        <div className="plan-card-go">
+          <Button kind="tone" size="small" data-testid="plan-settings" onClick={settings.onOpen}>
+            <IconPlanLimit size={16} />
+            {settings.label}
+          </Button>
         </div>
       )}
     </div>

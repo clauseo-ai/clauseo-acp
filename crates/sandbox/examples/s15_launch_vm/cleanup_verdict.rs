@@ -4,23 +4,31 @@
 //! `marker bits <present|absent>`: whether the job's notify command ran. No Win32 call here, so
 //! the rule has a unit test.
 //!
-//! The end sweeper makes no BITS call (0049): only the `SYSTEM` stop task (PR #668) cancels a
-//! pool user's BITS job, so nothing expects the session's end to remove it. Whether the job is
-//! still there is recorded as information. A job BITS accepted passes when it is absent, or
-//! present but inert: still there after a second session of the same pool user, its notify
-//! command never run (no marker) and its state never `TRANSFERRED` or `ACKNOWLEDGED`.
+//! The items are planted before the session, so that session is the next one for them. Its
+//! inner runner's first act removes the HKCU `Run` and `RunOnce` values and the Startup entries
+//! ([`FIRST_ACT`]); at its end the outer asks for the `SYSTEM` task `\Clauseo\SandboxSweep`,
+//! which deletes the pool user's scheduled tasks and cancels its BITS jobs ([`SWEEP`]); the inner
+//! touches neither. A check after the session's end sees both.
 //!
 //! BITS may refuse the job outright: `AddFile` (or `Resume`) fails with `ERROR_NOT_LOGGED_ON`
 //! (0x800704dd), as it did on the test VMs. That refusal proves the job can't run: no job of the
 //! pool user's can get a file, so none can transfer or set off its notify command. Such a plant
-//! passes, the marker still required absent; any other plant error is INFO.
+//! passes, the marker still required absent, and a half-made job still there is information;
+//! any other plant error is INFO.
 
+use super::cancel_verdict::sweep_task;
 use super::checks::values;
 use super::pool_verdict::Verdict;
 
 /// The kinds of item, in the order they are planted: the HKCU `Run` and `RunOnce` values, a
 /// Startup-folder entry, a scheduled task and a BITS job.
 pub(crate) const KINDS: [&str; 5] = ["run", "runonce", "startup", "task", "bits"];
+
+/// The kinds the next session's first act removes.
+const FIRST_ACT: [&str; 3] = ["run", "runonce", "startup"];
+
+/// The kinds besides BITS that the sandbox sweep task removes after a session's end.
+const SWEEP: [&str; 1] = ["task"];
 
 /// The BITS states of a job that ran: its file transferred, which sets off its notify command.
 const RAN: [&str; 2] = ["TRANSFERRED", "ACKNOWLEDGED"];
@@ -47,64 +55,57 @@ fn item<'l>(lines: &'l [String], kind: &str) -> Option<&'l str> {
     values(lines, &format!("item {kind}")).first().copied()
 }
 
-/// Whether the BITS job is still there in `lines`, a check's.
-pub(crate) fn bits_left(lines: &[String]) -> bool {
-    item(lines, "bits").is_some_and(|word| word.split(' ').next() == Some("present"))
-}
-
-/// Whether the first check after the session, `after`, needs no retry: the verdict with that
-/// check standing in for the second session's too isn't a FAIL.
+/// Whether the check after the session, `after`, needs no retry: its verdict isn't a FAIL.
 pub(crate) fn settled(planted: &[String], after: &[String]) -> bool {
-    !matches!(
-        end_cleanup(planted, after, Some(after), 0),
-        Verdict::Fail(_)
-    )
+    !matches!(end_cleanup(planted, after, &[], 0), Verdict::Fail(_))
 }
 
-/// The BITS job in one check: `Ok(None)` gone, `Ok(Some(state))` present but inert so far, `Err`
-/// a failure (it ran) or a check that didn't say.
-fn bits_in(lines: &[String], when: &str) -> Result<Option<String>, (bool, String)> {
+/// The BITS job in the check: `Ok(None)` gone, `Ok(Some(state))` present and not run, `Err` a
+/// failure (it ran) or a check that didn't say.
+fn bits_in(lines: &[String]) -> Result<Option<String>, (bool, String)> {
     match values(lines, "marker bits").first().copied() {
         Some("absent") => {}
         Some("present") => {
             return Err((
                 true,
-                format!("the BITS job's notify command ran (marker, {when})"),
+                "the BITS job's notify command ran (marker)".to_owned(),
             ));
         }
         word => {
             return Err((
                 false,
-                format!("bits marker {when} ({})", word.unwrap_or("no line")),
+                format!("bits marker ({})", word.unwrap_or("no line")),
             ));
         }
     }
     let word = item(lines, "bits").unwrap_or("no line");
     match word.split_once(' ') {
         None if word == "absent" => Ok(None),
-        Some(("present", state)) if RAN.contains(&state) => Err((
-            true,
-            format!("the BITS job ran: its state was {state} {when}"),
-        )),
+        Some(("present", state)) if RAN.contains(&state) => {
+            Err((true, format!("the BITS job ran: its state was {state}")))
+        }
         Some(("present", state)) => Ok(Some(state.to_owned())),
-        _ => Err((false, format!("bits {when} ({word})"))),
+        _ => Err((false, format!("bits ({word})"))),
     }
 }
 
 /// `end-cleanup`: `planted`, the lines of the plant before the session; `after`, those of the
-/// last check, `waited_ms` after the session ended; `again`, those of the check after a second
-/// session of the same pool user, when one ran. PASS when the four other kinds were planted and
-/// are now absent, and the BITS job is absent or present but inert, or BITS refused it (above);
-/// FAIL naming the kinds left (or not planted, or not checked), or when the BITS job ran; INFO
-/// when only the BITS job couldn't be planted otherwise (BITS unavailable) and the rest are gone.
+/// last check, `waited_ms` after the session ended; `stderr`, the session's outer's. PASS when
+/// the four other kinds were planted and are now absent, and the BITS job is absent (cancelled
+/// by the sweep task) or BITS refused it (above); FAIL naming the kinds left (or not planted, or
+/// not checked), or when the BITS job ran; INFO when only the BITS job couldn't be planted
+/// otherwise (BITS unavailable) and the rest are gone. Each verdict names the outer's lines about
+/// the sandbox sweep task, as information.
 pub(crate) fn end_cleanup(
     planted: &[String],
     after: &[String],
-    again: Option<&[String]>,
+    stderr: &[String],
     waited_ms: u128,
 ) -> Verdict {
-    let (mut left, mut unchecked, mut unplanted, mut gone) = (vec![], vec![], vec![], vec![]);
-    for kind in KINDS.into_iter().filter(|kind| *kind != "bits") {
+    let said = sweep_task(stderr);
+    let (mut left, mut unchecked, mut unplanted) = (vec![], vec![], vec![]);
+    let (mut first_act, mut swept) = (vec![], vec![]);
+    for kind in FIRST_ACT.into_iter().chain(SWEEP) {
         match item(planted, kind) {
             Some("planted") => {}
             word => {
@@ -112,15 +113,41 @@ pub(crate) fn end_cleanup(
                 continue;
             }
         }
+        let by = if FIRST_ACT.contains(&kind) {
+            "the session's first act"
+        } else {
+            "the sandbox sweep task"
+        };
         match item(after, kind) {
-            Some("absent") => gone.push(kind.to_owned()),
-            Some("present") => left.push(kind),
+            Some("absent") if FIRST_ACT.contains(&kind) => first_act.push(kind),
+            Some("absent") => swept.push(kind),
+            Some("present") => left.push(format!("{kind} (left by {by})")),
             word => unchecked.push(format!("{kind} ({})", word.unwrap_or("no line"))),
         }
     }
+    let bits_word = item(planted, "bits");
+    let bits_planted = bits_word == Some("planted");
+    let bits_refused = bits_word.is_some_and(refused);
+    let mut there = None;
+    match bits_in(after) {
+        Err((true, ran)) => return Verdict::Fail(format!("{ran}; {said}")),
+        Err((false, why)) if bits_planted || bits_refused => unchecked.push(why),
+        Err(_) | Ok(None) => {}
+        Ok(Some(state)) if bits_planted => left.push(format!(
+            "bits (state {state}; not cancelled by the sandbox sweep task)"
+        )),
+        Ok(Some(state)) => {
+            there = Some(format!(
+                "a half-made BITS job is still there (state {state}), unable to run"
+            ));
+        }
+    }
+    if bits_planted && left.iter().all(|kind| !kind.starts_with("bits")) {
+        swept.push("bits");
+    }
     if !left.is_empty() {
         return Verdict::Fail(format!(
-            "{waited_ms} ms after the session ended the pool user still has: {}{}",
+            "{waited_ms} ms after the session ended the pool user still has: {}{}; {said}",
             left.join(", "),
             if unchecked.is_empty() {
                 String::new()
@@ -129,55 +156,22 @@ pub(crate) fn end_cleanup(
             }
         ));
     }
-    let bits_planted = item(planted, "bits") == Some("planted");
-    let bits_refused = item(planted, "bits").is_some_and(refused);
-    let mut checks = vec![(after, "after the session")];
-    if let Some(again) = again {
-        checks.push((again, "after a second session"));
-    }
-    let mut states = Vec::new();
-    for (lines, when) in checks {
-        match bits_in(lines, when) {
-            Err((true, ran)) => return Verdict::Fail(ran),
-            Err((false, why)) if bits_planted || bits_refused => unchecked.push(why),
-            Err(_) => {}
-            Ok(state) => states.push(state),
-        }
-    }
-    // Information alone: the sweeper doesn't touch BITS, so the job's presence decides nothing.
-    let there = match states.first() {
-        Some(None) => Some("the BITS job isn't there after the session".to_owned()),
-        Some(Some(state)) => Some(format!(
-            "the BITS job is still there after the session (state {state}): the sweeper makes no \
-             BITS call, and only the system stop cancels it"
-        )),
-        None => None,
-    };
-    let inert = match states.as_slice() {
-        [Some(_)] if bits_planted && again.is_none() => {
-            unchecked.push("bits (present, not checked after a second session)".to_owned());
-            None
-        }
-        [Some(first), Some(second)] if bits_planted => Some(format!(
-            "the BITS job is left but inert (state {first}, then {second} after a second session; \
-             its notify command never ran), for the system stop"
-        )),
-        // Not planted, absent, or gone by the second check.
-        _ => None,
-    };
     if !unplanted.is_empty() || !unchecked.is_empty() {
         return Verdict::Fail(format!(
-            "not planted: {unplanted:?}; not checked after the session: {unchecked:?}"
+            "not planted: {unplanted:?}; not checked after the session: {unchecked:?}; {said}"
         ));
     }
     let mut note = format!(
-        "{} gone {waited_ms} ms after the session ended",
-        gone.join(", ")
+        "{} gone by the session's first act, {} gone by the sandbox sweep task, as checked {} ms \
+         after the session ended",
+        first_act.join(", "),
+        swept.join(", "),
+        waited_ms
     );
-    for info in [inert, there].into_iter().flatten() {
+    for info in there.into_iter().chain([said]) {
         note = format!("{note}; {info}");
     }
-    match item(planted, "bits") {
+    match bits_word {
         Some("planted") => Verdict::Pass(note),
         _ if bits_refused => Verdict::Pass(format!(
             "BITS refuses the pool user (0x800704dd), so no job of theirs can run; {note}"
@@ -191,7 +185,7 @@ pub(crate) fn end_cleanup(
 
 #[cfg(test)]
 mod tests {
-    use super::{Verdict, bits_left, end_cleanup, settled};
+    use super::{Verdict, end_cleanup, settled};
 
     fn lines(text: &[&str]) -> Vec<String> {
         text.iter().map(|l| (*l).to_owned()).collect()
@@ -224,8 +218,8 @@ mod tests {
         "item bits absent",
         "marker bits absent",
     ];
-    /// Every item gone but the BITS job, left inert.
-    const INERT: [&str; 6] = [
+    /// Every item gone but the BITS job, left without having run.
+    const LEFT: [&str; 6] = [
         "item run absent",
         "item runonce absent",
         "item startup absent",
@@ -234,71 +228,59 @@ mod tests {
         "marker bits absent",
     ];
 
-    fn judged(planted: &[&str], after: &[&str], again: Option<&[&str]>) -> Verdict {
-        let again = again.map(lines);
-        end_cleanup(&lines(planted), &lines(after), again.as_deref(), 4_000)
+    const FAILED: &str = "clauseo-sandbox-run: warning: the sandbox sweep task ended 0x80070005";
+
+    fn judged(planted: &[&str], after: &[&str]) -> Verdict {
+        end_cleanup(&lines(planted), &lines(after), &lines(&[FAILED]), 4_000)
     }
 
     #[test]
-    fn end_cleanup_passes_when_every_planted_item_is_gone() {
-        let Verdict::Pass(note) = judged(&PLANTED, &GONE, None) else {
+    fn end_cleanup_passes_naming_who_removed_each_kind() {
+        let Verdict::Pass(note) = judged(&PLANTED, &GONE) else {
             panic!("not a PASS");
         };
-        assert!(!bits_left(&lines(&GONE)));
-        // The job's absence is information, never counted as the sweeper's removal.
-        assert!(note.contains("the BITS job isn't there"), "{note}");
+        assert!(settled(&lines(&PLANTED), &lines(&GONE)));
+        for part in [
+            "run, runonce, startup gone by the session's first act",
+            "task, bits gone by the sandbox sweep task",
+            "4000 ms",
+            "ended 0x80070005",
+        ] {
+            assert!(note.contains(part), "{note} doesn't name {part}");
+        }
+    }
+
+    #[test]
+    fn end_cleanup_fails_a_bits_job_the_sweep_task_left() {
+        assert!(!settled(&lines(&PLANTED), &lines(&LEFT)));
+        let verdict = judged(&PLANTED, &LEFT);
         assert!(
-            !note.contains("bits gone") && !note.contains(", bits"),
-            "{note}"
+            matches!(&verdict, Verdict::Fail(why) if why.contains("bits (state TRANSIENT_ERROR; \
+                not cancelled by the sandbox sweep task)")),
+            "{verdict:?}"
         );
     }
 
     #[test]
-    fn end_cleanup_passes_a_bits_job_left_inert_after_a_second_session() {
-        assert!(bits_left(&lines(&INERT)));
-        assert!(settled(&lines(&PLANTED), &lines(&INERT)));
-        let again = with(INERT, &[(4, "item bits present QUEUED")]);
-        let Verdict::Pass(note) = judged(&PLANTED, &INERT, Some(&again)) else {
-            panic!("not a PASS");
-        };
-        assert!(note.contains("TRANSIENT_ERROR, then QUEUED"), "{note}");
-        // Gone by the second check: a PASS too.
-        let verdict = judged(&PLANTED, &INERT, Some(&GONE));
-        assert!(matches!(verdict, Verdict::Pass(_)), "{verdict:?}");
-    }
-
-    #[test]
     fn end_cleanup_fails_when_the_bits_job_ran() {
-        let fired = with(INERT, &[(5, "marker bits present")]);
-        for (after, again) in [
-            (fired, None),
-            (INERT, Some(fired)),
-            (with(GONE, &[(5, "marker bits present")]), None),
+        for after in [
+            with(LEFT, &[(5, "marker bits present")]),
+            with(GONE, &[(5, "marker bits present")]),
         ] {
-            let verdict = judged(&PLANTED, &after, again.as_ref().map(<[&str; 6]>::as_slice));
+            let verdict = judged(&PLANTED, &after);
             assert!(
                 matches!(&verdict, Verdict::Fail(why) if why.contains("notify command ran")),
                 "{verdict:?}"
             );
         }
-        let transferred = with(INERT, &[(4, "item bits present TRANSFERRED")]);
-        let verdict = judged(&PLANTED, &INERT, Some(&transferred));
+        let transferred = with(LEFT, &[(4, "item bits present TRANSFERRED")]);
+        let verdict = judged(&PLANTED, &transferred);
         assert!(
             matches!(&verdict, Verdict::Fail(why) if why.contains("TRANSFERRED")),
             "{verdict:?}"
         );
-        assert!(!settled(&lines(&PLANTED), &lines(&transferred)));
-    }
-
-    #[test]
-    fn end_cleanup_fails_a_bits_job_left_but_not_checked_again() {
-        let verdict = judged(&PLANTED, &INERT, None);
-        assert!(
-            matches!(&verdict, Verdict::Fail(why) if why.contains("second session")),
-            "{verdict:?}"
-        );
-        let unmarked = with(INERT, &[(5, "")]);
-        let verdict = judged(&PLANTED, &INERT, Some(&unmarked));
+        let unmarked = with(GONE, &[(5, "")]);
+        let verdict = judged(&PLANTED, &unmarked);
         assert!(
             matches!(&verdict, Verdict::Fail(why) if why.contains("bits marker")),
             "{verdict:?}"
@@ -311,26 +293,25 @@ mod tests {
 
     #[test]
     fn end_cleanup_passes_when_bits_refuses_the_pool_users_job() {
-        let suspended = with(INERT, &[(4, "item bits present SUSPENDED")]);
+        let suspended = with(LEFT, &[(4, "item bits present SUSPENDED")]);
         let resume = "item bits error resume: bitsadmin.exe exited -2147023651: 0x800704DD";
         for word in [REFUSED, resume] {
             let planted = with(PLANTED, &[(4, word)]);
-            for (after, again) in [(GONE, None), (suspended, Some(suspended))] {
-                let again = again.as_ref().map(<[&str; 6]>::as_slice);
-                let Verdict::Pass(note) = judged(&planted, &after, again) else {
+            for after in [GONE, suspended] {
+                let Verdict::Pass(note) = judged(&planted, &after) else {
                     panic!("not a PASS: {word}");
                 };
                 assert!(
                     note.starts_with("BITS refuses the pool user (0x800704dd)"),
                     "{note}"
                 );
-                // Whether the job is still there is recorded, and decides nothing.
-                let there = if after == GONE {
-                    "isn't there"
-                } else {
-                    "still there after the session (state SUSPENDED)"
-                };
-                assert!(note.contains(there), "{note}");
+                assert!(
+                    note.contains("task gone by the sandbox sweep task"),
+                    "{note}"
+                );
+                // A half-made job still there is recorded, and decides nothing.
+                let there = note.contains("half-made BITS job is still there (state SUSPENDED)");
+                assert_eq!(there, after == suspended, "{note}");
             }
         }
     }
@@ -339,13 +320,13 @@ mod tests {
     fn end_cleanup_fails_a_refused_bits_job_whose_marker_appears_or_isnt_checked() {
         let planted = with(PLANTED, &[(4, REFUSED)]);
         let fired = with(GONE, &[(5, "marker bits present")]);
-        let verdict = judged(&planted, &fired, None);
+        let verdict = judged(&planted, &fired);
         assert!(
             matches!(&verdict, Verdict::Fail(why) if why.contains("notify command ran")),
             "{verdict:?}"
         );
         let unmarked = with(GONE, &[(5, "")]);
-        let verdict = judged(&planted, &unmarked, None);
+        let verdict = judged(&planted, &unmarked);
         assert!(
             matches!(&verdict, Verdict::Fail(why) if why.contains("bits marker")),
             "{verdict:?}"
@@ -353,16 +334,23 @@ mod tests {
     }
 
     #[test]
-    fn end_cleanup_fails_naming_the_kinds_left() {
+    fn end_cleanup_fails_naming_the_kinds_left_and_who_left_them() {
         let after = with(
             GONE,
             &[(1, "item runonce present"), (3, "item task present")],
         );
-        let Verdict::Fail(why) = judged(&PLANTED, &after, None) else {
+        let Verdict::Fail(why) = judged(&PLANTED, &after) else {
             panic!("not a FAIL");
         };
-        assert!(why.contains("runonce, task"), "{why}");
+        assert!(
+            why.contains(
+                "runonce (left by the session's first act), task (left by the sandbox \
+                 sweep task)"
+            ),
+            "{why}"
+        );
         assert!(!why.contains("startup"), "{why}");
+        assert!(why.contains("ended 0x80070005"), "{why}");
     }
 
     #[test]
@@ -374,13 +362,13 @@ mod tests {
                 "item task error schtasks.exe exited 1: ERROR: Access is denied.",
             )],
         );
-        let verdict = judged(&planted, &GONE, None);
+        let verdict = judged(&planted, &GONE);
         assert!(
             matches!(&verdict, Verdict::Fail(why) if why.contains("task")),
             "{verdict:?}"
         );
         let partial = GONE.get(..2).unwrap_or_default();
-        let verdict = judged(&PLANTED, partial, None);
+        let verdict = judged(&PLANTED, partial);
         assert!(
             matches!(&verdict, Verdict::Fail(why) if why.contains("startup")),
             "{verdict:?}"
@@ -396,7 +384,7 @@ mod tests {
                 "item bits error bitsadmin.exe exited 1: BITS is disabled",
             )],
         );
-        let verdict = judged(&planted, &GONE, None);
+        let verdict = judged(&planted, &GONE);
         assert!(
             matches!(&verdict, Verdict::Info(why) if why.contains("BITS")),
             "{verdict:?}"
@@ -408,13 +396,11 @@ mod tests {
             "item bits error addfile: bitsadmin.exe exited 1: Unable to add file - 0x80070005",
         ] {
             let planted = with(PLANTED, &[(4, other)]);
-            let verdict = judged(&planted, &INERT, None);
+            let verdict = judged(&planted, &LEFT);
             assert!(matches!(verdict, Verdict::Info(_)), "{other}: {verdict:?}");
         }
-        let verdict = judged(&planted, &INERT, None);
-        assert!(matches!(verdict, Verdict::Info(_)), "{verdict:?}");
         let after = with(GONE, &[(0, "item run present")]);
-        let verdict = judged(&planted, &after, None);
+        let verdict = judged(&planted, &after);
         assert!(matches!(verdict, Verdict::Fail(_)), "{verdict:?}");
     }
 }

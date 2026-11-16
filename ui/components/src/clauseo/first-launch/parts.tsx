@@ -27,18 +27,27 @@ export function Done({
   );
 }
 
-/** The fine print, up front: what stays on this computer and what the AI company sees. Its glyph is the paper's, so
+/** The fine print, up front: what stays on this computer and what the AI company sees (both plans named until one is
+ * picked). Its glyph is the paper's, so
  * the lock stays the Safe workspace's alone. */
-export function DocumentsLine({ name }: { name: string }) {
+export function DocumentsLine({ name }: { name: string | null }) {
   const w = useFirstLaunchWords();
   return (
     <>
       <IconPaperBookPage size={14} className="flex-none" />
       <span>
         <Say>
-          {w("Your papers stay on this computer. {name} sees what each question sends it.", {
-            name,
-          })}
+          {/* null: no plan picked yet, and the line names both */}
+          {name === null
+            ? w(
+                "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
+              )
+            : w(
+                "Your papers stay on this computer. {name} sees the parts it reads to answer you.",
+                {
+                  name,
+                },
+              )}
         </Say>
       </span>
     </>

@@ -11,6 +11,9 @@ mod common;
 mod write;
 
 #[cfg(test)]
+#[path = "store/agent_prefs.rs"]
+mod agent_prefs;
+#[cfg(test)]
 #[path = "store/close.rs"]
 mod close;
 #[cfg(test)]
@@ -38,6 +41,9 @@ mod log_model;
 #[path = "store/matters.rs"]
 mod matters;
 #[cfg(test)]
+#[path = "store/pending_actions.rs"]
+mod pending_actions;
+#[cfg(test)]
 #[path = "store/reopen.rs"]
 mod reopen;
 #[cfg(test)]
@@ -52,3 +58,6 @@ mod skill_packs;
 #[cfg(test)]
 #[path = "store/title_source.rs"]
 mod title_source;
+#[cfg(test)]
+#[path = "store/unreadable_saved.rs"]
+mod unreadable_saved;

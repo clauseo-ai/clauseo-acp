@@ -47,6 +47,21 @@
   .room-house-head > .room-line {
     padding: var(--s1-5) var(--s3);
   }
+  /* beneath a matter's row, which stays: Locate folder beside a refusal, or the brief line with Undo */
+  .room-matter-below {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s0-5);
+    padding: 0 var(--s3) var(--s1-5);
+  }
+  .room-matter-below > .room-line {
+    padding: 0;
+  }
+  /* a quiet button's icon lines up with the words above it */
+  .room-matter-below > button {
+    margin-left: calc(-1 * var(--s3));
+  }
   .room-line-undo {
     @apply text-small font-chip text-primary;
     /* its focus ring clears the letters */

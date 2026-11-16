@@ -4,12 +4,16 @@
 //! reads the titles and links out of the raw result ([`found`]) and tells the host, which joins
 //! them to the agent's own tool call (`sources/case_law.rs`).
 //!
-//! The paths read are `structuredContent.results[]` for a search and
-//! `structuredContent.documents[]` for a read, the fake connector's; they are not checked
-//! against the live connector, so every step is lenient: a missing or misshapen list gives no
-//! links, an entry that is not an object or has no string `url` (or `link`) is skipped, as is
-//! one whose link is not https or a record would drop, and a title that is not a string becomes
-//! empty. At most `MAX_SEARCH_RESULTS` entries are read; the rest are skipped unparsed.
+//! Two shapes are read, never merged. First the structured one, the fake connector's:
+//! `structuredContent.results[]` for a search and `structuredContent.documents[]` for a read.
+//! When that gives no links, the text one, the live Indian Kanoon server's (server main 921725f),
+//! which answers with `content[]` text blocks only: lines that start `d123 "Title" · …`, or a
+//! JSON first block, each document linked to `https://data.clauseo.chat/d/d123` (see [`text`]).
+//!
+//! Every step is lenient: a missing or misshapen list gives no links, an entry that is not an
+//! object or has no string `url` (or `link`) is skipped, as is one whose link is not https or a
+//! record would drop, and a title that is not a string becomes empty. At most
+//! `MAX_SEARCH_RESULTS` entries are read; the rest are skipped unparsed.
 
 use std::fmt;
 
@@ -21,7 +25,7 @@ use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 
 use super::super::super::{CaseLawFound, CaseLawTool, FoundLink};
-use super::reply::{ToolResult, object, present};
+use super::reply::{object, present};
 use crate::sources::case_law::join_key;
 use crate::sources::{clean_title, record_url};
 
@@ -31,6 +35,8 @@ const MAX_TEXT_BYTES: usize = 16 * 1024;
 
 /// The one scheme a case-law result's link may have.
 const HTTPS: &str = "https://";
+
+mod text;
 
 /// What a case-law call's result is joined by.
 pub(in super::super) struct Join {
@@ -54,6 +60,22 @@ impl Join {
     }
 }
 
+/// A `tools/call` result, raw: what says it is an error, and the two shapes its links are in.
+#[derive(Deserialize)]
+struct CaseLawResult<'a> {
+    #[serde(rename = "isError", borrow, default, deserialize_with = "present")]
+    is_error: Option<&'a RawValue>,
+    #[serde(
+        rename = "structuredContent",
+        borrow,
+        default,
+        deserialize_with = "present"
+    )]
+    structured: Option<&'a RawValue>,
+    #[serde(borrow, default, deserialize_with = "present")]
+    content: Option<&'a RawValue>,
+}
+
 /// The two lists, raw.
 #[derive(Deserialize)]
 struct Lists<'a> {
@@ -75,9 +97,10 @@ struct Item<'a> {
 }
 
 /// What the call found, when its result is no error. A result with no readable list still
-/// counts (no links): the call ran, and its record names the query.
+/// counts (no links): the call ran, and its record names the query. The structured lists win
+/// when they give a link; otherwise the text content is read.
 pub(super) fn found(join: &Join, result: &RawValue) -> Option<CaseLawFound> {
-    let read = object::<ToolResult<'_>>(result)?;
+    let read = object::<CaseLawResult<'_>>(result)?;
     let is_error = read
         .is_error
         .is_some_and(|raw| serde_json::from_str::<bool>(raw.get()).unwrap_or(true));
@@ -89,10 +112,17 @@ pub(super) fn found(join: &Join, result: &RawValue) -> Option<CaseLawFound> {
         CaseLawTool::SearchLaw => lists.results,
         CaseLawTool::ReadDocument => lists.documents,
     });
+    let mut links = list.map(links).unwrap_or_default();
+    if links.is_empty() {
+        links = read
+            .content
+            .map(|content| text::links(join.tool, content))
+            .unwrap_or_default();
+    }
     Some(CaseLawFound {
         tool: join.tool,
         key: join.key,
-        links: list.map(links).unwrap_or_default(),
+        links,
     })
 }
 
@@ -140,18 +170,22 @@ impl<'de> Visitor<'de> for FirstLinks {
 fn link(raw: &RawValue) -> Option<FoundLink> {
     let item = object::<Item<'_>>(raw)?;
     let url = item.url.or(item.link).and_then(text)?;
+    let title = item.title.and_then(text);
+    found_link(&url, title.as_deref())
+}
+
+/// A link and its title, checked, cleaned and cut as [`link`] says; the text form's too.
+fn found_link(url: &str, title: Option<&str>) -> Option<FoundLink> {
     let https = url
         .get(..HTTPS.len())
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case(HTTPS));
     if !https {
         return None;
     }
-    let url = logged_url(&record_url(&url)?);
-    let title = item
-        .title
-        .and_then(text)
+    let url = logged_url(&record_url(url)?);
+    let title = title
         .map(|title| {
-            clean_title(&title)
+            clean_title(title)
                 .chars()
                 .take(MAX_WEB_TITLE_CHARS)
                 .collect()

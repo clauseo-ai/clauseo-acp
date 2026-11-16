@@ -6,7 +6,7 @@ use clauseo_protocol::{
     AgentCapabilities, AgentSessionId, CompactString, ConfigOption, StopReason,
 };
 
-use crate::event::{LimitSignal, RawFrame};
+use crate::event::{AgentFailed, ConnectionLost, LimitSignal, RawFrame};
 
 /// Options for [`connect`](crate::connect).
 #[derive(Debug, Clone, Default)]
@@ -30,6 +30,9 @@ pub struct AgentInfo {
     pub capabilities: AgentCapabilities,
     /// How it signs in, in its order.
     pub auth_methods: Vec<AuthMethod>,
+    /// `agentCapabilities.mcpCapabilities.http`: whether it takes an http MCP server. To one
+    /// that does not, [`McpServer::Http`] is left out of every session call.
+    pub mcp_http: bool,
 }
 
 /// One way the agent signs in. Stays an `acp` type until a host command needs it.
@@ -90,9 +93,17 @@ pub struct LoadSession {
     pub meta: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// An MCP server the agent starts. A stdio server goes on the wire with no `type` field, as ACP
-/// v1 has it: claude-agent-acp 0.89.1 drops a stdio server sent with `"type": "stdio"`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// An MCP server the agent starts or reaches. A stdio server goes on the wire with no `type`
+/// field, as ACP v1 has it: claude-agent-acp 0.89.1 drops a stdio server sent with
+/// `"type": "stdio"`. An http server goes as `{"type": "http", name, url, headers}`, ACP v1's
+/// `McpServerHttp`, and only to an agent whose `initialize` said `mcpCapabilities.http`; to
+/// any other it is left out and its name logged. There is no sse variant: codex-acp 2.2.2 has
+/// none.
+///
+/// `Debug` leaves out env and header values and the URL, which can hold secrets, and prints
+/// their names. A stdio server's command and args are printed as they are: put a secret in its
+/// env, not its args.
+#[derive(Clone, PartialEq, Eq)]
 pub enum McpServer {
     /// Over stdio, the transport every agent must support.
     Stdio {
@@ -105,6 +116,55 @@ pub enum McpServer {
         /// Its environment variables.
         env: Vec<(String, String)>,
     },
+    /// Over streamable HTTP, which the agent's own MCP client reaches.
+    Http {
+        /// Its name.
+        name: String,
+        /// Its URL.
+        url: String,
+        /// The HTTP headers the agent sends with each request, as name and value.
+        headers: Vec<(String, String)>,
+    },
+}
+
+impl McpServer {
+    /// Its name, whichever transport.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Stdio { name, .. } | Self::Http { name, .. } => name,
+        }
+    }
+}
+
+impl std::fmt::Debug for McpServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names = |pairs: &[(String, String)]| {
+            pairs
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>()
+        };
+        match self {
+            Self::Stdio {
+                name,
+                command,
+                args,
+                env,
+            } => f
+                .debug_struct("Stdio")
+                .field("name", name)
+                .field("command", command)
+                .field("args", args)
+                .field("env_names", &names(env))
+                .finish(),
+            Self::Http { name, headers, .. } => f
+                .debug_struct("Http")
+                .field("name", name)
+                .field("header_names", &names(headers))
+                .finish_non_exhaustive(),
+        }
+    }
 }
 
 /// What `session/new` and `session/load` gave back.
@@ -145,6 +205,29 @@ pub struct PromptEnd {
     pub stop: StopReason,
     /// A plan limit the response carried (an AIR `sessionFailure` in its `_meta`).
     pub limit: Option<LimitSignal>,
+    /// The response's AIR `sessionFailure` says the model refused the turn as too long to
+    /// read, and how (`map/too_long.rs`). Never a plan limit: `limit` stays `None` for it.
+    pub too_long: Option<TooLong>,
+    /// A lost connection the response carried (an AIR `sessionFailure` of category
+    /// `connection` in its `_meta`): codex-acp ends a turn whose retries ran out so.
+    pub connection: Option<ConnectionLost>,
+    /// A failure the agent gave up on the turn for (an AIR `sessionFailure` of severity `error`
+    /// with `retry` or `new_session` in its `_meta`, in no category another field reads):
+    /// codex-acp ends a turn so on Codex's internal error.
+    pub failed: Option<AgentFailed>,
+}
+
+/// How an AIR `sessionFailure` said a turn was too long to read. The driver does not know the
+/// agent; the host decides by the agent's kind which of these ends a turn `TooLong`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TooLong {
+    /// Titled "Prompt is too long" (Claude Code's own words): the question, or the conversation
+    /// with it, is over the model's context.
+    PromptTooLong,
+    /// Category `limit`, actions `["new_session"]`: codex-acp's `context_exhausted`, a full
+    /// context. claude-agent-acp sends the same shape for its configured turn or output limit,
+    /// which is not "too long".
+    ContextExhausted,
 }
 
 /// What `steer()` did. `steer()` gives `Error::SteerUnsupported`, sending nothing, unless the

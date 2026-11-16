@@ -14,14 +14,18 @@
 //! - a setup event of desktop's own (decision record 0048, `setup.rs`): `{"setup":<SetupEvent>}`,
 //!   below [`FRAME_LIMIT`] as it is, else in fragments like an event (a failed install's log
 //!   can be about 26 KB): the joined text is the whole `setup` message;
+//! - whether `main` is in the OS's own full screen, desktop's own too (`window_events.rs`):
+//!   `{"window_full_screen":<bool>}`, on the app feed, sent when the value changes and first
+//!   when the feed starts;
 //! - in the `e2e` build only, an event with the time the bridge received it from the host:
 //!   `{"timed":{"received_ms":<f64>,"event":<the event's text>}}`, `received_ms` in ms since
 //!   the Unix epoch. The event's text goes in as it is, between a fixed prefix and suffix. An
 //!   event that does not fit one message so wrapped goes as above, with no time. The default
 //!   build never sends it.
 //!
-//! The reader tells them apart by the top-level key: `fragment`, `stream_failed`, `setup` and
-//! `timed` are reserved, and no `HostEvent` kind may take one (a test in `frame/tests.rs` checks).
+//! The reader tells them apart by the top-level key: `fragment`, `stream_failed`, `setup`,
+//! `window_full_screen` and `timed` are reserved, and no `HostEvent` kind may take one (a test
+//! in `frame/tests.rs` checks).
 //! Every message is below [`FRAME_LIMIT`] bytes, so Tauri hands it to the page with one `eval`
 //! instead of a second fetch round trip.
 
@@ -117,6 +121,26 @@ enum StreamMessage {
     StreamFailed(StreamFailedMessage),
     /// An install or sign-in change (0048).
     Setup(SetupMessage),
+    /// Whether `main` is in the OS's own full screen.
+    WindowFullScreen(WindowFullScreenMessage),
+}
+
+/// `{"window_full_screen": <bool>}`: whether `main` is in the OS's own full screen
+/// (`Window::is_fullscreen`). On a notched Mac that window is shorter than its screen, so the
+/// page cannot tell from its size.
+#[derive(Serialize)]
+#[cfg_attr(test, derive(specta::Type))]
+pub(crate) struct WindowFullScreenMessage {
+    window_full_screen: bool,
+}
+
+/// The `window_full_screen` message's text for `full`.
+pub(crate) fn window_full_screen_text(full: bool) -> String {
+    // A struct of one bool, which serialises without fail.
+    serde_json::to_string(&WindowFullScreenMessage {
+        window_full_screen: full,
+    })
+    .unwrap_or_default()
 }
 
 /// `{"setup": <SetupEvent>}`.

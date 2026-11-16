@@ -1,26 +1,4 @@
 {
-  "ME-01": {
-    "en": "This folder is already a matter: {name}.",
-    "hi": "यह फ़ोल्डर पहले से एक मामला है: {name}।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (matter-exists)"
-  },
-  "ME-02": {
-    "en": "This folder is already a matter.",
-    "hi": "यह फ़ोल्डर पहले से एक मामला है।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (matter-exists)"
-  },
   "ME-03": {
     "en": "{path} is the folder Clauseo keeps matters in.",
     "hi": "{path} वह फ़ोल्डर है जिसमें Clauseo मामले रखता है।",
@@ -53,5 +31,104 @@
     "at": "2026-11-04",
     "by": "Rohan",
     "note": "Rohan, on the review page (matter-exists)"
+  },
+  "ME-06": {
+    "en": "This is the top of a drive. Choose a folder on it.",
+    "hi": "यह किसी ड्राइव का सबसे ऊपरी स्तर है। उस पर कोई फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
+  },
+  "ME-07": {
+    "en": "This is your home folder. Choose a folder inside it.",
+    "hi": "यह आपका होम फ़ोल्डर है। उसके भीतर कोई फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
+  },
+  "ME-08": {
+    "en": "This is a system folder. Choose another folder.",
+    "hi": "यह एक सिस्टम फ़ोल्डर है। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
+  },
+  "ME-09": {
+    "en": "This folder is part of Clauseo's own data. Choose another folder.",
+    "hi": "यह फ़ोल्डर Clauseo के अपने डेटा का हिस्सा है। दूसरा फ़ोल्डर चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
+  },
+  "ME-10": {
+    "en": "This folder is too deeply nested for Windows. Choose a shorter path.",
+    "hi": "यह फ़ोल्डर Windows के लिए दूसरे फ़ोल्डरों के बहुत भीतर है। छोटा पथ चुनें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
+  },
+  "ME-11": {
+    "en": "This folder is inside the folder of {name}.",
+    "hi": "यह फ़ोल्डर {name} के फ़ोल्डर के भीतर है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
+  },
+  "ME-12": {
+    "en": "This folder holds the folder of {name}.",
+    "hi": "इस फ़ोल्डर में {name} का फ़ोल्डर है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
+  },
+  "ME-13": {
+    "en": "Open {name}",
+    "hi": "{name} खोलें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
+  },
+  "ME-14": {
+    "en": "Opening the folder…",
+    "hi": "फ़ोल्डर खुल रहा है…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-11",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-11",
+    "by": "Rohan",
+    "note": "Rohan, approved words for folder PR 2 (each folder refusal says its reason)"
   }
 }

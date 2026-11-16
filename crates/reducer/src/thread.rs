@@ -89,7 +89,7 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         DomainEvent::TurnQueued(event) => turn::turn_queued(state, event, out),
         DomainEvent::QueuedPromptEdited(event) => queue::queued_prompt_edited(state, event, out),
         DomainEvent::SteerResolved(event) => queue::steer_resolved(state, event, out),
-        DomainEvent::TurnStarted(event) => turn::turn_started(state, event.turn, out),
+        DomainEvent::TurnStarted(event) => turn::turn_started(state, event, out),
         DomainEvent::TextAppended(event) => text_appended(state, seq, event, out),
         DomainEvent::ContentAppended(event) => content_appended(state, seq, event_id, event, out),
         DomainEvent::ToolCallStarted(event) => tool_call_started(state, seq, ts, event, out),
@@ -141,7 +141,19 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         DomainEvent::MatterCreated(_) => wrong_stream(out, "matter_created"),
         DomainEvent::CheckpointRecorded(_) => wrong_stream(out, "checkpoint_recorded"),
         DomainEvent::OutsideEdits(_) => wrong_stream(out, "outside_edits"),
-        DomainEvent::VersionRestored(_) => wrong_stream(out, "version_restored"),
+        // A restore asked from this conversation: its marker, as the matter's stream has it.
+        DomainEvent::VersionRestored(event) => {
+            let kind = MarkerKind::VersionRestored {
+                from: event.from,
+                checkpoint: event.checkpoint,
+                scope: event.scope.clone(),
+                undoes: event.undoes,
+                written: event.written.clone(),
+                removed: event.removed.clone(),
+                more: event.more,
+            };
+            insert_marker(state, seq, event_id, ts, kind, out);
+        }
         DomainEvent::MatterRelocated(_) => wrong_stream(out, "matter_relocated"),
     }
 }

@@ -1,7 +1,7 @@
 //! The scripted sign-in: the variable's form, each script's states in order, a cancel, the
 //! calls it leaves to S18, and the merged events ending with S18's.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -13,7 +13,7 @@ use clauseo_protocol::AgentId;
 use futures::StreamExt;
 use futures::channel::mpsc;
 
-use super::{EMAIL, FakeSignin, Script, Steps, merged, scripts_from};
+use super::{EMAIL, FakeSignin, Script, Status, Steps, merged, scripts_from, status_from};
 
 fn claude() -> AgentId {
     AgentId::new("claude-acp").unwrap()
@@ -90,6 +90,17 @@ impl crate::setup::backend::SetupAgents for Real {
     fn use_different_account(&self, _: &AgentId) -> Result<(), SigninError> {
         self.call("use_different_account");
         Ok(())
+    }
+    fn use_different_account_switching(&self, _: &AgentId) -> Result<(), SigninError> {
+        self.call("use_different_account_switching");
+        Ok(())
+    }
+    fn sign_in_switching(&self, _: &AgentId, _: Method) -> Result<(), SigninError> {
+        self.call("sign_in_switching");
+        Ok(())
+    }
+    fn own_login(&self, _: &AgentId) -> Option<clauseo_agents::OwnLogin> {
+        None
     }
     fn signin_state(&self, _: &AgentId) -> Option<SigninState> {
         None
@@ -253,4 +264,78 @@ fn the_merged_events_end_when_s18_s_end() {
     }]);
     let all: Vec<_> = futures::executor::block_on(merged(s18, fake_events).collect());
     assert_eq!(all.len(), 1, "ends though the scripts' sender lives");
+}
+
+/// The seam with Claude installed (`E2E_FAKE_INSTALLED`), its status answering `status`
+/// counted from `limit`, and its sign-in scripted `ok`.
+fn installed(
+    status: Status,
+    limit: Duration,
+) -> (FakeSignin, Arc<Real>, mpsc::UnboundedReceiver<AgentsEvent>) {
+    let (fake, real, events) = fake(Duration::ZERO);
+    let fake = fake.with_status(BTreeSet::from([claude()]), status, limit);
+    (fake, real, events)
+}
+
+const SIGNED_OUT: SigninState = SigninState::SignedOut { found: None };
+
+#[test]
+fn the_status_variable_names_signed_out_slow_or_hang() {
+    assert_eq!(status_from(None), Status::SignedOut);
+    assert_eq!(status_from(Some("")), Status::SignedOut);
+    assert_eq!(status_from(Some("signed_out")), Status::SignedOut);
+    assert_eq!(status_from(Some("other")), Status::SignedOut);
+    assert_eq!(status_from(Some(" slow ")), Status::Slow);
+    assert_eq!(status_from(Some("hang")), Status::Hang);
+}
+
+#[test]
+fn an_installed_agent_s_status_says_signed_out_at_once_with_no_s18_call() {
+    let (fake, real, mut events) = installed(Status::SignedOut, Duration::from_secs(3600));
+    let setup: &dyn crate::setup::backend::SetupAgents = &fake;
+    setup.check_status(&claude()).unwrap();
+    assert_eq!(states(&mut events, 1), [SIGNED_OUT]);
+    assert_eq!(setup.signin_state(&claude()), Some(SIGNED_OUT));
+    assert!(real.calls.lock().unwrap().is_empty(), "S18 is not asked");
+}
+
+#[test]
+fn slow_and_hang_say_checking_then_signed_out_after_their_wait() {
+    for (status, limit_ms, at_least) in [(Status::Slow, 40, 60), (Status::Hang, 20, 140)] {
+        let (fake, _real, mut events) = installed(status, Duration::from_millis(limit_ms));
+        let setup: &dyn crate::setup::backend::SetupAgents = &fake;
+        let began = clauseo_agents::testing::instant();
+        setup.check_status(&claude()).unwrap();
+        assert_eq!(
+            states(&mut events, 1),
+            [SigninState::Checking],
+            "{status:?}"
+        );
+        assert_eq!(setup.signin_state(&claude()), Some(SigninState::Checking));
+        assert_eq!(states(&mut events, 1), [SIGNED_OUT], "{status:?}");
+        let took = clauseo_agents::testing::millis_since(began);
+        assert!(took >= at_least, "{status:?} answered after {took} ms");
+    }
+}
+
+#[test]
+fn a_scripted_sign_in_pressed_while_checking_plays_and_the_check_s_end_never_comes() {
+    let (fake, _real, mut events) = installed(Status::Hang, Duration::from_millis(20));
+    let setup: &dyn crate::setup::backend::SetupAgents = &fake;
+    setup.check_status(&claude()).unwrap();
+    assert_eq!(states(&mut events, 1), [SigninState::Checking]);
+    setup.sign_in(&claude(), Method::Browser).unwrap();
+    let signed_in = SigninState::SignedIn {
+        email: Some(EMAIL.to_owned()),
+        plan: None,
+        source: Source::Own,
+        at: at(),
+    };
+    assert_eq!(
+        states(&mut events, 3),
+        [SigninState::Queued, waiting(), signed_in.clone()]
+    );
+    // past the check's 140 ms: its SignedOut was dropped, the sign-in stands
+    futures::executor::block_on(async_io::Timer::after(Duration::from_millis(300)));
+    assert_eq!(setup.signin_state(&claude()), Some(signed_in));
 }

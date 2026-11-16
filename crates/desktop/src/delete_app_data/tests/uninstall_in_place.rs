@@ -1,12 +1,14 @@
 //! The per-machine uninstaller runs in place and deletes itself (`windows/uninstall_in_place.nsh`):
 //! `_?=` in both registry commands; in `un.onInit` its plug-in folder first, then a refusal
 //! unless it runs in its own folder; then a delayed hidden cmd line, guarded by the main exe's
-//! absence, that deletes the image and removes only empty folders, started once per run.
+//! absence, that deletes the image, removes its own plug-in folder by its exact path and then the
+//! install folder only when empty, started once per run; and a line on its standard output when
+//! its section aborts.
 //! Per-user keeps Tauri's lines. The Windows VM runs it for real.
 
-use super::admin_copy::{assert_run, code_of, firm_it_codes, macro_body};
+use super::admin_copy::{assert_run, block, code_of, firm_it_codes, macro_body};
 use super::safe_temp::loads_a_plug_in;
-use super::sources::{line_with, read};
+use super::sources::{hook_code, line_with, read};
 use super::template::{TEMPLATE, block_code, split_blocks};
 
 fn code() -> Vec<String> {
@@ -123,7 +125,7 @@ fn the_uninstaller_makes_its_plug_in_folder_first_in_un_on_init() {
         macro_body(&start, "CLAUSEO_SAFE_PLUGINSDIR"),
         &[
             "!ifdef __UNINSTALL__",
-            "MessageBox MB_OK|MB_ICONSTOP \"$(uninstallTempFailed)\" /SD IDOK",
+            "MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST \"$(uninstallTempFailed)\" /SD IDOK",
             "!else",
         ],
     );
@@ -215,10 +217,11 @@ fn a_path_with_a_cmd_metacharacter_builds_no_command_line() {
 }
 
 /// The whole cmd line, as NSIS builds it: cmd without `AutoRun` or delayed expansion, PING by
-/// full path, uninstall.exe deleted only while no main exe is back, then the folder removed only
-/// when empty. No `installer-temp`: the plug-in folder has no parent of its own
-/// (`safe_temp.nsh`).
-const COMMAND: &str = r#"StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir "$INSTDIR""'"#;
+/// full path, uninstall.exe deleted only while no main exe is back, then the uninstaller's own
+/// plug-in folder (which NSIS's exit leaves, its System.dll in it: `safe_temp.nsh`), once more
+/// about 5 s later if it is still there, then the install folder only when empty. No
+/// `installer-temp`: the plug-in folder has no parent of its own.
+const COMMAND: &str = r#"StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir /s /q "$PLUGINSDIR" & (if exist "$PLUGINSDIR" ("$SYSDIR\PING.EXE" -n 6 127.0.0.1 >nul & rmdir /s /q "$PLUGINSDIR")) & rmdir "$INSTDIR""'"#;
 
 #[test]
 fn the_line_is_checked_then_built_to_delete_the_image_only_while_no_main_exe_is_back() {
@@ -227,13 +230,31 @@ fn the_line_is_checked_then_built_to_delete_the_image_only_while_no_main_exe_is_
         macro_body(&code, "CLAUSEO_UNINSTALL_SELF_DELETE")[1..],
         [
             r#"!if "${INSTALLMODE}" == "perMachine""#,
+            // The main exe's retry first (the test below), per machine only.
+            "!insertmacro CLAUSEO_UNINSTALL_RETRY_MAIN_EXE",
             "Push $0",
+            "Push $1",
             r#"StrCpy $ClauseoSelfDelete """#,
             r#"!insertmacro CLAUSEO_CMD_SAFE "$INSTDIR\${MAINBINARYNAME}.exe" $0"#,
+            // The plug-in folder the line removes: cmd-safe too, and the one this run made,
+            // directly in %ProgramFiles%\Clauseo (safe_temp.rs runs that test).
+            "${If} $0 = 1",
+            r#"!insertmacro CLAUSEO_CMD_SAFE "$PLUGINSDIR" $0"#,
+            "${EndIf}",
+            "${If} $0 = 1",
+            "!insertmacro CLAUSEO_OWN_PLUGINSDIR $0",
+            "${EndIf}",
             "${If} $0 = 1",
             r#"${AndIf} ${FileExists} "$INSTDIR\uninstall.exe""#,
             COMMAND,
+            // No line NSIS cut at its string limit: a cut path could name a parent folder.
+            "StrLen $1 $ClauseoSelfDelete",
+            "IntOp $1 $1 + 1",
+            "${If} $1 >= ${NSIS_MAX_STRLEN}",
+            r#"StrCpy $ClauseoSelfDelete """#,
             "${EndIf}",
+            "${EndIf}",
+            "Pop $1",
             "Pop $0",
             "${If} ${Silent}",
             "!insertmacro CLAUSEO_START_SELF_DELETE",
@@ -245,15 +266,76 @@ fn the_line_is_checked_then_built_to_delete_the_image_only_while_no_main_exe_is_
     for line in &code {
         assert!(!line.starts_with("Rename "), "{line}");
         assert!(!line.starts_with("GetTempFileName "), "{line}");
-        // No recursive removal anywhere in the file.
-        assert!(!line.contains("/s"), "{line}");
+        // No recursive removal anywhere in the file but the line's, of the plug-in folder.
+        assert!(line == COMMAND || !line.contains("/s"), "{line}");
         assert!(!line.contains("RMDir /r"), "{line}");
     }
+    // The line's: rmdir /s twice, each on "$PLUGINSDIR" whole, and $INSTDIR never with /s.
+    assert_eq!(COMMAND.matches("/s").count(), 2);
+    assert_eq!(COMMAND.matches(r#"rmdir /s /q "$PLUGINSDIR" "#).count(), 1);
+    assert_eq!(COMMAND.matches(r#"rmdir /s /q "$PLUGINSDIR")"#).count(), 1);
+    assert_eq!(COMMAND.matches(r#"rmdir "$INSTDIR""#).count(), 1);
+    assert!(COMMAND.ends_with(r#" & rmdir "$INSTDIR""'"#));
     // The comments say why /d is there, and what happens when the guard loses.
     let text = read("windows/uninstall_in_place.nsh");
     assert!(text.contains("; /d: an elevated cmd would otherwise run HKCU's Command Processor"));
     assert!(text.contains("in the instant between cmd's \"if\" and its \"del\""));
     assert!(text.contains("When the guard holds, the old file stays, which is harmless."));
+}
+
+#[test]
+fn a_held_main_exe_gets_ten_more_deletes_a_second_apart_never_under_update_nor_at_restart() {
+    let code = code();
+    // Per machine, not under /UPDATE: while the main exe is there, a second's wait and one more
+    // delete, at most CLAUSEO_MAIN_EXE_RETRIES times; nothing when the template's delete worked.
+    assert_eq!(
+        macro_body(&code, "CLAUSEO_UNINSTALL_RETRY_MAIN_EXE")[1..],
+        [
+            "${If} $UpdateMode <> 1",
+            "Push $0",
+            "${For} $0 1 ${CLAUSEO_MAIN_EXE_RETRIES}",
+            r#"${IfNot} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe""#,
+            "${ExitFor}",
+            "${EndIf}",
+            "Sleep 1000",
+            r#"Delete "$INSTDIR\${MAINBINARYNAME}.exe""#,
+            "${Next}",
+            "Pop $0",
+            "${EndIf}",
+        ]
+    );
+    assert!(code.contains(&"!define CLAUSEO_MAIN_EXE_RETRIES 10".to_owned()));
+    // Its one use: first in the self-delete's per-machine block (the test above), which the
+    // template inserts last in Section Uninstall; so a per-user build has none of it.
+    let uses: Vec<&String> = code
+        .iter()
+        .filter(|line| line.contains("CLAUSEO_UNINSTALL_RETRY_MAIN_EXE"))
+        .collect();
+    assert_eq!(
+        uses,
+        [
+            "!macro CLAUSEO_UNINSTALL_RETRY_MAIN_EXE",
+            "!insertmacro CLAUSEO_UNINSTALL_RETRY_MAIN_EXE",
+        ]
+    );
+    // Nothing queued for a restart: a reinstall before it writes the same paths, and the
+    // restart would delete the new files.
+    for line in &code {
+        assert!(!line.contains("/REBOOTOK"), "{line}");
+    }
+    // $UpdateMode is the uninstaller's own /UPDATE, which an update always passes: the
+    // reinstall page appends it whenever the installer has it.
+    let text = read(TEMPLATE);
+    let un_init = span(&text, "Function un.onInit", "FunctionEnd");
+    line_with(
+        &un_init,
+        &[r#"${GetOptions} $CMDLINE "/UPDATE" $UpdateMode"#],
+    );
+    let leave = span(&text, "Function PageLeaveReinstall", "FunctionEnd");
+    line_with(
+        &leave,
+        &[r#"${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE"#],
+    );
 }
 
 #[test]
@@ -293,7 +375,7 @@ fn the_uninstaller_refuses_to_run_anywhere_but_its_own_folder_with_26() {
             "${EndIf}",
             // StrCmp, so without case.
             "${If} $0 != $1",
-            r#"MessageBox MB_OK|MB_ICONSTOP "$(uninstallNotInPlace)" /SD IDOK"#,
+            r#"MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST "$(uninstallNotInPlace)" /SD IDOK"#,
             "SetErrorLevel ${CLAUSEO_EXIT_NOT_IN_PLACE}",
             "Quit",
             "${EndIf}",
@@ -371,4 +453,66 @@ fn the_command_starts_once_hidden_in_sysdir_from_the_section_under_s_else_at_gui
     line_with(&code, &["Var ClauseoSelfDelete"]);
     let copy = read("windows/admin_copy.nsh");
     assert!(copy.contains(r#"!include "${__FILEDIR__}\uninstall_in_place.nsh""#));
+}
+
+#[test]
+fn the_per_machine_uninstall_deletes_the_install_folder_key_but_not_under_update() {
+    // What the template writes in Section Install, each install a reinstall's included, and what
+    // its uninstall deletes only behind the box the pre-uninstall hook clears.
+    let text = read(TEMPLATE);
+    let install = span(&text, "Section Install", "SectionEnd");
+    line_with(
+        &install,
+        &[r#"WriteRegStr SHCTX "${MANUPRODUCTKEY}" "" $INSTDIR"#],
+    );
+    let uninstall = span(&text, "Section Uninstall", "SectionEnd");
+    let app_data = line_with(&uninstall, &["${If} $DeleteAppDataCheckboxState = 1"]);
+    assert!(app_data < line_with(&uninstall, &[r#"DeleteRegKey SHCTX "${MANUPRODUCTKEY}""#]));
+    // The hook: per machine, not under /UPDATE, the key in the 64-bit view it was written in,
+    // then its parent only when empty, the view put back.
+    let code = hook_code();
+    assert_eq!(
+        macro_body(&code, "NSIS_HOOK_POSTUNINSTALL")[1..],
+        [
+            r#"!if "${INSTALLMODE}" == "perMachine""#,
+            "${If} $UpdateMode <> 1",
+            "SetRegView 64",
+            r#"DeleteRegKey HKLM "${MANUPRODUCTKEY}""#,
+            r#"DeleteRegKey /ifempty HKLM "${MANUKEY}""#,
+            "SetRegView lastused",
+            "${EndIf}",
+            "!endif",
+        ]
+    );
+    // The template's defines it names.
+    assert!(text.contains(r#"!define MANUKEY "Software\${MANUFACTURER}""#));
+    assert!(text.contains(r#"!define MANUPRODUCTKEY "${MANUKEY}\${PRODUCTNAME}""#));
+}
+
+#[test]
+fn an_uninstall_whose_section_aborts_says_so_on_its_standard_output_and_writes_no_file() {
+    let code = code();
+    // NSIS calls it only when the section fails (exit 2 unless a code was set): one line to the
+    // standard output the caller gave, none without one (0 or INVALID_HANDLE_VALUE).
+    assert_eq!(
+        block(&code, "Function un.onUninstFailed", "FunctionEnd"),
+        [
+            "Function un.onUninstFailed",
+            "System::Call 'kernel32::GetStdHandle(i -11) p .r0'",
+            "${If} $0 P<> 0",
+            "${AndIf} $0 P<> -1",
+            r#"FileWrite $0 "clauseo uninstall: aborted in Section Uninstall$\r$\n""#,
+            "${EndIf}",
+            "FunctionEnd",
+        ]
+    );
+    // It opens no file, and it is the only one: the template defines none.
+    assert!(!code.iter().any(|line| line.starts_with("FileOpen ")));
+    assert_eq!(
+        code.iter()
+            .filter(|line| *line == "Function un.onUninstFailed")
+            .count(),
+        1
+    );
+    assert!(!read(TEMPLATE).contains("un.onUninstFailed"));
 }

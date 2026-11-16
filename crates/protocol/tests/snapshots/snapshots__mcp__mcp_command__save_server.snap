@@ -1,0 +1,34 @@
+---
+source: crates/protocol/tests/snapshots/mcp.rs
+expression: "super::save(clauseo_protocol::REDACTED_TEXT)"
+---
+{
+  "save_server": {
+    "previous_name": "gh",
+    "server": {
+      "name": "github",
+      "kind": "local",
+      "command": "/opt/homebrew/bin/npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": [
+        {
+          "name": "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "value": {
+            "set": "[redacted]"
+          }
+        },
+        {
+          "name": "GITHUB_TOOLSETS",
+          "value": {
+            "keep": {}
+          }
+        }
+      ],
+      "headers": [],
+      "enabled": true
+    }
+  }
+}

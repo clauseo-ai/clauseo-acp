@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"outer","status":"failed","meta":{"toolCallId":"inner","status":"completed"}},"_meta":{"sessionId":"inner-s"}}}

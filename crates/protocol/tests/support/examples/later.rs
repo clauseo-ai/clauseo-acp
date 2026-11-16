@@ -1,13 +1,16 @@
 //! `TurnFailed` examples for codes added after the 0048 install and sign-in set, which
 //! `later_variants` in the parent module chains on before them, R24's case-law records, and the
-//! host notices with a kind, which it chains on last, the skill pack notices among them.
+//! host notices with a kind, which it chains on next, the skill pack notices among them, and the
+//! later stop reasons (`NotAllowed`'s moved here from it), which it chains on next, and the later
+//! steer outcomes, which it chains on last.
 
 use clauseo_protocol::{
     AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PackId,
-    PackSkipReason, PageVia, PageVisited, SearchSource, TurnFailed, WebResult, WebSearchRecorded,
+    PackSkipReason, PageVia, PageVisited, SearchSource, SteerOutcome, SteerResolved, StopReason,
+    TurnEnded, TurnFailed, WebResult, WebSearchRecorded,
 };
 
-use crate::fixtures::{tool_call_id, turn_id};
+use crate::fixtures::{checkpoint_id, message_id, tool_call_id, turn_id};
 
 /// One `TurnFailed` of turn 3 for each later code, in the order the corpus first saw them.
 pub(super) fn failures() -> Vec<DomainEvent> {
@@ -97,10 +100,153 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::BlocklistRevokeNotSaved,
             "the data folder is read-only",
         ),
+        failed(
+            ErrorCode::SandboxCleaningUp,
+            "the sandbox's clean-up after an earlier session isn't finished",
+        ),
+        failed(ErrorCode::BlacklineNoWordTool, "stetdoc is not configured"),
+        failed(ErrorCode::BlacklineNotWord, "the path is not a .docx"),
+        failed(ErrorCode::BlacklineFailed, "stetdoc compare exited 1"),
+        // Never a turn's failure in practice (tracked-change codes); here for the corpus.
+        failed(ErrorCode::WordStetdocMissing, "no stetdoc program"),
+        failed(
+            ErrorCode::WordRevisionsStale,
+            "the file changed since the list",
+        ),
+        failed(ErrorCode::WordNotDocx, "not a Word document"),
+        failed(ErrorCode::WordEditFailed, "stetdoc timed out"),
+        failed(
+            ErrorCode::MatterFolderPermission,
+            "the privacy settings keep Clauseo from opening the matter folder",
+        ),
+    ]
+    .into_iter()
+    .chain(agent_failures())
+    .chain(mcp_failures())
+    .collect()
+}
+
+/// The later agent codes of a turn's end (D-050's offline and quiet, the too-long prompt, the
+/// service's own failure, a folder the agent can't start in), in the order the corpus first saw
+/// them.
+fn agent_failures() -> Vec<DomainEvent> {
+    vec![
+        failed(
+            ErrorCode::AgentOffline,
+            "the window said the computer is offline",
+        ),
+        failed(
+            ErrorCode::PromptTooLong,
+            "SendPrompt: prompt text in JSON-escaped bytes is 6291457, over the limit of 6291456",
+        ),
+        failed(
+            ErrorCode::AgentServiceError,
+            "the agent gave up on the turn (sessionFailure service)",
+        ),
+        failed(
+            ErrorCode::AgentQuiet,
+            "the agent sent nothing for 300 s with no tool running and no question waiting",
+        ),
+        failed(
+            ErrorCode::MatterFolderBackslash,
+            "the matter folder's path has a backslash, where Claude Code cannot start",
+        ),
+        failed(
+            ErrorCode::AgentFolderInaccessible,
+            "the agent could not open the matter folder as its working folder",
+        ),
+        failed(
+            ErrorCode::AgentUnreachable,
+            "the agent could not reach its service; probe class=refused via=direct status=0",
+        ),
+    ]
+}
+
+/// The Settings › Tools codes (`mcp.*`): never a turn's failure in practice; here for the corpus.
+fn mcp_failures() -> Vec<DomainEvent> {
+    vec![
+        failed(ErrorCode::McpNameEmpty, "the server has no name"),
+        failed(ErrorCode::McpNameTaken, "another server has this name"),
+        failed(
+            ErrorCode::McpNameReserved,
+            "the name is kept for Clauseo's own tool",
+        ),
+        failed(
+            ErrorCode::McpNameInvalid,
+            "the name holds a character it may not",
+        ),
+        failed(
+            ErrorCode::McpCommandInvalid,
+            "the program is a relative path",
+        ),
+        failed(
+            ErrorCode::McpCommandNotFound,
+            "the program is not on this computer",
+        ),
+        failed(ErrorCode::McpUrlInvalid, "the URL is not https"),
+        failed(
+            ErrorCode::McpHeaderNameInvalid,
+            "a header name is not a token",
+        ),
+        failed(
+            ErrorCode::McpEnvNameInvalid,
+            "a variable name is not an identifier",
+        ),
+        failed(
+            ErrorCode::McpSecretStoreFailed,
+            "the keychain refused the write",
+        ),
+        failed(ErrorCode::McpServerUnknown, "no server of that name"),
+        failed(
+            ErrorCode::McpSaveDeclined,
+            "the lawyer did not allow the program",
+        ),
+        failed(
+            ErrorCode::McpImportTooLarge,
+            "the import is too long to show in one confirm",
+        ),
+        failed(
+            ErrorCode::BlacklineNestedTable,
+            "stetdoc refused the compare over a table inside a table",
+        ),
+        failed(
+            ErrorCode::BlacklineCannotCompare,
+            "stetdoc refused the compare",
+        ),
+        failed(
+            ErrorCode::BlacklineNotReadable,
+            "stetdoc could not read a version",
+        ),
+        failed(
+            ErrorCode::BlacklineTooLarge,
+            "a version is past stetdoc's limit",
+        ),
+        failed(
+            ErrorCode::BlacklineFormatUnknown,
+            "the view is not in the stet 1 format",
+        ),
     ]
 }
 
 /// A `TurnFailed` of turn 3 with `code` and `detail`.
+/// Folder PR 2's refusal codes, never a turn's failure in practice; here for the corpus.
+fn folder_failures() -> Vec<DomainEvent> {
+    vec![
+        failed(
+            ErrorCode::MatterFolderInClauseoData,
+            "inside Clauseo's data folder",
+        ),
+        failed(
+            ErrorCode::MatterFolderInsideMatter,
+            "inside another matter's folder",
+        ),
+        failed(
+            ErrorCode::MatterFolderHoldsMatter,
+            "holds another matter's folder",
+        ),
+    ]
+}
+
 fn failed(code: ErrorCode, detail: &str) -> DomainEvent {
     TurnFailed {
         turn: turn_id(3),
@@ -129,6 +275,31 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 ],
                 more: 0,
             }),
+        },
+        Notice {
+            level: NoticeLevel::Info,
+            text: "Claude's automatic mode isn't available for this account, so Claude asks \
+                   before running commands."
+                .to_owned(),
+            kind: Some(NoticeKind::AutoModeUnavailable),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo blocked a request: it reaches outside this matter.".to_owned(),
+            kind: Some(NoticeKind::OutsideMatterBlocked),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo stopped a step: ChatGPT tried to go online by running a command. \
+                   ChatGPT can use web search instead."
+                .to_owned(),
+            kind: Some(NoticeKind::ShellNetworkBlocked),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo stopped a step: ChatGPT tried to go online by running a command."
+                .to_owned(),
+            kind: Some(NoticeKind::ShellNetworkBlockedNoWebSearch),
         },
     ];
     notices.extend(
@@ -176,9 +347,13 @@ fn skill_pack_notice(reason: PackSkipReason, words: &str) -> Notice {
     }
 }
 
-/// [`failures`], then [`case_law`], as the corpus first saw them.
+/// [`failures`], then [`folder_failures`], then [`case_law`], as the corpus first saw them.
 pub(super) fn failures_then_case_law() -> Vec<DomainEvent> {
-    failures().into_iter().chain(case_law()).collect()
+    failures()
+        .into_iter()
+        .chain(folder_failures())
+        .chain(case_law())
+        .collect()
 }
 
 /// R24: a document read through the case-law connector, and the connector's search.
@@ -203,6 +378,46 @@ fn case_law() -> Vec<DomainEvent> {
             )
             .with_source(SearchSource::CaseLaw, Some("search_law")),
         )
+        .into(),
+    ]
+}
+
+/// One `TurnEnded` of turn 3 for each stop reason added after v1: `NotAllowed`, `OutsideMatter`,
+/// `TooLong`.
+pub(super) fn stops() -> Vec<DomainEvent> {
+    vec![
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::NotAllowed,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
+        .into(),
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::OutsideMatter,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
+        .into(),
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::TooLong,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
+        .into(),
+    ]
+}
+
+/// One `SteerResolved` for each steer outcome added after v1: `NotSent`.
+pub(super) fn steers() -> Vec<DomainEvent> {
+    vec![
+        SteerResolved {
+            message: message_id(5),
+            outcome: SteerOutcome::NotSent { turn: turn_id(3) },
+            aside: Vec::new(),
+        }
         .into(),
     ]
 }

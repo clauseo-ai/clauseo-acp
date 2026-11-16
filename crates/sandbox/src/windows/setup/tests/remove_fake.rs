@@ -15,6 +15,7 @@ use crate::windows::acl_plan::{Grant, Sid};
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
 use crate::windows::pool::MachineRecord;
+use crate::windows::runner::marker::{marker_path, remove_marker, unclean_sessions};
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::remove::Removal;
@@ -292,6 +293,11 @@ impl Removal for Remover {
         Machine::delete_group(&mut self.m, group)
     }
 
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError> {
+        self.call(format!("remove_remote_logon_deny {}", rid(group)))?;
+        Machine::remove_remote_logon_deny(&mut self.m, group)
+    }
+
     fn as_owner<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> Result<T, MachineError> {
         if !self.can_act_as_owner() {
             return Err(MachineError::Other(
@@ -339,6 +345,21 @@ impl Removal for Remover {
         forget_bookkeeping(&self.m.data_dir(), matter)
             .map(drop)
             .map_err(|failure| MachineError::Other(failure.to_string()))
+    }
+
+    fn clear_markers(&mut self) -> Result<usize, MachineError> {
+        self.call("clear_markers")?;
+        assert!(
+            self.m.acting.get(),
+            "the markers are removed only as the owner"
+        );
+        let data = self.m.data_dir();
+        let sessions = unclean_sessions(&data).map_err(|e| MachineError::Other(e.to_string()))?;
+        for session in &sessions {
+            remove_marker(&marker_path(&data, &session.id))
+                .map_err(|e| MachineError::Other(e.to_string()))?;
+        }
+        Ok(sessions.len())
     }
 
     fn admins_ledger(

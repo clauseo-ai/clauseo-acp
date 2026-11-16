@@ -52,13 +52,19 @@ export interface HostTransport {
    * folder's ref and its home-relative display; `null` when the lawyer cancels. */
   pickFolder(): Promise<PickedFolder | null>;
   displayInfo(): Promise<DisplayInfo>;
-  /** Opens a web or mail link (https, http, mailto) in the default browser or mail app, after the host's native
-   * confirm names its host. A declined confirm rejects with `transport.unauthorized`; a bad link with
+  /** Opens a web or mail link (https, http, mailto) in the default browser or mail app. `shown` is the link's visible
+   * text: a plain web link opens at once, and a mailto link or one whose text names another site only after the host's
+   * native confirm names its host. `alwaysAsk` asks for any link, for an open that leads to more (Get installer
+   * quits Clauseo once the page opened). A declined confirm rejects with `transport.unauthorized`; a bad link with
    * `command.invalid`. */
-  openExternal(url: string): Promise<void>;
+  openExternal(url: string, shown?: string, alwaysAsk?: boolean): Promise<void>;
   /** Quits Clauseo the way Cmd+Q does: the agents' installs and sign-ins stop, then the host, and
    * the app ends. Resolves once the host has the request; the window is gone after it. */
   quitApp(): Promise<void>;
+  /** Opens macOS's Files and Folders privacy pane in System Settings, and nothing else: the desktop's
+   * `open_privacy_settings`, which takes no arguments. Off macOS it rejects with `command.invalid`; the room offers it
+   * on the Mac only, under `matter.folder_permission` (room/thread/privacy-settings.tsx). */
+  openPrivacySettings(): Promise<void>;
   /** Opens a matter document with its default app; `protected_view` says Word opened it in Protected View (a Word
    * document whose path is too long for Word, opened by its folders' short names on Windows). */
   openFile(file: FileRefId): Promise<OpenedFile>;
@@ -140,6 +146,7 @@ export class NullTransport implements HostTransport {
   displayInfo = nothing;
   openExternal = nothing;
   quitApp = nothing;
+  openPrivacySettings = nothing;
   openFile = nothing;
   reveal = nothing;
   subscribe(): () => void {

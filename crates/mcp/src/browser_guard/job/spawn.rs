@@ -9,7 +9,12 @@
 //! - stdin, stdout and stderr each `NUL`, a pipe or the guard's own handle ([`Io`]); only these
 //!   three are inherited, named in a `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`;
 //! - `CREATE_NO_WINDOW` (agent-browser issue #1644), and exactly the given environment;
-//! - the working folder, and std's quoting of the program and arguments (`command_line.rs`).
+//! - the working folder, and std's quoting of the program and arguments (`command_line.rs`);
+//! - on the guard's real runs, the hardened process and thread descriptors (`harden.rs`) in
+//!   `lpProcessAttributes` and `lpThreadAttributes`, so the child is hardened from its first
+//!   instruction;
+//! - and any further handles the caller made inheritable ([`Launch::inherit`]: the browser's
+//!   `DevTools` pipe ends, `chrome/pipe.rs`), added to the same handle list and nothing else.
 //!
 //! The child starts running, not suspended: it is in the job from its creation, so nothing has
 //! to wait for it to join. The guard writes Chrome's `running` record after this returns, as
@@ -27,9 +32,9 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{self, PipeReader, PipeWriter};
-use std::os::windows::ffi::OsStrExt;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{
     DUPLICATE_SAME_ACCESS, DuplicateHandle, GENERIC_READ, GENERIC_WRITE, HANDLE,
@@ -39,6 +44,7 @@ use windows::Win32::Security::SECURITY_ATTRIBUTES;
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
+use windows::Win32::System::SystemInformation::{GetSystemDirectoryW, GetWindowsDirectoryW};
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
     EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, InitializeProcThreadAttributeList,
@@ -49,6 +55,8 @@ use windows::Win32::System::Threading::{
 use windows::core::{PCWSTR, PWSTR, w};
 
 use super::super::command_line::{command_line, current_dir, env_block, is_batch};
+use super::super::env::WindowsDirs;
+use super::super::harden::Hardened;
 use super::child::Child;
 
 /// What one of a child's stdin, stdout and stderr is.
@@ -75,15 +83,24 @@ pub(crate) struct Launch<'a> {
     pub(crate) stdin: Io,
     pub(crate) stdout: Io,
     pub(crate) stderr: Io,
+    /// Inheritable handles the child gets besides its three standard ones, by the values the
+    /// caller already put on its command line. The caller owns them and closes them once this
+    /// returns.
+    pub(crate) inherit: &'a [RawHandle],
 }
 
-/// Starts `launch` in `job`, running. Every handle made here closes on every way out.
+/// Starts `launch` in `job` (none: in the guard's own jobs, as any child; only the guard's
+/// hardened copy, `job::start_copy`), running. Every handle made here closes on every way out.
 ///
 /// Refuses a relative program, which `CreateProcessW` would resolve against the guard's own
 /// folder, and a batch file (`is_batch`), which it would run through `cmd.exe`, whose quoting
 /// is not the one `command_line.rs` applies (CVE-2024-24576); std quotes for `cmd.exe` there or
 /// refuses. Both callers pass absolute executables the guard checked; this keeps it so.
-pub(super) fn spawn(job: HANDLE, launch: &Launch<'_>) -> io::Result<Child> {
+pub(super) fn spawn(
+    job: Option<HANDLE>,
+    hardened: Option<&Hardened>,
+    launch: &Launch<'_>,
+) -> io::Result<Child> {
     let program: Vec<u16> = launch.program.as_os_str().encode_wide().collect();
     if !launch.program.is_absolute() {
         return Err(io::Error::new(
@@ -119,6 +136,7 @@ pub(super) fn spawn(job: HANDLE, launch: &Launch<'_>) -> io::Result<Child> {
         .iter()
         .filter_map(|stdio| stdio.theirs.as_ref())
         .map(|handle| HANDLE(handle.as_raw_handle()))
+        .chain(launch.inherit.iter().map(|handle| HANDLE(*handle)))
         .collect();
     let inherit = !inherited.is_empty();
     let mut attributes = Attributes::new(job, inherited)?;
@@ -132,18 +150,22 @@ pub(super) fn spawn(job: HANDLE, launch: &Launch<'_>) -> io::Result<Child> {
     startup.lpAttributeList = attributes.list();
     let flags = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
     let mut info = PROCESS_INFORMATION::default();
+    let process_attributes = hardened.map(Hardened::process);
+    let thread_attributes = hardened.map(Hardened::thread);
     // SAFETY: `application`, `cwd` and `env` are NUL-terminated UTF-16 buffers (`env` a whole
     // block of `name=value` entries, as CREATE_UNICODE_ENVIRONMENT says), and `line` a
     // NUL-terminated buffer the call may write into, all live until it returns. `startup` is a
     // STARTUPINFOEXW whose `cb` is its size (EXTENDED_STARTUPINFO_PRESENT), its standard
     // handles open or null, and its attribute list initialised and live in `attributes`, with
     // the job and handle values it points to. `info` is a live PROCESS_INFORMATION it writes.
+    // The two SECURITY_ATTRIBUTES, when given, are live locals whose descriptors `hardened`
+    // owns for the call.
     unsafe {
         CreateProcessW(
             PCWSTR(application.as_ptr()),
             Some(PWSTR(line.as_mut_ptr())),
-            None,
-            None,
+            process_attributes.as_ref().map(|value| &raw const *value),
+            thread_attributes.as_ref().map(|value| &raw const *value),
             inherit,
             flags,
             Some(env.as_ptr().cast()),
@@ -170,6 +192,29 @@ pub(super) fn spawn(job: HANDLE, launch: &Launch<'_>) -> io::Result<Child> {
         stdout.ours.map(PipeReader::from),
         stderr.ours.map(PipeReader::from),
     ))
+}
+
+/// The Windows directory and the system directory, as Windows reports them: the defaults the
+/// child's environment gives `SystemRoot`, `windir` and `ComSpec` (`env.rs`). A call that fails
+/// leaves its field `None`.
+pub(crate) fn windows_dirs() -> WindowsDirs {
+    WindowsDirs {
+        windows: directory(GetWindowsDirectoryW),
+        system: directory(GetSystemDirectoryW),
+    }
+}
+
+/// The folder `call` writes into a buffer, or `None` when the call fails or the folder does not
+/// fit the buffer (a too-small buffer gets the length it needs back, at least the buffer's).
+fn directory(call: unsafe fn(Option<&mut [u16]>) -> u32) -> Option<PathBuf> {
+    let mut buffer = [0_u16; 1024];
+    // SAFETY: `buffer` is a live array the call may write up to its length of UTF-16 units
+    // into; it is read only after the call returns.
+    let length = usize::try_from(unsafe { call(Some(&mut buffer[..])) }).ok()?;
+    if length == 0 || length >= buffer.len() {
+        return None;
+    }
+    Some(PathBuf::from(OsString::from_wide(&buffer[..length])))
 }
 
 /// One of a child's standard handles: the child's end, inheritable and closed once the child
@@ -222,7 +267,7 @@ impl Stdio {
 }
 
 /// An inheritable copy of `handle`, with its access.
-fn inheritable(handle: HANDLE) -> io::Result<OwnedHandle> {
+pub(crate) fn inheritable(handle: HANDLE) -> io::Result<OwnedHandle> {
     let mut copy = HANDLE::default();
     // SAFETY: the current process's pseudo handle needs no closing; `handle` is open for the
     // call (the caller holds it), and `copy` is a live HANDLE the call writes.
@@ -283,9 +328,10 @@ struct Attributes {
 }
 
 impl Attributes {
-    /// The list for `job` and, unless none, `handles`.
-    fn new(job: HANDLE, handles: Vec<HANDLE>) -> io::Result<Attributes> {
-        let count = if handles.is_empty() { 1 } else { 2 };
+    /// The list for `job` and `handles`, each unless none.
+    fn new(job: Option<HANDLE>, handles: Vec<HANDLE>) -> io::Result<Attributes> {
+        // At least one slot, used or not: a list of none is no list.
+        let count = (u32::from(job.is_some()) + u32::from(!handles.is_empty())).max(1);
         let mut size = 0_usize;
         // SAFETY: with no list the call only writes the size a list of `count` needs into the
         // live `size`; it reports ERROR_INSUFFICIENT_BUFFER, which is expected.
@@ -296,7 +342,7 @@ impl Attributes {
         let mut attributes = Attributes {
             storage: vec![0; size.div_ceil(size_of::<usize>())].into_boxed_slice(),
             initialised: false,
-            jobs: Box::new([job]),
+            jobs: job.into_iter().collect(),
             handles: handles.into_boxed_slice(),
         };
         // SAFETY: `storage` is at least `size` writable bytes, aligned for pointers, which
@@ -306,22 +352,25 @@ impl Attributes {
         }
         .map_err(io::Error::from)?;
         attributes.initialised = true;
-        let job_list = usize::try_from(PROC_THREAD_ATTRIBUTE_JOB_LIST).map_err(io::Error::other)?;
-        // SAFETY: the list is initialised for `count` attributes; `jobs` is an array of one job
-        // handle, open while the caller's `Job` lives, of the size given, owned by
-        // `attributes`, so it outlives the list, which its drop deletes first.
-        unsafe {
-            UpdateProcThreadAttribute(
-                attributes.list(),
-                0,
-                job_list,
-                Some(attributes.jobs.as_ptr().cast()),
-                size_of_val(&*attributes.jobs),
-                None,
-                None,
-            )
+        if !attributes.jobs.is_empty() {
+            let job_list =
+                usize::try_from(PROC_THREAD_ATTRIBUTE_JOB_LIST).map_err(io::Error::other)?;
+            // SAFETY: the list is initialised for `count` attributes; `jobs` is an array of one
+            // job handle, open while the caller's `Job` lives, of the size given, owned by
+            // `attributes`, so it outlives the list, which its drop deletes first.
+            unsafe {
+                UpdateProcThreadAttribute(
+                    attributes.list(),
+                    0,
+                    job_list,
+                    Some(attributes.jobs.as_ptr().cast()),
+                    size_of_val(&*attributes.jobs),
+                    None,
+                    None,
+                )
+            }
+            .map_err(io::Error::from)?;
         }
-        .map_err(io::Error::from)?;
         if attributes.handles.is_empty() {
             return Ok(attributes);
         }

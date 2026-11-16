@@ -20,6 +20,7 @@ use crate::clock::{Clock as _, ManualClock};
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
 
+mod needed;
 mod server;
 use server::{Reply, Server};
 

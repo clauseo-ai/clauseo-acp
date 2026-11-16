@@ -566,3 +566,31 @@ fn a_url_with_any_format_character_is_refused() {
         assert!(!is_safe_url_text(bad), "{bad:?}");
     }
 }
+
+/// A Codex MCP call is kept once, by the host's own note before any source claims it
+/// (`actor/turn/updates.rs`); `Sources::started` no longer keeps it, so a call that also reaches
+/// it, or is noted again, is still one entry. Claude's calls are never kept.
+#[test]
+fn a_codex_mcp_call_is_kept_once() {
+    let codex = AgentId::new("codex-acp").unwrap();
+    let input = json!({"server": "case-law", "tool": "search_law", "arguments": {}});
+    let call = call(
+        "mcp.case-law.search_law",
+        ToolKind::Execute,
+        None,
+        ToolCallStatus::InProgress,
+        Some(&input),
+    );
+    let mut sources = Sources::default();
+    sources.codex_mcp_started(&codex, &call);
+    let _ = sources.started(turn(), tool_id(), &codex, &call);
+    sources.codex_mcp_started(&codex, &call);
+    assert_eq!(sources.codex_mcp_len(), 1);
+    assert_eq!(
+        sources.codex_mcp_call("tc-1"),
+        Some(("case-law", "search_law"))
+    );
+    let mut other = Sources::default();
+    other.codex_mcp_started(&claude(), &call);
+    assert_eq!(other.codex_mcp_len(), 0);
+}

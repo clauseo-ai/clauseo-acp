@@ -214,6 +214,7 @@ fn no_command_with_a_secret_shows_it() {
 fn every_sign_in() -> Vec<SignIn> {
     let mut states = vec![
         SignIn::SignedOut { found: None },
+        SignIn::Checking,
         SignIn::Queued,
         SignIn::Waiting {
             since: at(1_700_000_000_000),
@@ -258,6 +259,7 @@ fn every_sign_in() -> Vec<SignIn> {
                 method,
                 source,
                 at: at(7),
+                refused: None,
             });
         }
     }
@@ -267,6 +269,15 @@ fn every_sign_in() -> Vec<SignIn> {
         method: SignInMethod::ApiKey,
         source: SignInSource::Own,
         at: at(8),
+        refused: None,
+    });
+    states.push(SignIn::SignedIn {
+        email: None,
+        plan: None,
+        method: SignInMethod::ApiKey,
+        source: SignInSource::Own,
+        at: at(8),
+        refused: Some(at(10)),
     });
     states
 }
@@ -281,6 +292,11 @@ fn every_install() -> Vec<InstallProgress> {
     vec![
         InstallProgress::Missing {
             download_bytes: Count::from(61_000_000_u32),
+            installed_before: false,
+        },
+        InstallProgress::Missing {
+            download_bytes: Count::from(61_000_000_u32),
+            installed_before: true,
         },
         InstallProgress::Waiting {
             code: ErrorCode::AgentInstallOffline,
@@ -316,8 +332,15 @@ fn every_install() -> Vec<InstallProgress> {
 
 #[test]
 fn every_setup_event_round_trips() {
+    for python in crate::python::every_python() {
+        round_trips(&SetupEvent::SetupInfo {
+            keys_available: true,
+            python: Some(python),
+        });
+    }
     round_trips(&SetupEvent::SetupInfo {
         keys_available: false,
+        python: None,
     });
     for state in every_install() {
         round_trips(&SetupEvent::AgentInstallProgress {
@@ -339,6 +362,7 @@ fn setup_events_have_their_json_form() {
         (
             SetupEvent::SetupInfo {
                 keys_available: true,
+                python: None,
             },
             r#"{"setup_info":{"keys_available":true}}"#,
         ),
@@ -348,6 +372,13 @@ fn setup_events_have_their_json_form() {
                 state: SignIn::Queued,
             },
             r#"{"sign_in_changed":{"agent":"claude-acp","state":"queued"}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::Checking,
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":"checking"}}"#,
         ),
         (
             SetupEvent::SignInChanged {
@@ -379,6 +410,15 @@ fn setup_events_have_their_json_form() {
         (
             SetupEvent::SignInChanged {
                 agent: claude(),
+                state: SignIn::SignedOut {
+                    found: Some(FoundLogin::ReuseUnusable),
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_out":{"found":"reuse_unusable"}}}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
                 state: SignIn::Failed {
                     code: ErrorCode::SigninLinkExpired,
                     at: at(9),
@@ -401,13 +441,63 @@ fn setup_events_have_their_json_form() {
                 agent: claude(),
                 state: InstallProgress::Missing {
                     download_bytes: Count::from(5_u32),
+                    installed_before: false,
                 },
             },
             r#"{"agent_install_progress":{"agent":"claude-acp","state":{"missing":{"download_bytes":5}}}}"#,
         ),
+        (
+            SetupEvent::AgentInstallProgress {
+                agent: claude(),
+                state: InstallProgress::Missing {
+                    download_bytes: Count::from(5_u32),
+                    installed_before: true,
+                },
+            },
+            r#"{"agent_install_progress":{"agent":"claude-acp","state":{"missing":{"download_bytes":5,"installed_before":true}}}}"#,
+        ),
     ];
     for (event, json) in cases {
         assert_eq!(serde_json::to_string(&event).unwrap(), json);
+    }
+}
+
+/// `refused` is on the wire only when set, so a host before it and one after it agree.
+#[test]
+fn a_signed_in_carries_refused_only_when_set() {
+    let cases = [
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::SignedIn {
+                    email: None,
+                    plan: None,
+                    method: SignInMethod::ApiKey,
+                    source: SignInSource::Own,
+                    at: at(8),
+                    refused: None,
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_in":{"method":"api_key","source":"own","at":8}}}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::SignedIn {
+                    email: None,
+                    plan: None,
+                    method: SignInMethod::ApiKey,
+                    source: SignInSource::Own,
+                    at: at(8),
+                    refused: Some(at(10)),
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_in":{"method":"api_key","source":"own","at":8,"refused":10}}}}"#,
+        ),
+    ];
+    for (event, json) in cases {
+        assert_eq!(serde_json::to_string(&event).unwrap(), json);
+        assert_eq!(serde_json::from_str::<SetupEvent>(json).unwrap(), event);
     }
 }
 

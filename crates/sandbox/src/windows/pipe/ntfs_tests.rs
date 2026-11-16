@@ -29,7 +29,7 @@ use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 use crate::windows::test_acl::elevated_tests_enabled;
 use crate::windows::test_pool::{
-    Impersonating, Owned, TestUser, acl_entries, log_on, low_restricted_token,
+    Impersonating, Owned, TestUser, acl_entries, clock, log_on, low_restricted_token, report,
 };
 
 /// Each entry's rights (`pipe::PIPE_RIGHTS`): read and write, no new instance.
@@ -185,6 +185,7 @@ fn elevated_another_pool_users_low_token_is_refused_every_pipe() {
     let user = TestUser::new();
 
     // Pipes for another pool user: this one's Low token is refused each, by the DACL.
+    let started = clock();
     let (set, _pipes) = make_all(&pipe_sddl(&own, &sid("S-1-5-21-1-2-3-1101")));
     let low = low_restricted_token(&user);
     let refused: Vec<Result<(), i32>> = {
@@ -194,9 +195,11 @@ fn elevated_another_pool_users_low_token_is_refused_every_pipe() {
             .map(|role| past_dacl(&set, *role))
             .collect()
     };
+    report("pipes refused to another user's Low token", started);
     assert_eq!(refused, [Err(5); 4], "must refuse: another matter's agent");
 
     // Pipes naming the user: its own token gets past the DACL on each.
+    let started = clock();
     let (set, _pipes) = make_all(&pipe_sddl(&own, &user.sid));
     let logon = log_on(&user);
     let passed: Vec<Result<(), i32>> = {
@@ -206,10 +209,12 @@ fn elevated_another_pool_users_low_token_is_refused_every_pipe() {
             .map(|role| past_dacl(&set, *role))
             .collect()
     };
+    report("pipes passed the DACL for the user", started);
     assert_eq!(passed, [Ok(()); 4]);
 
     // Its own Low token: refused every pipe, the read end too, by the Medium label's
     // no-write-up and no-read-up.
+    let started = clock();
     let (set, _pipes) = make_all(&pipe_sddl(&own, &user.sid));
     let low_refused: Vec<Result<(), i32>> = {
         let _as_pool = Impersonating::start(&low);
@@ -218,6 +223,7 @@ fn elevated_another_pool_users_low_token_is_refused_every_pipe() {
             .map(|role| past_dacl(&set, *role))
             .collect()
     };
+    report("pipes refused the user's Low token", started);
     assert_eq!(
         low_refused,
         [Err(5); 4],

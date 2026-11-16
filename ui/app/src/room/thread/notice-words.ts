@@ -3,7 +3,9 @@
 // string or as an object it doesn't read) gives null, and the row shows the notice's text as the host wrote it.
 import { listOf, namesOf } from "@clauseo/components/lib/words-core.ts";
 import type { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
+import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import type { NoticeKind } from "../../transport/protocol.ts";
+import { agentNameOf } from "./stops.ts";
 
 /** The thread's words the line is drawn with: its page language, the thread's own, and the shared ones ({n} more). */
 export type NoticeWords = Pick<ReturnType<typeof useThreadWords>, "lang" | "th" | "t">;
@@ -66,14 +68,48 @@ function packSkipped(pack: string, reason: string, w: NoticeWords): string | nul
 }
 
 /** The line for a notice's kind in the page's language, its slots filled; null for no kind, or a kind this version
- * does not know, so the notice's own text shows. */
-export function noticeLine(kind: NoticeKind | undefined, w: NoticeWords): string | null {
-  if (typeof kind === "string")
-    return kind === "context_not_restored"
+ * does not know, so the notice's own text shows. `agent`: the open conversation's agent
+ * (useAgentPlan), named as the outside-matter stop names it (stops.ts). */
+export function noticeLine(
+  kind: NoticeKind | undefined,
+  w: NoticeWords,
+  agent?: AgentName,
+): string | null {
+  if (kind === "outside_matter_blocked") {
+    const name = agentNameOf(agent);
+    return name === null
+      ? w.th("Clauseo stopped a step: the AI tried to reach outside this matter.")
+      : w.th("Clauseo stopped a step: {name} tried to reach outside this matter.", { name });
+  }
+  if (kind === "shell_network_blocked") {
+    const name = agentNameOf(agent);
+    return name === null
       ? w.th(
-          "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
+          "Clauseo stopped a step: the AI tried to go online by running a command. It can use web search instead.",
         )
-      : null;
+      : w.th(
+          "Clauseo stopped a step: {name} tried to go online by running a command. {name} can use web search instead.",
+          { name },
+        );
+  }
+  // the same, in a session without web search: no web search is offered
+  if (kind === "shell_network_blocked_no_web_search") {
+    const name = agentNameOf(agent);
+    return name === null
+      ? w.th("Clauseo stopped a step: the AI tried to go online by running a command.")
+      : w.th("Clauseo stopped a step: {name} tried to go online by running a command.", { name });
+  }
+  if (typeof kind === "string") {
+    if (kind === "context_not_restored")
+      return w.th(
+        "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
+      );
+    if (kind === "auto_mode_unavailable")
+      return w.th(
+        "Claude's automatic mode isn't available for this account, so Claude asks before running commands.",
+      );
+    return null;
+  }
   // read by shape: a value from a newer host, or none (null), that this version doesn't know gives null. The field
   // is read rather than trusted to `in`: beside another object kind, each variant marks the other's key optional
   const came =

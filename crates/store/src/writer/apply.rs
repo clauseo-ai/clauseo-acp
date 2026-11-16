@@ -3,13 +3,13 @@
 use std::collections::HashMap;
 
 use clauseo_protocol::{
-    AccountLimits, AgentKind, AgentSessionId, ClientName, Seq, StreamId, Timestamp,
+    AccountLimits, AgentKind, AgentSessionId, ClientName, MatterId, Seq, StreamId, Timestamp,
 };
 use rusqlite::{Connection, params};
 
 use super::StreamState;
 use crate::codec::{self, MAX_STREAM_ID};
-use crate::{Commit, Committed, Error, Receipt, SnapshotIn, read};
+use crate::{Commit, Committed, Error, PendingAction, Receipt, SnapshotIn, read};
 
 /// The streams one commit touches, over the writer's map and its group's staged changes.
 pub(super) struct Changes<'a> {
@@ -186,17 +186,23 @@ fn put_rows(conn: &Connection, commit: &Commit) -> Result<(), Error> {
             .as_ref()
             .map(codec::skill_packs_text)
             .transpose()?;
+        let agent_prefs = matter
+            .agent_prefs
+            .as_ref()
+            .map(codec::agent_prefs_text)
+            .transpose()?;
         conn.prepare_cached(
             "INSERT INTO matters (id, name, kind, folder_path, folder_locator, shadow_repo_path, \
-             created_ms, client, next_date, pinned, last_opened_ms, forgotten_ms, skill_packs) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+             created_ms, client, next_date, pinned, last_opened_ms, forgotten_ms, skill_packs, \
+             agent_prefs) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
              ON CONFLICT (id) DO UPDATE \
              SET name = excluded.name, kind = excluded.kind, folder_path = excluded.folder_path, \
              folder_locator = excluded.folder_locator, \
              shadow_repo_path = excluded.shadow_repo_path, created_ms = excluded.created_ms, \
              client = excluded.client, next_date = excluded.next_date, \
              pinned = excluded.pinned, last_opened_ms = excluded.last_opened_ms, \
-             forgotten_ms = excluded.forgotten_ms, skill_packs = excluded.skill_packs",
+             forgotten_ms = excluded.forgotten_ms, skill_packs = excluded.skill_packs, \
+             agent_prefs = excluded.agent_prefs",
         )?
         .execute(params![
             matter.id.to_string(),
@@ -212,6 +218,7 @@ fn put_rows(conn: &Connection, commit: &Commit) -> Result<(), Error> {
             matter.last_opened.map(Timestamp::as_millis),
             matter.forgotten.map(Timestamp::as_millis),
             skill_packs,
+            agent_prefs,
         ])?;
     }
     if let Some(thread) = &commit.thread {
@@ -363,4 +370,31 @@ const fn agent_text(agent: AgentKind) -> &'static str {
         AgentKind::Claude => "claude",
         AgentKind::Codex => "codex",
     }
+}
+
+/// Keeps `action` as its matter's pending action, replacing any earlier one. Outside a group
+/// commit, so SQLite's own transaction syncs it (`synchronous=FULL`) before this returns.
+pub(super) fn put_pending_action(conn: &Connection, action: &PendingAction) -> Result<(), Error> {
+    conn.prepare_cached(
+        "INSERT INTO pending_actions (matter, kind, files, thread, at) VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT (matter) DO UPDATE SET kind = excluded.kind, files = excluded.files, \
+         thread = excluded.thread, at = excluded.at",
+    )?
+    .execute(params![
+        action.matter.to_string(),
+        action.kind.name(),
+        action
+            .files
+            .map(|files| i64::try_from(files.get()).unwrap_or(i64::MAX)),
+        action.thread.map(|thread| thread.to_string()),
+        action.at.as_millis(),
+    ])?;
+    Ok(())
+}
+
+/// Forgets `matter`'s pending action; none is fine.
+pub(super) fn clear_pending_action(conn: &Connection, matter: MatterId) -> Result<(), Error> {
+    conn.prepare_cached("DELETE FROM pending_actions WHERE matter = ?1")?
+        .execute([matter.to_string()])?;
+    Ok(())
 }

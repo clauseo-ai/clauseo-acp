@@ -13,8 +13,8 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-TARGETS=(acp_stdout protocol_decode matters_objects matters_read store_read settings_parse
-  reducer_snapshot)
+TARGETS=(acp_stdout acp_skipped_update protocol_decode matters_objects matters_read store_read
+  settings_parse reducer_snapshot zip_marks)
 failures=0
 
 fail() {

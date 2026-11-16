@@ -16,9 +16,10 @@ fn walk(segments: &[&str], escape: Escape) -> Folders {
         linear: Some(PathBuf::from("/m")),
         linear_pushed: Vec::new(),
     };
+    let reach = crate::pre_write_guard::Reach::new(std::path::Path::new("/m"));
     for segment in segments {
         let words: Vec<String> = segment.split(' ').map(str::to_owned).collect();
-        moved(&mut folders, &words, escape);
+        moved(&mut folders, &words, escape, &reach);
     }
     folders
 }

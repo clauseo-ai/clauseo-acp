@@ -10,6 +10,7 @@ import type {
   ElicitationId,
   ElicitationResponse,
   ErrorCode,
+  FileChoice,
   FileRefId,
   HostCommand,
   HostQuery,
@@ -29,6 +30,7 @@ import { queueCountPick } from "../queue-entries.ts";
 import { turnRunning } from "./live.ts";
 import { loadThread, threadLoaded } from "./chunk.ts";
 import { promptContent } from "./paper-mentions.ts";
+import { tooLong } from "./prompt-cost.ts";
 
 /** The code of a refused command, and its setter, which makes no set to the code already held: React drops such a
  * set at once but keeps it queued at its lane (Ask's click: sync), and the next render of Work at another lane (a
@@ -87,8 +89,9 @@ export async function previewUndoOf(
 export type ThreadActions = {
   readonly stream: StreamId | null;
   readonly sentTurn: TurnId | null;
-  /** Undoes every file of a step; rejects with the HostError when the host refuses. */
-  undo: (step: StepEntry) => Promise<void>;
+  /** Undoes a step: each file as `files` chooses (the thread's ask for a file that may hold the lawyer's own edits),
+   * else every file; rejects with the HostError when the host refuses. */
+  undo: (step: StepEntry, files?: readonly { path: string; choice: FileChoice }[]) => Promise<void>;
   /** Asks the host which of a step's papers were edited since Clauseo's change (PreviewUndo); absent where the host
    * has no PreviewUndo. Rejects with the HostError when the host refuses. */
   previewUndo?: ((step: StepEntry) => Promise<string[]>) | undefined;
@@ -103,6 +106,13 @@ export type ThreadActions = {
   /** H13's Retry from here on one of the lawyer's questions, at its time; absent where the host can't. Rejects with
    * the HostError when the host refuses. */
   retry?: ((message: MessageId, at: Timestamp) => Promise<void>) | undefined;
+  /** Sends a question again as a new turn of this thread: Try again after a Stop or a failed answer (D-027). True once
+   * send_prompt is accepted; never rejects. Absent where the rows have no session to send through. */
+  resend?: ((text: string) => Promise<boolean>) | undefined;
+  /** Send now on a steer still waiting on the agent's word: send_queued_now with the turn it was sent into, which the
+   * host stops (if it still runs) to send the words next. Rejects with the HostError when the host refuses
+   * (`thread.turn_not_queued`: the words had already moved). Absent where the rows have no session to send through. */
+  sendSteerNow?: ((turn: TurnId) => Promise<void>) | undefined;
 };
 
 export const ThreadActionsContext = createContext<ThreadActions | null>(null);
@@ -114,11 +124,17 @@ export function useThreadActions(): ThreadActions {
 }
 
 /** How a question goes (U7, H9): `behind`, sent while Clauseo works, so the host queues it (send_prompt with no
- * `delivery`) or, with `delivery: "steer"`, gives it to the running answer or stops that answer for it. A question
+ * `delivery`); with `delivery: "steer"` (Enter where the agent takes words mid-answer) gives it to the running answer
+ * when the agent can take it now, else the host puts it at the queue's head; with `delivery: "send_now"` (the hint's
+ * Send now) stops the running answer and sends it next, for every agent. A question
  * that goes behind a turn, or into a held or waiting queue, is not the sent turn: busy follows the status for it.
  * `files`, however it goes: the papers its `@` tokens mention, a `File` block each after its text, each once
  * (paper-mentions.ts); the host keeps them with a queued prompt, through an edit of its text too. */
-export type AskHow = { behind?: boolean; delivery?: "steer"; files?: readonly FileRefId[] };
+export type AskHow = {
+  behind?: boolean;
+  delivery?: "steer" | "send_now";
+  files?: readonly FileRefId[];
+};
 
 export type ThreadSession = {
   /** The open thread, or null before the first Ask makes one, while list_threads runs, or before the thread's chunk is
@@ -184,6 +200,12 @@ export function useThreadSession(
   const ask = useCallback(
     async (text: string, how: AskHow = {}): Promise<boolean> => {
       if (matter === null || key === null || sending.current) return false;
+      // over the host's cap on a prompt's text: refused here as the host would refuse it, measured once per send, before
+      // a draft's thread is made; nothing goes and the field keeps the words
+      if (tooLong(text)) {
+        refuse("prompt.too_long");
+        return false;
+      }
       sending.current = true;
       refuse(null);
       try {
@@ -258,10 +280,13 @@ export function useThreadSession(
   }, [command, refuse]);
 
   const undo = useCallback(
-    async (step: StepEntry) => {
+    async (step: StepEntry, chosen?: readonly { path: string; choice: FileChoice }[]) => {
       const id = open.current;
       if (id === null) throw internalError("no thread is open");
-      const files = step.files.map((f) => ({ path: f.path, choice: "undo" as const }));
+      const files =
+        chosen === undefined
+          ? step.files.map((f) => ({ path: f.path, choice: "undo" as const }))
+          : [...chosen];
       try {
         await command({ undo_step: { thread: id, turn: step.turn, files } });
       } catch (e) {
@@ -326,10 +351,45 @@ export function useThreadSession(
     [retryFrom],
   );
 
+  const sendSteerNow = useCallback(
+    async (turn: TurnId) => {
+      const id = open.current;
+      if (id === null) throw internalError("no thread is open");
+      try {
+        await command({ send_queued_now: { thread: id, turn } });
+      } catch (e) {
+        throw toHostError(e);
+      }
+    },
+    [command],
+  );
+
   const stream = thread === null ? null : streamOf(thread);
   const actions = useMemo(
-    () => ({ stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry }),
-    [stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry],
+    () => ({
+      stream,
+      sentTurn,
+      undo,
+      previewUndo,
+      answer,
+      answerElicitation,
+      stop,
+      retry,
+      resend: ask,
+      sendSteerNow,
+    }),
+    [
+      stream,
+      sentTurn,
+      undo,
+      previewUndo,
+      answer,
+      answerElicitation,
+      stop,
+      retry,
+      ask,
+      sendSteerNow,
+    ],
   );
   return { thread, sentTurn, refused: refused ?? link.refused, ask, stop, actions };
 }

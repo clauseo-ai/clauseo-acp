@@ -1,6 +1,6 @@
 //! What `HostConfig` taken apart (`ConfigParts::from`) hands the host thread (`ConfigParts`) and
-//! the updater's seams (`UpdateSeams`). Kept apart from `config.rs`, whose `HostConfig` builds
-//! them.
+//! the updater's seams (`UpdateSeams`), and two test seams of `HostConfig` that `config.rs` has
+//! no room for. Kept apart from `config.rs`, whose `HostConfig` builds them.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,6 +50,52 @@ pub(crate) struct ConfigParts {
     pub(crate) idle: IdleStop,
     /// The sandbox seam (`with_sandbox`), if any.
     pub(crate) sandbox: Option<Sandbox>,
+    /// The last run did not quit through its own quit (`with_last_run_unclean`).
+    pub(crate) last_run_unclean: bool,
+}
+
+/// Tests: the cloud-only probe of every matter walk (`clauseo_matters::Settings::probe`;
+/// default the OS's `OsProbe`), so a test can pretend some files are placeholders. A trait
+/// beside `HostConfig`'s own methods, as `config.rs` has no room for one more.
+#[cfg(feature = "test-support")]
+pub trait WithPlaceholderProbe {
+    /// This config, its matter walks asking `probe` whether a file is cloud-only.
+    #[must_use]
+    fn with_placeholder_probe(
+        self,
+        probe: Arc<dyn clauseo_matters::PlaceholderProbe + Send + Sync>,
+    ) -> Self;
+}
+
+#[cfg(feature = "test-support")]
+impl WithPlaceholderProbe for HostConfig {
+    fn with_placeholder_probe(
+        mut self,
+        probe: Arc<dyn clauseo_matters::PlaceholderProbe + Send + Sync>,
+    ) -> Self {
+        self.folder_probes.placeholder = probe;
+        self
+    }
+}
+
+/// Tests: where the matter workers' undo and restore deletes go
+/// (`clauseo_matters::Settings::trash`; default the OS's trash), so a test run never fills the
+/// machine's Trash or Recycle Bin. A trait beside `HostConfig`'s own methods, as
+/// [`WithPlaceholderProbe`] is.
+#[cfg(feature = "test-support")]
+pub trait WithMatterTrash {
+    /// This config, its matter workers moving each file they delete into the folder `folder`
+    /// (`clauseo_matters::FolderTrash`).
+    #[must_use]
+    fn with_matter_trash(self, folder: PathBuf) -> Self;
+}
+
+#[cfg(feature = "test-support")]
+impl WithMatterTrash for HostConfig {
+    fn with_matter_trash(mut self, folder: PathBuf) -> Self {
+        self.folder_probes.trash = Some(Arc::new(clauseo_matters::FolderTrash::new(folder)));
+        self
+    }
 }
 
 /// Takes the config apart.
@@ -77,6 +123,8 @@ impl From<HostConfig> for ConfigParts {
             folder_probes: config.folder_probes,
             counts: config.counts,
             search: config.search,
+            // Before `update` moves.
+            last_run_unclean: config.update.last_run_unclean,
             update: config.update,
             idle: config.idle,
             sandbox: config.sandbox,
@@ -94,4 +142,21 @@ pub(crate) struct UpdateSeams {
     /// The store's close reports a failure once it has closed (`with_failing_close`).
     #[cfg(feature = "test-support")]
     pub(crate) fail_close: bool,
+    /// The last run did not quit through its own quit (`HostConfig::with_last_run_unclean`).
+    pub(crate) last_run_unclean: bool,
+}
+
+#[expect(
+    clippy::multiple_inherent_impl,
+    reason = "config.rs is at its 600-line limit; the last run's flag lives beside its part"
+)]
+impl HostConfig {
+    /// The run before this one did not quit through its own quit (default: it did): the desktop's
+    /// mark in the data folder was still there. `LastExit` says so, for the room's notice, with
+    /// the file actions the store says that run left unfinished.
+    #[must_use]
+    pub fn with_last_run_unclean(mut self, unclean: bool) -> Self {
+        self.update.last_run_unclean = unclean;
+        self
+    }
 }

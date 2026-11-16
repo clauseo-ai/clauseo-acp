@@ -33,6 +33,16 @@ test("an edit before a token moves it, one after it leaves it, an insertion at e
   expect(shiftTokens(v, `प्रश्न ${v}`, [t])[0]?.start).toBe(11);
 });
 
+test("in a long field, a token past several blocks moves with an edit before it, and no tokens is no work", () => {
+  const before = "The parties agree that notice is given in writing.\n".repeat(300);
+  const v = `${before}/review now`;
+  const t = { start: before.length, end: before.length + 7, text: "/review" };
+  const typed = `${before.slice(0, 9000)}x${before.slice(9000)}/review now`;
+  expect(shiftTokens(v, typed, [t])).toEqual([{ ...t, start: t.start + 1, end: t.end + 1 }]);
+  expect(shiftTokens(v, `${v} and the lease`, [t])).toEqual([t]);
+  expect(shiftTokens(v, typed, [])).toEqual([]);
+});
+
 test("an edit inside a token, or across it, drops it; the others stand, even where the diff takes in their slash", () => {
   const v = "/review the lease /compact";
   const a = tok(v, "/review");

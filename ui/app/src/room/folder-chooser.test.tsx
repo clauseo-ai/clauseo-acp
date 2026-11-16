@@ -112,12 +112,6 @@ const sessionCalls = (transport: FakeTransport) =>
 const lists = (transport: FakeTransport) =>
   transport.calls.flatMap((c) => (c.call === "chooser_list" ? [c.go] : []));
 
-const created = (transport: FakeTransport) =>
-  transport
-    .only("dispatch")
-    .map((d) => d.command.command)
-    .filter((c) => "create_matter" in c);
-
 test("Change opens the chooser over New matter at the last place; choosing resolves the pick with the folder", async () => {
   const transport = await mount(today());
   await openForm();
@@ -293,22 +287,6 @@ test("while the confirm is up, the chooser waits and says so", async () => {
   await flush();
   expect(byId("chooser-waiting")).toBeNull();
   expect(chooser()).not.toBeNull();
-});
-
-test("Create with no folder picked: the chooser picks the parent, and the matter is made in it", async () => {
-  const transport = await mount(today());
-  await openForm();
-  await press(byId("create-matter"));
-  expect(chooser()).not.toBeNull();
-  await press(byId("chooser-choose"));
-  expect(created(transport)).toEqual([
-    {
-      create_matter: {
-        name: NAME,
-        source: { new_folder: { folder: "chosen:C:\\Users\\rmehra\\Documents\\Matters" } },
-      },
-    },
-  ]);
 });
 
 test("the picker's line covers the check before the chooser, and goes once the chooser shows", async () => {

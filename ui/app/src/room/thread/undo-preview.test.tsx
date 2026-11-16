@@ -1,12 +1,15 @@
 // @vitest-environment happy-dom
 // Undo's ask on a press, as the host's PreviewUndo answers it: a paper edited since asks about its file name, nothing
-// edited sends the undo at once, and a query that fails or is refused falls back to the flag a file carries. The press
-// waits for the answer, and each press asks again.
+// edited sends the undo at once, and a step with a file that may hold the lawyer's own edits asks in Versions' undo
+// dialog whatever the query answers (undo-lawyer-file.test.tsx). The press waits for the answer, and each press asks
+// again.
 import { act } from "react";
 import { th } from "@clauseo/components/lib/words-thread.ts";
+import { vt } from "@clauseo/components/lib/words-versions.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import { reset, step, THREAD, TURN, uuid } from "../../testing/stream-script.ts";
 import type { FileChange, HostError, StepEntry, ViewEntry } from "../../transport/protocol.ts";
+import { loadVersions } from "../versions/use-versions.ts";
 import { mountRoom, previewUndoScript, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
@@ -47,12 +50,14 @@ const previews = () =>
 /** The dialog's own chunk, loaded on the press as on a real reach. */
 const preload = () =>
   act(async () => void (await import("@clauseo/components/clauseo/change-note-ask.tsx")));
+/** Versions' chunk, which holds the undo dialog a flagged file asks in. */
+const preloadVersions = () => act(async () => void (await loadVersions()));
 
 const QUERY = { preview_undo: { thread: THREAD, turn: TURN } };
 
-test("nothing edited since: an exec-written paper undoes at once, with no ask", async () => {
+test("nothing edited since and no file flagged: the step undoes at once, with no ask", async () => {
   h = await mountRoom(previewUndoScript(() => answer([])));
-  h.deliver([reset([changed([file("Notice.docx", true)])])]);
+  h.deliver([reset([changed([file("Notice.docx")])])]);
   await preload();
   await h.click(h.one("undo"));
   await h.settle();
@@ -64,7 +69,7 @@ test("nothing edited since: an exec-written paper undoes at once, with no ask", 
 test("PreviewUndo lists a paper: the ask names its file name, and Undo anyway sends the undo", async () => {
   // the first path the host returns, by its file name: the wall shows the paper's path as it is
   h = await mountRoom(previewUndoScript(() => answer(["sub/notes.txt", "Other.docx"])));
-  h.deliver([reset([changed([file("sub/notes.txt", true), file("Other.docx")])])]);
+  h.deliver([reset([changed([file("sub/notes.txt"), file("Other.docx")])])]);
   await preload();
   await h.click(h.one("undo"));
   await h.settle();
@@ -92,7 +97,7 @@ test.each([
   ],
   ["failing", new Error("the host is gone")],
 ])(
-  "PreviewUndo %s with the flag set: the ask still shows, about the flagged paper",
+  "PreviewUndo %s with the flag set: Versions' undo dialog still asks, about the flagged paper",
   async (_, failure) => {
     h = await mountRoom(
       previewUndoScript(() => {
@@ -100,10 +105,10 @@ test.each([
       }),
     );
     h.deliver([reset([changed([file("Notice.docx"), file("Reply.docx", true)])])]);
-    await preload();
+    await preloadVersions();
     await h.click(h.one("undo"));
     await h.settle();
-    expect(document.body.textContent).toContain(askTitle("Reply.docx"));
+    expect(document.body.textContent).toContain(vt("en", "1 document may hold your own edits."));
     expect(h.sent("undo_step")).toEqual([]);
   },
 );
@@ -126,7 +131,7 @@ test("the undo isn't sent before PreviewUndo answers; Undo waits meanwhile, and 
   let release: (edited: string[]) => void = () => {};
   const held = new Promise<string[]>((resolve) => (release = resolve));
   h = await mountRoom(previewUndoScript(() => held.then(answer)));
-  h.deliver([reset([changed([file("Notice.docx", true)])])]);
+  h.deliver([reset([changed([file("Notice.docx")])])]);
   await h.click(h.one("undo"));
   expect(waits()).toBe(true);
   await h.click(h.one("undo"));

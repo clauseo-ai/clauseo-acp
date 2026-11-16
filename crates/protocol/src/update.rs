@@ -117,17 +117,20 @@ pub enum ManagedBy {
     /// The app's folder is not writable by the lawyer (macOS), so an update would ask for an
     /// administrator.
     ReadOnlyLocation,
-    /// A package manager updates it (Linux), or this build has no updater.
+    /// A package manager updates it (Linux).
     Package,
+    /// This build has no updater: a new version is installed over it.
+    Unavailable,
 }
 
 impl ManagedBy {
     /// Every value, in declaration order.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Policy,
         Self::PerMachine,
         Self::ReadOnlyLocation,
         Self::Package,
+        Self::Unavailable,
     ];
 }
 

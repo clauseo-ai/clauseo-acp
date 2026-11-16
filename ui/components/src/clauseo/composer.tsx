@@ -13,11 +13,10 @@ import {
   type RefObject,
 } from "react";
 import { Button } from "../ui/button.tsx";
-import { IconAddPapers, IconArrowUp, IconSafeWorkspace, IconStop } from "../icons/icons.tsx";
+import { IconAddPapers, IconArrowUp, IconStop } from "../icons/icons.tsx";
 import { motionAllowed, useDisplay } from "../lib/display.ts";
 import { late } from "../lib/late.ts";
 import { useThreadWords } from "../lib/words-thread.ts";
-import { rt } from "../lib/words-room.ts";
 import type { Paper } from "./matter.ts";
 import { dur, ease } from "./motion.ts";
 import { insertedOnly, mayTakeFocus, pressOwn, replaceAll } from "./composer-edit.ts";
@@ -25,11 +24,13 @@ import { sendsOnEnter } from "./composer-keys.ts";
 import type { MenuShown } from "./composer-menu.tsx";
 import { useRoom } from "./room-scope.ts";
 import { PaperChips } from "./paper-chips.tsx";
+import { SafeWorkspaceLine } from "./safe-workspace-line.tsx";
 import { Say } from "./say.tsx";
-import { StatusLine, type PlanChoice, type ReadyHint, type ToolsSegment } from "./status-line.tsx";
+import { StatusLine, type ConfigMenu, type PlanChoice } from "./status-line.tsx";
+import type { ReadyHint, ToolsSegment } from "./status-line.tsx";
 import { WorkingLine, WorkingSaid, WorkingTime, type WorkingState } from "./working-line.tsx";
 
-export type { PlanChoice, ReadyHint, ToolsSegment } from "./status-line.tsx";
+export type { ConfigMenu, PlanChoice, ReadyHint, ToolsSegment } from "./status-line.tsx";
 
 /** One of the agent's commands, as ACP's `available_commands_update` lists it and the session's header carries it
  * (`HeaderEntry.commands`, passed as it is): its name without the slash, what it does, and a hint for its input. */
@@ -129,6 +130,8 @@ export type ComposerProps<V extends string = string> = {
   choice?: PlanChoice<V>;
   /** The tool line on the status line, after the plan; none by default. */
   tools?: ToolsSegment | null;
+  /** The agent's model and effort on the status line, after the plan; none by default. */
+  menus?: readonly ConfigMenu[] | undefined;
   /** Keys the field passes on first, before its own Enter. True when one was taken, and its default is prevented.
    * While an input method composes it hears nothing: every key is the input method's then. */
   onKeyCommand?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
@@ -139,6 +142,8 @@ export type ComposerProps<V extends string = string> = {
   gate?: ReactNode;
   /** Words in the room's line's place, such as the fine print before signing in; false for no line at all. */
   line?: ReactNode | false;
+  /** The Safe workspace line says Clauseo changes the matter's files without asking: set by the host's D2d signal. */
+  worksOnItsOwn?: boolean;
   /** No matter open: the field, Add papers and Ask take nothing. */
   disabled?: boolean;
   /** data-testid on the field, Ask, Stop, the working line's row, and the `/` or `@` menu and each of its rows. */
@@ -197,10 +202,12 @@ export function Composer<V extends string = string>({
   onRemovePaper,
   choice,
   tools = null,
+  menus,
   onKeyCommand,
   id = "ask",
   gate,
   line,
+  worksOnItsOwn = false,
   disabled = false,
   testIds,
   commands,
@@ -289,6 +296,11 @@ export function Composer<V extends string = string>({
       // macOS commits a dead key's mark by taking it out and putting it back, in one task: no fit between (#117 L)
       const out = kind === "deleteCompositionText";
       if (!out) fitted.current = a.value;
+      // over the cap, a scroll height past the field's height is its words' own: the field stays, with no diff, no
+      // collapse and no settle. After a 6 MiB paste the diff took 11 ms a key; Backspace's whole fit 149 ms to 108
+      if (one > 0 && a.style.height === `${one * 6}px` && a.style.overflowY === "") {
+        if (a.scrollHeight > a.clientHeight) return;
+      }
       // words only put in, as plain typing does: the field can only keep its height or grow, which its own scroll
       // height shows with no collapse. Collapsing it to measure, as the whole fit does, laid out the room's column
       // twice and repainted the thread above on every keystroke (Chromium trace, #117 L). A mark that joins a
@@ -405,7 +417,7 @@ export function Composer<V extends string = string>({
   }, [room]);
   // the status line: what the last answer took, the plan, the hint, the plan choice or the tool line
   const said = took !== null || plan !== "" || hint !== null;
-  const status = said || choice !== undefined || tools !== null;
+  const status = said || choice !== undefined || tools !== null || (menus?.length ?? 0) > 0;
   return (
     <form
       ref={room.nodes.slot("composer")}
@@ -430,7 +442,9 @@ export function Composer<V extends string = string>({
       )}
       {acts}
       {/* a status line with nothing to say isn't drawn: no time yet, no plan, no choice and no hint */}
-      {status && <StatusLine {...{ took, plan, hint, choice, tools }} hidden={working !== null} />}
+      {status && (
+        <StatusLine {...{ took, plan, hint, choice, tools, menus }} hidden={working !== null} />
+      )}
       {/* while Clauseo works the working line is the well's top row, and the field its foot: one set-in region */}
       <div className="room-entry" ref={entry} data-working={working !== null ? "" : undefined}>
         {/* what assistive technology hears of the working line: one status region, mounted as long as the composer
@@ -579,21 +593,7 @@ export function Composer<V extends string = string>({
       </div>
       {notice}
       {line !== false && (
-        <p className="room-line">
-          {line ?? (
-            <>
-              <IconSafeWorkspace size={14} />
-              <span>
-                <Say>
-                  {rt(
-                    w.lang,
-                    "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
-                  )}
-                </Say>
-              </span>
-            </>
-          )}
-        </p>
+        <p className="room-line">{line ?? <SafeWorkspaceLine worksOnItsOwn={worksOnItsOwn} />}</p>
       )}
     </form>
   );

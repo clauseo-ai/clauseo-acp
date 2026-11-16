@@ -45,7 +45,7 @@ pub(super) fn on_store_failure(actor: &mut Actor, thread: ThreadId, failure: &Fa
     );
     current.store_failed = Some(failure.error.code());
     if current.live() {
-        cancel::cancel_running(actor, thread, None);
+        cancel::cancel_running(actor, thread, None, cancel::why::FAILURE);
     }
 }
 
@@ -75,7 +75,7 @@ pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
             }
         }
         TurnPhase::Prompting | TurnPhase::FallbackStop => {
-            cancel::cancel_running(actor, thread, None);
+            cancel::cancel_running(actor, thread, None, cancel::why::FAILURE);
         }
         TurnPhase::Checkpointing | TurnPhase::Ending => {}
         TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued | TurnPhase::Starting => {
@@ -124,8 +124,10 @@ pub(super) fn on_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let closed = state
         .closing
         .take_if(|closing| closing.close.turn == turn)
-        .map(|closing| closing.close.stop);
-    if let Some(stop) = closed {
+        .map(|closing| closing.close);
+    if let Some(close) = closed {
+        close.log_end(thread);
+        let stop = close.stop;
         // A stop at the limit decided while this end was not durable is logged now.
         limits::retry_stops(actor, thread, false);
         queue::on_turn_closed(actor, thread, turn, stop);

@@ -31,8 +31,8 @@ pub trait Removal {
     fn delete_record(&mut self) -> Result<(), MachineError>;
     /// The record's `AdminCopyOwner`: who placed the admin copy, `None` when there is none.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
-    /// Deletes the SYSTEM task `\Clauseo\SandboxStop` (`refresh::unregister_task`); one
-    /// already gone is `Ok`.
+    /// Deletes the SYSTEM tasks `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
+    /// (`refresh::POOL_TASKS`, `refresh::unregister_task`); one already gone is `Ok`.
     fn unregister_stop_task(&mut self) -> Result<(), MachineError>;
     /// The user who asked: the token user of the parent Windows recorded for this process,
     /// checked against ID reuse (`Owner::of_parent`, D-B2). `None` when it can't be found.
@@ -72,6 +72,9 @@ pub trait Removal {
     fn group_members(&mut self, group: &Sid) -> Result<usize, MachineError>;
     /// Deletes the group `group`.
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError>;
+    /// Takes "Deny log on through Remote Desktop Services" (`SeDenyRemoteInteractiveLogonRight`)
+    /// off the group `group` (`LsaRemoveAccountRights`, this right only); not held is `Ok`.
+    fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError>;
     /// Runs `f` with the calling thread acting as [`Removal::invoker`] (`Owner::run_as`), with
     /// the token [`Removal::can_act_as_owner`] names, then as itself again; called again inside
     /// `f`, runs `f` as it is. No invoker, or a failed impersonation, is the `Err`, and `f`
@@ -99,6 +102,11 @@ pub trait Removal {
     /// refused with nothing touched. The administrator's path never calls it: an administrator
     /// deletes nothing in the owner's folders (K1). Nothing checked yet is `Ok`, nothing touched.
     fn forget_set_aside(&mut self, matter: &MatterId) -> Result<(), MachineError>;
+    /// As the owner, inside [`Removal::as_owner`] and only there: every unclean-session marker
+    /// (`runner::marker`) in the run folder of the folder [`Removal::owners_ledger`] checked
+    /// removed; how many. Nothing checked yet is `Ok(0)`. Called outside it, refused with nothing
+    /// touched: an administrator deletes nothing in the owner's folders (K1).
+    fn clear_markers(&mut self) -> Result<usize, MachineError>;
     /// As this process, for a per-machine removal the owner didn't ask for: the record's
     /// `data_dir` checked as [`Removal::owners_ledger`] checks it, with the folder and its
     /// `sandbox` folder owned as `remove::owners` allows for `owner` (the record's), then the

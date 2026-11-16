@@ -102,6 +102,9 @@ pub(crate) fn import(root: &Path, folder: &Path) -> Matter {
         limits: Limits::DEFAULT,
         retention: Retention::KeepAll,
         probe: Arc::new(OsProbe),
+        trash: Arc::new(clauseo_matters::FolderTrash::new(
+            root.with_file_name("trash"),
+        )),
     };
     let new = NewMatter {
         id: "01910000-0000-7000-8000-000000000001".parse().unwrap(),

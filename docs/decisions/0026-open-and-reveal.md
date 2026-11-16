@@ -31,10 +31,29 @@ added: the dialog and opener plugins are called from Rust, as before.
     name.
 
   Anything else is `command.invalid`, checked before the settings are read and before any dialog.
-  Then a native confirm drawn by Rust names where the link goes: the host in its ASCII form (an
-  international name as `xn--`, so a look-alike cannot pass), with the port when the link names
-  one, or the mail addresses. Its words follow the app's language (`ui.language`, read from the
-  host when the dialog opens), in English and Hindi (`open/words.rs`, copy H11-01 to H11-07).
+  The command also takes the link's visible text (`shown`, optional) and `always_ask`
+  (optional). A plain https or http link opens with no confirm (amended 2026-11-11). The confirm
+  stays (`open/ask.rs`) for:
+  - a mailto link;
+  - a host that is an IP address, that is not ASCII, or that has a label in `xn--` form;
+  - visible text that could hide a host: a Default_Ignorable character, an image in the link
+    (U+FFFC), or in a word a character outside ASCII next to an ASCII letter, digit or `.` (fail
+    closed; curly quotes, dashes, `§`, `₹` and guillemets may touch letters and digits);
+  - visible text naming a host (width-folded, look-alike dots read as `.`) that is neither the
+    link's host nor a domain above or below it, label by label, `www.` aside;
+  - visible text over 4096 bytes;
+  - `always_ask`, which only adds a confirm (Get installer, which quits Clauseo after the page
+    opens).
+
+  A user name or password is refused earlier, by the link check. Text that names no host ("the
+  judgment") asks nothing. Answers' links pass their rendered text, and the web source tiles their
+  title; the app's own fixed pages pass none. A connector's pay link always asks. A link opened
+  with no confirm holds the next for a second, so script in the page cannot open a stream of tabs.
+  For the links that ask, a native confirm drawn by Rust names where the link goes: the host in
+  its ASCII form (an international name as `xn--`, so a look-alike cannot pass), with the port
+  when the link names one, or the mail addresses. Its words follow the app's language
+  (`ui.language`, read from the host when the dialog opens), in English and Hindi
+  (`open/words.rs`, copy H11-01 to H11-07).
   Cancel is the first button, so it is the default and focused one (Return and Enter, and Space
   on Windows) and a stray key never accepts. The confirm is drawn with rfd directly
   (`dialogs::confirm`, which U4's "always allow" confirm uses too), not through the dialog
@@ -127,8 +146,8 @@ added: the dialog and opener plugins are called from Rust, as before.
 - On macOS, Escape cancels a confirm whose cancel button macOS recognises by its English title
   ("Cancel"); in Hindi Escape may do nothing (the dialog stays, nothing opens), since rfd cannot
   give the button its key.
-- A new type in `DOCUMENT_TYPES`, a new scheme, a confirm that is skipped, or a new reveal target
-  needs a new record.
+- A new type in `DOCUMENT_TYPES`, a new scheme, a confirm skipped beyond the plain web links
+  above, or a new reveal target needs a new record.
 
 ## Status
 

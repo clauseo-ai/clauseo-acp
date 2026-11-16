@@ -308,12 +308,28 @@ open_data_enum! {
             /// Why the launch left it out.
             reason: PackSkipReason,
         },
+        /// Claude Code's `auto` permission mode is not available for this session (the account,
+        /// the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
+        /// running commands.
+        AutoModeUnavailable = "auto_mode_unavailable",
+        /// Clauseo's data fence refused a request of the agent's without asking the lawyer: it
+        /// reached outside this matter (Clauseo's own data folder, another matter). Once a turn.
+        OutsideMatterBlocked = "outside_matter_blocked",
+        /// Clauseo declined, without asking the lawyer, a shell command of the agent's that needed
+        /// the internet (curl, wget, a network approval, extra network permissions). Once a turn.
+        ShellNetworkBlocked = "shell_network_blocked",
+        /// As `shell_network_blocked`, in a session without web search (the firm or the lawyer
+        /// turned it off), so the words offer no web search instead. Once a turn.
+        ShellNetworkBlockedNoWebSearch = "shell_network_blocked_no_web_search",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
     }
     test mod notice_kind with [
         NoticeKind::ContextNotRestored,
+        NoticeKind::OutsideMatterBlocked,
+        NoticeKind::ShellNetworkBlocked,
+        NoticeKind::ShellNetworkBlockedNoWebSearch,
         NoticeKind::FilesCameBack {
             files: vec![MatterPath::new("Drafts/memo.docx").unwrap()],
             more: 2,
@@ -322,6 +338,7 @@ open_data_enum! {
             pack: PackId::new("nda-kit").unwrap(),
             reason: PackSkipReason::Changed,
         },
+        NoticeKind::AutoModeUnavailable,
     ];
 }
 

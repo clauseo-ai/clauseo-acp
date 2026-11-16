@@ -100,16 +100,10 @@ pub fn file_changes() -> Vec<FileChange> {
 
 /// Events that hold a value added after v1 that no example in [`every_event`] holds, so the
 /// corpus writer finds a holder for it: error codes no example turn fails with, the page vias
-/// no example opens a page with, and the stop reasons no example turn ends with.
+/// no example opens a page with, the stop reasons no example turn ends with, and the steer
+/// outcomes no example steer resolves with.
 pub fn later_variants() -> Vec<DomainEvent> {
     vec![
-        TurnEnded {
-            turn: turn_id(3),
-            stop: StopReason::NotAllowed,
-            usage: None,
-            checkpoint_after: Some(checkpoint_id(14)),
-        }
-        .into(),
         ThreadRenamed {
             title: short("Read the lease"),
             by: RenameSource::Placeholder,
@@ -207,6 +201,9 @@ pub fn later_variants() -> Vec<DomainEvent> {
             detail: Some("the guard hook has no program".to_owned()),
         }
         .into(),
+        CheckpointRecorded::new(checkpoint_id(18), CheckpointKind::Revisions, None, None)
+            .unwrap()
+            .into(),
         // Never a turn's failure in practice (the updater's code); here for the corpus.
         TurnFailed {
             turn: turn_id(3),
@@ -219,6 +216,8 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .chain(later::failures_then_case_law())
     .chain(setup::turns())
     .chain(later::notices())
+    .chain(later::stops())
+    .chain(later::steers())
     .collect()
 }
 
@@ -449,7 +448,11 @@ fn turn_end_events() -> Vec<DomainEvent> {
             turn,
             checkpoint: checkpoint_id(15),
             restored: vec![path("a.docx")],
-            kept: vec![path("b/new.docx")],
+            kept: vec![path("b/new.docx"), path("Sub/c.docx")],
+            unversioned: vec![SkippedFile {
+                path: path("Sub/c.docx"),
+                reason: SkippedFileReason::UnreadFolder,
+            }],
         }
         .into(),
     ]
@@ -484,11 +487,15 @@ fn matter_events() -> Vec<DomainEvent> {
         }
         .into(),
         VersionRestored {
+            undoes: None,
             from: checkpoint_id(8),
             checkpoint: checkpoint_id(17),
             scope: RestoreScope::Files {
                 paths: vec![path("a.docx")],
             },
+            written: vec![path("a.docx")],
+            removed: vec![path("b.docx")],
+            more: Some(3),
         }
         .into(),
         MatterRelocated {

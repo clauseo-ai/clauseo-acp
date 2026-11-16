@@ -24,10 +24,14 @@ fn the_remote_hints_in_the_base_environment_never_reach_the_child() {
     let (agents, events) = fx.start();
     agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
     events.until(|state| matches!(state, SigninState::Waiting { .. }));
+    // The quick status check before the login wrote its names first; on Unix the login's are
+    // the ones with the shim's `BROWSER`.
     crate::support::eventually("the login wrote its names", || {
-        fx.data.path().join("env-names").is_file()
+        std::fs::read_to_string(fx.data.path().join("env-names"))
+            .is_ok_and(|names| cfg!(not(unix)) || names.lines().any(|name| name == "BROWSER"))
     });
-    // Only the login has run (no poll was let through), so these are its names.
+    // Only the quick check and the login have run (no poll was let through), so these are the
+    // login's names (on Unix; elsewhere either run's, which share every name checked here).
     let names = fx.env_names();
     for hint in REMOTE_HINTS {
         assert!(

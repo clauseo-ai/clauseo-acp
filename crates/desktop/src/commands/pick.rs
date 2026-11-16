@@ -197,7 +197,7 @@ pub(crate) async fn chooser_choose<R: Runtime>(
     chooser: u32,
 ) -> Result<Option<PickedFolder>, HostError> {
     crate::ipc::timed("chooser_choose", async {
-        let confirm = crate::chooser::NativeFolderConfirm::new(app);
+        let confirm = crate::chooser::NativeFolderConfirm::new(app, &bridge);
         let home = SystemDirs.home();
         crate::chooser::choose_folder(&state, &bridge, &confirm, &last, home.as_deref(), chooser)
             .await

@@ -9,9 +9,9 @@
 //!     --CreateProcessAsUserW((B) token, private desktop, the in/out/err pipes)-->
 //!   the agent (the pool user, restricted, Low)
 //!
-//! at the session's end, from the outer, outside every job of the outer's:
-//!     --CreateProcessWithLogonW(LOGON_WITH_PROFILE, suspended, shut, resumed)-->
-//!   clauseo-sandbox-run --sweep   (the end sweeper: the pool user, Medium, detached)
+//! at the session's end, from the outer, once its job ended and emptied:
+//!     --ITaskService (IRegisteredTask::Run, as the desktop user)-->
+//!   \Clauseo\SandboxSweep   (the Task Scheduler's: SYSTEM, the pool users' tasks and BITS jobs)
 //! ```
 //!
 //! - The host writes a [`LaunchMessage`] ([`write_launch`]) into the protected run folder and
@@ -32,17 +32,19 @@
 //!   then every [`TICK`](sweep::TICK) while the agent runs and once more when it exited
 //!   (`inner_flow.rs`); the inner reads its own job's pid list for that, with no handle. The
 //!   first act also removes the pool user's per-user COM classes, `Run`/`RunOnce` values and
-//!   Startup entries, with no COM; the end sweeper removes those and then, over COM, its scheduled
-//!   tasks (`leftovers.rs`; no BITS call: the `SYSTEM` stop task cancels a pool user's jobs).
+//!   Startup entries, with no COM (`leftovers.rs`); nothing else removes them. The pool user's
+//!   scheduled tasks and BITS jobs are the `SYSTEM` sweep task's.
 //!   A pool user serves one live session at a time (`pool::assign::busy`), so none of those
 //!   processes is another session's.
 //! - At any end (the inner exiting, once the output drained; the host's stdin ending, once the
 //!   agent, its stdin closed, had 1 s to finish; a failure, at once) the outer ends the job,
-//!   waits up to 400 ms for it to empty, and then starts the end sweeper once (`end.rs`,
-//!   `sweeper.rs`): `--sweep`, the same kills with no job kept and the same removal, on its
-//!   own timeout. A job that doesn't empty starts no sweeper, nor does an end with less than
-//!   500 ms of the host's 2 s after its stdin end left. The sweeper is never in the outer's
-//!   job, so the host ending the outer leaves it running.
+//!   waits up to 400 ms for it to empty, and then, once, asks the Task Scheduler to run the
+//!   `SYSTEM` task `\Clauseo\SandboxSweep` (`end.rs`, `refresh::request_pool_sweep`), even when
+//!   the job didn't empty: it deletes every pool user's scheduled tasks and cancels their BITS
+//!   jobs, and kills nothing. The run is queued as the request returns, so the host ending the
+//!   outer leaves it running. A request that fails is logged and changes no exit code; the outer,
+//!   if it lives, waits up to 20 s for the run's result. No process of the pool user's is
+//!   started at the end.
 //! - The outer writes an unclean-session marker in the run folder once it has read the launch and
 //!   removes it only at a clean end (`marker.rs`); `unclean_sessions` lists those left.
 //! - The four pipes (`pipe.rs`) are the outer's, with the explicit DACL. The outer sends the
@@ -96,10 +98,8 @@ mod spawn;
 mod start;
 #[cfg(any(windows, test))]
 mod sweep;
-#[cfg(windows)]
-mod sweeper;
 #[cfg(any(windows, test))]
-mod sweeper_flow;
+pub mod unclean;
 
 pub use env::agent_env;
 #[cfg(windows)]
@@ -112,8 +112,10 @@ pub use paths::{WinPath, codex_reuse};
 #[cfg(windows)]
 pub use policy::codex_link_in_policy;
 pub use policy::{codex_reuse_in_policy, granted_paths};
+#[cfg(any(windows, test))]
+pub use unclean::StartUp;
 #[cfg(windows)]
-pub use sweeper::run_sweep;
+pub use unclean::os::start_up_requests;
 
 /// The runner's file name in the install folder. Kept stable: per-user installs grant it to the
 /// pool users (S15 `PR8`).
@@ -341,8 +343,6 @@ pub enum Mode {
     Launch(PathBuf),
     /// `--inner <pipe base>`: the inner runner.
     Inner(String),
-    /// `--sweep`: the end sweeper, which takes nothing else.
-    Sweep,
 }
 
 /// The mode `args` (the arguments after the program) name; `None` for any other command line.
@@ -350,7 +350,6 @@ pub fn mode(args: &[std::ffi::OsString]) -> Option<Mode> {
     match args {
         [flag, file] if flag == "--launch" => Some(Mode::Launch(PathBuf::from(file))),
         [flag, base] if flag == "--inner" => base.to_str().map(|base| Mode::Inner(base.to_owned())),
-        [flag] if flag == "--sweep" => Some(Mode::Sweep),
         _ => None,
     }
 }
@@ -388,7 +387,7 @@ pub fn write_launch(data_dir: &Path, message: &LaunchMessage) -> std::io::Result
 /// renumbered: the host reads them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunExit {
-    /// The command line isn't `--launch <file>`, `--inner <base>` or `--sweep`.
+    /// The command line isn't `--launch <file>` or `--inner <base>`.
     Usage,
     /// The launch file is missing, isn't the desktop user's alone, or breaks a rule.
     BadLaunch,
@@ -419,33 +418,43 @@ pub enum RunExit {
     AgentReserved,
     /// The inner runner's first-act sweep of the pool user's processes failed (`sweep.rs`): the
     /// process list couldn't be read, or a process of the pool user's couldn't be checked, or it
-    /// kept starting processes. Also the end sweeper's exit code when anything it did failed but
-    /// for an escapee. A process that couldn't be opened or ended is [`RunExit::Escapee`].
+    /// kept starting processes. A process that couldn't be opened or ended is
+    /// [`RunExit::Escapee`].
     Sweep,
     /// The runner's DLL search couldn't be kept to System32.
     DllSearch,
     /// A sweep found a process of the pool user's it couldn't end, even after the owner's
     /// `WRITE_DAC` reopen: one that shut its DACL to its own user, alive outside every job (M2).
-    /// The inner's first act exits with it and starts no agent; the end sweeper exits with it.
-    /// The outer exits with it whenever any sweep of its session found one: the first act's, the
-    /// inner's ticks and end (reported on `ctl`), or the end sweeper's (its exit code, when the
-    /// outer still waits for it). It wins over the agent's own code, even 0, which the outer then
-    /// says on stderr: the run's output came through, but the pool user has a process no sweep of
-    /// its own can end, and only the host can act on that (0049).
+    /// The inner's first act exits with it and starts no agent. The outer exits with it whenever
+    /// any sweep of its session found one: the first act's, or the inner's ticks and end
+    /// (reported on `ctl`). It wins over the agent's own code, even 0, which the outer then says
+    /// on stderr: the run's output came through, but the pool user has a process no sweep of its
+    /// own can end, and only the host can act on that (0049).
     Escapee,
-    /// Reserved, no longer produced. The end sweeper once exited with it when everything went
-    /// but BITS jobs of the pool user's it couldn't cancel (1245). It makes no BITS call now
-    /// (`leftovers.rs`), and the outer takes this code as any failed sweeper's. Kept, with its
-    /// number, since the codes are explicit and may be read downstream.
+    /// Reserved, no longer produced: a pool user's BITS jobs are cancelled by the `SYSTEM` tasks
+    /// alone (`SandboxSweep` at each session's end, `SandboxStop`). Kept, with its number, since
+    /// the codes are explicit and may be read downstream.
     PoolStop,
     /// The session's unclean-session marker couldn't be written, or the launch file's name gives
     /// it no id (`marker::marked`): the outer refuses the launch before any logon, so no session
     /// runs that no marker names.
     MarkerUnwritable,
+    /// F4: a marker of this pool user's (or one that names none, or can't be read) awaits a stop
+    /// that hasn't completed: a session a sweep found an escapee in, or one whose outer died
+    /// (`unclean::logon_check`), or one whose sweep after that stop completed and which now
+    /// awaits its final stop. The outer requested `\Clauseo\SandboxStop` and refuses the
+    /// launch before its own marker or any logon; a launch once the stop completed goes ahead.
+    AwaitingStop,
+    /// F4: a marker of this pool user's awaits a sweep that didn't complete within 15 s of the
+    /// outer's wait, or its stop (or the sweep after it) completed but it couldn't be re-marked
+    /// to await the sweep (or the final stop) (`unclean::logon_check`). No stop is awaited, so
+    /// none was requested; the outer refuses the launch before its own marker or any logon, and
+    /// a later launch checks again.
+    AwaitingSweep,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 18] = [
+    const ALL: [RunExit; 20] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -464,6 +473,8 @@ impl RunExit {
         RunExit::Escapee,
         RunExit::PoolStop,
         RunExit::MarkerUnwritable,
+        RunExit::AwaitingStop,
+        RunExit::AwaitingSweep,
     ];
 
     /// The exit code.
@@ -505,7 +516,9 @@ impl RunExit {
             | RunExit::DllSearch
             | RunExit::Escapee
             | RunExit::PoolStop
-            | RunExit::MarkerUnwritable => None,
+            | RunExit::MarkerUnwritable
+            | RunExit::AwaitingStop
+            | RunExit::AwaitingSweep => None,
         }
     }
 }

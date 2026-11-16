@@ -34,8 +34,9 @@ pub(crate) enum Destination {
 /// A link `open_external` may open: the URL to hand the OS, and where it goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Link {
-    /// The URL as the `url` crate writes it back.
-    pub(crate) url: String,
+    /// The URL as the `url` crate parsed it: the one value every check reads and, written back
+    /// (`as_str`), what the OS is handed. Nothing parses it again.
+    pub(crate) url: url::Url,
     /// Where it goes, as the confirm names it.
     pub(crate) destination: Destination,
 }
@@ -66,10 +67,7 @@ pub(crate) fn check_link(text: &str) -> Result<Link, HostError> {
             )));
         }
     };
-    Ok(Link {
-        url: url.as_str().to_owned(),
-        destination,
-    })
+    Ok(Link { url, destination })
 }
 
 /// The host an https or http link goes to, as ASCII (an international name in its `xn--`
@@ -114,6 +112,41 @@ fn web_host(url: &url::Url) -> Result<String, HostError> {
         Some(port) => format!("{shown}:{port}"),
         None => shown,
     })
+}
+
+/// The longest full address the confirm shows, in characters, `…` included.
+pub(crate) const MAX_ADDRESS_SHOWN: usize = 200;
+
+/// `url` as the confirm's full-address line shows it, below the host line that decides: each
+/// byte that is not printable ASCII (a space, a control such as CR, LF or tab, and every byte of
+/// a letter outside ASCII, so every bidi mark too) as `%XX`; over [`MAX_ADDRESS_SHOWN`]
+/// characters, the middle gives way to `…`, keeping the start (scheme and host) and the end.
+/// `check_link`'s URL is ASCII already, as the `url` crate writes it back (its host in `xn--`
+/// form); this holds the line to that whatever it is given.
+pub(crate) fn shown_address(url: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut escaped = String::with_capacity(url.len());
+    for byte in url.bytes() {
+        if byte.is_ascii_graphic() {
+            escaped.push(char::from(byte));
+        } else {
+            escaped.push('%');
+            escaped.push(char::from(HEX[usize::from(byte >> 4)]));
+            escaped.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+    }
+    // ASCII from here on, so a byte index is a character's.
+    if escaped.len() <= MAX_ADDRESS_SHOWN {
+        return escaped;
+    }
+    let kept = MAX_ADDRESS_SHOWN - 1;
+    let head = kept.div_ceil(2);
+    let tail = kept - head;
+    let mut shown = String::with_capacity(MAX_ADDRESS_SHOWN + 2);
+    shown.push_str(&escaped[..head]);
+    shown.push('…');
+    shown.push_str(&escaped[escaped.len() - tail..]);
+    shown
 }
 
 /// Whether `address` is on the internet at large: not loopback, private, link-local,

@@ -10,12 +10,18 @@ import {
   DEFAULT_DISPLAY,
   TEXT_SIZES,
   type Display,
+  type Lang,
   type Platform,
   type ReleaseMode,
 } from "@clauseo/components/lib/display.ts";
 import { frameBatch, liteBatch, type Batch } from "../store/batch.ts";
 import type { Settings, SettingsHost, UiSettings } from "./host-next.ts";
-import type { ToolsPatch, ToolsSettingsView } from "../transport/protocol.ts";
+import type {
+  PrivacyPatch,
+  PrivacySettings,
+  ToolsPatch,
+  ToolsSettingsView,
+} from "../transport/protocol.ts";
 
 /** The settings without a host; with one, a cache of the host's last answer, read only for the first frame. */
 export const DISPLAY_KEY = "clauseo.display";
@@ -101,6 +107,10 @@ export type DisplayEnv = {
   show: (display: Display) => void;
   /** Settings for this page only, never written: a dev or probe page's query. */
   override?: Partial<UiSettings>;
+  /** The language the desktop read before the window existed (connect.ts's injectedLanguage): the first frame's, over
+   * localStorage's cache and the default, until the host's settings arrive and take over. Anything but a known
+   * language is ignored. */
+  firstLanguage?: Lang | null;
   /** The OS to lay out for until the host says (setPlatform): the webview's own guess (platform.ts's guessPlatform),
    * so a Windows window doesn't start in the Mac's places and move. The Mac where left out. */
   platform?: Platform;
@@ -117,6 +127,10 @@ export interface DisplayStore {
   plans(): Settings["plans"];
   /** The lawyer's change to a tool's switch, sent to the host as a patch; nothing without a host that takes one. */
   setTools(patch: ToolsPatch): void;
+  /** The privacy switches as the host last said (`privacy.counts`), or undefined while it sends none. */
+  privacy(): PrivacySettings | undefined;
+  /** The lawyer's change to a privacy switch, sent to the host as a patch; nothing without a host that takes one. */
+  setPrivacy(patch: PrivacyPatch): void;
   display(): Display;
   /** The lawyer's change: written to localStorage, or with a NextHost sent to the host as a patch. */
   set(patch: Partial<UiSettings>): void;
@@ -168,6 +182,8 @@ function readStored(storage: DisplayEnv["storage"]): UiSettings {
 /** Starts the display from the settings, at once (display.ts's startDisplay), and keeps it in step with them. */
 export function createDisplayStore(env: DisplayEnv): DisplayStore {
   let stored = readStored(env.storage);
+  const first = one(["en", "hi"] as const, env.firstLanguage);
+  if (first !== undefined) stored = { ...stored, language: first };
   let over: Partial<UiSettings> = uiPatchOf(env.override);
   let platform: Platform = env.platform ?? DEFAULT_DISPLAY.platform;
   let releaseDate: string | null = null;
@@ -204,6 +220,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
   const host = env.host;
   let locked: readonly string[] = [];
   let tools: ToolsSettingsView | undefined;
+  let privacy: PrivacySettings | undefined;
   let plans: Settings["plans"];
   let stopHost = () => {};
   /** The settings_changed events heard: a read that one overtook is older than it, and dropped. */
@@ -212,6 +229,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
     stored = { ...DEFAULT_UI, ...uiPatchOf(settings.ui) };
     locked = settings.locked;
     tools = settings.tools;
+    privacy = settings.privacy;
     plans = settings.plans;
     try {
       env.storage?.setItem(DISPLAY_KEY, JSON.stringify(stored));
@@ -260,6 +278,16 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
       tools = { ...tools, ...patch };
       host.setToolSettings(patch).catch((error: unknown) => {
         console.warn(`set_tool_settings failed: ${JSON.stringify(error)}`);
+        void readHost(host);
+      });
+      for (const listener of listeners) listener();
+    },
+    privacy: () => privacy,
+    setPrivacy(patch) {
+      if (host === null || privacy === undefined) return;
+      privacy = { ...privacy, ...patch };
+      host.setPrivacySettings(patch).catch((error: unknown) => {
+        console.warn(`set_privacy_settings failed: ${JSON.stringify(error)}`);
         void readHost(host);
       });
       for (const listener of listeners) listener();

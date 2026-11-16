@@ -16,6 +16,13 @@
 //!   one the plan's `env` or the agent's own entry sets, and never `SSL_CERT_FILE`; the host's
 //!   forced variables (the sandbox's egress proxy, its root set) come after the hook's and win.
 //!
+//! And to Claude's and Codex's session `PATH` (`ProfileHook::agent_path`), Clauseo's Python
+//! runtime folders from the [`PythonSlot`] (`setup/python_path.rs`), which the setup thread
+//! fills once Python is `Ready` and empties otherwise, then, while there are any, the bundled
+//! PDF tools' folder (`setup/pdf_tools.rs`: `pdftoppm` and `pdfinfo` run that runtime); the
+//! host puts them after stetdoc's. On the same condition, Codex's instructions end with the line
+//! that tells it to render PDF pages with them (`clauseo_profile::instructions::codex_pdf`).
+//!
 //! Both snapshots are refreshed on each `SettingsChanged` (`setup/refresh.rs`). [`setup_vars`] is
 //! the one function that makes these variables: the limits readers take the same ones
 //! (`setup/readers.rs`), so a read goes where the agent's launches go. Desktop's copy is
@@ -24,6 +31,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::path::PathBuf;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use clauseo_host::{McpServer, NoProfile, PackRequest, ProfileHook};
@@ -35,6 +43,7 @@ use zeroize::Zeroizing;
 
 use super::keys::KeySlot;
 use super::network::{NetworkSlot, with_loopback};
+use super::python_path::PythonSlot;
 
 /// Each agent's firm plan, by agent id, as the settings last read gave it.
 pub(crate) type Plans = Arc<RwLock<BTreeMap<AgentId, Plan>>>;
@@ -49,23 +58,60 @@ pub(crate) fn plans_of(effective: &Effective) -> BTreeMap<AgentId, Plan> {
         .collect()
 }
 
-/// The launch profile, if it was built, plus the keys, the plans and the network route.
+/// The launch profile, if it was built, plus the keys, the plans, the network route and the
+/// Python folders.
 pub(crate) struct SetupHook {
     profile: Box<dyn ProfileHook>,
     keys: KeySlot,
     plans: Plans,
     network: NetworkSlot,
+    python: PythonSlot,
+    /// The bundled `pdftoppm` and `pdfinfo`'s folder (`setup::pdf_tools::found`), if found.
+    pdf_tools: Option<PathBuf>,
 }
 
 impl SetupHook {
-    /// The hook over `keys`, `plans` and `network`, with no profile (as `NoProfile`).
+    /// The hook over `keys`, `plans` and `network`, with no profile (as `NoProfile`) and no
+    /// Python folders.
     pub(crate) fn new(keys: KeySlot, plans: Plans, network: NetworkSlot) -> Self {
         Self {
             profile: Box::new(NoProfile),
             keys,
             plans,
             network,
+            python: PythonSlot::default(),
+            pdf_tools: None,
         }
+    }
+
+    /// This hook with Claude's and Codex's session `PATH` folders read from `python`.
+    #[must_use]
+    pub(crate) fn with_python(self, python: PythonSlot) -> Self {
+        Self { python, ..self }
+    }
+
+    /// This hook with the PDF tools' folder `folder` after the Python folders, while there are
+    /// any.
+    #[must_use]
+    pub(crate) fn with_pdf_tools(self, folder: Option<PathBuf>) -> Self {
+        Self {
+            pdf_tools: folder,
+            ..self
+        }
+    }
+
+    /// The Python runtime's folders, as the setup thread last put them in the slot.
+    fn python_dirs(&self) -> Vec<PathBuf> {
+        self.python
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The PDF tools' folder when it was found and `python` (the runtime's folders) has any:
+    /// the tools run that runtime, so they are on an agent's `PATH` only with it.
+    fn pdf_folder(&self, python: &[PathBuf]) -> Option<PathBuf> {
+        self.pdf_tools.clone().filter(|_| !python.is_empty())
     }
 
     /// This hook over `profile`, whose calls it hands through.
@@ -126,7 +172,20 @@ fn setup_parts(
         .unwrap_or_else(PoisonError::into_inner)
         .get(agent)
         .cloned();
-    if let Some(plan) = plan {
+    if let Some(mut plan) = plan {
+        // A firm plan whose key read failed (`KeyCache::unreadable_for`) loses its endpoint and
+        // provider here, whatever the host's refusal says yet: a launch in the gap before
+        // `refusal::sync_all` (a settings change) never goes keyless to a firm's gateway, where
+        // Claude Code would offer the lawyer's own claude.ai token (decision record 0048).
+        let firm = plan.endpoint.is_some() || plan.provider.is_some();
+        if firm
+            && keys
+                .get()
+                .is_some_and(|keys| keys.unreadable_for(agent, true))
+        {
+            plan.endpoint = None;
+            plan.provider = None;
+        }
         plan_env(kind, &plan, &mut vars);
     }
     let route = network.read().unwrap_or_else(PoisonError::into_inner);
@@ -205,13 +264,23 @@ impl ProfileHook for SetupHook {
         self.profile.mcp_servers(agent)
     }
 
+    /// The profile's Codex keys, a Codex agent's `developer_instructions` ending with the PDF
+    /// line when the PDF tools are on its `PATH` ([`Self::pdf_folder`]).
     fn codex_config(
         &self,
         agent: &AgentId,
         written: Option<&SkillsWritten>,
         packs: Option<&PacksWritten>,
     ) -> Map<String, Value> {
-        self.profile.codex_config(agent, written, packs)
+        let mut keys = self.profile.codex_config(agent, written, packs);
+        if AgentKind::of(agent) == Some(AgentKind::Codex)
+            && let Some(Value::String(text)) = keys.get_mut("developer_instructions")
+            && self.pdf_folder(&self.python_dirs()).is_some()
+        {
+            text.push_str("\n\n");
+            text.push_str(clauseo_profile::instructions::codex_pdf());
+        }
+        keys
     }
 
     fn launch_writes(&self, agent: &AgentId) -> Vec<SkillWrite> {
@@ -220,6 +289,24 @@ impl ProfileHook for SetupHook {
 
     fn pack_write(&self, agent: &AgentId, request: &PackRequest) -> Option<PackWrite> {
         self.profile.pack_write(agent, request)
+    }
+
+    /// The Python runtime's folders, as the setup thread last put them in the slot, then the PDF
+    /// tools' folder when there are any, for a Claude or Codex agent; none for any other. A read
+    /// of memory only: no I/O.
+    fn agent_path(&self, agent: &AgentId) -> Vec<PathBuf> {
+        if AgentKind::of(agent).is_none() {
+            return Vec::new();
+        }
+        let mut dirs = self.python_dirs();
+        if let Some(folder) = self.pdf_folder(&dirs) {
+            dirs.push(folder);
+        }
+        dirs
+    }
+
+    fn browser_tool(&self) -> Option<PathBuf> {
+        self.profile.browser_tool()
     }
 }
 

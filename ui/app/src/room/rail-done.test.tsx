@@ -1,6 +1,6 @@
 // U16b's Done and matter snooze on the rail over FakeTransport: Mark as done and its Undo, the Done fold's count and
-// Mark as not done, a matter snoozed (one snooze_thread per conversation not done) and Mark all done, the picker, the
-// open shelf's Wake now, and axe over the new parts in both themes.
+// Mark as not done, a matter snoozed (one snooze_thread per conversation not done) and Mark all conversations done,
+// the picker, the open shelf's Wake now, and axe over the new parts in both themes.
 // @vitest-environment happy-dom
 import axe from "axe-core";
 import { act } from "react";
@@ -122,7 +122,7 @@ test("a done row moves into the fold once the pointer leaves", async () => {
   expect(fold()?.querySelector(".room-fold-count")?.textContent).toBe("3");
 });
 
-test("a matter's Snooze until sends one snooze_thread per conversation not done; Mark all done one mark_thread_done each", async () => {
+test("a matter's Snooze until sends one snooze_thread per conversation not done; Mark all conversations done one mark_thread_done each", async () => {
   const transport = await mount({ lists: lists() });
   await press(rail()?.querySelector(`[aria-label="Actions for ${A.name}"]`));
   await press(item("Snooze until"));
@@ -139,7 +139,7 @@ test("a matter's Snooze until sends one snooze_thread per conversation not done;
     { thread: T_LIST.thread },
   ]);
   await press(rail()?.querySelector(`[aria-label="Actions for ${A.name}"]`));
-  await press(item("Mark all done"));
+  await press(item("Mark all conversations done"));
   expect(sent(transport, "mark_thread_done")).toEqual([
     { thread: T_A.thread, done: true },
     { thread: T_LIST.thread, done: true },

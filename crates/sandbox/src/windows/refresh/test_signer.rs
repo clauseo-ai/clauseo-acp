@@ -80,6 +80,22 @@ pub(super) fn image(version: [u16; 4], tail: &[u8]) -> Vec<u8> {
 
 /// [`image`] for the COFF `Machine` `machine`.
 pub(super) fn image_for(machine: u16, version: [u16; 4], tail: &[u8]) -> Vec<u8> {
+    image_with(machine, version, tail, None)
+}
+
+/// [`image_for`] with a PE32+ load config whose `CHPEMetadataPointer` is `chpe`: non-zero is a
+/// hybrid (ARM64EC or ARM64X) image, 0 a plain one, as an MSVC build with a load config is.
+pub(super) fn image_with_load_config(
+    machine: u16,
+    version: [u16; 4],
+    tail: &[u8],
+    chpe: u64,
+) -> Vec<u8> {
+    image_with(machine, version, tail, Some(chpe))
+}
+
+/// The image, with a load config when `chpe` is given.
+fn image_with(machine: u16, version: [u16; 4], tail: &[u8], chpe: Option<u64>) -> Vec<u8> {
     let mut bytes = vec![0u8; 0x200];
     let put = |bytes: &mut Vec<u8>, at: usize, value: &[u8]| {
         if bytes.len() < at + value.len() {
@@ -131,6 +147,16 @@ pub(super) fn image_for(machine: u16, version: [u16; 4], tail: &[u8]) -> Vec<u8>
     rsrc[0x48..0x4C].copy_from_slice(&u32le(0x1058));
     rsrc[0x4C..0x50].copy_from_slice(&u32le(92));
     rsrc.extend_from_slice(&info);
+    if let Some(chpe) = chpe {
+        // A 256-byte load config after the version data, in the same section (data directory 10).
+        let at = rsrc.len().next_multiple_of(8);
+        rsrc.resize(at + 256, 0);
+        rsrc[at..at + 4].copy_from_slice(&u32le(256));
+        rsrc[at + 200..at + 208].copy_from_slice(&chpe.to_le_bytes());
+        let rva = 0x1000 + u32::try_from(at).unwrap();
+        put(&mut bytes, optional + 112 + 80, &u32le(rva));
+        put(&mut bytes, optional + 112 + 84, &u32le(256));
+    }
     let size = u32::try_from(rsrc.len()).unwrap();
     put(&mut bytes, optional + 112 + 16, &u32le(0x1000));
     put(&mut bytes, optional + 112 + 20, &u32le(size));

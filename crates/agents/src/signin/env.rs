@@ -1,4 +1,4 @@
-//! The whole environment of a sign-in, status or detection child, built from a base (the app's
+//! The whole environment of a sign-in or status child, built from a base (the app's
 //! own environment, [`crate::SigninConfig::base_env`]).
 //!
 //! The child gets exactly this map: the caller's launcher is made with
@@ -41,15 +41,10 @@ pub(crate) enum Vendor {
     Codex,
 }
 
-/// What a run is for, and so which home variables it gets.
+/// What a run is for, and so which home variables it gets. Detection starts no run (it is a
+/// stat, `super::detect`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RunKind<'a> {
-    /// Detection: the lawyer's own login, looked at where the CLI keeps it by default.
-    ///
-    /// "with the run environment below minus the home variables and `HOME` change, and without
-    /// the store override"; Claude "with `CLAUDE_CONFIG_DIR` and
-    /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` unset"; Codex "with `CODEX_HOME` unset".
-    Detect,
     /// Clauseo's own login, in `home` (`Locations::agent_home`, as text, never canonicalised).
     ///
     /// Claude: "`CLAUDE_CONFIG_DIR=<data_dir>/agents/claude-acp/home` (new),
@@ -121,7 +116,7 @@ const STRIPPED_PREFIXES: [&str; 1] = ["SSH_"];
 
 /// Names dropped from every run: the remote-session hints the CLIs read to skip the browser,
 /// and every variable this module sets itself, so an inherited one never survives a run that
-/// does not set it (detection's homes) or leaks a stale value.
+/// does not set it or leaks a stale value.
 /// An inherited `BROWSER` stays when there is no shim (Windows, Codex): it is the lawyer's own
 /// choice of browser.
 const STRIPPED: [&str; 6] = [
@@ -150,8 +145,13 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
     match inputs.vendor {
         Vendor::Claude => {
             set(&mut env, "ANTHROPIC_API_KEY", OsStr::new(""));
+            // The split between Clauseo's own login and the lawyer's. Own: the inherited
+            // `CLAUDE_SECURESTORAGE_CONFIG_DIR` is stripped, so Claude's item is
+            // `Claude Code-credentials-<hash of home>`, never the lawyer's. Reused: `""`, the
+            // lawyer's unsuffixed item. Any Keychain shim or jail (draft #815, plan-c) applies to
+            // Own only: on macOS a Reused run must reach Apple's `security` and SecurityServer
+            // (decision 0046, "Guard"; `signin/reuse.rs`).
             match inputs.kind {
-                RunKind::Detect => {}
                 RunKind::Own { home } => set(&mut env, "CLAUDE_CONFIG_DIR", home.as_os_str()),
                 RunKind::Reused { home } => {
                     set(&mut env, "CLAUDE_CONFIG_DIR", home.as_os_str());
@@ -169,11 +169,10 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
         }
         Vendor::Codex => {
             set(&mut env, "CODEX_API_KEY", OsStr::new(""));
-            if let RunKind::Own { home } | RunKind::Reused { home } = inputs.kind {
-                set(&mut env, "CODEX_HOME", home.as_os_str());
-                if matches!(inputs.os, Os::Darwin | Os::Linux) {
-                    set(&mut env, "HOME", home.as_os_str());
-                }
+            let (RunKind::Own { home } | RunKind::Reused { home }) = inputs.kind;
+            set(&mut env, "CODEX_HOME", home.as_os_str());
+            if matches!(inputs.os, Os::Darwin | Os::Linux) {
+                set(&mut env, "HOME", home.as_os_str());
             }
         }
     }
@@ -230,15 +229,9 @@ pub(crate) fn ca_var(vendor: Vendor) -> &'static str {
     }
 }
 
-/// The arguments every Codex run but detection adds after its command:
-/// `-c cli_auth_credentials_store="file"`. Detection gets none ("without the store override").
-pub(crate) fn codex_store_args(kind: RunKind<'_>) -> Vec<OsString> {
-    match kind {
-        RunKind::Detect => Vec::new(),
-        RunKind::Own { .. } | RunKind::Reused { .. } => {
-            CODEX_STORE.iter().map(OsString::from).collect()
-        }
-    }
+/// The arguments every Codex run adds after its command: `-c cli_auth_credentials_store="file"`.
+pub(crate) fn codex_store_args() -> Vec<OsString> {
+    CODEX_STORE.iter().map(OsString::from).collect()
 }
 
 /// Whether `name` is dropped from every run.

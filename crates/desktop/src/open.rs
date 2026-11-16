@@ -1,11 +1,13 @@
 //! What the three commands that leave the app do (`docs/decisions/0026-open-and-reveal.md`):
-//! `open_external` opens an https, http or mailto link in the default browser or mail app after
-//! a native confirm naming where it goes; `open_file` opens a document of a matter with its
+//! `open_external` opens an https, http or mailto link in the default browser or mail app, a
+//! plain web link at once and a mailto or misleading one after a native confirm naming where it
+//! goes (`ask.rs`); `open_file` opens a document of a matter with its
 //! default app; `reveal` shows a matter's folder, or the app data folder, in Finder or File
 //! Explorer. The webview names a file by the `FileRefId` the host issued and a folder by its
 //! matter, never by a path. The host, the confirm and the OS sit behind traits, so tests run
 //! without a window and never open anything.
 
+mod ask;
 mod bounded;
 pub(crate) mod gate;
 mod link;
@@ -27,6 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::dialogs::BoxFuture;
 
+pub(crate) use ask::needs_confirm;
 pub(crate) use bounded::FOLDER_WAIT;
 
 pub(crate) use gate::{AFTER_DECLINE, BETWEEN_OPENS, Now, OpenGates, now};
@@ -194,16 +197,69 @@ pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<Document, Hos
 /// `command.invalid`.
 pub(crate) fn open_url_unconfirmed(opener: &dyn Opener, url: &str) -> Result<(), HostError> {
     let link = check_link(url)?;
-    if !link.url.starts_with("https://") {
+    if link.url.scheme() != "https" {
         return Err(invalid("only https links open without a confirm"));
     }
-    opener.open_url(&link.url)
+    opener.open_url(link.url.as_str())
 }
 
-/// `open_external` for a checked `link`: asks the lawyer in `language`, through `gate` (one
-/// confirm at a time, none for [`AFTER_DECLINE`] after a decline: `command.conflict`), and
-/// opens it. Declined, nothing opens and the call fails with `transport.unauthorized`.
+/// macOS's Files and Folders pane in System Settings' Privacy & Security.
+pub(crate) const PRIVACY_FILES_AND_FOLDERS: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders";
+
+/// `open_privacy_settings`: opens [`PRIVACY_FILES_AND_FOLDERS`] when `mac`, and nothing else, so
+/// the page can open no other URL with it. Off macOS it opens nothing and is `command.invalid`;
+/// the page shows its button on macOS only.
+pub(crate) fn open_privacy_settings(opener: &dyn Opener, mac: bool) -> Result<(), HostError> {
+    if !mac {
+        return Err(invalid("the Privacy settings pane is macOS's"));
+    }
+    opener.open_url(PRIVACY_FILES_AND_FOLDERS)
+}
+
+/// When `open_external` asks before it opens a link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ask<'a> {
+    /// Whatever the link: for an open that leads to more, such as Get installer, which quits
+    /// Clauseo once the page opened. It can only add a confirm, never remove one.
+    Always,
+    /// When [`needs_confirm`] says so, for a link whose visible text is this (`None`: it has none).
+    IfMisleading(Option<&'a str>),
+}
+
+/// `open_external` for a checked `link`: when `ask` is [`Ask::Always`], or when [`needs_confirm`]
+/// says so (a mailto link, an address or international host, or text that names another site or
+/// could hide one), it asks first, as [`open_confirmed`] does; otherwise it opens at once. Both go
+/// through `gate`: one call at a time (`command.conflict`), none for [`AFTER_DECLINE`] after a
+/// decline, and none for [`BETWEEN_OPENS`] after a link opened with no confirm, so script in the
+/// page cannot open a stream of tabs the lawyer was never asked about. An accepted confirm sets no
+/// pause: the lawyer chose it.
 pub(crate) async fn open_external(
+    confirm: &dyn LinkConfirm,
+    opener: &dyn Opener,
+    gate: &gate::Gate,
+    now: Now<'_>,
+    language: Language,
+    link: &Link,
+    ask: Ask<'_>,
+) -> Result<(), HostError> {
+    let asks = match ask {
+        Ask::Always => true,
+        Ask::IfMisleading(shown) => needs_confirm(link, shown),
+    };
+    if asks {
+        return open_confirmed(confirm, opener, gate, now, language, link).await;
+    }
+    let pass = gate.enter(now())?;
+    pass.quiet_for(now(), BETWEEN_OPENS);
+    opener.open_url(link.url.as_str())
+}
+
+/// Opens a checked `link` after asking the lawyer in `language`, whatever the link: through
+/// `gate` (one confirm at a time, none for [`AFTER_DECLINE`] after a decline:
+/// `command.conflict`). Declined, nothing opens and the call fails with `transport.unauthorized`.
+/// `open_external` uses it for the links that need a confirm; a connector's pay link always does.
+pub(crate) async fn open_confirmed(
     confirm: &dyn LinkConfirm,
     opener: &dyn Opener,
     gate: &gate::Gate,
@@ -212,17 +268,14 @@ pub(crate) async fn open_external(
     link: &Link,
 ) -> Result<(), HostError> {
     let pass = gate.enter(now())?;
-    if !confirm
-        .confirm_link(LinkWords::new(&link.destination, language))
-        .await
-    {
+    if !confirm.confirm_link(LinkWords::new(link, language)).await {
         pass.quiet_for(now(), AFTER_DECLINE);
         return Err(HostError::new(
             ErrorCode::TransportUnauthorized,
             "the lawyer declined to open the link",
         ));
     }
-    opener.open_url(&link.url)
+    opener.open_url(link.url.as_str())
 }
 
 /// `open_file`: through `gate` (one at a time, and at most one document opened per

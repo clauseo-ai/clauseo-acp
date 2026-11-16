@@ -94,6 +94,22 @@ impl SetupAgents for Networks {
     fn use_different_account(&self, _agent: &AgentId) -> Result<(), clauseo_agents::SigninError> {
         Ok(())
     }
+    fn use_different_account_switching(
+        &self,
+        _agent: &AgentId,
+    ) -> Result<(), clauseo_agents::SigninError> {
+        Ok(())
+    }
+    fn sign_in_switching(
+        &self,
+        _agent: &AgentId,
+        _method: clauseo_agents::Method,
+    ) -> Result<(), clauseo_agents::SigninError> {
+        Ok(())
+    }
+    fn own_login(&self, _agent: &AgentId) -> Option<clauseo_agents::OwnLogin> {
+        None
+    }
     fn signin_state(&self, _agent: &AgentId) -> Option<clauseo_agents::SigninState> {
         None
     }
@@ -501,3 +517,4 @@ fn a_lookup_past_the_budget_reaches_the_route_once_it_answers() {
 
 mod keep;
 mod reach;
+mod virtual_time;

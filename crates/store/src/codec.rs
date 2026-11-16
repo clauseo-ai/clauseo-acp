@@ -1,8 +1,8 @@
 //! The stored forms: the `events` key, the `MessagePack` envelope, and the text of ids and rows.
 
 use clauseo_protocol::{
-    Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind, PackList, RenameSource, SCHEMA_VERSION,
-    Seq, StreamId, Timestamp,
+    AgentPrefs, Envelope, EnvelopeRead, MAX_MSGPACK_DEPTH, MatterKind, PackList, RenameSource,
+    SCHEMA_VERSION, Seq, StreamId, Timestamp,
 };
 use serde::Deserialize;
 
@@ -145,12 +145,25 @@ pub(crate) fn skill_packs_text(packs: &PackList) -> Result<String, Error> {
     })
 }
 
-/// A `matters.skill_packs` read back: text that is not a JSON array of pack ids, or a list that
-/// breaks the list's rules (more than 32 ids, an id twice), is corrupt.
-pub(crate) fn skill_packs(text: &str) -> Result<PackList, Error> {
-    serde_json::from_str(text).map_err(|error| {
-        Error::corrupt(format!(
-            "a matter's skill packs {text:?} do not parse: {error}"
-        ))
+/// The `matters.agent_prefs` text: a JSON object of picks by agent kind.
+pub(crate) fn agent_prefs_text(prefs: &AgentPrefs) -> Result<String, Error> {
+    serde_json::to_string(prefs).map_err(|error| Error::Encode {
+        detail: format!("a matter's agent prefs: {error}"),
     })
+}
+
+/// A `matters.agent_prefs` read back: text that is not such an object (an unknown agent kind,
+/// more picks than `ConfigPicks` holds) is corrupt. The error leaves the text out; the decoder's
+/// message may quote a part of it, so no caller logs it.
+pub(crate) fn agent_prefs(text: &str) -> Result<AgentPrefs, Error> {
+    serde_json::from_str(text)
+        .map_err(|error| Error::corrupt(format!("a matter's agent prefs do not parse: {error}")))
+}
+
+/// A `matters.skill_packs` read back: text that is not a JSON array of pack ids, or a list that
+/// breaks the list's rules (more than 32 ids, an id twice), is corrupt. The error leaves the text
+/// out; the decoder's message may quote a part of it, so no caller logs it.
+pub(crate) fn skill_packs(text: &str) -> Result<PackList, Error> {
+    serde_json::from_str(text)
+        .map_err(|error| Error::corrupt(format!("a matter's skill packs do not parse: {error}")))
 }

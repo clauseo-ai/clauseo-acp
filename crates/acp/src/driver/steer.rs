@@ -21,20 +21,25 @@ use crate::types::SteerResult;
 const STEERING_METHOD: &str = "_session/steering";
 
 /// Sends the steer; the answer is the [`SteerResult`]. An error answer is `Failed`; a transport
-/// error (the agent is gone) stays an error.
+/// error (the agent is gone) stays an error. `held`: the turn waits on its own permission
+/// request, so native steering is enough (`Client::steer_held`).
 pub(crate) fn steer(
     cx: &ConnectionTo<Agent>,
     shared: &Arc<Shared>,
     session: &AgentSessionId,
     content: Vec<ContentBlock>,
+    held: bool,
     reply: Reply<SteerResult>,
 ) {
     let (supported, capabilities) = {
         let state = shared.state();
-        (
-            steering::supported(state.steering),
-            state.prompt_capabilities,
-        )
+        let native = state.steering.is_some_and(|steering| steering.native);
+        let supported = if held {
+            native
+        } else {
+            steering::supported(state.steering)
+        };
+        (supported, state.prompt_capabilities)
     };
     if !supported {
         return answer(reply, Err(Error::SteerUnsupported));

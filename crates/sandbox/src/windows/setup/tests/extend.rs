@@ -38,7 +38,7 @@ fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() 
     .map(str::to_owned)
     .into();
     expected.extend((1001..=1008).map(|r| format!("account_name {r}")));
-    expected.push("group".to_owned());
+    expected.extend(["group", "deny_remote_logon 1000"].map(str::to_owned));
     expected.extend((1001..=1008).map(|r| format!("profile_of {r}")));
     let mut recorded: Vec<String> = (1001..=1008).map(|r| r.to_string()).collect();
     for n in 9..=12u32 {
@@ -145,7 +145,7 @@ fn a_re_run_reuses_the_recorded_accounts_and_resets_their_passwords() {
     .map(str::to_owned)
     .into();
     expected.extend((1001..=1008).map(|r| format!("account_name {r}")));
-    expected.extend(["sessions_open", "group"].map(str::to_owned));
+    expected.extend(["sessions_open", "group", "deny_remote_logon 1000"].map(str::to_owned));
     for n in 1..=8 {
         let name = format!("ClauseoSb0{n}");
         expected.extend(

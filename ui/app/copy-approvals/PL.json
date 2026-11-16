@@ -1,0 +1,26 @@
+{
+  "PL-01": {
+    "en": "A new conversation. It reads this matter's one paper.",
+    "hi": "एक नई बातचीत। यह इस मामले का एक दस्तावेज़ पढ़ती है।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "papers_live (sweep 2)",
+    "note": "Rohan's approved words (U6, U2), reused for the wall following the folder (0055, D-055 to D-057)"
+  },
+  "PL-02": {
+    "en": "A new conversation. It reads this matter's {n} papers.",
+    "hi": "एक नई बातचीत। यह इस मामले के {n} दस्तावेज़ पढ़ती है।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "papers_live (sweep 2)",
+    "note": "Rohan's approved words (U6, U2), reused for the wall following the folder (0055, D-055 to D-057)"
+  },
+  "PL-03": {
+    "en": "This matter's folder has moved.",
+    "hi": "इस मामले का फ़ोल्डर कहीं और ले जाया गया है।",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "papers_live (sweep 2)",
+    "note": "Rohan's approved words (U6, U2), reused for the wall following the folder (0055, D-055 to D-057)"
+  }
+}

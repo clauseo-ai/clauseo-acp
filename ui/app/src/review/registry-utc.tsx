@@ -5,6 +5,7 @@ import type { ToolCallEntry, ToolCallStatus, ToolKind, ViewEntry } from "../tran
 import { agentText, step, toolCall, userMessage } from "../testing/stream-script.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost } from "./hosts.ts";
+import { UTC_TASKS } from "./registry-utc-tasks.tsx";
 import { RoomClicking, RoomOver } from "./states.tsx";
 import { stepLiveWords, stepWords, type WordsRef } from "./words.ts";
 import type { StepKey } from "@clauseo/components/lib/words-steps.ts";
@@ -147,7 +148,9 @@ export const UTC: Entry[] = [
   opened("UTC-78", "Tried to run a task.", [call("execute", "failed")]),
   opened("UTC-79", "Tried to think it through.", [call("think", "cancelled")]),
   opened("UTC-80", "Tried one other thing.", [call("other", "failed")]),
-  opened("UTC-81", "Tried: {title}.", [call("other", "cancelled", titled("Check the cause list"))]),
+  opened("UTC-81", "Tried: {title}.", [
+    call("other", "cancelled", titled("Check the share register")),
+  ]),
   // a row whose state this version can't read
   opened("UTC-82", "State not known", [call("read", "unknown", COMPLAINT)]),
   folded("UTC-83", "State not known.", [call("read", "unknown", COMPLAINT)]),
@@ -198,7 +201,7 @@ export const UTC: Entry[] = [
   ]),
   folded("UTC-35", "Did {n} other things.", [
     call("other", "completed", titled("Ask the court's records")),
-    call("other", "completed", titled("Check the cause list")),
+    call("other", "completed", titled("Check the share register")),
   ]),
   folded("UTC-36", "And 1 more.", [
     call("read", "completed", COMPLAINT),
@@ -278,4 +281,5 @@ export const UTC: Entry[] = [
     call("read", "completed", { ...COMPLAINT, background: true }),
     call("read", "completed", { ...FORM, background: true }),
   ]),
+  ...UTC_TASKS,
 ];

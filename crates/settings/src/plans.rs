@@ -214,7 +214,7 @@ pub(crate) fn address_ok(url: &str, scheme: &str) -> bool {
 
 /// Whether `authority` is a host, or `[` an IPv6 literal `]`, then `:` and a port of 1 to 5
 /// digits up to 65535 if any.
-fn authority_ok(authority: &str) -> bool {
+pub(crate) fn authority_ok(authority: &str) -> bool {
     let (host, port) = match authority.strip_prefix('[') {
         Some(literal) => match literal.split_once(']') {
             Some((inside, "")) => (inside, None),
@@ -370,8 +370,9 @@ pub(crate) fn entry_is_clauseos(entry: &Value, data_dir: &Path) -> bool {
     owns(command, script, data_dir)
 }
 
-/// [`entry_is_clauseos`] for a launch about to be written.
-pub(crate) fn launch_is_clauseos(launch: &AgentLaunch, data_dir: &Path) -> bool {
+/// [`entry_is_clauseos`] for a launch about to be written, or one held: desktop reads an
+/// `agents.<id>` entry that is Clauseo's as an install it made here before (#859).
+pub fn launch_is_clauseos(launch: &AgentLaunch, data_dir: &Path) -> bool {
     owns(
         &launch.command,
         launch.args.first().map(String::as_str),

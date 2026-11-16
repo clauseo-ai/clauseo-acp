@@ -29,12 +29,10 @@ export const HI = {
   "Needs you": "आपकी ज़रूरत है",
   Today: "आज",
   Yesterday: "बीता कल",
-  // the date groups, by each matter's next date, in this order
-  Tomorrow: "कल",
-  "This week": "इस सप्ताह",
-  "Next week": "अगले सप्ताह",
-  Later: "बाद में",
-  "No date yet": "अभी कोई तारीख नहीं",
+  // the rail's group of matters answering now, under Needs you
+  Working: "काम चल रहा है",
+  // the rail's group of every other matter, by latest activity, under Needs you or Working
+  "Other matters": "बाकी मामले",
   "No matters yet": "अभी कोई मामला नहीं",
   "Add a matter's folder.": "मामले का फ़ोल्डर जोड़ें।",
   "Add a matter's folder. Clauseo reads its papers before your first question.":

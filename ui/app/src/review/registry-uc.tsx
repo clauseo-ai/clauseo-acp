@@ -1,10 +1,11 @@
 // UC's copy review entries (the protection screens): the room's line and marks, the Not protected
-// note for each cause, the Add room and remove confirms, the firm's notice, the first run's Safe
-// workspace step and design B's blocks and repair, in the real room over a FakeTransport that
-// carries the protection wire; and Settings' Safe workspace, in the real settings window. A note or
-// a confirm shows after the presses that open it (PressInOrder). Notes are marked explained first,
-// so none opens by itself over a line's cell. The shipped and the design's own lines are approved
-// "by": "design"; the new ones are provisional, English only (hi: later). R18's screens are UC2's.
+// note for each cause, the Add room and remove confirms, the firm's notice, and the first run's Safe
+// workspace step, in the real room over a FakeTransport that carries the protection wire; and
+// Settings' Safe workspace, in the real settings window. A note or a confirm shows after the presses
+// that open it (PressInOrder). Notes are marked explained first, so none opens by itself over a
+// line's cell. The shipped and the design's own lines are approved "by": "design"; the new ones are
+// provisional, English only (hi: later). R18's screens are UC2's. UC-80 on (design B's blocks and
+// repair) are in registry-uc-blocks.tsx.
 import type { FirstLaunchKey } from "@clauseo/components/lib/words-first-launch.ts";
 import type { ProtectionKey } from "@clauseo/components/lib/words-protection.ts";
 import type { SettingsKey } from "@clauseo/components/lib/words-settings.ts";
@@ -35,7 +36,7 @@ import {
 const CLAUDE: AgentId = "claude-acp";
 const THREAD = "00000000-0000-4000-8000-0000000000c1";
 const np = (cause: unknown): Protection => ({ not_protected: { cause } }) as Protection;
-const P = {
+export const P = {
   b: { protected: { tier: "b" } } as Protection,
   a: { protected: { tier: "a" } } as Protection,
   needs: np("needs_set_up"),
@@ -55,9 +56,12 @@ const P = {
   other: np("other_account"),
 };
 /** A view whose set-up brings no Windows prompt, so the app offers it. */
-const NO_PROMPT = { retry_asks_admin: false } as Partial<ProtectionView>;
+export const NO_PROMPT = { retry_asks_admin: false } as Partial<ProtectionView>;
 
-const viewOf = (computer: Protection, over: Partial<ProtectionView> = {}): ProtectionView => ({
+export const viewOf = (
+  computer: Protection,
+  over: Partial<ProtectionView> = {},
+): ProtectionView => ({
   tier: "protected" in computer ? (computer.protected?.tier ?? "c") : "c",
   computer,
   required: false,
@@ -66,7 +70,10 @@ const viewOf = (computer: Protection, over: Partial<ProtectionView> = {}): Prote
 });
 
 /** A protection host whose commands never answer, so a wait stays in view. */
-const held = (computer: Protection, over: Partial<ProtectionView> = {}): FakeProtectionHost => ({
+export const held = (
+  computer: Protection,
+  over: Partial<ProtectionView> = {},
+): FakeProtectionHost => ({
   view: () => viewOf(computer, over),
   command: () => new Promise<void>(() => {}),
 });
@@ -78,7 +85,7 @@ const quiet = () =>
     JSON.stringify({ computer: true, matters: [MATTER.matter] }),
   );
 
-type RoomScene = {
+export type RoomScene = {
   protection: Protection;
   computer?: Protection;
   over?: Partial<ProtectionView>;
@@ -108,10 +115,10 @@ const roomHost = (s: RoomScene) => () => {
 const pressing = (press: string[] | undefined, children: React.ReactNode) =>
   press === undefined ? children : <PressInOrder press={press}>{children}</PressInOrder>;
 
-const LINE = '[data-testid="workspace-line"]';
-const SETUP = '[data-testid="protection-setup"]';
+export const LINE = '[data-testid="workspace-line"]';
+export const SETUP = '[data-testid="protection-setup"]';
 
-const room = (id: string, words: WordsRef, screen: string, s: RoomScene): Entry => ({
+export const room = (id: string, words: WordsRef, screen: string, s: RoomScene): Entry => ({
   id,
   words,
   screen,
@@ -145,7 +152,7 @@ const firstHost = (over: Partial<ProtectionView>, computer: Protection) => () =>
     setup: { first: () => SIGN },
     protection: held(computer, over),
   });
-const first = (
+export const first = (
   id: string,
   words: WordsRef,
   press?: string[],
@@ -159,7 +166,7 @@ const first = (
 });
 
 /** The settings window at the Safe workspace. */
-const settings = (
+export const settings = (
   id: string,
   key: SettingsKey | WordsRef,
   protection: FakeProtectionHost,
@@ -174,21 +181,24 @@ const settings = (
     pressing(press, <SettingsOver section="workspace" lang={lang} protection={protection} />),
 });
 
-const pw = (key: ProtectionKey) => protectionWords(key);
+export const pw = (key: ProtectionKey) => protectionWords(key);
 const fw = (key: FirstLaunchKey) => firstLaunchWords(key);
-const note = (protection: Protection): RoomScene => ({ protection, press: [LINE] });
+export const note = (protection: Protection): RoomScene => ({ protection, press: [LINE] });
 const REFUSED_INVALID: FakeProtectionHost = {
   view: () => {
     throw { code: "command.invalid", message: "not admitted yet", retryable: false };
   },
 };
 
-/** UC's entries, UC-01 to UC-96, each id written as it is; ids missing are unused. */
+/**
+ * UC's entries, UC-01 to UC-78, each id written as it is; ids missing are unused. UC-80 on are in
+ * registry-uc-blocks.tsx.
+ */
 export const UC: Entry[] = [
   room(
     "UC-01",
     roomWords(
-      "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
+      "Safe workspace. Clauseo works only in this matter's folder. It can't open your other files unless you allow it.",
     ),
     "room/protection-line",
     { protection: P.b },
@@ -196,7 +206,7 @@ export const UC: Entry[] = [
   room("UC-02", toolbarWords("Not protected."), "room/protection-line", { protection: P.refused }),
   room(
     "UC-03",
-    toolbarWords("Clauseo asks before each change in this matter."),
+    toolbarWords("Clauseo changes files in this matter without asking."),
     "room/protection-line",
     {
       protection: P.refused,
@@ -205,23 +215,17 @@ export const UC: Entry[] = [
   room(
     "UC-04",
     toolbarWords(
-      "Clauseo can change files in this matter without asking. It asks before going beyond it.",
+      "Clauseo can read any file you can open, and changes files in this matter without asking. It asks before changing files outside it.",
     ),
     "room/protection-line",
     { protection: P.refused, agent: "codex-acp" },
-  ),
-  room(
-    "UC-05",
-    toolbarWords("Clauseo can reach beyond this matter's folder without asking."),
-    "room/protection-line",
-    { protection: P.off },
   ),
   room("UC-06", toolbarWords("Not protected"), "room/protection-mark", { protection: P.refused }),
   first("UC-10", fw("Windows asks once for permission to set up the Safe workspace.")),
   first(
     "UC-11",
     pw(
-      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
     ),
   ),
   room("UC-12", pw("Set up the Safe workspace"), "room/np-note", {
@@ -240,7 +244,7 @@ export const UC: Entry[] = [
   room(
     "UC-21",
     versionWords(
-      "The Safe workspace is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
+      "The Safe workspace is off for {matter}. Claude changes files in this matter without asking. ChatGPT can read any file you can open, and asks before changing files outside this matter's folder.",
     ),
     "room/np-note",
     note(P.off),
@@ -248,7 +252,7 @@ export const UC: Entry[] = [
   room(
     "UC-22",
     pw(
-      "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+      "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer.",
     ),
     "room/np-note",
     note(P.needs),
@@ -256,7 +260,7 @@ export const UC: Entry[] = [
   room(
     "UC-23",
     pw(
-      "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+      "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it.",
     ),
     "room/np-note",
     note(P.refused),
@@ -270,7 +274,7 @@ export const UC: Entry[] = [
   room(
     "UC-25",
     pw(
-      "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+      "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it.",
     ),
     "room/np-note",
     note(P.cant),
@@ -329,19 +333,19 @@ export const UC: Entry[] = [
   room(
     "UC-38",
     pw(
-      "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+      "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer.",
     ),
     "room/np-note",
     note(np({ unsupported: { why: "not_built" } })),
   ),
   settings(
     "UC-36",
-    "The Safe workspace isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.",
+    "The Safe workspace isn't available on Windows on ARM yet.",
     held(np({ unsupported: { why: "windows_arm" } })),
   ),
   settings(
     "UC-37",
-    "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.",
+    "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update.",
     held(np({ unsupported: { why: "not_built" } })),
   ),
   room("UC-40", pw("Set up the Safe workspace?"), "room/protection-confirm", {
@@ -354,7 +358,7 @@ export const UC: Entry[] = [
   settings(
     "UC-42",
     pw(
-      "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      "Windows will ask to let Clauseo remove the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, enter the password of an administrator account on this computer.",
     ),
     held(P.b),
     ['[data-testid="protection-remove"]'],
@@ -412,34 +416,18 @@ export const UC: Entry[] = [
   settings("UC-64", "Windows keeps Clauseo inside each matter's folder.", held(P.a)),
   settings("UC-65", "Set up with Windows' permission.", held(P.b)),
   settings("UC-66", "Not protected", held(P.needs)),
-  settings(
-    "UC-67",
-    "The Safe workspace isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.",
-    held(P.needs),
-  ),
-  settings(
-    "UC-68",
-    "Windows didn't allow the set-up, so Clauseo asks before changing anything outside a matter's folder.",
-    held(P.refused),
-  ),
+  settings("UC-67", "The Safe workspace isn't set up on this computer yet.", held(P.needs)),
+  settings("UC-68", "Windows didn't allow the set-up.", held(P.refused)),
   settings(
     "UC-69",
     "Set up on {date}, with Windows' permission.",
     held(P.b, { set_up_at: Date.UTC(2026, 10, 3, 6, 0) } as Partial<ProtectionView>),
   ),
-  settings(
-    "UC-70",
-    "The Safe workspace couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
-    held(P.failed),
-  ),
-  settings(
-    "UC-71",
-    "This computer can't run the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
-    held(P.cant),
-  ),
+  settings("UC-70", "The Safe workspace couldn't be set up on this computer.", held(P.failed)),
+  settings("UC-71", "This computer can't run the Safe workspace.", held(P.cant)),
   settings(
     "UC-72",
-    "The Safe workspace isn't available on Linux yet, so Clauseo asks before changing anything outside a matter's folder.",
+    "The Safe workspace isn't available on Linux yet.",
     held(np({ unsupported: { why: "os" } })),
   ),
   settings("UC-73", "Set up again", held(P.refused, NO_PROMPT)),
@@ -465,125 +453,5 @@ export const UC: Entry[] = [
     ),
     "room/protection-required",
     { protection: np({ unsupported: { why: "not_built" } }), over: { required: true } },
-  ),
-  // design B: what stops the Safe workspace, and the repair
-  room(
-    "UC-80",
-    pw(
-      "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
-    ),
-    "room/np-note",
-    note(P.policy),
-  ),
-  settings(
-    "UC-81",
-    pw(
-      "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
-    ),
-    held(P.policy),
-  ),
-  settings(
-    "UC-82",
-    pw(
-      "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
-    ),
-    held(P.policy),
-  ),
-  room(
-    "UC-83",
-    pw(
-      "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
-    ),
-    "room/np-note",
-    note(P.tool),
-  ),
-  first(
-    "UC-84",
-    pw("The Safe workspace wasn't set up when Clauseo was installed."),
-    undefined,
-    {},
-    P.missing,
-  ),
-  first(
-    "UC-85",
-    pw("Run the Clauseo installer again to set up the Safe workspace."),
-    undefined,
-    {},
-    P.missing,
-  ),
-  first("UC-86", pw("Get the installer"), undefined, {}, P.missing),
-  settings(
-    "UC-87",
-    pw("Your firm manages how Clauseo is installed on this computer."),
-    held(P.missing, { required: true }),
-  ),
-  settings(
-    "UC-88",
-    pw(
-      "The program that sets up the Safe workspace has changed since Clauseo was installed. Install Clauseo again to restore it.",
-    ),
-    held(P.changed),
-  ),
-  settings(
-    "UC-89",
-    pw(
-      "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
-    ),
-    held(P.unsafe),
-  ),
-  room(
-    "UC-90",
-    pw(
-      "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
-    ),
-    "room/np-note",
-    note(P.other),
-  ),
-  settings(
-    "UC-91",
-    pw(
-      "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
-    ),
-    held(P.newer),
-  ),
-  room(
-    "UC-92",
-    pw(
-      "Your firm requires the Safe workspace on this computer, so Clauseo can't answer here until it's set up.",
-    ),
-    "room/protection-required",
-    { protection: P.missing, over: { required: true } },
-  ),
-  settings(
-    "UC-93",
-    pw(
-      "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Your firm manages this computer's settings.",
-    ),
-    {
-      view: () => viewOf(P.failed, NO_PROMPT),
-      command: () => Promise.reject({ code: "sandbox.blocked", message: "", retryable: false }),
-    },
-    [SETUP],
-  ),
-  room("UC-94", pw("Add room for 4 more?"), "room/protection-confirm", {
-    protection: P.pool,
-    press: [LINE, SETUP],
-  }),
-  room(
-    "UC-95",
-    pw(
-      "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown. That's expected for Clauseo. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
-    ),
-    "room/protection-confirm",
-    { protection: P.pool, press: [LINE, SETUP] },
-  ),
-  first(
-    "UC-96",
-    pw(
-      "Clauseo will close so the installer can set up the Safe workspace. Run the installer you download, then open Clauseo again.",
-    ),
-    undefined,
-    {},
-    P.missing,
   ),
 ];

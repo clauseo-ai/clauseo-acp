@@ -6,7 +6,8 @@
 //! runs on the main thread or an async worker. Nothing waits for the thread or joins it: the
 //! window, the host and the welcome screen never wait on it. It shows nothing; each outcome is
 //! one line in host.log (target [`TARGET`]). Before the compare it logs the task's last run
-//! (`last_refresh_run`), so a refresh that keeps failing shows in host.log.
+//! (`last_refresh_run`), so a refresh that keeps failing shows in host.log. First of all it
+//! reads Smart App Control's state for the page (`smart_app_control.rs`), one registry read.
 
 /// The log target: host.log keeps `clauseo_*::lifecycle` INFO lines.
 #[cfg(windows)]
@@ -97,6 +98,8 @@ fn run() {
     use clauseo_sandbox::windows::refresh::{
         TaskError, installed_setup_sha256, recorded_admin_copy_sha256, request_admin_refresh,
     };
+    // Smart App Control's state for the page, read here first so the page rarely waits on it.
+    let _sac = crate::smart_app_control::state();
     log_last_run();
     let recorded = match recorded_admin_copy_sha256() {
         Ok(recorded) => recorded,

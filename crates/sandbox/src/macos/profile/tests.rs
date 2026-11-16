@@ -1,5 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(target_os = "macos")]
+use super::names::{GIT_NAME_REGEX, HEAD_REGEX};
 use super::*;
 use crate::test_support::TempDir;
 use crate::{LinkFinding, LinkKind, PolicyBuilder};
@@ -424,4 +426,109 @@ fn many_findings_stay_within_the_link_rule_budget() {
     // The whole argument list stays far from the 1 MB argument limit.
     let bytes: usize = profile.args().iter().map(|a| a.len()).sum();
     assert!(bytes < 64 * 1024, "{bytes} bytes");
+}
+
+/// A name rule's pattern as Seatbelt reads it: `sandbox-exec` with only that deny, so each
+/// probe shows what the pattern matches. Whether `sh -c "$cmd $1"` is refused in the matter.
+#[cfg(target_os = "macos")]
+fn regex_refuses(regex: &str, matter: &Path, cmd: &str, rel: &str) -> bool {
+    let profile = format!(
+        "(version 1)(allow default)(deny file-write* (require-all (subpath (param \"M\")) \
+         (regex #\"{regex}\")))"
+    );
+    let script = format!("{cmd} \"$1\"");
+    let out = async_io::block_on(
+        async_process::Command::new("/usr/bin/sandbox-exec")
+            .arg("-D")
+            .arg(format!("M={}", matter.display()))
+            .args(["-p", &profile, "/bin/sh", "-c", &script, "sh"])
+            .arg(matter.join(rel))
+            .output(),
+    )
+    .unwrap();
+    let refused = !out.status.success();
+    if refused {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("Operation not permitted"), "{stderr}");
+    }
+    refused
+}
+
+/// Checks `regex` refuses each of `refused` and none of `allowed`, each a command and a path.
+#[cfg(target_os = "macos")]
+fn check_regex(regex: &str, matter: &Path, refused: &[(&str, &str)], allowed: &[(&str, &str)]) {
+    for (cmd, rel) in refused {
+        assert!(
+            regex_refuses(regex, matter, cmd, rel),
+            "{cmd} {rel:?} was allowed"
+        );
+    }
+    for (cmd, rel) in allowed {
+        assert!(
+            !regex_refuses(regex, matter, cmd, rel),
+            "{cmd} {rel:?} was refused"
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_git_name_regex_matches_only_a_name_git() {
+    let w = World::new("profile-git-name");
+    w.dir.dir("matter/sub");
+    w.dir.dir("matter/deep/.git");
+    w.dir.dir("matter/.github");
+    let matter = dunce::canonicalize(w.at("matter")).unwrap();
+    let refused = [
+        ("mkdir", ".git"),
+        ("mkdir", ".GIT"),
+        ("touch", ".Git"),
+        ("mkdir", "sub/.git"),
+        ("touch", "deep/.git/x"),
+        ("touch", ".git"),
+        // Names HFS+ opens as `.git`: its ignorables before, between and after the letters.
+        ("mkdir", ".g\u{200C}it"),
+        ("touch", "\u{FEFF}.G\u{202A}I\u{206F}T\u{200F}"),
+        ("touch", ".gi\u{200D}\u{202E}\u{206A}t"),
+    ];
+    let allowed = [
+        ("touch", ".gitignore"),
+        ("touch", ".github/x"),
+        ("touch", "a.git"),
+        ("mkdir", "sub/.gitattributes-dir"),
+        ("touch", "sub/x.git"),
+        ("touch", ".g\u{200C}itignore"),
+        // U+200B and U+2010 are not ignorable.
+        ("touch", ".g\u{200B}it"),
+        ("touch", ".g\u{2010}it"),
+    ];
+    check_regex(GIT_NAME_REGEX, &matter, &refused, &allowed);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_head_regex_matches_only_a_last_name_head() {
+    let w = World::new("profile-head");
+    w.dir.dir("matter/docs");
+    let matter = dunce::canonicalize(w.at("matter")).unwrap();
+    let refused = [
+        ("touch", "HEAD"),
+        ("touch", "docs/head"),
+        ("mkdir", "docs/Head"),
+        ("touch", "HE\u{200D}AD"),
+        ("touch", "\u{202A}HEAD\u{FEFF}"),
+    ];
+    let allowed = [
+        ("touch", "HEADER.md"),
+        ("touch", "ahead"),
+        ("touch", "docs/a\u{200D}head"),
+        ("touch", "docs/HEAD.txt"),
+        // ZWJ and ZWNJ in Hindi and Persian names.
+        ("touch", "\u{915}\u{94D}\u{200D}\u{937}.txt"),
+        (
+            "touch",
+            "\u{645}\u{6CC}\u{200C}\u{62E}\u{648}\u{627}\u{647}\u{645}.txt",
+        ),
+    ];
+    check_regex(HEAD_REGEX, &matter, &refused, &allowed);
 }

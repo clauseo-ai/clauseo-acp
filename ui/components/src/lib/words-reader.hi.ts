@@ -111,6 +111,16 @@ export const HI = {
     "खुली रहने तक फ़ाइल Word के पास रहती है। अभी कुछ नहीं बदला है।",
   "Try again": "फिर से प्रयास करें",
   "Change by {who}, {when}": "{who} का बदलाव, {when}",
+  // a Word document's own tracked changes, from its tile on the wall (provisional Hindi)
+  "Tracked changes": "ट्रैक किए गए बदलाव",
+  "No tracked changes in this file.": "इस फ़ाइल में कोई ट्रैक किया गया बदलाव नहीं है।",
+  "Formatting changed": "फ़ॉर्मैटिंग बदली गई",
+  Moved: "जगह बदली गई",
+  "In a header or footer": "हेडर या फ़ुटर में",
+  "In a footnote or endnote": "फ़ुटनोट या एंडनोट में",
+  "In a comment": "टिप्पणी में",
+  "The first {shown} are listed here. Accept all and Reject all decide all {n}.":
+    "यहाँ पहले {shown} दिखाए गए हैं। सभी स्वीकार करें और सभी अस्वीकार करें सभी {n} बदलावों पर लागू होते हैं।",
 
   // the citations checked
   "Checked {n} citations at {time}.": "{time} बजे {n} उद्धरण जाँचे गए।",

@@ -6,12 +6,11 @@
 //! the daemon and Chrome when the guard exits. Claims hold within this host process only: two
 //! hosts on one machine can be handed the same port (stage C's `ports`).
 //!
-//! - [`BrowserPorts`]: Chrome's debugging port (`--cdp-port`), the stream server's port
-//!   (`AGENT_BROWSER_STREAM_PORT`) and, on Windows, agent-browser's daemon port
-//!   (`--daemon-port`), each a [`PortClaim`] from stage C's `ports` (`claim_browser_port`, or
-//!   `claim_browser_port_at` for the daemon's, both outside tier B's range), so no other
-//!   session of this host is handed them. The jail pins the session's loopback reach to them
-//!   ([`BrowserPorts::loopback`]).
+//! - [`BrowserPorts`]: Chrome's debugging port (`--cdp-port`) and, on Windows, agent-browser's
+//!   daemon port (`--daemon-port`), each a [`PortClaim`] from stage C's `ports`
+//!   (`claim_browser_port`, or `claim_browser_port_at` for the daemon's, both outside tier B's
+//!   range), so no other session of this host is handed them. The jail pins the session's
+//!   loopback reach to them ([`BrowserPorts::loopback`]).
 //! - macOS and Linux: one [`BrowserSocketDir`], `/tmp/clauseo-ab-<16 random>` (mode 0700, with
 //!   its lock file), as `AGENT_BROWSER_SOCKET_DIR`. The guard gets [`BrowserSocketDir::path`],
 //!   the `/tmp/...` form, never the canonical one, which is 8 bytes longer on macOS
@@ -42,18 +41,17 @@ use clauseo_sandbox::ports::{self, PortClaim};
 pub(crate) struct BrowserPorts {
     /// Chrome's debugging port, the guard's `--cdp-port`.
     pub(crate) cdp: PortClaim,
-    /// The stream server's port, `AGENT_BROWSER_STREAM_PORT`.
-    pub(crate) stream: PortClaim,
     /// Windows only: agent-browser's daemon port, the guard's `--daemon-port`.
     pub(crate) daemon: Option<PortClaim>,
 }
 
 impl BrowserPorts {
-    /// The ports the session's jail may reach on loopback, in order CDP, stream, then the
-    /// daemon's on Windows: what stage C's R17 maps to `Loopback::Ports` where it builds the
-    /// session's policy.
+    /// The ports the session's jail may reach on loopback, in order CDP, then the daemon's on
+    /// Windows: what stage C's R17 maps to `Loopback::Ports` where it builds the session's
+    /// policy. No stream port: the guard turns agent-browser's stream server off
+    /// (`AGENT_BROWSER_STREAM_DISABLED=1`), so none is claimed.
     pub(crate) fn loopback(&self) -> Vec<u16> {
-        let mut ports = vec![self.cdp.port(), self.stream.port()];
+        let mut ports = vec![self.cdp.port()];
         ports.extend(self.daemon.as_ref().map(PortClaim::port));
         ports
     }
@@ -136,14 +134,9 @@ impl BrowserSession {
             (name, Some(claim))
         };
         let cdp = ports::claim_browser_port().map_err(ClaimError::Port)?;
-        let stream = ports::claim_browser_port().map_err(ClaimError::Port)?;
         Ok(Self {
             name,
-            ports: BrowserPorts {
-                cdp,
-                stream,
-                daemon,
-            },
+            ports: BrowserPorts { cdp, daemon },
             #[cfg(unix)]
             socket_dir,
             // InJail, the only launch the host builds (`HostConfig::with_browser_launch`).

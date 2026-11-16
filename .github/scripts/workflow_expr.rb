@@ -111,7 +111,12 @@ class WorkflowExpr
       take
       v
     when :id
-      return call(t[1], args) if op?("(") && (take || true) && (args = arguments)
+      # A function call. (Not a modifier `if` that assigns args in its condition: Ruby reads the
+      # `args` in the body as a method call there, so every call raised NameError.)
+      if op?("(")
+        take
+        return call(t[1], arguments)
+      end
       { "true" => true, "false" => false, "null" => nil }.fetch(t[1]) { @ctx.call(t[1]) }
     end
   end

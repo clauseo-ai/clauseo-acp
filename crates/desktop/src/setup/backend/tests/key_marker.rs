@@ -1,6 +1,7 @@
 //! The "key stored" marker in the key cache (decision record 0048, R20 P5b A4): with a keychain
-//! that never answers by the bound, an agent the marker does not mark launches without a key and
-//! one it marks is refused with `agent.key_unreadable`; a corrupt marker marks every agent. A
+//! that never answers by the bound, or that fails the read, an agent the marker does not mark
+//! launches without a key and one it marks is refused with `agent.key_unreadable`; a corrupt
+//! marker marks every agent. A
 //! save sets the marker before the keychain write and is refused when it cannot; a clear removes
 //! the key, then the marker; each read that answers brings the marker in step.
 
@@ -9,9 +10,11 @@ use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, UNIX_EPOCH};
 
+use clauseo_agents::SigninState;
 use clauseo_agents::keys::Keychain;
-use clauseo_protocol::{ErrorCode, Secret};
+use clauseo_protocol::{AgentId, ErrorCode, Secret, SignIn};
 use clauseo_settings::{Files, SystemFiles};
 use futures::StreamExt as _;
 use zeroize::Zeroizing;
@@ -21,10 +24,40 @@ use super::key_reads::{KEY, Never, Passed, stored};
 use super::{claude, codex};
 use crate::bridge::lock;
 use crate::setup::KeyWrite;
+use crate::setup::compose::{Facts, compose};
 use crate::setup::keys::marker::{self, Marked};
 use crate::setup::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNote, KeyNotes};
 use crate::setup::refusal::settle_after_load;
 use crate::test_support::{Scratch, block_on};
+
+/// A [`Scratch`] for a test that releases a hung read: that read writes the marker on its own
+/// thread, and the write can land after the scratch's removal and leave its temporary file
+/// behind. Its drop pauses first, so the write lands before the scratch removes the folder.
+struct Late(Scratch);
+
+impl Late {
+    fn folder(test: &str, dirs: &[&str]) -> Self {
+        Self(Scratch::folder(test, dirs))
+    }
+}
+
+impl std::ops::Deref for Late {
+    type Target = Scratch;
+
+    fn deref(&self) -> &Scratch {
+        &self.0
+    }
+}
+
+impl Drop for Late {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the write runs on a thread the injected clock cannot see, so only a real pause lets it land"
+    )]
+    fn drop(&mut self) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
 
 /// The real file system, its writes failing while `fail` is set; each write records whether
 /// the keychain held Claude's key when it was made.
@@ -85,6 +118,11 @@ fn load(keychain: Keychain, marker: KeyMarker, timer: &impl clauseo_process::Tim
 
 /// The refusals the host is told once the load is over.
 fn settled(keys: &KeyCache) -> Vec<HostCall> {
+    settled_with(keys, &BTreeSet::new())
+}
+
+/// [`settled`], with the agents in `firm` under a firm plan (an endpoint or a provider).
+fn settled_with(keys: &KeyCache, firm: &BTreeSet<AgentId>) -> Vec<HostCall> {
     let rig = rig(true);
     let agents = [&claude(), &codex()];
     block_on(settle_after_load(
@@ -92,6 +130,7 @@ fn settled(keys: &KeyCache) -> Vec<HostCall> {
         keys,
         agents,
         &BTreeSet::new(),
+        firm,
     ));
     rig.host.calls()
 }
@@ -102,7 +141,7 @@ fn secret(text: &str) -> Secret {
 
 #[test]
 fn a_silent_keychain_refuses_the_marked_agent_and_launches_the_unmarked_one_without_a_key() {
-    let scratch = Scratch::folder("key-marker-silent", &[]);
+    let scratch = Late::folder("key-marker-silent", &[]);
     let marker = KeyMarker::new(scratch.path(), [&claude(), &codex()]);
     marker.set(&claude()).unwrap();
     let keychain = stored();
@@ -125,7 +164,7 @@ fn a_silent_keychain_refuses_the_marked_agent_and_launches_the_unmarked_one_with
 
 #[test]
 fn a_silent_keychain_with_no_marker_file_refuses_no_agent() {
-    let scratch = Scratch::folder("key-marker-fresh", &[]);
+    let scratch = Late::folder("key-marker-fresh", &[]);
     let keychain = Keychain::memory();
     keychain.hang_reads(true);
     let keys = load(
@@ -145,7 +184,7 @@ fn a_silent_keychain_with_no_marker_file_refuses_no_agent() {
 
 #[test]
 fn a_silent_keychain_with_a_corrupt_marker_refuses_every_agent() {
-    let scratch = Scratch::folder("key-marker-corrupt-load", &["agents"]);
+    let scratch = Late::folder("key-marker-corrupt-load", &["agents"]);
     scratch.file("agents/key-stored.json", b"[\"claude-acp\"");
     let keychain = Keychain::memory();
     keychain.hang_reads(true);
@@ -272,7 +311,7 @@ fn a_read_that_answers_sets_a_missing_marker_and_clears_a_stale_one() {
 
 #[test]
 fn a_late_read_that_answers_a_key_marks_an_unmarked_agent() {
-    let scratch = Scratch::folder("key-marker-late-key", &[]);
+    let scratch = Late::folder("key-marker-late-key", &[]);
     // Codex's key is stored, but no marker marks Codex: its read is silent at the bound.
     let keychain = Keychain::memory();
     keychain.store(&codex(), KEY).unwrap();
@@ -305,10 +344,11 @@ fn a_late_read_that_answers_a_key_marks_an_unmarked_agent() {
 }
 
 #[test]
-fn a_keychain_error_refuses_an_unmarked_agent_with_key_unreadable() {
+fn a_keychain_error_for_an_unmarked_agent_launches_it_without_a_key() {
     let scratch = Scratch::folder("key-marker-error", &[]);
     // Codex's key is stored and no marker marks it; the keychain refuses the read (an error,
-    // not a timeout). Claude's read is refused too, though it holds no key.
+    // not a timeout). Claude's read is refused too, though it holds no key. Neither is marked,
+    // so each is taken as a read that timed out: no key Clauseo stored, no refusal (M-d).
     let keychain = Keychain::memory();
     keychain.store(&codex(), KEY).unwrap();
     keychain.fail_reads(true);
@@ -317,15 +357,149 @@ fn a_keychain_error_refuses_an_unmarked_agent_with_key_unreadable() {
         KeyMarker::new(scratch.path(), [&claude(), &codex()]),
         &Never,
     );
-    assert!(keys.unreadable(&codex()) && keys.has(&codex()));
-    let refused = Some(ErrorCode::AgentKeyUnreadable);
+    assert!(!keys.unreadable(&codex()) && !keys.has(&codex()));
+    assert!(!keys.unreadable(&claude()) && !keys.has(&claude()));
     assert_eq!(
         settled(&keys),
         [
-            HostCall::SetLaunchRefused(claude(), refused),
-            HostCall::SetLaunchRefused(codex(), refused),
+            HostCall::SetLaunchRefused(claude(), None),
+            HostCall::SetLaunchRefused(codex(), None),
         ]
     );
     assert_eq!(marked(&scratch), Marked::Only(BTreeSet::new()));
+    keychain.fail_reads(false);
+}
+
+#[test]
+fn a_keychain_error_for_a_marked_agent_is_still_key_unreadable() {
+    let scratch = Scratch::folder("key-marker-error-marked", &[]);
+    // Claude's key was stored through Clauseo (marked); the keychain now refuses every read.
+    // A firm's key must never be silently skipped: Claude stays refused. Codex is unmarked.
+    let keychain = Keychain::memory();
+    keychain.store(&claude(), KEY).unwrap();
+    let marker = KeyMarker::new(scratch.path(), [&claude(), &codex()]);
+    marker.set(&claude()).unwrap();
+    keychain.fail_reads(true);
+    let keys = load(keychain.clone(), marker, &Never);
+    assert!(keys.unreadable(&claude()) && keys.has(&claude()));
+    assert_eq!(keys.get(&claude()), None);
+    assert!(!keys.unreadable(&codex()) && !keys.has(&codex()));
+    assert_eq!(
+        settled(&keys),
+        [
+            HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyUnreadable)),
+            HostCall::SetLaunchRefused(codex(), None),
+        ]
+    );
+    assert_eq!(marked(&scratch), Marked::Only([claude()].into()));
+    keychain.fail_reads(false);
+}
+
+#[test]
+fn a_lost_marker_with_a_healthy_keychain_changes_nothing() {
+    let scratch = Scratch::folder("key-marker-lost", &[]);
+    let keychain = Keychain::memory();
+    keychain.store(&claude(), KEY).unwrap();
+    // Claude's key is stored, but the marker file is gone: a folder with no marker file stands
+    // in for one that was lost.
+    let marker = KeyMarker::new(scratch.path(), [&claude(), &codex()]);
+    assert_eq!(marked(&scratch), Marked::Only(BTreeSet::new()));
+    // The read answers: the stored key is read and used, and the marker is set again.
+    let keys = load(keychain, marker, &Never);
+    assert!(!keys.unreadable(&claude()));
+    assert_eq!(
+        keys.get(&claude()).as_deref().map(String::as_str),
+        Some(KEY)
+    );
+    assert_eq!(
+        settled(&keys),
+        [
+            HostCall::SetLaunchRefused(claude(), None),
+            HostCall::SetLaunchRefused(codex(), None),
+        ]
+    );
+    assert_eq!(marked(&scratch), Marked::Only([claude()].into()));
+}
+
+#[test]
+fn no_keychain_and_nothing_marked_composes_to_sign_in() {
+    let scratch = Scratch::folder("key-marker-no-keychain", &[]);
+    // M-d: no login keychain, so every read fails; no agent is marked. The status check's
+    // answer (`SignedOut`) is what the card shows: Sign in, not "Sign-in didn't finish.".
+    let keychain = Keychain::memory();
+    keychain.fail_reads(true);
+    let keys = load(
+        keychain.clone(),
+        KeyMarker::new(scratch.path(), [&claude(), &codex()]),
+        &Never,
+    );
+    let s18 = SigninState::SignedOut { found: None };
+    for agent in [claude(), codex()] {
+        let facts = Facts {
+            key: keys.in_memory(&agent).then_some(UNIX_EPOCH),
+            unreadable: keys.unreadable(&agent).then_some(UNIX_EPOCH),
+            read_failed: keys.read_failed(&agent).then_some(UNIX_EPOCH),
+            ..Facts::default()
+        };
+        assert!(
+            matches!(
+                compose(&agent, Some(&s18), facts),
+                Some(SignIn::SignedOut { .. })
+            ),
+            "{agent:?} shows Sign in"
+        );
+    }
+    keychain.fail_reads(false);
+}
+
+#[test]
+fn a_keychain_error_under_a_firm_plan_refuses_an_unmarked_agent_with_key_unreadable() {
+    let scratch = Scratch::folder("key-marker-error-firm", &[]);
+    // Neither agent is marked and every read fails, but Claude has a firm endpoint or provider:
+    // its launch must not go keyless, so a lawyer's own sign-in token never reaches the firm's
+    // gateway, and "Firm" on screen stays true. Codex, with no firm plan, launches as above.
+    let keychain = Keychain::memory();
+    keychain.fail_reads(true);
+    let keys = load(
+        keychain.clone(),
+        KeyMarker::new(scratch.path(), [&claude(), &codex()]),
+        &Never,
+    );
+    assert!(!keys.unreadable(&claude()) && keys.read_failed(&claude()));
+    assert!(keys.unreadable_for(&claude(), true));
+    assert!(!keys.unreadable_for(&codex(), false));
+    assert_eq!(
+        settled_with(&keys, &BTreeSet::from([claude()])),
+        [
+            HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyUnreadable)),
+            HostCall::SetLaunchRefused(codex(), None),
+        ]
+    );
+    // The card says so: the firm line gives way to the unreadable key, as for a marked agent.
+    let facts = Facts {
+        firm: Some(UNIX_EPOCH),
+        read_failed: keys.read_failed(&claude()).then_some(UNIX_EPOCH),
+        ..Facts::default()
+    };
+    let s18 = SigninState::SignedOut { found: None };
+    assert!(matches!(
+        compose(&claude(), Some(&s18), facts),
+        Some(SignIn::Failed {
+            code: ErrorCode::AgentKeyUnreadable,
+            ..
+        })
+    ));
+    let managed = Facts {
+        managed: Some(UNIX_EPOCH),
+        firm: None,
+        ..facts
+    };
+    assert!(matches!(
+        compose(&claude(), Some(&s18), managed),
+        Some(SignIn::Failed {
+            code: ErrorCode::AgentKeyUnreadable,
+            ..
+        })
+    ));
     keychain.fail_reads(false);
 }

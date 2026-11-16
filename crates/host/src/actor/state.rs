@@ -52,6 +52,9 @@ pub(crate) struct ThreadEntry {
     pub(crate) turn: turn::TurnState,
     /// The papers its undos removed that the host still looks for (`turn/came_back.rs`).
     pub(crate) came_back: turn::CameBackWatches,
+    /// `CreateThread`'s config, in memory only: set at the session's start while the thread has
+    /// logged no options of its own (`turn/picks.rs`).
+    pub(crate) picks: Option<clauseo_protocol::ConfigPicks>,
 }
 
 /// Work in flight that start-up and shutdown wait for.

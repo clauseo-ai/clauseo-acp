@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use clauseo_host::{Host, HostConfig, ManualClock, SequentialIds};
+use clauseo_host::{Host, HostConfig, ManualClock, SequentialIds, WithMatterTrash as _};
 use clauseo_process::{Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{ErrorCode, Timestamp};
 use clauseo_settings::{Effective, FilePolicy, Locations, SystemFiles};
@@ -155,10 +155,25 @@ impl Dir {
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(locations, &SystemFiles, &[&policy]);
         crate::idle_stop::off(HostConfig::new(effective, launcher))
+            // A silent turn is never probed: no host test touches the network (D-050).
+            .with_quiet_watch(false)
             .with_limits_reader(Arc::new(NoReader))
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))
             .with_managed_mcp_path(self.root.join("managed-mcp.json"))
+            // Every lawyer's MCP server's program is found where it says, on any machine; the
+            // tests of the search set their own.
+            .with_mcp_resolver(Arc::new(|typed: &str| Some(std::path::PathBuf::from(typed))))
+            // And every confirm before a server is added or changed is allowed; the confirm's
+            // tests set their own.
+            .with_mcp_confirm(Arc::new(AllowAll))
+            // Undo's and restore's deletes go to the test's own trash, never the machine's.
+            .with_matter_trash(self.trash())
+    }
+
+    /// The folder undo's and restore's deletes go into (`with_matter_trash`).
+    pub(crate) fn trash(&self) -> PathBuf {
+        self.root.join("trash")
     }
 
     /// The clock of run `run`.
@@ -277,10 +292,43 @@ impl Dir {
 
 impl Drop for Dir {
     fn drop(&mut self) {
+        // A Claude session's short temp folder in `/tmp` (`agent::claude_tmp`), named in a run
+        // folder the host kept at its stop: the next start's sweep would take it, a test's never
+        // comes.
+        let runs = std::fs::read_dir(&self.data)
+            .into_iter()
+            .flatten()
+            .flatten();
+        for run in runs.filter(|entry| entry.file_name().to_string_lossy().starts_with("run")) {
+            for session in std::fs::read_dir(run.path())
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                let Ok(short) = std::fs::read_to_string(session.path().join("claude-tmp")) else {
+                    continue;
+                };
+                if short.starts_with("/tmp/clsb-")
+                    && !short.contains("..")
+                    && let Err(error) = write::remove_dir_all(Path::new(&short))
+                {
+                    eprintln!("could not remove {short}: {error}");
+                }
+            }
+        }
         for folder in [&self.root, &self.work] {
             if let Err(error) = write::remove_dir_all(folder) {
                 eprintln!("could not remove {}: {error}", folder.display());
             }
         }
+    }
+}
+
+/// An MCP confirm that allows every save (`HostConfig::with_mcp_confirm`).
+struct AllowAll;
+
+impl clauseo_host::McpLaunchConfirm for AllowAll {
+    fn confirm(&self, _ask: &clauseo_host::McpLaunchAsk) -> bool {
+        true
     }
 }

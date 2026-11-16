@@ -444,7 +444,11 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::PoolStop.no_sandbox(), None);
     assert_eq!(RunExit::MarkerUnwritable.code(), 0xE0C1_5011);
     assert_eq!(RunExit::MarkerUnwritable.no_sandbox(), None);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 18), None);
+    assert_eq!(RunExit::AwaitingStop.code(), 0xE0C1_5012);
+    assert_eq!(RunExit::AwaitingStop.no_sandbox(), None);
+    assert_eq!(RunExit::AwaitingSweep.code(), 0xE0C1_5013);
+    assert_eq!(RunExit::AwaitingSweep.no_sandbox(), None);
+    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 20), None);
     assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
     assert_eq!(RunExit::Sweep.no_sandbox(), None);
@@ -517,11 +521,10 @@ fn the_firm_ca_files_come_from_the_launch_alone() {
 }
 
 #[test]
-fn the_command_line_names_one_mode_and_sweep_takes_nothing_else() {
+fn the_command_line_names_one_mode_and_sweep_is_none_of_them() {
     let args = |list: &[&str]| -> Vec<std::ffi::OsString> {
         list.iter().map(std::ffi::OsString::from).collect()
     };
-    assert_eq!(mode(&args(&["--sweep"])), Some(Mode::Sweep));
     assert_eq!(
         mode(&args(&[
             "--launch",
@@ -537,6 +540,8 @@ fn the_command_line_names_one_mode_and_sweep_takes_nothing_else() {
     );
     for wrong in [
         &[][..],
+        // The end sweeper is gone: its flag is a usage error like any other.
+        &["--sweep"],
         &["--sweep", "x"],
         &["--sweep", "--inner", "b"],
         &["--Sweep"],

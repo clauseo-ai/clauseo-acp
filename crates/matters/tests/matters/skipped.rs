@@ -6,7 +6,7 @@ use clauseo_matters::{CheckpointOutcome, Limits};
 use clauseo_protocol::{SkippedFile, SkippedFileReason};
 
 use crate::fixture::{
-    Fixture, added, assert_none, cid, created, meta, modified, path, tools, undo,
+    Fixture, assert_none, cid, created, meta, modified, path, read_at, tools, undo,
 };
 #[cfg(unix)]
 use crate::support;
@@ -48,15 +48,16 @@ fn over_cap_file_skipped_and_never_written() {
     // A new over-cap file is listed once, then not again while unchanged.
     fx.write("big.bin", [7; 20]);
     lock_out(&fx, "big.bin");
+    // Its checkpoint is taken, with no file changed: the skip record names it.
     let checkpoint = matter.before_turn(&meta(2)).unwrap();
-    assert_eq!(checkpoint.outcome, CheckpointOutcome::Reused(cid(1)));
+    assert_eq!(checkpoint.outcome, CheckpointOutcome::Created(cid(2)));
     assert_none(&checkpoint.changes);
     assert_eq!(
         checkpoint.skipped,
         [skipped("big.bin", SkippedFileReason::OverSizeCap)]
     );
     let checkpoint = matter.before_turn(&meta(3)).unwrap();
-    assert_eq!(checkpoint.outcome, CheckpointOutcome::Reused(cid(1)));
+    assert_eq!(checkpoint.outcome, CheckpointOutcome::Reused(cid(2)));
     assert_none(&checkpoint.skipped);
 
     // A versioned file that grows over the cap is skipped, not deleted.
@@ -99,7 +100,8 @@ fn cloud_only_file_skipped() {
     fx.probe.mark(fx.file("cloud2.docx"));
     lock_out(&fx, "cloud2.docx");
     let checkpoint = matter.before_turn(&meta(2)).unwrap();
-    assert_eq!(checkpoint.outcome, CheckpointOutcome::Reused(cid(1)));
+    assert_eq!(checkpoint.outcome, CheckpointOutcome::Created(cid(2)));
+    assert_none(&checkpoint.changes);
     assert_eq!(
         checkpoint.skipped,
         [skipped("cloud2.docx", SkippedFileReason::CloudOnly)]
@@ -107,11 +109,11 @@ fn cloud_only_file_skipped() {
     let checkpoint = matter.before_turn(&meta(3)).unwrap();
     assert_none(&checkpoint.skipped);
 
-    // Downloaded: now it is versioned, as a new file.
+    // Downloaded unchanged: now it is versioned, as the baseline it was, not as a new file.
     let_in(&fx, "cloud2.docx");
     fx.probe.unmark(fx.file("cloud2.docx"));
-    let changes = created(matter.before_turn(&meta(4)).unwrap(), 4);
-    assert_eq!(changes, [added("cloud2.docx", b"also in the cloud")]);
+    assert_none(&created(matter.before_turn(&meta(4)).unwrap(), 4));
+    assert_eq!(read_at(&matter, 4, "cloud2.docx"), b"also in the cloud");
 }
 
 #[test]
@@ -124,19 +126,22 @@ fn cloud_only_file_keeps_previous_version() {
     fx.probe.mark(fx.file("doc.docx"));
     lock_out(&fx, "doc.docx");
     let checkpoint = matter.before_turn(&meta(2)).unwrap();
-    assert_eq!(checkpoint.outcome, CheckpointOutcome::Reused(cid(1)));
+    assert_eq!(checkpoint.outcome, CheckpointOutcome::Created(cid(2)));
     assert_none(&checkpoint.changes);
     assert_eq!(
         checkpoint.skipped,
         [skipped("doc.docx", SkippedFileReason::CloudOnly)]
     );
+    assert_eq!(read_at(&matter, 2, "doc.docx"), b"v1");
 
+    // Downloaded with the size and mtime it had while cloud-only: what the folder held then (a
+    // colleague's edit in the cloud), a baseline, not a change; the tree takes it.
     let_in(&fx, "doc.docx");
     fx.probe.unmark(fx.file("doc.docx"));
-    let changes = created(matter.before_turn(&meta(3)).unwrap(), 3);
+    assert_none(&created(matter.before_turn(&meta(3)).unwrap(), 3));
     assert_eq!(
-        changes,
-        [modified("doc.docx", b"v1", b"v2, changed while cloud-only")]
+        read_at(&matter, 3, "doc.docx"),
+        b"v2, changed while cloud-only"
     );
 }
 
@@ -179,20 +184,17 @@ fn changed_cloud_only_file_never_read() {
         [modified("other.txt", b"other v2", b"other v1")]
     );
 
-    // Downloaded again: the change is from the old content id, and the new file is added.
+    // Downloaded again, both as the step last saw them (same size and mtime): baselines, not
+    // changes; the tree takes their content.
     for rel in ["doc.docx", "new.docx"] {
         let_in(&fx, rel);
         fx.probe.unmark(fx.file(rel));
     }
     assert_eq!(fx.read("doc.docx"), b"v2 from the cloud");
     let changes = created(matter.before_turn(&meta(6)).unwrap(), 6);
-    assert_eq!(
-        changes,
-        [
-            modified("doc.docx", b"v1", b"v2 from the cloud"),
-            added("new.docx", b"never versioned"),
-        ]
-    );
+    assert_none(&changes);
+    assert_eq!(read_at(&matter, 6, "doc.docx"), b"v2 from the cloud");
+    assert_eq!(read_at(&matter, 6, "new.docx"), b"never versioned");
 }
 
 /// A subfolder that does not read is skipped with a warning and its files stay in the tree as
@@ -218,7 +220,9 @@ fn unreadable_subfolder_keeps_its_files() {
         created(checkpoint.unwrap(), 2),
         [modified("a.txt", b"one", b"two")]
     );
-    // Readable again and unchanged: nothing to record.
-    let again = matter.before_turn(&meta(3)).unwrap();
-    assert_eq!(again.outcome, CheckpointOutcome::Reused(cid(2)));
+    // Readable again and unchanged: no file to report, but the skip record no longer names the
+    // folder, so the checkpoint is taken.
+    assert_none(&created(matter.before_turn(&meta(3)).unwrap(), 3));
+    let again = matter.before_turn(&meta(4)).unwrap();
+    assert_eq!(again.outcome, CheckpointOutcome::Reused(cid(3)));
 }

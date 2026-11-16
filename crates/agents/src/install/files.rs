@@ -1,7 +1,10 @@
 //! A try's files: Node's archive when Node is downloaded, then each package of the agent's
 //! derived lock for this platform. Each comes from the network (through the mirror when one is
-//! set) into `agents/downloads/`, or from the offline bundle with no network call, and is
-//! checked against its digest. Progress covers them all.
+//! set) into `agents/downloads/` (Node's archive, under `.lock-node`) or the agent's own
+//! `agents/downloads/<id>/` (its packages), or from the offline bundle with no network call,
+//! and is checked against its digest. Progress covers them all. Each agent has its own package
+//! folder and npm cache, so two installs at once never write, or clean up, each other's files:
+//! the two agents' locks may share a package, and each fetches its own copy.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -9,14 +12,17 @@ use std::sync::PoisonError;
 use std::time::Duration;
 
 use clauseo_process::Timer;
+use clauseo_protocol::AgentId;
 
 use super::{Job, NodeChoice, Run, TryError};
 use crate::config::AgentsConfig;
 use crate::download::firm::{BundleEntry, bundle_file, bundle_path, copy_from_bundle, mirror_url};
 use crate::download::{FetchJob, Fetcher, Magic, part_path};
+use crate::pins::LockedPackage;
 use crate::platform::Os;
+use crate::snapshot::NodeArchive;
 use crate::state::InstallState;
-use crate::write;
+use crate::write::{self, AgentsLock, Mode};
 
 /// A package's size cap when the snapshot has no size row for the agent and platform (fixture
 /// snapshots): 512 MiB.
@@ -31,8 +37,6 @@ pub(crate) struct Fetched {
     /// Each checked tarball's absolute path, by its lock entry's path: the `file:` URLs of the
     /// lock `npm ci` reads.
     pub(crate) tarballs: BTreeMap<String, PathBuf>,
-    /// Node's checked archive, when the runtime is to be unpacked.
-    pub(crate) node_archive: Option<PathBuf>,
     /// The files this install put in `downloads/`, removed once it is `Ready`.
     downloaded: Vec<PathBuf>,
 }
@@ -60,9 +64,14 @@ struct Item {
     package: Option<String>,
 }
 
-/// `<data_dir>/agents/downloads`.
+/// `<data_dir>/agents/downloads`: Node's and Python's archives, each under its runtime's lock.
 pub(crate) fn downloads_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("agents").join("downloads")
+}
+
+/// `<data_dir>/agents/downloads/<id>`: `agent`'s package tarballs, under its own lock.
+pub(crate) fn agent_downloads(data_dir: &Path, agent: &AgentId) -> PathBuf {
+    downloads_dir(data_dir).join(agent.as_str())
 }
 
 /// Fetches (or finds in the bundle) every file of the try, sending progress.
@@ -89,7 +98,6 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
     let mut fetcher = None;
     let mut fetched = Fetched {
         tarballs: BTreeMap::new(),
-        node_archive: None,
         downloaded: Vec::new(),
     };
     for (n, item) in items.into_iter().enumerate() {
@@ -123,27 +131,7 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
             }
             Source::Fetch(fetch_job) => {
                 if fetcher.is_none() {
-                    // The network now, not the job's start's: a fresh one from the caller when it
-                    // has one (its route resolved again past 60 s), else the last
-                    // `set_network` gave, so a try after a change (one waiting offline, say)
-                    // goes through the new proxy.
-                    let mut install = config.install.clone();
-                    let fresh = config
-                        .install
-                        .refresh
-                        .as_ref()
-                        .and_then(|refresh| refresh());
-                    let network = fresh.unwrap_or_else(|| {
-                        let network = job.network.read().unwrap_or_else(PoisonError::into_inner);
-                        network.clone()
-                    });
-                    install.set_network(network);
-                    fetcher = Some(Fetcher::new(
-                        &install,
-                        &job.ticket.agent,
-                        job.system_proxy.as_deref(),
-                        &config.data_dir,
-                    )?);
+                    fetcher = Some(new_fetcher(job)?);
                 }
                 let Some(client) = fetcher.as_ref() else {
                     return Err(TryError::retry("no HTTP client", config));
@@ -161,11 +149,37 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
             Some(entry) => {
                 fetched.tarballs.insert(entry, path);
             }
-            None => fetched.node_archive = Some(path),
+            // Node first: unpacked now, and `.lock-node` given up, so another install waits for
+            // Node alone, never for this one's packages.
+            None => job.unpack_node(node, &path)?,
         }
     }
     progress.tick(job, run, true);
     Ok(fetched)
+}
+
+/// A client on the network now, not the job's start's: a fresh one from the caller when it has
+/// one (its route resolved again past 60 s), else the last `set_network` gave, so a try after a
+/// change (one waiting offline, say) goes through the new proxy.
+pub(super) fn new_fetcher<T: Timer + Send + Sync>(job: &Job<T>) -> Result<Fetcher, TryError> {
+    let config = &job.config;
+    let mut install = config.install.clone();
+    let fresh = config
+        .install
+        .refresh
+        .as_ref()
+        .and_then(|refresh| refresh());
+    let network = fresh.unwrap_or_else(|| {
+        let network = job.network.read().unwrap_or_else(PoisonError::into_inner);
+        network.clone()
+    });
+    install.set_network(network);
+    Ok(Fetcher::new(
+        &install,
+        &job.ticket.agent,
+        job.system_proxy.as_deref(),
+        &config.data_dir,
+    )?)
 }
 
 /// The try's files, Node's archive first.
@@ -173,6 +187,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
     let config = &job.config;
     let data = &config.data_dir;
     let downloads = downloads_dir(data);
+    let packages = agent_downloads(data, &job.ticket.agent);
     let size_of = |path: &Path| std::fs::metadata(path).ok().map(|meta| meta.len());
     let mut items = Vec::new();
     if let NodeChoice::Runtime { fetch: true, .. } = node {
@@ -186,7 +201,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
         let fetch_job = FetchJob {
             url: entry.url(archive),
             expected: archive.expected().clone(),
-            dest: downloads.join(archive.name()),
+            dest: node_dest(&downloads, archive),
             magic: if archive.is_zip() {
                 Magic::Zip
             } else {
@@ -225,7 +240,7 @@ fn items<T: Timer + Send + Sync>(job: &Job<T>, node: &NodeChoice) -> Result<Vec<
     for package in config.snapshot.packages(&job.ticket.agent, config.platform) {
         let short = package.name.rsplit('/').next().unwrap_or(&package.name);
         let label = format!("{short}-{}.tgz", package.version);
-        let dest = downloads.join(format!("{}.tgz", package.integrity.hex()));
+        let dest = package_dest(&packages, package);
         let item = if let Some(bundle) = &config.install.bundle {
             let in_bundle = bundle.join("npm");
             // npm cannot read a `file:` tarball on a Windows share (see `is_unc`): copied first.
@@ -346,17 +361,167 @@ impl Progress {
     }
 }
 
-/// After `Ready`: removes this install's downloads (never the bundle's files) and the npm
-/// cache's contents. A file that will not go is left; the next install reuses or replaces it.
-/// The cache goes only when no link stands at `agents` or `npm-cache`.
-pub(super) fn clean_up(config: &AgentsConfig, fetched: &Fetched) {
-    for path in &fetched.downloaded {
-        drop(write::remove_file(path));
-        drop(write::remove_file(&part_path(path)));
+/// Where Node's archive `archive` is downloaded to, in `downloads`.
+fn node_dest(downloads: &Path, archive: &NodeArchive) -> PathBuf {
+    downloads.join(archive.name())
+}
+
+/// Where the npm tarball of `package` is downloaded to, in an agent's `downloads`: named by its
+/// digest.
+fn package_dest(downloads: &Path, package: &LockedPackage) -> PathBuf {
+    downloads.join(format!("{}.tgz", package.integrity.hex()))
+}
+
+impl Fetched {
+    /// The files this try put in `downloads/`, for [`clean_up`].
+    pub(super) fn downloaded(&self) -> &[PathBuf] {
+        &self.downloaded
     }
-    let cache = npm_cache(&config.data_dir);
-    if write::real_dirs_under(&config.data_dir, &cache).unwrap_or(false) {
+}
+
+/// Every file an install of `agent` may have put in `downloads/`: each package's tarball, and
+/// Node's archive when `with_node`, for [`clean_up`] after a `Ready` that fetched nothing
+/// itself (a kept set-up renamed alone, or an install found finished), whose files an earlier
+/// try left.
+pub(super) fn install_downloads(
+    config: &AgentsConfig,
+    agent: &AgentId,
+    with_node: bool,
+) -> Vec<PathBuf> {
+    let node = node_archive_path(config).filter(|_| with_node);
+    let packages_dir = agent_downloads(&config.data_dir, agent);
+    let packages = config
+        .snapshot
+        .packages(agent, config.platform)
+        .into_iter()
+        .map(|package| package_dest(&packages_dir, package));
+    node.into_iter().chain(packages).collect()
+}
+
+/// The bytes of `agent`'s install files on the disk now, for the disk check of another try
+/// (`worker/space.rs`): its package downloads, its npm cache, its temp install trees and the
+/// finished folder of this snapshot's `<hash>`, and with `node` Node's archive, its temp
+/// folder and runtime. Read through no link; what cannot be read counts 0.
+pub(crate) fn written(config: &AgentsConfig, agent: &AgentId, node: bool) -> u64 {
+    let data = &config.data_dir;
+    let mut paths = vec![agent_downloads(data, agent), npm_cache(data, agent)];
+    let root = crate::receipt::install_root(data, agent);
+    if let (Some(hash), Ok(entries)) = (
+        config.snapshot.install_hash(agent, config.platform),
+        std::fs::read_dir(&root),
+    ) {
+        let tmp = format!(".tmp-{hash}-");
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == hash.as_str() || name.starts_with(&tmp) {
+                paths.push(entry.path());
+            }
+        }
+    }
+    if node {
+        let dir = crate::node::runtime_dir(data, config.snapshot.node(), config.platform);
+        if let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) {
+            let mut tmp = std::ffi::OsString::from(".tmp-");
+            tmp.push(name);
+            paths.push(parent.join(tmp));
+        }
+        paths.push(dir);
+        paths.extend(node_archive_path(config));
+    }
+    paths
+        .iter()
+        .map(|path| crate::disk::bytes_under(path))
+        .fold(0, u64::saturating_add)
+}
+
+/// Where Node's archive for this platform is downloaded to, when the snapshot has one.
+fn node_archive_path(config: &AgentsConfig) -> Option<PathBuf> {
+    let archive = config.snapshot.node_archive(config.platform)?;
+    Some(node_dest(&downloads_dir(&config.data_dir), archive))
+}
+
+/// After `Ready`, on every way there: removes `downloaded`, files of `agent`'s install in
+/// `downloads/` (never the bundle's files), and its npm cache's contents. Node's archive goes
+/// when this install fetched it or the runtime is unpacked (the other install's `Ready` may come
+/// first, while this one's npm still holds Node), and only with `.lock-node` free: another
+/// install may be fetching it again. A file that will not go is left; the next install reuses or
+/// replaces it.
+pub(super) fn clean_up(config: &AgentsConfig, agent: &AgentId, downloaded: &[PathBuf]) {
+    let node = node_archive_path(config);
+    for path in downloaded {
+        if node.as_ref() != Some(path) {
+            drop(write::remove_file(path));
+            drop(write::remove_file(&part_path(path)));
+        }
+    }
+    let node = node.filter(|path| downloaded.contains(path) || super::runtime_ready(config));
+    if let Some(path) = node
+        && let Ok(Some(held)) = write::try_lock(&config.data_dir, AgentsLock::Node, Mode::Exclusive)
+    {
+        drop(write::remove_file(&path));
+        drop(write::remove_file(&part_path(&path)));
+        drop(held);
+    }
+    write::remove_empty_dir(&agent_downloads(&config.data_dir, agent));
+    empty_npm_cache(&config.data_dir, agent);
+}
+
+/// Removes `agent`'s npm cache, ours alone: after `Ready`, at the start of each try and at the
+/// worker's start, always with the agent's `.lock-<id>` held. npm adds every tarball to it on
+/// each `npm ci`, and a try cut short (a quit, a pause, a killed npm) never reaches the
+/// clean-up after `Ready`, so without this each interrupted try would leave another copy
+/// behind. It goes only when no link stands at `agents`, `npm-cache` or the agent's folder in
+/// it; one that will not go now goes next time.
+pub(crate) fn empty_npm_cache(data_dir: &Path, agent: &AgentId) {
+    let cache = npm_cache(data_dir, agent);
+    if write::real_dirs_under(data_dir, &cache).unwrap_or(false) {
         drop(write::remove_dir_all(&cache));
+    }
+}
+
+/// What an older Clauseo, which installed one agent at a time, left in the shared places now
+/// split per agent: the one npm cache's own entries in `agents/npm-cache` (any but an agent's
+/// folder of `known`), and the package tarballs named by their digest in `agents/downloads`
+/// (with their `.part` files). Run at the worker's start with `agents/.lock` held shared, so no
+/// older Clauseo, which holds it exclusive, is using them; this Clauseo never writes there. The
+/// legacy `agents/npmrc` files are empty and left. What will not go now goes next time.
+pub(crate) fn remove_legacy_shared(data_dir: &Path, known: &[AgentId]) {
+    let cache = data_dir.join("agents").join("npm-cache");
+    if write::real_dirs_under(data_dir, &cache).unwrap_or(false)
+        && let Ok(entries) = std::fs::read_dir(&cache)
+    {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if known.iter().any(|agent| name == agent.as_str()) {
+                continue;
+            }
+            let path = entry.path();
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                drop(write::remove_dir_all(&path));
+            } else {
+                drop(write::remove_file(&path));
+            }
+        }
+    }
+    let downloads = downloads_dir(data_dir);
+    if write::real_dirs_under(data_dir, &downloads).unwrap_or(false)
+        && let Ok(entries) = std::fs::read_dir(&downloads)
+    {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let stem = name
+                .strip_suffix(".tgz.part")
+                .or_else(|| name.strip_suffix(".tgz"));
+            let digest = stem.is_some_and(|stem| {
+                !stem.is_empty() && stem.bytes().all(|byte| byte.is_ascii_hexdigit())
+            });
+            let is_file = entry.file_type().is_ok_and(|kind| kind.is_file());
+            if digest && is_file {
+                drop(write::remove_file(&entry.path()));
+            }
+        }
     }
 }
 
@@ -385,9 +550,12 @@ pub(crate) fn data_dir_on_share(data_dir: &str, os: Os) -> bool {
     os == Os::Win32 && is_unc(data_dir)
 }
 
-/// `<data_dir>/agents/npm-cache`.
-pub(crate) fn npm_cache(data_dir: &Path) -> PathBuf {
-    data_dir.join("agents").join("npm-cache")
+/// `<data_dir>/agents/npm-cache/<id>`: `agent`'s own npm cache.
+pub(crate) fn npm_cache(data_dir: &Path, agent: &AgentId) -> PathBuf {
+    data_dir
+        .join("agents")
+        .join("npm-cache")
+        .join(agent.as_str())
 }
 
 #[cfg(test)]

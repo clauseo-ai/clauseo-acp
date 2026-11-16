@@ -52,7 +52,7 @@ pub(crate) fn cancel_all(actor: &mut Actor) {
         .map(|(thread, _)| *thread)
         .collect();
     for thread in threads {
-        cancel::cancel_current(actor, thread);
+        cancel::cancel_current(actor, thread, cancel::why::INSTALL);
     }
 }
 

@@ -140,7 +140,10 @@ impl Walk<'_> {
             .into_iter()
             .chain([data])
             .any(|p| in_folder(p, parent));
-        let file_in_it = all().any(|k| k.parent().is_some_and(|p| p == parent) && k.is_file());
+        let file_in_it = all().any(|k| {
+            // `same`: a long kept file's verbatim parent is the plain `parent`.
+            k.parent().is_some_and(|p| crate::policy::same(p, parent)) && k.is_file()
+        });
         if inside || holds_records || file_in_it {
             return Ok(None);
         }

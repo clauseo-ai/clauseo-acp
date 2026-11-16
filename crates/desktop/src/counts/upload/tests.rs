@@ -34,9 +34,11 @@ fn only_a_plain_https_origin_is_an_endpoint() {
 }
 
 #[test]
-fn release_builds_have_an_empty_endpoint_and_ignore_the_variable() {
-    assert_eq!(RELEASE_ENDPOINT, "");
-    assert_eq!(endpoint(RELEASE_ENDPOINT), None);
+fn release_builds_post_to_the_worker_and_ignore_the_variable() {
+    assert_eq!(
+        endpoint(RELEASE_ENDPOINT).as_deref(),
+        Some("https://t.clauseo.chat")
+    );
 }
 
 #[test]

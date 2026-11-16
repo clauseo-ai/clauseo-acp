@@ -14,9 +14,12 @@
 //! 3. reads the record (`HKLM\SOFTWARE\Clauseo\Sandbox`): `AdminCopyOwner`, `UserInstallDir`
 //!    (a plain local path, which must lie inside the owner's profile as `ProfileList` names it,
 //!    a temporary profile counting as none; for a `machine` owner, a folder only SYSTEM,
-//!    Administrators or `TrustedInstaller` can change, `--adopt --per-machine`'s test) and
-//!    `AdminCopyVersion`; nothing else comes from outside: no argument, no environment. Not
-//!    `OwnerSid`: the pool's owner, which the in-app `--remove` deletes while the copy stays;
+//!    Administrators or `TrustedInstaller` can change, `--adopt --per-machine`'s test),
+//!    `AdminCopyVersion` and `GroupSid` (the pool's group, which step 9's DACL denies; text that
+//!    isn't a SID refuses); nothing else comes from outside: no argument, no environment. Not
+//!    `OwnerSid`: the pool's owner, which the in-app `--remove` deletes while the copy stays.
+//!    With a `GroupSid`, it then gives the admin folder and copy that group's deny if they lack
+//!    only that (`deny.rs`), whatever the run does next;
 //! 4. clears what an earlier refresh left in staging;
 //! 5. reads the exe and its `.sig` from the install folder, which the lawyer controls and may
 //!    re-point at any time: every folder of its path is opened relative to its parent's handle
@@ -26,7 +29,7 @@
 //! 6. copies the exe into the SYSTEM-only staging folder and reads it back from there;
 //! 7. verifies the staged bytes' signature (`signature.rs`), never the user folder's file, so
 //!    a swap after the check changes nothing; requires the staged image's CPU type (`Machine`)
-//!    to be this copy's, so an exe for another CPU never replaces it; requires the staged exe's
+//!    to be this copy's, save one move, x64 to ARM64 (`machine.rs`); requires the staged exe's
 //!    `FILEVERSION` (`pe_version.rs`) to be the signed `version`'s core with a zero fourth
 //!    part; then refuses a signed version older than the record's `AdminCopyVersion` by semver
 //!    precedence (`version.rs`, [`version_not_older`]: a prerelease is older than its release);
@@ -67,6 +70,9 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+mod deny;
+#[cfg(test)]
+mod deny_tests;
 #[cfg(test)]
 mod fake;
 #[cfg(windows)]
@@ -75,6 +81,7 @@ pub mod key;
 #[cfg(test)]
 mod key_tests;
 pub mod last_run;
+mod machine;
 pub mod pe_version;
 #[cfg(test)]
 mod refusal_tests;
@@ -105,14 +112,15 @@ pub(crate) mod windows_tests;
 #[cfg(windows)]
 pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
 pub use rules::{
-    EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT, SystemTask, TASKS,
-    TEARDOWN, Teardown, action_path, hex, inside_profile, same_path, sddl_matches, task_sddl,
+    EXECUTION_LIMIT, POOL_TASKS, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT,
+    SWEEP_ARG, SWEEP_EXECUTION_LIMIT, SystemTask, TASKS, TEARDOWN, Teardown, action_path, hex,
+    inside_profile, same_path, sddl_matches, task_sddl,
 };
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]
 pub use task::{
     TASK_FOLDER, TaskError, last_refresh_run, register_task, request_admin_refresh,
-    request_pool_stop, unregister_task,
+    request_pool_stop, request_pool_sweep, unregister_task,
 };
 pub use version::version_not_older;
 #[cfg(windows)]
@@ -129,7 +137,8 @@ pub const SIG_CAP: u64 = 4 * 1024;
 /// The updater key built in (`build.rs`): Tauri's base64 of a minisign public key, the
 /// placeholder in a build given none.
 pub const UPDATER_KEY: &str = env!("CLAUSEO_SANDBOX_UPDATER_KEY");
-/// This exe's COFF `Machine`, the only one a staged exe may have: the admin copy is this exe.
+/// This exe's COFF `Machine`, the one a staged exe must have but for the move to ARM64
+/// (`machine.rs`): the admin copy is this exe.
 pub const OWN_MACHINE: u16 = if cfg!(target_arch = "aarch64") {
     pe_version::MACHINE_ARM64
 } else if cfg!(target_arch = "x86") {
@@ -144,7 +153,7 @@ pub const OWN_MACHINE: u16 = if cfg!(target_arch = "aarch64") {
 pub struct Trust<'a> {
     /// Tauri's base64 of the minisign public key.
     pub key: &'a str,
-    /// The COFF `Machine` the staged image must have.
+    /// The COFF `Machine` the staged image must have, but for the move to ARM64.
     pub machine: u16,
 }
 
@@ -181,7 +190,8 @@ pub enum RefreshExit {
     /// 41: `UserInstallDir` isn't inside the owner's profile, or the owner has none; for a
     /// `machine` owner, it isn't a folder only administrators can change.
     OutsideProfile,
-    /// 42: the staged exe is for another CPU type than this copy.
+    /// 42: the staged exe is for another CPU type than this copy, and isn't the one allowed move
+    /// (`machine.rs`: x64 to a newer ARM64 build on an ARM64 machine).
     WrongMachine,
     /// 43: the admin folder couldn't be held for the renames (someone holds it); nothing moved.
     FolderBusy,
@@ -223,6 +233,8 @@ pub struct RefreshRecord {
     pub admin_copy_sha256: Option<String>,
     /// `AdminCopyVersion`: the admin copy's file version.
     pub admin_copy_version: Option<String>,
+    /// `GroupSid`: the pool's group, which the staged copy's DACL denies (`admin_copy::locked`).
+    pub group_sid: Option<String>,
 }
 
 /// A failed effect: what failed, as a line for the log. Names no user path.
@@ -260,8 +272,17 @@ pub trait Refresher {
     fn stage(&mut self, exe: &[u8]) -> Result<Vec<u8>, Failed>;
     /// The SHA-256 of the file now at the admin path; `None` when there is none.
     fn admin_copy_sha256(&mut self) -> Result<Option<[u8; 32]>, Failed>;
-    /// Gives the staged file the admin copy's owner and protected DACL.
-    fn secure_staged(&mut self) -> Result<(), Failed>;
+    /// The CPU type of the file now at the admin path, read as the hash is
+    /// (`pe_version::plain_machine`); `None` when there is none, or it isn't a PE image.
+    fn admin_copy_machine(&mut self) -> Result<Option<u16>, Failed>;
+    /// The machine's own CPU type: `IsWow64Process2`'s native machine.
+    fn native_machine(&mut self) -> Result<u16, Failed>;
+    /// Gives the staged file the admin copy's owner and protected DACL, denying `group` when
+    /// the record names one (`admin_copy::locked_file_sddl`).
+    fn secure_staged(&mut self, group: Option<&Sid>) -> Result<(), Failed>;
+    /// Gives the admin folder and copy `group`'s deny when both are locked exactly and either
+    /// lacks only that (`admin_copy::owed`): whether it did. Anything else is left.
+    fn deny_group(&mut self, group: &Sid) -> Result<bool, Failed>;
     /// Opens the admin folder for adding a file, sharing read, write and delete, and keeps the
     /// handle until [`Refresher::release_admin_folder`]: while it is open, no one can open the
     /// folder in a way that fails the renames into it.
@@ -310,6 +331,7 @@ struct Checked {
     dir: PathBuf,
     sha256: Option<String>,
     version: String,
+    group: Option<Sid>,
 }
 
 /// The steps; `Ok` carries the log line of a run that left the admin copy current.
@@ -336,6 +358,7 @@ fn run_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refus
 /// Steps 3 to 9, with the set-up lock held.
 fn locked_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refusal> {
     let record = fs.record().map_err(|why| (RefreshExit::NoRecord, why))?;
+    deny::heal(fs, &record);
     let checked = checked(fs, record)?;
     if let Err(why) = fs.clear_leftovers() {
         fs.log(true, &format!("an earlier refresh's leftovers stay: {why}"));
@@ -430,6 +453,11 @@ fn checked(fs: &mut impl Refresher, record: RefreshRecord) -> Result<Checked, Re
     let version = record
         .admin_copy_version
         .ok_or_else(|| refuse("the record has no AdminCopyVersion"))?;
+    let group = match record.group_sid.as_deref().map(Sid::parse) {
+        None => None,
+        Some(Ok(group)) => Some(group),
+        Some(Err(_)) => return Err(refuse("the record's GroupSid isn't a SID")),
+    };
     let outside = |why: String| (RefreshExit::OutsideProfile, why);
     match owner {
         CopyOwner::User(owner) => {
@@ -456,6 +484,7 @@ fn checked(fs: &mut impl Refresher, record: RefreshRecord) -> Result<Checked, Re
         dir,
         sha256: record.admin_copy_sha256,
         version,
+        group,
     })
 }
 
@@ -468,15 +497,7 @@ fn replace(
     trust: &Trust<'_>,
 ) -> Result<Replaced, Refusal> {
     let signed = verify(staged, sig, trust.key).map_err(|error| refused(&error))?;
-    let machine = pe_version::machine(staged);
-    if machine != Some(trust.machine) {
-        let found = machine.map_or_else(|| "none".to_owned(), |m| format!("{m:#06x}"));
-        let why = format!(
-            "the staged exe is for machine {found}, not this copy's {:#06x}",
-            trust.machine
-        );
-        return Err((RefreshExit::WrongMachine, why));
-    }
+    machine::check(fs, staged, trust, &checked.version, &signed.version)?;
     let file = pe_version::file_version(staged).ok_or_else(|| {
         let why = "the staged exe carries no readable FILEVERSION".to_owned();
         (RefreshExit::Downgrade, why)
@@ -514,7 +535,7 @@ fn replace(
         );
         return Err((RefreshExit::Downgrade, why));
     }
-    fs.secure_staged()
+    fs.secure_staged(checked.group.as_ref())
         .map_err(|why| (RefreshExit::StagingFailed, why))?;
     fs.hold_admin_folder()
         .map_err(|why| (RefreshExit::FolderBusy, why))?;

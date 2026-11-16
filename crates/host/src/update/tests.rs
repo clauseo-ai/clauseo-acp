@@ -6,8 +6,8 @@ use futures::executor::block_on;
 use super::*;
 
 #[test]
-fn update_no_updater_is_a_package_install_that_offers_nothing() {
-    assert_eq!(NoUpdater.install_kind(), InstallKind::Package);
+fn update_no_updater_is_unavailable_and_offers_nothing() {
+    assert_eq!(NoUpdater.install_kind(), InstallKind::Unavailable);
     assert_eq!(block_on(NoUpdater.check()), Ok(None));
 }
 

@@ -8,6 +8,7 @@ use async_process::ChildStderr;
 use futures::AsyncReadExt;
 
 pub(crate) use redact::Redactor;
+pub use redact::redact_tokens;
 
 mod redact;
 

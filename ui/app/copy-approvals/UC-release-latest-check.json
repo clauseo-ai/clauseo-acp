@@ -1,0 +1,37 @@
+{
+  "UC-751": {
+    "en": "Opening Clauseo the first time",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage F (provisional; Rohan batch review)"
+  },
+  "UC-752": {
+    "en": "Clauseo is a small open-source project with no funding yet, so this beta isn't signed by Apple or Microsoft. Your computer asks before it opens Clauseo the first time.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage F (provisional; Rohan batch review)"
+  },
+  "UC-753": {
+    "en": "Mac: drag Clauseo onto Applications and open it. macOS says it can't be opened: click Done or OK, not the button that moves it to the Bin. Then open System Settings, click Privacy & Security, scroll down to Security and click Open Anyway. On macOS 15 and later, right-clicking the app and choosing Open no longer gets past this block. Installing Clauseo on a Mac shows each click.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage F (provisional; Rohan batch review)"
+  },
+  "UC-754": {
+    "en": "If macOS says Clauseo \"is damaged\": this one line in Terminal removes the \"downloaded from the internet\" mark from Clauseo alone: xattr -dr com.apple.quarantine /Applications/Clauseo.app. Then open Clauseo again. On a work Mac, ask your IT team before you do this.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage F (provisional; Rohan batch review)"
+  },
+  "UC-755": {
+    "en": "Windows: a blue box says Windows protected your PC. Click More info, then Run anyway. Installing Clauseo on Windows shows each click.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage F (provisional; Rohan batch review)"
+  }
+}

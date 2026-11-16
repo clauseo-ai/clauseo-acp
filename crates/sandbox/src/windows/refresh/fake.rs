@@ -37,6 +37,8 @@ pub(super) struct Fake {
     /// What `stage` reads back, when it differs from what it was given.
     pub(super) staged_reads_back: Option<Vec<u8>>,
     pub(super) admin_file: Option<Vec<u8>>,
+    /// The machine's own CPU type, as `native_machine` gives it; `Err` when it can't be read.
+    pub(super) native: Result<u16, &'static str>,
     pub(super) staged: Option<Vec<u8>>,
     pub(super) set_aside: Option<Vec<u8>>,
     /// The step that fails, as a failed call.
@@ -45,6 +47,12 @@ pub(super) struct Fake {
     pub(super) crash: Option<&'static str>,
     pub(super) crashed: bool,
     pub(super) calls: Vec<&'static str>,
+    /// The group each `secure_staged` denied, in order.
+    pub(super) secured_for: Vec<Option<Sid>>,
+    /// The group the admin folder and copy deny (none: locked with no deny), which
+    /// `deny_group` sets, and the groups it was asked for.
+    pub(super) denies: Option<Sid>,
+    pub(super) denied_for: Vec<Sid>,
     pub(super) logs: Vec<(bool, String)>,
     /// The staging folder's state.
     pub(super) staging: Staging,
@@ -73,6 +81,7 @@ impl Fake {
                 user_install_dir: Some(INSTALL.to_owned()),
                 admin_copy_sha256: Some(sha_hex(old)),
                 admin_copy_version: Some(OLD_VERSION.to_owned()),
+                group_sid: None,
             },
             profile: Some(PathBuf::from(PROFILE)),
             admin_only: false,
@@ -80,12 +89,16 @@ impl Fake {
             source_sig: Ok(key.sign(new, sig_comment)),
             staged_reads_back: None,
             admin_file: Some(old.to_vec()),
+            native: Ok(pe_version::MACHINE_X64),
             staged: None,
             set_aside: None,
             fail: None,
             crash: None,
             crashed: false,
             calls: Vec::new(),
+            secured_for: Vec::new(),
+            denies: None,
+            denied_for: Vec::new(),
             logs: Vec::new(),
             staging: Staging::Absent,
         }
@@ -190,8 +203,28 @@ impl Refresher for Fake {
             .as_ref()
             .map(|file| Sha256::digest(file).into()))
     }
-    fn secure_staged(&mut self) -> Result<(), Failed> {
+    fn admin_copy_machine(&mut self) -> Result<Option<u16>, Failed> {
+        // Read from the file at the admin path, as the real one reads it.
+        self.step("admin_machine")?;
+        Ok(self
+            .admin_file
+            .as_deref()
+            .and_then(pe_version::plain_machine))
+    }
+    fn native_machine(&mut self) -> Result<u16, Failed> {
+        self.calls.push("native");
+        self.native.map_err(str::to_owned)
+    }
+    fn secure_staged(&mut self, group: Option<&Sid>) -> Result<(), Failed> {
+        self.secured_for.push(group.cloned());
         self.step("secure_staged")
+    }
+    fn deny_group(&mut self, group: &Sid) -> Result<bool, Failed> {
+        self.denied_for.push(group.clone());
+        self.step("deny_group")?;
+        let lacking = self.denies.as_ref() != Some(group);
+        self.denies = Some(group.clone());
+        Ok(lacking)
     }
     fn hold_admin_folder(&mut self) -> Result<(), Failed> {
         self.step("hold")

@@ -201,8 +201,10 @@ fn a_state_read_from_a_snapshot_counts_the_questions_that_wait() {
 }
 
 #[test]
-fn ending_an_earlier_prompts_turn_leaves_the_later_prompt_starting() {
+fn ending_an_earlier_prompts_turn_settles_under_the_later_prompt() {
     // Two prompts sent while no turn runs; the first one's turn is cancelled before it starts.
+    // The later one came while the first was on its way, so the first stays the thread's last
+    // turn (the host queues the later one behind it, `queued.rs`): its end settles the status.
     let mut log = Log::thread(23).unwrap();
     log.push(thread_created().unwrap()).unwrap();
     let (first, first_message): (TurnId, MessageId) = (log.fresh().unwrap(), log.fresh().unwrap());
@@ -224,9 +226,9 @@ fn ending_an_earlier_prompts_turn_leaves_the_later_prompt_starting() {
         prompt_status(&state, later_message),
         Some(UserMessageStatus::Sent)
     );
-    assert_eq!(status(&state), ThreadStatus::Starting);
+    assert_eq!(status(&state), ThreadStatus::Idle);
 
-    // The later prompt's own turn ending settles it.
+    // The later prompt's own turn ending leaves it so.
     cancel(&mut log, &mut state, later);
     assert_eq!(status(&state), ThreadStatus::Idle);
 }

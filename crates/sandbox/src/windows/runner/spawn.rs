@@ -1,7 +1,7 @@
 //! The runners' process calls (Windows): the outer's `CreateProcessWithLogonW` of the inner
-//! runner and of the end sweeper, the kill-on-close job (whose one handle is the outer's), and the
-//! inner's private desktop, error mode and `CreateProcessAsUserW` of the agent with only its three
-//! pipes inherited.
+//! runner, the kill-on-close job (whose one handle is the outer's), and the inner's private
+//! desktop, error mode and `CreateProcessAsUserW` of the agent with only its three pipes
+//! inherited.
 #![expect(
     unsafe_code,
     reason = "FFI to the logon, job, desktop and process calls"
@@ -11,10 +11,8 @@ use std::ffi::c_void;
 use std::io;
 use std::time::Duration;
 
-use windows::Win32::Foundation::{
-    HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, SetHandleInformation, WAIT_OBJECT_0, WAIT_TIMEOUT,
-};
-use windows::Win32::Security::{SECURITY_ATTRIBUTES, TOKEN_QUERY};
+use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows::Win32::Security::TOKEN_QUERY;
 use windows::Win32::System::Diagnostics::Debug::{
     SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SEM_NOOPENFILEERRORBOX, SetErrorMode,
 };
@@ -32,7 +30,6 @@ use windows::Win32::System::JobObjects::{
 use windows::Win32::System::LibraryLoader::{
     LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories, SetDllDirectoryW,
 };
-use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
@@ -102,12 +99,11 @@ impl Process {
     }
 }
 
-// SAFETY: the handles are kernel handles any thread may use; the end sweeper's is kept behind a
-// mutex for the outer's last wait.
+// SAFETY: the handles are kernel handles any thread may use.
 unsafe impl Send for Process {}
 
-/// The launch's kill-on-close job, held where every end path reaches it (the outer's end
-/// sweeper's steps), on the stdin relay's thread too.
+/// The launch's kill-on-close job, held where every end path reaches it (the outer's session
+/// end's steps), on the stdin relay's thread too.
 pub(super) struct Job(pub(super) Handle);
 
 // SAFETY: a job handle is a kernel handle any thread may use; it is closed once, when its owner
@@ -117,18 +113,15 @@ unsafe impl Send for Job {}
 // `QueryInformationJobObject`, `AssignProcessToJobObject`) may run on two threads at once.
 unsafe impl Sync for Job {}
 
-/// The outer's call: starts `exe <args>` (`--inner <base>`, or `--sweep`) as the pool user
-/// `name` (on this computer) with its profile loaded, suspended, hidden, in `cwd`, with the pool
-/// user's own environment; with `output`, its stdout and stderr are that handle, which the
-/// Secondary Logon service duplicates from this process into the new one. The password buffer is
-/// wiped when this returns. A failure gives the Win32 code.
+/// The outer's call: starts `exe <args>` (`--inner <base>`) as the pool user `name` (on this
+/// computer) with its profile loaded, suspended, hidden, in `cwd`, with the pool user's own
+/// environment. The password buffer is wiped when this returns. A failure gives the Win32 code.
 pub(super) fn log_on(
     name: &str,
     password: Zeroizing<String>,
     exe: &str,
     args: &str,
     cwd: &str,
-    output: Option<HANDLE>,
 ) -> Result<Process, u32> {
     let user = HSTRING::from(name);
     let mut secret: Zeroizing<Vec<u16>> = Zeroizing::new(Vec::with_capacity(password.len() + 1));
@@ -139,17 +132,12 @@ pub(super) fn log_on(
         .encode_utf16()
         .chain([0])
         .collect();
-    let mut startup = STARTUPINFOW {
+    let startup = STARTUPINFOW {
         cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or(0),
         dwFlags: STARTF_USESHOWWINDOW,
         wShowWindow: SW_HIDE,
         ..STARTUPINFOW::default()
     };
-    if let Some(output) = output {
-        startup.dwFlags |= STARTF_USESTDHANDLES;
-        startup.hStdOutput = output;
-        startup.hStdError = output;
-    }
     let mut info = PROCESS_INFORMATION::default();
     // SAFETY: every string is NUL-terminated and outlives the call, the command line writable as
     // the call requires; no environment, so the pool user's own is made from its profile;
@@ -279,33 +267,6 @@ pub(super) fn assign(job: &Handle, process: HANDLE) -> io::Result<()> {
     // process handle with `PROCESS_SET_QUOTA` and `PROCESS_TERMINATE` (the logon call's has
     // every right).
     unsafe { AssignProcessToJobObject(job.0, process) }.map_err(|e| os_error(&e))
-}
-
-/// An anonymous pipe for the end sweeper's output: the read end, not inheritable, as a `File`,
-/// and the write end, inheritable as the Secondary Logon service needs its standard handles.
-pub(super) fn output_pipe() -> io::Result<(std::fs::File, Handle)> {
-    let attributes = SECURITY_ATTRIBUTES {
-        nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).map_err(io::Error::other)?,
-        lpSecurityDescriptor: std::ptr::null_mut(),
-        bInheritHandle: true.into(),
-    };
-    let (mut read, mut write) = (HANDLE::default(), HANDLE::default());
-    // SAFETY: both out-pointers are live, each owned by `Handle` once written; `attributes`
-    // outlives the call.
-    unsafe {
-        CreatePipe(
-            &raw mut read,
-            &raw mut write,
-            Some(&raw const attributes),
-            0,
-        )
-    }
-    .map_err(|e| os_error(&e))?;
-    let (read, write) = (Handle(read), Handle(write));
-    // SAFETY: the read end is live; this clears its inherit flag alone.
-    unsafe { SetHandleInformation(read.0, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0)) }
-        .map_err(|e| os_error(&e))?;
-    Ok((crate::windows::pipe::os::into_file(read), write))
 }
 
 /// Lets the suspended `process` run.

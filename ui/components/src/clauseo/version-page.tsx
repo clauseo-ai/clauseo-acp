@@ -4,7 +4,8 @@
 import type { ReactNode, RefObject } from "react";
 import { Button } from "../ui/button.tsx";
 import { IconOpen, IconPaperBookPage } from "../icons/icons.tsx";
-import { useVersionWords } from "../lib/words-versions.ts";
+import { OBJECT_WORDS, useVersionWords } from "../lib/words-versions.ts";
+import { rdt } from "../lib/words-reader.ts";
 import { Heading } from "./heading.tsx";
 import { keepIds } from "./matter.ts";
 import { useRoom } from "./room-scope.ts";
@@ -12,12 +13,21 @@ import { Say } from "./say.tsx";
 import type { ParaDiff, RowDiff, Run } from "./versions-diff.ts";
 import { useStuck } from "./stuck.ts";
 
-/** Words as runs: the same, came in, or went out; the lawyer's own at 600. */
+/** Words as runs: the same, came in, or went out; the lawyer's own at 600. A run that stands for an object (a
+ * picture put in, a footnote taken out) shows its bracketed word, marked in or out the same way. */
 export function Runs({ runs }: { runs: readonly Run[] }) {
+  const w = useVersionWords();
   return (
     <>
       {runs.map((r, i) => {
-        const words = <Say>{keepIds(r.text)}</Say>;
+        const words =
+          r.object === undefined ? (
+            <Say>{keepIds(r.text)}</Say>
+          ) : (
+            <span className="ver-object">
+              <Say>{w.v(OBJECT_WORDS[r.object])}</Say>
+            </span>
+          );
         const inner = r.mine ? <b className="ver-mine">{words}</b> : words;
         if (r.kind === "ins")
           return (
@@ -85,24 +95,109 @@ export function DraftSheet({
       <Heading level={2} className="page-title" id={id("ver-title")}>
         <Say>{head.title}</Say>
       </Heading>
-      <div className="page-paras">
-        {diffs.map((d) => (
-          <p
-            key={d.place}
-            className="ver-place"
-            data-place={d.place}
-            data-change={marked && d.kind !== "same" ? d.kind : undefined}
-            data-differs={differs?.has(d.place) === true ? "" : undefined}
-          >
-            <Runs runs={d.runs} />
-          </p>
-        ))}
-      </div>
+      <Paras diffs={diffs} marked={marked} differs={differs} />
       <p className="page-foot">
         <span aria-hidden="true">1</span>
         <span className="sr-only">{w.t("Page 1")}</span>
       </p>
     </article>
+  );
+}
+
+/** A sheet's paragraphs, each in its place; marked: each that changed carries its bar, and a blackline's paragraph
+ * says above its words when only its formatting changed or it holds text Word hides; a place that couldn't be shown
+ * says so instead of words. */
+function Paras({
+  diffs,
+  marked,
+  differs,
+}: {
+  diffs: readonly ParaDiff[];
+  marked: boolean;
+  differs?: ReadonlySet<number> | undefined;
+}) {
+  const w = useVersionWords();
+  return (
+    <div className="page-paras">
+      {diffs.map((d) => (
+        <p
+          key={d.place}
+          className="ver-place"
+          data-place={d.place}
+          data-change={marked && d.kind !== "same" ? (d.note ?? d.kind) : undefined}
+          data-differs={differs?.has(d.place) === true ? "" : undefined}
+        >
+          {d.note === "formatted" && (
+            <span className="ver-para-note">
+              <Say>{rdt(w.lang, "Formatting changed")}</Say>
+            </span>
+          )}
+          {d.hidden === true && (
+            <span className="ver-para-note">
+              <Say>{w.v("Hidden in Word")}</Say>
+            </span>
+          )}
+          {d.note === "not_shown" ? (
+            <span className="ver-not-shown">
+              <Say>{w.v("This part couldn't be shown.")}</Say>
+            </span>
+          ) : (
+            <Runs runs={d.runs} />
+          )}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/** A Word document whose changes the host's Word tool marked up: its name over its paragraphs, words in underlined,
+ * words out struck, and a bar by each paragraph that changed. */
+export function MarkedSheet({ title, diffs }: { title: string; diffs: readonly ParaDiff[] }) {
+  const { id } = useRoom();
+  return (
+    <article className="page ver-page ver-marked" aria-labelledby={id("ver-marked")}>
+      <Heading level={2} className="page-title ver-marked-title" id={id("ver-marked")}>
+        <Say>{title}</Say>
+      </Heading>
+      <Paras diffs={diffs} marked />
+    </article>
+  );
+}
+
+/** Over a marked-up sheet: when the struck words stood, and that the underlined ones stand now. */
+export function MarkedHead({ then, now }: { then: string; now: string }) {
+  return (
+    <div className="ver-sheet-head ver-marked-head">
+      <p className="ver-sheet-label" data-side="then">
+        <Say>{then}</Say>
+      </p>
+      <p className="ver-sheet-label" data-side="now">
+        <Say>{now}</Say>
+      </p>
+    </div>
+  );
+}
+
+/** A line on the desk over the sheet: that the marking up runs, why it couldn't be done (with Try again where another
+ * try may mend it), or that only part of the document is shown. */
+export function MarkLine({
+  text,
+  failed = false,
+  action,
+}: {
+  text: string;
+  /** Optional: the line says why the marking up failed. */
+  failed?: boolean;
+  /** Optional: a way on beside the line, Try again. */
+  action?: ReactNode;
+}) {
+  return (
+    <div className="ver-mark-line" data-tone={failed ? "failed" : undefined}>
+      <p className="ver-mark-text" role="status">
+        <Say>{text}</Say>
+      </p>
+      {action}
+    </div>
   );
 }
 

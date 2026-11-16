@@ -3,8 +3,9 @@
 //! repeat of it changes nothing.
 
 use clauseo_protocol::{
-    Cost, Count, FilesChanged, Finite, SkippedFile, SkippedFileReason, TextOrBlob, ToolCallPatch,
-    ToolCallUpdated, ToolKind, ToolLocation, UsageUpdated, ViewEntry,
+    ChangeKind, ContentId, Cost, Count, FileChange, FilesChanged, Finite, MatterPath, SkippedFile,
+    SkippedFileReason, TextOrBlob, ToolCallPatch, ToolCallUpdated, ToolKind, ToolLocation,
+    UsageUpdated, ViewEntry,
 };
 use clauseo_reducer::{StreamState, ViewChange, apply};
 
@@ -173,4 +174,60 @@ fn files_changed_after_the_turn_ended_updates_its_step() {
         let kept = state.entries().get(&step.order);
         assert_eq!(kept, Some(&ViewEntry::Step(step)));
     }
+}
+
+#[test]
+fn a_logged_file_in_a_dot_folder_counts_no_paper() {
+    // Logged before dot-folders were left out: Claude Code wrote its settings.
+    let settings = FileChange::new(
+        MatterPath::new(".claude/settings.local.json").unwrap(),
+        ChangeKind::Added,
+        None,
+        Some(ContentId::new("ab12").unwrap()),
+        Count::new(40).unwrap(),
+    )
+    .unwrap();
+    let skipped = SkippedFile {
+        path: MatterPath::new("a/.Codex/big.bin").unwrap(),
+        reason: SkippedFileReason::OverSizeCap,
+    };
+    let papers = file_changes().unwrap();
+    let mut files = papers.clone();
+    files.insert(0, settings);
+    let mut log = Log::thread(23).unwrap();
+    log.push(thread_created().unwrap()).unwrap();
+    let turn = start_turn(&mut log, "Tidy the lease.").unwrap();
+    log.push(FilesChanged {
+        turn,
+        files: files.clone(),
+        skipped: vec![skipped.clone()],
+    })
+    .unwrap();
+    let checkpoint = log.fresh().unwrap();
+    log.push(turn_ended(turn, checkpoint).unwrap()).unwrap();
+    let mut state = fold(log.events());
+    let step = |state: &StreamState| {
+        state
+            .entries()
+            .values()
+            .find_map(|entry| {
+                if let ViewEntry::Step(step) = entry {
+                    Some(step.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+    };
+    assert_eq!(step(&state).files, papers);
+    assert_eq!(step(&state).skipped, Vec::<SkippedFile>::new());
+    // A late one is filtered the same way, and changes nothing here.
+    let late = FilesChanged {
+        turn,
+        files,
+        skipped: vec![skipped],
+    };
+    let out = apply(&mut state, &log.push(late).unwrap()).unwrap();
+    assert_eq!(out.changes, Vec::<ViewChange>::new());
+    assert_eq!(step(&state).files, papers);
 }

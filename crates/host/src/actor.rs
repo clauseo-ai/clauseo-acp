@@ -32,11 +32,13 @@ use crate::matter_worker::MatterWorker;
 use crate::pipeline::{Draft, FeederTx, Pipeline, Ticket};
 use crate::snapshot::SnapshotWorker;
 
+mod agent_options;
 mod allowed;
 mod app;
 mod app_lists;
 mod blocked;
 mod browser_install;
+mod browser_policy;
 mod commands;
 mod connectors;
 pub(crate) mod counting;
@@ -44,17 +46,20 @@ pub(crate) mod documents;
 mod folder_state;
 pub(crate) mod header_tools;
 pub(crate) mod input;
+pub(crate) mod last_exit;
 pub(crate) mod limits;
 mod locate;
 mod main_loop;
 mod matter_details;
 mod matters;
+mod mcp;
 mod papers;
 pub(crate) mod protection;
 mod query;
 mod rail;
 mod relocate;
 mod requests;
+mod revisions;
 pub(crate) mod scan;
 pub(crate) mod scratch;
 pub(crate) use matters::probe::FolderProbes;
@@ -115,6 +120,8 @@ pub(crate) struct Actor {
     pub(crate) counts: Option<clauseo_counts::Counts>,
     /// The updater's machine, its tasks, timer and file thread (`update.rs`).
     pub(crate) update: update::UpdateHost,
+    /// How the last run ended, and the file actions recorded now (`last_exit.rs`).
+    pub(crate) last_exit: last_exit::LastExitHost,
     /// What to count once a command's commit is durable, by command (`counting.rs`).
     pub(crate) count_on_commit: BTreeMap<clauseo_protocol::CommandId, counting::OnCommit>,
     pub(crate) launcher: Arc<dyn Launcher>,
@@ -134,10 +141,14 @@ pub(crate) struct Actor {
     pub(crate) wiring: crate::config::LaunchWiring,
     /// The Chrome for Testing download: its tools, its start-up sweep and the one running.
     pub(crate) browser_install: browser_install::BrowserInstall,
+    /// The lawyer's re-read of the firm's browser policy: whether one runs, and its latest state.
+    pub(crate) browser_policy: browser_policy::PolicyCheck,
     /// This computer's protection, its seam and the set-up work running (`protection.rs`).
     pub(crate) protection: protection::ProtectionHost,
     /// The connector state and the commands' work in flight (R24).
     pub(crate) connectors: connectors::ConnectorsOnActor,
+    /// The lawyer's MCP servers: the commands' keychain work and the view sent (`mcp.rs`).
+    pub(crate) mcp: mcp::McpOnActor,
     /// The tools each thread's header shows, laid over the header unlogged.
     pub(crate) header_tools: header_tools::HeaderTools,
     /// The turn path's host-wide state: the start-up `run/` sweep, `stop_agents`' waits.
@@ -177,6 +188,8 @@ pub(crate) struct Actor {
     /// proxies' views (`allowed.rs`). Boxed, as is `blocked`, so the host thread's close future
     /// stays under clippy's `large_futures` limit on Windows.
     pub(crate) allowed: Box<allowed::AllowState>,
+    /// Each agent's config options as its latest session reported them (`agent_options.rs`).
+    pub(crate) agent_options: agent_options::AgentOptions,
     /// The settings the block list's updater reads each round, kept current (`blocklist.rs`).
     pub(crate) blocklist: Option<crate::blocklist::Live>,
     /// The limits model, its reader, timer and subscribers (`limits.rs`).
@@ -203,6 +216,12 @@ pub(crate) struct Actor {
     /// Matter folders whose `ListMatters` stat is still running (`folder_state.rs`).
     pub(crate) stats_running: folder_state::Running,
     pub(crate) files: papers::FileRefs,
+    /// Each matter's background scan for tracked changes (`papers/scan.rs`).
+    pub(crate) paper_scans: papers::scan::PaperScans,
+    /// The matter whose folder is watched, the last one opened (`papers/follow.rs`).
+    pub(crate) papers_follow: Option<Box<papers::Follow>>,
+    /// Whether that folder is watched: `papers::follow::live_watch`, set by tests.
+    pub(crate) papers_live: bool,
     pub(crate) next_sub: u64,
     pub(crate) work: Work,
     pub(crate) phase: HostPhase,
@@ -268,7 +287,7 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
 
 /// The host thread's body.
 fn run(
-    (first, mut config): (protection::Observed, HostConfig),
+    (first, config): (protection::Observed, HostConfig),
     requests: async_channel::Receiver<Request>,
     (post, internal): (async_channel::Sender<Input>, async_channel::Receiver<Input>),
     ready: mpsc::Sender<Result<(), Error>>,
@@ -277,7 +296,7 @@ fn run(
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
     let allowed_sites = blocklist::allowed_sites(&config);
-    let blocklist = blocklist::take(&mut config);
+    let blocklist = blocklist::prepare(&config);
     let ended: Result<_, futures::channel::oneshot::Sender<()>> = pool.run_until(async move {
         let mut actor = match startup::open((config, first), spawner, post, ready.clone()).await {
             Ok(actor) => actor,
@@ -288,7 +307,8 @@ fn run(
         };
         allowed::start(&mut actor, allowed_sites);
         startup::begin_startup(&mut actor);
-        // Stops when this block ends, however it ends (`blocklist.rs`).
+        // Only when something enforces the list (`blocklist::needed`); stops when this block
+        // ends, however it ends (`blocklist.rs`).
         let _blocklist = blocklist.and_then(|start| {
             actor.blocklist = Some(start.live.clone());
             blocklist::start(start)
@@ -497,20 +517,33 @@ impl Actor {
             Input::IdleDeadline { generation } => turn::idle_due(self, generation),
             Input::FolderStates(states) => query::on_folder_states(self, states),
             Input::Scan(input) => scan::on_input(self, input),
+            Input::PaperMarks(batch) => papers::scan::on_batch(self, batch),
             Input::Scratch(input) => scratch::on_input(self, input),
             Input::Documents(input) => documents::on_input(self, input),
             Input::NewFolder(probed) => matters::probe::on_probed(self, *probed),
             Input::Located(located) => locate::on_located(self, *located),
             Input::BrowserInstall(state) => browser_install::on_state(self, state),
+            Input::BrowserPolicy(input) => browser_policy::on_input(self, input),
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::Update(input) => update::on_input(self, input),
+            Input::Recorded(recorded) => last_exit::on_recorded(self, *recorded),
             Input::Connector(input) => connectors::on_input(self, *input),
+            Input::Mcp(input) => mcp::on_input(self, *input),
             Input::Protection(done) => protection::work::on_done(self, *done),
             Input::Allowed(input) => allowed::on_input(self, *input),
+            Input::SiteBlocked { session, site } => blocked::site_blocked(self, session, site),
+            #[cfg(not(windows))]
+            Input::PapersChanged(changed) => papers::on_changed(self, changed),
+            #[cfg(not(windows))]
+            Input::WatchStarted(started) => papers::on_started(self, *started),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {
                 let _gone = reply.send(());
+            }
+            #[cfg(feature = "test-support")]
+            Input::StateForTest(reply) => {
+                let _gone = reply.send(turn::sign_in::state_for_test(self));
             }
         }
     }

@@ -2,7 +2,7 @@
 // The spec suites check the HTML of the hast the renderer produces; this checks that the React DOM our
 // components make from that hast keeps its text, for every example, and that the differences are the
 // intended ones: links keep an href only for https, http, mailto (and fragments, mapped to the answer's
-// ids), so relative links are inert; images that are not clauseo-file: or raster data: are placeholders;
+// ids), and any other link is its text alone, in a link-text span; images that are not clauseo-file: or raster data: are placeholders;
 // code blocks drop their class for data-lang.
 import type { Element, Root as Hast, RootContent } from "hast";
 import { act } from "react";
@@ -73,7 +73,7 @@ test("for every spec example the DOM keeps the hast's text, links and images, wi
     const label = `example ${example.example}`;
     if (words(dom.textContent ?? "") !== words(text))
       failures.push(`${label}: text "${dom.textContent}" against "${text}"`);
-    const anchors = [...dom.querySelectorAll("a")];
+    const anchors = [...dom.querySelectorAll('a, [data-clauseo="link-text"]')];
     if (anchors.length !== links.length)
       failures.push(`${label}: ${anchors.length} links against ${links.length}`);
     anchors.forEach((anchor, at) => {
@@ -82,6 +82,11 @@ test("for every spec example the DOM keeps the hast's text, links and images, wi
       const shownHref = anchor.getAttribute("href");
       // A fragment points at the answer's own id: the sanitiser's prefix, the answer's scope, the fragment.
       const fragment = typeof href === "string" && href.startsWith("#");
+      // a link with nothing to open (a relative or file link that names no paper, another scheme) is its text alone
+      if (anchor.tagName !== "A") {
+        if (kept !== null || fragment) failures.push(`${label}: ${String(href)} lost its link`);
+        return;
+      }
       const ok = fragment
         ? shownHref?.startsWith("#user-content-md") && shownHref.endsWith(`-${href.slice(1)}`)
         : shownHref === kept;

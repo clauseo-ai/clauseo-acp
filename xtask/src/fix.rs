@@ -36,6 +36,7 @@ pub(crate) enum Fix {
     Exceptions(Box<checks::exceptions::Fix>),
     ExpectAllowlist(Box<checks::expect_allowlist::Fix>),
     Pins(Box<checks::pins::Fix>),
+    UnixPaths(Box<checks::unix_paths::Fix>),
     /// `cargo xtask mutants`, which prints a missed mutant as a violation.
     Mutants(Box<mutants::Fix>),
     /// A step's fix line, built from the command that ran and what the tool printed. Only
@@ -77,6 +78,7 @@ impl fmt::Display for Fix {
             Fix::Exceptions(fix) => fix.fmt(f),
             Fix::ExpectAllowlist(fix) => fix.fmt(f),
             Fix::Pins(fix) => fix.fmt(f),
+            Fix::UnixPaths(fix) => fix.fmt(f),
             Fix::Mutants(fix) => fix.fmt(f),
             Fix::Tool(ToolText(text)) => f.write_str(text),
             #[cfg(test)]
@@ -114,5 +116,6 @@ wraps! {
     Exceptions(checks::exceptions::Fix),
     ExpectAllowlist(checks::expect_allowlist::Fix),
     Pins(checks::pins::Fix),
+    UnixPaths(checks::unix_paths::Fix),
     Mutants(mutants::Fix),
 }

@@ -1,5 +1,5 @@
 //! The per-user class removal on a real machine (N3): an in-process server planted for the Task
-//! Scheduler's class, in both registry views, is gone before COM starts. The keys are planted
+//! Scheduler's class, in both registry views, is gone, with no COM call made. The keys are planted
 //! under a scratch root of this user's own `HKEY_CURRENT_USER`, never its real classes.
 #![expect(unsafe_code, reason = "FFI to the registry in tests")]
 
@@ -11,9 +11,9 @@ use windows::core::PCWSTR;
 
 use super::super::{Kind, remove_all};
 use super::*;
-use crate::windows::token::os::{own_token, user};
+use crate::windows::token::os::own_token;
 
-/// The Task Scheduler's class, which the end sweeper makes in-process.
+/// The Task Scheduler's class: a class a runner of the pool user's could make in-process.
 const TASK_SCHEDULER: &str = "{0F87369F-A4E5-4CFC-BD3E-73E6154572DD}";
 
 /// Makes `HKEY_CURRENT_USER\<path>` with `dll` as its default value.
@@ -54,7 +54,7 @@ fn exists(path: &str) -> bool {
 }
 
 #[test]
-fn a_planted_task_scheduler_server_is_removed_before_com() {
+fn a_planted_task_scheduler_server_is_removed() {
     let mut random = [0u8; 8];
     getrandom::fill(&mut random).unwrap();
     let scratch = format!(
@@ -71,15 +71,13 @@ fn a_planted_task_scheduler_server_is_removed_before_com() {
         plant(path, r"C:\Users\Public\evil.dll");
     }
     let token = own_token().unwrap();
-    let me = user(&token).unwrap();
-    let mut calls = OsLeftovers::new(&token, me);
+    let mut calls = OsLeftovers::new(&token);
     calls.classes.clone_from(&classes);
     let mut lines = Vec::new();
     let clean = remove_all(&mut calls, &[Kind::Classes], "test", &mut |line| {
         lines.push(line.to_owned());
     });
     let left: Vec<&String> = planted.iter().filter(|path| exists(path)).collect();
-    let com_started = calls.com.is_some();
     drop(calls);
     // The scratch root goes whatever the result.
     drop(delete_tree(&wide(&scratch)));
@@ -89,6 +87,5 @@ fn a_planted_task_scheduler_server_is_removed_before_com() {
         lines,
         ["clauseo-sandbox-run: cleanup (test): removed 3 per-user COM class keys"]
     );
-    assert!(!com_started, "the classes alone never start COM");
     assert!(!exists(&format!("{classes}\\CLSID")));
 }

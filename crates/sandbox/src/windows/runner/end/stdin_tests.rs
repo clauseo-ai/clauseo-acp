@@ -29,37 +29,50 @@ fn note(events: &Events, origin: Instant, what: &'static str) {
 }
 
 /// Real-clock steps: the job's end lets the blocked write fail, as the agent's end does to the
-/// pipe on Windows.
+/// pipe on Windows. Each of the end's calls takes `slow` for each step it stands for.
 struct Steps {
     origin: Instant,
     events: Events,
     unblock: Mutex<Option<mpsc::Sender<()>>>,
+    slow: Duration,
 }
 
-impl SweeperSteps for Steps {
-    type Sweeper = ();
+impl Steps {
+    /// Takes `times` × `slow`: nothing is ever sent on `idle`.
+    fn take(&self, times: u32) {
+        let (_kept, idle) = mpsc::channel::<()>();
+        assert!(idle.recv_timeout(self.slow * times).is_err());
+    }
+}
+
+impl EndSteps for Steps {
     fn empty_job(&self) -> Result<(), String> {
         note(&self.events, self.origin, "job ended");
         drop(self.unblock.lock().unwrap().take());
+        // The whole wait for the job to empty.
+        self.take(4);
         Ok(())
     }
-    fn log_on(&self) -> Result<(), String> {
+    fn next_number(&self, _: &'static str) -> Result<u64, String> {
+        self.take(1);
+        Ok(1)
+    }
+    fn request_sweep(&self) -> Result<(), String> {
+        self.take(2);
         Ok(())
     }
-    fn shut(&self, (): &()) -> Result<(), String> {
+    fn request_stop(&self) -> bool {
+        self.take(2);
+        true
+    }
+    fn settle(&self, _: &MarkerState) -> Result<(), String> {
+        self.take(1);
+        note(&self.events, self.origin, "settled");
         Ok(())
     }
-    fn resume(&self, (): &()) -> Result<(), String> {
-        Ok(())
-    }
-    fn kill(&self, (): &()) {}
-    fn keep(&self, (): ()) {}
     fn log(&self, _: &str) {}
     fn now(&self) -> Duration {
         clock().saturating_duration_since(self.origin)
-    }
-    fn wait(&self) -> Swept {
-        Swept::Unclean
     }
 }
 
@@ -121,10 +134,11 @@ fn the_deadline_starts_at_the_hosts_stdin_end_while_the_write_to_the_agent_is_bl
     let origin = clock();
     let events = Events::default();
     let (unblock, unblocked) = mpsc::channel();
-    let end = EndSweep::new(Steps {
+    let end = SessionEnd::new(Steps {
         origin,
         events: Arc::clone(&events),
         unblock: Mutex::new(Some(unblock)),
+        slow: Duration::ZERO,
     });
     let from = Large {
         left: 8 << 20,
@@ -161,4 +175,35 @@ fn the_deadline_starts_at_the_hosts_stdin_end_while_the_write_to_the_agent_is_bl
     assert!(at("job ended") <= at("write failed"), "{events:?}");
     assert!(at("write failed") <= at("agent stdin closed"), "{events:?}");
     assert_eq!(end.began(), Some(EndSignal::Stdin));
+}
+
+#[test]
+fn a_cancel_ends_the_outer_within_3_s_of_the_hosts_stdin_end() {
+    // The agent never finishes: its full grace, the job's end with a full 400 ms wait to empty,
+    // an escapee's two reads and two requests at 100 ms each, and the marker's write. The
+    // escapee's end is the longest: it reads and requests the stop as well.
+    let origin = clock();
+    let events = Events::default();
+    let end = SessionEnd::new(Steps {
+        origin,
+        events: Arc::clone(&events),
+        unblock: Mutex::new(None),
+        slow: Duration::from_millis(100),
+    });
+    end.mark_escapee();
+    let (feed, fed) = mpsc::channel::<Vec<u8>>();
+    drop(feed);
+    relay_stdin(Fed(fed), io::sink(), &end, GRACE, drop);
+    end.finish();
+    let took = clock().saturating_duration_since(origin);
+    let events = events.lock().unwrap().clone();
+    assert!(
+        events.iter().any(|(what, _)| *what == "settled"),
+        "{events:?}"
+    );
+    assert!(took >= GRACE, "{took:?}");
+    assert!(
+        took <= OUTER_END,
+        "the outer's end took {took:?}: {events:?}"
+    );
 }

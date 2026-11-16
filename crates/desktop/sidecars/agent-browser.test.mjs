@@ -71,12 +71,30 @@ async function exists(path) {
   return stat(path).then(() => true, () => false);
 }
 
+/** A fetch that answers each call from `answers` in turn: a function returning a Response. */
+function scripted(answers) {
+  const calls = [];
+  const fetch = async (url, init) => {
+    calls.push({ url, headers: init?.headers ?? {} });
+    const next = answers.shift();
+    if (next === undefined) throw new Error(`unexpected request to ${url}`);
+    return next();
+  };
+  return { calls, fetch };
+}
+
+/** A wait that records each delay instead of sleeping. */
+function waits() {
+  const delays = [];
+  return { delays, wait: async (ms) => void delays.push(ms) };
+}
+
 describe("fetchAgentBrowser", () => {
   test("an unknown triple throws and fetches nothing", async () => {
     const { fetch, calls } = stubFetch();
     const dest = await destIn("agent-browser-riscv64.bin");
     await assert.rejects(
-      fetchAgentBrowser("riscv64gc-unknown-linux-gnu", dest, { fetch }),
+      fetchAgentBrowser("riscv64gc-unknown-linux-gnu", dest, { fetch, env: {} }),
       /not in agent-browser\.toml/,
     );
     assert.equal(calls.length, 0);
@@ -97,7 +115,7 @@ describe("fetchAgentBrowser", () => {
       const pinPath = await pinFile(url, sha(BODY));
       const { fetch, calls } = stubFetch();
       const dest = await destIn("agent-browser-linux-x64");
-      await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), /pinned url/, url);
+      await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} }), /pinned url/, url);
       assert.equal(calls.length, 0, url);
     }
   });
@@ -106,7 +124,7 @@ describe("fetchAgentBrowser", () => {
     const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(Buffer.from("the pinned bytes")));
     const { fetch, calls } = stubFetch(BODY);
     const dest = await destIn("agent-browser-linux-x64");
-    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), /sha256 for/);
+    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} }), /sha256 for/);
     assert.equal(calls.length, 1);
     assert.equal(await exists(dest), false);
     assert.equal(await exists(`${dest}.partial`), false);
@@ -116,7 +134,7 @@ describe("fetchAgentBrowser", () => {
     const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
     const { fetch } = stubFetch(BODY, 404);
     const dest = await destIn("agent-browser-linux-x64");
-    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), /HTTP 404/);
+    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} }), /HTTP 404/);
     assert.equal(await exists(dest), false);
   });
 
@@ -124,7 +142,7 @@ describe("fetchAgentBrowser", () => {
     const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
     const { fetch } = stubFetch(BODY, 204);
     const dest = await destIn("agent-browser-linux-x64");
-    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), /not 200/);
+    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} }), /not 200/);
     assert.equal(await exists(dest), false);
     assert.equal(await exists(`${dest}.partial`), false);
   });
@@ -139,7 +157,7 @@ describe("fetchAgentBrowser", () => {
       const pinPath = await pinFile(url, sha(BODY));
       const { fetch, calls } = stubFetch(BODY);
       const dest = await destIn("agent-browser-linux-x64");
-      await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), /pinned url/, url);
+      await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} }), /pinned url/, url);
       assert.equal(calls.length, 0, url);
     }
   });
@@ -147,7 +165,7 @@ describe("fetchAgentBrowser", () => {
   test("the download carries a timeout signal", async () => {
     const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
     const { fetch, calls } = stubFetch(BODY);
-    await fetchAgentBrowser("x86_64-unknown-linux-gnu", await destIn("agent-browser-linux-x64"), { fetch, pinPath });
+    await fetchAgentBrowser("x86_64-unknown-linux-gnu", await destIn("agent-browser-linux-x64"), { fetch, pinPath, env: {} });
     assert.ok(calls[0].init.signal instanceof AbortSignal);
     assert.equal(calls[0].init.signal.aborted, false);
   });
@@ -169,7 +187,7 @@ describe("fetchAgentBrowser", () => {
       }),
     });
     const dest = await destIn("agent-browser-linux-x64");
-    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), /over 67108864 bytes/);
+    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} }), /over 67108864 bytes/);
     assert.equal(cancelled, true);
     assert.equal(await exists(dest), false);
   });
@@ -179,7 +197,7 @@ describe("fetchAgentBrowser", () => {
     const chunk = new Uint8Array(16 * 1024 * 1024);
     const { fetch } = stubFetch([chunk, chunk, chunk, chunk, chunk]); // 80 MB, no Content-Length
     const dest = await destIn("agent-browser-linux-x64");
-    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), /over 67108864 bytes/);
+    await assert.rejects(fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} }), /over 67108864 bytes/);
     assert.equal(await exists(dest), false);
     assert.equal(await exists(`${dest}.partial`), false);
   });
@@ -188,7 +206,7 @@ describe("fetchAgentBrowser", () => {
     const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
     const { fetch } = stubFetch(null);
     const dest = await destIn("agent-browser-linux-x64");
-    await fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath });
+    await fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} });
     assert.deepEqual(await readFile(dest), BODY);
   });
 
@@ -196,7 +214,7 @@ describe("fetchAgentBrowser", () => {
     const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
     const { fetch, calls } = stubFetch(BODY);
     const dest = await destIn("agent-browser-x86_64-unknown-linux-gnu");
-    const returned = await fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath });
+    const returned = await fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} });
     assert.equal(returned, dest);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, `${PREFIX}/agent-browser-linux-x64`);
@@ -215,7 +233,7 @@ describe("fetchAgentBrowser", () => {
     await writeFile(pinPath, `version = "${VERSION}"\n\n[x86_64-unknown-linux-gnu]\nnone = true\n`);
     const { fetch, calls } = stubFetch();
     const dest = await destIn("agent-browser-x86_64-unknown-linux-gnu");
-    assert.equal(await fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath }), null);
+    assert.equal(await fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, { fetch, pinPath, env: {} }), null);
     assert.equal(calls.length, 0);
     assert.equal(await exists(dest), false);
   });
@@ -224,7 +242,55 @@ describe("fetchAgentBrowser", () => {
     const pinPath = await pinFile(`${PREFIX}/agent-browser-win32-x64.exe`, sha(BODY), "x86_64-pc-windows-msvc");
     const { fetch } = stubFetch(BODY);
     const dest = await destIn("agent-browser-x86_64-pc-windows-msvc.exe");
-    await fetchAgentBrowser("x86_64-pc-windows-msvc", dest, { fetch, pinPath });
+    await fetchAgentBrowser("x86_64-pc-windows-msvc", dest, { fetch, pinPath, env: {} });
+    assert.deepEqual(await readFile(dest), BODY);
+  });
+
+  test("a 503 then a 200 succeeds after one wait", async () => {
+    const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
+    const server = scripted([
+      () => new Response("busy", { status: 503 }),
+      () => new Response(BODY, { status: 200 }),
+    ]);
+    const timer = waits();
+    const dest = await destIn("agent-browser-linux-x64");
+    await fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, {
+      fetch: server.fetch,
+      pinPath,
+      env: {},
+      wait: timer.wait,
+      log: () => {},
+    });
+    assert.equal(server.calls.length, 2);
+    assert.deepEqual(timer.delays, [30_000]);
+    assert.deepEqual(await readFile(dest), BODY);
+  });
+
+  test("with GH_TOKEN it goes through the API: the release by its tag, then the asset's API url", async () => {
+    const pinPath = await pinFile(`${PREFIX}/agent-browser-linux-x64`, sha(BODY));
+    const assetApi = "https://api.github.com/repos/vercel-labs/agent-browser/releases/assets/7";
+    const release = {
+      assets: [
+        { name: "agent-browser-darwin-x64", url: `${assetApi}1` },
+        { name: "agent-browser-linux-x64", url: assetApi },
+      ],
+    };
+    const server = scripted([() => Response.json(release), () => new Response(BODY, { status: 200 })]);
+    const dest = await destIn("agent-browser-linux-x64");
+    await fetchAgentBrowser("x86_64-unknown-linux-gnu", dest, {
+      fetch: server.fetch,
+      pinPath,
+      env: { GH_TOKEN: "ghs_test" },
+      wait: waits().wait,
+      log: () => {},
+    });
+    assert.deepEqual(server.calls.map((c) => c.url), [
+      `https://api.github.com/repos/vercel-labs/agent-browser/releases/tags/v${VERSION}`,
+      assetApi,
+    ]);
+    for (const call of server.calls) assert.equal(call.headers.Authorization, "Bearer ghs_test");
+    assert.equal(server.calls[0].headers.Accept, "application/vnd.github+json");
+    assert.equal(server.calls[1].headers.Accept, "application/octet-stream");
     assert.deepEqual(await readFile(dest), BODY);
   });
 });

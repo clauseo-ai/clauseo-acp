@@ -49,7 +49,7 @@
 //! under the crate's folder and is lexed here.
 
 mod macros;
-mod paths;
+pub(in crate::checks) mod paths;
 mod predicate;
 
 use super::report;
@@ -181,7 +181,7 @@ pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<
 
 /// The tokens of `text`, which is lexed once. When its first line is a shebang, rustc leaves that
 /// line out, so the line is blanked and the text is lexed again.
-fn lex(text: &str) -> Result<TokenStream, LexError> {
+pub(in crate::checks) fn lex(text: &str) -> Result<TokenStream, LexError> {
     let lexed = TokenStream::from_str(text);
     if is_shebang(text, &lexed) {
         TokenStream::from_str(blank_first_line(text))
@@ -230,7 +230,7 @@ fn blank_first_line(text: &str) -> &str {
 
 /// True when `file` ends in `.rs` in any case, which a case-insensitive file system opens for a
 /// module.
-fn is_rust_file(file: &str) -> bool {
+pub(in crate::checks) fn is_rust_file(file: &str) -> bool {
     Path::new(file)
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("rs"))
@@ -443,14 +443,14 @@ fn attribute_head(
 }
 
 /// The name of `ident`, without the `r#` of a raw identifier.
-fn ident_name(ident: &proc_macro2::Ident) -> String {
+pub(in crate::checks) fn ident_name(ident: &proc_macro2::Ident) -> String {
     let text = ident.to_string();
     text.strip_prefix("r#")
         .map_or_else(|| text.clone(), str::to_owned)
 }
 
 /// True when `tree` is the punctuation `ch`.
-fn is_punct(tree: &TokenTree, ch: char) -> bool {
+pub(in crate::checks) fn is_punct(tree: &TokenTree, ch: char) -> bool {
     matches!(tree, TokenTree::Punct(punct) if punct.as_char() == ch)
 }
 
@@ -460,7 +460,7 @@ fn starts_with_punct(rest: &[TokenTree], ch: char) -> bool {
 }
 
 /// A 1-based line from a span's line.
-fn line_of(line: usize) -> u32 {
+pub(in crate::checks) fn line_of(line: usize) -> u32 {
     u32::try_from(line).unwrap_or(u32::MAX).max(1)
 }
 

@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use clauseo_matters::{OsProbe, PlaceholderProbe};
 use clauseo_protocol::{CommandId, ErrorCode};
 
 use super::{Details, begin_create, not_begun};
@@ -64,6 +65,14 @@ pub(crate) struct FolderProbes {
     pub(crate) new_folder: Probe,
     /// A located file's folder ([`probe_located`]).
     pub(crate) locate: LocateProbe,
+    /// Whether a matter folder's file is a cloud-only placeholder, for every walk of the
+    /// matter workers (`clauseo_matters::Settings::probe`): the OS's, or a test's stand-in
+    /// (`HostConfig::with_placeholder_probe`).
+    pub(crate) placeholder: Arc<dyn PlaceholderProbe + Send + Sync>,
+    /// Where the matter workers' undo and restore deletes go (`clauseo_matters::Settings::trash`):
+    /// `None` for `matter_settings`' own (the OS's), or a test's folder
+    /// (`HostConfig::with_matter_trash`).
+    pub(crate) trash: Option<Arc<dyn clauseo_matters::Trash>>,
     /// Tests: shutdown waits for the probes running too ([`stop_held`]).
     #[cfg(test)]
     stop_hold: Option<StopHold>,
@@ -76,6 +85,8 @@ impl FolderProbes {
         Self {
             new_folder,
             locate,
+            placeholder: Arc::new(OsProbe),
+            trash: None,
             stop_hold: None,
         }
     }
@@ -95,6 +106,8 @@ impl Default for FolderProbes {
         Self {
             new_folder: Arc::new(probe_folder),
             locate: Arc::new(probe_located),
+            placeholder: Arc::new(OsProbe),
+            trash: None,
             #[cfg(test)]
             stop_hold: None,
         }

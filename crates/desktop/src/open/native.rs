@@ -1,7 +1,7 @@
 //! The native sides of [`super::LinkConfirm`] and [`super::Opener`]: the confirm drawn by
-//! Rust with the dialog plugin (`dialogs::confirm`: Cancel first and default, over the main
-//! window), and the OS's default apps and file manager through the opener plugin. The webview
-//! has no permission for either plugin.
+//! Rust with the dialog plugin (`dialogs::confirm`: the link's button first and default, so
+//! Return opens and Escape cancels, over the main window), and the OS's default apps and file
+//! manager through the opener plugin. The webview has no permission for either plugin.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use tauri::{AppHandle, Runtime};
 use tauri_plugin_opener::OpenerExt as _;
 
 use super::{LinkConfirm, LinkWords, Locate, LocatedFile, Opener};
-use crate::dialogs::BoxFuture;
+use crate::dialogs::{BoxFuture, Owner};
 
 /// The link confirm, drawn by Rust.
 pub(crate) struct NativeLinkConfirm<R: Runtime> {
@@ -30,6 +30,8 @@ impl<R: Runtime> LinkConfirm for NativeLinkConfirm<R> {
     fn confirm_link(&self, words: LinkWords) -> BoxFuture<'_, bool> {
         crate::dialogs::confirm(
             &self.app,
+            Owner::Main,
+            crate::dialogs::DefaultButton::Ok,
             rfd::MessageLevel::Info,
             words.title,
             words.message,
@@ -82,12 +84,19 @@ fn not_opened(what: &str, error: &tauri_plugin_opener::Error) -> HostError {
     )
 }
 
+/// An `internal` failure for a link the OS did not open. The opener's own error can quote the
+/// URL (`Not allowed to open url …`), and this message reaches the page's console, so it is left
+/// out: no URL goes to a log.
+fn link_not_opened() -> HostError {
+    HostError::new(ErrorCode::Internal, "the system did not open the link")
+}
+
 impl<R: Runtime> Opener for NativeOpener<R> {
     fn open_url(&self, url: &str) -> Result<(), HostError> {
         self.app
             .opener()
             .open_url(url, None::<&str>)
-            .map_err(|error| not_opened("link", &error))
+            .map_err(|_quotes_the_url| link_not_opened())
     }
 
     fn open_path(&self, path: &Path, kind: &str) -> Result<(), HostError> {

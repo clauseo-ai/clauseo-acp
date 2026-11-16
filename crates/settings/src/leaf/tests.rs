@@ -280,12 +280,7 @@ fn key_names_each_leaf_and_apply_sets_it() {
         args: Vec::new(),
         env: BTreeMap::new(),
     };
-    let server = McpServerLaunch {
-        command: abs_str("bin/s"),
-        args: Vec::new(),
-        env: BTreeMap::new(),
-        enabled: true,
-    };
+    let server = McpServerLaunch::local(abs_str("bin/s"), Vec::new(), BTreeMap::new(), true);
     let leaves = [
         (
             Leaf::DefaultLocation(Some(abs("m"))),

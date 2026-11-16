@@ -393,6 +393,10 @@ pub struct StepEntry {
     pub files: Vec<FileChange>,
     /// The files it changed but did not version.
     pub skipped: Vec<SkippedFile>,
+    /// The before-turn checkpoint, from its `TurnStarted`; `None` for a turn that never
+    /// started, and in a step folded before the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub checkpoint_before: Option<CheckpointId>,
     /// The after-turn checkpoint; `None` when it failed, and the step cannot be undone.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub checkpoint_after: Option<CheckpointId>,
@@ -471,8 +475,15 @@ pub enum MarkerKind {
         restored: Vec<MatterPath>,
         /// Files kept as they were.
         kept: Vec<MatterPath>,
+        /// The kept files the lawyer chose to undo that Clauseo had no earlier copy of, with why
+        /// each had not been versioned: in the folder before the turn but skipped (cloud-only or
+        /// over the size cap), then changed by it. Undo never deletes or overwrites them. Missing
+        /// reads as empty, and empty is left out, so an entry from before the field still decodes.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        unversioned: Vec<SkippedFile>,
     },
-    /// A version was restored (matter stream).
+    /// A version was restored (matter stream, and the stream of the conversation it was asked
+    /// from).
     VersionRestored {
         /// The checkpoint restored from.
         from: CheckpointId,
@@ -480,6 +491,18 @@ pub enum MarkerKind {
         checkpoint: CheckpointId,
         /// What was put back.
         scope: RestoreScope,
+        /// The `restore` checkpoint it took back, if it did.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        undoes: Option<CheckpointId>,
+        /// The files it wrote, as the event lists them; missing from older logs.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        written: Vec<MatterPath>,
+        /// The files it removed, as the event lists them; missing from older logs.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        removed: Vec<MatterPath>,
+        /// How many files it wrote or removed past those lists; missing when none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        more: Option<u32>,
     },
     /// The matter's folder was located after it moved (matter stream): "Found at {folder}".
     MatterRelocated {

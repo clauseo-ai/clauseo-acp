@@ -10,7 +10,8 @@
 //   id (a paper).
 // - A polite live region says how many rows the menu opened with (or that the papers are loading, then how many
 //   there are), then the highlighted one's name as the arrows move: a textarea takes no combobox role, and VoiceOver
-//   follows aria-activedescendant reliably only on one.
+//   follows aria-activedescendant reliably only on one. As typing narrows the rows it says the new count, and "No
+//   results" when a query matches nothing and the menu closes, each once typing has stopped for SAY_AFTER_MS.
 // - It stands at the caret's x, 4 px clear of the field, inside what clips it (the room's column), its rows scrolling
 //   under about eight; placed again as the window resizes, the field's size changes or anything scrolls while open.
 // - A pick is a token (composer-tokens.ts), held and drawn from this chunk as long as the menu lives; a trigger that
@@ -24,6 +25,7 @@ import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { fileTypeIcon } from "../icons/file-type.ts";
 import { cn } from "../lib/cn.ts";
+import { src } from "../lib/words-sources.ts";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { useLayer } from "../ui/layer-context.ts";
 import { separator } from "../ui/recipes-controls.ts";
@@ -34,6 +36,7 @@ import {
   keyIds,
   matching,
   runEnd,
+  SAY_AFTER_MS,
   triggerAt,
   type Trigger,
 } from "./composer-menu-logic.ts";
@@ -87,6 +90,9 @@ const tokenOf = (o: Open, i: number): string | undefined => {
   return m === undefined ? undefined : mentionText(m.text);
 };
 
+/** How many rows the open menu has: its commands, or the papers that matched (past the rows shown too). */
+const countOf = (o: Open): number => (o.kind === "command" ? o.items.length : o.total);
+
 /** What the live region says of a row as it is lit: a command with its slash, a paper by its name. */
 const sayOf = (o: Open, i: number): string | undefined =>
   o.kind === "command" ? tokenOf(o, i) : o.items[i]?.label;
@@ -138,6 +144,26 @@ export function ComposerMenu({
   const shown = useRef<MenuShown>(null);
   // what the live region says: the count as the menu opens, then the highlighted row's name
   const [said, setSaid] = useState("");
+  // a narrowed count or "No results", said once typing stops
+  const sayLater = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sayNow = (text: string) => {
+    if (sayLater.current !== null) clearTimeout(sayLater.current);
+    sayLater.current = null;
+    setSaid(text);
+  };
+  const sayAfter = (text: string) => {
+    if (sayLater.current !== null) clearTimeout(sayLater.current);
+    sayLater.current = setTimeout(() => {
+      sayLater.current = null;
+      setSaid(text);
+    }, SAY_AFTER_MS);
+  };
+  useEffect(
+    () => () => {
+      if (sayLater.current !== null) clearTimeout(sayLater.current);
+    },
+    [],
+  );
   // the picks, as tokens, and the overlay that draws them behind the field
   const cover = useRef<HTMLDivElement>(null);
   const tokens = useRef<Tokens | null>(null);
@@ -161,20 +187,26 @@ export function ComposerMenu({
     return o.total === 1 ? w.th("1 paper") : w.th("{n} papers", { n: o.total });
   };
 
-  const setOpen = (next: Open | null) => {
+  /** Opens, moves or closes the menu. `unmatched`: it closes because the query typed into it matches nothing. */
+  const setOpen = (next: Open | null, unmatched = false) => {
     const was = now.current.open;
     now.current = { ...now.current, open: next };
     setOpenState(next);
-    if (next === null) setSaid("");
-    else if (
+    if (next === null) {
+      if (unmatched) sayAfter(src(w.lang, "No results"));
+      // closed already: a "No results" on its way stands
+      else if (was !== null) sayNow("");
+    } else if (
       was === null ||
       was.kind !== next.kind ||
       (next.kind === "mention" && was.kind === "mention" && was.note !== next.note)
     ) {
-      setSaid(countWords(next));
+      sayNow(countWords(next));
+    } else if (countOf(next) !== countOf(was)) {
+      sayAfter(countWords(next));
     } else {
       const name = sayOf(next, next.hi);
-      if (name !== undefined && name !== sayOf(was, was.hi)) setSaid(name);
+      if (name !== undefined && name !== sayOf(was, was.hi)) sayNow(name);
     }
     const ids = next === null ? [] : keyIds(list, keysOf(next));
     const s: MenuShown =
@@ -256,13 +288,14 @@ export function ComposerMenu({
     if (!same && !(canOpen && dismissed.current !== trigger.at)) return setOpen(null);
     if (trigger.char === "/") {
       const items = matching(now.current.commands, trigger.query);
-      if (items.length === 0) return setOpen(null);
+      if (items.length === 0) return setOpen(null, same);
       const lit = same && cur.kind === "command" ? (cur.items[cur.hi]?.name ?? null) : null;
       return setOpen({ kind: "command", trigger, items, hi: keepHighlight(items, lit) });
     }
     // a new `@` asks the room again; its cache answers at once, or after 30 s from the host
     if (!same) load();
-    setOpen(mentionOpen(trigger, same ? cur : null));
+    const next = mentionOpen(trigger, same ? cur : null);
+    setOpen(next, same && next === null);
   };
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;

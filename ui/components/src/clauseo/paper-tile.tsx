@@ -1,5 +1,6 @@
 import type { FocusEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement } from "react";
-import type { ComponentType } from "react";
+import { useRef, type ComponentType } from "react";
+import type { FileTone } from "../icons/file-type.ts";
 import type { IconProps } from "../icons/icon.tsx";
 import { Button } from "../ui/button.tsx";
 import { Chip } from "../ui/chip.tsx";
@@ -8,6 +9,7 @@ import { useWords } from "../lib/words.ts";
 import { langOfText } from "../lib/script.ts";
 import { useCarded, useDraftHolders, useInHand, type Target } from "./hand.ts";
 import { useWide } from "./layout.ts";
+import { useMiddleCut } from "./middle-cut.ts";
 import {
   citationsOf,
   citedPapers,
@@ -51,16 +53,56 @@ export type PaperTileProps = {
   era?: "gone" | "touched" | undefined;
   /** Optional: test ids for the e2e specs: on the face, the button a press lands on. */
   testIds?: { face?: string };
+  /** Optional: a second, quiet press under the face, where the room gives one: a Word document's Tracked changes. The
+   * face's press stays the tile's main act. */
+  action?: { label: string; onPress: () => void; testId?: string };
   /** Optional: the paper's file type's glyph (fileTypeIcon), at 24 px on the tile's top line, above its title. Hidden
    * from assistive technology: the file's name says its type. */
   fileIcon?: ComponentType<IconProps>;
+  /** Optional: the colour of the glyph's tab (fileToneOf), on an uncited tile: Word blue, PDF red, Excel green,
+   * PowerPoint orange; neutral, or left out, the glyph keeps the quiet ink. On a dimmed tile (`away`) the colour dims
+   * with it (wall.css). */
+  fileTone?: FileTone;
+  /** Optional: the title is a file's name, in two lines at most: a name too long for them loses letters from its
+   * middle, never its end, so its extension shows. Its whole name stays in the face's text; pair it with a `tip` that
+   * shows it whole to the eye. */
+  fileName?: boolean;
+  /** Optional: what a press of the face does, in words on the face, under the title: Open in Word. */
+  cue?: string;
+  /** Optional: a file or folder the room lists but Clauseo doesn't read (only online, or a folder it couldn't open),
+   * dimmed, with why in these words on the face under the title, in the cue's place. Its face does nothing and says
+   * so (aria-disabled) yet keeps the focus, so its tip still shows; give it no `onTurn`, `card` or `action`. */
+  away?: string;
 };
+
+/** A file's name on its tile, in two lines at most, cut in its middle past them (middle-cut.ts). A cut name is for
+ * the eye; assistive technology reads the whole name. */
+function FileName({
+  id,
+  name,
+  lang,
+}: {
+  id: string | undefined;
+  name: string;
+  lang: string | undefined;
+}) {
+  const shown = useRef<HTMLSpanElement>(null);
+  const whole = useRef<HTMLSpanElement>(null);
+  useMiddleCut(shown, whole, name);
+  return (
+    <span className="tile-title tile-name" id={id} lang={lang}>
+      <span className="tile-name-text" ref={shown} />
+      <span className="sr-only" ref={whole} />
+    </span>
+  );
+}
 
 /** One paper on the wall. Uncited it lies flat; cited it fills with its role's colour and stays lit. Hover lifts it
  * 1 px; in hand (pointed at, focused, tapped) it comes forward toward the work; under its card it stays on the wall
  * and its own words step out. */
 export function PaperTile({
   fileIcon: FileIcon,
+  fileTone,
   id,
   state,
   numeral,
@@ -72,6 +114,10 @@ export function PaperTile({
   onTurn,
   era,
   testIds,
+  action,
+  fileName = false,
+  cue,
+  away,
 }: PaperTileProps) {
   const w = useWords();
   const wide = useWide();
@@ -98,6 +144,7 @@ export function PaperTile({
       hand.focusOn(e.currentTarget, target, "tile");
   };
   const onClick = (e: MouseEvent<HTMLButtonElement>) => {
+    if (away !== undefined) return;
     if (onTurn !== undefined) onTurn();
     else if (card) hand.press(e.currentTarget, target, "tile", e.detail === 0);
   };
@@ -115,6 +162,9 @@ export function PaperTile({
       data-hand={lifted ? "" : undefined}
       data-carded={carded ? "" : undefined}
       data-era={era}
+      data-act={action === undefined ? undefined : ""}
+      data-away={away === undefined ? undefined : ""}
+      data-file={FileIcon === undefined || fileTone === "neutral" ? undefined : fileTone}
       inert={era === "gone" ? true : undefined}
       aria-hidden={era === "gone" ? true : undefined}
     >
@@ -126,6 +176,7 @@ export function PaperTile({
           ref={nodes.keep("face", id, card)}
           className={card ? "tile-face card-trigger" : "tile-face"}
           aria-describedby={label === undefined ? undefined : room.id(`paper-${id}-more`)}
+          aria-disabled={away === undefined ? undefined : true}
           title={tip === undefined ? hint : undefined}
           data-card={card ? `paper:${id}` : undefined}
           onPointerEnter={onPointerEnter}
@@ -152,9 +203,26 @@ export function PaperTile({
             </span>
           )}
           {FileIcon !== undefined && <FileIcon size={24} className="tile-glyph" />}
-          <span className="tile-title" lang={latin ? "en" : langOfText(title)}>
-            {latin ? title : <Say>{title}</Say>}
-          </span>
+          {fileName ? (
+            <FileName
+              id={action === undefined ? undefined : room.id(`paper-${id}-title`)}
+              name={title}
+              lang={latin ? "en" : langOfText(title)}
+            />
+          ) : (
+            <span
+              className="tile-title"
+              id={action === undefined ? undefined : room.id(`paper-${id}-title`)}
+              lang={latin ? "en" : langOfText(title)}
+            >
+              {latin ? title : <Say>{title}</Say>}
+            </span>
+          )}
+          {(away ?? cue) !== undefined && (
+            <span className="tile-cue">
+              <Say>{away ?? cue ?? ""}</Say>
+            </span>
+          )}
           {state !== "uncited" && (
             <span className="tile-foot">
               <Chip
@@ -164,6 +232,19 @@ export function PaperTile({
             </span>
           )}
         </button>,
+      )}
+      {action !== undefined && (
+        <Button
+          kind="quiet"
+          size="small"
+          className="tile-act"
+          // which paper's: its title, as the face shows it
+          aria-describedby={room.id(`paper-${id}-title`)}
+          data-testid={action.testId}
+          onClick={action.onPress}
+        >
+          {action.label}
+        </Button>
       )}
       {label !== undefined && (
         <span className="sr-only" id={room.id(`paper-${id}-more`)}>

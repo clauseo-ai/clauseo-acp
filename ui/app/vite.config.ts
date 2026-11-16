@@ -7,6 +7,7 @@ import { defineConfig, type Plugin, type ViteBuilder } from "vite";
 import { configDefaults } from "vitest/config";
 import { BaseSequencer, type TestSpecification } from "vitest/node";
 import tauriConf from "../../crates/desktop/tauri.conf.json" with { type: "json" };
+import { appVersion } from "./src/settings/app-version.ts";
 
 /** The directives the dev policy loosens, and what each gets, for a dev server on `port`. */
 function devAdditions(port: number): Record<string, string> {
@@ -131,9 +132,13 @@ export function cspMeta(): Plugin {
   };
 }
 
-/** The compile-time constants every build of the app carries: the version About shows (src/settings/version.ts), from
- * tauri.conf.json, its one home. vite.review.config.ts takes them too. */
-export const APP_DEFINE = { __CLAUSEO_VERSION__: JSON.stringify(tauriConf.version) };
+/** The compile-time constants every build of the app carries: the version About shows (src/settings/version.ts).
+ * vite.review.config.ts takes them too. */
+export const APP_DEFINE = {
+  __CLAUSEO_VERSION__: JSON.stringify(
+    appVersion(tauriConf.version, process.env.CLAUSEO_VERSION_SUFFIX),
+  ),
+};
 
 /** The pages the release build makes, each its own entry with its own first load: the room, and the settings window.
  * The dev-only pages (gallery.html, parts.html, review.html) are not among them, so none of them ships. */
@@ -182,7 +187,7 @@ function probeEntry(): Plugin {
  * the title rules nothing; U7's queue strip only the first load; U16a's Find results only the first load and the small
  * jump-entry chunk they share with the list (isLazyShared); the tool line (its own chunk) only the first load, and its
  * popover only those and the line; UD2's first read's start only the first load and the small
- * chunks it shares with the list (isLazyShared); U17's tool result block only those
+ * chunks it shares with the list (isLazyShared), and its offer (D-015) the same; U17's tool result block only those
  * and the list. The Hindi words (ui/components' words-hi.ts, every words
  * file's .hi.ts) import only the first load's words registry: display.ts loads them before a Hindi display shows.
  * The dialogs that share the dialog primitives are
@@ -203,12 +208,14 @@ export const BARE_CHUNKS = [
   "tool-popover",
   "result",
   "first-read-start",
+  "first-read-offer",
   "words-hi",
 ];
 
-/** The settings window's lazy chunks, bare as BARE_CHUNKS' are: Connectors' body (U15, settings/sections/connectors.tsx), Plans' (UD2) and the Safe workspace's (UC)
- * imports only the settings window's first load. vite-config.test.ts checks it carries no preload. */
-export const SETTINGS_BARE_CHUNKS = ["connectors", "plans", "workspace"];
+/** The settings window's lazy chunks, bare as BARE_CHUNKS' are: Connectors' body (U15, settings/sections/connectors.tsx), Plans' (UD2), the Safe workspace's (UC) and Tools' (settings/sections/mcp-tools.tsx, UC-169 on)
+ * imports only the settings window's first load, and at most a part only they share (the alert dialog: the Safe workspace's and
+ * Tools' confirms). vite-config.test.ts checks it carries no preload. */
+export const SETTINGS_BARE_CHUNKS = ["connectors", "plans", "workspace", "mcp-tools"];
 
 /** The lazy chunks that keep Vite's preload list, though not bare: a lazy part behind a click whose chunk imports
  * shared chunks the first load lacks. Since the dialog primitives (dialog-start, DialogRoot, DialogDescription) left
@@ -224,6 +231,8 @@ export const PRELOADED_CHUNKS = [
   "note-chunk",
   // 0053: the unsafe-site allow's confirm, behind a notice's press (room/thread/site-blocked.tsx)
   "site-allow-confirm",
+  // a .docx's tracked changes, behind its tile's press (room/paper-wall.tsx), whose lock dialog takes the primitives
+  "changes-chunk",
 ];
 
 const HELPER = "__vitePreload(() => ";

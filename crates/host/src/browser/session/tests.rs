@@ -138,11 +138,15 @@ fn two_sessions_get_distinct_ports_and_folders_and_drop_frees_them() {
     assert_eq!(second.name, "thread-2");
     let mut ports = first.ports.loopback();
     ports.extend(second.ports.loopback());
-    assert_eq!(ports.len(), 4, "two each, no daemon port off Windows");
+    assert_eq!(
+        ports.len(),
+        2,
+        "one each (CDP), no stream port, no daemon port off Windows"
+    );
     let mut distinct = ports.clone();
     distinct.sort_unstable();
     distinct.dedup();
-    assert_eq!(distinct.len(), 4, "{ports:?}");
+    assert_eq!(distinct.len(), 2, "{ports:?}");
     assert_ne!(first.socket_dir.path(), second.socket_dir.path());
     for session in [&first, &second] {
         let meta = std::fs::symlink_metadata(session.socket_dir.path()).unwrap();
@@ -178,7 +182,7 @@ fn two_sessions_get_distinct_ports_and_folders_and_drop_frees_them() {
 }
 
 /// No browser claim lands in tier B's range (S15 PR7), where every pool user's static permit
-/// reaches: Chrome's debugging port and the stream port of many sessions held at once. Linux
+/// reaches: Chrome's debugging port of many sessions held at once. Linux
 /// hands out ports in 46100-46199 from its ephemeral range, so a claim there must be asked again.
 #[cfg(unix)]
 #[test]

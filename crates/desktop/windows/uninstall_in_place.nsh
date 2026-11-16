@@ -23,16 +23,28 @@
 ;   with it (they name only that file and the folder, non-recursively). At the end of the section
 ;   (block "uninstall-self-delete") CLAUSEO_UNINSTALL_SELF_DELETE builds a hidden cmd line that,
 ;   about 3 s later (PING -n 4), once the uninstaller has exited, deletes uninstall.exe if the
-;   main exe isn't there, then removes $INSTDIR only when empty (rmdir without /s). By then NSIS's
-;   exit cleanup has removed the uninstaller's own plug-in folder, which sits directly in
-;   %ProgramFiles%\Clauseo, the default $INSTDIR (safe_temp.nsh). un.onInit has already removed
-;   earlier builds' empty installer-temp there (the same macro).
+;   main exe isn't there, then removes the uninstaller's own plug-in folder, then $INSTDIR only
+;   when empty (rmdir without /s).
+; - The plug-in folder sits directly in %ProgramFiles%\Clauseo, the default $INSTDIR
+;   (safe_temp.nsh), and NSIS's exit cleanup doesn't remove it: its System.dll stays (safe_temp.nsh,
+;   "Leftovers"), and the folder with it, and so $INSTDIR. So the line removes it once the
+;   uninstaller has exited: "rmdir /s /q" on $PLUGINSDIR, that exact path and nothing else, once
+;   more about 5 s later (PING -n 6) if it is still there. Only when $PLUGINSDIR is cmd-safe too
+;   and is the folder CLAUSEO_SAFE_PLUGINSDIR made (CLAUSEO_OWN_PLUGINSDIR: directly in
+;   %ProgramFiles%\Clauseo, an NSIS temp name). It can't be $INSTDIR or hold it: GetTempFileName
+;   gave it a name nothing had. The line is dropped whole when NSIS cut it at its string limit
+;   (NSIS_MAX_STRLEN), since a cut path could name a parent. un.onInit has already removed earlier
+;   runs' folders (CLAUSEO_REMOVE_OLD_PLUGINSDIRS, in CLAUSEO_MACHINE_START) and earlier builds'
+;   empty installer-temp (the same macro).
 ; - The guard: an install writes the main exe (File, first in Section Install) before
 ;   WriteUninstaller, so with no main exe the uninstall.exe there is still this old one. A new
 ;   install in the folder meanwhile writes the main exe first, and the line leaves its
 ;   uninstall.exe. The guard loses only if that install's main exe and WriteUninstaller both land
 ;   in the instant between cmd's "if" and its "del"; then the new uninstall.exe goes, which a
 ;   reinstall puts back. When the guard holds, the old file stays, which is harmless.
+; - Before the line, the main exe once more (CLAUSEO_UNINSTALL_RETRY_MAIN_EXE): when the
+;   template's Delete of it failed because something held it for a moment, up to 10 more tries
+;   1 s apart, never under /UPDATE and never queued for a restart.
 ; - It starts once. Interactive and /P (both have a window) start it from un.onGUIEnd (block
 ;   "un-gui-end"), after the user closes the window; the section's end would be too early, since
 ;   the window stays on "Completed" until Close. /S has no window, so no un.onGUIEnd: the section
@@ -43,10 +55,12 @@
 ;   keeps the new install's uninstall.exe, and a folder removed while the user is still on the
 ;   folder page is made again by the install's SetOutPath.
 ;
-; It builds no line, and leaves uninstall.exe, when $INSTDIR\<main exe> holds one of
-; % ^ & | < > " ! (cmd expands % and, with delayed expansion, !, even in quotes; the rest end the
-; quoting or the command), or uninstall.exe isn't there. The file is harmless: firm-it.md says it
-; may stay until removed by hand.
+; It builds no line, and leaves uninstall.exe and the plug-in folder, when $INSTDIR\<main exe> or
+; $PLUGINSDIR holds one of % ^ & | < > " ! (cmd expands % and, with delayed expansion, !, even in
+; quotes; the rest end the quoting or the command), when $PLUGINSDIR isn't the folder
+; CLAUSEO_SAFE_PLUGINSDIR made, when uninstall.exe isn't there, or when the line is too long. The
+; file is harmless: firm-it.md says it may stay until removed by hand; the next per-machine run
+; removes the folder.
 
 ; The cmd line, built in the section and started once (empty when there is nothing to start).
 Var ClauseoSelfDelete
@@ -113,7 +127,7 @@ Var ClauseoSelfDelete
       StrCpy $1 $1 -1
     ${EndIf}
     ${If} $0 != $1
-      MessageBox MB_OK|MB_ICONSTOP "$(uninstallNotInPlace)" /SD IDOK
+      MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST "$(uninstallNotInPlace)" /SD IDOK
       SetErrorLevel ${CLAUSEO_EXIT_NOT_IN_PLACE}
       Quit
     ${EndIf}
@@ -123,22 +137,66 @@ Var ClauseoSelfDelete
   !endif
 !macroend
 
-; Last in Section Uninstall (block "uninstall-self-delete"), after everything else is removed.
-; Keeps $0.
+; The main exe once more when the template's one Delete of it failed: something held it for a
+; moment (an on-access scan of an image just written, for one). The ARM64 install smoke saw it
+; once in about 20 runs: uninstall.exe /S exited 0 with Clauseo.exe, so uninstall.exe (the
+; guard) and the folder, left, and a delete a minute later worked. So, per machine and not under
+; /UPDATE, up to CLAUSEO_MAIN_EXE_RETRIES more deletes 1 s apart while it is there; nothing when
+; it's gone, as it is after a normal uninstall. Nothing is queued for a restart (no /REBOOTOK):
+; a reinstall before the restart writes the same paths, and the restart would delete the new
+; files. Still held after the last try: as before, the folder stays and the reinstall page says
+; unableToUninstall. Never during an update: the updater starts the installer with /UPDATE, the
+; installer passes /UPDATE to the old uninstaller whenever it has it (the template's
+; PageLeaveReinstall), and un.onInit sets $UpdateMode from it; the uninstaller an update runs is
+; the old build's own, behind the same test. Keeps $0.
+!define CLAUSEO_MAIN_EXE_RETRIES 10
+!macro CLAUSEO_UNINSTALL_RETRY_MAIN_EXE
+  ${If} $UpdateMode <> 1
+    Push $0
+    ${For} $0 1 ${CLAUSEO_MAIN_EXE_RETRIES}
+      ${IfNot} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+        ${ExitFor}
+      ${EndIf}
+      Sleep 1000
+      Delete "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${Next}
+    Pop $0
+  ${EndIf}
+!macroend
+
+; Last in Section Uninstall (block "uninstall-self-delete"), after everything else is removed:
+; first the main exe's retry, then the line. Keeps $0 and $1.
 !macro CLAUSEO_UNINSTALL_SELF_DELETE
   !if "${INSTALLMODE}" == "perMachine"
+    !insertmacro CLAUSEO_UNINSTALL_RETRY_MAIN_EXE
     Push $0
+    Push $1
     StrCpy $ClauseoSelfDelete ""
-    ; The longest path the line names.
+    ; The longest path under $INSTDIR the line names, then the plug-in folder it removes: cmd-safe
+    ; and this run's own (safe_temp.nsh).
     !insertmacro CLAUSEO_CMD_SAFE "$INSTDIR\${MAINBINARYNAME}.exe" $0
+    ${If} $0 = 1
+      !insertmacro CLAUSEO_CMD_SAFE "$PLUGINSDIR" $0
+    ${EndIf}
+    ${If} $0 = 1
+      !insertmacro CLAUSEO_OWN_PLUGINSDIR $0
+    ${EndIf}
     ${If} $0 = 1
     ${AndIf} ${FileExists} "$INSTDIR\uninstall.exe"
       ; /d: an elevated cmd would otherwise run HKCU's Command Processor AutoRun, the user's own
       ; hive under split-token UAC. /v:off: no ! expansion, whatever HKCU says. The outer quotes:
       ; with more than two quotes, cmd /c drops the first and the last. The brackets end the if
-      ; before the rmdir (a quoted ")" in a path doesn't close them).
-      StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir "$INSTDIR""'
+      ; before the rmdir (a quoted ")" in a path doesn't close them). /s only on $PLUGINSDIR.
+      StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir /s /q "$PLUGINSDIR" & (if exist "$PLUGINSDIR" ("$SYSDIR\PING.EXE" -n 6 127.0.0.1 >nul & rmdir /s /q "$PLUGINSDIR")) & rmdir "$INSTDIR""'
+      ; NSIS cuts a string at NSIS_MAX_STRLEN - 1 characters; a cut line could end in a parent
+      ; folder's path, so none then.
+      StrLen $1 $ClauseoSelfDelete
+      IntOp $1 $1 + 1
+      ${If} $1 >= ${NSIS_MAX_STRLEN}
+        StrCpy $ClauseoSelfDelete ""
+      ${EndIf}
     ${EndIf}
+    Pop $1
     Pop $0
     ; /S: no window, so no un.onGUIEnd; start it now. Interactive and /P wait for un.onGUIEnd.
     ${If} ${Silent}
@@ -152,3 +210,21 @@ Var ClauseoSelfDelete
 !macro CLAUSEO_UNINSTALL_GUI_END
   !insertmacro CLAUSEO_START_SELF_DELETE
 !macroend
+
+; An uninstall whose section aborts says so on its standard output, when it has one, and writes
+; nothing to disk. NSIS calls this only on that way out (Ui.c:456, when install_thread fails), never
+; after an Abort or Quit in un.onInit and never after a header it couldn't read; all three exit 2
+; ("aborted by script") unless SetErrorLevel set a code first, and every refusal of ours does. In
+; the section the one Abort without a code of its own is Tauri's CheckIfAppIsRunning (in
+; NSIS_HOOK_PREUNINSTALL's step 0 and again in the template), under /S when Restart Manager lists
+; a process using the main exe and can't shut it down. The ARM64 install smoke (release.yml)
+; redirects the uninstaller's output to tell these apart. Only a caller that gave the process a
+; standard output gets the line: the reinstall page's ExecWait and a start from Explorer give
+; none. In every build, per user too: INSTALLMODE isn't defined yet where this file is included.
+Function un.onUninstFailed
+  System::Call 'kernel32::GetStdHandle(i -11) p .r0'
+  ${If} $0 P<> 0
+  ${AndIf} $0 P<> -1
+    FileWrite $0 "clauseo uninstall: aborted in Section Uninstall$\r$\n"
+  ${EndIf}
+FunctionEnd

@@ -1,4 +1,4 @@
-//! `read_line`'s splitting, limits and overflow modes.
+//! `read_line`'s splitting, limits and overflow modes, and the guard's close reply while stopped.
 
 use std::io::Cursor;
 
@@ -71,4 +71,23 @@ fn a_line_over_the_limit_is_skipped_whole() {
         ]
     );
     assert_eq!(lines(b"123456789", 4), [(Line::Oversize, Vec::new())]);
+}
+
+/// The guard's close reply while stopped is one JSON-RPC line with the request's id and
+/// agent-browser's result, parsed from the pinned text (a typo there would leave `null`).
+#[test]
+fn the_close_reply_while_stopped_is_agent_browsers_result_with_the_id() {
+    let line = super::closed_reply(&serde_json::json!("close-7"));
+    assert!(
+        line.ends_with('\n') && line.matches('\n').count() == 1,
+        "{line}"
+    );
+    let reply: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(reply["jsonrpc"], "2.0");
+    assert_eq!(reply["id"], "close-7");
+    assert_eq!(reply["result"]["isError"], false, "{reply}");
+    assert_eq!(
+        reply["result"]["structuredContent"]["response"]["data"]["closed"], true,
+        "{reply}"
+    );
 }

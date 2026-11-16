@@ -15,6 +15,11 @@
 //!   spec's settings keep theirs (`fake_agent`, or none).
 //! - Pair it with `E2E_FAKE_SIGNIN` ([`scripted`] wraps that over this), so the sign-in pending at
 //!   `Ready` (`backend/pending.rs`) plays the scripted one rather than S18's.
+//! - `E2E_FAKE_INSTALLED=<agent>[,<agent>]` (e.g. `claude-acp`): each named agent starts
+//!   `Ready { version: e2e }` instead, with no install run: installed, so its status check runs at
+//!   once and the welcome says it is ready. Its status answer is `E2E_FAKE_STATUS`'s
+//!   (`fake_signin.rs`, signed out by default), and a press of Sign in plays `E2E_FAKE_SIGNIN`'s
+//!   script for it. An agent named in both variables is installed.
 //!
 //! Contract: built only with the `e2e` feature (`setup.rs` declares the module under it, and
 //! `start.rs` calls [`scripted`] under it), so no release reads the variable or fakes an install.
@@ -37,6 +42,8 @@ use crate::bridge::lock;
 
 /// The agents whose install is scripted.
 const AGENTS_VAR: &str = "E2E_FAKE_INSTALL";
+/// The agents that start installed, with no install run.
+pub(crate) const INSTALLED_VAR: &str = "E2E_FAKE_INSTALLED";
 /// How long each state before `Ready` lasts.
 pub(crate) const HOLD: Duration = Duration::from_millis(1000);
 /// What the scripted install "downloads".
@@ -71,25 +78,32 @@ fn wrap(
     real: Arc<dyn SetupAgents>,
     source: impl Stream<Item = AgentsEvent> + Send + 'static,
 ) -> (Arc<dyn SetupAgents>, BoxStream<'static, AgentsEvent>) {
-    let agents = agents_from(std::env::var(AGENTS_VAR).ok().as_deref());
-    if agents.is_empty() {
+    let installed = agents_from(std::env::var(INSTALLED_VAR).ok().as_deref());
+    let missing: BTreeSet<AgentId> = agents_from(std::env::var(AGENTS_VAR).ok().as_deref())
+        .difference(&installed)
+        .cloned()
+        .collect();
+    if missing.is_empty() && installed.is_empty() {
         return (real, source.boxed());
     }
     tracing::info!(
-        agents = agents.len(),
+        missing = missing.len(),
+        installed = installed.len(),
         "e2e: scripted installs stand in for S18's"
     );
-    wrap_with(real, source, agents, HOLD)
+    wrap_with(real, source, &missing, &installed, HOLD)
 }
 
-/// [`wrap`] for `agents`, each state held `hold`.
+/// [`wrap`] for `missing` (each state held `hold`) and `installed`.
 fn wrap_with(
     real: Arc<dyn SetupAgents>,
     source: impl Stream<Item = AgentsEvent> + Send + 'static,
-    agents: BTreeSet<AgentId>,
+    missing: &BTreeSet<AgentId>,
+    installed: &BTreeSet<AgentId>,
     hold: Duration,
 ) -> (Arc<dyn SetupAgents>, BoxStream<'static, AgentsEvent>) {
-    let (fake, events) = FakeInstall::new(real, &agents, hold);
+    let (fake, events) = FakeInstall::new(real, missing, installed, hold);
+    let agents: BTreeSet<AgentId> = missing.union(installed).cloned().collect();
     let source = source.filter(move |event| {
         ready(!matches!(event, AgentsEvent::Install { agent, .. } if agents.contains(agent)))
     });
@@ -150,11 +164,13 @@ pub(crate) struct FakeInstall {
 }
 
 impl FakeInstall {
-    /// The seam over `real` with `agents`' installs scripted, each state held `hold`, and the
-    /// scripts' events: each agent's `Missing` first.
+    /// The seam over `real` with `agents`' installs scripted, each state held `hold`, and
+    /// `installed`'s already done, and the scripts' events: each agent's `Missing` first, each
+    /// installed one's `Ready`.
     pub(crate) fn new(
         real: Arc<dyn SetupAgents>,
         agents: &BTreeSet<AgentId>,
+        installed: &BTreeSet<AgentId>,
         hold: Duration,
     ) -> (Self, mpsc::UnboundedReceiver<AgentsEvent>) {
         let (events, receiver) = mpsc::unbounded();
@@ -167,6 +183,12 @@ impl FakeInstall {
                 download_bytes: DOWNLOAD_BYTES,
             };
             shared.say(agent, missing);
+        }
+        for agent in installed {
+            let ready = InstallState::Ready {
+                version: VERSION.to_owned(),
+            };
+            shared.say(agent, ready);
         }
         let fake = Self { real, shared, hold };
         (fake, receiver)
@@ -244,6 +266,12 @@ impl SetupAgents for FakeInstall {
     fn sign_in(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
         self.real.sign_in(agent, method)
     }
+    fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
+        self.real.sign_in_switching(agent, method)
+    }
+    fn own_login(&self, agent: &AgentId) -> Option<clauseo_agents::OwnLogin> {
+        self.real.own_login(agent)
+    }
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.real.cancel_sign_in(agent)
     }
@@ -264,6 +292,9 @@ impl SetupAgents for FakeInstall {
     }
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.real.use_different_account(agent)
+    }
+    fn use_different_account_switching(&self, agent: &AgentId) -> Result<(), SigninError> {
+        self.real.use_different_account_switching(agent)
     }
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         self.real.signin_state(agent)

@@ -38,9 +38,9 @@ PR 2 (this record's) adds the wire, stubbed, and `update.failed`.
   pubkey and the endpoint land with PR 6.
 - **Empty endpoints until the real key.** PRs 1 to 5 land with `endpoints` empty (the
   `tauri-config` check refuses endpoints without a pubkey, and the plugin's `build` fails with
-  `EmptyEndpoints`). A build with no endpoint uses `NoUpdater`, shown as `managed` by `package`, so
-  it never touches the network. The `e2e` build alone sets an endpoint in code
-  (`E2E_UPDATE_ENDPOINT`) and trusts the test key (landed with PR 5).
+  `EmptyEndpoints`). A build with no endpoint uses `NoUpdater`, shown as `managed` by
+  `unavailable` (`package` on Linux), so it never touches the network. The `e2e` build alone
+  sets an endpoint in code (`E2E_UPDATE_ENDPOINT`) and trusts the test key (landed with PR 5).
 
 ### The `Updater` trait
 
@@ -49,7 +49,8 @@ The host reaches the plugin through a trait, as it reaches processes through
 
 - `install_kind()`: `CurrentUser`, `PerMachine` (the exe under Program Files, or its uninstall
   key in HKLM), `ReadOnlyLocation` (a macOS `.app` whose folder the user cannot write, so the
-  plugin would ask for an administrator) or `Package` (Linux, and `NoUpdater`).
+  plugin would ask for an administrator), `Package` (Linux) or `Unavailable` (`NoUpdater`: a
+  build with no updater).
 - `check()` and `download(offer, progress)` run in the host's state machine. The download
   verifies the minisign signature and the signed version (the plugin's `Update::download`) and
   goes into `<data_dir>/updates/<version>/`, never a matter folder. Both return
@@ -126,8 +127,8 @@ All additive under 0002 (no `schema_version` change; none of it is logged). In
 - `UpdateState`: `idle`, `checking`, `downloading { version, received, total? }`,
   `ready { version }`, `scheduled { version }`, `installing { version }`,
   `failed { version?, at, stage: check | download | install }`,
-  `managed { by: policy | per_machine | read_only_location | package }`. Sizes are `Count`, the
-  crate's safe 64-bit number, so TypeScript reads them exactly.
+  `managed { by: policy | per_machine | read_only_location | package | unavailable }`. Sizes
+  are `Count`, the crate's safe 64-bit number, so TypeScript reads them exactly.
 - `HostQuery::GetUpdate` → `QueryResult::Update(UpdateView)`, read after subscribing to the app
   stream, as `GetSettings` is.
 - `HostEvent::UpdateChanged(UpdateView)`, app-wide like `SettingsChanged` (0019's app stream).
@@ -259,8 +260,9 @@ call before `install` stays a no-op seam until S22 merges.
 `crates/desktop/src/update.rs` and its modules implement the trait over the plugin and run the
 install; what the brief left open was decided so:
 
-- **Which updater.** Linux and debug builds give the host none (`NoUpdater`, `managed` by
-  `package`), and so does a release build while `tauri.conf.json` names no endpoint, so the
+- **Which updater.** Linux gives the host `PackageManaged`, which never offers an update
+  (`managed` by `package`). Debug builds give the host none (`NoUpdater`, `managed` by
+  `unavailable`), and so does a release build while `tauri.conf.json` names no endpoint, so the
   plugin's `build` (which fails with `EmptyEndpoints`) is never called. The `e2e` build takes
   an updater only from its variables, never from the config, so a test run never reaches the
   real endpoint: `E2E_FAKE_UPDATE=<version>` (a fake, installed per user, that offers that

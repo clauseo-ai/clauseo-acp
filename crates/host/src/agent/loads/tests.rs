@@ -7,8 +7,8 @@ use serde_json::{Map, Value, json};
 
 use super::{
     ALLOW_BYPASS_OPTION, CLAUDE_AI_MCP_VAR, CLAUDE_MANAGED_SETTING_SOURCES, CLAUDE_MODE,
-    CLAUDE_SETTING_SOURCES, GUARD_MATCHER, GuardHook, McpControl, guard_entry, launch_env,
-    mcp_control, mcp_servers, session_meta,
+    CLAUDE_SETTING_SOURCES, GUARD_MATCHER, GuardHook, McpControl, claude_mode, guard_entry,
+    launch_env, mcp_control, session_meta,
 };
 use crate::write;
 
@@ -28,7 +28,10 @@ fn with_no_hook_the_meta_is_the_switches() {
             "strictMcpConfig": true,
             "settingSources": CLAUDE_SETTING_SOURCES,
             "allowDangerouslySkipPermissions": false,
-            "env": {"ENABLE_CLAUDEAI_MCP_SERVERS": "false"},
+            "env": {
+                "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+                "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+            },
         }}})
     );
     assert_eq!(CLAUDE_SETTING_SOURCES, ["user"]);
@@ -62,7 +65,11 @@ fn the_switches_win_over_the_hook_and_every_other_hook_key_stays() {
                     "allowDangerouslySkipPermissions": false,
                     "model": "opus",
                     "settings": {"syncClaudeAiPlugins": false},
-                    "env": {"ENABLE_CLAUDEAI_MCP_SERVERS": "false", "FIRM": "1"},
+                    "env": {
+                        "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+                        "FIRM": "1",
+                        "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+                    },
                 },
             },
         })
@@ -117,7 +124,21 @@ fn bypass_stays_off_and_the_hooks_mode_flags_are_taken_out() {
             "{control:?}"
         );
     }
-    assert_eq!(CLAUDE_MODE, "default");
+    assert_eq!(CLAUDE_MODE, "auto");
+}
+
+/// A Claude session starts in `auto` outside forced ask (`acceptEdits` its fallback) and in
+/// `default` in it (decision 3 of 2026-11-04 stands), and never in bypass.
+#[test]
+fn claude_starts_in_auto_and_forced_ask_in_default() {
+    assert_eq!(claude_mode(false), "auto");
+    assert_eq!(super::CLAUDE_FALLBACK_MODE, "acceptEdits");
+    assert_eq!(claude_mode(true), "default");
+    assert!(crate::agent::forced_ask::mode_allowed(claude_mode(true)));
+    assert!(!crate::agent::forced_ask::mode_allowed(claude_mode(false)));
+    for forced_ask in [false, true] {
+        assert_ne!(claude_mode(forced_ask), "bypassPermissions");
+    }
 }
 
 /// The guard's entry: the exec form with `--matter <folder>`, the matcher and the timeout,
@@ -332,6 +353,31 @@ fn managed_mcp_is_a_file_at_the_path() {
     write::remove_dir_all(&root).unwrap();
 }
 
+/// The lawyer's servers `effective` sends under `control`, outside the Safe workspace, with no
+/// keychain value and no host `PATH`, each command found where it says.
+fn sent(effective: &Effective, control: McpControl) -> Vec<McpServer> {
+    let commands: Vec<(String, String)> = effective
+        .mcp_servers()
+        .values()
+        .filter_map(|server| server.command())
+        .map(|command| (command.to_owned(), command.to_owned()))
+        .collect();
+    let commands: Vec<(&str, &str)> = commands
+        .iter()
+        .map(|(typed, path)| (typed.as_str(), path.as_str()))
+        .collect();
+    let secrets = super::lawyer::McpSecrets::of(&[], &commands);
+    let lawyer = super::lawyer::Lawyer {
+        control,
+        safe_workspace: false,
+    };
+    let host = super::lawyer::HostEnv {
+        path: None,
+        windows_env: &[],
+    };
+    super::lawyer::servers(effective, lawyer, &secrets, host).0
+}
+
 #[test]
 fn only_enabled_servers_go_in_name_order_and_none_under_managed_mcp() {
     let root = scratch("servers");
@@ -345,7 +391,7 @@ fn only_enabled_servers_go_in_name_order_and_none_under_managed_mcp() {
     write::write_file(&root.join("settings.json"), settings.to_string().as_bytes()).unwrap();
     let effective = Effective::load(&Locations::under_root(&root), &SystemFiles, &[]);
     assert_eq!(effective.warnings(), []);
-    let servers = mcp_servers(&effective, McpControl::Clauseo);
+    let servers = sent(&effective, McpControl::Clauseo);
     assert_eq!(
         servers,
         vec![
@@ -355,17 +401,18 @@ fn only_enabled_servers_go_in_name_order_and_none_under_managed_mcp() {
                 args: vec!["--stdio".to_owned()],
                 env: vec![
                     ("A".to_owned(), "1".to_owned()),
-                    ("B".to_owned(), "2".to_owned())
+                    ("B".to_owned(), "2".to_owned()),
+                    ("PATH".to_owned(), root.join("bin").display().to_string()),
                 ],
             },
             McpServer::Stdio {
                 name: "zeta".to_owned(),
                 command: bin("zeta").into(),
                 args: Vec::new(),
-                env: Vec::new(),
+                env: vec![("PATH".to_owned(), root.join("bin").display().to_string())],
             },
         ]
     );
-    assert_eq!(mcp_servers(&effective, McpControl::Managed), Vec::new());
+    assert_eq!(sent(&effective, McpControl::Managed), Vec::new());
     write::remove_dir_all(&root).unwrap();
 }

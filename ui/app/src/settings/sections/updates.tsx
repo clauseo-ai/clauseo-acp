@@ -4,7 +4,7 @@
 // set_update_mode. A firm's policy lock (`update.mode` in the locked keys, or the host's settings.locked) greys the
 // choice with "Managed by firm", as the other locked settings say it. Where someone else manages updates (managed:
 // policy, a per-machine install, a read-only location, a package manager) one line says who, with no choice and no
-// Check now. Shown only where the transport carries the updater (sections.tsx).
+// Check now; a build with no updater (managed: unavailable) says it doesn't update itself, the same way. Shown only where the transport carries the updater (sections.tsx).
 import { useId } from "react";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";

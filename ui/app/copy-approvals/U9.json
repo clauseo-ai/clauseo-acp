@@ -128,5 +128,16 @@
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U9-15": {
+    "en": "This paper is no longer in the matter's folder.",
+    "hi": "यह दस्तावेज़ अब मामले के फ़ोल्डर में नहीं है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-10",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-10",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "D-034: an answer's link to a paper the folder no longer holds; shaped like 'This matter is no longer in Clauseo.'"
   }
 }

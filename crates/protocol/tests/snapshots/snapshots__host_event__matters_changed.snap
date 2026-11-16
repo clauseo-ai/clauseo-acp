@@ -1,6 +1,6 @@
 ---
 source: crates/protocol/tests/snapshots.rs
-expression: "HostEvent::MattersChanged(MattersChanged\n{\n    matters:\n    vec![MatterSummary\n    {\n        matter: matter_id(1), name: \"Smith v Jones\".to_owned(), kind:\n        MatterKind::Folder, last_activity:\n        Some(Timestamp::new(1_760_000_009_000).unwrap()), client:\n        Some(ClientName::new(\"Rathi Steels\").unwrap()), next_date: None,\n        skill_packs: Some(pack_list(&[\"nda-kit\"])), pinned: true, last_opened:\n        None, status: MatterStatus::Stopped\n        { at: Timestamp::new(1_760_000_008_000).unwrap() }, folder_display:\n        \"Documents/Clauseo/Smith v Jones\".to_owned(), folder_state:\n        FolderState::Missing, folder_support:\n        Some(FolderSupportKind::CantChangePermissions), protection:\n        Some(Protection::NotProtected\n        {\n            cause: NotProtectedCause::SwitchedOff\n            { at: Timestamp::new(1_760_000_007_000).unwrap(), },\n        }),\n    }], removed: vec![matter_id(3)], all: false,\n})"
+expression: "HostEvent::MattersChanged(MattersChanged\n{\n    matters:\n    vec![MatterSummary\n    {\n        matter: matter_id(1), name: \"Smith v Jones\".to_owned(), kind:\n        MatterKind::Folder, last_activity:\n        Some(Timestamp::new(1_760_000_009_000).unwrap()), client:\n        Some(ClientName::new(\"Rathi Steels\").unwrap()), next_date: None,\n        skill_packs: Some(pack_list(&[\"nda-kit\"])), agent_prefs:\n        Some(agent_prefs()), pinned: true, last_opened: None, status:\n        MatterStatus::Stopped\n        { at: Timestamp::new(1_760_000_008_000).unwrap() }, folder_display:\n        \"Documents/Clauseo/Smith v Jones\".to_owned(), folder_state:\n        FolderState::Missing, folder_support:\n        Some(FolderSupportKind::CantChangePermissions), protection:\n        Some(Protection::NotProtected\n        {\n            cause: NotProtectedCause::SwitchedOff\n            { at: Timestamp::new(1_760_000_007_000).unwrap(), },\n        }),\n    }], removed: vec![matter_id(3)], all: false,\n})"
 ---
 {
   "matters_changed": {
@@ -14,6 +14,12 @@ expression: "HostEvent::MattersChanged(MattersChanged\n{\n    matters:\n    vec!
         "skill_packs": [
           "nda-kit"
         ],
+        "agent_prefs": {
+          "claude": {
+            "effort": "high",
+            "model": "opus"
+          }
+        },
         "pinned": true,
         "status": {
           "stopped": {

@@ -12,6 +12,7 @@ use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID};
 use crate::windows::writer::{Label, Strict};
 use walk::race::{HOOK, REFUSE, Stage};
 
+mod read_child;
 mod round2;
 mod round4;
 mod round5;

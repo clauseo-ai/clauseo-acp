@@ -3,7 +3,8 @@
 // crates/desktop/src/open/words.rs, and a Rust test there fails unless each string below is in this file verbatim, so
 // what the reviewers approve is what the dialog says. The dialog's language follows Clauseo's own setting
 // (`ui.language`), not the computer's. A host shows in ASCII (an international name in its `xn--` form), so the dialog
-// can't show a look-alike. Each state is a mock of the dialog, its slots filled with an example.
+// can't show a look-alike; below it, the whole link, ASCII with every control and bidi mark as %XX and its middle
+// cut to "…" past 200 characters (D-029). Each state is a mock of the dialog, its slots filled with an example.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { ConfirmMock } from "./confirm-mock.tsx";
 import type { Entry } from "./entry.ts";
@@ -27,9 +28,11 @@ const MAIL_MESSAGE = dialogWords(
   "आपका ईमेल ऐप {address} के लिए नया संदेश खोलेगा।",
 );
 const MAIL_OK = dialogWords("Open email app", "ईमेल ऐप खोलें");
+const WEB_ADDRESS = dialogWords("Full address: {address}", "पूरा पता: {address}");
 
-/** The examples the mocks put in the slots: a host as the dialog shows it, and an address. */
+/** The examples the mocks put in the slots: a host and its whole link as the dialog shows them, and an address. */
 const HOST = "indiankanoon.org";
+const FULL = "https://indiankanoon.org/doc/1766147/";
 const ADDRESS = "registry@delhihighcourt.nic.in";
 
 const web = (lang: Lang) => (
@@ -37,7 +40,7 @@ const web = (lang: Lang) => (
     lang={lang}
     cancel={CANCEL}
     title={WEB_TITLE}
-    message={WEB_MESSAGE.text(lang).replace("{host}", HOST)}
+    message={`${WEB_MESSAGE.text(lang).replace("{host}", HOST)}\n\n${WEB_ADDRESS.text(lang).replace("{address}", FULL)}`}
     ok={WEB_OK}
   />
 );
@@ -63,4 +66,5 @@ export const H11: Entry[] = [
   { id: "H11-05", words: MAIL_TITLE, screen: "native/mail-confirm", ...DIALOG, render: mail },
   { id: "H11-06", words: MAIL_MESSAGE, screen: "native/mail-confirm", ...DIALOG, render: mail },
   { id: "H11-07", words: MAIL_OK, screen: "native/mail-confirm", ...DIALOG, render: mail },
+  { id: "H11-08", words: WEB_ADDRESS, screen: "native/link-confirm", ...DIALOG, render: web },
 ];

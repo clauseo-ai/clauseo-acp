@@ -136,7 +136,8 @@ test("opened in place: its rows, each with its icon, the paper by its file name 
       read(7, 201, "papers/2019/Lease deed.pdf"),
       agentText(8, 2, "Weighing clause nine.", "thought"),
       search(9, 202, "notice period"),
-      call(10, 203, "execute", "failed"),
+      // no title: nothing names the task (tool-rows.test.tsx has the titled ones)
+      call(10, 203, "execute", "failed", { title: "" }),
       agentText(11, 3, "Clause nine needs notice."),
     ]),
   ]);
@@ -213,6 +214,21 @@ test("a failure stays visible on the folded line", async () => {
   expect(g.dataset["trouble"]).toBe("true");
   expect(h.one("step-group-trouble")?.textContent).toBe("1 failed.");
   expect(lineOf(g)?.textContent).toBe("1 paper read. 1 failed.");
+});
+
+test("two failed tasks with nothing to tell them apart say Tried to run a task. once (D-077)", async () => {
+  h = await mountRoom();
+  h.deliver([
+    reset([
+      ASKED,
+      call(7, 201, "execute", "failed", { title: "" }),
+      call(8, 202, "execute", "failed", { title: "" }),
+      agentText(9, 3, "Done."),
+    ]),
+  ]);
+  const said = h.one("step-group-trouble")?.textContent ?? "";
+  expect(said).toBe("Tried to run a task. And 1 more.");
+  expect(said.split("Tried to run a task.")).toHaveLength(2);
 });
 
 test("a step in a state this version can't read shows neither failed nor done: the folded line and its row agree", async () => {

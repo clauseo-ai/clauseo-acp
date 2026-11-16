@@ -74,7 +74,7 @@ fn a_failed_undo_commit_keeps_the_writer_and_is_retried() {
         "the writer waits for the retry"
     );
     let state = &rig.actor.threads[&thread].turn;
-    assert!(state.note.as_ref().is_none_or(Vec::is_empty));
+    assert!(state.note.told.as_ref().is_none_or(Vec::is_empty));
 
     rig.release_held();
     rig.settle_commits();
@@ -88,9 +88,16 @@ fn a_failed_undo_commit_keeps_the_writer_and_is_retried() {
     let note = rig.actor.threads[&thread]
         .turn
         .note
+        .told
         .clone()
         .unwrap_or_default();
-    let names: Vec<_> = note.iter().map(MatterPath::as_str).collect();
+    let names: Vec<_> = note
+        .iter()
+        .map(|told| match told {
+            crate::undo_note::Told::Undone(path) => path.as_str(),
+            crate::undo_note::Told::Restored(_) => "a restore",
+        })
+        .collect();
     assert_eq!(names, ["brief.txt"]);
     rig.finish();
 }

@@ -89,6 +89,7 @@ impl Adopter for WindowsAdopter {
         let pool = record_write::read(key)?;
         let (copy_owner, version) = record_write::read_admin(key)?;
         Ok(Records {
+            group: pool.as_ref().map(|record| record.group.clone()),
             pool_owner: pool.map(|record| record.owner),
             copy_owner,
             version,
@@ -111,8 +112,8 @@ impl Adopter for WindowsAdopter {
         os::security(path).map_err(Cause::from)
     }
 
-    fn lock_down(&mut self, dir: &Path, exe: &Path) -> Result<(), Cause> {
-        os::lock_down_tree(dir, exe).map_err(Cause::from)
+    fn lock_down(&mut self, dir: &Path, exe: &Path, group: Option<&Sid>) -> Result<(), Cause> {
+        os::lock_down_tree(dir, exe, group).map_err(Cause::from)
     }
 
     fn sha256(&mut self, exe: &Path) -> Result<String, Cause> {

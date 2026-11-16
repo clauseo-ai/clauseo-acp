@@ -267,9 +267,9 @@ impl<R: Runtime> ConnectorOpener for LinkOpener<R> {
     }
 }
 
-/// `OpenPayLink`'s open: the host's checked pay link, https only, through `open_external`'s
-/// native confirm and gate (one confirm at a time, a pause after a decline). Declined, nothing
-/// opens (`transport.unauthorized`).
+/// `OpenPayLink`'s open: the host's checked pay link, https only, always through `open_external`'s
+/// native confirm (`open::open_confirmed`) and gate (one confirm at a time, a pause after a
+/// decline). Declined, nothing opens (`transport.unauthorized`).
 pub(crate) async fn open_pay_link(
     confirm: &dyn LinkConfirm,
     opener: &dyn Opener,
@@ -279,13 +279,13 @@ pub(crate) async fn open_pay_link(
     url: &str,
 ) -> Result<(), HostError> {
     let link = local_link(url).map_or_else(|| https_link(url), Ok)?;
-    crate::open::open_external(confirm, opener, gate, now, language, &link).await
+    crate::open::open_confirmed(confirm, opener, gate, now, language, &link).await
 }
 
 /// `url` as a link `open_external` takes, https only.
 fn https_link(url: &str) -> Result<crate::open::Link, HostError> {
     let link = crate::open::check_link(url)?;
-    if !link.url.starts_with("https://") {
+    if link.url.scheme() != "https" {
         return Err(HostError::new(
             ErrorCode::CommandInvalid,
             "a pay link is https only",
@@ -298,7 +298,7 @@ fn https_link(url: &str) -> Result<crate::open::Link, HostError> {
 /// the error names no URL.
 fn open_link(opener: &dyn Opener, url: &str) -> Result<(), String> {
     let opened = match local_link(url) {
-        Some(link) => opener.open_url(&link.url),
+        Some(link) => opener.open_url(link.url.as_str()),
         None => open_url_unconfirmed(opener, url),
     };
     opened.map_err(|error| {
@@ -323,7 +323,7 @@ fn local_link(url: &str) -> Option<crate::open::Link> {
         && parsed.username().is_empty()
         && parsed.password().is_none();
     ours.then(|| crate::open::Link {
-        url: parsed.as_str().to_owned(),
+        url: parsed,
         destination: crate::open::Destination::Web(
             LOCAL_ORIGIN.trim_start_matches("http://").to_owned(),
         ),

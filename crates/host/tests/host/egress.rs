@@ -15,7 +15,7 @@ use clauseo_protocol::ToolsUnavailableReason;
 use serde_json::json;
 
 use crate::profile_rig::{
-    CLAUDE, Hook, Wired, agent_lines, agents, browser_server, first_frame_tools, settings,
+    BROWSING, Hook, Wired, agent_lines, agents, browser_server, first_frame_tools, settings,
     template, turn,
 };
 use crate::support::Dir;
@@ -59,7 +59,8 @@ impl EgressProxy for Recording {
         session: SessionKey,
         config: clauseo_sandbox::ProxyConfig,
     ) -> Result<(), clauseo_sandbox::Error> {
-        assert!(config.allow.contains("api.anthropic.com"), "{config:?}");
+        // The agent's own API host is checked in `launch_checks/egress/tests.rs`: these tests
+        // launch a kind-less agent (`BROWSING`), whose list holds the seed sites alone.
         assert!(config.allow.contains("sci.gov.in"), "{config:?}");
         // Stage C's rule: the host opens a proxy only for a launch that offers the browser, and
         // binds its token-free browser listener; a launch without one opens none (the tests
@@ -158,7 +159,7 @@ pub(crate) fn claude_then(dir: &Dir, servers: &serde_json::Value, then: &[serde_
     let scenario = template(dir, "claude", &lines);
     settings(
         dir,
-        agents(&[(CLAUDE, &scenario, json!({}))]),
+        agents(&[(BROWSING, &scenario, json!({}))]),
         json!({"tools": {"browser": true, "web_search": false}}),
     );
 }
@@ -177,7 +178,7 @@ fn the_proxy_opens_once_per_launch_and_closes_after_the_tree_has_gone() {
         wired(config, proxy, removals)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     let browser = first_frame_tools(&host, thread)
         .into_iter()
@@ -227,7 +228,7 @@ fn a_failed_launch_closes_the_proxy_it_opened() {
         wired(config, proxy, removals)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     let _turn = host.prompt(thread, "Go.");
     closes
         .recv_timeout(Duration::from_secs(60))
@@ -249,7 +250,7 @@ fn a_proxy_that_does_not_open_leaves_the_browser_out() {
         wired(config, proxy, removals)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     let browser = first_frame_tools(&host, thread)
         .into_iter()
@@ -276,7 +277,7 @@ fn no_proxy_opens_with_the_browser_off() {
     );
     settings(
         &dir,
-        agents(&[(CLAUDE, &scenario, json!({}))]),
+        agents(&[(BROWSING, &scenario, json!({}))]),
         json!({"tools": {"browser": false, "web_search": false}}),
     );
     let (proxy, log, _closes) = Recording::new(false);
@@ -285,7 +286,7 @@ fn no_proxy_opens_with_the_browser_off() {
         wired(config, proxy, removals)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     host.shutdown();
     assert_eq!(calls(&log), ["removal"]);
@@ -306,7 +307,7 @@ fn no_proxy_opens_without_chrome() {
             .with_chrome_roots(roots)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
-    let thread = host.create_thread(matter, CLAUDE);
+    let thread = host.create_thread(matter, BROWSING);
     turn(&host, thread);
     let browser = first_frame_tools(&host, thread)
         .into_iter()

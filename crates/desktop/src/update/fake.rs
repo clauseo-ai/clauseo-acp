@@ -33,6 +33,7 @@ impl Updater for FakeUpdater {
         let offer = Offer {
             version: self.version.clone(),
             handle: Opaque::new(FakeHandle),
+            refetch: false,
         };
         Box::pin(futures::future::ready(Ok(Some(offer))))
     }

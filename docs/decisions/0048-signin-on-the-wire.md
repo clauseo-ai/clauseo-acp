@@ -74,9 +74,16 @@ window sent still passes through Tauri's buffers, which Clauseo does not zero.
 
 **`SetupEvent`.** Three payloads, in the crate's event form (external tagging, snake case,
 `None` fields left out):
-- `SetupInfo { keys_available }`: whether the OS keychain can hold a key (false where Linux has
-  no Secret Service; the key screens hide). A new subscription gets it first, then every agent's
-  install and sign-in state, before any newer event.
+- `SetupInfo { keys_available, python }`: whether the OS keychain can hold a key (false where
+  Linux has no Secret Service; the key screens hide), and, since stage D, the Python runtime's
+  state as an optional `PythonProgress` (left out when unset, so an older host's event decodes
+  with none). Desktop sends `SetupInfo` again on each Python change. A new subscription gets it
+  first, then every agent's install and sign-in state, before any newer event.
+  `PythonProgress` is `Unavailable`, `Missing { download_bytes }`, `Waiting { code, hosts,
+  log }`, `Downloading { received, total }`, `Installing`, `Ready { version }` and
+  `Failed { cause, code, blocked_by, hosts, log }`; `code`, `blocked_by` and `hosts` are
+  optional. Python is one for the computer: no agent's `Missing` counts its archive, and a
+  `RetryAgentInstall` for any ready agent retries it.
 - `AgentInstallProgress { agent, state: InstallProgress }`, S17's `InstallState`:
   `Missing { download_bytes }`, `Waiting { code, hosts, log }` (offline; it retries by itself),
   `Downloading { received, total }`, `Installing`, `Ready { version }`,
@@ -88,14 +95,18 @@ window sent still passes through Tauri's buffers, which Clauseo does not zero.
   lines it left out, and decoding refuses more. Sizes are `Count`s.
 - `SignInChanged { agent, state: SignIn }`, S18's `SigninState` with how the agent is signed in:
   `SignedOut { found }`, `Queued`, `Waiting { since, nudge }`, `DeviceCode { url, code,
-  expires_at }`, `LoginFound { from, email }`, `SignedIn { email, plan, method, source, at }`,
+  expires_at }`, `LoginFound { from, email }`, `SignedIn { email, plan, method, source, at, refused }`,
   `Failed { code, at }`, and desktop's own `Switching { since, stuck }` (P5b, below). `found`
   is a `FoundLogin` (`claude_settings`,
   `claude_windows_sandbox`, `codex_keyring`, `reused_failed`, `reused_signed_out`,
   `reused_changed`, `codex_link_split`, then UD2's `none_found`: the search ran and found no
   login, and `reuse_off`: S18's `no-reuse` is there, so nothing was looked for); `from` is a `LoginFrom` (`claude_code`, `codex`);
   `method` a `SignInMethod` (`plan`, `api_key`, `firm`); `source` a `SignInSource` (`reused`,
-  the lawyer's own CLI login, or `own`, Clauseo's). `plan` is a `PlanLabel` in words, from
+  the lawyer's own CLI login, or `own`, Clauseo's). `refused` is optional and comes only with
+  `method: api_key`: it is set when a sign-in recheck meets an `agent.auth_required` hold while a
+  key is in memory and no endpoint or provider outranks it, so the provider refused that key,
+  and it clears when a key is saved or removed. A later turn the provider accepts with the same
+  key does not clear it. `plan` is a `PlanLabel` in words, from
   `limits`' plan words; desktop turns S18's raw plan string into it. Times are `Timestamp`s. A
   device code is shown to the lawyer, so it is a plain string, not a `Secret`.
 
@@ -103,6 +114,17 @@ A second `FindLogin` replaces the first (`agents` `signin/job.rs`, `Task::supers
 
 Install and sign-in failures carry an `ErrorCode`, never `agents`' own kinds. These enums are
 closed: setup events are never logged, and window and desktop ship together.
+
+Python's failures are the exception: they carry a `PythonFailureCause` (`blocked`,
+`disk_full`, `failed`, `run_blocked`, `run_failed`). Two of those, the OS refusing to start
+the runtime and its check failing, have no `ErrorCode`, and adding codes would change the counts
+schema for a state that never stops an agent. A download-side failure also carries the agent
+install's code (`agent.install_blocked`, `agent.install_disk_full`, `agent.install_failed`),
+and a blocked download the Python hosts, so the window reuses the agent's lines. `run_blocked`
+carries an optional `blocked_by` (`PythonBlockedBy`: `app_control` for Windows error 4551 or
+its NT status `0xC0E90002`, App Control for Business or Smart App Control; `applocker` for
+1260, `AppLocker` or Software Restriction Policies; `unknown` otherwise), read only from the
+failed start's error code or the exit status of a process refused at load.
 
 **New error codes.** Eleven, before `unknown`, each with its row in 0003 and in
 `docs/ui-states.md` section 9. An unknown code still decodes to `unknown`.
@@ -428,12 +450,29 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   - *The first load is bounded.* Desktop reads each agent's key on a thread of its own and its
     setup thread waits for them at most 10 s on its timer (`setup/keys/reads.rs`). Then, per
     agent: no item stored lifts the refusal, and it launches without a key; a key read fine lifts
-    it, and it launches with the key; a read that failed sets `agent.key_unreadable`. Such a
-    key never reads as "no key" and the agent never launches without it. A read that has not
+    it, and it launches with the key. A read that failed (the keychain's error) or has not
     answered by the bound sets `agent.key_unreadable` only for an agent the "key stored" marker
-    below marks; an unmarked agent has no key Clauseo stored, so it launches without one and no
-    refusal follows. The log line names the agent, "key unreadable" and the error's kind; never
-    the key, the item's name or a path.
+    below marks: such a key never reads as "no key" and the agent never launches without it, so
+    a firm's stored key is never skipped silently. An unmarked agent has no key Clauseo stored,
+    so it launches without one and no refusal follows, unless a firm endpoint or provider is
+    set for it (`plans.<id>`): under a firm plan a failed read sets `agent.key_unreadable`
+    whatever the marker (`KeyCache::unreadable_for`). A keyless launch with the firm's
+    `ANTHROPIC_BASE_URL` would let Claude Code offer the lawyer's own claude.ai sign-in token
+    to the firm's gateway, and "Firm" on screen must stay true. (The orchestrator's ruling on
+    the review of #1132.) (Amended 2026-11-15, the orchestrator's
+    ruling on VM row M-d: a failed read used to set the refusal for every agent, and a Mac with
+    no login keychain, where every read fails, showed "Sign-in didn't finish." in place of Sign
+    in for agents that had never stored a key.) The accepted cost: a marker lost together with a
+    keychain error means a session without the stored key, until a read answers and the marker
+    is set again. That session is not always a refused one: the session launch sets no key variable
+    (`setup/hook.rs`, `setup_parts`; the entry's placeholder stays empty), so the agent signs in with whatever login it finds, Clauseo's
+    own or the lawyer's reused one, and a firm's matter can run on a personal account, under
+    that account's data terms, in place of the firm's key. What the lawyer sees then follows
+    the login in use, not the key: the sign-in line is S18's, with that account's email and
+    plan (`setup/compose.rs`, rules 5 and 6), the limits read that login's numbers
+    (`setup/readers.rs`, `keys_ready`), and the key's row does not say it is in use. The log line names the agent, "key unreadable" (or, unmarked, that the
+    read failed and it launches without a key) and the error's kind; never the key, the item's
+    name or a path.
   - *The "key stored" marker* (the orchestrator's ruling, a follow-up to #506). Desktop keeps,
     outside the keychain, a list of the agents Clauseo stored a key for:
     `<data_dir>/agents/key-stored.json`, `{"agents": ["claude-acp"]}`, beside the `firm-policy`
@@ -576,6 +615,54 @@ reads' hold dropped and `limits_login_changed`.
   questions waiting until the app restarts.** The app gives the card its words later.
 - *Clauseo's own login signed out* calls `restart_agents` as well as `limits_login_changed`
   (ruling 3), so no idle agent stays on the old login.
+
+### PATH
+
+Once Clauseo's Python runtime is `Ready`, Claude's and Codex's session processes find it on
+their `PATH`, unjailed (stage D, launch). The order is stetdoc's folder first, as before, then
+the runtime's folders, then the user's `PATH`. On macOS the runtime's folder is `<rt>/bin`; on
+Windows it is `<rt>\clauseo-bin` (pandoc), `<rt>` (`python.exe`) and `<rt>\Scripts` (pip),
+those that exist. `agents::python_path_dirs` gives them, empty unless the runtime passes its
+receipt check. Desktop looks them up on the setup thread at start and on each Python state,
+into a slot: `Ready` fills it, any other state empties it. `SetupHook::agent_path` (the host's
+`ProfileHook::agent_path`) hands the slot to Claude and Codex only, with no I/O. The host takes
+only absolute folders, since a relative one would resolve against the matter folder. Sessions
+only: sign-in, status and detection runs, the limits readers and the Node lookup get nothing.
+There is no stub: while Python is not `Ready`, nothing is added and a system Python stays as
+it was. When the runtime's folders go on, the session drops an inherited `PYTHONHOME` and
+`PYTHONPATH`, either of which could stop the bundled Python starting. On Windows `<rt>` on
+`PATH` also puts `python313.dll` and `vcruntime140.dll` on child processes' DLL search path;
+that is accepted for launch, and PR 2's launcher, after launch, removes the need.
+
+The folders also come first inside the agents' shells, on macOS and Linux, because macOS
+login shells re-sort `PATH` (`/etc/zprofile` runs `path_helper`, which puts `/usr/bin` first,
+so a Codex turn ran `/usr/bin/python3` and `import docx` failed). Codex (`@openai/codex`
+0.162.1) runs each command with `-lc` unless `allow_login_shell = false`
+(`config/src/config_toml.rs:221`, default true at `core/src/config/mod.rs:3852`,
+`core/src/tools/handlers/unified_exec.rs:104-113`), after sourcing a login-shell snapshot
+(`shell_snapshot`, on by default). The session's `CODEX_CONFIG` gets `allow_login_shell =
+false` and `features.shell_snapshot = false`, so a command runs `-c` with Codex's process
+environment (`protocol/src/shell_environment.rs:91-158`) and Codex still puts its own bundled
+tools' folder first (`core/src/tools/runtimes/unified_exec.rs:505-520`); no
+`shell_environment_policy.set.PATH`, which would stop Codex replaying that folder
+(`core/src/tools/runtimes/mod.rs:105-111`). On macOS the session's `PATH` also gets the
+folders `path_helper` adds (`/etc/paths`, then `/etc/paths.d/*` by name, read on the
+launch-prep thread) right after Clauseo's, so the GUI `PATH` and `/etc/paths` keep reaching
+Codex. The trade-off, on macOS and Linux alike: with no login shell and no snapshot, Codex's
+commands lose what the lawyer's own shell startup adds (a `~/.zprofile` with `brew shellenv`,
+pyenv or nvm, a `~/.zshrc`'s aliases and exports). It is accepted so Clauseo's tools and Codex's
+bundled `rg` come first; what reaches Codex is the `PATH` Clauseo builds (its folders,
+`path_helper`'s, then the rest of the `PATH` Clauseo was started with). Claude keeps the lawyer's
+startup files. Claude Code (2.1.293) pastes the file
+`CLAUDE_ENV_FILE` names into each Bash command after its login-shell snapshot; the launch writes
+`export PATH='<folders>':"$PATH"` there, which keeps everything the snapshot built. Both are per
+session, since the shell browser's folder is on one session's `PATH` and not another's: the keys
+ride in `CODEX_CONFIG`, which codex-acp sends as each thread's `config` and app-server turns
+into overrides on `config.toml` (`app-server/src/config_manager.rs:446-457`), not in the home's
+shared `config.toml`; the file is `<data>/run/<session id>/clauseo-env.sh`, gone with the run
+folder, not in the shared Claude home. With no folders nothing is set, and an inherited
+`CLAUDE_ENV_FILE` is left alone (it is replaced only when Clauseo sets its own). Windows is
+unchanged (`agent/shell_path.rs`).
 
 ## Consequences
 

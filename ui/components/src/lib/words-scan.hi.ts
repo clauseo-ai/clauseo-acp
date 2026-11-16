@@ -6,6 +6,11 @@ export const HI = {
   // UD2-01, UD2-02: the counts so far
   "{n} files, {mb} MB": "{n} फ़ाइलें, {mb} MB",
   "1 file, {mb} MB": "1 फ़ाइल, {mb} MB",
+  // UC-135, UC-136: the counts for a folder under 1 MB, in KB (D-072; provisional)
+  "{n} files, {kb} KB": "{n} फ़ाइलें, {kb} KB",
+  "1 file, {kb} KB": "1 फ़ाइल, {kb} KB",
+  // UC-137: the scan done, and no file in the folder (D-072; provisional)
+  "The folder is empty.": "फ़ोल्डर खाली है।",
   // UD2-03, UD2-04: the file the walk reached, or none yet
   "Reading the folder. Now {title}.": "फ़ोल्डर पढ़ा जा रहा है। अभी {title}।",
   "Reading the folder.": "फ़ोल्डर पढ़ा जा रहा है।",

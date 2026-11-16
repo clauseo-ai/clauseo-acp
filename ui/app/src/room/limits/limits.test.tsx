@@ -21,8 +21,10 @@ import type {
 } from "../../transport/protocol.ts";
 import { CLAUDE, setupStoreOf, type SetupSource } from "../../store/setup.ts";
 import { fakeNext } from "../fake-next.ts";
+import { loadThread } from "../thread/chunk.ts";
 import { mountRoom, type Harness } from "../thread/harness.ts";
 import { LIMIT_WARNING_FEED } from "./limit-warning-feed.ts";
+import { bounded, startWaits } from "./limits-test-wait.ts";
 import { preloadPlanCard } from "./plan-card-load.ts";
 
 // the card's preload, watched: the same function, counted
@@ -38,7 +40,9 @@ let h: Harness | null = null;
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
+  startWaits();
 });
+
 afterEach(async () => {
   await h?.unmount();
   h = null;
@@ -121,7 +125,10 @@ async function room(
     }),
     display: { language },
     setup: { first: () => setupFirst },
+    waitForRenderer: false,
   });
+  // the thread's chunk, which the harness would await in an act of its own with no bound
+  await bounded("the thread's chunk", loadThread);
   h.deliver([reset([])]);
   await h.type("Summarise the notice to the bank.");
   return h;
@@ -130,16 +137,10 @@ async function room(
 /** Plays a view, and lets a chunk it asks for (the warning's note) load. */
 const view = async (v: LimitsView) => {
   await act(async () => h!.transport.limitsChanged(v));
-  await act(async () => {
-    await vi.dynamicImportSettled();
-  });
+  await bounded("the view's chunks", () => vi.dynamicImportSettled());
 };
 /** Lets the setup wire's events and a chunk they ask for land. */
-const settle = async () => {
-  await act(async () => {
-    await vi.dynamicImportSettled();
-  });
-};
+const settle = () => bounded("the setup wire's chunks", () => vi.dynamicImportSettled());
 const plan = () => h!.one("plan");
 // the plan's words as they show; the meter's hidden "x" (Base UI's, for VoiceOver) is none of them
 const shown = () => plan()?.textContent?.replace(/x$/, "");
@@ -152,7 +153,7 @@ async function openCard() {
   await h!.click(plan());
   const card = () => document.querySelector<HTMLElement>('[data-testid="plan-card"]');
   for (let i = 0; i < 5 && card() === null; i += 1) {
-    await act(async () => {
+    await bounded("the card's chunk", async () => {
       await vi.dynamicImportSettled();
       await new Promise((r) => setTimeout(r, 0));
     });
@@ -511,9 +512,7 @@ test("limit-warning's feed as claude-acp: the marker goes none, loading, unavail
   note();
   for (const line of LIMIT_WARNING_FEED) {
     await act(async () => h!.transport.deliver(line));
-    await act(async () => {
-      await vi.dynamicImportSettled();
-    });
+    await bounded("the line's chunks", () => vi.dynamicImportSettled());
     note();
   }
   expect(h!.transport.problems).toEqual([]);
@@ -546,9 +545,7 @@ test("focus on the plan starts loading its card before any press; the card stays
   await act(async () => plan()?.focus());
   expect(preload).toHaveBeenCalledTimes(1);
   expect(document.querySelector('[data-testid="plan-card"]')).toBeNull();
-  await act(async () => {
-    await vi.dynamicImportSettled();
-  });
+  await bounded("the card's preload", () => vi.dynamicImportSettled());
   const card = await openCard();
   expect(card?.textContent).toContain("Claude Max");
 });

@@ -12,7 +12,7 @@ use clauseo_agents::keys::Keychain;
 use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_process::{Error, LaunchSpec, Launched, Launcher};
 use clauseo_protocol::{AgentId, AgentKind};
-use clauseo_settings::{AgentLaunch, Effective, Locations, SystemFiles};
+use clauseo_settings::{AgentLaunch, Effective, Locations, Plan, PlanProvider, SystemFiles};
 use futures::FutureExt as _;
 
 use super::{LeaveReaders, SwappableReaders, read_vars};
@@ -113,7 +113,6 @@ fn claude_s_read_has_the_home_and_the_key_and_a_hold_survives_an_entry_set() {
 #[test]
 fn a_read_s_variables_are_the_launch_hook_s_for_the_plan_and_the_key() {
     use clauseo_host::ProfileHook as _;
-    use clauseo_settings::{Plan, PlanProvider};
 
     use crate::setup::hook::SetupHook;
 
@@ -366,4 +365,123 @@ fn a_blocked_agent_with_a_stored_key_never_reads() {
         ReadOutcome::Failed(ReadFailure::LaunchFailed(_))
     ));
     assert_eq!(lock(&launcher.0).len(), 1, "nothing read while blocked");
+}
+
+/// The login keychain locked: Claude's read fails at once with no launch (its Claude Code would
+/// ask the keychain and show the unlock dialog), so the last numbers stay as stale; Codex's
+/// read is not held; unlocked again, Claude's next read goes out.
+#[test]
+fn a_locked_keychain_holds_claude_s_read_and_the_next_read_goes_out() {
+    let scratch = Scratch::folder("setup-readers-locked", &["data"]);
+    let script = fake_file(scratch.path(), SCRIPT, "");
+    fake_file(
+        scratch.path(),
+        SDK,
+        r#"{"name":"@anthropic-ai/claude-agent-sdk"}"#,
+    );
+    let locations = Locations::under_root(&scratch.path().join("data"));
+    let effective = Effective::load(&locations, &SystemFiles, &[]);
+    let slot = Arc::new(OnceLock::new());
+    let _set = slot.set(Arc::new(KeyCache::load_all(
+        Keychain::memory(),
+        std::iter::empty(),
+    )));
+    let launcher = Arc::new(Recording::default());
+    let locked = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let seen = Arc::clone(&locked);
+    let readers = SwappableReaders::new(
+        &effective,
+        Arc::clone(&launcher) as Arc<dyn Launcher>,
+        slot,
+        Arc::default(),
+        Arc::default(),
+    )
+    .with_keychain_locked(move || seen.load(std::sync::atomic::Ordering::SeqCst));
+    let entry = AgentLaunch {
+        command: if cfg!(windows) {
+            r"C:\node\node.exe".to_owned()
+        } else {
+            // unix-paths-ok: the cfg!(windows) branch above uses a Windows path there
+            "/usr/local/bin/node".to_owned()
+        },
+        args: vec![script],
+        env: std::collections::BTreeMap::new(),
+    };
+    readers.set_entry(AgentKind::Claude, Some(entry));
+    let ReadOutcome::Failed(ReadFailure::LaunchFailed(why)) =
+        block_on(readers.read(AgentKind::Claude))
+    else {
+        panic!("a read with the keychain locked must fail without a launch");
+    };
+    assert_eq!(why, "the login keychain is locked");
+    assert!(
+        lock(&launcher.0).is_empty(),
+        "a Claude read went out while locked"
+    );
+    locked.store(false, std::sync::atomic::Ordering::SeqCst);
+    block_on(readers.read(AgentKind::Claude));
+    assert_eq!(
+        lock(&launcher.0).len(),
+        1,
+        "the read after the unlock did not go out"
+    );
+}
+
+/// Whether a Claude read gets past the key check with a keychain that fails every read and no
+/// "key stored" mark, under `plan` (decision record 0048: a failed read refuses under a firm
+/// plan whatever the marker; with none, the read goes out keyless).
+fn keys_ready_with_failed_read(plan: Option<Plan>) -> Result<(), ReadFailure> {
+    let scratch = Scratch::folder("readers-firm-failed-read", &[]);
+    let claude = AgentId::new("claude-acp").unwrap();
+    let keychain = Keychain::memory();
+    keychain.fail_reads(true);
+    let notes = crate::setup::keys::KeyNotes::new();
+    let cache = KeyCache::load_bounded(
+        keychain.clone(),
+        [&claude],
+        crate::setup::keys::KeyMarker::new(scratch.path(), [&claude]),
+        notes.sender(),
+        &clauseo_process::AsyncIoTimer,
+        crate::setup::keys::KEYS_LOAD_BOUND,
+    );
+    assert!(!cache.unreadable(&claude) && cache.read_failed(&claude));
+    let slot = Arc::new(OnceLock::new());
+    let _set = slot.set(Arc::new(cache));
+    let plans: crate::setup::hook::Plans = Arc::new(std::sync::RwLock::new(
+        plan.map(|plan| (claude.clone(), plan))
+            .into_iter()
+            .collect(),
+    ));
+    let ready = block_on(super::keys_ready(&slot, &plans, AgentKind::Claude));
+    keychain.fail_reads(false);
+    ready
+}
+
+#[test]
+fn a_failed_key_read_under_a_firm_endpoint_or_provider_fails_the_read() {
+    let endpoint = Plan {
+        endpoint: Some("https://gw.firm.example".to_owned()),
+        ..Plan::default()
+    };
+    assert!(keys_ready_with_failed_read(Some(endpoint)).is_err());
+    for provider in [PlanProvider::Bedrock, PlanProvider::Vertex] {
+        let plan = Plan {
+            provider: Some(provider),
+            ..Plan::default()
+        };
+        assert!(
+            keys_ready_with_failed_read(Some(plan)).is_err(),
+            "{provider:?}"
+        );
+    }
+}
+
+#[test]
+fn a_failed_key_read_with_no_firm_plan_lets_the_read_go_out() {
+    assert!(keys_ready_with_failed_read(None).is_ok());
+    let env_only = Plan {
+        env: [("AWS_REGION".to_owned(), "eu-west-2".to_owned())].into(),
+        ..Plan::default()
+    };
+    assert!(keys_ready_with_failed_read(Some(env_only)).is_ok());
 }

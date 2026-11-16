@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::SetNetwork { online: false }"
+---
+{
+  "set_network": {
+    "online": false
+  }
+}
