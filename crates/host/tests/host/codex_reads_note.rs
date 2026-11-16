@@ -68,13 +68,15 @@ fn branch(label: &str, blocks: &[&str], saw: &str) -> Value {
 /// The prompt Codex holds until it is cancelled.
 const HANG: &str = "Hang on.";
 
-/// A prompt branch for [`HANG`] alone: a first word, then `session/cancel`, ended `cancelled`.
+/// A prompt branch for [`HANG`] alone: a tool call under way, then `session/cancel`, ended
+/// `cancelled`.
 fn hang(label: &str) -> Value {
     json!([
         {"expect": {"method": "session/prompt", "as": label,
             "params": {"sessionId": "sess-1", "prompt": [{"type": "text", "text": HANG}]}}},
-        {"update": {"session": "sess-1", "update": {"sessionUpdate": "agent_message_chunk",
-            "messageId": format!("m-{label}"), "content": {"type": "text", "text": "Reading."}}}},
+        {"update": {"session": "sess-1", "update": {"sessionUpdate": "tool_call",
+            "toolCallId": format!("t-{label}"), "title": "Read the lease", "kind": "read",
+            "status": "in_progress"}}},
         {"expect": {"method": "session/cancel", "params": {"sessionId": "sess-1"}}},
         {"respond": {"to": label, "result": {"stopReason": "cancelled"}}},
     ])
@@ -413,11 +415,12 @@ fn a_withdrawal_mid_turn_stops_it_and_the_none_note_goes_first_next() {
     host.settle();
     assert_eq!(ask(&host, &mut events, thread, "Second."), "saw-invite");
     let (hung, _) = host.prompt(thread, HANG);
-    events.until("the turn's start", |e| {
-        e.events()
-            .any(|event| matches!(event, DomainEvent::TurnStarted(started) if started.turn == hung))
+    // The prompt reached Codex once its tool call is in.
+    events.until("the turn's tool call", |e| {
+        e.events().any(
+            |event| matches!(event, DomainEvent::ToolCallStarted(started) if started.turn == hung),
+        )
     });
-    host.settle();
     host.ok(HostCommand::WithdrawMatterRead {
         thread,
         matter: other,

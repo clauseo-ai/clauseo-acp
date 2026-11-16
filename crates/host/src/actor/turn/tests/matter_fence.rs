@@ -68,7 +68,7 @@ pub(super) fn rules_for(rig: &Rig, thread: ThreadId, matter: MatterId) -> (bool,
         .unwrap();
     let folder = other.spellings.first().unwrap().to_str().unwrap();
     let base = rule_path(folder, cfg!(windows));
-    let deny = claude_deny_rules(&run.data_deny);
+    let deny = claude_deny_rules(&run.data_deny, false);
     let allow = claude_allow_rules(&run.data_deny);
     let has = |rules: &[String], rule: String| rules.contains(&rule);
     (

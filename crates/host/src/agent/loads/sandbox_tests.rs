@@ -289,6 +289,7 @@ fn a_wildcard_in_an_own_path_sends_no_sandbox() {
         let settings = settings(&session, None, false, false, &json!({}));
         assert!(settings.get("sandbox").is_none());
         let mut session = Session::new("s-1");
+        // unix-paths-ok: Claude's sandbox is macOS and Linux only; never a Windows path
         session.data = vec![PathBuf::from("/Users/l").join(glob)];
         assert_eq!(mac(&session.paths()), Err(Off::Wildcard), "{glob}");
     }

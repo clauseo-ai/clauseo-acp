@@ -177,8 +177,9 @@ pub(super) struct CodexAgent {
 
 /// Runs `waiting` once `thread`'s agent has a session; a turn stops a stale-fenced agent first.
 pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
-    let stale = matches!(waiting, Waiting::Turn(_)) && super::idle::fence_stale(actor, thread);
-    let mut stop_first = false;
+    let Some(waiting) = super::idle::stop_stale_first(actor, thread, waiting) else {
+        return;
+    };
     let Some(state) = state(actor, thread) else {
         fail_waiting(actor, thread, &waiting, &lost("a thread"));
         return;
@@ -194,18 +195,10 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
             // idle): the work waits for a new agent (`stop_closed`).
             Stage::Closed => stop_closed(agent, waiting),
             Stage::Attached if agent.link.closed() => stop_closed(agent, waiting),
-            Stage::Attached if stale => {
-                agent.after_stop.push(waiting);
-                stop_first = true;
-            }
             Stage::Attached => run_waiting(actor, thread, waiting),
             Stage::Initializing | Stage::Loading => agent.waiting.push(waiting),
             Stage::Stopping => agent.after_stop.push(waiting),
         },
-    }
-    if stop_first {
-        tracing::info!(target: LIFECYCLE, %thread, "agent stopped before a prompt for a matter fence change");
-        idle_stop(actor, thread);
     }
 }
 

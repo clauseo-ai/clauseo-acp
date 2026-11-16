@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! Another matter's registered folder holding `*` or `?` in Claude's sandbox: the pattern it is
 //! on macOS, widened on Linux, and no sandbox when that deny would cover the session's own
 //! folders (`agent/loads/sandbox/glob.rs`).

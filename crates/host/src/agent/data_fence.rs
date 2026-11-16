@@ -58,8 +58,7 @@ pub(crate) use launch::{LaunchDeny, claude_project_key, claude_projects, launch_
 pub(crate) use matters::Fenced;
 pub(crate) use shell_deny::{
     own_shell_allow_rules, own_shell_glob_deny_rules, windows_matter_shell_rules,
-    windows_shell_deny_rules,
-    windows_shell_deny_rules_without_variables,
+    windows_shell_deny_rules, windows_shell_deny_rules_without_variables,
 };
 pub(crate) use variables::launch_vars;
 

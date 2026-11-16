@@ -7,11 +7,12 @@
 use std::path::Path;
 
 use clauseo_profile::instructions::{
-    BrowserPart, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, CODEX_SHELL_OFFLINE, LEGAL, SCALE_CLAUDE,
-    STETDOC_CLI, TOOLS, browser_part, browser_part_for, codex_shell, connectors_part, word_count,
+    BrowserPart, CLAUDE_SHELL_MACOS, CODEX_REFUSAL, CODEX_SHELL_OFFLINE, LEGAL,
+    OTHER_MATTERS as FENCED_RULE, SCALE_CLAUDE, STETDOC_CLI, TOOLS, browser_part, browser_part_for,
+    codex_shell, connectors_part, other_matters_unfenced, word_count,
 };
 use clauseo_profile::placeholders::{
-    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, OTHER_MATTERS, WORK_FOLDER,
 };
 use clauseo_profile::subagents::{PAPER_READER, ResearcherArm, researcher_prompt, subagents};
 use clauseo_profile::{ClauseoProfile, Instructions};
@@ -23,14 +24,16 @@ const LEGAL_MAX: usize = 1360;
 /// 0058's cap, kept.
 const SHARED_MAX: usize = 1800;
 /// Claude's whole `systemPrompt.append` on macOS: the tools part with the stetdoc line, the
-/// legal part, the shell line and "Working at scale".
-const CLAUDE_MAX: usize = 2250;
+/// legal part, the shell line and "Working at scale". 2,272 with #1085's other matters' rule,
+/// rounded up.
+const CLAUDE_MAX: usize = 2300;
 /// Codex's whole `developer_instructions` on macOS: the tools part with the stetdoc line, the
 /// legal part, the offline line, the refusal line, the shell line and the built-in skills index.
 /// A launch's pack lines come on top, capped by their own budget (decision record 0040).
 /// 2000 until the browser part's certificate-error rule (20 words) took the count from 1996 to
-/// 2016.
-const CODEX_MAX: usize = 2040;
+/// 2016; 2,130 with #1085's other matters' rule for Windows (the larger) before that rule, so
+/// about 2,150 with both, rounded up.
+const CODEX_MAX: usize = 2170;
 /// The paper reader's prompt, its folder filled.
 const PAPER_READER_MAX: usize = 200;
 /// The researcher's prompt, either arm.
@@ -40,9 +43,16 @@ const RESEARCHER_MAX: usize = 650;
 const DATA: &str = "/Users/Ann Mary/Library/Application Support/Clauseo";
 
 /// `text` with the host's tokens filled as for a session under [`DATA`] with the case-law
-/// entry, `{browser}` given `browser`.
+/// entry, `{browser}` given `browser` and `{other_matters}` the fenced rule (#1085).
 #[cfg(test)]
 fn filled(text: &str, browser: &str) -> String {
+    filled_with(text, browser, FENCED_RULE.trim())
+}
+
+/// [`filled`] with `{other_matters}` given `rule`: Codex on Windows gets its own
+/// (`other_matters_unfenced`).
+#[cfg(test)]
+fn filled_with(text: &str, browser: &str, rule: &str) -> String {
     let work = format!("{DATA}/run/0b7e3c1a-5d2f-4e8a-9c61-2f4d8e7a1b30/work");
     let notes = format!("{DATA}/agent-state/matter-4821/notes");
     clauseo_profile::placeholders::fill(
@@ -53,6 +63,7 @@ fn filled(text: &str, browser: &str) -> String {
             (MATTER_NOTES, &notes),
             (CONNECTORS, connectors_part(true)),
             (BROWSER, browser),
+            (OTHER_MATTERS, rule),
         ],
     )
     .unwrap()
@@ -124,9 +135,14 @@ fn codex_standing_text_budget() {
     let profile = profile();
     let index = profile.skills_index();
     assert!(word_count(&index) <= 150, "{} words", word_count(&index));
-    let text = filled(
-        &format!("{}\n\n{index}", profile.codex_instructions_for(true)),
-        browser_part_for(BrowserPart::On, true),
+    let codex = format!("{}\n\n{index}", profile.codex_instructions_for(true));
+    let browser = browser_part_for(BrowserPart::On, true);
+    let text = filled(&codex, browser);
+    // On Windows Codex gets the unfenced rule instead (#1085): the larger one counts too.
+    let windows = word_count(&filled_with(&codex, browser, other_matters_unfenced()));
+    assert!(
+        windows <= CODEX_MAX,
+        "Codex's standing text on Windows has {windows} words"
     );
     for line in [
         CODEX_SHELL_OFFLINE,
