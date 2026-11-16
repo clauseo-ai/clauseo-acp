@@ -84,12 +84,12 @@ test("leaving a draft with nothing typed drops it; with words it stays", async (
   expect(threadsOf(talks.view().rows)).toEqual([T1]);
   talks.startNew();
   const draft = talks.view().open as string;
-  drafts.set(draft, "  ");
+  drafts.set(draft, { typed: "  ", pastes: [] });
   talks.open(t1);
   expect(threadsOf(talks.view().rows)).toEqual([T1]);
   talks.startNew();
   const kept = talks.view().open as string;
-  drafts.set(kept, "What does clause nine say?");
+  drafts.set(kept, { typed: "What does clause nine say?", pastes: [] });
   talks.open(t1);
   expect(talks.view().rows.map((r) => r.key)).toEqual([kept, t1]);
   // and opening it again finds the same draft
@@ -532,7 +532,7 @@ test("S5: with words typed it stays, and once a question is accepted it is never
   talks.startNew();
   const key = talks.view().open as string;
   await talks.create(key);
-  drafts.set(key, "Summarise the lease");
+  drafts.set(key, { typed: "Summarise the lease", pastes: [] });
   talks.open(t1);
   await settle();
   expect(sent("archive_thread")).toEqual([]);
@@ -565,7 +565,7 @@ test("N2: words of whitespace only leave the drafts map with their draft", async
   const t1 = talks.view().open as string;
   talks.startNew();
   const key = talks.view().open as string;
-  drafts.set(key, "   ");
+  drafts.set(key, { typed: "   ", pastes: [] });
   talks.open(t1);
   expect(drafts.has(key)).toBe(false);
   expect(threadsOf(talks.view().rows)).toEqual([T1]);

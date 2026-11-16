@@ -1,7 +1,7 @@
 // The long paste's copy review entries (paste-chips.tsx): the composer with a pasted text of about eight pages or more
 // as its chip, "Pasted text" over its size in words (UC-256, UC-257, or UC-259 for a text of one word), with Remove
 // pasted text (UC-258), shown with its button focused. The text is the probe's fixture (long-question-fixtures.ts).
-// A draft this long comes back as a chip, so the composer starts with it.
+// The composer starts with a draft holding it as a chip.
 import { PASTE_CHIP_MIN } from "@clauseo/components/clauseo/paste-chips-logic.ts";
 import { longQuestion } from "../room/long-question-fixtures.ts";
 import type { Entry } from "./entry.ts";

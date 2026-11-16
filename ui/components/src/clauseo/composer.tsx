@@ -27,7 +27,15 @@ import { useRoom } from "./room-scope.ts";
 import { PaperChips } from "./paper-chips.tsx";
 import { PasteChips } from "./paste-chips.tsx";
 import { usePasteChips } from "./paste-chips-state.ts";
-import { askedOf, PASTE_CHIP_MIN, splitAsked } from "./paste-chips-logic.ts";
+import {
+  chipOf,
+  draftOf,
+  EMPTY_DRAFT,
+  PASTE_CHIP_MIN,
+  sentOf,
+  type Draft,
+  type PasteChip,
+} from "./paste-chips-logic.ts";
 import { SafeWorkspaceLine } from "./safe-workspace-line.tsx";
 import { Say } from "./say.tsx";
 import { StatusLine, type ConfigMenu, type PlanChoice } from "./status-line.tsx";
@@ -35,6 +43,7 @@ import type { ReadyHint, ToolsSegment } from "./status-line.tsx";
 import { WorkingLine, WorkingSaid, WorkingTime, type WorkingState } from "./working-line.tsx";
 
 export type { ConfigMenu, PlanChoice, ReadyHint, ToolsSegment } from "./status-line.tsx";
+export type { Draft } from "./paste-chips-logic.ts";
 
 /** One of the agent's commands, as ACP's `available_commands_update` lists it and the session's header carries it
  * (`HeaderEntry.commands`, passed as it is): its name without the slash, what it does, and a hint for its input. */
@@ -66,6 +75,10 @@ const NO_COMMANDS: readonly SlashCommand[] = [];
  * title and page, and a press to take it off again. */
 export type QuestionPaper = Pick<Paper, "id" | "title" | "pb">;
 
+/** What the composer is given, as a Draft: a string is typed words for the field, or one chip, whole, when it is
+ * PASTE_CHIP_MIN units or more (draftOf), so the field never takes a long text. */
+const draftIn = (text: string | Draft): Draft => (typeof text === "string" ? draftOf(text) : text);
+
 /** The working line opens upward from the field in 240 ms on the spring: the well grows from the field's own
  * height to take the row, whose words are already on it. Once, as Clauseo starts; its words change in place after. */
 function useOpening(ref: RefObject<HTMLDivElement | null>, on: boolean) {
@@ -91,10 +104,14 @@ function useOpening(ref: RefObject<HTMLDivElement | null>, on: boolean) {
  * engine's own editing (`execCommand`), so Cmd/Ctrl+Z takes it back. */
 export type ComposerHandle = {
   focus: () => void;
-  /** What the field holds now: its typed words, then each long paste's text (paste-chips-logic.ts's askedOf). */
+  /** What goes if sent now, as one string: the typed words and each long paste's text (paste-chips-logic.ts's
+   * sentOf). Made on each call: for a send, or to check what was sent, never per keystroke. */
   text: () => string;
-  /** Puts the field's focus in it and replaces all it holds with `text`, as one step undo takes back. */
-  setText: (text: string) => void;
+  /** What the composer holds now, its typed words and its long pastes' texts apart (paste-chips-logic.ts's Draft). */
+  draft: () => Draft;
+  /** Puts the field's focus in it and replaces all it holds with `text`, as one step undo takes back. A string is
+   * typed words (one chip when it is PASTE_CHIP_MIN units or more); a Draft brings its chips with it. */
+  setText: (text: string | Draft) => void;
   /** Empties the field as one undoable step: with the field focused, or with focus on nothing or on a button of the
    * field's own row (Ask, just pressed), which it takes back to the field. With focus anywhere else on the page it is
    * emptied in place, so the lawyer's focus never moves, and that one step can't be undone. Given `only`, it clears
@@ -104,7 +121,7 @@ export type ComposerHandle = {
   /** Puts `text` into the field only while it is empty, as one undoable step, and never moves the lawyer's focus:
    * it takes the focus only where clear may (mayTakeFocus), and anywhere else the words go in place. While an input
    * method composes it waits for the composition's end, and fills then only if the field is still empty. */
-  fill: (text: string) => void;
+  fill: (text: string | Draft) => void;
   /** The things the field's `@` tokens mention now, in the order they first stand in it, each once: what a send of
    * its words names alongside them. A token edited or deleted mentions nothing. */
   mentioned: () => readonly MentionItem[];
@@ -122,13 +139,13 @@ export type ComposerProps<V extends string = string> = {
   /** Clauseo is answering: Stop stands where Ask stood. */
   busy?: boolean;
   onStop?: () => void;
-  /** The words the field starts with, such as the matter's draft. Read once, as the field mounts: key the composer to
-   * start it again with other words. */
-  initialText?: string;
-  /** Hears what the field holds after each change, an input method's composing included, read from the field, with
-   * the long pastes' chips (askedOf), and whether it holds no words at all. Read `empty` rather than trimming the text:
-   * the text is made without copying a long paste, and a trim would copy it on every keystroke. */
-  onInput?: (text: string, empty: boolean) => void;
+  /** What the composer starts with, such as the conversation's draft: a string is typed words for the field (as
+   * setText takes them), and a Draft brings its chips too. Read once, as the field mounts: key the composer to start it again with other words. */
+  initialText?: string | Draft;
+  /** Hears what the composer holds after each change, an input method's composing included: the field's words and
+   * the long pastes' texts apart (a Draft), and whether it holds no words at all. Read `empty` rather than trimming:
+   * a trim of a long paste would copy it on every keystroke. */
+  onInput?: (draft: Draft, empty: boolean) => void;
   /** The handle: focus, the field's words, and setting or clearing them so undo survives. */
   ref?: Ref<ComposerHandle>;
   papers?: readonly QuestionPaper[];
@@ -229,21 +246,23 @@ export function Composer<V extends string = string>({
   // changes only when the field fills or empties, so a keystroke renders nothing
   // pinned at mount: React writes a textarea's defaultValue (its text child) on every commit, and the caller's draft
   // changes as the lawyer types, so passing the prop through would rewrite the field's child mid-composition
-  // a long paste in the draft comes back as its chip (paste-chips.tsx), the typed words into the field
-  const [start] = useState(() => splitAsked(initialText));
+  // a draft's long pastes come back as their chips (paste-chips.tsx), as they were, and its typed words into the field
+  const [start] = useState(() => draftIn(initialText));
   const initial = start.typed;
-  const chips = usePasteChips(start.chips);
+  const chips = usePasteChips(start.pastes.map(chipOf));
   const [boxEmpty, setEmpty] = useState(() => initial.trim() === "");
   const empty = boxEmpty && chips.list.length === 0;
   const area = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
-  // all the composer holds, as one string: built per call, never per keystroke but as a concatenation
-  const asked = () => askedOf(area.current?.value ?? "", chips.tail());
+  // what the composer holds, its words and chips apart: per keystroke, with no copy of a long paste
+  const draft = (): Draft => ({ typed: area.current?.value ?? "", pastes: chips.pastes() });
+  // all the composer holds as the one string it goes as: built only to send, or to check what was sent
+  const asked = () => sentOf(draft());
   // a clear asked for while an input method composed: what the field held then, cleared at the composition's end
   // only if the field still holds it
   const clearAfter = useRef<string | null>(null);
   // a fill asked for while an input method composed: put in at the composition's end, if the field is empty then
-  const fillAfter = useRef<string | null>(null);
+  const fillAfter = useRef<string | Draft | null>(null);
   // fits the field to its words; `grow` after an input event, when words only put in can only keep or grow it
   const fitRef = useRef<(grow?: boolean, kind?: string) => void>(() => {});
   // the words as the field was last fitted to them
@@ -294,23 +313,30 @@ export function Composer<V extends string = string>({
     tokenSync.current?.();
     const none = a.value.trim() === "";
     setEmpty(none);
-    onInput?.(asked(), none && !chips.has());
+    onInput?.(draft(), none && !chips.has());
   };
-  // the field's words and the chips together set to `next`, split again (splitAsked): the chips first, so the field's
-  // input event reads them, and one undo step for both (usePasteChips); a field the engine left as it was is told here
-  const replace = (a: HTMLTextAreaElement, next: string, focus: boolean, inPlace = false) => {
-    const { typed, chips: back } = splitAsked(next);
+  // the field's words and the chips together set to `next`, as it holds them apart: the chips first, so the field's
+  // input event reads them, and one undo step for both (usePasteChips); a field the engine left as it was is told here.
+  // A chip kept in its place keeps its words' count
+  const replace = (a: HTMLTextAreaElement, next: Draft, focus: boolean, inPlace = false) => {
+    const { typed } = next;
     const was = a.value;
+    const now = chips.now();
+    const same =
+      next.pastes.length === now.length && next.pastes.every((t, i) => t === now[i]!.text);
+    const back: readonly PasteChip[] = same
+      ? now
+      : next.pastes.map((t, i) => (now[i]?.text === t ? now[i]! : chipOf(t)));
     const step = chips.set(back, typed);
     if (inPlace) a.value = typed;
     const engine = !inPlace && replaceAll(a, typed, focus);
     if (step !== null) step.engine = engine && was !== typed;
     if (!engine || was === typed) changed();
   };
-  const put = (next: string) => {
+  const put = (next: string | Draft) => {
     const a = area.current;
     if (a === null) return;
-    replace(a, next, true);
+    replace(a, draftIn(next), true);
     a.focus();
   };
   const clear = (only?: string, inPlace = false) => {
@@ -321,9 +347,9 @@ export function Composer<V extends string = string>({
       clearAfter.current = asked();
       return;
     }
-    replace(a, "", mayTakeFocus(a), inPlace);
+    replace(a, EMPTY_DRAFT, mayTakeFocus(a), inPlace);
   };
-  const fill = (text: string, inPlace = false) => {
+  const fill = (text: string | Draft, inPlace = false) => {
     const a = area.current;
     if (a === null) return;
     if (composing.current) {
@@ -332,7 +358,7 @@ export function Composer<V extends string = string>({
       return;
     }
     if (a.value !== "" || chips.has()) return;
-    replace(a, text, mayTakeFocus(a), inPlace);
+    replace(a, draftIn(text), mayTakeFocus(a), inPlace);
   };
   // the held clear and fill, once the composition is over; in place when the field is losing focus, which it never
   // takes back
@@ -348,6 +374,7 @@ export function Composer<V extends string = string>({
   useImperativeHandle(ref, () => ({
     focus: () => area.current?.focus(),
     text: asked,
+    draft,
     setText: put,
     clear: (only) => clear(only),
     fill: (text) => fill(text),

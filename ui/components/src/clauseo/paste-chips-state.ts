@@ -1,7 +1,7 @@
-// The composer's hold on its long pastes' chips (paste-chips.tsx draws them): the list, the chips' joined text, and
-// their part in the field's undo.
+// The composer's hold on its long pastes' chips (paste-chips.tsx draws them): the list, the chips' texts, and their
+// part in the field's undo.
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { chipOf, chipTail, type PasteChip } from "./paste-chips-logic.ts";
+import { chipOf, type PasteChip } from "./paste-chips-logic.ts";
 
 /** A change of the chips made with a change of the field's words (a clear, fill or set through the handle), which
  * Cmd/Ctrl+Z takes back with the field's: `box` is what the field held after it, `engine` whether the engine's undo
@@ -14,22 +14,24 @@ type Step = {
 };
 
 /** The composer's chips: the list to draw, read through a ref so a keystroke never waits on a render, and the chips'
- * text joined once per change (chipTail) for the composer's one string. */
+ * texts listed once per change, for the composer's Draft (paste-chips-logic.ts). */
 export function usePasteChips(initial: readonly PasteChip[]) {
   const [list, setList] = useState(initial);
   const now = useRef(initial);
-  const tail = useRef(chipTail(initial));
+  const texts = useRef(initial.map((c) => c.text));
   const steps = useRef<Step[]>([]);
   const put = (next: readonly PasteChip[]) => {
     if (next === now.current) return;
     now.current = next;
-    tail.current = chipTail(next);
+    texts.current = next.map((c) => c.text);
     setList(next);
   };
   return {
     list,
-    /** The chips' texts joined, as they follow the typed words. */
-    tail: () => tail.current,
+    /** The chips' texts, in paste order: the same array until the chips change. */
+    pastes: () => texts.current,
+    /** The chips now, read without a render. */
+    now: () => now.current,
     has: () => now.current.length > 0,
     /** A paste of `text`, as the last chip: the lawyer's own change, so no undo step of the field's comes with it. */
     add: (text: string) => {

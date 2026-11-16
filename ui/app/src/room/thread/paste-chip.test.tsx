@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 // The long paste's chips in the room (composer.tsx, paste-chips.tsx): what goes is one string, the typed words then
 // each chip's text; the cap counts the chips, the window's (prompt-cost.ts) and the host's (ChatGPT's, #985) alike, and
-// a refusal keeps them; and the chips come back with the composer's words wherever those come back: the draft after a
-// visit to another conversation, and the stopped question's refill.
+// a refusal keeps them; and the chips come back with the composer's words wherever those come back, as they were: the
+// draft after a visit to another conversation (the typed words and the chips' texts kept apart), and the stopped
+// question's refill.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -109,7 +110,7 @@ const A = "01900002-0000-7000-8000-00000000000a" as MatterId;
 const B = "01900002-0000-7000-8000-00000000000b" as MatterId;
 
 /** WorkComposer as room.tsx renders it, keyed by its conversation; `refill` as work.tsx passes the stopped question. */
-function room(drafts: Drafts) {
+function room(drafts: Drafts, sent: string[] = []) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -126,7 +127,10 @@ function room(drafts: Drafts) {
           refused={null}
           failed={null}
           refill={refill}
-          onAsk={async () => true}
+          onAsk={async (text) => {
+            sent.push(text);
+            return true;
+          }}
           onStop={() => {}}
         />,
       ),
@@ -147,12 +151,12 @@ test("a conversation's chips are in its draft: there again after a visit to anot
   await show(A);
   expect(chips()).toBe(2);
   expect(field().value).toBe("Compare.");
-  expect(drafts.get(A)).toBe(`Compare.\n\n${one}\n\n${two}`);
+  expect(drafts.get(A)).toEqual({ typed: "Compare.", pastes: [one, two] });
   await act(async () => document.querySelector<HTMLButtonElement>(".q-paste button")!.click());
   await show(B);
   await show(A);
   expect(chips()).toBe(1);
-  expect(drafts.get(A)).toBe(`Compare.\n\n${two}`);
+  expect(drafts.get(A)).toEqual({ typed: "Compare.", pastes: [two] });
 });
 
 test("the stopped question's refill brings its chips back with its words", async () => {
@@ -174,5 +178,36 @@ test("the stopped question's refill brings its chips back with its words", async
   await show(A, { key: "01900002-0000-7000-8000-0000000000e1" as EntryId, text: asked });
   expect(chips()).toBe(1);
   expect(field().value).toBe("Read this.");
-  expect(drafts.get(A)).toBe(asked);
+  expect(drafts.get(A)).toEqual({ typed: "Read this.", pastes: [one] });
+});
+
+const enter = () =>
+  act(async () => {
+    field().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, bubbles: true, cancelable: true }),
+    );
+  });
+
+test("a chip whose text holds another chip's comes back byte for byte after a visit, and goes as pasted", async () => {
+  const drafts: Drafts = new Map();
+  const sent: string[] = [];
+  const show = room(drafts, sent);
+  await show(A);
+  // agreement A, then schedule B pasted out of it: A = P + B + S
+  const schedule = brief(25_000, "s");
+  const agreement = `${brief(30_000, "p")}${schedule}${brief(30_000, "q")}`;
+  await paste(agreement);
+  await paste(schedule);
+  await type("Is B consistent with A?");
+  await show(B);
+  await show(A);
+  expect(chips()).toBe(2);
+  expect(field().value).toBe("Is B consistent with A?");
+  const back = drafts.get(A)!;
+  expect(back.pastes).toHaveLength(2);
+  expect(back.pastes[0] === agreement).toBe(true);
+  expect(back.pastes[1] === schedule).toBe(true);
+  await enter();
+  expect(sent).toHaveLength(1);
+  expect(sent[0] === `Is B consistent with A?\n\n${agreement}\n\n${schedule}`).toBe(true);
 });

@@ -2,6 +2,7 @@
 // Undo send, and the answers to the agent's permission requests and questions. Which thread is open is the conversations' (conversations.ts), which also make the thread on a draft's
 // first Ask and title it once the question is accepted, so a visit leaves no empty thread behind. A refused command
 // shows by its code only, never its message.
+import type { Draft } from "@clauseo/components/clauseo/paste-chips-logic.ts";
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
@@ -48,8 +49,9 @@ export function useRefused(): [ErrorCode | null, (code: ErrorCode | null) => voi
 
 /** Each conversation's words in the composer's field, by its key (conversations.ts), kept above the room's Work, so
  * leaving a conversation or its matter and coming back finds them where the lawyer left them (a refused send promises
- * "Your question is kept."). */
-export type Drafts = Map<string, string>;
+ * "Your question is kept."). Each holds the typed words and each long paste's text apart, as the composer does
+ * (paste-chips-logic.ts's Draft), so its chips come back as they were. */
+export type Drafts = Map<string, Draft>;
 
 /** What the session needs of the open conversation (conversations.ts). */
 export type ConversationLink = {

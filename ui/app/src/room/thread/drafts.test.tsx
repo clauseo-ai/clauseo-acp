@@ -165,11 +165,11 @@ test("tokens survive a visit to another conversation as their own words: a paper
   const words = '/review compare @"Pleadings/Board minutes.pdf" ';
   expect(field().value).toBe(words);
   expect(handle.current?.mentioned().map((m) => m.id)).toEqual(["f-1"]);
-  expect(drafts.get(A)).toBe(words);
+  expect(drafts.get(A)).toEqual({ typed: words, pastes: [] });
   // to another conversation and back: the words exactly, the tokens' text in them
   await show(B);
   expect(field().value).toBe("");
   await show(A);
-  expect(drafts.get(A)).toBe(words);
+  expect(drafts.get(A)).toEqual({ typed: words, pastes: [] });
   expect(field().value).toBe(words);
 });

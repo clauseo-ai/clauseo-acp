@@ -401,7 +401,8 @@ export class Conversations {
   #leave(m: MatterState): void {
     const key = m.open;
     if (key === null) return;
-    const typed = (this.#drafts.get(key) ?? "").trim() !== "";
+    const kept = this.#drafts.get(key);
+    const typed = kept !== undefined && (kept.typed.trim() !== "" || kept.pastes.length > 0);
     if (typed) return;
     // words of whitespace only go with their conversation
     this.#drafts.delete(key);
