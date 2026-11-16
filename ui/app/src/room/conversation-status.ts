@@ -29,7 +29,7 @@ export function rowWords(
   const resting = s === "idle" || s === "agent_exited" || s === "idle_stopped";
   if (resting && row.seen === false && row.last_stop?.reason === "failed")
     return { state: "failed", at: row.last_stop.at };
-  if (s === "idle" && row.seen === false && row.last_stop !== undefined) {
+  if (resting && row.seen === false && row.last_stop !== undefined) {
     const reason = row.last_stop.reason;
     if (reason === "cancelled" || reason === "not_allowed" || reason === "outside_matter")
       return { state: "stopped", at: row.last_stop.at };
