@@ -53,6 +53,16 @@ pub struct WordBlackline {
     /// differ. Empty when none; missing reads as empty, and empty is left out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub changed_tables: Vec<ChangedTable>,
+    /// How many tables' formatting differs, those past the 50 [`Self::changed_tables`] holds
+    /// counted too: more than that list's length only past the cap. 0 when none; missing reads
+    /// as 0, and 0 is left out.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub changed_tables_total: u32,
+}
+
+/// Whether `value` is its type's default, for a field left out when it is.
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
 }
 
 /// A footnote, an endnote, a header or a footer that holds a change, shown after the body.

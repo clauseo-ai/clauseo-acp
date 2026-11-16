@@ -216,6 +216,7 @@ pub(crate) fn read_view(json: &str) -> Result<Read, ViewFailure> {
             changed_links: Vec::new(),
             parts: Vec::new(),
             changed_tables: Vec::new(),
+            changed_tables_total: 0,
         },
         skipped: text.skipped,
         first_skip: text.first_skip,
