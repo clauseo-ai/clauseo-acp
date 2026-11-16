@@ -62,13 +62,11 @@ pub(super) fn launch_keys(
         let part = connectors_part(prepared.run.case_law.relay().is_some());
         // The part `session_loads` would fill, from the same inputs: the browser entry's state
         // as it stands now (a slot taken in between leaves wrong words, but no browser).
-        let control = loads::mcp_control(&actor.managed_mcp);
-        let (_, browser_switch) = switches(actor);
+        let switch = (loads::mcp_control(&actor.managed_mcp), switches(actor).1);
         let matter = super::session::folder(actor, thread)?;
         let downloads = matter.join(browser::DOWNLOADS_FOLDER);
         let fallback = browser::fallback_downloads(&prepared.run.notes);
-        let folders = (downloads.as_path(), fallback.as_path());
-        let inputs = browser_inputs(actor, &prepared.run, (control, browser_switch), folders);
+        let inputs = browser_inputs(actor, &prepared.run, switch, (&downloads, &fallback));
         let (_, entry) = browser::hook_servers(actor.profile.mcp_servers(&agent_id), &inputs);
         let shell = shell_browser(actor, &prepared.run, &agent_id);
         let kind = AgentKind::of(&agent_id);
@@ -444,9 +442,8 @@ fn case_law_servers(
     (rest, entry, state)
 }
 
-/// What the `browser` entry of `run`'s session needs (`agent::loads::browser`), whose
-/// matter's downloads folder is `downloads.0` and Clauseo's own downloads folder for the
-/// matter `downloads.1` (`browser::fallback_downloads`).
+/// What the `browser` entry of `run`'s session needs (`agent::loads::browser`), given the
+/// matter's downloads folder and Clauseo's own for it (`browser::fallback_downloads`).
 fn browser_inputs<'a>(
     actor: &Actor,
     run: &'a RunFolders,
