@@ -3,8 +3,9 @@
 //!
 //! - Claude ([`claude_options`]): `disallowedTools` always holds `WebSearch` and `WebFetch`
 //!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
-//!   `WebSearch` (not on a Bedrock login, which has none), a bare `WebFetch` (every page fetched
-//!   unasked) and one `WebFetch(domain:…)` per seed site, and `mcp__case-law__<tool>` per
+//!   `WebSearch` (not on a Bedrock login, which has none) and one `WebFetch(domain:…)` per seed
+//!   site, and no bare `WebFetch` (a hook's is dropped, with any `WebFetch` rule holding `*`), so
+//!   a fetch from any other host goes to the permission mode (decision record 0030), and `mcp__case-law__<tool>` per
 //!   search and read tool (`case_law::UNASKED_TOOLS`) only in a session that got the
 //!   `case-law` entry (any hook rule for that server is dropped otherwise), and before it
 //!   `mcp__<name>` for each of the lawyer's servers that runs without asking
@@ -168,8 +169,8 @@ pub(crate) struct ClaudeKeys<'a> {
     pub(crate) login: Login,
     /// The session's folders.
     pub(crate) folders: Folders<'a>,
-    /// The hosts seeded as `WebFetch(domain:…)` rules, beside the bare `WebFetch` that already
-    /// covers them: kept as the record of the trusted sites (R21's list).
+    /// The hosts seeded as `WebFetch(domain:…)` rules (`browser::seed_sites::WEB_FETCH_SITES`):
+    /// a fetch from one runs unasked, and one from any other host goes to the permission mode.
     pub(crate) seed_sites: &'a [&'a str],
     /// The session runs in forced ask (`agent/forced_ask.rs`): no `allowedTools` at all, the
     /// hook's included, and the forced-ask `permissions.ask` rules in the flag settings.
@@ -207,7 +208,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         if keys.login != Login::Bedrock {
             push_new(&mut allowed, "WebSearch");
         }
-        push_new(&mut allowed, "WebFetch");
+        allowed.retain(|rule| !rule.as_str().is_some_and(is_open_fetch_rule));
         for site in keys.seed_sites {
             push_new(&mut allowed, &format!("WebFetch(domain:{site})"));
         }
@@ -408,6 +409,12 @@ fn forced_ask_settings(settings: &mut Map<String, Value>) {
 
 /// Whether an `allowedTools` rule is for a built-in web tool: `WebSearch`, `WebFetch`, or a
 /// `WebSearch(…)` or `WebFetch(…)` rule.
+/// A `WebFetch` allow rule that covers more than named hosts: the bare tool, or a rule holding
+/// `*` (`WebFetch(domain:*)`, `WebFetch(domain:*.in)`), which Claude Code reads as a pattern.
+fn is_open_fetch_rule(rule: &str) -> bool {
+    rule == "WebFetch" || (rule.starts_with("WebFetch(") && rule.contains('*'))
+}
+
 fn is_web_rule(rule: &str) -> bool {
     WEB_TOOLS.iter().any(|tool| {
         rule.strip_prefix(tool)

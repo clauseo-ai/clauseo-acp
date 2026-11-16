@@ -146,6 +146,14 @@ any ACP message, including permission requests with misleading text.
 - `designed`: A human approves only escalations: paths outside the matter, new web domains, sandbox
   off, full-access modes, "always allow", all through native dialogs drawn by Rust or a denial card that
   opens one
+- `built`: Claude's web fetch runs unasked only for the seeded legal sites
+  (`host/src/browser/seed_sites.rs` `WEB_FETCH_SITES`, exact host names); there is no bare
+  `WebFetch` allow. A fetch from any other host is judged by Anthropic's auto-mode check in auto
+  mode, with no card, and asks once per new site in an ask mode (one card per site per session
+  until stage B's per-matter store remembers it). Limit: the fetch runs in the Claude process,
+  outside the Bash sandbox and the guard hook, so in auto mode that check is the only thing
+  between a poisoned document and a fetch that carries matter text in its URL
+  ([0030](decisions/0030-launch-profile.md), "Claude's web fetches")
 - `built`: Permission answers are checked against the options offered, in the bridge and again in
   the host; `designed`: options are labelled by kind, not by the agent's text (the permission prompt)
 - `designed`: ACP message sizes are capped; Clauseo advertises no file or terminal access to the

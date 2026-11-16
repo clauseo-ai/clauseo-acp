@@ -12,7 +12,7 @@ use super::browser::Switch;
 use super::profile::{ClaudeKeys, Folders, Login, claude_options, fill_meta, web_search_state};
 use super::profile_tests::{LOCKED_OFF, OFF, ON, reason};
 use super::{CLAUDE_SHELL_FOLDER_VAR, GuardHook, McpControl, session_meta};
-use crate::browser::seed_sites::SEED_SITES;
+use crate::browser::seed_sites::WEB_FETCH_SITES;
 
 pub(super) fn folders() -> Folders<'static> {
     Folders {
@@ -35,7 +35,7 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         web_search,
         login,
         folders: folders(),
-        seed_sites: SEED_SITES,
+        seed_sites: &WEB_FETCH_SITES,
         forced_ask: false,
         data: &NO_DENY,
         case_law: false,
@@ -59,7 +59,8 @@ fn strings(value: &Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-/// R21's "Permissions": the profile's allow list, `WebSearch`, bare `WebFetch`, the seed sites.
+/// R21's "Permissions": the profile's allow list, `WebSearch`, the seed sites, and no bare
+/// `WebFetch` (decision record 0030, "Claude's web fetches").
 #[test]
 fn the_allow_list_is_exactly_the_permissions_list() {
     let hook = json!({"allowedTools": [
@@ -79,15 +80,43 @@ fn the_allow_list_is_exactly_the_permissions_list() {
         "Bash(stetdoc lookup:*)".to_owned(),
         "Bash(stetdoc capabilities:*)".to_owned(),
         "WebSearch".to_owned(),
-        "WebFetch".to_owned(),
     ];
     expected.extend(
-        SEED_SITES
+        WEB_FETCH_SITES
             .iter()
             .map(|site| format!("WebFetch(domain:{site})")),
     );
     assert_eq!(strings(&options["allowedTools"]), expected);
+    assert!(!strings(&options["allowedTools"]).contains(&"WebFetch"));
     assert_eq!(options.get("disallowedTools"), None);
+}
+
+/// A hook's bare `WebFetch`, or a `WebFetch` rule holding `*`, would let every host through
+/// unasked: dropped while web search is on. A hook's named host stays.
+#[test]
+fn a_hooks_open_webfetch_rules_are_dropped() {
+    let hook = json!({"allowedTools": [
+        "WebFetch",
+        "WebFetch(domain:*)",
+        "WebFetch(domain:*.in)",
+        "WebFetch(domain:firm.example)",
+        "mcp__browser",
+    ]});
+    for login in [Login::FirstParty, Login::Bedrock, Login::OtherCloud] {
+        let options = options(&hook, &keys(ON, login));
+        let allowed = strings(&options["allowedTools"]);
+        assert!(
+            allowed
+                .iter()
+                .all(|rule| *rule != "WebFetch" && !rule.contains('*')),
+            "{allowed:?}"
+        );
+        assert_eq!(
+            allowed[..2],
+            ["WebFetch(domain:firm.example)", "mcp__browser"]
+        );
+        assert!(allowed.contains(&"WebFetch(domain:www.sci.gov.in)"));
+    }
 }
 
 #[test]
@@ -109,7 +138,7 @@ fn a_bedrock_login_keeps_webfetch_and_skips_the_preflight() {
     let options = options(&json!({}), &keys(ON, Login::Bedrock));
     let allowed = strings(&options["allowedTools"]);
     assert!(!allowed.contains(&"WebSearch"));
-    assert!(allowed.contains(&"WebFetch") && allowed.contains(&"WebFetch(domain:sci.gov.in)"));
+    assert!(!allowed.contains(&"WebFetch") && allowed.contains(&"WebFetch(domain:sci.gov.in)"));
     assert_eq!(options["settings"]["skipWebFetchPreflight"], json!(true));
     assert_eq!(options.get("disallowedTools"), None);
     let other = self::options(&json!({}), &keys(ON, Login::OtherCloud));
