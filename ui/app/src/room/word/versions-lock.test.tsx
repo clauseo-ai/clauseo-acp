@@ -57,6 +57,12 @@ async function undoRefused(paths: string[], error: HostError = locked): Promise<
   return room;
 }
 
+// A test that times out mid-act (a 1 ms limit, so it always does): the next tests still get their room, because the
+// harness takes no act once its test has ended and unmounts after the one in flight (testing/rig-life.ts).
+test.fails("a test that times out mid-act leaves the next test its room", async () => {
+  h = await undoRefused(["drafts/notes.docx"]);
+}, 1);
+
 test("an undo of one .docx refused with the lock: Word's stage, naming it, with Try again", async () => {
   h = await undoRefused(["drafts/notes.docx"]);
   expect(h.sent("undo_step")).toHaveLength(1);
