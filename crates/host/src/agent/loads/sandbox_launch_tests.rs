@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use clauseo_protocol::ErrorCode;
 use serde_json::{Value, json};
 
-use super::sandbox::{ClaudeSandbox, Off, SandboxOs, WILDCARDS, Wild, wild_folder};
+use super::sandbox::{ClaudeSandbox, Off, OtherMatter, SandboxOs, WILDCARDS, Wild, wild_folder};
 use super::sandbox_tests::{Session, settings};
 
 /// What a launch carries: the flag settings' `sandbox` object, or the refusal's code.
@@ -121,12 +121,24 @@ fn every_mac_and_linux_launch_has_a_sandbox_or_a_refusal() {
     {
         use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
+        // A name that is not UTF-8 (where another matter's folder leads; a stored folder is
+        // always UTF-8): its own code, never agent.sandbox_unavailable's restart advice.
         let mut session = Session::new("s-1");
-        session
-            .other_matters
-            .push(PathBuf::from(OsStr::from_bytes(b"/Users/l/\xff")));
-        let launch = launch(&session, SandboxOs::Linux);
-        assert_eq!(launch, Launch::Refused(ErrorCode::AgentSandboxUnavailable));
+        let mut other = OtherMatter::at("/Users/l/Clients/B");
+        other.walked = Some(PathBuf::from(OsStr::from_bytes(b"/Users/l/\xff")));
+        session.other_matters.push(other);
+        for os in [SandboxOs::Mac, SandboxOs::Linux] {
+            let launch = launch(&session, os);
+            assert_eq!(
+                launch,
+                Launch::Refused(ErrorCode::MatterNameUnreadable),
+                "{os:?}"
+            );
+            assert_ne!(launch, Launch::Refused(ErrorCode::AgentSandboxUnavailable));
+        }
+        let refusal = Off::NotUtf8.refusal().expect("a refusal");
+        assert_eq!(refusal.code(), ErrorCode::MatterNameUnreadable);
+        assert!(!refusal.to_wire().message().contains("Users"));
     }
 }
 
@@ -192,7 +204,7 @@ fn with_matter(path: &str) -> Session {
 
 fn with_other(path: &str) -> Session {
     let mut session = Session::new("s-1");
-    session.other_matters.push(PathBuf::from(path));
+    session.other_matters.push(OtherMatter::at(path));
     session
 }
 

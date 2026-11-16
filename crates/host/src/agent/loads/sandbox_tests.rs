@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::browser::Switch;
 use super::profile::{ClaudeKeys, Folders, Login, claude_options};
-use super::sandbox::{ClaudeSandbox, Off, SandboxOs, SandboxPaths, Wild};
+use super::sandbox::{ClaudeSandbox, Off, OtherMatter, SandboxOs, SandboxPaths, Wild};
 use crate::agent::data_fence::LaunchDeny;
 
 static NO_DENY: LaunchDeny = LaunchDeny {
@@ -33,7 +33,8 @@ pub(super) struct Session {
     pub(super) home: PathBuf,
     pub(super) claude_tmp: Option<PathBuf>,
     pub(super) data: Vec<PathBuf>,
-    pub(super) other_matters: Vec<PathBuf>,
+    pub(super) other_matters: Vec<OtherMatter>,
+    pub(super) matter_walked: Option<PathBuf>,
 }
 
 const DATA: &str = "/Users/l/Library/Application Support/Clauseo";
@@ -61,7 +62,8 @@ impl Session {
             home: data.join("agents/claude-acp/home"),
             claude_tmp: Some(PathBuf::from(SHORT)),
             data: vec![data.to_path_buf()],
-            other_matters: vec![PathBuf::from("/Users/l/Clients/B")],
+            other_matters: vec![OtherMatter::at("/Users/l/Clients/B")],
+            matter_walked: None,
             run,
         }
     }
@@ -69,6 +71,7 @@ impl Session {
     pub(super) fn paths(&self) -> SandboxPaths<'_> {
         SandboxPaths {
             matter: &self.matter,
+            matter_walked: self.matter_walked.as_deref(),
             work: &self.work,
             tmp: &self.tmp,
             claude_tmp: self.claude_tmp.as_deref(),
@@ -228,8 +231,8 @@ fn the_data_folder_and_other_matters_are_denied_wherever_they_are() {
     session.data = vec![PathBuf::from("/srv/clauseo"), PathBuf::from("/srv/link")];
     session.matter = PathBuf::from("/Volumes/x/Clients/A");
     session.other_matters = vec![
-        PathBuf::from("/Volumes/x/Clients/B"),
-        PathBuf::from("/opt/C"),
+        OtherMatter::at("/Volumes/x/Clients/B"),
+        OtherMatter::at("/opt/C"),
     ];
     let sandbox = mac(&session.paths()).unwrap();
     for denied in [
@@ -304,7 +307,7 @@ fn a_wildcard_in_an_own_path_sends_no_sandbox() {
 fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
     let mut session = Session::new("s-1");
     session.matter = PathBuf::from("/Users/l/Clients/Smith [2024]");
-    session.other_matters = vec![PathBuf::from("/Users/l/Clients/Jones [a-b]")];
+    session.other_matters = vec![OtherMatter::at("/Users/l/Clients/Jones [a-b]")];
     let escaped = "/Users/l/Clients/Smith [[]2024]";
     let on_mac = mac(&session.paths()).unwrap();
     for list in [&on_mac.allow_write, &on_mac.allow_read] {
@@ -468,7 +471,7 @@ fn a_path_that_is_not_utf8_fails_closed() {
             .any(|path| path.contains("Users/l/\u{fffd}"))
     );
     let mut session = Session::new("s-1");
-    session.other_matters.push(odd);
+    session.other_matters.push(OtherMatter::at(odd));
     assert_eq!(mac(&session.paths()), Err(Off::NotUtf8));
 }
 
@@ -522,55 +525,24 @@ fn only_the_trust_roots_file_opens() {
     assert!(!sandbox.allow_read.iter().any(|path| path.contains("/tls")));
 }
 
-/// A data folder reached through a link (`CLAUSEO_DATA_DIR` naming one): Claude Code keeps an
-/// allowed path's link spelling when the link leads elsewhere, so the session's work, temp and
-/// notes folders, its `PATH` file and the Python runtime go in under the real spelling too.
-/// Nothing wider: never `<data>` itself, and another run's folders stay shut under both.
+/// A data folder reached through a link (`CLAUSEO_DATA_DIR` naming one): the sandbox opens
+/// only the paths it is handed, which the launch prep has re-spelled under the real path
+/// (`launch_checks::folders::respell_run`, tested with a real link there), and adds nothing
+/// under the other spelling; both spellings stay denied, and neither opens another run's
+/// folders or `<data>` itself.
 #[test]
-fn a_linked_data_folder_opens_its_folders_under_both_spellings() {
+fn a_linked_data_folder_opens_nothing_under_its_other_spelling() {
     const REAL: &str = "/Volumes/Data/Clauseo";
     let plain = mac(&Session::new("s-1").paths()).unwrap();
     let mut session = Session::new("s-1");
     session.data = vec![PathBuf::from(REAL), PathBuf::from(DATA)];
     let linked = mac(&session.paths()).unwrap();
-    let real = |path: &Path| Path::new(REAL).join(path.strip_prefix(DATA).unwrap());
-    let text = |path: PathBuf| path.to_str().unwrap().to_owned();
-    let runtime = session.path[1].parent().unwrap().to_path_buf();
-    for path in [&session.work, &session.tmp, &session.notes] {
-        assert!(linked.allow_write.contains(&text(real(path))), "{path:?}");
-        assert!(linked.allow_read.contains(&text(real(path))), "{path:?}");
-        assert!(linked.allow_read.contains(&text(path.clone())), "{path:?}");
+    assert_eq!(linked.allow_write, plain.allow_write);
+    for open in &linked.allow_read {
+        assert!(!open.starts_with(REAL), "{open}");
     }
-    for path in [&session.env_file, &runtime] {
-        assert!(linked.allow_read.contains(&text(real(path))), "{path:?}");
-        assert!(linked.allow_read.contains(&text(path.clone())), "{path:?}");
-    }
-    // What was added is exactly those five, under the real spelling.
-    let mut expected: Vec<String> = [&session.work, &session.tmp, &session.notes]
-        .into_iter()
-        .chain([&session.env_file, &runtime])
-        .map(|path| text(real(path)))
-        .collect();
-    let lists = [
-        (&plain.allow_write, &linked.allow_write),
-        (&plain.allow_read, &linked.allow_read),
-    ];
-    for (before, after) in lists {
-        assert!(before.iter().all(|path| after.contains(path)));
-        let mut added: Vec<String> = after
-            .iter()
-            .filter(|path| !before.contains(path))
-            .cloned()
-            .collect();
-        added.sort();
-        expected.sort();
-        assert!(
-            added.iter().all(|path| expected.contains(path)),
-            "{added:?}"
-        );
-    }
-    // Another run's folders, and <data> itself, are under no allowed path in either spelling.
     for data in [REAL, DATA] {
+        assert!(linked.deny_read.iter().any(|deny| deny == data), "{data}");
         let other_run = Path::new(data).join("run/s-2");
         for shut in [
             Path::new(data).to_path_buf(),

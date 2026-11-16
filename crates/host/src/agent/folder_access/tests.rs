@@ -194,12 +194,13 @@ fn claude_codes_working_directory_exit_is_folder_inaccessible_with_no_path() {
     assert!(session_refusal(&other).is_none());
 }
 
-/// Claude Code's exit at start when its sandbox can't start (`failIfUnavailable`), passed on
-/// as the adapter passes any exit at start (assumed the same shape as above):
+/// Claude Code's exit at start when its sandbox can't start (`failIfUnavailable`), as
+/// claude-agent-acp 0.89.1 passed it on over stdio for Claude Code 2.1.293 on Linux with bwrap
+/// hidden (captured 2026-11-16, `session/new`, -32603, the text verbatim):
 /// `agent.sandbox_unavailable`, with no path, never "Claude sent something Clauseo can't read".
 #[test]
 fn claude_codes_sandbox_exit_is_sandbox_unavailable_with_no_path() {
-    let details = r#"{"details":"Claude Code process exited with code 1. stderr: Error: sandbox required but unavailable: bwrap not found at /Users/rohan/x"}"#;
+    let details = r#"{"details":"Claude Code returned an error result: Sandbox required but unavailable: sandbox is enabled but dependencies are missing: bubblewrap (bwrap) not installed · install missing tools (e.g. apt install bubblewrap socat) or see https://code.claude.com/docs/en/sandboxing. Set sandbox.failIfUnavailable=false to allow unsandboxed execution."}"#;
     let error = Error::Acp(clauseo_acp::Error::Rpc {
         method: "session/new".to_owned(),
         code: -32603,

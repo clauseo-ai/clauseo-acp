@@ -388,19 +388,20 @@ error_codes! {
         connection, or its name did not resolve. The answer so far is kept; asking again can \
         work.";
     MatterFolderWildcard = "matter.folder_wildcard", retryable: false, meaning: "The matter \
-        folder's path has `*` or `?` in a folder's name, on macOS or Linux, where Claude's \
-        sandbox cannot name it (Claude Code reads a sandbox path as a pattern with no escape for \
-        those characters), so the host did not start Claude rather than start it without the \
-        sandbox. Renaming the folder fixes it.";
+        folder's path has `*` or `?` in a folder's name, on macOS or Linux, which Claude's sandbox \
+        reads as a pattern with no escape, so the host did not start Claude rather than start it \
+        without the sandbox. Renaming the folder fixes it.";
     AgentSandboxWildcard = "agent.sandbox_wildcard", retryable: false, meaning: "A path Claude's \
         sandbox must name outside the matter folder's own path (Clauseo's data, work, temp or \
         notes folder, or another matter's folder) has `*` or `?`, on macOS or Linux, where \
         Claude's sandbox cannot name it, so the host did not start Claude rather than start it \
         without the sandbox.";
     AgentSandboxUnavailable = "agent.sandbox_unavailable", retryable: false, meaning: "Claude's \
-        sandbox could not be set up for the launch on macOS or Linux (Claude's short temp folder \
-        could not be made, a folder to deny is not UTF-8, or Claude Code exited at start because \
-        its sandbox could not start), so Claude was not started without the sandbox.";
+        sandbox could not be set up on macOS or Linux (its short temp folder was not made, or \
+        Claude Code exited at start as its sandbox could not start), so Claude was not started.";
+    MatterNameUnreadable = "matter.name_unreadable", retryable: false, meaning: "A folder \
+        Claude's sandbox must deny has a name that is not UTF-8 (where another matter's folder \
+        leads, or the data folder's real path), so Claude did not start; renaming it fixes it.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

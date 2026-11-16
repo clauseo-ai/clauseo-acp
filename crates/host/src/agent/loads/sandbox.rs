@@ -15,11 +15,13 @@
 //!   covers more than the folder; on Linux it is widened to the folder above it with neither
 //!   ([`glob`], where the runtime's conversion is quoted). Otherwise another matter's folder
 //!   never turns the sandbox off;
-//! - when a path it must deny is not UTF-8 (it could not be named).
+//! - when a path it must deny is not UTF-8 (it could not be named): where another matter's
+//!   folder leads, or `<data>`'s real path (a stored folder is always UTF-8).
 //!
 //! Each of those but Windows refuses the launch ([`ClaudeSandbox::for_launch`], [`Off::refusal`]:
-//! `matter.folder_wildcard`, `agent.sandbox_wildcard`, `agent.sandbox_unavailable`), with one
-//! warn line: Claude never starts on macOS or Linux without its sandbox.
+//! `matter.folder_wildcard`, `agent.sandbox_wildcard`, `matter.name_unreadable`,
+//! `agent.sandbox_unavailable`), with one warn line: Claude never starts on macOS or Linux
+//! without its sandbox.
 //!
 //! A `[` (in `Smith [2024]`) is escaped instead ([`escape_brackets`]). Claude Code 2.1.293
 //! reads a sandbox path holding `*`, `?`, `[` or `]` as a glob (its `W4t`, sandbox-runtime
@@ -66,14 +68,17 @@
 //!   (stage C on a Mac) ([`DENIED_DOMAINS`]).
 //! - `filesystem.allowWrite`: the matter folder, the work folder, the session's temp folder, the
 //!   matter's notes and Claude's short temp folder (`CLAUDE_CODE_TMPDIR`, where sandboxed
-//!   commands' `TMPDIR` is made). Under a linked data folder the work, temp and notes folders
-//!   go in under its real spelling too, and so do the `PATH` file and the Python runtime in
-//!   `allowRead` ([`data_twins`]): the runtime keeps a link spelling that leads elsewhere.
+//!   commands' `TMPDIR` is made). Under a linked data folder every one of them, and every
+//!   path in `allowRead`, is the real spelling: the launch prep re-spells the run
+//!   (`launch_checks::folders::respell_run`), since Seatbelt has to read a link to walk it and
+//!   the link sits under the denied home (stage C's Mac row on 0fcfd522b).
 //! - `filesystem.denyWrite`: the matter's `.clauseo` folder, which holds `matter.json`, the
 //!   marker that finds a moved matter folder again.
 //! - `filesystem.denyRead`: the lawyer's home (other clients' files, `~/.ssh`), each spelling of
 //!   `<data>` (it may lie outside the home), every other matter's folder the host knows at the
-//!   launch, `/Volumes` and `/Users/Shared`; the data fence's `Read(…)` deny rules become read
+//!   launch, as stored and where it leads unless that is a place the sandbox must leave open
+//!   ([`links`]: `/`, a folder above the session's own, a system folder; the launch then tells
+//!   the lawyer), `/Volumes` and `/Users/Shared`; the data fence's `Read(…)` deny rules become read
 //!   denies too. A matter registered after the launch is in no list: the accepted residual.
 //! - `filesystem.allowRead` ([`ClaudeSandbox::allow_read`]): re-opens, within those denies,
 //!   what a sandboxed command needs, with the `PATH` file Claude Code reads into each command
@@ -100,6 +105,9 @@ use serde_json::{Map, Value, json};
 use crate::error::Error;
 
 pub(crate) mod glob;
+pub(crate) mod links;
+
+pub(crate) use links::OtherMatter;
 
 /// The hosts a sandboxed command may not reach even through Claude Code's proxy: loopback, where
 /// the browser's debugging port and agent-browser's daemon listen, and the any-address
@@ -147,7 +155,7 @@ pub(crate) enum Off {
     Windows,
     /// Claude's short temp folder was not made.
     NoTemp,
-    /// A path to deny is not UTF-8.
+    /// A path to deny is not UTF-8: where another matter's folder leads, or `<data>`'s.
     NotUtf8,
     /// A path of the session's own, or of `<data>`, holds one of [`WILDCARDS`].
     Wildcard(Wild),
@@ -171,8 +179,9 @@ impl Off {
     /// The launch refusal for this reason: none on Windows, where no sandbox was meant to be;
     /// `matter.folder_wildcard` for a wildcard in the matter folder's path,
     /// `agent.sandbox_wildcard` for one in Clauseo's own folders or for another matter's pattern
-    /// that would cover this session's folders ([`Off::CoversOwn`]), `agent.sandbox_unavailable`
-    /// otherwise. The detail names no path.
+    /// that would cover this session's folders ([`Off::CoversOwn`]), `matter.name_unreadable`
+    /// for a name that is not UTF-8 (renaming fixes it, a restart never), and
+    /// `agent.sandbox_unavailable` otherwise. The detail names no path.
     pub(crate) fn refusal(&self) -> Option<Error> {
         let (code, detail) = match self {
             Self::Windows => return None,
@@ -195,8 +204,8 @@ impl Off {
                 "Claude's short temp folder was not made, so it has no sandbox",
             ),
             Self::NotUtf8 => (
-                ErrorCode::AgentSandboxUnavailable,
-                "a folder Claude's sandbox must deny is not UTF-8",
+                ErrorCode::MatterNameUnreadable,
+                "a folder Claude's sandbox must deny has a name that is not UTF-8",
             ),
         };
         Some(Error::refused(code, detail))
@@ -222,6 +231,9 @@ pub(crate) struct ClaudeSandbox {
     pub(crate) allow_read: Vec<String>,
     /// The paths whose violations go unreported, for every command.
     pub(crate) quiet: Vec<String>,
+    /// The names of the other matters where their folders lead was left out of the denies
+    /// ([`links`]), for the launch's notice.
+    pub(crate) links_left_out: Vec<String>,
 }
 
 /// The session's paths the sandbox names.
@@ -229,6 +241,8 @@ pub(crate) struct ClaudeSandbox {
 pub(crate) struct SandboxPaths<'a> {
     /// The matter folder (the agent's working folder).
     pub(crate) matter: &'a Path,
+    /// Where it leads (the launch prep's walk), when that differs from `matter`.
+    pub(crate) matter_walked: Option<&'a Path>,
     /// `<run>/work`.
     pub(crate) work: &'a Path,
     /// `<run>/tmp` (`agent::temp`).
@@ -258,8 +272,8 @@ pub(crate) struct SandboxPaths<'a> {
     pub(crate) claude_home: &'a Path,
     /// Each spelling of `<data>` (`LaunchDeny::spellings`).
     pub(crate) data: &'a [PathBuf],
-    /// Every other matter's folder the host knows.
-    pub(crate) other_matters: &'a [PathBuf],
+    /// Every other matter the host knows, its folder as stored and where it leads.
+    pub(crate) other_matters: &'a [OtherMatter],
 }
 
 /// The prefix of the Python runtime's folder name (`agents::python`).
@@ -290,23 +304,26 @@ impl ClaudeSandbox {
             tracing::warn!("Claude's sandbox is off: its temp folder was not made; refused");
             return Err(Off::NoTemp);
         };
-        let denied = paths.data.iter().chain(paths.other_matters);
+        let marker = paths.matter.join(MATTER_MARKER);
+        let own = [paths.matter, paths.work, paths.tmp, paths.notes, claude_tmp];
+        let mut sandbox = Self {
+            allow_write: texts(own),
+            deny_write: texts([marker.as_path()]),
+            deny_read: Vec::new(),
+            allow_read: Self::allow_read(paths, claude_tmp),
+            quiet: texts([paths.claude_home.join(SNAPSHOTS).as_path()]),
+            links_left_out: Vec::new(),
+        };
+        let denies = sandbox.other_denies(os, paths);
+        let denied = paths.data.iter().chain(&denies.spellings);
         let Some(mut deny_read) = strict_texts(denied.map(PathBuf::as_path)) else {
-            tracing::warn!("Claude's sandbox is off: a folder to deny is not UTF-8; refused");
+            not_utf8(paths, &denies.spellings);
             return Err(Off::NotUtf8);
         };
         deny_read.splice(0..0, DENY_READ.iter().map(|path| (*path).to_owned()));
-        let marker = paths.matter.join(MATTER_MARKER);
-        let own = [paths.matter, paths.work, paths.tmp, paths.notes, claude_tmp];
-        let twins = data_twins([paths.work, paths.tmp, paths.notes], paths.data);
-        let mut sandbox = Self {
-            allow_write: texts(own.into_iter().chain(twins.iter().map(PathBuf::as_path))),
-            deny_write: texts([marker.as_path()]),
-            deny_read,
-            allow_read: Self::allow_read(paths, claude_tmp),
-            quiet: texts([paths.claude_home.join(SNAPSHOTS).as_path()]),
-        };
-        let others = texts(paths.other_matters.iter().map(PathBuf::as_path));
+        sandbox.deny_read = deny_read;
+        sandbox.links_left_out = denies.left_out;
+        let others = texts(denies.spellings.iter().map(PathBuf::as_path));
         if let Some(wild) = sandbox.wildcard(paths.matter, &others) {
             tracing::warn!(
                 folder = %wild.folder,
@@ -315,7 +332,9 @@ impl ClaudeSandbox {
             );
             return Err(Off::Wildcard(wild));
         }
-        if glob::fence_others(os, &mut sandbox).is_err() {
+        let own_matter = [Some(paths.matter), paths.matter_walked];
+        let own_matter = texts(own_matter.into_iter().flatten());
+        if glob::fence_others(os, &mut sandbox, &own_matter).is_err() {
             tracing::warn!(
                 "Claude's sandbox is off: another matter's deny covers its own; refused"
             );
@@ -326,6 +345,24 @@ impl ClaudeSandbox {
             .allow_read
             .extend(tool_results(paths.claude_home, paths.matter));
         Ok(sandbox)
+    }
+
+    /// The other matters' read-deny spellings ([`links::other_denies`]), against what the
+    /// session must keep open: its matter (each spelling), Claude's config folder and every
+    /// folder its lists open.
+    fn other_denies(&self, os: SandboxOs, paths: &SandboxPaths<'_>) -> links::OtherDenies {
+        let lists = [&self.allow_write, &self.allow_read, &self.quiet];
+        let mut open: Vec<&Path> = lists.into_iter().flatten().map(Path::new).collect();
+        open.extend(
+            [
+                Some(paths.matter),
+                paths.matter_walked,
+                Some(paths.claude_home),
+            ]
+            .iter()
+            .flatten(),
+        );
+        links::other_denies(os, paths.other_matters, &open)
     }
 
     /// The lists with each `[` escaped where `os` reads globs, each escaped allowed path also
@@ -348,6 +385,7 @@ impl ClaudeSandbox {
             deny_read: denied(self.deny_read),
             allow_read: allowed(self.allow_read),
             quiet: denied(self.quiet),
+            links_left_out: self.links_left_out,
         }
     }
 
@@ -390,9 +428,6 @@ impl ClaudeSandbox {
         folders.extend(paths.skills.iter().cloned());
         folders.extend(paths.env_file.map(Path::to_path_buf));
         folders.extend(paths.ca_file.map(Path::to_path_buf));
-        // Under a linked data folder, these also under its other spelling.
-        let mut twins = vec![paths.work, paths.tmp, paths.notes];
-        twins.extend(paths.env_file);
         for folder in paths.path {
             let runtime = folder.parent().filter(|parent| {
                 parent
@@ -400,10 +435,8 @@ impl ClaudeSandbox {
                     .and_then(|name| name.to_str())
                     .is_some_and(|name| name.starts_with(RUNTIME_PREFIX))
             });
-            twins.extend(runtime);
             folders.push(runtime.unwrap_or(folder).to_path_buf());
         }
-        folders.extend(data_twins(twins, paths.data));
         texts(folders.iter().map(PathBuf::as_path))
     }
 
@@ -479,26 +512,6 @@ fn allowed_entries(path: String) -> Vec<String> {
     }
 }
 
-/// For each of `paths` under one spelling of `<data>` (`data`), the same path under each other
-/// spelling. Claude Code resolves a link in an allowed path only when it stays under the path,
-/// and Seatbelt matches the real one, so under a linked data folder (`CLAUSEO_DATA_DIR` may
-/// name one) the configured spelling alone opens nothing. Only what `paths` names: never
-/// `<data>` itself or another run's folders.
-fn data_twins<'a>(paths: impl IntoIterator<Item = &'a Path>, data: &[PathBuf]) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    for path in paths {
-        for spelling in data {
-            let rest = path.strip_prefix(spelling).ok();
-            let Some(rest) = rest.filter(|rest| !rest.as_os_str().is_empty()) else {
-                continue;
-            };
-            let others = data.iter().filter(|other| *other != spelling);
-            out.extend(others.map(|other| other.join(rest)));
-        }
-    }
-    out
-}
-
 /// The paths as UTF-8 text, in order, each once; one that is not UTF-8 is left out.
 fn texts<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -508,6 +521,30 @@ fn texts<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Vec<String> {
         }
     }
     out
+}
+
+/// One warn line for a deny that is not UTF-8: the other matter's id whose folder holds or
+/// leads to it, else `<data>`'s; never the path.
+fn not_utf8(paths: &SandboxPaths<'_>, spellings: &[PathBuf]) {
+    let bad = |path: &PathBuf| path.to_str().is_none();
+    let matter = paths.other_matters.iter().find(|other| {
+        bad(&other.stored)
+            || other
+                .walked
+                .as_ref()
+                .is_some_and(|walked| spellings.contains(walked) && bad(walked))
+    });
+    match matter {
+        Some(other) => tracing::warn!(
+            matter = ?other.id,
+            "Claude's sandbox is off: another matter's folder leads to a name that is not UTF-8; \
+             refused"
+        ),
+        None => tracing::warn!(
+            "Claude's sandbox is off: the data folder's real path has a name that is not UTF-8; \
+             refused"
+        ),
+    }
 }
 
 /// [`texts`], or none when a path is not UTF-8.

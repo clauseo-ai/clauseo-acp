@@ -1557,7 +1557,8 @@ expression: counts_schema()
         "agent.unreachable",
         "matter.folder_wildcard",
         "agent.sandbox_wildcard",
-        "agent.sandbox_unavailable"
+        "agent.sandbox_unavailable",
+        "matter.name_unreadable"
       ],
       "type": "string"
     },

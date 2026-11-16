@@ -109,14 +109,15 @@ pub(crate) struct TurnState {
     run: Option<launch_checks::RunFolders>,
     /// The skill packs its launches skipped, each pack and reason told once for the host's run.
     packs: launch_checks::PackNotices,
-    /// The thread was told Claude's auto mode is not available (`session/claude_mode.rs`), once
-    /// for the host's run.
+    /// Other matters whose folders lead somewhere unexpected, each told once (`LinkNotices`).
+    links: profile_loads::LinkNotices,
+    /// Told Claude's auto mode is not available (`session/claude_mode.rs`), once a host run.
     auto_told: bool,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
-    /// The thread's sources in progress: the browser's opens and the agents' web calls that have
-    /// not finished. Kept past a turn's end, so a completion that comes late or in a replay finds
-    /// its call and is still not recorded (`updates.rs` drops it by its origin).
+    /// The thread's sources in progress: the browser's opens and the agents' web calls not
+    /// finished, kept past a turn's end so a late or replayed completion finds its call and is
+    /// still not recorded (`updates.rs` drops it by its origin).
     sources: crate::sources::Sources,
     /// Text not durable yet.
     text: ThreadText,
@@ -134,8 +135,7 @@ pub(crate) struct TurnState {
     undo: Option<Box<undo::UndoLog>>,
     /// The prompts waiting behind the current turn, whether they are held, steers in flight.
     queue: queue::ThreadQueue,
-    /// The turn `HostHandle::stop_agents` cancelled: unless it ends `EndTurn`, it goes back
-    /// to the queue held for the sign-in (`sign_in.rs`).
+    /// The turn `HostHandle::stop_agents` cancelled: back to the held queue unless `EndTurn`.
     stopped_for_sign_in: Option<TurnId>,
     /// Where the thread's name stands for the agent's titles (D-070), in this run.
     title: state::TitleWindow,

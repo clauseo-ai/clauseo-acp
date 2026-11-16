@@ -340,6 +340,13 @@ open_data_enum! {
             /// How many.
             more: u32,
         },
+        /// Another matter's folder now leads somewhere Claude's sandbox must leave open (`/`, a
+        /// folder above this matter's, a system folder): the link stays denied, where it leads
+        /// is not, and the lawyer should check that folder. Told at the launch, once a matter.
+        OtherMatterLinkUnexpected = "other_matter_link_unexpected" {
+            /// The other matter's name as the lawyer sees it; never a path.
+            matter: String,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -364,6 +371,9 @@ open_data_enum! {
             reason: PackSkipReason::Changed,
         },
         NoticeKind::AutoModeUnavailable,
+        NoticeKind::OtherMatterLinkUnexpected {
+            matter: "Acme v Jones".to_owned(),
+        },
     ];
 }
 

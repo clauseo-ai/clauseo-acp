@@ -9,6 +9,7 @@ use clauseo_protocol::{ErrorCode, MatterId};
 
 use super::{RunFolders, RunSweep};
 use crate::agent::data_fence;
+use crate::agent::loads::sandbox::OtherMatter;
 use crate::error::Error;
 
 /// [`RunFolders::make`]: makes `run`'s folders, each through no link below `data`. Before
@@ -79,35 +80,88 @@ fn data_spellings(data: &Path) -> Vec<PathBuf> {
     spellings
 }
 
-/// The launch's fences, made by the launch prep: Claude's data folder deny rules
-/// ([`launch_deny`]) and the other matters' folders Claude's sandbox denies, each spelling
-/// ([`matter_spellings`] of what [`super::launch_paths`] set, as stored, for a Claude session).
-/// A matter registered after the launch is in no list (the accepted residual).
-pub(super) fn fences(run: &mut RunFolders, stored: &Path, data: &Path, home: Option<&Path>) {
-    run.data_deny = launch_deny(run, stored, data, home);
-    run.other_matters = matter_spellings(&run.other_matters);
+/// For a Claude launch: the data folder `data` (as configured) resolved once, and, when that
+/// differs (`CLAUSEO_DATA_DIR` names a link), every folder of `run` under it re-spelled under
+/// the real path (`RunFolders::respelled`), so the agent is handed only real spellings: its
+/// sandbox denies the link by name and sits under the denied home, and Seatbelt has to read a
+/// link to walk it, so nothing is reachable through the link spelling whatever the allow lists
+/// say (stage C's Mac linked-data row on 0fcfd522b). The deny lists keep both spellings
+/// ([`launch_deny`]). Returns the data folder to make the run's folders under. File system
+/// calls: off the actor.
+pub(super) fn respell_run(run: &mut RunFolders, data: &Path) -> PathBuf {
+    let Ok(real) = dunce::canonicalize(data) else {
+        return data.to_owned();
+    };
+    if real == data {
+        return real;
+    }
+    run.respelled = Some((data.to_owned(), real.clone()));
+    for path in [
+        &mut run.root,
+        &mut run.work,
+        &mut run.notes,
+        &mut run.browser,
+        &mut run.agent_browser,
+        &mut run.browser_config,
+        &mut run.downloads,
+        &mut run.browser_profile,
+        &mut run.skill_packs,
+        &mut run.relay_token,
+    ] {
+        *path = respelled(path, data, &real);
+    }
+    real
 }
 
-/// Each of `folders` where it leads (the network-safe walk, `network_paths::touchable`), then
-/// as stored when that differs; as stored alone when it is on a share, does not resolve, or is
-/// not absolute. Claude Code's sandbox resolves no link in a deny, so a matter registered
-/// through one is denied by both.
-pub(super) fn matter_spellings(folders: &[PathBuf]) -> Vec<PathBuf> {
+impl RunFolders {
+    /// `path` under the data folder as configured, under its real path when the run was
+    /// re-spelled ([`RunFolders::respelled`]); as it is otherwise.
+    pub(crate) fn real(&self, path: &Path) -> PathBuf {
+        self.respelled.as_ref().map_or_else(
+            || path.to_owned(),
+            |(link, real)| respelled(path, link, real),
+        )
+    }
+}
+
+/// `path` under `from` as the same path under `to`; as it is otherwise.
+pub(super) fn respelled(path: &Path, from: &Path, to: &Path) -> PathBuf {
+    path.strip_prefix(from)
+        .map_or_else(|_| path.to_owned(), |rest| to.join(rest))
+}
+
+/// The launch's fences, made by the launch prep: Claude's data folder deny rules
+/// ([`launch_deny`]), and for a Claude sandbox where the other matters' folders
+/// ([`matter_spellings`] of what [`super::launch_paths`] set, as stored) and this session's
+/// matter folder lead. A matter registered after the launch is in no list (the accepted
+/// residual).
+pub(super) fn fences(run: &mut RunFolders, stored: &Path, data: &Path, home: Option<&Path>) {
+    run.data_deny = launch_deny(run, stored, data, home);
+    if run.claude_tmp.is_some() {
+        matter_spellings(&mut run.other_matters);
+        run.matter_walked = walked(&crate::agent::session_folder(stored));
+    }
+}
+
+/// Sets where each of `others`' folders leads ([`walked`]). Claude Code's sandbox resolves no
+/// link in a deny, so a matter registered through one is denied by both, unless where it leads
+/// is a place the sandbox must leave open (`agent::loads::sandbox::links`).
+pub(super) fn matter_spellings(others: &mut [OtherMatter]) {
+    for other in others {
+        other.walked = walked(&other.stored);
+    }
+}
+
+/// Where `folder` leads (the network-safe walk, `network_paths::touchable`) when that differs
+/// from it; none when it is on a share, does not resolve, or is not absolute.
+pub(super) fn walked(folder: &Path) -> Option<PathBuf> {
     let net = crate::network_paths::NetEnv::current();
     let disk = crate::network_paths::resolve::Disk::resolved(&net);
-    let mut out: Vec<PathBuf> = Vec::new();
-    for folder in folders {
-        let walked = folder
-            .is_absolute()
-            .then(|| crate::network_paths::touchable(folder, folder, &disk))
-            .flatten();
-        for spelling in walked.into_iter().chain([folder.clone()]) {
-            if !out.contains(&spelling) {
-                out.push(spelling);
-            }
-        }
-    }
-    out
+    let walked = folder
+        .is_absolute()
+        .then(|| crate::network_paths::touchable(folder, folder, &disk))
+        .flatten();
+    walked.filter(|walked| walked != folder)
 }
 
 /// Claude's data folder deny rules for this launch: every entry of `data` that is not the
@@ -125,7 +179,11 @@ pub(super) fn launch_deny(
     let projects = claude_home.map_or_else(Vec::new, |home| {
         data_fence::claude_projects(home, &[&cwd, stored])
     });
-    let mut deny = data_fence::launch_deny(data_spellings(data), data, &own, &projects);
+    // Under a linked data folder `data` is the real path (`respell_run`); the link is denied too.
+    let mut spellings = data_spellings(data);
+    let link = run.respelled.as_ref().map(|(link, _)| link);
+    spellings.extend(link.filter(|link| !spellings.contains(link)).cloned());
+    let mut deny = data_fence::launch_deny(spellings, data, &own, &projects);
     deny.own_reads = data_fence::own_reads(data, &[&run.work, &run.notes]);
     deny
 }

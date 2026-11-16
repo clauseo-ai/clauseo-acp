@@ -71,9 +71,13 @@ const CWD_MISSING: &str = "`cwd` does not exist";
 /// adapter passes it on in the answer's `data.details`.
 const ACCESS_REFUSED: &str = "Can't access working directory";
 
-/// What Claude Code 2.1.293 prints when its sandbox can't start and the settings say
+/// What Claude Code 2.1.293 says when its sandbox can't start and the settings say
 /// `failIfUnavailable` (Clauseo's always do, `agent/loads/sandbox.rs`): it exits at start rather
-/// than run commands unsandboxed ("Error: sandbox required but unavailable: …").
+/// than run commands unsandboxed. Matched without case: measured on Linux with bwrap hidden
+/// (2026-11-16), it prints "Error: sandbox required but unavailable: …" on stderr, but its
+/// result ("Sandbox required but unavailable: …") is what claude-agent-acp 0.89.1 passes
+/// on, as `session/new`'s -32603 with `data.details` "Claude Code returned an error result:
+/// Sandbox required but unavailable: …".
 const SANDBOX_UNAVAILABLE: &str = "sandbox required but unavailable";
 
 /// The failure for a Claude whose sandbox could not start ([`SANDBOX_UNAVAILABLE`]).
@@ -148,7 +152,11 @@ pub(crate) fn session_refusal(error: &Error) -> Option<Error> {
     let says = |words: &str| {
         message.contains(words) || acp.rpc_data().is_some_and(|text| text.contains(words))
     };
-    if says(SANDBOX_UNAVAILABLE) {
+    let says_folded = |words: &str| {
+        let has = |text: &str| text.to_lowercase().contains(words);
+        has(message) || acp.rpc_data().is_some_and(has)
+    };
+    if says_folded(SANDBOX_UNAVAILABLE) {
         tracing::warn!("Claude Code's sandbox could not start, so it exited at start");
         return Some(Error::refused(
             ErrorCode::AgentSandboxUnavailable,

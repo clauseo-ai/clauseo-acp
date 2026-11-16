@@ -19,6 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::links::{fold, key};
 use super::{ClaudeSandbox, SandboxOs, WILDCARDS, texts};
 
 /// Whether the sandbox can name `path` as the folder it is: UTF-8, no `*` or `?`.
@@ -38,15 +39,21 @@ pub(super) fn widened(path: &Path) -> PathBuf {
 pub(super) struct CoversOwn;
 
 /// Each deny in `sandbox` that holds `*` or `?` (another matter's registered folder:
-/// `ClaudeSandbox::has_wildcard` turned every other off) on `os`: on macOS kept as the pattern,
-/// [`CoversOwn`] when [`deny_covers`] has it cover one of the session's own folders (what its
-/// lists allow, before escaping); on Linux replaced by the folder above it with neither
-/// ([`widened`]), [`CoversOwn`] when that folder holds one of them.
-pub(super) fn fence_others(os: SandboxOs, sandbox: &mut ClaudeSandbox) -> Result<(), CoversOwn> {
+/// `ClaudeSandbox::wildcard` turned every other off) on `os`: on macOS kept as the pattern,
+/// [`CoversOwn`] when [`covers`] has it cover one of the session's own folders (what its
+/// lists allow, before escaping, and `matter`, the matter folder as stored and where it leads);
+/// on Linux replaced by the folder above it with neither ([`widened`]), [`CoversOwn`] when
+/// that folder holds one of them, compared by name.
+pub(super) fn fence_others(
+    os: SandboxOs,
+    sandbox: &mut ClaudeSandbox,
+    matter: &[String],
+) -> Result<(), CoversOwn> {
     let own: Vec<String> = sandbox
         .allow_write
         .iter()
         .chain(&sandbox.allow_read)
+        .chain(matter)
         .cloned()
         .collect();
     for list in [&mut sandbox.deny_read, &mut sandbox.deny_write] {
@@ -58,14 +65,18 @@ pub(super) fn fence_others(os: SandboxOs, sandbox: &mut ClaudeSandbox) -> Result
                 continue;
             }
             if os == SandboxOs::Mac {
-                if own.iter().any(|path| deny_covers(deny, path)) {
+                if own.iter().any(|path| covers(deny, path)) {
                     return Err(CoversOwn);
                 }
                 kept.push(Path::new(deny));
                 continue;
             }
             let above = widened(Path::new(deny));
-            if own.iter().any(|path| Path::new(path).starts_with(&above)) {
+            let above_key = key(os, &above);
+            if own
+                .iter()
+                .any(|path| key(os, Path::new(path)).starts_with(&above_key))
+            {
                 return Err(CoversOwn);
             }
             widen.push(above);
@@ -82,6 +93,18 @@ pub(super) fn fence_others(os: SandboxOs, sandbox: &mut ClaudeSandbox) -> Result
         *list = next;
     }
     Ok(())
+}
+
+/// Whether Claude Code's macOS deny for `pattern` covers `path` as Seatbelt matches it, which
+/// ignores case and Unicode form (measured): [`deny_covers`] of the two as they are, folded
+/// (`network_paths::fold_name`: lower case, NFD) and lower case in NFC. Any of them covering
+/// refuses, which only ever refuses more.
+pub(crate) fn covers(pattern: &str, path: &str) -> bool {
+    use unicode_normalization::UnicodeNormalization;
+    let nfc = |text: &str| -> String { text.nfc().flat_map(char::to_lowercase).collect() };
+    deny_covers(pattern, path)
+        || deny_covers(&fold(SandboxOs::Mac, pattern), &fold(SandboxOs::Mac, path))
+        || deny_covers(&nfc(pattern), &nfc(path))
 }
 
 /// One step of `globToRegex`'s regex.

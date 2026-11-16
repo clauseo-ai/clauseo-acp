@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use super::super::sandbox::glob::deny_covers;
-use super::super::sandbox::{ClaudeSandbox, Off, SandboxOs};
+use super::super::sandbox::{ClaudeSandbox, Off, OtherMatter, SandboxOs};
 use super::{Session, mac};
 
 /// The session's own folders: what its lists allow, before escaping.
@@ -32,7 +32,7 @@ fn a_wildcard_neighbour_is_denied_as_its_pattern() {
     for name in ["What?", "A*B"] {
         let mut session = Session::new("s-1");
         let other = PathBuf::from("/Users/l/Clients").join(name);
-        session.other_matters.push(other.clone());
+        session.other_matters.push(OtherMatter::at(other.clone()));
         let sandbox = mac(&session.paths()).expect("the sandbox stays on");
         let pattern = other.to_str().unwrap();
         assert!(
@@ -60,7 +60,10 @@ fn stage_cs_registered_names_keep_the_sandbox_on() {
     let bracket = docs.join("stagec-proof-claude-[x]");
     let mut session = Session::new("s-1");
     session.matter = docs.join("stagec-1097/Matter A");
-    session.other_matters = vec![star.clone(), bracket.clone()];
+    session.other_matters = vec![
+        OtherMatter::at(star.clone()),
+        OtherMatter::at(bracket.clone()),
+    ];
     let sandbox = mac(&session.paths()).expect("the sandbox stays on");
     let star = star.to_str().unwrap();
     assert!(sandbox.deny_read.iter().any(|deny| deny == star));
@@ -82,7 +85,7 @@ fn stage_cs_registered_names_keep_the_sandbox_on() {
 fn a_neighbour_pattern_over_the_own_matter_sends_no_sandbox() {
     let mut session = Session::new("s-1");
     session.matter = PathBuf::from("/x/A");
-    session.other_matters = vec![PathBuf::from("/x/?")];
+    session.other_matters = vec![OtherMatter::at("/x/?")];
     for os in [SandboxOs::Mac, SandboxOs::Linux] {
         assert_eq!(
             ClaudeSandbox::for_os(os, &session.paths()),
@@ -97,7 +100,7 @@ fn a_neighbour_pattern_over_the_own_matter_sends_no_sandbox() {
 #[test]
 fn linux_widens_a_wildcard_neighbour_or_refuses() {
     let mut session = Session::new("s-1");
-    session.other_matters = vec![PathBuf::from("/Users/l/Elsewhere/What?/2024")];
+    session.other_matters = vec![OtherMatter::at("/Users/l/Elsewhere/What?/2024")];
     let linux = ClaudeSandbox::for_os(SandboxOs::Linux, &session.paths()).unwrap();
     assert!(
         linux
@@ -106,8 +109,74 @@ fn linux_widens_a_wildcard_neighbour_or_refuses() {
             .any(|deny| deny == "/Users/l/Elsewhere")
     );
     assert!(!linux.deny_read.iter().any(|deny| deny.contains('?')));
-    session.other_matters = vec![PathBuf::from("/Users/l/Clients/What?")];
+    session.other_matters = vec![OtherMatter::at("/Users/l/Clients/What?")];
     let linux = ClaudeSandbox::for_os(SandboxOs::Linux, &session.paths());
     assert_eq!(linux, Err(Off::CoversOwn));
     assert!(mac(&session.paths()).is_ok());
+}
+
+/// The security review of #1153, L1: the "covers own matter" check compares the matter folder
+/// where it leads as well as stored, folded as Seatbelt matches (case and Unicode form) on
+/// macOS: `/tmp/x/Own` (which leads to `/private/tmp/x/Own`) against `/private/tmp/x/O*`,
+/// `/Users/l/clients/Own` against `/Users/l/Clients/O*`, and an NFC name against an NFD
+/// pattern each refuse; so does the walked spelling on Linux.
+#[test]
+fn the_own_matter_is_covered_by_where_it_leads_and_folded() {
+    let cases: [(&str, Option<&str>, &str); 3] = [
+        (
+            "/tmp/x/Own",
+            Some("/private/tmp/x/Own"),
+            "/private/tmp/x/O*",
+        ),
+        ("/Users/l/clients/Own", None, "/Users/l/Clients/O*"),
+        (
+            "/Users/l/Clients/Caf\u{e9}",
+            None,
+            "/Users/l/Clients/Cafe\u{301}*",
+        ),
+    ];
+    for (matter, walked, other) in cases {
+        let mut session = Session::new("s-1");
+        session.matter = PathBuf::from(matter);
+        session.other_matters = vec![OtherMatter::at(other)];
+        assert!(
+            mac(&session.paths()).is_ok(),
+            "{matter}: as stored alone, no match"
+        );
+        session.matter_walked = walked.map(PathBuf::from);
+        if walked.is_none() {
+            // The fold alone finds it.
+            assert_eq!(mac(&session.paths()), Err(Off::CoversOwn), "{matter}");
+            continue;
+        }
+        assert_eq!(mac(&session.paths()), Err(Off::CoversOwn), "{matter}");
+        let linux = ClaudeSandbox::for_os(SandboxOs::Linux, &session.paths());
+        assert_eq!(linux, Err(Off::CoversOwn), "{matter} on Linux");
+    }
+}
+
+/// Where another matter's folder leads is left out of the denies when it is `/`, a system
+/// folder the shell reads or one above it, a folder above the session's own or the stored
+/// folder it came from, compared folded on macOS; a link to `~/Documents` stays denied.
+#[test]
+fn where_a_link_leads_is_left_open_only_for_the_shells_places() {
+    use super::super::sandbox::links::left_open;
+    let stored = Path::new("/Users/l/Clients/B");
+    let own = [Path::new("/Users/l/Clients/A")];
+    let mac_open = |walked: &str| left_open(SandboxOs::Mac, Path::new(walked), stored, &own);
+    for walked in [
+        "/",
+        "/usr",
+        "/private",
+        "/private/var",
+        "/Users",
+        "/users/L/clients",
+    ] {
+        assert!(mac_open(walked), "{walked}");
+    }
+    for walked in ["/Users/l/Documents", "/usr/local/x", "/Users/l/Clients/C"] {
+        assert!(!mac_open(walked), "{walked}");
+    }
+    let linux = left_open(SandboxOs::Linux, Path::new("/users/l"), stored, &own);
+    assert!(!linux, "Linux compares names as they are");
 }

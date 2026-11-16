@@ -405,6 +405,7 @@ fn only_a_launch_with_no_shell_sandbox_gets_the_glob_denies() {
         deny_read: Vec::new(),
         allow_read: Vec::new(),
         quiet: Vec::new(),
+        links_left_out: Vec::new(),
     };
     let sandboxed = launch_deny_rules(&deny, Some(&sandbox));
     assert!(

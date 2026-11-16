@@ -553,6 +553,10 @@ fn attach_commit(
     for notice in super::launch_checks::pack_notices(actor, thread) {
         out.push(actor, notice)?;
     }
+    // The other matters whose folders now lead somewhere unexpected, each told once.
+    for notice in super::profile_loads::link_notices(actor, thread) {
+        out.push(actor, notice)?;
+    }
     let now = actor.now().wall;
     let entry = actor
         .threads

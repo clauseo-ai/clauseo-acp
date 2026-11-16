@@ -171,6 +171,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentSandboxUnavailable,
             "Claude's short temp folder was not made, so it has no sandbox",
         ),
+        failed(
+            ErrorCode::MatterNameUnreadable,
+            "a folder Claude's sandbox must deny has a name that is not UTF-8",
+        ),
     ]
 }
 
@@ -294,6 +298,16 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                    before running commands."
                 .to_owned(),
             kind: Some(NoticeKind::AutoModeUnavailable),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "The folder for Acme v Jones has been replaced by a shortcut to somewhere \
+                   else, so Clauseo can no longer keep Claude out of the place it leads to. \
+                   Check that folder before you open Acme v Jones again."
+                .to_owned(),
+            kind: Some(NoticeKind::OtherMatterLinkUnexpected {
+                matter: "Acme v Jones".to_owned(),
+            }),
         },
         Notice {
             level: NoticeLevel::Warning,

@@ -60,6 +60,7 @@ use crate::agent::codex_fence::Listed;
 use crate::agent::data_fence::LaunchDeny;
 use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::agent::loads::lawyer::Reads as McpReads;
+use crate::agent::loads::sandbox::OtherMatter;
 use crate::agent::login_link::{self, Checked, LoginCheck};
 use crate::agent::{claude_tmp, codex, data_folder};
 use crate::browser::session::BrowserSession;
@@ -164,8 +165,14 @@ pub(crate) struct RunFolders {
     /// path, then as configured when it differs, and the patterns under it, every entry not this
     /// session's own enumerated by the launch prep; later run folders and notes are in no rule.
     pub(crate) data_deny: LaunchDeny,
-    /// The other matters' folders Claude's sandbox denies, each spelling (`folders::fences`).
-    pub(crate) other_matters: Vec<PathBuf>,
+    /// The other matters Claude's sandbox denies, each folder as stored and where it leads
+    /// (`folders::fences`).
+    pub(crate) other_matters: Vec<OtherMatter>,
+    /// Where this session's matter folder leads, when that differs from it (`folders::fences`,
+    /// for Claude's sandbox).
+    pub(crate) matter_walked: Option<PathBuf>,
+    /// Under a linked data folder: it as configured, and its real path (`folders::respell_run`).
+    pub(crate) respelled: Option<(PathBuf, PathBuf)>,
     /// What the launch prep listed for Codex's data fence (`agent::codex_fence::list`): the
     /// siblings of this session's run folder and notes, `run.old-*`, and what of `<data>/agents`
     /// and its runtime folder the shell needs not. Each folder is denied whole until then.
@@ -238,6 +245,8 @@ impl RunFolders {
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
             other_matters: Vec::new(),
+            matter_walked: None,
+            respelled: None,
             codex_listed: Listed::default(),
             case_law: relay::CaseLaw::Absent,
             egress: None,
@@ -346,6 +355,13 @@ pub(super) fn prepare(
             job,
             move || {
                 data_folder::refuse_data_folder(&stored, &data)?;
+                // Claude gets the data folder's real spelling alone (`folders::respell_run`).
+                let data = if claude {
+                    folders::respell_run(&mut run, &data)
+                } else {
+                    data
+                };
+                let home = home.map(|home| run.real(&home));
                 // The working folder the agent starts in, unless too deep or named with a `\`.
                 let cwd = crate::agent::folder_name::launch_cwd(claims.path.kind, &stored)?;
                 let mut answer = None;

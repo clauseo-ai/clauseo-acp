@@ -15,6 +15,7 @@ use super::packs::{PackPrep, pack_prep};
 use super::relay::{self, CaseLawPrep};
 use super::skill_wait::{SkillsPrep, skills_prep};
 use crate::actor::Actor;
+use crate::agent::loads::sandbox::OtherMatter;
 use crate::agent::loads::tls_roots;
 use crate::agent::shell_path::{self, SessionPath};
 use crate::clock::Clock;
@@ -82,13 +83,17 @@ impl PathPrep {
         let shell = run.browser_shell && run.chrome.is_some();
         let tools = self.browser_tool.filter(|_| shell);
         let (hook, hook_path) = self.hook;
-        let dirs = self.prepend.into_iter().chain(tools).chain(hook).collect();
+        // Under a linked data folder, Claude's are the real spellings (`folders::respell_run`).
+        let dirs = self.prepend.into_iter().chain(tools).chain(hook);
+        let dirs = dirs.map(|dir| run.real(&dir)).collect();
         // The trust roots for a sandbox that will be on: a Claude session on macOS with its
         // short temp folder (`agent::loads::tls_roots`).
         let roots = self
             .tls_roots
             .filter(|_| run.claude_tmp.is_some())
-            .and_then(|(data, clock)| tls_roots::write_roots(&data, &tls_roots::security(clock)));
+            .and_then(|(data, clock)| {
+                tls_roots::write_roots(&run.real(&data), &tls_roots::security(clock))
+            });
         shell_path::prepare(dirs, hook_path, self.kind, &run.root, roots.as_deref())
     }
 }
@@ -115,7 +120,12 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
             .matters
             .iter()
             .filter(|(id, _)| **id != row.matter)
-            .map(|(_, entry)| PathBuf::from(&entry.row.folder_path))
+            .map(|(id, entry)| OtherMatter {
+                id: Some(*id),
+                name: entry.row.name.clone(),
+                stored: PathBuf::from(&entry.row.folder_path),
+                walked: None,
+            })
             .collect();
     }
     let skills = skills_prep(actor, &row.agent);

@@ -27,6 +27,7 @@ use crate::log_file::LIFECYCLE;
 mod sandbox;
 
 use sandbox::session_sandbox;
+pub(super) use sandbox::{LinkNotices, link_notices};
 
 /// `tools.web_search` and `tools.browser`, with whether each is locked.
 fn switches(actor: &Actor) -> (Switch, Switch) {
@@ -204,6 +205,7 @@ pub(super) fn session_loads(
         .as_ref()
         .is_some_and(|(_, part)| *part == BrowserPart::On);
     let sandbox = session_sandbox(actor, thread, kind, &agent_id, &run, matter)?;
+    sandbox::hold_link_notices(actor, thread, sandbox.as_ref());
     // The lawyer's servers this session gets, and those left out (a keychain value or the
     // program missing, the Safe workspace).
     let (lawyer_sent, left_out) = sent_lawyer_servers(&run, control);
