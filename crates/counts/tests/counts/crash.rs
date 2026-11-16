@@ -12,7 +12,7 @@ use clauseo_counts::{
 };
 use serde_json::Value;
 
-use crate::support::{HOUR, SEED, Scratch, about, at, counts_dir, files, plant, saving};
+use crate::support::{HOUR, SEED, Scratch, about, at, counts_dir, files, plant, remove, saving};
 
 pub(crate) const ON: Switch = Switch {
     counts: true,
@@ -396,6 +396,134 @@ fn a_link_in_place_of_the_native_record_is_never_followed() {
     plant(&paper, b"the lawyer's paper");
     let native = scratch.path().join("crash/native");
     crate::write::link_file(&native, &paper);
+
+    let mut record = crashes.open_native(at(2, 0)).unwrap().unwrap();
+    let mut buf = [0_u8; NATIVE_LINE_MAX];
+    record.write_all(native_line(11, true, &mut buf)).unwrap();
+    drop(record);
+
+    assert_eq!(std::fs::read(&paper).unwrap(), b"the lawyer's paper");
+    let kind = std::fs::symlink_metadata(&native).unwrap().file_type();
+    assert!(kind.is_file() && !kind.is_symlink(), "{kind:?}");
+    assert!(std::fs::read(&native).unwrap().ends_with(b"signal 11 1\n"));
+}
+
+/// Runs `call` on a thread and returns its answer; fails when there is none within 10 s, which is
+/// what a read that waited on a FIFO with no writer would be.
+#[cfg(unix)]
+fn answer_within_10s<T: Send + 'static>(call: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || drop(tx.send(call())));
+    rx.recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the call waited on a FIFO that nothing writes to")
+}
+
+/// A FIFO in place of the native record: a read that waited on it would never return. The next
+/// start opens the record anew, as it does for a link, and the FIFO is gone.
+#[cfg(unix)]
+#[test]
+fn a_fifo_in_place_of_the_native_record_is_never_waited_on() {
+    let scratch = Scratch::new("crash-native-fifo");
+    let (_counts, crashes) = recording(&scratch);
+    let native = scratch.path().join("crash/native");
+    crate::write::make_fifo(&native);
+
+    let record = answer_within_10s(move || crashes.open_native(at(2, 0)));
+    let mut record = record.unwrap().unwrap();
+    let mut buf = [0_u8; NATIVE_LINE_MAX];
+    record.write_all(native_line(11, true, &mut buf)).unwrap();
+    drop(record);
+
+    let kind = std::fs::symlink_metadata(&native).unwrap().file_type();
+    assert!(kind.is_file() && !kind.is_symlink(), "{kind:?}");
+    assert!(std::fs::read(&native).unwrap().ends_with(b"signal 11 1\n"));
+}
+
+/// A FIFO in place of a queued report: the queue lists plain files only, so a report that is due
+/// is not read from it, nothing waits on it and no POST is made. It is left where it is, as a
+/// link in its place would be.
+#[cfg(unix)]
+#[test]
+fn a_fifo_in_place_of_a_queued_report_is_never_waited_on() {
+    use std::os::unix::fs::FileTypeExt as _;
+    let scratch = Scratch::new("crash-queued-fifo");
+    let (counts, crashes) = recording(&scratch);
+    crashes
+        .record_renderer_gone(RendererGoneReason::Crashed, at(2, 60))
+        .unwrap();
+    crashes.ingest(&counts, ON, at(2, 120)).unwrap();
+    let queued = crashes.queued();
+    assert_eq!(queued.len(), 1);
+    let path = scratch.path().join("crash/queue").join(&queued[0]);
+    remove(&path);
+    crate::write::make_fifo(&path);
+
+    // Past the latest first try (a day after the crash), when the report would go.
+    let next = crashes.clone();
+    let due = answer_within_10s(move || next.due(&counts, at(3, 2 * HOUR)));
+    assert_eq!(due, None);
+    assert_eq!(crashes.queued(), Vec::<String>::new());
+    assert!(
+        std::fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_fifo()
+    );
+}
+
+/// Makes `link` a symbolic link to `target`, or returns false after a note when this account may
+/// not make one, and the test passes. Under CI (`CI` set and not empty, `false` or `0`) it fails
+/// instead, so Windows CI always runs the test.
+#[cfg(windows)]
+fn made_link(link: &std::path::Path, target: &std::path::Path) -> bool {
+    let Err(err) = crate::write::symlink_file(link, target) else {
+        return true;
+    };
+    let ci =
+        std::env::var_os("CI").is_some_and(|ci| !matches!(ci.to_str(), Some("" | "false" | "0")));
+    assert!(!ci, "CI must make symbolic links for this test: {err}");
+    eprintln!("skipped: this account cannot make symbolic links ({err})");
+    false
+}
+
+/// A link in place of a queued report is never followed: the queue lists plain files only, so
+/// nothing is read through it and the file it names is untouched.
+#[cfg(windows)]
+#[test]
+fn a_link_in_place_of_a_queued_report_is_never_followed() {
+    let scratch = Scratch::new("crash-queued-link");
+    let (counts, crashes) = recording(&scratch);
+    crashes
+        .record_renderer_gone(RendererGoneReason::Crashed, at(2, 60))
+        .unwrap();
+    crashes.ingest(&counts, ON, at(2, 120)).unwrap();
+    let queued = crashes.queued();
+    assert_eq!(queued.len(), 1);
+    let path = scratch.path().join("crash/queue").join(&queued[0]);
+    let paper = scratch.path().join("matter/contract.docx");
+    plant(&paper, b"the lawyer's paper");
+    remove(&path);
+    if !made_link(&path, &paper) {
+        return;
+    }
+
+    assert_eq!(crashes.due(&counts, at(3, 2 * HOUR)), None);
+    assert_eq!(std::fs::read(&paper).unwrap(), b"the lawyer's paper");
+}
+
+/// The Windows twin of [`a_link_in_place_of_the_native_record_is_never_followed`]: a link opened
+/// as itself is no plain file, so the next start deletes it and makes the record anew.
+#[cfg(windows)]
+#[test]
+fn a_link_in_place_of_the_native_record_is_never_followed_on_windows() {
+    let scratch = Scratch::new("crash-native-link-windows");
+    let (_counts, crashes) = recording(&scratch);
+    let paper = scratch.path().join("matter/contract.docx");
+    plant(&paper, b"the lawyer's paper");
+    let native = scratch.path().join("crash/native");
+    if !made_link(&native, &paper) {
+        return;
+    }
 
     let mut record = crashes.open_native(at(2, 0)).unwrap().unwrap();
     let mut buf = [0_u8; NATIVE_LINE_MAX];
