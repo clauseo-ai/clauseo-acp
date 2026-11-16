@@ -394,3 +394,42 @@ test("agent.tool_missing: Windows' line names Windows Security, the Mac's and Li
   // no other line names Claude
   expect(win("ChatGPT")).not.toContain("Claude can");
 });
+
+// matter.claude_tasks_file and matter.git_folder: the Mac's line adds how to show a dot folder in Finder; Windows,
+// Linux and a caller with no place get the line itself.
+test.each([["matter.claude_tasks_file"], ["matter.git_folder"]])(
+  "%s: the Mac's line says how Finder shows a dot folder; the other computers' don't",
+  (code) => {
+    const base = errorWords("en", code);
+    const finder =
+      " Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.";
+    expect(base).toContain("Claude can work here.");
+    expect(errorWords("en", code, undefined, { platform: "mac", parent: null })).toBe(
+      base + finder,
+    );
+    for (const platform of ["windows", "linux"] as const)
+      expect(errorWords("en", code, undefined, { platform, parent: null })).toBe(base);
+    // No Hindi yet: the English stands.
+    expect(errorWords("hi", code, undefined, { platform: "mac", parent: null })).toBe(
+      base + finder,
+    );
+  },
+);
+
+test("matter.git_folder names the thread's agent, on the Mac too", () => {
+  const code = "matter.git_folder";
+  const line = (agent: Parameters<typeof errorWords>[2]) => errorWords("en", code, agent);
+  expect(line(undefined)).toContain("doesn't start Claude in a folder");
+  const mac = errorWords(
+    "en",
+    code,
+    { kind: "codex", name: null },
+    { platform: "mac", parent: null },
+  );
+  expect(mac).toContain("and ChatGPT can work here.");
+  expect(mac).toContain("press Command-Shift-period in Finder");
+  expect(line({ kind: "codex", name: null })).toContain("and ChatGPT can work here.");
+  expect(line({ kind: undefined, name: "gemini" })).toContain("doesn't start gemini in a folder");
+  expect(line({ kind: undefined, name: " " })).toContain("and the AI can work here.");
+  expect(line({ kind: "claude", name: null })).not.toContain("{agent}");
+});

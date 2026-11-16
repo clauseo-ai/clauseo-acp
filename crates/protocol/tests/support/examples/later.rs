@@ -119,6 +119,14 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::MatterFolderPermission,
             "the privacy settings keep Clauseo from opening the matter folder",
         ),
+        failed(
+            ErrorCode::MatterClaudeTasksFile,
+            "the matter folder holds .claude/scheduled_tasks.json",
+        ),
+        failed(
+            ErrorCode::MatterGitFolder,
+            "the matter folder holds a .git folder",
+        ),
     ]
     .into_iter()
     .chain(agent_failures())

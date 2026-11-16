@@ -115,11 +115,15 @@ test("U3's ids are written as they are: one per error code but U3-07's and Versi
     // agent.unreachable's entry came after U3 closed to new ids: it is UC-530 (registry-offline.tsx)
     .filter(([code]) => code !== "agent.unreachable")
     .map(([code]) => `U3-err-${code}`);
-  // agent.tool_missing's agent and Mac (and Linux) lines are U3-err-<code>.<variant> (registry-tool.tsx), after the codes' own
-  const variant = (id: string) =>
-    /^U3-err-agent\.tool_missing\.(chatgpt|named|nameless|mac)/.test(id);
+  // agent.tool_missing's agent and Mac (and Linux) lines (registry-tool.tsx), and the dot-folder refusals' agent and
+  // Mac lines (registry-dot.tsx), are U3-err-<code>.<variant>, after the codes' own
+  const tool = (id: string) => /^U3-err-agent\.tool_missing\.(chatgpt|named|nameless|mac)/.test(id);
+  const dot = (id: string) =>
+    /^U3-err-matter\.(claude_tasks_file|git_folder)\.(chatgpt|named|nameless|mac)/.test(id);
+  const variant = (id: string) => tool(id) || dot(id);
   expect(ids.filter((id) => id.startsWith("U3-err-") && !variant(id))).toEqual(codes);
-  expect(ids.filter(variant)).toHaveLength(7);
+  expect(ids.filter(tool)).toHaveLength(7);
+  expect(ids.filter(dot)).toHaveLength(14);
   expect(ids.filter((id) => !id.startsWith("U3-err-"))).toEqual([
     ...Array.from({ length: 15 }, (_, i) => `U3-${String(i + 1).padStart(2, "0")}`),
     "U3-17",

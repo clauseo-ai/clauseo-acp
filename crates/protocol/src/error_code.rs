@@ -390,6 +390,11 @@ error_codes! {
     AgentToolMissing = "agent.tool_missing", retryable: false, meaning: "A program Clauseo puts \
         on the agent's PATH is missing or changed (a virus scanner may have quarantined it), so \
         the agent was not started; the app copies it again when it is opened.";
+    MatterClaudeTasksFile = "matter.claude_tasks_file", retryable: false, meaning: "The matter \
+        folder holds `.claude/scheduled_tasks.json`; Clauseo doesn't start Claude in a matter \
+        that holds it.";
+    MatterGitFolder = "matter.git_folder", retryable: false, meaning: "The matter folder holds \
+        a `.git` folder (or file); Clauseo doesn't start Claude in a matter that holds it.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
