@@ -32,6 +32,7 @@ import { UTC } from "./registry-utc.tsx";
 import { WEB_SOURCES } from "./registry-web-sources.tsx";
 import { UET } from "./registry-uet.tsx";
 import { UD1 } from "./registry-ud1.tsx";
+import { UD1_CRASH } from "./registry-ud1-crash.tsx";
 import { UD2 } from "./registry-ud2.tsx";
 import { UD2_PLANS } from "./registry-ud2-plans.tsx";
 import { UC_ALL } from "./registry-uc-word.tsx";
@@ -406,6 +407,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UET,
   ...ME,
   ...UD1,
+  ...UD1_CRASH,
   ...UD2,
   ...UD2_PLANS,
   ...UC_ALL,
