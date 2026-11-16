@@ -136,3 +136,50 @@ test("a hidden note stays hidden while out of credit, and the set empties when c
   transport.appEvent({ connectors_changed: state(OUT) });
   expect(store.hidden("t1")).toBe(false);
 });
+
+const low = (on: boolean): ConnectorStatus => ({
+  signed_in: { low: on, balance: { credits: on ? 8 : 200 } },
+});
+
+test("low turning true marks the turns running then, once; low already, or at the first state, marks none", () => {
+  const transport = withFeed();
+  const store = createConnectorsStore(transport);
+  // the first state heard is low: no change, though a turn runs
+  store.turnStarted("t1", "a");
+  transport.appEvent({ connectors_changed: state(low(true)) });
+  expect(store.lowTurn("t1")).toBeUndefined();
+  transport.appEvent({ connectors_changed: state(low(false)) });
+  store.turnEnded("t1", "a");
+  store.turnStarted("t1", "b");
+  store.turnStarted("t2", "c");
+  store.turnStarted("t3", "d");
+  store.turnEnded("t3", "d");
+  transport.appEvent({ connectors_changed: state(low(true)) });
+  expect([store.lowTurn("t1"), store.lowTurn("t2"), store.lowTurn("t3")]).toEqual([
+    "b",
+    "c",
+    undefined,
+  ]);
+  // still low as a later turn starts: it keeps none, and the earlier turn keeps its own
+  store.turnEnded("t1", "b");
+  store.turnStarted("t1", "e");
+  transport.appEvent({ connectors_changed: { ...state(low(true)), locked: true } });
+  expect(store.lowTurn("t1")).toBe("b");
+  // not low clears every one
+  transport.appEvent({ connectors_changed: state(low(false)) });
+  expect(store.lowTurn("t1")).toBeUndefined();
+  expect(store.lowTurn("t2")).toBeUndefined();
+});
+
+test("out of credit counts as low: a top-up that leaves it low marks nothing; connectors off is no change", () => {
+  const transport = withFeed();
+  const store = createConnectorsStore(transport);
+  transport.appEvent({ connectors_changed: state({ out_of_credit: {} }) });
+  store.turnStarted("t1", "a");
+  transport.appEvent({ connectors_changed: state(low(true)) });
+  expect(store.lowTurn("t1")).toBeUndefined();
+  transport.appEvent({ connectors_changed: state(low(false), false) });
+  transport.appEvent({ connectors_changed: state(low(true), false) });
+  transport.appEvent({ connectors_changed: state(low(true)) });
+  expect(store.lowTurn("t1")).toBeUndefined();
+});
