@@ -159,29 +159,58 @@ impl MatterFence {
     }
 
     /// Fills each matter's spellings and fence paths, the session's matter folder spelled each
-    /// of `own` ways and `<data>` each of `data` ways. Reads the file system: off the actor.
+    /// of `own` ways and `<data>` each of `data` ways, each kept place known by where it
+    /// leads too ([`Kept`]), so a spelling of the own matter the caller did not pass (a link
+    /// to it, macOS's `/var` for `/private/var`) is still never fenced. Reads the file system:
+    /// off the actor.
     pub(crate) fn resolve(mut self, own: &[&Path], data: &[&Path]) -> Self {
         let net = NetEnv::current();
         let disk = Disk::resolved(&net);
-        self.own = own.iter().map(|place| place.to_path_buf()).collect();
+        let kept = |place: &Path| Kept {
+            place: place.to_path_buf(),
+            real: real(place, &disk),
+        };
+        let own: Vec<Kept> = own.iter().map(|place| kept(place)).collect();
+        let data: Vec<Kept> = data.iter().map(|place| kept(place)).collect();
+        // The own matter where it leads too, for `split_own` and `innermost`.
+        self.own = Vec::new();
+        for place in own
+            .iter()
+            .flat_map(|kept| [Some(&kept.place), kept.real.as_ref()])
+        {
+            if let Some(place) = place.filter(|place| !self.own.contains(place)) {
+                self.own.push(place.clone());
+            }
+        }
+        let reals: Vec<Option<PathBuf>> = self
+            .others
+            .iter()
+            .map(|other| real(&other.folder, &disk))
+            .collect();
         for other in &mut self.others {
             other.spellings = spellings(&other.folder, &disk);
         }
-        let invited: Vec<PathBuf> = self
+        let invited: Vec<Kept> = self
             .others
             .iter()
-            .filter(|other| other.invited)
-            .flat_map(|other| other.spellings.iter().cloned())
+            .zip(&reals)
+            .filter(|(other, _)| other.invited)
+            .flat_map(|(other, real)| {
+                other.spellings.iter().map(|spelling| Kept {
+                    place: spelling.clone(),
+                    real: real.clone(),
+                })
+            })
             .collect();
-        for other in &mut self.others {
-            let mut keep: Vec<&Path> = own.iter().chain(data).copied().collect();
+        for (other, real) in self.others.iter_mut().zip(&reals) {
+            let mut keep: Vec<&Kept> = own.iter().chain(&data).collect();
             if !other.invited {
-                keep.extend(invited.iter().map(PathBuf::as_path));
+                keep.extend(&invited);
             }
             let mut paths = Vec::new();
             let mut whole = true;
             for spelling in &other.spellings {
-                match fence_paths(spelling, &keep, &net) {
+                match fence_paths(spelling, real.as_deref(), &keep, &net) {
                     Ok(found) => paths.extend(found),
                     Err(()) => whole = false,
                 }
@@ -301,6 +330,22 @@ impl MatterFence {
     }
 }
 
+/// A kept place (the session's matter folder, `<data>`, an invited matter) as given, and where
+/// it leads (`touchable`'s walk) when it resolves.
+struct Kept {
+    /// The place as the launch spells it.
+    place: PathBuf,
+    /// Where it leads, links followed; none on a share or when it does not resolve.
+    real: Option<PathBuf>,
+}
+
+/// Where `path` leads (`touchable`'s walk), when it is absolute and local and resolves.
+fn real(path: &Path, disk: &Disk<'_>) -> Option<PathBuf> {
+    path.is_absolute()
+        .then(|| touchable(path, path, disk))
+        .flatten()
+}
+
 /// `folder`'s spellings: where it leads (`touchable`'s walk), then as stored when that differs;
 /// as stored alone when it is not absolute-and-local or does not resolve.
 fn spellings(folder: &Path, disk: &Disk<'_>) -> Vec<PathBuf> {
@@ -353,20 +398,35 @@ pub(crate) fn key_as(path: &Path, insensitive: bool) -> Vec<OsString> {
         .collect()
 }
 
-/// The fence paths of one spelling of another matter's folder (the module doc), kept places
-/// `keep`: none when it is one of them; `Err` when it holds one and can't be listed down to it.
-fn fence_paths(spelling: &Path, keep: &[&Path], net: &NetEnv) -> Result<Vec<PathBuf>, ()> {
+/// The fence paths of one spelling of another matter's folder (the module doc), the folder
+/// leading to `real`, kept places `keep`: none when it is one of them; `Err` when it holds one
+/// and can't be listed down to it. A kept place is matched by its text under the spelling's, or
+/// by where it leads under `real` (the way down then named as it leads, the same entries under
+/// either spelling): a link to the session's matter, or the matter stored as `/var/…` and the
+/// other as `/private/var/…` (macOS), is still its own matter.
+fn fence_paths(
+    spelling: &Path,
+    real: Option<&Path>,
+    keep: &[&Kept],
+    net: &NetEnv,
+) -> Result<Vec<PathBuf>, ()> {
     let at = key(spelling);
+    let real_at = real.map(key);
     let mut inside: Vec<Vec<OsString>> = Vec::new();
-    for place in keep {
-        let place_key = key(place);
-        if !place_key.starts_with(&at) {
-            continue;
+    for kept in keep {
+        let by_text = Some((kept.place.as_path(), &at));
+        let by_real = kept.real.as_deref().zip(real_at.as_ref());
+        // Each way the place lies under the folder: by its text, and by where it leads.
+        for (place, under) in [by_text, by_real].into_iter().flatten() {
+            let place_key = key(place);
+            if !place_key.starts_with(under) {
+                continue;
+            }
+            if place_key.len() == under.len() {
+                return Ok(Vec::new());
+            }
+            inside.push(below(place, under.len()));
         }
-        if place_key.len() == at.len() {
-            return Ok(Vec::new());
-        }
-        inside.push(below(place, at.len()));
     }
     if inside.is_empty() {
         return Ok(vec![spelling.to_owned()]);

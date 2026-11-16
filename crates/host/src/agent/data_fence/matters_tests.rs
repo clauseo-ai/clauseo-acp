@@ -197,7 +197,10 @@ fn other_matters_are_spelled_both_ways_and_never_cover_the_sessions_own() {
     }
 }
 
-/// A link registered as a matter's folder is denied as itself and where it leads.
+/// A link registered as a matter's folder is denied as itself and where it leads (its canonical
+/// path: `root/outside` is `/private/var/…` on macOS, whose temp folder is under `/var`). Any
+/// other spelling of where it leads is left to Claude Code, which resolves links before it
+/// checks a literal path ([`claude_denies`]).
 #[cfg(unix)]
 #[test]
 fn a_linked_matter_folder_is_denied_at_both_places() {
@@ -220,8 +223,133 @@ fn a_linked_matter_folder_is_denied_at_both_places() {
         ..LaunchDeny::default()
     };
     let rules = claude_deny_rules(&deny, false);
+    let real = dunce::canonicalize(&real).unwrap();
     for path in [link.join("a.pdf"), real.join("a.pdf"), link, real] {
         assert!(denied(&rules, "Read", &path), "{path:?}: {rules:#?}");
+    }
+}
+
+/// Whether Claude Code refuses `tool` on the existing `path` under `rules`: it resolves links
+/// before it checks a literal path (`own_allow`'s module doc), so a rule for the path as given
+/// or for where it leads refuses it.
+fn claude_denies(rules: &[String], tool: &str, path: &Path) -> bool {
+    denied(rules, tool, path) || denied(rules, tool, &dunce::canonicalize(path).unwrap())
+}
+
+/// The folders of the spelling rule: under `root`, a real `private/var/t/Clients` holding the
+/// session's matter `Own` (`a.txt`), another matter `Other` (`b.txt`) and a folder `Sib`;
+/// `var` a link to `private/var` (macOS's `/var`), `clients` a link to the parent folder,
+/// `own-link` and `other-link` links straight to the two matters. Each matter's spellings:
+/// (own, other).
+#[cfg(unix)]
+fn spelled_layout(root: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let real = root.join("private/var/t/Clients");
+    write::create_dir_all(&real.join("Sib")).unwrap();
+    for file in ["Own/a.txt", "Other/b.txt"] {
+        write::create_dir_all(real.join(file).parent().unwrap()).unwrap();
+        write::write_file(&real.join(file), b"x").unwrap();
+    }
+    let link = |target: &Path, name: &str| {
+        write::symlink(target, &root.join(name)).unwrap();
+        root.join(name)
+    };
+    link(&root.join("private/var"), "var");
+    let parent = link(&real, "clients");
+    let (own_link, other_link) = (
+        link(&real.join("Own"), "own-link"),
+        link(&real.join("Other"), "other-link"),
+    );
+    let by_var = root.join("var/t/Clients");
+    let canonical = dunce::canonicalize(&real).unwrap();
+    let ways = |name: &str, linked: PathBuf| {
+        [&real, &by_var, &canonical, &parent]
+            .map(|base| base.join(name))
+            .into_iter()
+            .chain([linked])
+            .collect()
+    };
+    (ways("Own", own_link), ways("Other", other_link))
+}
+
+/// The spelling rule, both ways: the session's matter, given in any one spelling (as stored,
+/// through macOS's `/var`, canonical, through a link to its parent or straight to it), is in no
+/// rule under any spelling, though other matters are registered at its parent, at itself (a
+/// forgotten matter) and at the sibling, each in every spelling; and the sibling matter is denied
+/// Read and Edit under every spelling, as Claude Code checks it.
+#[cfg(unix)]
+#[test]
+fn the_own_matter_is_never_fenced_and_another_always_is_in_any_spelling() {
+    let dir = layout("matters-spelling-rule");
+    let (own, other) = spelled_layout(dir.path());
+    // The parent in its four spellings (`own-link`'s parent is `root`, no matter's folder).
+    let parents: Vec<PathBuf> = own[..4]
+        .iter()
+        .map(|own| own.parent().unwrap().to_owned())
+        .collect();
+    let registered: Vec<(PathBuf, bool)> = parents
+        .iter()
+        .chain(&own)
+        .chain(&other)
+        .map(|folder| (folder.clone(), false))
+        .collect();
+    for given in &own {
+        let fence = matters(&registered, &[given.as_path()], &[]);
+        assert!(fence.unfenced.is_empty(), "{given:?}: {fence:?}");
+        let deny = LaunchDeny {
+            matters: fence,
+            ..LaunchDeny::default()
+        };
+        let rules = claude_deny_rules(&deny, false);
+        for spelling in &own {
+            for path in [spelling.clone(), spelling.join("a.txt")] {
+                let canonical = dunce::canonicalize(&path).unwrap();
+                for tool in ["Read", "Edit"] {
+                    let refused = denied(&rules, tool, &path) || denied(&rules, tool, &canonical);
+                    assert!(!refused, "own {given:?}: {tool} {path:?}: {rules:#?}");
+                }
+            }
+        }
+        for spelling in &other {
+            for path in [spelling.clone(), spelling.join("b.txt")] {
+                for tool in ["Read", "Edit"] {
+                    let refused = claude_denies(&rules, tool, &path);
+                    assert!(refused, "own {given:?}: {tool} {path:?}: {rules:#?}");
+                }
+            }
+        }
+    }
+}
+
+/// Another matter registered in one spelling alone is denied by that spelling and its canonical
+/// path, so Claude Code refuses it through any link (`/var`, its parent's, its own), the
+/// session's matter given in one spelling only.
+#[cfg(unix)]
+#[test]
+fn another_matter_in_one_spelling_is_denied_through_every_link() {
+    let dir = layout("matters-spelling-other");
+    let (own, other) = spelled_layout(dir.path());
+    for stored in &other {
+        let fence = matters(&[(stored.clone(), false)], &[own[0].as_path()], &[]);
+        let canonical = dunce::canonicalize(stored).unwrap();
+        let mut want = vec![canonical.clone()];
+        if *stored != canonical {
+            want.push(stored.clone());
+        }
+        assert_eq!(fence.others[0].paths, want, "{stored:?}");
+        let deny = LaunchDeny {
+            matters: fence,
+            ..LaunchDeny::default()
+        };
+        let rules = claude_deny_rules(&deny, false);
+        for path in other
+            .iter()
+            .flat_map(|other| [other.clone(), other.join("b.txt")])
+        {
+            for tool in ["Read", "Edit"] {
+                let refused = claude_denies(&rules, tool, &path);
+                assert!(refused, "{stored:?}: {tool} {path:?}: {rules:#?}");
+            }
+        }
     }
 }
 
