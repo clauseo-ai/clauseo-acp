@@ -131,7 +131,10 @@ With `publish`, the workflow makes the GitHub release `patched_tag` in clauseo-a
 pre-release that is never marked latest (the updater reads `releases/latest`), with the four
 binaries, `SHA256SUMS` and the records. Then paste each triple's `url` and `sha256` lines,
 which the build log prints, into the pin's macOS and Windows tables, replacing the all-zero
-placeholder the fetch refuses.
+placeholder the fetch refuses. The attestation's source commit is the workflow's commit on main
+(the build is dispatched from main with the source sha as input); the attested build record
+(`<triple>.json`) names the upstream commit and each patch's sha256, which must match the tagged
+commit's patches.
 
 The build aims to be reproducible, but a runner image with a newer linker can still change the
 bytes. The release trusts the pinned sha256 of the published binary, not a rebuild. Nothing is
