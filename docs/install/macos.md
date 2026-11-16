@@ -12,8 +12,9 @@ app hasn't changed since it was built but not who built it.
 
 So macOS can't check who made Clauseo, and blocks it until you say yes.
 
-This is temporary. Release builds will be notarised by Apple and signed with a Developer ID in the
-maintainer's name, Rohan Shiralkar, once it's set up. Then this page shrinks to "open it as usual".
+Clauseo is in beta, and the beta isn't notarised. Notarisation needs a paid Apple developer account,
+which costs money every year. Clauseo will be notarised once there is funding for it. Until then,
+every version you download from the release page asks this once.
 
 ## What the message means
 

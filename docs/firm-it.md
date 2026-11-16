@@ -538,8 +538,9 @@ Then set it up again from Clauseo, signed in as the other account.
   hash instead (below). The clicks past each warning are in [the Windows install
   guide](install/windows.md).
 - **macOS: signed ad hoc for now**, with no Developer ID and not notarised (decision 0035,
-  "Context"). Release builds will be notarised under an individual Developer ID, "Developer ID
-  Application: Rohan Shiralkar", once it is set up (decision 0035, "Signing for the beta"). Until
+  "Context"). The launch is an unsigned beta (decision 0035, "The unsigned beta"); notarisation
+  under an individual Developer ID, "Developer ID Application: Rohan Shiralkar", comes once there
+  is funding for the Apple account (decision 0035, "Signing for the beta"). Until
   then Gatekeeper blocks the first open: [the macOS install guide](install/macos.md) has the
   clicks. There is no Team ID yet for a privacy (PPPC) profile; when there is one, it changes if
   the Apple account later moves to an organisation.
