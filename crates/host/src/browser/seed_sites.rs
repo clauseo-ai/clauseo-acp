@@ -182,6 +182,10 @@ pub const FETCH_ONLY_SITES: &[&str] = &[
 pub const WEB_FETCH_SITES: [&str; SEED_SITES.len() + FETCH_ONLY_SITES.len()] =
     concat(SEED_SITES, FETCH_ONLY_SITES);
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "const fn: no get_mut in const; N is the two lengths' sum, so every index is in bounds and a wrong N fails at compile time"
+)]
 const fn concat<const N: usize>(
     first: &[&'static str],
     then: &[&'static str],
