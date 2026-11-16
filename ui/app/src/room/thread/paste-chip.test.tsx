@@ -9,6 +9,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import {
+  draftOf,
   forgetChipsForTests,
   PASTE_CHIP_MIN,
 } from "@clauseo/components/clauseo/paste-chips-logic.ts";
@@ -121,7 +122,7 @@ const A = "01900002-0000-7000-8000-00000000000a" as MatterId;
 const B = "01900002-0000-7000-8000-00000000000b" as MatterId;
 
 /** WorkComposer as room.tsx renders it, keyed by its conversation; `refill` as work.tsx passes the stopped question. */
-function room(drafts: Drafts, sent: string[] = []) {
+function room(drafts: Drafts, sent: string[] = [], ok = () => true) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -140,7 +141,7 @@ function room(drafts: Drafts, sent: string[] = []) {
           refill={refill}
           onAsk={async (text) => {
             sent.push(text);
-            return true;
+            return ok();
           }}
           onStop={() => {}}
         />,
@@ -339,4 +340,31 @@ test("33 long pastes come back after a visit, each as it was, and the typed word
   expect(back.pastes.every((t, i) => t === pasted[i])).toBe(true);
   await enter();
   expect(sent[0] === `${pasted.join("\n\n")}\n\nSummarise each, briefly.`).toBe(true);
+});
+
+test("a question is remembered for its chips only once accepted, and never one over the cap", async () => {
+  let accept = false;
+  const show = room(new Map(), [], () => accept);
+  await show(A);
+  const one = brief(PASTE_CHIP_MIN, "a");
+  await paste(one);
+  await type("Read it.");
+  const asked = `${one}\n\nRead it.`;
+  // refused: not remembered, so the same words given back are one whole chip
+  await enter();
+  expect(chips()).toBe(1);
+  expect(draftOf(asked)).toEqual({ typed: "", pastes: [asked] });
+  // accepted: remembered as the draft it went from
+  accept = true;
+  await enter();
+  expect(chips()).toBe(0);
+  expect(draftOf(asked)).toEqual({ typed: "Read it.", pastes: [one] });
+  // over MAX_PROMPT_TEXT_BYTES: never remembered, whatever the answer
+  const big = "a".repeat(MAX_PROMPT_TEXT_BYTES);
+  await paste(big);
+  await type("All of it.");
+  await enter();
+  expect(chips()).toBe(0);
+  const over = `${big}\n\nAll of it.`;
+  expect(draftOf(over)).toEqual({ typed: "", pastes: [over] });
 });

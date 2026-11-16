@@ -70,6 +70,7 @@ import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
 import { joinsIn, pickFull, queueFullLine } from "./composer-queue.ts";
 import { useNotSentRestore } from "./steer-restore.ts";
+import { tooLong } from "./prompt-cost.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
 import { holdLine, useHold } from "../first-run/hold.ts";
@@ -275,18 +276,18 @@ export function WorkComposer({
     if (lost !== null) setLost(null);
     // the papers the field's tokens mention as it goes, read with its words, sent with them however they go
     const files = (field.current?.mentioned() ?? []).map((m) => m.id);
-    // the draft it goes from, so the host giving back exactly these words (a stopped question, a steer not sent, a
-    // lost edit) brings its chips back as they were (draftOf)
+    // its draft, remembered once accepted and under the cap, so these exact words given back (a stopped question, a
+    // steer not sent, a lost edit) bring its chips back (draftOf)
     const from = field.current?.draft();
-    if (from !== undefined && sentOf(from) === asked) rememberSent(asked, from);
     if (how === undefined) asking.current = asked;
     void onAsk(asked, files.length === 0 ? how : { ...how, files }).then((ok) => {
       if (how === undefined) asking.current = null;
       const back = held.current;
       held.current = null;
       if (!ok) return;
-      // pressed on the hint's Send now or Queue, which sit outside the field's row: the focus goes back to the field
-      // first, so the clear is one step Cmd/Ctrl+Z takes back, and not lost with the hint as it goes
+      if (from !== undefined && !tooLong(asked) && sentOf(from) === asked)
+        rememberSent(asked, from);
+      // from the hint's Send now or Queue: the focus back in the field first, so the clear is one step undo takes back
       if (field.current?.text() === asked && inHint(document.activeElement)) field.current.focus();
       // words typed while it went keep their place; the emptied field's change drops the draft, and Cmd/Ctrl+Z
       // brings the question back
