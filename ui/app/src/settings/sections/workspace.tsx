@@ -18,12 +18,8 @@ import { CopyForIt } from "@clauseo/components/clauseo/copy-for-it.tsx";
 import { ProtectionConfirm } from "@clauseo/components/clauseo/protection-confirm.tsx";
 import { IconSafeWorkspace } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
-import {
-  INSTALLER_CLOSE,
-  pw,
-  WINDOWS_LINE,
-  WINDOWS_STRICT,
-} from "@clauseo/components/lib/words-protection.ts";
+import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
+import { wl, WINDOWS_LINE, WINDOWS_STRICT } from "@clauseo/components/lib/words-windows-line.ts";
 import { useSettingsWords, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useEffect, useId, useRef, useState } from "react";
