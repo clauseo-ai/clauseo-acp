@@ -430,9 +430,10 @@ fn allow(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) -> Result<(), 
         about,
         always,
     } = ask;
-    let once = always
-        .ok_or_else(|| super::lost("a kept rule's option"))?
-        .once;
+    let always = always.ok_or_else(|| super::lost("a kept rule's option"))?;
+    // The resolution names the kept rule, so the thread shows the host answered from it.
+    let kept = always.kept.ok().map(|kept| Box::new(kept.offer));
+    let once = always.once;
     let tool_call = known_tool(actor, thread, &session, &acp_tool_call_id);
     let agent_id = agent(actor, thread)
         .map(|agent| agent.id)
@@ -462,6 +463,7 @@ fn allow(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) -> Result<(), 
         choice,
         by,
         held_open: None,
+        always: kept,
     };
     out.push(actor, resolved)?;
     let then = Then::Permission {

@@ -65,6 +65,7 @@ fn a_permission_refused_for_an_open_document_names_the_file() {
         choice: choice.clone(),
         by: Principal::LocalDesktop,
         held_open: held_open.clone(),
+        always: None,
     };
     let out = apply(&mut state, &log.push(refused).unwrap()).unwrap();
     assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
@@ -76,6 +77,7 @@ fn a_permission_refused_for_an_open_document_names_the_file() {
         choice,
         by,
         held_open: held_open.map(Box::new),
+        always: None,
     };
     assert_eq!(entry.state, settled);
     assert_eq!(status(&state), ThreadStatus::Running);
@@ -104,6 +106,7 @@ fn a_permission_entry_carries_what_the_request_is_about() {
             choice: PermissionChoice::Cancelled,
             by: Principal::LocalDesktop,
             held_open: None,
+            always: None,
         };
         let out = apply(&mut state, &log.push(cancelled).unwrap()).unwrap();
         let ViewEntry::Permission(entry) = first_upsert(&out.changes) else {
@@ -141,12 +144,58 @@ fn a_permission_entry_carries_what_always_would_keep() {
             choice: PermissionChoice::Cancelled,
             by: Principal::LocalDesktop,
             held_open: None,
+            always: None,
         };
         let out = apply(&mut state, &log.push(cancelled).unwrap()).unwrap();
         let ViewEntry::Permission(entry) = first_upsert(&out.changes) else {
             panic!("{:?}", out.changes);
         };
         assert_eq!(entry.always, always);
+    }
+}
+
+/// The host's own answer from a kept rule reaches the entry's resolved state with the rule
+/// (`PermissionState::Resolved::always`), so the app shows "Allowed: always for this matter".
+#[test]
+fn a_host_answer_from_a_kept_rule_names_it_in_the_entry() {
+    let offer = AlwaysOffer {
+        kind: AlwaysKind::Command,
+        shown: Some("wc -l notes.txt".to_owned()),
+        cwd: None,
+    };
+    for always in [Some(offer), None] {
+        let mut log = Log::thread(23).unwrap();
+        log.push(thread_created().unwrap()).unwrap();
+        start_turn(&mut log, "Count the lines.").unwrap();
+        let request: PermissionRequestId = log.fresh().unwrap();
+        let mut state = fold(log.events());
+        apply(
+            &mut state,
+            &log.push(permission_requested(request, None)).unwrap(),
+        )
+        .unwrap();
+        let choice = PermissionChoice::Selected {
+            option_id: "allow-once".into(),
+            kind: PermissionKind::AllowOnce,
+        };
+        let resolved = PermissionResolved {
+            request,
+            choice: choice.clone(),
+            by: Principal::LocalDesktop,
+            held_open: None,
+            always: always.clone().map(Box::new),
+        };
+        let out = apply(&mut state, &log.push(resolved).unwrap()).unwrap();
+        let ViewEntry::Permission(entry) = first_upsert(&out.changes) else {
+            panic!("{:?}", out.changes);
+        };
+        let settled = PermissionState::Resolved {
+            choice,
+            by: Principal::LocalDesktop,
+            held_open: None,
+            always: always.map(Box::new),
+        };
+        assert_eq!(entry.state, settled);
     }
 }
 

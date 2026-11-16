@@ -166,6 +166,7 @@ pub fn permission_resolved(request: PermissionRequestId) -> DomainEvent {
         },
         by: Principal::LocalDesktop,
         held_open: None,
+        always: None,
     }
     .into()
 }

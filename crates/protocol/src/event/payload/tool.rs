@@ -96,6 +96,13 @@ pub struct PermissionResolved {
     /// request's reject-once option, or `Cancelled` when it offered none.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub held_open: Option<MatterPath>,
+    /// The host answered this request itself from a rule the lawyer kept with "Always for this
+    /// matter" (decision 0063): what that rule covers. Set only on the host's own answer, never
+    /// when the lawyer chose an option, so the app tells the two apart.
+    // Boxed: rarely set, and inline it would grow every event by an offer. Serde and specta see
+    // through the box, so the wire shape is the offer's.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub always: Option<Box<AlwaysOffer>>,
 }
 
 /// A permission request expired unanswered.

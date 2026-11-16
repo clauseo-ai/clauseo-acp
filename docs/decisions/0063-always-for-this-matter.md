@@ -134,7 +134,9 @@ held-open checks, with a **one-time** approval:
 - Claude: `allow-once`.
 
 It is logged as `PermissionRequested` and `PermissionResolved` in one commit
-(`by: local_desktop`). The log line holds the thread id, the agent kind, the entry kind and
+(`by: local_desktop`). The resolution's `always` holds the kept entry's `AlwaysOffer`, and
+only the host's own answer sets it: the app shows UC-814 when `always` is set, and a lawyer's
+"Allow once" on a card that offered "Always" leaves it out. The log line holds the thread id, the agent kind, the entry kind and
 nothing of the command (0047).
 
 An entry answers only threads whose matter is its matter (`threads.matter_id`). A thread that

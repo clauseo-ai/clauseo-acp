@@ -52,6 +52,7 @@ pub(super) fn session_events() -> Vec<DomainEvent> {
             choice: PermissionChoice::Cancelled,
             by: Principal::LocalDesktop,
             held_open: Some(path("Brief.docx")),
+            always: None,
         }
         .into(),
         PermissionExpired {

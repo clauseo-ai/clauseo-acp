@@ -443,6 +443,7 @@ fn refuse_held_open(
             choice,
             by: Principal::LocalDesktop,
             held_open: Some(path),
+            always: None,
         },
     )?;
     out.send(actor, then)?;

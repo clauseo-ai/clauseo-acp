@@ -95,6 +95,7 @@ pub(super) fn answer_permission(
         },
         by: Principal::LocalDesktop,
         held_open: None,
+        always: None,
     };
     out.push(actor, resolved)?;
     // "Always" kept nothing: the lawyer reads that it was allowed this once only, and why.

@@ -301,6 +301,10 @@ pub enum PermissionState {
         // and specta see through the box, so the wire shape is the path's.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         held_open: Option<Box<MatterPath>>,
+        /// What the kept rule covers, when the host answered from one itself
+        /// (`PermissionResolved::always`); none when the lawyer answered. Boxed as `held_open`.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        always: Option<Box<AlwaysOffer>>,
     },
     /// Expired unanswered.
     Expired {

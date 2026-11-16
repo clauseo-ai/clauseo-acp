@@ -4817,6 +4817,12 @@ export type PermissionResolved = {
 	 *  request's reject-once option, or `Cancelled` when it offered none.
 	 */
 	held_open?: MatterPath,
+	/**
+	 *  The host answered this request itself from a rule the lawyer kept with "Always for this
+	 *  matter" (decision 0063): what that rule covers. Set only on the host's own answer, never
+	 *  when the lawyer chose an option, so the app tells the two apart.
+	 */
+	always?: AlwaysOffer,
 };
 
 /**  Where a permission request or an elicitation stands. */
@@ -4834,6 +4840,11 @@ export type PermissionState =
 	 *  because of it (`PermissionResolved::held_open`).
 	 */
 	held_open?: MatterPath,
+	/**
+	 *  What the kept rule covers, when the host answered from one itself
+	 *  (`PermissionResolved::always`); none when the lawyer answered. Boxed as `held_open`.
+	 */
+	always?: AlwaysOffer,
 } }) & { expired?: never } | 
 /**  Expired unanswered. */
 ({ expired: {

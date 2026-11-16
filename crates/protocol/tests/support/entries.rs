@@ -161,6 +161,7 @@ fn approval_entries() -> Vec<ViewEntry> {
                 choice: PermissionChoice::Cancelled,
                 by: Principal::LocalDesktop,
                 held_open: Some(Box::new(path("Brief.docx"))),
+                always: None,
             },
             about: Some(PermissionAbout::AgentPlan),
             always: Some(AlwaysOffer {

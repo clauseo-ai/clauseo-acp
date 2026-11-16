@@ -12,8 +12,8 @@ use serde_json::json;
 
 use crate::always::{
     ALWAYS, CLAUDE, ask, asked, assert_only_host_always, bash_options, claude_scenario, guard,
-    kept_rules, offers, refused_answer, resolutions, rules_file, signed_rules, until_kept,
-    wc_offer,
+    kept_rules, offers, refused_answer, resolutions, resolved_always, rules_file, signed_rules,
+    until_kept, wc_offer,
 };
 use crate::permissions::answer_from;
 use crate::support::{Dir, Running, Scenario, matter_with_thread};
@@ -94,6 +94,8 @@ fn an_agents_own_host_option_ids_are_dropped() {
             events.dump()
         );
         assert_eq!(offers(&events), [Some(wc_offer("wc -l notes.txt")), None]);
+        // The lawyer's "Allow once" on a card that offered "Always" names no kept rule.
+        assert_eq!(resolved_always(&events), [None, None], "forced: {forced}");
         assert_only_host_always(&events);
         host.shutdown();
     }

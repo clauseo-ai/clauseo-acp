@@ -18,6 +18,7 @@ fn refused(held_open: Option<MatterPath>) -> DomainEvent {
         },
         by: Principal::LocalDesktop,
         held_open,
+        always: None,
     }
     .into()
 }

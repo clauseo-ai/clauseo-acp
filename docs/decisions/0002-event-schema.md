@@ -111,7 +111,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `web_search_recorded` | turn, tool_call, agent (`AgentId`), query (cap 1,000 chars), results (`WebResult`s, at most 50, may be empty), source? (`SearchSource`, default `web`, left out when `web`; R24), tool? (the connector's tool, cap 64 chars; R24) | acp | yes | T |
 | `page_visited` | turn, tool_call, url, title?, via (`PageVia`) | acp | yes | T |
 | `permission_requested` | request, tool_call?, options, deliverable, about? (`PermissionAbout`), always? (`AlwaysOffer`: kind `AlwaysKind`, shown? ≤ 8 KiB, cwd?) | acp | yes | T |
-| `permission_resolved` | request, choice, by, held_open? (0021) | host | yes | T |
+| `permission_resolved` | request, choice, by, held_open? (0021), always? (0063) | host | yes | T |
 | `permission_expired` | request, reason | host | yes | T |
 | `elicitation_requested` | elicitation, request (form schema or URL) | acp | yes | T |
 | `elicitation_resolved` | elicitation, outcome, by (never the values; see the paragraph after the table) | host | yes | T |

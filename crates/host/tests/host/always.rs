@@ -135,6 +135,18 @@ pub(crate) fn resolutions(events: &Events) -> Vec<Resolution> {
         .collect()
 }
 
+/// What each logged resolution says the host answered from (`PermissionResolved.always`), in
+/// order: some only for the host's own answer from a kept rule.
+pub(crate) fn resolved_always(events: &Events) -> Vec<Option<AlwaysOffer>> {
+    events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::PermissionResolved(resolved) => Some(resolved.always.clone().map(|a| *a)),
+            _ => None,
+        })
+        .collect()
+}
+
 /// What each logged request's `clauseo.always` would keep, in order.
 pub(crate) fn offers(events: &Events) -> Vec<Option<AlwaysOffer>> {
     events
@@ -281,6 +293,13 @@ fn always_for_this_matter_is_kept_by_the_host_not_in_the_matter() {
         events.dump()
     );
     assert_eq!(offers(&events), [Some(wc_offer("wc -l notes.txt")), None]);
+    // Only the host's own answer names the rule it answered from.
+    assert_eq!(
+        resolved_always(&events),
+        [None, Some(wc_offer("wc -l notes.txt"))],
+        "{}",
+        events.dump()
+    );
     // The rule is kept in Clauseo's data, written on its own thread.
     let file = rules_file(&dir, matter);
     let kept =

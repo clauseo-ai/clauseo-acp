@@ -1,10 +1,11 @@
 //! `PermissionRequested.always`: an `AlwaysOffer` when the host offers "Always for this matter"
 //! (`clauseo.always`), left out otherwise; an entry written before the field existed decodes
-//! with `None`, and a kind from a newer Clauseo reads as `unknown`.
+//! with `None`, and a kind from a newer Clauseo reads as `unknown`. `PermissionResolved.always`:
+//! the kept rule the host answered from, left out when the lawyer answered.
 
 use clauseo_protocol::{
-    AlwaysKind, AlwaysOffer, Deliverable, DomainEvent, PermissionKind, PermissionOption,
-    PermissionRequested,
+    AlwaysKind, AlwaysOffer, Deliverable, DomainEvent, PermissionChoice, PermissionKind,
+    PermissionOption, PermissionRequested, PermissionResolved, Principal,
 };
 use serde_json::{Value, json};
 
@@ -95,6 +96,47 @@ fn an_entry_without_always_decodes_with_none_and_a_newer_kind_reads_as_unknown()
             cwd: None,
         }))
     );
+}
+
+fn resolved(always: Option<AlwaysOffer>) -> DomainEvent {
+    PermissionResolved {
+        request: permission_request_id(10),
+        choice: PermissionChoice::Selected {
+            option_id: short("allow-once"),
+            kind: PermissionKind::AllowOnce,
+        },
+        by: Principal::LocalDesktop,
+        held_open: None,
+        always: always.map(Box::new),
+    }
+    .into()
+}
+
+/// The host's own answer from a kept rule names it; the lawyer's answer leaves it out, and a
+/// resolution written before the field existed decodes with `None`.
+#[test]
+fn a_resolution_names_the_kept_rule_only_when_the_host_answered_from_it() {
+    let host = serde_json::to_value(resolved(Some(command_offer()))).unwrap();
+    assert_eq!(
+        host["permission_resolved"]["always"],
+        json!({"kind": "command", "shown": "wc -l notes.txt", "cwd": "Drafts"})
+    );
+    let lawyer = serde_json::to_value(resolved(None)).unwrap();
+    assert_eq!(
+        lawyer["permission_resolved"].get("always"),
+        None,
+        "{lawyer}"
+    );
+    for always in [Some(command_offer()), None] {
+        round_trips(&resolved(always));
+    }
+    let old = json!({"permission_resolved": {
+        "request": serde_json::to_value(permission_request_id(10)).unwrap(),
+        "choice": {"selected": {"option_id": "allow-once", "kind": "allow_once"}},
+        "by": serde_json::to_value(Principal::LocalDesktop).unwrap(),
+    }});
+    let old: DomainEvent = serde_json::from_value(old).unwrap();
+    assert_eq!(old, resolved(None));
 }
 
 /// Each `AlwaysKind` keeps its wire form, and one from a newer Clauseo reads as `unknown`.

@@ -255,6 +255,7 @@ pub(super) fn log_cancel(
             choice: PermissionChoice::Cancelled,
             by: Principal::LocalDesktop,
             held_open: None,
+            always: None,
         };
         out.push(actor, resolved)?;
     }

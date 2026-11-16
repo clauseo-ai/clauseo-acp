@@ -52,6 +52,7 @@ pub(super) fn permission_resolved(
         choice: event.choice.clone(),
         by: event.by.clone(),
         held_open: event.held_open.clone().map(Box::new),
+        always: event.always.clone(),
     };
     settle_permission(
         state,
