@@ -348,15 +348,16 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
 }
 
 /// Step 4 for a prompted turn (typed, or taken from the queue) whose agent is marked to relaunch
-/// (`idle::Relaunch`, a Tools change): with nothing else on that agent (no question or call
-/// open, no output held for a turn of its own) it stops and a new one starts for the turn, as
-/// [`restart_if_moved`] does, so the prompt goes with the new inputs. An agent-started turn
-/// that has opened is never cut: it is the current turn then, not this one. A command Claude put
-/// in the background (a steer during a Bash call) that has not reported yet is cut: the host
-/// sees it only when it reports, so the relaunch ends it and its result never comes. A relaunch
-/// within `cap_min_idle` of a turn that closed after a steer during a tool call is logged.
-/// `false` when nothing was restarted.
+/// (`idle::Relaunch`): with nothing else on that agent (no question or call open, no output held
+/// for a turn of its own, nothing its mark waits for, `idle::holds_relaunch`) it stops and a new
+/// one starts for the turn, as [`restart_if_moved`] does, so the prompt goes with the new inputs.
+/// An agent-started turn that has opened is never cut: it is the current turn then. For a Tools
+/// change, a command Claude put in the background (a steer during a Bash call) that has not
+/// reported yet is cut: the host sees it only when it reports, so the relaunch ends it and its
+/// result never comes. A relaunch within `cap_min_idle` of a turn that closed after a steer
+/// during a tool call is logged. `false` when nothing was restarted.
 pub(super) fn restart_if_marked(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
+    let (now, window) = (actor.now().mono, actor.turn_path.idle.window());
     let Some(state) = state(actor, thread) else {
         return false;
     };
@@ -375,13 +376,11 @@ pub(super) fn restart_if_marked(actor: &mut Actor, thread: ThreadId, turn: TurnI
     let Some(why) = agent.idle.relaunch else {
         return false;
     };
-    if !prompted || held || open || !up || super::idle::calls(agent) > 0 {
+    if !prompted || held || open || !up || super::idle::holds_relaunch(agent, now, window) {
         return false;
     }
     let steered_end = agent.idle.steered_end;
     tracing::info!(target: LIFECYCLE, %thread, why = why.as_str(), "agent relaunched for a prompt");
-    let now = actor.now().mono;
-    let window = actor.turn_path.idle.window();
     if let Some(at) = steered_end
         && now.saturating_sub(at) <= window
     {

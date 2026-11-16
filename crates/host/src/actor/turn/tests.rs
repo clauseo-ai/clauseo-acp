@@ -30,6 +30,7 @@ mod order;
 mod own_cancel;
 mod own_restart;
 mod papers;
+mod profile_live;
 mod queue;
 mod relocate;
 mod removal;

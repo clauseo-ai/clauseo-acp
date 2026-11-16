@@ -115,9 +115,9 @@ pub trait ProfileHook: Send {
     /// The profile's generation (default: 0): it grows each time the profile the other methods
     /// read changes, as desktop's does when stetdoc's background try puts a new one in place.
     /// The host reads it before a launch's skills writes, and an agent launched on an older
-    /// generation is marked to relaunch once [`Self::changed`] tells of a newer one: it is
-    /// idle-stopped once idle for the grace (`cap_min_idle`), never mid-turn, and its next
-    /// question relaunches it on the new profile. No I/O.
+    /// generation is marked to relaunch once [`Self::changed`] tells of a newer one: its next
+    /// question relaunches it on the new profile, and with none it stops at the idle limit,
+    /// never mid-turn. No I/O.
     fn generation(&self) -> u64 {
         0
     }

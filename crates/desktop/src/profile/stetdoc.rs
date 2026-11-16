@@ -5,8 +5,8 @@
 //! the agent starts that follow. An agent launch while a try is in flight waits for that try's
 //! end, at most 20 s from the launch (`ProfileHook::launch_wait`), with its turn "starting"
 //! meanwhile. An agent already running when the answer lands is marked to relaunch
-//! (`ProfileHook::changed`): never stopped mid-turn, it stops once idle for a minute, and the
-//! next question in its conversation starts it again with the skill. Nothing is shown to the
+//! (`ProfileHook::changed`): the next question in its conversation starts it again with the
+//! skill, and with none it stops at the idle limit, never mid-turn. Nothing is shown to the
 //! lawyer.
 //!
 //! Only the profile itself (the instructions' stetdoc line and the skills) changes after the
@@ -194,8 +194,11 @@ pub(super) fn recheck_later(recheck: Recheck, live: Live) {
                 &state,
                 later,
             ));
-            if let Some(state) = answered.state {
-                live.set(render(base, &state, browser));
+            // Only a real change is put in place: each one marks every agent launched before it to
+            // relaunch. stetdoc found broken (`State::Off`) is one, on purpose: those agents are
+            // told of a stetdoc that no longer answers, so each relaunches once without it.
+            if let Some(new) = answered.state.filter(|new| *new != state) {
+                live.set(render(base, &new, browser));
             }
             // The try ends after its answer is in place: a launch that waited reads it.
             drop(answered.held);
@@ -205,6 +208,8 @@ pub(super) fn recheck_later(recheck: Recheck, live: Live) {
     }
 }
 
+/// Where a release bundles stetdoc, in a folder of its own so that only that folder goes first
+/// on the agents' `PATH` (U13; `.github/scripts/sidecars.mjs`, `crates/desktop/stetdoc.toml`).
 /// On macOS (`macos`), `Clauseo.app/Contents/Helpers/stetdoc/stetdoc`, found from `exe_dir`
 /// (`Contents/MacOS`): notarisation wants no program in `Contents/Resources`. Elsewhere
 /// `<resource_dir>/stetdoc/stetdoc[.exe]`, Tauri's resource folder (on Windows the install
