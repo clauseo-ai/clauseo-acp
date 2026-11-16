@@ -564,13 +564,14 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     (`$env:VAR`, `$VAR`, `/c/…`) is in that shell's rules alone, and PowerShell's are deduplicated
     in any case. The worst realistic launch (a long profile, a configured folder in two
     spellings, 1,000 matters) stays under 1.8 MiB. A matter's work folders
-    (`agent-state/<matter>/work/<thread>`) go in groups as well: measured on Windows, each other
-    conversation adds 46 bytes (65 with two spellings), where named whole it added 1,010 (1,283)
-    and filled 2 MiB at about 930 conversations. With two spellings the data folder's rules
-    alone are 906,222 bytes before any conversation. Past that a launch sheds the configured
-    folder's variable forms (logged, fields only), and a launch whose settings would still pass
-    Claude Code's 2 MiB fails (`agent.launch_failed`) rather than start without its rules. The
-    flag settings go to Claude Code as a file,
+    (`agent-state/<matter>/work/<thread>`) go in groups as well: measured on Windows and macOS
+    alike, each other conversation adds 46 bytes (65 with two spellings), where named whole it
+    added 1,010 (1,283) and filled 2 MiB at about 930 conversations. With two spellings the data
+    folder's rules alone are 906,222 bytes before any conversation; at 1,000 matters they are
+    84,005 bytes of Read and Edit rules and 846,109 of shell rules. Past that a launch sheds the
+    configured folder's variable forms (logged, fields only), and a launch whose settings would
+    still pass Claude Code's 2 MiB fails (`agent.launch_failed`) rather than start without its
+    rules. The flag settings go to Claude Code as a file,
     `<data>/launch-settings/<run id>.json` (`agent/launch_settings.rs`), not inline: the SDK
     puts inline settings on the command line, which Windows caps at 32,767 characters, and
     Claude Code reads a settings file of at most 2 MiB, else it exits at start-up. It reads the
