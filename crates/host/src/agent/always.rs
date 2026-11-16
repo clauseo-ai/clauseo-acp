@@ -152,7 +152,23 @@ pub(crate) fn rule(request: &Request<'_>) -> Result<Kept, NotKept> {
 }
 
 fn offer(kind: AlwaysKind, shown: Option<String>, cwd: Option<String>) -> AlwaysOffer {
-    AlwaysOffer { kind, shown, cwd }
+    AlwaysOffer {
+        kind,
+        shown,
+        cwd,
+        server: None,
+        tool: None,
+    }
+}
+
+/// A tool's offer: its server and its name there, never the whole `mcp__<server>__<tool>`, so
+/// the card can say "{tool} from {server}". Web search has no server.
+fn tool_offer(server: Option<&str>, tool: &str) -> AlwaysOffer {
+    AlwaysOffer {
+        server: server.map(str::to_owned),
+        tool: Some(tool.to_owned()),
+        ..offer(AlwaysKind::Tool, None, None)
+    }
 }
 
 fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
@@ -219,11 +235,11 @@ fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
                 Some(host),
             )
         }
-        "WebSearch" => kept(
-            WEB_SEARCH.to_owned(),
-            AlwaysKind::Tool,
-            Some(WEB_SEARCH.to_owned()),
-        ),
+        "WebSearch" => Kept {
+            rule: WEB_SEARCH.to_owned(),
+            offer: tool_offer(None, WEB_SEARCH),
+            command: None,
+        },
         "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => {
             kept(EDIT_ALL.to_owned(), AlwaysKind::FileEdit, None)
         }
@@ -242,7 +258,14 @@ fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
             kept(rule, AlwaysKind::Read, Some(shown))
         }
         name if SPENDS.contains(&name) => return Err(NotKept::NoRule),
-        name if is_mcp_tool(name) => kept(name.to_owned(), AlwaysKind::Tool, Some(name.to_owned())),
+        name if is_mcp_tool(name) => {
+            let (server, tool) = mcp_parts(name).ok_or(NotKept::NoRule)?;
+            Kept {
+                rule: name.to_owned(),
+                offer: tool_offer(Some(server), tool),
+                command: None,
+            }
+        }
         _ => return Err(NotKept::NoRule),
     })
 }
@@ -467,6 +490,12 @@ fn one_plain_command(command: &str, grammar: plain::Grammar, agent: plain::Agent
         Ok(_) | Err(plain::NotPlain::Outside) => true,
         Err(_) => false,
     }
+}
+
+/// An MCP tool's server and its name there: `mcp__<server>__<tool>` split at the first `__`
+/// after the server's name (Claude Code's own form).
+fn mcp_parts(name: &str) -> Option<(&str, &str)> {
+    name.strip_prefix("mcp__")?.split_once("__")
 }
 
 /// An MCP tool's exact name, `mcp__<server>__<tool>`: letters, digits, `_` and `-` only.

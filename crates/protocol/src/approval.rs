@@ -88,15 +88,23 @@ open_unit_enum! {
 pub struct AlwaysOffer {
     /// What kind of thing is kept.
     pub kind: AlwaysKind,
-    /// What it covers, as the card shows it: the exact command text, the site's host name, the
-    /// tool's name, or a read file's path relative to the matter folder (`/`-separated); none
-    /// for a file edit (it covers the whole matter). At most 8 KiB.
+    /// What it covers, as the card shows it: the exact command text, the site's host name, or a
+    /// read file's path relative to the matter folder (`/`-separated); none for a file edit (it
+    /// covers the whole matter) and for a tool (`server` and `tool`). At most 8 KiB.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub shown: Option<String>,
     /// For a command: the working folder relative to the matter folder, `/`-separated; none when
     /// it runs in the matter folder itself.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub cwd: Option<String>,
+    /// For a tool: the MCP server it comes from (`case-law` for `mcp__case-law__search_law`);
+    /// none for web search, which has no server, and for every other kind.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub server: Option<String>,
+    /// For a tool: its own name on that server (`search_law`), or `WebSearch`; none for every
+    /// other kind. A tool's offer has no `shown`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tool: Option<String>,
 }
 
 open_data_enum! {

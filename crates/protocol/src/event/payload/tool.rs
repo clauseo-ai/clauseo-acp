@@ -77,8 +77,10 @@ pub struct PermissionRequested {
     pub about: Option<PermissionAbout>,
     /// What "Always for this matter" would keep, when the host offers it (`clauseo.always`);
     /// none when it is not offered.
+    // Boxed: inline it would grow every event by an offer. Serde and specta see through the
+    // box, so the wire shape is the offer's.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub always: Option<AlwaysOffer>,
+    pub always: Option<Box<AlwaysOffer>>,
 }
 
 /// A permission request was answered; the first valid answer wins.

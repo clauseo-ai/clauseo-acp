@@ -439,9 +439,9 @@ export type AlwaysOffer = {
 	/**  What kind of thing is kept. */
 	kind: AlwaysKind,
 	/**
-	 *  What it covers, as the card shows it: the exact command text, the site's host name, the
-	 *  tool's name, or a read file's path relative to the matter folder (`/`-separated); none
-	 *  for a file edit (it covers the whole matter). At most 8 KiB.
+	 *  What it covers, as the card shows it: the exact command text, the site's host name, or a
+	 *  read file's path relative to the matter folder (`/`-separated); none for a file edit (it
+	 *  covers the whole matter) and for a tool (`server` and `tool`). At most 8 KiB.
 	 */
 	shown?: string,
 	/**
@@ -449,6 +449,16 @@ export type AlwaysOffer = {
 	 *  it runs in the matter folder itself.
 	 */
 	cwd?: string,
+	/**
+	 *  For a tool: the MCP server it comes from (`case-law` for `mcp__case-law__search_law`);
+	 *  none for web search, which has no server, and for every other kind.
+	 */
+	server?: string,
+	/**
+	 *  For a tool: its own name on that server (`search_law`), or `WebSearch`; none for every
+	 *  other kind. A tool's offer has no `shown`.
+	 */
+	tool?: string,
 };
 
 /**  The text an `AppendText` extends. JSON: `"agent_text"` or `{"user_block": 1}`. */

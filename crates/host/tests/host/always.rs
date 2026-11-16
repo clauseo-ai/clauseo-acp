@@ -141,7 +141,7 @@ pub(crate) fn resolved_always(events: &Events) -> Vec<Option<AlwaysOffer>> {
     events
         .events()
         .filter_map(|event| match event {
-            DomainEvent::PermissionResolved(resolved) => Some(resolved.always.clone().map(|a| *a)),
+            DomainEvent::PermissionResolved(resolved) => Some(resolved.always.as_deref().cloned()),
             _ => None,
         })
         .collect()
@@ -152,7 +152,7 @@ pub(crate) fn offers(events: &Events) -> Vec<Option<AlwaysOffer>> {
     events
         .events()
         .filter_map(|event| match event {
-            DomainEvent::PermissionRequested(asked) => Some(asked.always.clone()),
+            DomainEvent::PermissionRequested(asked) => Some(asked.always.as_deref().cloned()),
             _ => None,
         })
         .collect()
@@ -208,6 +208,8 @@ pub(crate) fn wc_offer(command: &str) -> AlwaysOffer {
         kind: AlwaysKind::Command,
         shown: Some(command.to_owned()),
         cwd: None,
+        server: None,
+        tool: None,
     }
 }
 
@@ -442,6 +444,8 @@ fn a_rule_outside_the_matter_is_neither_kept_nor_applied() {
         kind: AlwaysKind::FileEdit,
         shown: None,
         cwd: None,
+        server: None,
+        tool: None,
     });
     let offered = offers(&events);
     assert_eq!(

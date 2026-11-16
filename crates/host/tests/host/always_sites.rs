@@ -59,6 +59,8 @@ fn site_offer(host: &str) -> AlwaysOffer {
         kind: AlwaysKind::Site,
         shown: Some(host.to_owned()),
         cwd: None,
+        server: None,
+        tool: None,
     }
 }
 

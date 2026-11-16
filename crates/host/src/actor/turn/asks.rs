@@ -370,7 +370,7 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk, real:
             options,
             deliverable: Deliverable::Live,
             about,
-            always: offered,
+            always: offered.map(Box::new),
         };
         commit(actor, thread, [event.into()], Vec::new())
     })();

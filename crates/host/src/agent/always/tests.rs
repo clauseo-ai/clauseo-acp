@@ -187,11 +187,30 @@ fn file_tools_keep_the_whole_matter_and_read_the_exact_path() {
     );
 }
 
+/// An MCP tool's card names its server and its tool apart, never the whole
+/// `mcp__<server>__<tool>`; the rule keeps the whole name.
+#[test]
+fn a_tool_offer_names_its_server_and_tool() {
+    for (name, server, tool) in [
+        ("mcp__case-law__search_law", "case-law", "search_law"),
+        ("mcp__court__find__case", "court", "find__case"),
+    ] {
+        let kept = claude(name, Some(&json!({})), false).unwrap();
+        assert_eq!(kept.rule, name);
+        assert_eq!(kept.offer.kind, AlwaysKind::Tool);
+        assert_eq!(kept.offer.server.as_deref(), Some(server), "{name}");
+        assert_eq!(kept.offer.tool.as_deref(), Some(tool), "{name}");
+        assert_eq!(kept.offer.shown, None, "{name}");
+    }
+}
+
 #[test]
 fn web_search_and_powershell_are_claudes() {
     let search = claude("WebSearch", Some(&json!({"query": "x"})), false).unwrap();
     assert_eq!(search.rule, "WebSearch");
     assert_eq!(search.offer.kind, AlwaysKind::Tool);
+    assert_eq!(search.offer.tool.as_deref(), Some("WebSearch"));
+    assert_eq!((search.offer.server, search.offer.shown), (None, None));
     assert!(well_formed("WebSearch"));
     let shell = json!({"command": "Get-ChildItem"});
     let kept = claude("PowerShell", Some(&shell), true).unwrap();

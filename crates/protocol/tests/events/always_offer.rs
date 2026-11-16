@@ -16,6 +16,8 @@ fn command_offer() -> AlwaysOffer {
         kind: AlwaysKind::Command,
         shown: Some("wc -l notes.txt".to_owned()),
         cwd: Some("Drafts".to_owned()),
+        server: None,
+        tool: None,
     }
 }
 
@@ -30,7 +32,7 @@ fn requested(always: Option<AlwaysOffer>) -> DomainEvent {
         }],
         deliverable: Deliverable::Live,
         about: None,
-        always,
+        always: always.map(Box::new),
     }
     .into()
 }
@@ -65,6 +67,8 @@ fn always_is_an_offer_or_left_out_and_round_trips() {
         kind: AlwaysKind::FileEdit,
         shown: None,
         cwd: None,
+        server: None,
+        tool: None,
     };
     for always in [Some(command_offer()), Some(file_edit), None] {
         round_trips(&requested(always));
@@ -84,6 +88,8 @@ fn an_entry_without_always_decodes_with_none_and_a_newer_kind_reads_as_unknown()
             kind: AlwaysKind::Site,
             shown: Some("example.com".to_owned()),
             cwd: None,
+            server: None,
+            tool: None,
         }))
     );
     let newer: DomainEvent =
@@ -94,8 +100,28 @@ fn an_entry_without_always_decodes_with_none_and_a_newer_kind_reads_as_unknown()
             kind: AlwaysKind::Unknown,
             shown: None,
             cwd: None,
+            server: None,
+            tool: None,
         }))
     );
+}
+
+/// A tool's offer carries its server and its tool apart, and no `shown`.
+#[test]
+fn a_tool_offer_names_its_server_and_tool() {
+    let tool = AlwaysOffer {
+        kind: AlwaysKind::Tool,
+        shown: None,
+        cwd: None,
+        server: Some("case-law".to_owned()),
+        tool: Some("search_law".to_owned()),
+    };
+    let value = serde_json::to_value(requested(Some(tool.clone()))).unwrap();
+    assert_eq!(
+        value["permission_requested"]["always"],
+        json!({"kind": "tool", "server": "case-law", "tool": "search_law"})
+    );
+    round_trips(&requested(Some(tool)));
 }
 
 fn resolved(always: Option<AlwaysOffer>) -> DomainEvent {

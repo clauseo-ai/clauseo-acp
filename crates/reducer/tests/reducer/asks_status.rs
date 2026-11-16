@@ -123,6 +123,8 @@ fn a_permission_entry_carries_what_always_would_keep() {
         kind: AlwaysKind::Command,
         shown: Some("wc -l notes.txt".to_owned()),
         cwd: Some("Drafts".to_owned()),
+        server: None,
+        tool: None,
     };
     for always in [Some(offer), None] {
         let mut log = Log::thread(23).unwrap();
@@ -131,7 +133,7 @@ fn a_permission_entry_carries_what_always_would_keep() {
         let request: PermissionRequestId = log.fresh().unwrap();
         let mut requested = permission_requested(request, None);
         if let DomainEvent::PermissionRequested(event) = &mut requested {
-            event.always = always.clone();
+            event.always = always.clone().map(Box::new);
         }
         let mut state = fold(log.events());
         let out = apply(&mut state, &log.push(requested).unwrap()).unwrap();
@@ -162,6 +164,8 @@ fn a_host_answer_from_a_kept_rule_names_it_in_the_entry() {
         kind: AlwaysKind::Command,
         shown: Some("wc -l notes.txt".to_owned()),
         cwd: None,
+        server: None,
+        tool: None,
     };
     for always in [Some(offer), None] {
         let mut log = Log::thread(23).unwrap();

@@ -179,8 +179,11 @@ host also answers, with no card, the tools of servers it injected itself
 `check_citations` and `account`, by exact name, on the reserved `case-law` server Clauseo sent.
 `recharge` and any tool that spends money always asks.
 
-**Protocol.** `PermissionRequested.always: Option<AlwaysOffer { kind, shown, cwd }>` tells the
-card what "Always" would keep. #1109's `HostQuery::KeptPermissions` and
+**Protocol.** `PermissionRequested.always: Option<AlwaysOffer { kind, shown, cwd, server, tool }>`
+tells the card what "Always" would keep: `shown` is the exact command, the site, or a read file's
+path relative to the matter folder; `cwd` a Codex command's folder relative to the matter; a tool
+has no `shown` but its MCP `server` (none for web search) and its `tool` name there, for UC-819's
+"{tool} from {server}". #1109's `HostQuery::KeptPermissions` and
 `HostCommand::RemoveKeptPermission` list and remove entries, and `KeptKind` gains `command` and
 `file_edit` meanings for the new rules (below).
 
