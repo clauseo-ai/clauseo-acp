@@ -70,8 +70,10 @@ mod cancel_leftovers;
 #[cfg(test)]
 #[path = "host/claude_files.rs"]
 mod claude_files;
+#[cfg(test)]
 #[path = "host/claude_launch_env.rs"]
 mod claude_launch_env;
+#[cfg(test)]
 #[path = "host/claude_mode.rs"]
 mod claude_mode;
 #[cfg(test)]
