@@ -33,6 +33,10 @@ pub(crate) enum Role {
     Stream,
     /// A redirection's target: the `x` of `>x`, the `1` of `2>&1`.
     Target,
+    /// An argument as Windows PowerShell 5.1 spells it, after the same argument as 7 does, when
+    /// it holds `` `e `` or `` `u{…} `` (7's escapes): a name to check, never a position of its
+    /// own.
+    Alt,
 }
 
 /// One simple command's words, or a heredoc body's (`command` false: its lines are data, not

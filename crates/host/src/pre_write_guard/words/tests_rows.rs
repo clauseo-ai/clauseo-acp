@@ -126,9 +126,10 @@ fn a_mixed_doubled_quote_keeps_the_second() {
     );
 }
 
-/// Row 9 (L4): Windows PowerShell 5.1 reads `"`u{43}"` as `u{43}`, PowerShell 7.4 as `C`. Both
-/// readings are kept, 7's then 5.1's, so a held `Contracte.docx` spelled ``Contract`e.docx`` is
-/// still named (5.1 writes `Contracte.docx`, 7 a name with ESC in it).
+/// Row 9 (L4): Windows PowerShell 5.1 reads ``"`u{43}"`` as `u{43}`, PowerShell 7.4 as `C`. Both
+/// readings are kept, 7's then 5.1's (a role of its own, [`Role::Alt`], or a redirection's target
+/// when the word is one), so a held `Contracte.docx` spelled ``Contract`e.docx`` is still named
+/// (5.1 writes `Contracte.docx`, 7 a name with ESC in it).
 #[test]
 fn a_7_only_escape_is_read_both_ways() {
     assert_eq!(segments("echo \"`u{43}\""), [vec!["echo", "C", "u{43}"]]);
@@ -141,6 +142,22 @@ fn a_7_only_escape_is_read_both_ways() {
             "x"
         ]]
     );
+    let mut read = Segments::new(64);
+    shell_segments(
+        "Get-Content x > Contract`e.docx",
+        Escape::Backtick,
+        &mut read,
+    );
+    let segment = read.iter().next().unwrap();
+    assert_eq!(segment.redirects, ["Contract\u{1b}.docx", "Contracte.docx"]);
+    assert_eq!(
+        segment.roles,
+        [Role::Arg, Role::Arg, Role::Target, Role::Target]
+    );
+    let mut read = Segments::new(64);
+    shell_segments("Remove-Item Contract`e.docx", Escape::Backtick, &mut read);
+    let segment = read.iter().next().unwrap();
+    assert_eq!(segment.roles, [Role::Arg, Role::Arg, Role::Alt]);
     // Every other escape reads the same in both.
     assert_eq!(segments("echo a`tb"), [vec!["echo", "a\tb"]]);
 }

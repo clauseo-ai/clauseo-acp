@@ -57,14 +57,9 @@ pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segme
     let mut scanner = Scanner {
         chars: command.chars().peekable(),
         escape,
-        ansi_c: escape == '\\',
-        powershell: escape == '`',
         word: String::new(),
         in_word: false,
-        quoted: false,
-        unknown: false,
-        stream: false,
-        here: false,
+        known: Known::default(),
         awaiting_delimiter: None,
         redirecting: None,
         heredocs: Vec::new(),
@@ -79,24 +74,17 @@ pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segme
     }
 }
 
-/// The state of [`shell_segments`].
+/// The state of [`shell_segments`]. The escape character says the shell: `\` a POSIX one (with
+/// ANSI-C quoting, `$'…'`), `` ` `` `PowerShell` ([`Self::powershell`]).
 struct Scanner<'a> {
     chars: std::iter::Peekable<std::str::Chars<'a>>,
     escape: char,
-    /// Whether `$'…'` is ANSI-C quoting (POSIX shells).
-    ansi_c: bool,
     word: String,
     in_word: bool,
-    /// Whether a quote or the escape character was part of the word being read.
-    quoted: bool,
-    /// `PowerShell`'s rules (`powershell.rs`).
-    powershell: bool,
-    /// Whether the word being read holds an expansion, or a quote that never closed.
-    unknown: bool,
-    /// Whether the word being read is a stream's number before `>` ([`Role::Stream`]).
-    stream: bool,
-    /// Whether the word being read holds a here-string's body.
-    here: bool,
+    /// What is known of the word being read so far: whether a quote or the escape character was
+    /// part of it, whether it holds an expansion or a quote that never closed, whether it is a
+    /// stream's number before `>` ([`Role::Stream`]), whether it holds a here-string's body.
+    known: Known,
     /// After `<<` or `<<-`: the next word is a heredoc's delimiter; whether tabs are stripped.
     awaiting_delimiter: Option<bool>,
     /// After `>`: the next word is a redirection's target; whether it duplicates a descriptor.
@@ -119,6 +107,11 @@ enum Quote {
 }
 
 impl Scanner<'_> {
+    /// Whether the command is `PowerShell`'s (`powershell.rs`).
+    fn powershell(&self) -> bool {
+        self.escape == '`'
+    }
+
     fn run(&mut self, segments: &mut Segments) {
         let mut quote = Quote::None;
         let mut prev = ' ';
@@ -127,7 +120,7 @@ impl Scanner<'_> {
                 return;
             }
             let unquoted = quote == Quote::None;
-            if self.powershell
+            if self.powershell()
                 && let Some(next) = self.powershell_char(quote, c, segments)
             {
                 quote = next;
@@ -139,7 +132,7 @@ impl Scanner<'_> {
             match (quote, c) {
                 (Quote::None, '#') if !self.in_word => {
                     // `PowerShell` ends a comment at a CR too (VM row 2, 5.1 and 7.4).
-                    let cr_ends = self.powershell;
+                    let cr_ends = self.powershell();
                     while self
                         .chars
                         .peek()
@@ -149,7 +142,7 @@ impl Scanner<'_> {
                     }
                 }
                 // `PowerShell` takes a lone CR, and CRLF, as one new line (VM rows 2 and 3).
-                (Quote::None, '\r') if self.powershell => {
+                (Quote::None, '\r') if self.powershell() => {
                     self.chars.next_if_eq(&'\n');
                     self.operator('\n', prev, segments);
                 }
@@ -184,7 +177,7 @@ impl Scanner<'_> {
                 (Quote::None, c) if c.is_whitespace() => self.end_word(segments),
                 (Quote::None, '\'') => quote = self.open(Quote::Single),
                 (Quote::None, '"') => quote = self.open(Quote::Double),
-                (Quote::None, '$') if self.ansi_c && self.chars.peek() == Some(&'\'') => {
+                (Quote::None, '$') if self.escape == '\\' && self.chars.peek() == Some(&'\'') => {
                     self.chars.next();
                     quote = self.open(Quote::AnsiC);
                 }
@@ -192,7 +185,7 @@ impl Scanner<'_> {
                     Some('\n') | None => {}
                     Some(next) => {
                         self.in_word = true;
-                        self.quoted = true;
+                        self.known.quoted = true;
                         self.word.push(next);
                     }
                 },
@@ -222,7 +215,7 @@ impl Scanner<'_> {
             }
         }
         if quote != Quote::None {
-            self.unknown = true;
+            self.known.unknown = true;
             segments.set_unsure();
         }
         self.end_word(segments);
@@ -237,10 +230,10 @@ impl Scanner<'_> {
     fn operator(&mut self, c: char, prev: char, segments: &mut Segments) {
         if c == '>'
             && self.in_word
-            && !self.quoted
+            && !self.known.quoted
             && (self.word == "*" || self.word.chars().all(|d| d.is_ascii_digit()))
         {
-            self.stream = true;
+            self.known.role = Role::Stream;
         }
         self.end_word(segments);
         let next = self.chars.peek().copied();
@@ -310,7 +303,7 @@ impl Scanner<'_> {
                     }
                     Some(next) => {
                         self.in_word = true;
-                        self.quoted = true;
+                        self.known.quoted = true;
                         self.escape_char(next);
                     }
                 }
@@ -318,7 +311,7 @@ impl Scanner<'_> {
             }
             Quote::None | Quote::Double if c == '$' && expands(self.chars.peek().copied()) => {
                 self.in_word = true;
-                self.unknown = true;
+                self.known.unknown = true;
                 self.word.push(c);
                 let start = self.word.len();
                 let closed = powershell::expansion(&mut self.chars, &mut self.word);
@@ -347,14 +340,14 @@ impl Scanner<'_> {
                     Ok(read) => read,
                     Err(body) => {
                         segments.set_unsure();
-                        self.unknown = true;
+                        self.known.unknown = true;
                         (body, false)
                     }
                 };
-                self.unknown |= double && powershell::has_expansion(&body);
+                self.known.unknown |= double && powershell::has_expansion(&body);
                 self.in_word = true;
-                self.quoted = true;
-                self.here = true;
+                self.known.quoted = true;
+                self.known.here = true;
                 self.word.push_str(&body);
                 Some(quote)
             }
@@ -368,12 +361,20 @@ impl Scanner<'_> {
     /// PowerShell 7's; Windows PowerShell 5.1 reads them as the letters themselves, so that
     /// reading is kept too ([`Self::alt`]): the word is also added as 5.1 spells it.
     fn escape_char(&mut self, next: char) {
-        let rest = self.chars.clone();
-        let before = rest.clone().count();
+        // `u{…}` is at most `{`, six digits and `}`: no more is looked at, whatever the length.
+        let ahead: String = if next == 'u' {
+            self.chars.clone().take(8).collect()
+        } else {
+            String::new()
+        };
         let decoded = powershell::escaped(next, &mut self.chars);
-        let used = before - self.chars.clone().count();
         if decoded != next && matches!(next, 'e' | 'u') {
-            let raw: String = std::iter::once(next).chain(rest.take(used)).collect();
+            let digits = ahead.split_inclusive('}').next().unwrap_or_default();
+            let raw = if next == 'u' {
+                format!("u{digits}")
+            } else {
+                "e".to_owned()
+            };
             self.alt.push((self.word.len(), decoded, raw));
         }
         self.word.push(decoded);
@@ -397,7 +398,7 @@ impl Scanner<'_> {
             return quote;
         }
         match self.chars.peek().copied() {
-            Some('.' | '[' | '(') => self.unknown = true,
+            Some('.' | '[' | '(') => self.known.unknown = true,
             Some(next)
                 if !next.is_whitespace()
                     && !matches!(next, ',' | ';' | '|' | '&' | ')' | '>' | '<' | '}') =>
@@ -414,7 +415,7 @@ impl Scanner<'_> {
     /// Opens `quote` in the word being read, which so counts as quoted.
     fn open(&mut self, quote: Quote) -> Quote {
         self.in_word = true;
-        self.quoted = true;
+        self.known.quoted = true;
         quote
     }
 
@@ -424,19 +425,15 @@ impl Scanner<'_> {
             return;
         }
         self.in_word = false;
-        let quoted = std::mem::take(&mut self.quoted);
-        let unknown = std::mem::take(&mut self.unknown);
-        let stream = std::mem::take(&mut self.stream);
+        let mut known = std::mem::take(&mut self.known);
         let alt = std::mem::take(&mut self.alt);
-        let here = std::mem::take(&mut self.here);
         let word = std::mem::take(&mut self.word);
         if let Some(dash) = self.awaiting_delimiter.take() {
             self.heredocs.push((word, dash));
             return;
         }
-        let mut role = if stream { Role::Stream } else { Role::Arg };
         if let Some(duplicate) = self.redirecting.take() {
-            role = Role::Target;
+            known.role = Role::Target;
             let target = if duplicate {
                 format!("&{word}")
             } else {
@@ -444,17 +441,18 @@ impl Scanner<'_> {
             };
             segments.redirect(target);
         }
-        let known = Known {
-            quoted,
-            unknown,
-            role,
-            here,
-        };
         let alt = powershell::spelled_as_5_1(&word, alt);
         segments.push_word(word, known);
-        // The same word as Windows PowerShell 5.1 reads it, when it holds a 7-only escape.
+        // The same word as Windows PowerShell 5.1 reads it, when it holds a 7-only escape: a
+        // role of its own ([`Role::Alt`]), or a redirection's target too when the word is one
+        // (`> Contract`e.docx` writes `Contracte.docx` on 5.1).
         if let Some(alt) = alt {
-            let role = Role::Arg;
+            let role = if known.role == Role::Target {
+                segments.redirect(alt.clone());
+                Role::Target
+            } else {
+                Role::Alt
+            };
             segments.push_word(alt, Known { role, ..known });
         }
     }

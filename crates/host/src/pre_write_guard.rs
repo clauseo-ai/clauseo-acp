@@ -548,10 +548,10 @@ fn targets(
 /// How a `Bash` tool's command is read: as `PowerShell` under Codex's hook (no `--matter`) on
 /// Windows, else as Bash. Codex names every shell call `Bash` (codex-rs `HookToolName::bash`,
 /// `tools/handlers/shell/shell_command.rs`, `unified_exec/exec_command.rs`) and sends the
-/// model's script as it is, which on Windows its shell runs as `powershell.exe -Command
-/// <script>`: a real Codex 0.162.1 hook input on Windows (VM, 16 Nov 2026) was `tool_name`
-/// `Bash` with `Set-Content -LiteralPath 'notes.txt' -Value 'hello'`. Claude Code's `Bash`
-/// (with `--matter`) is Git Bash on Windows, so it stays Bash.
+/// model's script as it is, which on Windows its shell runs as
+/// `powershell.exe -Command <script>`: a real Codex 0.162.1 hook input on Windows (VM, 16 Nov
+/// 2026) was `tool_name` `Bash` with `Set-Content -LiteralPath 'notes.txt' -Value 'hello'`.
+/// Claude Code's `Bash` (with `--matter`) is Git Bash on Windows, so it stays Bash.
 fn bash_escape(codex: bool, windows: bool) -> Escape {
     if codex && windows {
         Escape::Backtick
