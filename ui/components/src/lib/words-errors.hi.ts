@@ -260,6 +260,9 @@ export const HI = {
     "{name} मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
   "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
     "AI मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  // agent.tool_secret_unreadable: a tool's saved value still being read from the keychain at launch. hi: later
+  "macOS is asking whether Clauseo may use a saved password or key for one of your tools. Answer that prompt, then try again; your question is kept. If you'd rather not allow it, turn tools off in Settings, then Tools.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

@@ -159,6 +159,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentUnreachable,
             "the agent could not reach its service; probe class=refused via=direct status=0",
         ),
+        failed(
+            ErrorCode::AgentToolSecretUnreadable,
+            "a Settings > Tools secret's keychain read did not answer in time",
+        ),
     ]
 }
 

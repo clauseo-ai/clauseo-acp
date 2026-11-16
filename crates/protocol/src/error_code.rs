@@ -387,6 +387,10 @@ error_codes! {
         service, or a proxy or firewall in front of it, refused, timed out or blocked the \
         connection, or its name did not resolve. The answer so far is kept; asking again can \
         work.";
+    AgentToolSecretUnreadable = "agent.tool_secret_unreadable", retryable: true, meaning: "A \
+        Settings › Tools secret's keychain read did not answer before the launch's wait ran out \
+        (most often a keychain permission prompt nobody has answered yet); no agent was started \
+        and the question is kept. Trying again once the prompt is answered can succeed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

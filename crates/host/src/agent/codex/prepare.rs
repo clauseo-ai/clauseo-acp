@@ -9,10 +9,14 @@
 //! not answer) strands at most that thread, and the caller fails closed. Waiting too long is
 //! not a missing folder: [`off_actor`] fails as `agent.launch_failed`, which may be retried
 //! (the picked-folder query answers `check_failed` instead), and the log says what was waited
-//! on, for how long, and how it ended once it did.
+//! on, for how long, and how it ended once it did. A launch whose wait runs out while its thread
+//! reads a Settings › Tools secret from the keychain ([`ToolSecretRead`]) fails as
+//! `agent.tool_secret_unreadable` instead: the Mac is most likely showing a keychain prompt
+//! nobody has answered, and the lawyer is told to answer it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use clauseo_protocol::{ErrorCode, MatterId};
@@ -54,6 +58,14 @@ impl Job {
         }
     }
 
+    /// The same job, whose wait running out during `reading` is the keychain's.
+    pub(crate) fn watching(self, reading: ToolSecretRead) -> Watched {
+        Watched {
+            job: self,
+            reading: Some(reading),
+        }
+    }
+
     /// Other work, waited on for [`PREPARE_WAIT`].
     pub(crate) const fn short(what: &'static str, matter: Option<MatterId>) -> Self {
         Self {
@@ -61,6 +73,42 @@ impl Job {
             matter,
             wait: PREPARE_WAIT,
         }
+    }
+}
+
+/// A [`Job`] and what its thread may be waiting on when its wait runs out, if anything.
+#[derive(Debug, Clone)]
+pub(crate) struct Watched {
+    job: Job,
+    /// Set while the thread reads a Settings › Tools secret, when the work reads any.
+    reading: Option<ToolSecretRead>,
+}
+
+impl From<Job> for Watched {
+    fn from(job: Job) -> Self {
+        Self { job, reading: None }
+    }
+}
+
+/// Set while a launch's thread waits on the keychain for a Settings › Tools secret
+/// (`agent::loads::lawyer::read`). macOS holds that call while it asks the lawyer whether
+/// Clauseo may use the item, so a wait that runs out meanwhile is a prompt nobody answered, not a
+/// slow folder. A read that is refused is not a failure: its server is left out (`lawyer.rs`).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ToolSecretRead(Arc<AtomicBool>);
+
+impl ToolSecretRead {
+    /// Runs `read`, marked as a keychain read until it returns.
+    pub(crate) fn during<T>(&self, read: impl FnOnce() -> T) -> T {
+        self.0.store(true, Ordering::SeqCst);
+        let answer = read();
+        self.0.store(false, Ordering::SeqCst);
+        answer
+    }
+
+    /// Whether a read is under way.
+    fn under_way(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
     }
 }
 
@@ -83,14 +131,18 @@ pub(crate) async fn off_actor<T: Send + 'static>(
 /// thread, so what it made is taken back there and never on the actor. An answer is either
 /// taken by the caller or undone, never both and never neither: the caller closes the channel
 /// when it gives up, then takes an answer already sent.
+/// A job [`Job::watching`] a keychain read fails as `agent.tool_secret_unreadable` when its wait
+/// runs out during that read.
 pub(crate) async fn off_actor_or_undo<T: Send + 'static>(
     clock: Arc<dyn Clock>,
-    job: Job,
+    job: impl Into<Watched>,
     work: impl FnOnce() -> Result<T, Error> + Send + 'static,
     undo: impl FnOnce(T) + Send + 'static,
 ) -> Result<T, Error> {
+    let Watched { job, reading } = job.into();
     let (send, answer) = async_channel::bounded(1);
     let thread_clock = Arc::clone(&clock);
+    let (what, matter) = (job.what, job.matter);
     let started = std::thread::Builder::new()
         .name(THREAD_NAME.to_owned())
         .spawn(move || {
@@ -104,8 +156,8 @@ pub(crate) async fn off_actor_or_undo<T: Send + 'static>(
                 .as_ref()
                 .map_or_else(|error| error.code().as_str(), |_| "ok");
             tracing::warn!(
-                what = job.what,
-                matter = ?job.matter,
+                what,
+                matter = ?matter,
                 took_ms = took.as_millis(),
                 outcome,
                 "{THREAD_NAME} answered after its caller stopped waiting"
@@ -143,14 +195,20 @@ pub(crate) async fn off_actor_or_undo<T: Send + 'static>(
             if let Ok(result) = answer.try_recv() {
                 return result;
             }
+            let tool_secret = reading.as_ref().is_some_and(ToolSecretRead::under_way);
             tracing::warn!(
                 what = job.what,
                 matter = ?job.matter,
                 waited_ms = job.wait.as_millis(),
                 error_kind = "timed out",
+                tool_secret,
                 "{THREAD_NAME} did not answer in time; the call fails and may be retried"
             );
-            Err(too_late())
+            Err(if tool_secret {
+                tool_secret_late()
+            } else {
+                too_late()
+            })
         }
     }
 }
@@ -185,6 +243,16 @@ fn too_late() -> Error {
     Error::refused(
         ErrorCode::AgentLaunchFailed,
         "Clauseo's checks of the matter's folder did not answer in time.",
+    )
+}
+
+/// The failure when the wait ran out during a Settings › Tools secret's keychain read: retryable,
+/// and the lawyer's question is kept, as for [`too_late`]. The detail names no tool: it is never
+/// shown, and the words point to the prompt and to Settings › Tools.
+fn tool_secret_late() -> Error {
+    Error::refused(
+        ErrorCode::AgentToolSecretUnreadable,
+        "A Settings › Tools secret's keychain read did not answer in time.",
     )
 }
 

@@ -39,6 +39,10 @@ fn env_of(server: &McpServer) -> Vec<(String, String)> {
     env.clone()
 }
 
+fn reading() -> crate::agent::codex::prepare::ToolSecretRead {
+    crate::agent::codex::prepare::ToolSecretRead::default()
+}
+
 const NO_HOST: HostEnv<'static> = HostEnv {
     path: None,
     windows_env: &[],
@@ -194,14 +198,19 @@ fn reads_keep_only_usable_values() {
         accounts,
         commands: vec!["npx".to_owned(), "gone".to_owned()],
     };
-    let secrets = lawyer::read(Some(&store as &dyn SecretStore), &resolve, wanted.clone());
+    let secrets = lawyer::read(
+        Some(&store as &dyn SecretStore),
+        &resolve,
+        wanted.clone(),
+        &reading(),
+    );
     let debug = format!("{secrets:?}");
     assert_eq!(
         debug,
         "McpSecrets { values: 1, unreadable: 3, commands: 1, key: ToolsKey { rev: 0, servers: 0 } }"
     );
     assert!(!debug.contains("s3cr3t"));
-    let none = lawyer::read(None, &resolve, wanted);
+    let none = lawyer::read(None, &resolve, wanted, &reading());
     assert_eq!(
         format!("{none:?}"),
         "McpSecrets { values: 0, unreadable: 4, commands: 1, key: ToolsKey { rev: 0, servers: 0 } }"
@@ -331,7 +340,12 @@ fn a_remote_server_goes_with_its_headers_filled_from_the_keychain() {
     store.put("docs/header/Authorization", b"Bearer s3cret-header");
     store.put("split/header/Authorization", b"Bearer x\r\nX-Evil: 1");
     let resolve: lawyer::Resolve = std::sync::Arc::new(|_: &str| None);
-    let secrets = lawyer::read(Some(&store as &dyn SecretStore), &resolve, wanted);
+    let secrets = lawyer::read(
+        Some(&store as &dyn SecretStore),
+        &resolve,
+        wanted,
+        &reading(),
+    );
     let (servers, left_out) = lawyer::servers(&effective, CLAUSEO, &secrets, NO_HOST);
     assert_eq!(
         servers,

@@ -17,7 +17,9 @@
 //!   blocking keychain call), and the values ride the run's folders ([`McpSecrets`]) to the
 //!   session calls. A server with a value missing or unreadable (not UTF-8, holding NUL, or a
 //!   keychain error) is left out of the session, with a log line naming the server and the
-//!   variable or header, never a value.
+//!   variable or header, never a value. Each read runs marked ([`ToolSecretRead`]): a launch
+//!   whose wait runs out while macOS holds one at its permission prompt fails as
+//!   `agent.tool_secret_unreadable` (`agent/codex/prepare.rs`), not as a slow folder.
 //!   A plain value (a firm's policy, a hand-edited file) goes as it is. A header value that an
 //!   HTTP header cannot hold ([`header_value_ok`]: a control character other than tab, which
 //!   would split the request, or a non-ASCII byte) leaves its server out the same way.
@@ -48,6 +50,7 @@ use clauseo_settings::{Effective, McpTransport, McpValue, McpValueKind, keychain
 use zeroize::Zeroizing;
 
 use super::McpControl;
+use crate::agent::codex::prepare::ToolSecretRead;
 
 mod key;
 mod redact;
@@ -173,6 +176,7 @@ pub(crate) struct Reads {
     resolve: Resolve,
     wanted: Wanted,
     key: ToolsKey,
+    reading: ToolSecretRead,
 }
 
 impl Reads {
@@ -189,12 +193,19 @@ impl Reads {
                 &actor.mcp.secret_revs,
                 actor.mcp.tools_rev,
             ),
+            reading: ToolSecretRead::default(),
         }
+    }
+
+    /// The mark its keychain reads set, for the launch's wait (`prepare::Job::watching`).
+    pub(crate) fn reading(&self) -> ToolSecretRead {
+        self.reading.clone()
     }
 
     /// The reads and the resolves ([`read`]): blocking, on the launch-prep thread.
     pub(crate) fn read(self) -> McpSecrets {
-        let mut secrets = read(self.store.as_deref(), &self.resolve, self.wanted);
+        let store = self.store.as_deref();
+        let mut secrets = read(store, &self.resolve, self.wanted, &self.reading);
         secrets.key = self.key;
         secrets
     }
@@ -203,11 +214,12 @@ impl Reads {
 /// Reads `wanted`'s accounts from `store` and resolves its commands with `resolve`: blocking
 /// keychain and file system calls, so on the launch-prep thread. A missing item, a keychain
 /// error, an item that is not UTF-8 or holds NUL is unreadable (its bytes zeroed); with no
-/// store every account is.
+/// store every account is. Each keychain call runs marked with `reading`.
 pub(crate) fn read(
     store: Option<&dyn SecretStore>,
     resolve: &Resolve,
     wanted: Wanted,
+    reading: &ToolSecretRead,
 ) -> McpSecrets {
     let mut secrets = McpSecrets::default();
     for command in wanted.commands {
@@ -216,7 +228,7 @@ pub(crate) fn read(
         }
     }
     for account in wanted.accounts {
-        let value = store.and_then(|store| match store.get(&account) {
+        let value = store.and_then(|store| match reading.during(|| store.get(&account)) {
             Ok(Some(bytes)) => usable(bytes),
             Ok(None) => None,
             Err(error) => {

@@ -20,6 +20,8 @@ mod codex;
 mod codex_entry_tests;
 pub(crate) mod lawyer;
 #[cfg(test)]
+mod lawyer_keychain_tests;
+#[cfg(test)]
 mod lawyer_tests;
 #[cfg(test)]
 mod layering_tests;

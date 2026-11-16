@@ -86,10 +86,11 @@ test("agent.exited before H10: the stopped line with its time, no Restart, no de
   expect(host.textContent).not.toContain("Details");
 });
 
-test("with H10 faked: Restart for agent.exited, agent.launch_failed and thread.interrupted only, and it calls restart", () => {
+test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.tool_secret_unreadable and thread.interrupted only, and it calls restart", () => {
   expect([...RESTARTS].sort()).toEqual([
     "agent.exited",
     "agent.launch_failed",
+    "agent.tool_secret_unreadable",
     "thread.interrupted",
   ]);
   for (const code of RESTARTS) {
@@ -160,6 +161,15 @@ test("the stopped question comes back only before H10, only for the codes asking
   expect(refillOf(brk("matter.folder_backslash"), true, null)).toBeNull();
   expect(refillOf(brk("agent.folder_inaccessible"), true, null)).toBeNull();
   expect(refillOf(brk("agent.unreachable"), true, null)).toBeNull();
+});
+
+test("agent.tool_secret_unreadable: a launch that waited out a keychain prompt gives the question back, as its words say", () => {
+  const b = brk("agent.tool_secret_unreadable");
+  expect(refillOf(b, true, null)).toEqual({ key: "step:x", text: "Q" });
+  expect(refillOf(b, false, null)).toBeNull();
+  expect(errorWords("en", "agent.tool_secret_unreadable")).toContain("your question is kept");
+  // no line of its own before H10: the step row says its words
+  expect(stoppedLine("en", b, 0, null)).toBeNull();
 });
 
 test("agent.service_error (#1030): no Restart, no time mark, no working line, with H10 or without", () => {

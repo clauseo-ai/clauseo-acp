@@ -126,6 +126,7 @@ export type ErrorCode =
   | "blackline.not_readable"
   | "blackline.too_large"
   | "blackline.format_unknown"
+  | "agent.tool_secret_unreadable"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -361,6 +362,12 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // Restart. Draft English (Rohan to approve); Hindi provisional
   "agent.folder_inaccessible":
     "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+  // a launch whose Settings › Tools value was still being read from the keychain when its wait ran out (a keychain
+  // prompt nobody answered): no agent started. The host can't say which tool, so the words point to the prompt and to
+  // turning tools off in Settings, then Tools.
+  // The app thread's wording (provisional); Hindi later
+  "agent.tool_secret_unreadable":
+    "macOS is asking whether Clauseo may use a saved password or key for one of your tools. Answer that prompt, then try again; your question is kept. If you'd rather not allow it, turn tools off in Settings, then Tools.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

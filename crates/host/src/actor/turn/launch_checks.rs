@@ -37,7 +37,7 @@
 //! folders and what its shells get ([`claim`], `agent/shell_path.rs`): Claude's
 //! `clauseo-env.sh` in the run folder, and on macOS the folders `path_helper` adds, for Codex.
 //! It also reads the keychain values of the lawyer's enabled MCP servers and resolves their
-//! programs (`agent::loads::lawyer`).
+//! programs (`agent::loads::lawyer`), marked so a wait spent on a keychain prompt says so.
 //!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
@@ -311,7 +311,6 @@ pub(super) fn prepare(
             return;
         }
     };
-    let job = codex::prepare::Job::launch(run.key.matter);
     let slot_wait = browser::slot_wait(actor, run.key, &claims.browser);
     run.slot_waited = slot_wait.is_some();
     let Some(state) = state(actor, thread) else {
@@ -326,6 +325,7 @@ pub(super) fn prepare(
     let block_list_wait = claims.egress.block_list_wait(Arc::clone(&actor.clock));
     let matter = run.key.matter;
     let (mcp, settings) = (McpReads::of(actor), Reads::of(actor, claude));
+    let job = codex::prepare::Job::launch(matter).watching(mcp.reading());
     actor.spawn_post(async move {
         let skills = skill_wait::after_keys(keys_wait, skills).await;
         // Before anything is made for the launch: a folder that is gone, or does not answer,
