@@ -59,6 +59,7 @@ fn query_result_word_blackline() {
                 vec![run(RunKind::Del, "Old clause.")],
             ),
         ],
+        changed_links: Vec::new(),
         truncated: false,
         notices: Vec::new(),
     });

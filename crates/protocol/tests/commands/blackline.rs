@@ -71,6 +71,7 @@ fn a_word_blackline_answer_on_the_wire() {
                 hidden: false,
             },
         ],
+        changed_links: Vec::new(),
         truncated: false,
         notices: Vec::new(),
     });
@@ -103,6 +104,7 @@ fn a_word_blackline_answer_on_the_wire() {
 fn a_word_blackline_answer_with_notices_on_the_wire() {
     let answer = QueryResult::WordBlackline(WordBlackline {
         paragraphs: Vec::new(),
+        changed_links: Vec::new(),
         truncated: false,
         notices: vec![
             BlacklineNotice::PartNotShown,
@@ -151,6 +153,7 @@ fn hidden_text_formatting_and_places_not_shown_on_the_wire() {
                 hidden: false,
             },
         ],
+        changed_links: Vec::new(),
         truncated: false,
         notices: vec![BlacklineNotice::ChangesOutsideText],
     });
@@ -182,6 +185,7 @@ fn an_object_run_on_the_wire() {
             ],
             hidden: false,
         }],
+        changed_links: Vec::new(),
         truncated: false,
         notices: Vec::new(),
     });
