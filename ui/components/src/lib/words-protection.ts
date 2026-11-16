@@ -34,7 +34,7 @@ export const INSTALLER_CLOSE: ProtectionKey =
 /** What the Safe workspace can't stop on Windows (UC-820), said once in the room when a second matter exists and always
  * in Settings' Safe workspace while it is on. Its Mac counterpart (UC-821) comes with the host's Mac fence. */
 export const WINDOWS_LINE: ProtectionKey =
-  "On Windows, Clauseo stops Claude's file tools and its usual file commands from opening or changing another matter's files. It can't stop everything yet: a program Claude writes and runs can still reach them, with only Anthropic's own safety checks in the way; ChatGPT's commands can read other matters' folders; and, until an update closes it, Claude can see the names and sizes of the folders and files of other matters kept in the same folder as this one. For matters that must stay strictly apart, use a Mac.";
+  "On Windows, Clauseo stops Claude's file tools and its usual file commands from opening or changing another matter's files. It can't stop everything yet: a program Claude writes and runs, or a command it tucks inside another command, can still reach them; ChatGPT's commands can read other matters' folders; and, until an update closes it, Claude can see the names and sizes of the folders and files of other matters kept in the same folder as this one. For matters that must stay strictly apart, use a Mac.";
 
 /** A protection command's or launch's refusal in words: the pool's and the block's codes here,
  * every other through errorWords. */
