@@ -1,10 +1,11 @@
 //! The short form beside the long: added once and after its path, never for a volume that makes
-//! none (the call gives the path back) or a path with none, never asked of a network path.
+//! none (the call gives the path back), never asked of a network path; a path that can't be
+//! read is counted for the warning, a missing one (a matter whose folder is gone) is not.
 
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
-use super::with_short_forms_by;
+use super::{Looked, short_forms_counted};
 use crate::network_paths::NetEnv;
 
 fn abs(path: &str) -> PathBuf {
@@ -17,10 +18,16 @@ fn a_short_form_goes_after_its_path_once() {
     let long = abs("/Users/clauseo-lawyer/Matters/B");
     let short = abs("/Users/CLAUSE~1/Matters/B");
     let given = short.clone();
-    let found = with_short_forms_by(vec![long.clone(), short.clone()], &net, &|path: &Path| {
-        (path == long).then(|| given.clone())
-    });
+    let (found, unread) =
+        short_forms_counted(vec![long.clone(), short.clone()], &net, &|path: &Path| {
+            if path == long {
+                Looked::Form(given.clone())
+            } else {
+                Looked::Form(path.to_path_buf())
+            }
+        });
     assert_eq!(found, [long, short]);
+    assert_eq!(unread, 0);
 }
 
 /// A volume with short names off gives the path back as it is: nothing is added.
@@ -31,10 +38,29 @@ fn a_volume_without_short_names_adds_nothing() {
         abs("/Users/l/Matters/B"),
         abs("/Users/l/AppData/Local/Clauseo"),
     ];
-    let same = with_short_forms_by(paths.clone(), &net, &|path: &Path| Some(path.to_path_buf()));
+    let (same, unread) = short_forms_counted(paths.clone(), &net, &|path: &Path| {
+        Looked::Form(path.to_path_buf())
+    });
     assert_eq!(same, paths);
-    let none = with_short_forms_by(paths.clone(), &net, &|_: &Path| None);
-    assert_eq!(none, paths);
+    assert_eq!(unread, 0);
+}
+
+/// A folder that is gone adds nothing and is no failure; one that exists and can't be read is
+/// counted for the warning.
+#[test]
+fn a_missing_folder_is_not_counted_and_an_unread_one_is() {
+    let net = NetEnv::current();
+    let (gone, there) = (abs("/Users/l/Matters/Gone"), abs("/Users/l/Matters/B"));
+    let (found, unread) =
+        short_forms_counted(vec![gone.clone(), there.clone()], &net, &|path: &Path| {
+            if path == gone {
+                Looked::Missing
+            } else {
+                Looked::Unread
+            }
+        });
+    assert_eq!(found, [gone, there]);
+    assert_eq!(unread, 1);
 }
 
 #[test]
@@ -46,10 +72,10 @@ fn a_network_path_is_never_asked() {
         windows: true,
         ..net
     };
-    let found = with_short_forms_by(vec![share.clone()], &net, &|_: &Path| {
+    let (found, unread) = short_forms_counted(vec![share.clone()], &net, &|_: &Path| {
         asked.set(asked.get() + 1);
-        None
+        Looked::Unread
     });
     assert_eq!(found, [share]);
-    assert_eq!(asked.get(), 0);
+    assert_eq!((asked.get(), unread), (0, 0));
 }
