@@ -5,9 +5,15 @@
 use clauseo_protocol::{CheckpointId, MatterPath, Timestamp};
 
 use crate::connectors::civil_from_days;
+use crate::versions::VersionsTool;
 
 mod from_log;
 pub(crate) use from_log::{Floor, carried, kept, read, restores_in};
+
+/// The note's last line when the agent has the version-history tool (`versions.rs`).
+pub(crate) const VERSIONS_LINE: &str = "\nTo see what the files held before, use the \
+     list_versions and read_version tools (clauseo-versions): they list this matter's versions \
+     and read an earlier version of a file it still holds.";
 
 /// The most files of each list a restore's note names (and its `VersionRestored` logs); the
 /// rest are counted.
@@ -158,8 +164,9 @@ pub(crate) fn add_undone(told: &mut Vec<Told>, path: &MatterPath) {
 /// The note's text for `told`, or `None` when nothing was put back or removed. Undos in a row
 /// share one line, each restore has its own, in order. An undo deletes a file its turn made,
 /// and a restore that undoes another deletes one that restore added: the undo line says so,
-/// since the version they go back to did not have them.
-pub(crate) fn note_text(told: &[Told]) -> Option<String> {
+/// since the version they go back to did not have them. When this launch's agent has the
+/// version-history tool (`tool`), the note ends by pointing at it.
+pub(crate) fn note_text(told: &[Told], tool: VersionsTool) -> Option<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut undone: Vec<&str> = Vec::new();
     for item in told {
@@ -175,8 +182,12 @@ pub(crate) fn note_text(told: &[Told]) -> Option<String> {
     if lines.is_empty() {
         return None;
     }
+    let pointer = match tool {
+        VersionsTool::Offered => VERSIONS_LINE,
+        VersionsTool::Absent => "",
+    };
     Some(format!(
-        "{} Read them again before relying on what you remember about them.",
+        "{} Read them again before relying on what you remember about them.{pointer}",
         lines.join("\n")
     ))
 }

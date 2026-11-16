@@ -21,6 +21,7 @@ use super::super::Actor;
 use super::super::input::Input;
 use super::{LogFor, TurnInput, state};
 use crate::undo_note::{self, Floor, RestoreNote, Told};
+use crate::versions::VersionsTool;
 
 /// A thread's undo note.
 #[derive(Debug, Default)]
@@ -36,6 +37,9 @@ pub(crate) struct NoteState {
     waiting: Option<Waiting>,
     /// What a prompt took of `told`, until its turn ended and it reached the agent or not.
     sent: Option<(TurnId, Vec<Told>)>,
+    /// Whether the current launch's agent has the version-history tool, which the note then
+    /// points at: the transport sets it at each launch; `Absent` until then.
+    pub(crate) versions: VersionsTool,
 }
 
 /// Where the matter's log is read from for the note's restores (`undo_note::Read`).
@@ -93,7 +97,10 @@ impl NoteState {
 pub(super) fn text(actor: &mut Actor, thread: ThreadId) -> Option<String> {
     ensure(actor, thread);
     let state = state(actor, thread)?;
-    let undo = undo_note::note_text(state.note.told.as_deref().unwrap_or_default());
+    let undo = undo_note::note_text(
+        state.note.told.as_deref().unwrap_or_default(),
+        state.note.versions,
+    );
     let owed = state.offline_owed;
     let owed = owed.then(|| {
         let web_search = crate::actor::header_tools::web_search_on(actor, thread);

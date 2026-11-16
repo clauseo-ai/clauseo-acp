@@ -6,6 +6,7 @@ use super::{
     NoteInput, RESTORE_FILES_CAP, RestoreNote, Told, add_undone, capped, note_text,
     since_last_turn, with_restores,
 };
+use crate::versions::VersionsTool;
 
 fn paths(names: &[&str]) -> Vec<MatterPath> {
     names.iter().map(|n| n.parse().unwrap()).collect()
@@ -48,7 +49,7 @@ fn lists_undos_since_last_turn_once_each() {
     ];
     let told = since_last_turn(inputs, Vec::new());
     assert_eq!(
-        note_text(&told).unwrap(),
+        note_text(&told, VersionsTool::Absent).unwrap(),
         "Note from Clauseo: since your last turn, the lawyer put these files back to an earlier \
          version, and removed those it did not have: notes/a.txt, brief.txt. Read them again \
          before relying on what you remember about them."
@@ -65,7 +66,7 @@ fn lists_undos_since_last_turn_once_each() {
         Vec::new(),
     );
     assert_eq!(after_turn, []);
-    assert_eq!(note_text(&after_turn), None);
+    assert_eq!(note_text(&after_turn, VersionsTool::Absent), None);
 }
 
 /// Stage C: Undo removed the reply, then a Versions restore brought it back. Two lines, in
@@ -81,7 +82,7 @@ fn a_restore_after_an_undo_has_its_own_line_after_it() {
         vec![restore(&["reply.docx"], &[], 60)],
     );
     assert_eq!(
-        note_text(&told).unwrap(),
+        note_text(&told, VersionsTool::Absent).unwrap(),
         "Note from Clauseo: since your last turn, the lawyer put these files back to an earlier \
          version, and removed those it did not have: reply.docx.\nThe lawyer restored reply.docx \
          from Versions; it's back as of 2026-11-11 14:06 UTC. Read them again before relying on \
@@ -112,7 +113,7 @@ fn restores_and_undos_keep_their_order() {
     add_undone(&mut told, &paths(&["a.txt"])[0]);
     assert_eq!(told.len(), 2);
     assert_eq!(
-        note_text(&told).unwrap(),
+        note_text(&told, VersionsTool::Absent).unwrap(),
         "Note from Clauseo: The lawyer restored a.txt, b.txt from Versions; they're back as of \
          2026-11-11 14:05 UTC.\nThat restore also removed c.txt, which that version did not \
          have.\nThen the lawyer put these files back to an earlier version, and removed those it \
@@ -124,7 +125,7 @@ fn restores_and_undos_keep_their_order() {
 fn a_restore_that_only_removed_says_so() {
     let told = [Told::Restored(restore(&[], &["draft.docx"], 0))];
     assert_eq!(
-        note_text(&told).unwrap(),
+        note_text(&told, VersionsTool::Absent).unwrap(),
         "Note from Clauseo: The lawyer restored an earlier version from Versions as of \
          2026-11-11 14:05 UTC; it removed draft.docx, which that version did not have. Read them \
          again before relying on what you remember about them."
@@ -227,9 +228,21 @@ fn a_large_restore_names_the_first_files_and_counts_the_rest() {
         more,
         ..restore(&["a.txt"], &[], 0)
     };
-    let text = note_text(&[Told::Restored(note)]).unwrap();
+    let text = note_text(&[Told::Restored(note)], VersionsTool::Absent).unwrap();
     assert!(
         text.contains("\nThat restore also changed 4 more files not named here. Read them"),
         "{text}"
     );
+}
+
+#[test]
+fn the_note_points_at_the_version_tool_only_when_the_launch_has_it() {
+    let told = vec![Told::Undone("brief.docx".parse().unwrap())];
+    let with = note_text(&told, VersionsTool::Offered).unwrap();
+    let without = note_text(&told, VersionsTool::Absent).unwrap();
+    assert!(with.ends_with(super::VERSIONS_LINE), "{with}");
+    assert!(with.contains("list_versions and read_version"), "{with}");
+    assert!(!without.contains("list_versions"), "{without}");
+    assert_eq!(with, format!("{without}{}", super::VERSIONS_LINE));
+    assert_eq!(note_text(&[], VersionsTool::Offered), None);
 }
