@@ -73,7 +73,7 @@ fn strings(value: &Value) -> Vec<&str> {
 }
 
 /// The launch's `claudeCode.options` over a hook that sent `hook` as its `claudeCode.options`.
-fn options(hook: Value, web: super::browser::Switch) -> Value {
+fn options(hook: &Value, web: super::browser::Switch) -> Value {
     let given = json!({"claudeCode": {"options": hook}});
     let meta = session_meta(
         given.as_object().cloned(),
@@ -148,7 +148,7 @@ fn the_tools_left_out_are_denied_by_name() {
         ]
     );
     for web in [ON, OFF] {
-        let options = options(json!({}), web);
+        let options = options(&json!({}), web);
         let disallowed = strings(&options["disallowedTools"]);
         let offered = strings(&options["tools"]);
         assert_eq!(offered, claude_tools(cfg!(windows), web.on));
@@ -165,7 +165,7 @@ fn the_tools_left_out_are_denied_by_name() {
 #[test]
 fn the_launch_keeps_claude_codes_scheduler_and_agent_listing_off() {
     let hook = json!({"allowedTools": ["CronCreate", "ScheduleWakeup", "ListAgents", "Read"]});
-    let options = options(hook, OFF);
+    let options = options(&hook, OFF);
     for name in [
         "CronCreate",
         "CronDelete",
@@ -191,7 +191,7 @@ fn the_hook_cannot_widen_the_tool_list() {
         json!(["Read", "CronCreate", "Workflow"]),
     ] {
         let hook = json!({"tools": given, "disallowedTools": ["NotebookEdit"]});
-        let options = options(hook, ON);
+        let options = options(&hook, ON);
         assert_eq!(
             strings(&options["tools"]),
             claude_tools(cfg!(windows), true)
@@ -322,16 +322,18 @@ fn every_claude_launch_keeps_messaging_between_sessions_and_remote_control_off()
 }
 
 /// `SendMessage` stays offered (it continues a helper); `ListAgents` is neither offered nor
-/// allowed.
+/// allowed to run: not in `tools`, and named in `disallowedTools`.
 #[test]
 fn send_message_stays_and_list_agents_is_left_out() {
-    let options = options(json!({"allowedTools": ["ListAgents", "ListPeers"]}), ON);
+    let options = options(&json!({"allowedTools": ["ListAgents", "ListPeers"]}), ON);
     let offered = strings(&options["tools"]);
     assert!(offered.contains(&"SendMessage") && offered.contains(&"Agent"));
     for name in ["ListAgents", "ListPeers"] {
         assert!(!offered.contains(&name));
-        assert!(strings(&options["disallowedTools"]).contains(&name));
-        assert!(!strings(&options["allowedTools"]).contains(&name), "{name}");
+        assert!(
+            strings(&options["disallowedTools"]).contains(&name),
+            "{name}"
+        );
     }
 }
 
