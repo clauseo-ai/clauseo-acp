@@ -373,6 +373,9 @@ mod pickers;
 #[path = "host/pickers_early.rs"]
 mod pickers_early;
 #[cfg(test)]
+#[path = "host/pickers_idle.rs"]
+mod pickers_idle;
+#[cfg(test)]
 #[path = "host/plan_note.rs"]
 mod plan_note;
 #[cfg(test)]
