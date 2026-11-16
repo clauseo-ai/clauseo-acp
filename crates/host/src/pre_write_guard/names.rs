@@ -23,7 +23,7 @@ pub(super) use allow::{read_only, textutil_writes};
 use spelling::as_listed;
 pub(super) use spelling::listed_spelling;
 pub(crate) use stetdoc::GuardFence;
-pub(super) use stetdoc::{Fenced, Stetdoc, fenced_read, stetdoc};
+pub(super) use stetdoc::{Fenced, Stetdoc, fenced_read_in_time, stetdoc};
 
 /// The most folder entries [`held_files`] reads; a larger matter is read in part, shallow folders
 /// first.

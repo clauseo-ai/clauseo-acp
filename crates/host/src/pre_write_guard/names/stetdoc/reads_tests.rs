@@ -1,7 +1,7 @@
 //! The stetdoc read fence on a disk in memory: what Claude's `Bash(stetdoc <sub>:*)` rules
 //! may read, in Bash's and PowerShell's forms.
 
-use super::{GuardFence, MATTERS_BUDGET, OVERFLOW_FLAG, git_bash};
+use super::{GuardFence, MATTERS_BUDGET, OVERFLOW_FLAG, OptionWord, git_bash, option_word};
 
 fn fence() -> GuardFence {
     GuardFence {
@@ -136,6 +136,9 @@ mod on_disk {
                 "ls; stetdoc lookup /w/B~1/secret.docx Losses",
                 "stetdoc view -- link/secret.docx",
                 "stetdoc view --find=/w/b/secret.docx Contract.docx",
+                "stetdoc view -o/w/b Contract.docx",
+                "stetdoc view -olink/secret.docx Contract.docx",
+                "stetdoc check -o=link Contract.docx",
                 "stetdoc view Contract.docx | head -5; stetdoc view link/secret.docx",
             ],
             |_, got| matter_b(got.as_ref()),
@@ -317,6 +320,27 @@ mod on_disk {
         );
     }
 
+    /// A stetdoc line with a command that writes a file, or a word zsh would make a program's
+    /// path, is refused; so is a PowerShell word that 5.1 would hand on as other words.
+    #[test]
+    fn a_stetdoc_line_with_a_writing_filter_or_an_odd_word_is_refused() {
+        let both_shells = [
+            "stetdoc view Contract.docx | uniq - /w/m/out.txt",
+            "stetdoc view Contract.docx | uniq",
+            "=stetdoc view /w/b/secret.docx",
+            "stetdoc view =secret.docx",
+        ];
+        not_plain(BASH, &both_shells);
+        not_plain(PWSH, &both_shells);
+        not_plain(
+            PWSH,
+            &[
+                "stetdoc view --find 'q q\"q /w/b/secret.docx'",
+                "stetdoc view --find 'q q\\' /w/b/secret.docx",
+            ],
+        );
+    }
+
     /// A stetdoc command fed by a pipe, a redirection or a process substitution is refused, and
     /// so is the standard input word.
     #[test]
@@ -329,7 +353,6 @@ mod on_disk {
                 "stetdoc view /dev/stdin < /w/b/secret.docx",
                 "stetdoc view - < /w/b/secret.docx",
                 "stetdoc view -",
-                "stetdoc view -o/w/b Contract.docx",
             ],
         );
     }
@@ -489,5 +512,24 @@ fn git_bash_forms_become_windows_paths_or_none() {
         "C:/a;D:/b",
     ] {
         assert_eq!(git_bash(word), None, "{word}");
+    }
+}
+
+/// An option word's value: after `=` in a long option, after the letter in a short one.
+#[test]
+fn a_short_options_joined_value_is_a_value() {
+    for (word, want) in [
+        ("--find", OptionWord::Name),
+        ("--find=x", OptionWord::Value("x")),
+        ("-o", OptionWord::Name),
+        ("-oNAME", OptionWord::Value("NAME")),
+        ("-o=NAME", OptionWord::Value("NAME")),
+        ("-o/w/b", OptionWord::Value("/w/b")),
+        ("-o=", OptionWord::Odd),
+        ("-", OptionWord::Odd),
+        ("-5", OptionWord::Odd),
+        ("--find=", OptionWord::Odd),
+    ] {
+        assert_eq!(option_word(word), want, "{word}");
     }
 }

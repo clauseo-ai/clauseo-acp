@@ -2,9 +2,13 @@
 //! short list of simple commands joined by `;`, `&&`, `||`, `|` or a new line, each word a plain
 //! literal (a bare word of safe characters, a single-quoted string, or a double-quoted string
 //! with nothing the shell would change), with no wildcard anywhere and no redirection but
-//! `2>&1`. Anything else is not that shape ([`plain_segments`] gives `None`), and a command
-//! that mentions stetdoc ([`mentions_stetdoc`]) in another shape is refused. Nothing here tries
-//! to read what an unusual line would do; it only says whether the line is the plain shape.
+//! `2>&1`. In PowerShell no word holds `"`, and no quoted word with a space ends in `\`:
+//! Windows PowerShell 5.1 hands such a word on in double quotes as it is, so a program would
+//! read it as other words. No bare word starts with `=`, or holds `==` (zsh's `=name` is
+//! the path of the program `name`). Anything else is not that shape ([`plain_segments`] gives
+//! `None`), and a command that mentions stetdoc ([`mentions_stetdoc`]) in another shape is
+//! refused. Nothing here tries to read what an unusual line would do; it only says whether the
+//! line is the plain shape.
 
 /// The most bytes, words and simple commands a line of the plain shape has.
 const MAX_BYTES: usize = 16 * 1024;
@@ -63,7 +67,15 @@ pub(super) fn plain_segments(text: &str, powershell: bool) -> Option<Vec<Segment
                     if c == '"' && !plain_in_double(next, powershell) {
                         return None;
                     }
+                    if powershell && next == '"' {
+                        // Only in single quotes: 5.1 would end its own double quotes here.
+                        return None;
+                    }
                     quoted.push(next);
+                }
+                if powershell && quoted.ends_with('\\') && quoted.contains(char::is_whitespace) {
+                    // 5.1's closing `"` would follow the `\`, which escapes it.
+                    return None;
                 }
                 // The word ends here: what follows must end it.
                 if chars
@@ -99,6 +111,10 @@ pub(super) fn plain_segments(text: &str, powershell: bool) -> Option<Vec<Segment
                     return None;
                 }
                 if line.state == Word::Quoted {
+                    return None;
+                }
+                if c == '=' && (line.state == Word::None || line.word.ends_with('=')) {
+                    // zsh's `=name`, at a word's start or after an `=` (`magic_equal_subst`).
                     return None;
                 }
                 line.word.push(c);

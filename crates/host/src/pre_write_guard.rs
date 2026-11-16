@@ -82,8 +82,9 @@
 //!     Claude's entry passes (`--fence-*`, `names::GuardFence`), a `view`, `inspect`,
 //!     `check` or `lookup` whose document's real path lies in the data folder (but the
 //!     session's own folders), another matter's folder or a protected root is refused, and so
-//!     is one whose document it can't follow (`names::stetdoc`'s `reads`). Anywhere else, a
-//!     template in the lawyer's Documents too, it reads as before.
+//!     is one whose document it can't follow (`names::stetdoc`'s `reads`), and one whose walk
+//!     isn't done within its own deadline (`deadline`). Anywhere else, a template in the
+//!     lawyer's Documents too, it reads as before.
 //!
 //!   Not caught: the guard stops an agent overwriting a held document by accident; it is not a
 //!   boundary against an agent set on evading it (stage C's sandbox is). It misses a command
@@ -380,6 +381,9 @@ fn read_reason(fenced: &names::Fenced) -> String {
         names::Fenced::Shape => {
             format!("Clauseo doesn't run this stetdoc command. {STETDOC_PLAIN}")
         }
+        names::Fenced::Late => "Clauseo couldn't check where this stetdoc command reads in time, \
+             so it doesn't run. A folder it looks at may be on a drive that isn't answering."
+            .to_owned(),
     }
 }
 
@@ -457,8 +461,7 @@ fn refusal(
             escape,
             ..
         } => {
-            let disk = crate::network_paths::resolve::Disk::real(reach.net());
-            let read = names::fenced_read(text, *escape, (&base, &folder), fence, &disk);
+            let read = names::fenced_read_in_time(text, *escape, (&base, &folder), fence);
             if let Some(fenced) = read {
                 return Ok(Some(Refusal::StetdocRead(fenced)));
             }

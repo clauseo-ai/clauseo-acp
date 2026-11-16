@@ -7,10 +7,12 @@ use crate::pre_write_guard::shell::command_words;
 use crate::stetdoc_args::parse;
 use crate::stetdoc_args::{Form, args_of, form};
 
+mod deadline;
 mod reads;
 mod shape;
+pub(in crate::pre_write_guard) use deadline::fenced_read_in_time;
+pub(in crate::pre_write_guard) use reads::Fenced;
 pub(crate) use reads::GuardFence;
-pub(in crate::pre_write_guard) use reads::{Fenced, fenced_read};
 
 /// What a `stetdoc` segment does to held files.
 #[derive(Debug, Clone, PartialEq, Eq)]

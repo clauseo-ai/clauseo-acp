@@ -353,6 +353,7 @@ crates/host/src/actor/startup.rs open clippy::too_many_lines
 # One match arm per matter job, as actor/query.rs's query has one arm per query; splitting handle into helpers is on the after-launch list.
 crates/host/src/matter_worker.rs handle clippy::too_many_lines
 crates/host/tests/host/blackline.rs stetdoc_on_path clippy::disallowed_methods
+crates/host/src/pre_write_guard/names/stetdoc/shape_tests.rs windows_powershell_splits_a_word_with_a_double_quote clippy::disallowed_methods
 crates/host/src/clock.rs SystemClock::now clippy::disallowed_methods
 crates/host/src/write.rs - clippy::disallowed_methods
 # R23 PR 4 (#456): `sync_dir` is Ok on every OS but Unix, where only the folder sync can fail.

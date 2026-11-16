@@ -14,18 +14,25 @@
 //! - a command that runs stetdoc names it first, as `stetdoc`, and is the first of its pipe;
 //! - every other command is a filter from a short list ([`FILTERS`]) with no word mentioning
 //!   stetdoc, so no folder change, alias, function, variable, link, wrapper or other shell;
-//! - each word of a stetdoc command that is not an option name, and each option's `=value`, is
-//!   walked to its real path ([`walk`]: every link followed, each name's long form, so an 8.3
-//!   short name too) and refused in a fenced place, for every subcommand;
+//! - each word of a stetdoc command that is not an option name, each option's `=value` and
+//!   each short option's joined value (`-oNAME`) is walked to its real path ([`walk`]: every
+//!   link followed, each name's long form, so an 8.3 short name too) and refused in a fenced
+//!   place, for every subcommand;
 //! - a reading subcommand's document must exist and have one name (no hard link).
 //!
 //! A word the walk can't vouch for (a network path, a link it can't read) is refused. Git Bash's
 //! `/c/…`, `/cygdrive/c/…` and `/proc/cygdrive/c/…` are read as Git Bash hands them on; any
 //! other path from its root (`/tmp`, `/usr`) is refused on Windows.
 //!
+//! The walk runs on a thread of its own: past [`super::deadline::WALK_DEADLINE`] (a mount that
+//! hangs) the command is refused, before Claude Code's time limit for the hook would let it run.
+//!
 //! Not caught here: a link swapped between this check and stetdoc opening the path (a loop run
 //! in the background by an earlier command), and a hard link inside a working copy that
-//! `check` prints. The walk is `network_paths::resolve::walk`, the data fence's.
+//! `check` prints. Nor a renamed copy of stetdoc, or any spelling of it in which the text
+//! "stetdoc" never appears: the fence doesn't recognise it, so only Claude's classifier judges
+//! the command (and on the Mac the sandbox, when it is on). The walk is
+//! `network_paths::resolve::walk`, the data fence's.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -49,10 +56,10 @@ const OVERFLOW_FLAG: &str = "--fence-overflow";
 const MATTERS_BUDGET: usize = 16 * 1024;
 
 /// The commands a line that runs stetdoc may hold beside it, as their first word: filters of
-/// its output that start no other program, change no folder and make no link. PowerShell's
-/// are matched in any case.
-const FILTERS: [&str; 12] = [
-    "head", "tail", "grep", "wc", "cut", "tr", "uniq", "echo", "printf", "ls", "pwd", "true",
+/// its output that start no other program, change no folder, make no link and write no file
+/// (not `uniq`, which writes its second operand). PowerShell's are matched in any case.
+const FILTERS: [&str; 11] = [
+    "head", "tail", "grep", "wc", "cut", "tr", "echo", "printf", "ls", "pwd", "true",
 ];
 const PS_FILTERS: [&str; 9] = [
     "select-object",
@@ -161,7 +168,7 @@ impl GuardFence {
     }
 
     /// Whether it fences anything.
-    fn is_on(&self) -> bool {
+    pub(super) fn is_on(&self) -> bool {
         self.overflow
             || !self.data.is_empty()
             || !self.matters.is_empty()
@@ -195,6 +202,8 @@ pub(in crate::pre_write_guard) enum Fenced {
     Overflow(String),
     /// The line mentions stetdoc and is not the plain shape ([`super::shape`]).
     Shape,
+    /// The walk did not finish within [`super::deadline::WALK_DEADLINE`].
+    Late,
 }
 
 /// The first reason `fence` refuses the shell command `command` (its shell's escape `escape`),
@@ -296,14 +305,25 @@ fn segment_refusal(
 enum OptionWord<'a> {
     /// A bare option name (`-x`, `--name`).
     Name,
-    /// `--name=value`: the value.
+    /// `--name=value`, or a short option's joined value (`-xVALUE`, `-x=VALUE`): the value.
     Value(&'a str),
     /// Anything else: a lone `-` (standard input), or an option with something stuck to it.
     Odd,
 }
 
-/// What the word `word`, starting with `-`, is ([`OptionWord`]).
+/// What the word `word`, starting with `-`, is ([`OptionWord`]). A short option takes what
+/// follows its letter as its value, as stetdoc's parser does; for a flag that is more flags,
+/// which only adds a path to check.
 fn option_word(word: &str) -> OptionWord<'_> {
+    if let Some(short) = word.strip_prefix('-').filter(|rest| !rest.starts_with('-'))
+        && let Some(rest) = short.strip_prefix(|c: char| c.is_ascii_alphabetic())
+    {
+        return match rest.strip_prefix('=').unwrap_or(rest) {
+            "" if rest.is_empty() => OptionWord::Name,
+            "" => OptionWord::Odd,
+            value => OptionWord::Value(value),
+        };
+    }
     let (name, value) = match word.split_once('=') {
         Some((name, value)) => (name, Some(value)),
         None => (word, None),

@@ -152,6 +152,12 @@ any ACP message, including permission requests with misleading text.
   adapter
 - `designed`: The host checkpoints the matter before and after every turn, so any step can be undone
 - `designed`: Adapters are installed pinned by version and integrity hash
+- `built`: The pre-write guard fences the reads of stetdoc, which Claude's allow rules run with no
+  question: a line that mentions stetdoc must be plain simple commands, and a word leading into the
+  data folder, another matter's folder or a protected root is refused
+  (`pre_write_guard/names/stetdoc/reads.rs`). Not caught: a renamed copy of stetdoc, or a
+  spelling in which the text "stetdoc" never appears, isn't recognised by the fence, so only
+  Claude's classifier judges it (and on the Mac the sandbox, when it is on)
 
 ## Sandbox
 

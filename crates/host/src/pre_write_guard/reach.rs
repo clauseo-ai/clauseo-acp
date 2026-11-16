@@ -35,11 +35,6 @@ impl Reach {
         self.walked_on(path, &Disk::resolved(&self.net))
     }
 
-    /// The network rules it walks with.
-    pub(super) fn net(&self) -> &NetEnv {
-        &self.net
-    }
-
     /// [`Self::walked`], walking on `disk`.
     fn walked_on(&self, path: &Path, disk: &Disk<'_>) -> Option<PathBuf> {
         if path.as_os_str().len() > MAX_RESOLVED {
