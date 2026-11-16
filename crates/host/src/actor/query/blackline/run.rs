@@ -188,7 +188,8 @@ pub(crate) fn note_tables(blackline: &mut WordBlackline, compared: TablesCompare
 }
 
 /// The older and the newer text of each header and footer the blackline shows, white space
-/// taken out.
+/// taken out; each also with every paragraph's first word taken out, since the view writes a
+/// list number into the runs (`{§"1."}`) that the part's `w:t` does not hold.
 fn shown_header_texts(blackline: &WordBlackline) -> Vec<String> {
     let mut texts = Vec::new();
     for part in &blackline.parts {
@@ -199,14 +200,23 @@ fn shown_header_texts(blackline: &WordBlackline) -> Vec<String> {
             continue;
         }
         for side in [RunKind::Del, RunKind::Ins] {
-            let text: String = part
-                .paragraphs
-                .iter()
-                .flat_map(|paragraph| &paragraph.runs)
-                .filter(|run| run.kind == RunKind::Same || run.kind == side)
-                .map(|run| run.text.as_str())
-                .collect();
-            texts.push(squeezed(&text));
+            let (mut whole, mut numbered) = (String::new(), String::new());
+            for paragraph in &part.paragraphs {
+                let text: String = paragraph
+                    .runs
+                    .iter()
+                    .filter(|run| run.kind == RunKind::Same || run.kind == side)
+                    .map(|run| run.text.as_str())
+                    .collect();
+                let trimmed = text.trim_start();
+                let rest = trimmed
+                    .find(char::is_whitespace)
+                    .map_or("", |space| trimmed.get(space..).unwrap_or_default());
+                whole.push_str(&text);
+                numbered.push_str(rest);
+            }
+            texts.push(squeezed(&whole));
+            texts.push(squeezed(&numbered));
         }
     }
     texts

@@ -105,8 +105,17 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
                 }
             }
             Event::Empty(element) => {
-                if main && word && element.local_name().as_ref() == "sectPr" {
+                let name = element.local_name();
+                if main && word && name.as_ref() == "sectPr" {
                     sections.push(Vec::new());
+                }
+                // A symbol (`w:sym`) is text the views show, by its character's code.
+                let symbol = (word && name.as_ref() == "sym")
+                    .then(|| symbol_of(&element))
+                    .flatten();
+                if let Some(character) = symbol {
+                    whole.push(character);
+                    add_text(&mut tables, &open, &character.to_string());
                 }
             }
             Event::End(_) => match stack.pop() {
@@ -126,9 +135,9 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
                 add_text(&mut tables, &open, &text);
             }
             Event::GeneralRef(entity) if stack.last() == Some(&Frame::Text) => {
-                let entity = format!("&{};", &*entity);
-                whole.push_str(&entity);
-                add_text(&mut tables, &open, &entity);
+                let text = entity_text(&entity);
+                whole.push_str(&text);
+                add_text(&mut tables, &open, &text);
             }
             Event::Eof => {
                 // A table whose every row's deletion is tracked is gone once they are accepted.
@@ -144,6 +153,25 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
             | Event::GeneralRef(_) => {}
         }
     }
+}
+
+/// The text an entity reference in a `w:t` stands for: a predefined entity (`&amp;`) or a
+/// character reference (`&#8212;`) resolved, anything else as it is written.
+fn entity_text(entity: &quick_xml::events::BytesRef<'_>) -> String {
+    if let Ok(Some(character)) = entity.resolve_char_ref() {
+        return character.to_string();
+    }
+    quick_xml::escape::resolve_predefined_entity(entity)
+        .map_or_else(|| format!("&{};", &**entity), str::to_owned)
+}
+
+/// The character of a `w:sym` element, by its `w:char` attribute's hex code.
+fn symbol_of(element: &BytesStart<'_>) -> Option<char> {
+    let code = element
+        .attributes()
+        .flatten()
+        .find(|attr| attr.key.local_name().as_ref() == "char")?;
+    char::from_u32(u32::from_str_radix(&code.value, 16).ok()?)
 }
 
 /// Adds `text` to every open table's text, and to its current row's and cell's.

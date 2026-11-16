@@ -137,3 +137,36 @@ def split(name, first_header, body_text):
 # so the new first section's header pairs with nothing and is not compared.
 split('added-old.docx', None, 'The term is one year.')
 split('added-new.docx', 'Schedule header.', 'The term is two years.')
+
+
+NUMBERING = (f'{XML}<w:numbering {W}><w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0">'
+             '<w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>'
+             '</w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>')
+
+
+def headed(name, header_xml):
+    """A body paragraph that stays, and a default header holding `header_xml`."""
+    parts = {'word/header1.xml': f'{XML}<w:hdr {W}>{header_xml}</w:hdr>',
+             'word/numbering.xml': NUMBERING}
+    rels = (f'<Relationship Id="rIdH" Type="{R}header" Target="header1.xml"/>'
+            f'<Relationship Id="rIdNum" Type="{R}numbering" Target="numbering.xml"/>')
+    types = (f'<Override PartName="/word/header1.xml" ContentType="{CT}header+xml"/>'
+             f'<Override PartName="/word/numbering.xml" ContentType="{CT}numbering+xml"/>')
+    body = (p('Body.') +
+            '<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/></w:sectPr>')
+    pkg(name, body, parts, rels, types)
+
+
+# Headers whose text the views write differently from the part's w:t: an entity and a character
+# reference, a list number, a symbol (w:sym). Each changes from "Draft 1" to "Draft 2".
+FORMS = {
+    'entity': lambda d: ('<w:p><w:r><w:t xml:space="preserve">Smith &amp; Co &#8212; Draft '
+                         f'{d}</w:t></w:r></w:p>'),
+    'numbered': lambda d: ('<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/>'
+                           f'</w:numPr></w:pPr><w:r><w:t>Draft {d}</w:t></w:r></w:p>'),
+    'symbol': lambda d: ('<w:p><w:r><w:sym w:font="Wingdings" w:char="F0FC"/>'
+                         f'<w:t xml:space="preserve"> Draft {d}</w:t></w:r></w:p>'),
+}
+for form, header in FORMS.items():
+    headed(f'{form}-old.docx', header(1))
+    headed(f'{form}-new.docx', header(2))

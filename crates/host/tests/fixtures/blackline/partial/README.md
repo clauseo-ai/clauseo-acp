@@ -89,6 +89,9 @@ The notes, headers and footers, what compare says beside the redline, and table 
 - `added-old.docx`, `added-new.docx`: an existing paragraph ends a new first section with a header
   of its own, beside a body change. compare warns nothing, marks neither the header nor the
   section break, and its headers' view shows the new header unchanged.
+- `entity-*`, `numbered-*`, `symbol-*`: a header changing from "Draft 1" to "Draft 2" whose text
+  the views write unlike its `w:t`: "Smith &amp; Co &#8212;" (the headers' view prints
+  `Smith & Co —`), a numbered paragraph (`{§"1."} Draft …`) and a `w:sym` (`\u{f0fc} Draft …`).
 - Each of these four pairs has `view-<pair>.json`, `check-<pair>.json` and
   `final-<pair>-old.json`, `final-<pair>-new.json` as above.
 
