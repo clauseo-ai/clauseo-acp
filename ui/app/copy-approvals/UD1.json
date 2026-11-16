@@ -61,9 +61,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-12": {
     "en": "{name} is ready",
@@ -78,9 +78,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-14": {
     "en": "Use the system proxy",
@@ -151,9 +151,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; reworded to match UD1-93, orchestrator approved the words 2026-11-10, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-25": {
     "en": "Sign in",
@@ -252,9 +252,12 @@
   "UD1-38": {
     "en": "Finish signing in with your browser.",
     "hi": "अपने ब्राउज़र में साइन इन पूरा करें",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review)"
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-39": {
     "en": "Didn't open?",
@@ -496,9 +499,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-66": {
     "en": "{app} on this computer is signed out, so Clauseo stopped using its sign-in.",
@@ -649,9 +652,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (no IT endings)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (no IT endings)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-80": {
@@ -660,9 +663,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-81": {
     "en": "Clauseo is still stopping the old login. It keeps trying by itself, so there's nothing you need to do.",
@@ -670,9 +673,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-82": {
     "en": "If this goes on, quit Clauseo and open it again.",
@@ -680,9 +683,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-83": {
     "en": "Clauseo is still switching accounts. Try again in a moment.",
@@ -690,9 +693,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-84": {
     "en": "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
@@ -700,16 +703,19 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-85": {
     "en": "Try again",
     "hi": "फिर से प्रयास करें",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-86": {
     "en": "Use the system proxy",
@@ -717,9 +723,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-87": {
     "en": "Use the system proxy",
@@ -727,9 +733,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-88": {
     "en": "Getting {name} ready… {done} MB of {total} MB",
@@ -737,9 +743,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-89": {
     "en": "Checking whether you're signed in to {name}…",
@@ -747,9 +753,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-90": {
     "en": "{plan} isn't installed on this computer any more.",
@@ -777,9 +783,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-93": {
     "en": "Your papers stay on this computer. Claude or ChatGPT sees the parts it reads to answer you.",
@@ -787,9 +793,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-94": {
     "en": "Sign in with {name}",
@@ -817,9 +823,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-97": {
     "en": "Claude may ask you to sign in again in your browser. Use your Claude account.",
@@ -827,9 +833,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-98": {
     "en": "Also downloads Clauseo's document tools ({size}).",
@@ -837,9 +843,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-99": {
     "en": "Downloading document tools… {done} of {size}",
@@ -847,9 +853,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-100": {
     "en": "Clauseo couldn't download its document tools.",
@@ -857,9 +863,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-101": {
     "en": "Windows blocked Clauseo's document tools on this computer.",
@@ -867,9 +873,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator approved the words 2026-11-10, copy review pending)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "UD1-102": {
     "en": "You're offline. Setting up waits for the connection.",

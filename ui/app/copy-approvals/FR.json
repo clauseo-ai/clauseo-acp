@@ -57,9 +57,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Rohan's approved line with 'an agent' replaced by 'Claude and ChatGPT' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "FR-09": {
@@ -98,9 +98,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (no Safe workspace at launch; info line settled by the orchestrator)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "FR-13": {
     "en": "No file permissions / This drive doesn't keep file permissions",
@@ -119,9 +119,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Rohan's approved line with 'an agent' replaced by 'Claude and ChatGPT' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "FR-15": {
@@ -130,9 +130,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (no Safe workspace at launch; info line settled by the orchestrator)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "FR-20": {
     "en": "Clauseo couldn't check this folder, so Claude asks before every change.",
@@ -151,9 +151,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "FR-22": {
     "en": "Open Privacy settings",
@@ -161,9 +161,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator settled the words 2026-11-10, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "macOS only: the button under matter.folder_permission's stop; it opens System Settings at Privacy & Security, Files and Folders (the desktop's open_privacy_settings)"
   },
   "FR-23": {
@@ -172,9 +172,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; orchestrator settled the words 2026-11-10, copy review pending)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "macOS only: the line under Open Privacy settings"
   },
   "FR-24": {
@@ -183,9 +183,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (draft; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "On macOS and Linux, New matter's warning for a folder whose name has a backslash, where Claude can't start (the host refuses it as matter.folder_backslash); Choose another folder (FR-09) and Create anyway (FR-10)"
   },
   "FR-25": {
@@ -194,9 +194,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (draft; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Locate's step for a folder picked whose name has a backslash, on macOS and Linux: FR-24's title and body, then Choose another folder (FR-09) and Locate anyway (FR-26)"
   },
   "FR-26": {
@@ -205,9 +205,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (draft; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Locate's step's other button: relocates the matter to the folder with a backslash anyway"
   },
   "FR-27": {
@@ -216,9 +216,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (draft; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "On Linux, New matter's warning for a folder whose own name has a backslash: its body, naming the file manager (title and name as FR-24); Locate's step and the first screen's say the same"
   },
   "FR-28": {
@@ -227,9 +227,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (draft; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "On the Mac, New matter's warning when a folder above the one picked has the backslash, named by {folder} (the nearest): its title, body and accessible name; Locate's step and the first screen's say the same"
   },
   "FR-29": {
@@ -238,9 +238,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (draft; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "On Linux, the same as FR-28: its body, naming the file manager"
   },
   "FR-30": {
@@ -249,9 +249,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (draft; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "On macOS and Linux, the first screen's Open the folder, a folder picked whose path has a backslash: the step's other button, which opens the folder as a matter anyway (the step's words as FR-24 or FR-28; Choose another folder as FR-09)"
   }
 }

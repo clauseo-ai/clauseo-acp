@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; conversation small fixes)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Activity row of a chained command (&&, ||, ; or |) that failed or was stopped: its programs counted, where it once named only the first (\"Tried to run New-Item.\"). Done, the row says the folded line's \"Ran {n} tasks.\" (UTC-32). The command shows whole under Show the command."
   },
   "UC-301": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; conversation small fixes)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Working line and live row of a chained command (&&, ||, ; or |) while it runs: its programs counted, where it once named only the first (\"Running New-Item.\")."
   },
   "UC-302": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; conversation small fixes)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Permission prompt of a chained command (&&, ||, ; or |): its programs counted, where it once named only the first (\"Run New-Item.\"); the command shows whole under Show the command."
   }
 }

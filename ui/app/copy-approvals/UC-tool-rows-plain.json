@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Working line and live step: a task named by its own title or the text it shows (Claude's description of a command), where it gave no other words. Was \"Running a task.\""
   },
   "UC-241": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Working line and live step: a skill Clauseo doesn't ship, being read. Never the skill's internal name (e.g. clauseo:legal-drafting)"
   },
   "UC-242": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The legal-drafting skill's name in \"Read {name}.\" / \"Reading {name}.\" / \"Tried to read {name}.\"; was \"Load skill: clauseo:legal-drafting\""
   },
   "UC-243": {
@@ -38,9 +38,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The legal-research skill's name in the skill row"
   },
   "UC-244": {
@@ -49,9 +49,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The matter-brief skill's name in the skill row"
   },
   "UC-245": {
@@ -60,9 +60,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The agent-browser skill's name in the skill row"
   },
   "UC-246": {
@@ -71,9 +71,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row, done: a task named by its own title or the text it shows, a leading Run dropped, sentence case (\"Ran the checks.\"). Was \"Ran a task.\""
   },
   "UC-247": {
@@ -82,9 +82,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row, failed or stopped, for the same task"
   },
   "UC-248": {
@@ -93,9 +93,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row, done: a skill Clauseo doesn't ship. Never the skill's internal name"
   },
   "UC-249": {
@@ -104,9 +104,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row, failed or stopped, for the same skill"
   }
 }

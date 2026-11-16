@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: the action reached files or systems Claude wasn't asked to use (rule names such as Unauthorized Access). Replaces Claude Code's raw refusal text, which stays in the call's output"
   },
   "UC-601": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: matter information sent outside (Data Exfiltration). Replaces Claude Code's raw refusal text, which stays in the call's output"
   },
   "UC-602": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: a search for passwords or sign-in keys (Credential Exploration). Replaces Claude Code's raw refusal text, which stays in the call's output"
   },
   "UC-603": {
@@ -38,9 +38,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: deleting or overwriting that can't be undone (Irreversible Local Destruction). Replaces Claude Code's raw refusal text, which stays in the call's output"
   },
   "UC-604": {
@@ -49,9 +49,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: getting around the checks on Claude's work (Undermining Oversight). Replaces Claude Code's raw refusal text, which stays in the call's output"
   },
   "UC-605": {
@@ -60,9 +60,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: changing Claude's own setup (Self-Modification). Replaces Claude Code's raw refusal text, which stays in the call's output"
   },
   "UC-606": {
@@ -71,9 +71,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: changing something outside the matter (Production Deploy). Replaces Claude Code's raw refusal text, which stays in the call's output"
   },
   "UC-607": {
@@ -82,9 +82,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: instructions hidden in a document or web page (Prompt Injection). Replaces Claude Code's raw refusal text, which stays in the call's output"
   },
   "UC-608": {
@@ -93,9 +93,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: code from an untrusted source (Untrusted Code Execution). Replaces Claude Code's raw refusal text, which stays in the call's output"
   },
   "UC-609": {
@@ -104,9 +104,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: spending money or acting outside Clauseo (Financial Transaction). Replaces Claude Code's raw refusal text, which stays in the call's output"
   },
   "UC-610": {
@@ -115,9 +115,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call Claude Code's built-in safety check (auto mode) blocked: a rule name none of the others knows. Replaces Claude Code's raw refusal text, which stays in the call's output"
   },
   "UC-611": {
@@ -126,9 +126,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, when the safety check couldn't judge the call (busy, too long a transcript) and Claude Code didn't run it"
   },
   "UC-612": {
@@ -137,9 +137,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row's why line, a call one of Clauseo's own deny rules refused (Clauseo's app data, another matter)"
   }
 }

@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Permission prompt, under \"Clauseo asks before going on.\", for a request named only SandboxNetworkAccess (the sandbox's network permission): never the raw name"
   },
   "UC-161": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Permission prompt line for a request named only by a shell tool's name (Bash, exec_command, shell), with no task words of its own"
   },
   "UC-162": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Permission prompt line for a request named only by a read tool's name (Read, read_file, fs.read)"
   },
   "UC-163": {
@@ -38,9 +38,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Permission prompt line for a request named only by a write tool's name (Write, write_file, ApplyPatch, MultiEdit)"
   },
   "UC-164": {
@@ -49,9 +49,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Permission prompt line for a request named only by a search tool's name (Grep, Glob)"
   },
   "UC-165": {
@@ -60,9 +60,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Permission prompt line for a request named only by a web or browser tool's name (WebFetch, WebSearch, mcp__browser__…)"
   },
   "UC-166": {
@@ -71,9 +71,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row, done, for a step titled only SandboxNetworkAccess"
   },
   "UC-167": {
@@ -82,9 +82,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Step row, failed or stopped, for a step titled only SandboxNetworkAccess"
   },
   "UC-168": {
@@ -93,9 +93,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; orchestrator to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Working line and live step, for a step titled only SandboxNetworkAccess"
   }
 }

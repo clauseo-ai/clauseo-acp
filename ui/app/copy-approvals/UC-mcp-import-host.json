@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "orchestrator (PR A3: native confirm before an MCP import)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "MCP import confirm: title"
   },
   "UC-232": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "orchestrator (PR A3: native confirm before an MCP import)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "MCP import confirm: message; {list} is each server with its program or URL"
   },
   "U3-err-mcp.import_too_large": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-12",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-12",
-    "by": "orchestrator (PR A3: native confirm before an MCP import)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "mcp.import_too_large: the import's servers are too long for one confirm, so nothing was imported (Settings › Tools)"
   }
 }

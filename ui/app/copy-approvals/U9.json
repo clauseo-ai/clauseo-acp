@@ -95,9 +95,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U9-12": {
     "en": "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.",
@@ -105,9 +105,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U9-13": {
     "en": "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
@@ -115,9 +115,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U9-14": {
     "en": "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
@@ -125,9 +125,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U9-15": {
     "en": "This paper is no longer in the matter's folder.",
@@ -135,9 +135,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "D-034: an answer's link to a paper the folder no longer holds; shaped like 'This matter is no longer in Clauseo.'"
   }
 }

@@ -5,9 +5,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "the model menu's title on the composer's status line, and its trigger's name before the agent's own value: \"Model: Sonnet\""
   },
   "PK-02": {
@@ -16,9 +16,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "the effort menu's title, and its trigger's name before the value: \"Effort: High\"; shown only where the agent offers an effort"
   },
   "PK-03": {
@@ -27,9 +27,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "the composer's line when the plan chosen for a conversation isn't set up or signed in here; {name} is Claude or ChatGPT"
   },
   "PK-04": {
@@ -38,9 +38,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "the line's one act: it opens the plan's own sign-in in the browser, downloading it first if needed"
   },
   "PK-05": {
@@ -49,9 +49,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; words pending orchestrator 2026-11-10)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; words pending orchestrator 2026-11-10)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "in place of PK-03 when the plan's sign-in expired; its act is the existing \"Sign in again\" (UD2-23)"
   }
 }

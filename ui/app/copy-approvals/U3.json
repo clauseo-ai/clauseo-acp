@@ -304,9 +304,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Widened from U3-41 (approved 2026-11-02) for a network folder that doesn't answer in time, which now also gives matter.folder_missing (#617)"
   },
   "U3-err-matter.folder_not_a_matter": {
@@ -315,9 +315,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Split from matter.folder_missing: the folder is there but its .clauseo/matter.json is missing, unreadable or another matter's"
   },
   "U3-err-matter.folder_permission": {
@@ -405,9 +405,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Rohan, on the review page (folder-rights FR18)"
   },
   "U3-err-matter.folder_too_deep": {
@@ -416,9 +416,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-matter.folder_no_permissions": {
     "en": "ChatGPT can't work on a drive without file permissions. Move the matter to this computer.",
@@ -426,17 +426,17 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Rohan, on the review page (folder-rights FR19)"
   },
   "U3-err-matter.codex_folder": {
     "en": "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.",
     "hi": "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ ChatGPT का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Rohan, on the review page (built from R15-codex c921f277), 2026-11-02 15:35",
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
@@ -559,9 +559,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Was \"Sign-in was cancelled in the browser.\" (approved 2026-11-05); the cancel can come from the app's own Cancel or from a quit, not only the browser"
   },
   "U3-err-signin.link_expired": {
@@ -682,9 +682,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-51": {
     "en": "You didn't allow a request, so the answer stopped. The answer so far is kept.",
@@ -730,9 +730,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-signin.firm_managed": {
     "en": "Questions go through your firm's own account, so there's nothing to sign in to here.",
@@ -740,9 +740,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-signin.key_in_use": {
     "en": "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
@@ -750,9 +750,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-signin.agents_still_running": {
     "en": "Clauseo is still finishing. Try again in a moment.",
@@ -760,9 +760,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-agent.keys_loading": {
     "en": "Clauseo is still starting. Try again in a moment.",
@@ -770,9 +770,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-agent.key_unreadable": {
     "en": "Clauseo couldn't check for a saved API key in time. If this computer asks for permission, allow it, then try again.",
@@ -780,9 +780,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-matter.document_path_too_long": {
     "en": "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
@@ -790,9 +790,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-matter.protected_link": {
     "en": "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.",
@@ -800,9 +800,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-sandbox.setup_refused": {
     "en": "Windows didn't get permission for the change Clauseo asked it to approve, so nothing changed. Try again, and choose Yes when Windows asks.",
@@ -810,9 +810,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-sandbox.setup_failed": {
     "en": "The Safe workspace couldn't be set up on this computer. Try again.",
@@ -820,9 +820,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (no IT endings)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (no IT endings)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-sandbox.setup_required": {
     "en": "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.",
@@ -830,9 +830,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-sandbox.required": {
     "en": "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here.",
@@ -840,9 +840,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (no IT endings)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (no IT endings)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-sandbox.blocked": {
     "en": "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.",
@@ -850,9 +850,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)"
   },
   "U3-err-blocklist.override_off": {
     "en": "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.",
@@ -860,9 +860,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (no IT endings)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (no IT endings)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The \"Allow this site\" refusal when the firm's policy forbids overriding the unsafe-site list (ADR 0053)"
   },
   "U3-err-blocklist.notice_expired": {
@@ -871,9 +871,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "stage E (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "stage E (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The \"Allow this site\" refusal for a blocked-site notice the host no longer keeps (too old, or from before a restart) (ADR 0053)"
   },
   "U3-err-blocklist.allow_not_saved": {
@@ -882,9 +882,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The \"Allow this site\" allow that lasts until Clauseo closes, because Clauseo couldn't save it (ADR 0053)"
   },
   "U3-err-blocklist.revoke_not_saved": {
@@ -893,9 +893,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The removal of an allow that lasts until Clauseo closes, because Clauseo couldn't save it (ADR 0053)"
   },
   "U3-err-sandbox.cleaning_up": {
@@ -904,9 +904,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "sandbox track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "sandbox track (provisional; the app thread owns the words)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "A send refused while the Safe workspace's clean-up after an earlier session is still running; retryable (ADR 0049)"
   },
   "U3-err-agent.install_setup_failed": {
@@ -915,9 +915,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "orchestrator (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-08",
-    "by": "orchestrator (provisional; app copy review; Rohan's rule: no line ends by telling the lawyer to ask IT)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "Failed after every file downloaded: npm set-up, the rename into place or the receipt (Windows VM, Defender/folder walkers)"
   },
   "U3-err-word.revisions_stale": {
@@ -926,9 +926,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "orchestrator (settled en)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The send-refusal entry every error code gets (registry.tsx's ERRORS); the panel's own state is UC-124 to UC-127"
   },
   "U3-err-word.not_docx": {
@@ -937,9 +937,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "orchestrator (settled en)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The send-refusal entry every error code gets (registry.tsx's ERRORS); the panel's own state is UC-124 to UC-127"
   },
   "U3-err-word.stetdoc_missing": {
@@ -948,9 +948,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "orchestrator (settled en)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The send-refusal entry every error code gets (registry.tsx's ERRORS); the panel's own state is UC-124 to UC-127"
   },
   "U3-err-word.edit_failed": {
@@ -959,9 +959,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-09",
-    "by": "orchestrator (settled en)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "The send-refusal entry every error code gets (registry.tsx's ERRORS); the panel's own state is UC-124 to UC-127"
   },
   "U3-err-agent.offline": {
@@ -970,9 +970,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-10",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-10",
-    "by": "app track (provisional; Rohan batch review)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "D-050: an answer the lost connection stopped (agent.offline), on the stop line under the answer, with Try again beside Copy; reuses U3-err-agent.install_offline's \"You're offline\" and U3-04's \"The answer so far is kept.\""
   },
   "U3-err-matter.folder_in_clauseo_data": {
@@ -1025,9 +1025,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-11",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-11",
-    "by": "app track (provisional; the fallback as U3-53's the AI, orchestrator to settle)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "U3-54 where the room knows no agent name (stops.ts), as U3-53; rendered alone"
   },
   "U3-err-prompt.too_long": {
@@ -1069,9 +1069,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (draft; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "matter.folder_backslash: the matter folder's path has a backslash on macOS or Linux, where Claude Code can't start, so the host didn't start the agent; Try again under the turn, never Restart; Claude's; ChatGPT's is U6F-25"
   },
   "U3-err-agent.folder_inaccessible": {
@@ -1080,9 +1080,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-15",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-15",
-    "by": "app track (draft; Rohan to approve)",
+    "status": "approved",
+    "at": "2026-11-16",
+    "by": "Rohan (review page, 2026-11-16)",
     "note": "agent.folder_inaccessible: the agent couldn't open the matter folder as it started (Claude Code's \"Can't access working directory\"); Try again under the turn, never Restart; Claude's; ChatGPT's is U6F-28"
   }
 }
