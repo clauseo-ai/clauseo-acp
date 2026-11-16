@@ -426,6 +426,10 @@ mirror install works as before, from the same first use.
 - At every Claude Code pin bump, and for any PR that changes the rules a launch emits, run the
   emitted settings through the pinned binary on Windows and the Mac and confirm every rule is
   kept ("N in, N kept"; `scripts/claude-rule-probe`).
+- Every agent pin bump re-checks the draft pickers' seed
+  (`crates/host/src/actor/agent_options/seed.rs`): its model and effort option ids against the
+  new adapters' code, and that any model or effort row it holds is still offered to every
+  account. Its constants name the versions they came from.
 - `limits`' path rules hold for the layout. A test in `crates/limits/tests/` points a settings
   entry at a fixture install laid out by this crate.
 - R20 adds the four codes to `ErrorCode`, wires `Agents` into desktop, and writes `Installed` as

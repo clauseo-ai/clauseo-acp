@@ -7,12 +7,7 @@
 //! Every durable `ConfigOptionsReplaced` of a thread (the session's start, a `SetConfigOption`'s
 //! answer, the agent's own update; `rail::note_commit`) replaces its agent's options when they
 //! differ, and every app subscriber then gets `SettingsChanged`, on which a window lists the
-//! agents again. An empty list replaces nothing. An agent with no session yet has none.
-//!
-//! Read once, at the first need. A file that is missing, does not read, is over [`CAP`] or is of
-//! another version counts as none (logged): the worst a damaged file does is hide the pickers
-//! until the agent's next session starts. A write that fails is logged and the options hold in
-//! memory for the host's run.
+//! agents again. An empty list replaces nothing.
 //!
 //! Each option's current value is the one the session started with: the options the agent
 //! reported in its `session/new`, `session/load` or `session/resume` answer ([`started`],
@@ -21,6 +16,17 @@
 //! kept current that it still offers ([`merged`]), so a pick in one conversation never becomes
 //! another's draft default. An option the report drops goes; one with no kept current takes the
 //! report's.
+//!
+//! An agent with no session yet has none kept: a Claude or ChatGPT agent then gives its seed
+//! (`seed.rs`, the agent's own default, never sent), so its first conversation's draft shows the
+//! pickers too; any other agent gives none. The seed is only ever shown, never kept: what is
+//! kept comes from a session's reports alone, so the first session's start replaces it whole,
+//! and [`merged`] never carries its value over.
+//!
+//! Read once, at the first need. A file that is missing, does not read, is over [`CAP`] or is of
+//! another version counts as none (logged): the worst a damaged file does is hide the pickers
+//! until the agent's next session starts. A write that fails is logged and the options hold in
+//! memory for the host's run.
 
 use std::collections::BTreeMap;
 use std::io::{self, Read};
@@ -73,8 +79,16 @@ impl AgentOptions {
         self.starting.insert(thread, options.to_vec());
     }
 
-    /// `agent`'s options as its latest session reported them; empty before any.
+    /// `agent`'s options as its latest session reported them; before any, its kind's seed
+    /// ([`seed::of`]: the model and effort at the agent's own default), else none.
     pub(crate) fn of(&mut self, agent: &str) -> &[ConfigOption] {
+        self.kept()
+            .get(agent)
+            .map_or_else(|| seed::of(agent), Vec::as_slice)
+    }
+
+    /// `agent`'s options as its sessions reported them, with no seed: empty before any.
+    fn stored(&mut self, agent: &str) -> &[ConfigOption] {
         self.kept().get(agent).map_or(&[], Vec::as_slice)
     }
 
@@ -121,7 +135,7 @@ pub(super) fn note(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]
     let options = match actor.agent_options.starting.remove(&thread) {
         Some(start) if !start.is_empty() => start,
         Some(_) => options.to_vec(),
-        None => merged(actor.agent_options.of(agent.as_str()), options),
+        None => merged(actor.agent_options.stored(agent.as_str()), options),
     };
     let changed = match actor.agent_options.keep(agent.as_str(), &options) {
         Ok(changed) => changed,
@@ -138,12 +152,18 @@ pub(super) fn note(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]
 
 /// `reported`, a session's later options, with each current value from `kept` that `reported`
 /// still offers; an option whose kept current it no longer offers (the efforts of a picked
-/// model) stays as kept, and one with none kept, or of another kind, is as reported.
+/// model) stays as kept, and one with none kept, or of another kind, is as reported. `kept`
+/// holds no seed (`AgentOptions::stored`); a kept option at the seed's value counts as none
+/// kept all the same ([`seed::is_seed`]), so [`seed::AGENT_DEFAULT`] is never kept over a
+/// session's report.
 fn merged(kept: &[ConfigOption], reported: &[ConfigOption]) -> Vec<ConfigOption> {
     reported
         .iter()
         .map(|option| {
-            let Some(old) = kept.iter().find(|old| old.id == option.id) else {
+            let Some(old) = kept
+                .iter()
+                .find(|old| old.id == option.id && !seed::is_seed(old))
+            else {
                 return option.clone();
             };
             let mut option = option.clone();
@@ -204,5 +224,6 @@ fn read(path: &Path) -> BTreeMap<String, Vec<ConfigOption>> {
     }
 }
 
+pub(crate) mod seed;
 #[cfg(test)]
 mod tests;

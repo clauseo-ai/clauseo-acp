@@ -1,0 +1,10 @@
+{"scenario":"pickers-seed-codex","description":"pickers-seed in Codex's shape (as pickers-codex-late: gpt-6, medium): the client switches the mode to workspace-write, then sends the prompt with no session/set_config_option before it","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"agent","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"}]},"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"gpt-6","options":[{"value":"gpt-6","name":"GPT-6"},{"value":"gpt-6-luna","name":"GPT-6 Luna"}]},{"id":"reasoning_effort","name":"Reasoning effort","category":"thought_level","type":"select","currentValue":"medium","options":[{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},{"value":"high","name":"High"}]}]}}}
+{"expect":{"method":"session/set_mode","as":"set-mode","params":{"sessionId":"sess-1","modeId":"workspace-write"}}}
+{"respond":{"to":"set-mode","result":{}}}
+{"note":"no session/set_config_option before the prompt: a set here is a mismatch","expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Answer at Codex's own default."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
