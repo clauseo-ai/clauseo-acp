@@ -70,8 +70,14 @@ fn the_recheck_resolves_a_linked_matter_again() {
     crate::write::create_dir_all(&root.join("other/.codex")).unwrap();
     let link = root.join("link");
     crate::write::symlink(&root.join("clean"), &link).unwrap();
-    let check =
-        || futures::executor::block_on(super::recheck(Arc::new(clock()), None, Some(link.clone())));
+    let check = || {
+        futures::executor::block_on(super::recheck(
+            Arc::new(clock()),
+            None,
+            Some(link.clone()),
+            Ok(None),
+        ))
+    };
     assert!(check().is_ok());
     crate::write::remove_file(&link).unwrap();
     crate::write::symlink(&root.join("other"), &link).unwrap();
