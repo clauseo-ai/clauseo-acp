@@ -1,9 +1,10 @@
 // UC's entries for two activity rows in plain words (UC-240 to UC-249): a skill read as a guide, never by its internal
 // name ("clauseo:legal-drafting"; room/thread/skill-words.ts), and a task named by its own title where it gave no other
-// words, in place of "Ran a task."; and a step of Clauseo's case-law connector in its own words (UC-475 to UC-483).
+// words, in place of "Ran a task."; and a step of Clauseo's case-law connector in its own words (UC-475 to UC-483),
+// and a group of them counted so (UC-493 to UC-498).
 // The real room over FakeTransport.
 import type { ToolCallEntry, ToolCallStatus, ToolKind, ViewEntry } from "../transport/protocol.ts";
-import { step, toolCall, userMessage } from "../testing/stream-script.ts";
+import { step, toolCall, userMessage, uuid } from "../testing/stream-script.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost, type ThreadState } from "./hosts.ts";
 import { RoomClicking, RoomOver } from "./states.tsx";
@@ -39,6 +40,16 @@ const opened = (c: ViewEntry) => () => (
     clicks={['[data-testid="step-group"] button']}
   />
 );
+/** The settled thread with these calls folded into one group, its line saying them. */
+const folded = (calls: ViewEntry[]) => () => (
+  <RoomOver host={host({ entries: [QUESTION, ...calls, step(91)] })} />
+);
+/** `n` calls of one case-law tool, done, each its own. */
+const laws = (n: number, make: (status: ToolCallStatus) => ViewEntry): ViewEntry[] =>
+  Array.from({ length: n }, (_, i) => {
+    const c = make("completed").tool_call!;
+    return { tool_call: { ...c, order: 10 + i, tool_call: uuid(600 + i, 7) } };
+  });
 const running = (c: ViewEntry) => () => (
   <RoomOver host={host({ entries: [QUESTION, c], status: "running" })} />
 );
@@ -158,5 +169,42 @@ export const UC_TOOL_ROWS: Entry[] = [
     words: stepWords("Tried to get a payment link for case-law credits."),
     screen: "room/thread",
     render: opened(law("chatgpt", "recharge", "failed", {})),
+  },
+  // the folded line of a group of case-law steps, counted by what each does, under either agent
+  {
+    id: "UC-493",
+    words: stepWords("Searched case law once."),
+    screen: "room/thread",
+    render: folded(laws(1, (s) => law("chatgpt", "search_law", s, SOUGHT))),
+  },
+  {
+    id: "UC-494",
+    words: stepWords("Searched case law {n} times."),
+    screen: "room/thread",
+    render: folded(laws(3, (s) => law("claude", "search_law", s, SOUGHT))),
+  },
+  {
+    id: "UC-495",
+    words: stepWords("Checked your case-law credits once."),
+    screen: "room/thread",
+    render: folded(laws(1, (s) => law("claude", "account", s, {}))),
+  },
+  {
+    id: "UC-496",
+    words: stepWords("Checked your case-law credits {n} times."),
+    screen: "room/thread",
+    render: folded(laws(2, (s) => law("chatgpt", "account", s, {}))),
+  },
+  {
+    id: "UC-497",
+    words: stepWords("Got a payment link for case-law credits once."),
+    screen: "room/thread",
+    render: folded(laws(1, (s) => law("chatgpt", "recharge", s, {}))),
+  },
+  {
+    id: "UC-498",
+    words: stepWords("Got {n} payment links for case-law credits."),
+    screen: "room/thread",
+    render: folded(laws(2, (s) => law("claude", "recharge", s, {}))),
   },
 ];

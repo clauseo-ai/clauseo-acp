@@ -16,14 +16,16 @@ import {
   asksWords,
   doingOf,
   internalOf,
+  kindOf,
   placeOf,
   sentenceOf,
   siteQuery,
   titleOf,
   unsettled,
+  webSearchOf,
 } from "./step-names.ts";
 import { taskOf } from "./task-words.ts";
-import { toolNameOf } from "./tool-names.ts";
+import { caseLawOf, toolNameOf, type CaseLaw } from "./tool-names.ts";
 import { caseLawDone, skillDone, toolDone } from "./tool-words.ts";
 import { skillOf } from "./skill-words.ts";
 
@@ -146,8 +148,30 @@ function namedOf(lang: Lang, entry: ToolCallEntry): string {
   return title === "" ? steps(lang, "State not known.") : sentenceOf(title);
 }
 
+/** What a step is counted and drawn as: its kind, or, for one of Clauseo's own MCP tools, its family whatever kind
+ * the agent gave it (Claude's other, ChatGPT's execute): the browser's as fetch, the case-law connector's by what it
+ * does. */
+export type GroupKind = StepKind | `case_law_${CaseLaw}`;
+
+/** A step's GroupKind: a case-law tool by what it does, a looking-online tool (tool-names.ts: the browser's, a web
+ * search or fetch) as fetch, any other by its kind. */
+export function groupKindOf(call: ToolCallEntry): GroupKind {
+  const law = caseLawOf(call.title);
+  if (law !== null) return `case_law_${law}`;
+  if (toolNameOf(call.title)?.as === "fetch") return "fetch";
+  return stepKindOf(kindOf(call));
+}
+
+/** The kind a step's icon is drawn for: its GroupKind, every case-law tool as case_law (the case-law glyph), and
+ * switch_mode as itself. For a row's icon. */
+export function drawnKindOf(call: ToolCallEntry): string {
+  const k = groupKindOf(call);
+  if (k.startsWith("case_law_")) return "case_law";
+  return k === "other" ? kindOf(call) : k;
+}
+
 /** The words of a summary sentence for a kind, one and many. */
-const COUNTED: Record<Exclude<StepKind, "think">, [one: StepKey, many: StepKey]> = {
+const COUNTED: Record<Exclude<GroupKind, "think">, [one: StepKey, many: StepKey]> = {
   read: ["1 paper read.", "{n} papers read."],
   edit: ["1 paper changed.", "{n} papers changed."],
   delete: ["1 paper deleted.", "{n} papers deleted."],
@@ -156,16 +180,25 @@ const COUNTED: Record<Exclude<StepKind, "think">, [one: StepKey, many: StepKey]>
   fetch: ["Looked online once.", "Looked online {n} times."],
   execute: ["Ran 1 task.", "Ran {n} tasks."],
   other: ["Did 1 other thing.", "Did {n} other things."],
+  case_law_search: ["Searched case law once.", "Searched case law {n} times."],
+  case_law_credits: [
+    "Checked your case-law credits once.",
+    "Checked your case-law credits {n} times.",
+  ],
+  case_law_payment: [
+    "Got a payment link for case-law credits once.",
+    "Got {n} payment links for case-law credits.",
+  ],
 };
 
 const counted = (lang: Lang, [one, many]: [StepKey, StepKey], n: number) =>
   n === 1 ? steps(lang, one) : steps(lang, many, { n });
 
 /** The kinds of a group's steps, the most first, ties in the order each came: the folded line's icons. */
-export function kindsOf(calls: readonly ToolCallEntry[]): { kind: StepKind; n: number }[] {
-  const by = new Map<StepKind, number>();
+export function kindsOf(calls: readonly ToolCallEntry[]): { kind: GroupKind; n: number }[] {
+  const by = new Map<GroupKind, number>();
   for (const c of calls) {
-    const k = stepKindOf(c.kind);
+    const k = groupKindOf(c);
     by.set(k, (by.get(k) ?? 0) + 1);
   }
   // Map keeps the order each kind came; sort is stable
@@ -173,10 +206,16 @@ export function kindsOf(calls: readonly ToolCallEntry[]): { kind: StepKind; n: n
 }
 
 /** The folded line's icons, by kindsOf: other draws switch_mode's own glyph when every step it counts switched the
- * mode (the words still count it as other). */
+ * mode (the words still count it as other), and each case-law family draws the case-law glyph (case_law). */
 export function iconsOf(calls: readonly ToolCallEntry[]): string[] {
-  const modes = calls.every((c) => stepKindOf(c.kind) !== "other" || c.kind === "switch_mode");
-  return kindsOf(calls).map((k) => (k.kind === "other" && modes ? "switch_mode" : k.kind));
+  const modes = calls.every((c) => groupKindOf(c) !== "other" || c.kind === "switch_mode");
+  return kindsOf(calls).map((k) =>
+    k.kind === "other" && modes
+      ? "switch_mode"
+      : k.kind.startsWith("case_law_")
+        ? "case_law"
+        : k.kind,
+  );
 }
 
 /** The most kinds the folded line names; the rest are "And 3 more.". */
@@ -292,7 +331,7 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
     tried
       ? steps(lang, "Tried: {title}.", { title: own.replace(/[.!?।…]+$/, "") })
       : sentenceOf(own);
-  switch (entry.kind) {
+  switch (kindOf(entry)) {
     case "read":
       return name === null
         ? titled(say("Read the papers.", "Tried to read the papers."))
@@ -326,7 +365,10 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
           })
         : name !== null
           ? say("Read {name} online.", "Tried to read {name} online.", { name })
-          : titled(say("Looked online.", "Tried to look online."));
+          : // ChatGPT's "Web search" is codex-acp's label, not the agent's words
+            webSearchOf(entry)
+            ? say("Looked online.", "Tried to look online.")
+            : titled(say("Looked online.", "Tried to look online."));
     }
     case "execute": {
       // the agent's own words for the task, else the program and the paper it ran on (D-017)

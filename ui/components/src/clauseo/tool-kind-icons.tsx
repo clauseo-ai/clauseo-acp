@@ -1,8 +1,10 @@
 // The icon of a step in the thread, by what it does: ACP's tool kinds (read, edit, delete, move, search, execute,
 // think, fetch, switch_mode, and other for the rest), the icon pass's glyphs (icons/tool-kinds.tsx, through
-// icons.tsx), and the break for a step that failed. Everything draws a step's icon through ToolKindIcon.
+// icons.tsx), and the break for a step that failed. case_law, a step of Clauseo's case-law connector, draws the glyph
+// the case-law hint has (IconSearch), not the papers' search. Everything draws a step's icon through ToolKindIcon.
 import {
   IconBreak,
+  IconSearch,
   IconToolDelete,
   IconToolEdit,
   IconToolExecute,
@@ -26,6 +28,7 @@ export function ToolKindIcon({
   if (failed) return <IconBreak {...props} />;
   // switch_mode counts as other in the words, but has a glyph of its own
   if (kind === "switch_mode") return <IconToolSwitchMode {...props} />;
+  if (kind === "case_law") return <IconSearch {...props} />;
   switch (stepKindOf(kind)) {
     case "read":
       return <IconToolRead {...props} />;
