@@ -87,12 +87,26 @@ pub(crate) enum Where {
     Endnotes,
 }
 
-/// A package read: each part's tables, in the order of [`Where`] (headers and footers each by
-/// their first use).
+/// A package read: the body's, the footnotes' and the endnotes' tables, in that order; each
+/// header and footer part some section uses, by its name; and each section's header and footer
+/// parts by kind of page, first to last.
 #[derive(Debug, Default)]
 pub(crate) struct Package {
     pub(crate) parts: Vec<(Where, Vec<Table>)>,
+    pub(crate) headers: BTreeMap<String, HeaderPart>,
+    pub(crate) sections: Vec<SectionParts>,
 }
+
+/// A header or footer part: where it is, and its tables.
+#[derive(Debug)]
+pub(crate) struct HeaderPart {
+    pub(crate) place: Where,
+    pub(crate) tables: Vec<Table>,
+}
+
+/// One section's header and footer parts, a kind of page it has none for taking the one before
+/// it: footer or not, the kind of page, the part's name.
+pub(crate) type SectionParts = Vec<(bool, HeaderSlot, String)>;
 
 /// One relationship: its type's last word and its target, resolved to a part's name.
 struct Rel {
@@ -126,11 +140,11 @@ pub(crate) fn read_package(bytes: &[u8]) -> Option<Package> {
         None => Vec::new(),
     };
     let document = read_part(&mut zip, &main, &mut left)?;
-    let (body, sections) = tables_of(&document, true)?;
+    let (body, sections, _) = tables_of(&document, true)?;
     let mut package = Package::default();
     package.parts.push((Where::Body, body));
-    let mut headers: Vec<((u32, u8), Where, Vec<Table>)> = Vec::new();
-    let mut uses = uses_of(&sections, &rels);
+    let (mut uses, effective) = uses_of(&sections, &rels);
+    package.sections = effective;
     for rel in &rels {
         let place = match rel.kind.as_str() {
             // Taken out once read, so a part two relationships name is read once.
@@ -143,33 +157,24 @@ pub(crate) fn read_package(bytes: &[u8]) -> Option<Package> {
             _ => continue,
         };
         let xml = read_part(&mut zip, &rel.target, &mut left)?;
-        let (tables, _) = tables_of(&xml, false)?;
+        let (tables, _, _) = tables_of(&xml, false)?;
         match place {
-            Where::Header(_) | Where::Footer(_) => headers.push((first_use(&place), place, tables)),
+            Where::Header(_) | Where::Footer(_) => {
+                let part = HeaderPart { place, tables };
+                package.headers.insert(rel.target.clone(), part);
+            }
             notes @ (Where::Body | Where::Footnotes | Where::Endnotes) => {
                 package.parts.push((notes, tables));
             }
         }
     }
-    headers.sort_by_key(|(first, _, _)| *first);
-    package.parts.extend(
-        headers
-            .into_iter()
-            .map(|(_, place, tables)| (place, tables)),
-    );
-    package.parts.sort_by_key(|(place, _)| rank(place));
-    Some(package)
-}
-
-/// Where a part goes: the body, the footnotes, the endnotes, then headers and footers.
-fn rank(place: &Where) -> u8 {
-    match place {
+    // The body first, then the footnotes, then the endnotes.
+    package.parts.sort_by_key(|(place, _)| match place {
         Where::Body => 0,
         Where::Footnotes => 1,
-        Where::Endnotes => 2,
-        Where::Header(_) => 3,
-        Where::Footer(_) => 4,
-    }
+        Where::Endnotes | Where::Header(_) | Where::Footer(_) => 2,
+    });
+    Some(package)
 }
 
 /// A header's or footer's first use: its first section and kind of page.
@@ -196,15 +201,16 @@ fn slot_rank(slot: HeaderSlot) -> u8 {
     }
 }
 
-/// Where each header and footer part is, by its name: each section's references by kind of
-/// page, a section with none for a kind taking the one before it.
-fn uses_of(sections: &[SectionRefs], rels: &[Rel]) -> BTreeMap<String, Where> {
+/// Where each header and footer part is, by its name, and each section's parts: each section's
+/// references by kind of page, a section with none for a kind taking the one before it.
+fn uses_of(sections: &[SectionRefs], rels: &[Rel]) -> (BTreeMap<String, Where>, Vec<SectionParts>) {
     let slots = [
         HeaderSlot::Default,
         HeaderSlot::FirstPage,
         HeaderSlot::EvenPages,
     ];
     let mut found: BTreeMap<String, (bool, Vec<HeaderUse>)> = BTreeMap::new();
+    let mut effective: Vec<SectionParts> = vec![Vec::new(); sections.len()];
     for footer in [false, true] {
         for slot in slots {
             let mut current: Option<&str> = None;
@@ -219,6 +225,9 @@ fn uses_of(sections: &[SectionRefs], rels: &[Rel]) -> BTreeMap<String, Where> {
                     continue;
                 };
                 let section = u32::try_from(index + 1).unwrap_or(u32::MAX);
+                if let Some(parts) = effective.get_mut(index) {
+                    parts.push((footer, slot, target.clone()));
+                }
                 let entry = found.entry(target).or_insert_with(|| (footer, Vec::new()));
                 match entry.1.iter_mut().find(|used| used.slot == slot) {
                     Some(used) => used.sections.push(section),
@@ -230,7 +239,7 @@ fn uses_of(sections: &[SectionRefs], rels: &[Rel]) -> BTreeMap<String, Where> {
             }
         }
     }
-    found
+    let places = found
         .into_iter()
         .map(|(name, (footer, uses))| {
             let place = if footer {
@@ -240,7 +249,8 @@ fn uses_of(sections: &[SectionRefs], rels: &[Rel]) -> BTreeMap<String, Where> {
             };
             (name, place)
         })
-        .collect()
+        .collect();
+    (places, effective)
 }
 
 /// The part `name` whole, at most [`MAX_PART_BYTES`] and `left`, which the read takes from;

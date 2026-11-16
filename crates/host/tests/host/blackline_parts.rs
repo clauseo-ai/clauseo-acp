@@ -151,4 +151,19 @@ fn the_real_stetdoc_shows_the_parts_and_names_what_compare_misses() {
         assert_eq!(answer.notices, [CellFormatChanged], "{pair}");
         assert_eq!(answer.changed_tables, [shaded()], "{pair}");
     }
+    // A cover section inserted first, with its own header: the old header, whose table's
+    // shading changed, is on section 2 now and pairs with itself. compare can't mark up the
+    // inserted paragraph that ends the cover section, which may differ.
+    let cover = through_real(&stetdoc, "cover");
+    assert_eq!(cover.notices, [CellFormatChanged, MayDiffer]);
+    let on_section_2 = ChangedTable {
+        place: TablePlace::Header {
+            uses: vec![HeaderUse {
+                slot: HeaderSlot::Default,
+                sections: vec![2],
+            }],
+        },
+        ..shaded()
+    };
+    assert_eq!(cover.changed_tables, [on_section_2]);
 }

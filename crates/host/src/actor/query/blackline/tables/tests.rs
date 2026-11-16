@@ -259,6 +259,88 @@ fn a_tables_change_in_a_header_names_the_header() {
     );
 }
 
+/// A header part holding `xml`'s body.
+fn hdr(xml: &str) -> String {
+    format!("<w:hdr {W}>{xml}{}</w:hdr>", p(""))
+}
+
+/// A one-cell table reading `text`, its cell with `tcpr`.
+fn logo(text: &str, tcpr: &str) -> String {
+    table(&row(&cell(text, tcpr), ""), "", COLS)
+}
+
+/// A file whose sections each use one header, by default: `headers` gives each section's header
+/// part's XML, first to last, and the body holds `body` in the last section.
+fn sectioned(headers: &[String], body: &str) -> Vec<u8> {
+    let mut parts = Vec::new();
+    let mut rels = String::new();
+    let mut xml = String::new();
+    for (index, header) in headers.iter().enumerate() {
+        let name = format!("header{index}.xml");
+        rels.push_str(&format!(
+            r#"<Relationship Id="rIdH{index}" Type="{REL}/header" Target="{name}"/>"#
+        ));
+        parts.push((format!("word/{name}"), header.clone()));
+        let reference = format!(r#"<w:headerReference w:type="default" r:id="rIdH{index}"/>"#);
+        if index + 1 < headers.len() {
+            xml.push_str(&format!(
+                "<w:p><w:pPr><w:sectPr>{reference}</w:sectPr></w:pPr></w:p>"
+            ));
+        } else {
+            xml.push_str(&format!("{}<w:sectPr>{reference}</w:sectPr>", p(body)));
+        }
+    }
+    let parts: Vec<(&str, String)> = parts
+        .iter()
+        .map(|(name, xml)| (name.as_str(), xml.clone()))
+        .collect();
+    docx_with(&xml, &parts, &rels)
+}
+
+/// A cover section inserted before the only one, with its own header, while the shading of the
+/// table in the old section's header changes: the sections pair from the last one back, as
+/// stetdoc's compare pairs them, so the header with the table pairs with itself and its table
+/// is named on section 2.
+#[test]
+fn a_header_whose_section_moved_pairs_from_the_last_section_back() {
+    let shaded = r#"<w:shd w:val="clear" w:fill="FFFF00"/>"#;
+    let old = sectioned(&[hdr(&logo("Logo", ""))], "One year.");
+    let new = sectioned(
+        &[hdr(&p("Cover header.")), hdr(&logo("Logo", shaded))],
+        "Two years.",
+    );
+    let uses = vec![HeaderUse {
+        slot: HeaderSlot::Default,
+        sections: vec![2],
+    }];
+    assert_eq!(
+        compare(&old, &new),
+        TablesCompared {
+            changed: vec![ChangedTable {
+                place: TablePlace::Header { uses },
+                number: 1,
+                formats: vec![Shading],
+            }],
+            ..TablesCompared::default()
+        }
+    );
+}
+
+/// A header with a table that pairs with no header of the other version: what changed in its
+/// table can't be told, so the blackline may differ.
+#[test]
+fn a_header_with_tables_and_no_counterpart_may_differ() {
+    let old = sectioned(&[hdr(&logo("Logo", ""))], "One year.");
+    let new = sectioned(
+        &[hdr(&logo("Logo", "")), hdr(&logo("Seal", ""))],
+        "Two years.",
+    );
+    assert!(compare(&old, &new).may_differ);
+    // Without a table, a header with no counterpart has nothing to compare.
+    let plain = sectioned(&[hdr(&p("Cover.")), hdr(&logo("Logo", ""))], "Two years.");
+    assert!(!compare(&old, &plain).may_differ);
+}
+
 /// Past the cap the rest may differ; a file that does not read may differ.
 #[test]
 fn too_many_tables_and_unreadable_files_may_differ() {

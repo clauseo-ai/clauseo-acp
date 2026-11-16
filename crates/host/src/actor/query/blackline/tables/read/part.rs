@@ -22,15 +22,19 @@ enum Frame {
     Other,
 }
 
-/// The tables of one XML part, in the order they start, and (for the main document, `main`) its
-/// sections' references; `None` when the part does not read.
-pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<(Vec<Table>, Vec<SectionRefs>)> {
+/// What one XML part holds: its tables, in the order they start, (for the main document,
+/// `main`) its sections' references, and its whole text.
+type PartRead = (Vec<Table>, Vec<SectionRefs>, String);
+
+/// One XML part read ([`PartRead`]); `None` when it does not read.
+pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<PartRead> {
     let mut reader = NsReader::from_reader(xml);
     let mut buf = Vec::new();
     let mut tables: Vec<Table> = Vec::new();
     let mut open: Vec<usize> = Vec::new();
     let mut stack: Vec<Frame> = Vec::new();
     let mut sections: Vec<SectionRefs> = Vec::new();
+    let mut whole = String::new();
     loop {
         buf.clear();
         let (resolved, event) = reader.read_resolved_event_into(&mut buf).ok()?;
@@ -118,13 +122,15 @@ pub(super) fn tables_of(xml: &[u8], main: bool) -> Option<(Vec<Table>, Vec<Secti
                 None => return None,
             },
             Event::Text(text) if stack.last() == Some(&Frame::Text) => {
+                whole.push_str(&text);
                 add_text(&mut tables, &open, &text);
             }
             Event::GeneralRef(entity) if stack.last() == Some(&Frame::Text) => {
                 let entity = format!("&{};", &*entity);
+                whole.push_str(&entity);
                 add_text(&mut tables, &open, &entity);
             }
-            Event::Eof => return stack.is_empty().then_some((tables, sections)),
+            Event::Eof => return stack.is_empty().then_some((tables, sections, whole)),
             Event::Text(_)
             | Event::CData(_)
             | Event::Comment(_)

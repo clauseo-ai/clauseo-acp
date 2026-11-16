@@ -85,3 +85,55 @@ LONG = 'The tenant shall keep the premises in good repair throughout the term of
 pkg('excluded-old.docx', p(LONG) + S)
 pkg('excluded-new.docx', p(LONG) + '<w:p><w:pPr><w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
     '</w:sectPr></w:pPr><w:r><w:t>End of the section</w:t></w:r></w:p>' + S)
+
+
+def sectioned(name, cover, fill, body_text):
+    """A header with a 1-cell table (its cell shaded `fill` when given) on the last section, and,
+    when `cover` is given, a first section before it with a header of its own reading `cover`."""
+    tcpr = f'<w:shd w:val="clear" w:color="auto" w:fill="{fill}"/>' if fill else ''
+    logo = grid(row(cell(p('Logo'), tcpr)), 1)
+    parts = {'word/header1.xml': f'{XML}<w:hdr {W}>{logo}{p("")}</w:hdr>'}
+    rels = f'<Relationship Id="rIdH" Type="{R}header" Target="header1.xml"/>'
+    types = f'<Override PartName="/word/header1.xml" ContentType="{CT}header+xml"/>'
+    body = ''
+    if cover is not None:
+        parts['word/header2.xml'] = f'{XML}<w:hdr {W}>{p(cover)}</w:hdr>'
+        rels += f'<Relationship Id="rIdC" Type="{R}header" Target="header2.xml"/>'
+        types += f'<Override PartName="/word/header2.xml" ContentType="{CT}header+xml"/>'
+        body += ('<w:p><w:pPr><w:sectPr><w:headerReference w:type="default" r:id="rIdC"/>'
+                 '</w:sectPr></w:pPr><w:r><w:t>Cover.</w:t></w:r></w:p>')
+    body += (p(body_text) +
+             '<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/></w:sectPr>')
+    pkg(name, body, parts, rels, types)
+
+
+# A cover section inserted before the only one, with a header of its own, while the shading of
+# the table in the old section's header changes, beside a body change. stetdoc pairs the
+# sections from the last one back: the header with the table pairs with itself.
+sectioned('cover-old.docx', None, None, 'The term is one year.')
+sectioned('cover-new.docx', 'Cover header.', 'FFFF00', 'The term is two years.')
+
+
+def split(name, first_header, body_text):
+    """"Part one." then `body_text`, the last section's header reading "Main header."; with
+    `first_header`, "Part one." ends a first section of its own, whose header reads it."""
+    parts = {'word/header1.xml': f'{XML}<w:hdr {W}>{p("Main header.")}</w:hdr>'}
+    rels = f'<Relationship Id="rIdH" Type="{R}header" Target="header1.xml"/>'
+    types = f'<Override PartName="/word/header1.xml" ContentType="{CT}header+xml"/>'
+    first = p('Part one.')
+    if first_header is not None:
+        parts['word/header2.xml'] = f'{XML}<w:hdr {W}>{p(first_header)}</w:hdr>'
+        rels += f'<Relationship Id="rIdS" Type="{R}header" Target="header2.xml"/>'
+        types += f'<Override PartName="/word/header2.xml" ContentType="{CT}header+xml"/>'
+        first = ('<w:p><w:pPr><w:sectPr><w:headerReference w:type="default" r:id="rIdS"/>'
+                 '</w:sectPr></w:pPr><w:r><w:t>Part one.</w:t></w:r></w:p>')
+    body = (first + p(body_text) +
+            '<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/></w:sectPr>')
+    pkg(name, body, parts, rels, types)
+
+
+# A section added in the newer version (an existing paragraph now ends a first section) with a
+# header of its own, beside a body change. stetdoc pairs the sections from the last one back,
+# so the new first section's header pairs with nothing and is not compared.
+split('added-old.docx', None, 'The term is one year.')
+split('added-new.docx', 'Schedule header.', 'The term is two years.')
