@@ -70,7 +70,8 @@ export type Done =
   | { kind: "restored"; to: string; n: number; outcome: Outcome }
   /** One file put back as it was at a version, by Versions' per-file Restore. */
   | { kind: "restoredFile"; to: string; file: string; outcome: Outcome }
-  | { kind: "undidRestore"; at: Timestamp }
+  /** file: the one file the restore undone had put back (Versions' Restore this document), null for the matter. */
+  | { kind: "undidRestore"; at: Timestamp; file: string | null }
   | {
       kind: "undidChange";
       of: Timestamp;
@@ -79,6 +80,20 @@ export type Done =
        * them. */
       kept?: readonly SkippedFile[];
     };
+
+/** What a restore that went through did: undid the restore it undoes (undoneFile: the one file that one put back, if
+ * it put back one), restored the matter, or restored one file. */
+export const restoreDone = (
+  ask: Pick<RestoreAsk, "id" | "preview" | "undoes" | "file">,
+  outcome: Outcome,
+  at: Timestamp,
+  undoneFile: string | null,
+): Done =>
+  ask.undoes !== null
+    ? { kind: "undidRestore", at, file: undoneFile }
+    : ask.file === null
+      ? { kind: "restored", to: ask.id, n: ask.preview.changes.length, outcome }
+      : { kind: "restoredFile", to: ask.id, file: ask.file, outcome };
 
 /** The restore a restored line's Undo takes back: only one the host wrote and marked on the matter's stream. A restore
  * that found nothing to write answers with a version that was already there, and has no marker. */
@@ -128,6 +143,8 @@ export type Snapshot = {
   titles: ReadonlyMap<ThreadId, string>;
   /** Each restore the matter's stream has a marker for, to the version it restored. */
   restores: ReadonlyMap<string, string>;
+  /** Each restore of one file the matter's stream has a marker for, to that file. */
+  oneFile: ReadonlyMap<string, string>;
   now: Timestamp;
   zone: string;
 };
@@ -147,6 +164,7 @@ export const freshSnapshot = (now: Timestamp, zone: string): Snapshot => ({
   compare: null,
   titles: new Map(),
   restores: new Map(),
+  oneFile: new Map(),
   now,
   zone,
 });

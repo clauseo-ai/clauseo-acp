@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Restoring one document's copy review cells (UC-316 to UC-324), rendered as the review renders them (in StrictMode):
+// Restoring one document's copy review cells (UC-316 to UC-325, and UC-428), rendered as the review renders them (in StrictMode):
 // each shows its string, its slots filled, in the state it names, after the presses that bring it.
 import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";

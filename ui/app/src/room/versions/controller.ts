@@ -42,6 +42,7 @@ import {
   keepEdited,
   outcomeOf,
   sameChanges,
+  restoreDone,
   staleNewest,
   undoAsk,
   type Ask,
@@ -190,6 +191,7 @@ export class VersionsController {
       refused: this.#snap.refused && !settled,
       titles,
       restores: read.restores,
+      oneFile: read.oneFile,
       now,
       unsaved: unsavedOf(this.#store, talks.threads),
       canUndo: newestUndo(timeline, this.#steps.missing, read.restores) !== null,
@@ -480,7 +482,7 @@ export class VersionsController {
   }
 
   async #restore(ask: RestoreAsk): Promise<void> {
-    const { id, preview, undoes, file } = ask;
+    const { id, undoes, file } = ask;
     // the conversation the lawyer is in records the restore too; a draft has none yet
     const thread = this.#thread;
     const outcome = await this.#act({
@@ -492,6 +494,13 @@ export class VersionsController {
         ...(thread === null ? {} : { thread }),
       },
     });
+    if (
+      outcome.kind === "refused" &&
+      outcome.code === "matter.file_folder_clash" &&
+      outcome.current
+    )
+      // the file can't come back as things stand: the dialog says why, and Try again once it's renamed or moved
+      return this.#set({ ask: { ...ask, stage: "confirm", failed: outcome.code } });
     if (outcome.kind === "refused") {
       const again = (p: string) => this.#preview(p, undoes, file);
       await this.#refused(
@@ -500,14 +509,11 @@ export class VersionsController {
       );
       return;
     }
-    this.#finish(
-      undoes !== null
-        ? { kind: "undidRestore", at: this.meta(id)?.ts ?? this.#snap.now }
-        : file === null
-          ? { kind: "restored", to: id, n: preview.changes.length, outcome }
-          : { kind: "restoredFile", to: id, file, outcome },
-      { checkpoint: outcome.kind === "wrote" ? outcome.checkpoint : null, turn: null },
-    );
+    const undone = this.#snap.oneFile.get(undoes ?? "") ?? null;
+    this.#finish(restoreDone(ask, outcome, this.meta(id)?.ts ?? this.#snap.now, undone), {
+      checkpoint: outcome.kind === "wrote" ? outcome.checkpoint : null,
+      turn: null,
+    });
   }
 
   /** An act done: back at now, with the line saying what it did. */

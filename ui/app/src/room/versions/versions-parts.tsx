@@ -204,6 +204,7 @@ export function VersionsCentre({
   const waitId = useId();
   const desk = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
   const lead = useRef<HTMLButtonElement>(null);
   const away = onPanel !== null;
   // the panel put away took the focus with it: the band's Versions, which brings it back, takes it
@@ -211,6 +212,15 @@ export function VersionsCentre({
     const at = document.activeElement;
     if (away && (at === null || at === document.body)) lead.current?.focus();
   }, [away]);
+
+  // a restore done with the focus lost with its dialog: the done line's Undo, the next thing to do, takes it
+  const undoable = s.done === null ? null : restoreOf(s, s.done);
+  useEffect(() => {
+    const at = document.activeElement;
+    if (s.ask !== null || undoable === null || (at !== null && at !== document.body)) return;
+    const undo = [...document.querySelectorAll<HTMLElement>(".ver-restored-undo")];
+    undo.find((el) => keyIsMine(room, el))?.focus();
+  }, [s.ask, undoable, room]);
 
   // Escape comes back to now, from anywhere in the room but a field or a dialog; while a panel stands over the band,
   // wherever the focus is, it puts the panel away first and keeps the look
@@ -379,11 +389,15 @@ export function VersionsCentre({
               : {
                   action: (
                     <WaitingButton
-                      waiting={waiting !== null}
-                      describedBy={waitId}
+                      waiting={waiting !== null || asking}
+                      describedBy={waiting === null ? undefined : waitId}
                       className="ver-restore-file"
                       testId="version-restore-file"
-                      onClick={() => void c.askRestore(shown.id, null, back)}
+                      onClick={() => {
+                        // a second press while the preview is on its way asks nothing more
+                        setAsking(true);
+                        void c.askRestore(shown.id, null, back).finally(() => setAsking(false));
+                      }}
                     >
                       <IconHistory size={16} />
                       {w.v("Restore this document")}
