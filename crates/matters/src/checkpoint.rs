@@ -563,6 +563,8 @@ fn tree_of(entries: &[CacheEntry]) -> Vec<SizedFile> {
 }
 
 mod baselines;
+#[cfg(feature = "test-support")]
+pub(crate) mod old_files;
 mod timeline;
 mod walk_folder;
 

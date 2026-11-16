@@ -135,6 +135,10 @@ mod drive_root;
 mod papers;
 
 #[cfg(test)]
+#[path = "matters/holds_now.rs"]
+mod holds_now;
+
+#[cfg(test)]
 #[path = "matters/devanagari.rs"]
 mod devanagari;
 

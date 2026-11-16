@@ -3,6 +3,8 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+pub use crate::matter::reads::checkpoint_with_old_files;
+
 /// Set by [`pretend_word_running_since_epoch`]; never cleared.
 static PRETEND_WORD: AtomicBool = AtomicBool::new(false);
 

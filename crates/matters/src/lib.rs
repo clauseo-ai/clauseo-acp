@@ -39,7 +39,8 @@
 //!   [`Matter::compare`] ([`CompareSide`]), [`Matter::files_at`] ([`VersionFile`]) and
 //!   [`Matter::read_file`] read versions and take `&self`; [`Matter::papers`] lists the folder
 //!   as it is now ([`PaperList`], [`Paper`]) by the checkpoint walk's rules;
-//!   [`is_excluded_path`] says whether that walk passes a path over.
+//!   [`is_excluded_path`] says whether that walk passes a path over, and [`holds_now`] whether
+//!   that walk would find one file now, by its exact name.
 //! - [`held_open`]: whether Word (or, on Windows, any program) has a file of the folder open
 //!   ([`HeldOpen`]), by the rule undo and restore refuse with; [`held_open_at`] takes a path
 //!   as an agent names it, resolved into the folder by [`matter_path_in`], and
@@ -50,7 +51,9 @@
 //!   is passed over by the stale rule (`locks/stale.rs`) on macOS and Windows.
 //! - With the `test-support` feature, [`test_support::pretend_word_running_since_epoch`], for
 //!   tests that plant an owner file and need it held through the stale rule, and
-//!   [`test_support::bring_back_after_delete`], a sync client putting back a file just deleted.
+//!   [`test_support::bring_back_after_delete`], a sync client putting back a file just deleted,
+//!   and [`test_support::checkpoint_with_old_files`], a checkpoint holding excluded files as a
+//!   build from before the dot-folder rule took them.
 //! - [`scan`]: what importing a folder would take ([`ScanReport`]), before any write.
 //! - [`scan_folder`]: the folder scan before a matter, by the import's walk and rules, with
 //!   running counts and the file reached ([`ScanProgress`]) and its totals ([`FolderScan`],
@@ -170,7 +173,8 @@ pub use locks::{
     matter_path_in, matter_path_of_resolved,
 };
 pub use matter::{
-    Matter, check_marker, history_exists, read_marker, remove_marker_of, set_aside_marker,
+    Matter, check_marker, history_exists, holds_now, read_marker, remove_marker_of,
+    set_aside_marker,
 };
 pub use papers::{Paper, PaperList};
 pub use place::{Place, SyncService, place};
