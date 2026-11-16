@@ -421,7 +421,6 @@ fn every_deny_still_wins_beside_the_allow() {
         names(&format!(r"run\{LAPTOP_RUN}\relay-token")),
         names(r"run\01a1d672-1c0e-7d3b-8e11-5a2b9c0d4e6f-2\x"),
         names(r"run\01a1d673-4d5a-776d-9061-201035c7d75e-2\work"),
-        names(&format!(r"run\{LAPTOP_RUN}\work\x")),
         names(&format!(
             r"agent-state\{LAPTOP_MATTER}\work\{LAPTOP_OTHER_THREAD}\x"
         )),

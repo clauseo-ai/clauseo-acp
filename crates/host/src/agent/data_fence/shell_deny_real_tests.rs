@@ -150,7 +150,6 @@ fn a_laptop_like_folder_lets_the_own_folders_through_and_denies_the_rest() {
             names(&format!(r"agent-state\{}\notes\x", ids[ids.len() - 1])),
             names(r"run\01a1d672-1c0e-7d3b-8e11-5a2b9c0d4e6f-2\x"),
             names(r"run\01a1d673-4d5a-776d-9061-201035c7d75e-2\x"),
-            names(&format!(r"run\{LAPTOP_RUN}\work\x")),
             names(&format!(
                 r"agent-state\{LAPTOP_MATTER}\work\{LAPTOP_OTHER_THREAD}\x"
             )),

@@ -241,10 +241,11 @@ anything the agent starts.
   watcher; `designed`: the denial event and card, and widening access restarts the agent only if
   the lawyer accepts (R18)
 - `built` (macOS, Linux, tier C): Codex's own sandbox denies its shell the data folder's
-  Clauseo-only paths, every other session's run folder and every other matter's notes, later ones
-  included ([0030](decisions/0030-launch-profile.md)). Gaps: `run.old-*` when the data folder's
-  path holds a glob character; none of it on Windows, where Codex's unelevated sandbox
-  can't enforce a read deny (until S15)
+  Clauseo-only paths, every other session's run folder, every other conversation's work folder
+  and every other matter's notes, later ones included ([0030](decisions/0030-launch-profile.md)).
+  Gaps: `run.old-*` when the data folder's path holds a glob character; none of it on Windows,
+  where Codex's unelevated sandbox can't enforce a read deny (until S15). On Windows, a Codex
+  command's write roots are its own conversation's folders
 - `built` (Windows, Codex): Codex runs Clauseo's guard hook as one PowerShell statement
   (`agent/loads/codex.rs`, `ps_command`) naming `clauseo-guard.exe`, a console program installed
   beside `Clauseo.exe` (`codex_guard_program`); the guard's 0 and 2 end the hook, and any other
@@ -280,6 +281,10 @@ anything the agent starts.
   process start) keep the default thread DACL, so such a process can take one over and read the
   key, and the install is per-user, so it could replace the binary anyway
   ([README](../crates/desktop/agent-browser/README.md))
+- `built` (all): A conversation's work folder stays between launches, so a link an agent makes
+  in it stays too. Seatbelt and the host's auto-deny resolve links, and a launch replaces a link
+  or file in the work folder's place with a new folder and removes a `.claude` in the work and
+  notes folders
 
 ## Egress proxy
 

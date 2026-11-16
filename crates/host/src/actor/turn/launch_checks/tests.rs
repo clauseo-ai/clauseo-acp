@@ -16,6 +16,8 @@ use crate::pipeline::tests::support::id;
 use crate::write;
 
 mod claude_sandbox;
+mod codex_roots;
+mod own_folders;
 
 /// A fresh data folder under the temp folder for `test`.
 fn scratch(test: &str) -> PathBuf {
