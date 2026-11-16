@@ -3,7 +3,8 @@
 //! [`PREFIX`], with the microseconds each phase took since the guard started and what the walk
 //! of held files read. Off by default; off, each mark is one thread-local read.
 //!
-//! The phases, in order (one that did not run is left out): `read` (stdin), `parse` (JSON),
+//! The phases, in order (one that did not run is left out): `read` (stdin), `fence` (the
+//! file-tool fence, `crate::file_fence`, when the hook passes it), `parse` (JSON),
 //! `targets` (the paths the tool names; for a shell command, its words, each looked up as a file
 //! from every folder it may be in), `resolve` (each target resolved canonically and checked for
 //! an owner file), `walk` (a shell command's listing of the matter's held files), `decide` (the

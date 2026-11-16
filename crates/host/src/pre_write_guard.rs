@@ -151,6 +151,11 @@
 //! captured again from the real tool whenever a pinned Claude Code or Codex version moves. In
 //! default and plan mode the permission check (ADR 0021) still stops a write to a held file; in
 //! acceptEdits and bypassPermissions this guard is the only stop. It never panics.
+//!
+//! The file-tool fence runs first, and fails closed (`crate::file_fence`): with its `--fence`
+//! argument (Claude Code's entry, `agent/loads.rs`), a `Read`, `Edit`, `Write`, `MultiEdit`,
+//! `NotebookEdit`, `Grep` or `Glob` whose path really lands in a fenced place is refused, and so
+//! is any input, here or on that path, that the fence cannot read or decide in time.
 
 mod ask;
 mod codex;
@@ -168,6 +173,8 @@ use clauseo_protocol::MatterPath;
 use serde_json::Value;
 
 use codex::{has_codex_part, in_codex_folder, patch_targets};
+
+use crate::file_fence;
 // The data folder fence reads a command's `sh -c` scripts as this guard does
 // (`agent/data_fence/command.rs`).
 use reach::Reach;
@@ -201,13 +208,14 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 /// refuse that is not one of `ask::LOCAL_READS` gets Claude Code's `ask` decision on
 /// `output` (`ask.rs`); otherwise `output` stays empty.
 pub fn run(args: &[OsString], input: impl Read, output: impl Write, errors: impl Write) -> i32 {
+    file_fence::guard::arm(args);
     let on = timings::wanted(std::env::var_os(timings::ENV).as_deref());
     run_timed(args, input, (output, errors), on)
 }
 
 /// [`run`], with the phase timings ([`timings`]) on or off; when on, their line follows any
 /// other line on `errors`.
-fn run_timed(
+pub(crate) fn run_timed(
     args: &[OsString],
     input: impl Read,
     (mut output, mut errors): (impl Write, impl Write),
@@ -215,12 +223,22 @@ fn run_timed(
 ) -> i32 {
     timings::start(on);
     let mut bytes = Vec::new();
-    let found = match input.take(MAX_INPUT).read_to_end(&mut bytes) {
-        Ok(_) => {
-            timings::mark("read");
-            refusal(&bytes, matter_arg(args).as_deref())
-        }
-        Err(_) => Err(Ignored::Unreadable),
+    let read = input.take(MAX_INPUT).read_to_end(&mut bytes).is_ok();
+    if read {
+        timings::mark("read");
+    }
+    // The file-tool fence first, failing closed (`file_fence`); then this guard, failing open.
+    let matter = matter_arg(args);
+    let fence_input: &[u8] = if read { &bytes } else { &[] };
+    let fenced = file_fence::guard::check(args, fence_input, matter.as_deref());
+    file_fence::guard::decided();
+    if file_fence::guard::wanted(args) {
+        timings::mark("fence");
+    }
+    let found = match (fenced, read) {
+        (Some(denial), _) => Ok(Some(Refusal::Fence(denial))),
+        (None, true) => refusal(&bytes, matter.as_deref()),
+        (None, false) => Err(Ignored::Unreadable),
     };
     timings::mark("decide");
     let refused = matches!(found, Ok(Some(_)));
@@ -307,6 +325,8 @@ enum Refusal {
     CodexFolder,
     /// A shell command runs `stetdoc mcp` or `stetdoc init`.
     StetdocServe,
+    /// The file-tool fence refuses the call (`file_fence`).
+    Fence(file_fence::decide::Denial),
 }
 
 impl Refusal {
@@ -324,6 +344,7 @@ impl Refusal {
             Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
                                    in its shell: run the stetdoc command you need directly."
                 .to_owned(),
+            Self::Fence(denial) => denial.reason().to_owned(),
         }
     }
 }

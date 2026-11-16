@@ -73,6 +73,9 @@ crates/desktop/src/update/arch.rs native_is_arm64 unsafe_code
 crates/desktop/src/profile.rs first_on_path clippy::disallowed_methods
 crates/desktop/src/window_events.rs raise_main_window clippy::let_underscore_must_use
 crates/desktop/src/lib.rs stop_host_then_exit clippy::exit
+# The file-tool fence's deadline and panic hook refuse with the guard's code from a watch thread
+# or a panic hook, where no caller is left to return it to.
+crates/host/src/file_fence/guard.rs refuse_now clippy::exit
 # The machine's total memory (src/machine_memory.rs): sysctlbyname on macOS, GlobalMemoryStatusEx
 # on Windows. Each module's FFI call, under its own #![expect].
 crates/desktop/src/machine_memory.rs mac unsafe_code

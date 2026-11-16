@@ -249,6 +249,7 @@ mod config;
 pub mod connectors;
 mod encode;
 mod error;
+mod file_fence;
 mod file_link;
 mod handle;
 mod ids;
