@@ -99,19 +99,19 @@
     "note": "Versions' line after a one-document restore to a version from another day, with Undo"
   },
   "UC-325": {
-    "en": "Undid the restore. '{paper}' is back as it was at {time}.",
-    "hi": "पुनर्स्थापना पूर्ववत की गई। '{paper}' फिर से वैसा है जैसा वह {time} बजे था।",
+    "en": "Undid the restore. '{paper}' is back as it was before.",
+    "hi": "पुनर्स्थापना पूर्ववत की गई। '{paper}' फिर से वैसा है जैसा वह पहले था।",
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-16",
-    "note": "Versions' line after undoing a one-document restore (Undo on its done line); {time} the version it went back to",
+    "note": "Versions' line after undoing a one-document restore (Undo on its done line); the paper is back as it was just before the restore, so no time is given",
     "by": "host follow-ups (provisional; orchestrator to approve)"
   },
   "UC-428": {
-    "en": "Restored {paper}.",
-    "hi": "{paper} पुनर्स्थापित किया गया।",
+    "en": "Restored '{paper}'.",
+    "hi": "'{paper}' पुनर्स्थापित किया गया।",
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
@@ -121,13 +121,13 @@
     "by": "host follow-ups (provisional; orchestrator to approve)"
   },
   "U3-err-matter.file_folder_clash": {
-    "en": "Clauseo can't restore this document: a folder now has its name, or the folder it was in is now a file. Rename or move that folder or file, then try again. Nothing has changed.",
-    "hi": "Clauseo यह दस्तावेज़ पुनर्स्थापित नहीं कर सकता: अब एक फ़ोल्डर का यही नाम है, या जिस फ़ोल्डर में यह था वह अब एक फ़ाइल है। उस फ़ोल्डर या फ़ाइल का नाम बदलें या उसे कहीं और ले जाएँ, फिर दोबारा प्रयास करें। कुछ नहीं बदला है।",
+    "en": "Clauseo can't restore this paper: a folder now has its name, or the folder it was in is now a file. Nothing has changed. Rename or move that folder or file, then try again.",
+    "hi": "Clauseo यह दस्तावेज़ पुनर्स्थापित नहीं कर सकता: अब एक फ़ोल्डर का यही नाम है, या जिस फ़ोल्डर में यह था वह अब एक फ़ाइल है। कुछ नहीं बदला है। उस फ़ोल्डर या फ़ाइल का नाम बदलें या उसे कहीं और ले जाएँ, फिर दोबारा प्रयास करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-15",
+    "hi_at": "2026-11-16",
     "hi_by": "host follow-ups (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-15",
+    "at": "2026-11-16",
     "by": "host follow-ups (provisional; orchestrator to approve)",
     "note": "matter.file_folder_clash: Versions' Restore this document refused, the paper's name now a folder or its folder now a file; nothing written. Id form required by status.test.ts (one U3-err-<code> per ErrorCode)"
   }
