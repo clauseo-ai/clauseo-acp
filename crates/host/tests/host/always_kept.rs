@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::always::{
     ALWAYS, CLAUDE, ask, asked, assert_only_host_always, bash_options, claude_scenario, guard,
-    keep, kept_rules, offers, refused_answer, resolutions, rules_file, signed_rules, until_kept,
+    kept_rules, offers, refused_answer, resolutions, rules_file, signed_rules, until_kept,
     wc_offer,
 };
 use crate::permissions::answer_from;
@@ -343,7 +343,7 @@ fn a_kept_edit_all_never_follows_a_link_out_of_the_matter() {
     let host = dir.start(0);
     let matter = host.create_matter("m", &folder);
     let thread = host.create_thread(matter, CLAUDE);
-    keep(&dir, matter, &["Edit(*)"]);
+    crate::always::keep(&dir, matter, &["Edit(*)"]);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Edit the files.");
     answer_from(
