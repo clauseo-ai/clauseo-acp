@@ -20,6 +20,7 @@ use clauseo_protocol::{
 
 use crate::matters::summary;
 use crate::observe::Events;
+use crate::pickers_seed::AGENT_DEFAULT;
 use crate::support::{Dir, Running, Scenario, matter_with_thread};
 
 /// The agent id that makes a fake agent a Claude agent, so picks are kept per kind.
@@ -147,10 +148,14 @@ fn a_first_conversation_keeps_the_options_and_a_pick_becomes_the_matters() {
         &[(CLAUDE, Scenario::Bundled("pickers-first"))],
     );
     let host = dir.start(0);
-    assert!(agent_options(&host).is_empty(), "none before any session");
+    // Before any session, the seed (`pickers_seed.rs`): the model and effort at the agent's own
+    // default.
+    let seed = agent_options(&host);
+    assert_eq!(current(&seed, "model").as_deref(), Some(AGENT_DEFAULT));
+    assert_eq!(values(&seed, "effort"), [AGENT_DEFAULT]);
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
-    // Nothing tells the option's category yet: the command starts the session, whose options
-    // then refuse it before it reaches the agent (`pickers-first` takes a prompt next).
+    // The seed holds no mode option, so the command is refused before any session
+    // (`pickers-first` takes a prompt next).
     host.refused(set(thread, "mode", "plan"), ErrorCode::CommandInvalid);
     let mut events = turn(&host, thread, "Summarise clause 4.");
     let kept = agent_options(&host);

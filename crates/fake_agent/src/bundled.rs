@@ -110,6 +110,8 @@ bundled! {
         "pickers-recommended",
         "pickers-released",
         "pickers-resume",
+        "pickers-seed",
+        "pickers-seed-codex",
         "pickers-stale",
         "pickers-starting",
         "plan",

@@ -388,6 +388,12 @@ mod pickers_idle;
 #[path = "host/pickers_log.rs"]
 mod pickers_log;
 #[cfg(test)]
+#[path = "host/pickers_seed.rs"]
+mod pickers_seed;
+#[cfg(test)]
+#[path = "host/pickers_seed_log.rs"]
+mod pickers_seed_log;
+#[cfg(test)]
 #[path = "host/plan_note.rs"]
 mod plan_note;
 #[cfg(test)]
