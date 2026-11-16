@@ -43,7 +43,8 @@ mod tests {
         ("aarch64-pc-windows-msvc", None),
     ];
 
-    /// The sha256 a table of ours holds until the build workflow has run.
+    /// The sha256 a table of ours holds before the build workflow has run. None of our tables may
+    /// hold it (all zeros is what `is_hex` would otherwise accept).
     const PLACEHOLDER: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
     /// Whether `text` is `len` lowercase hex characters.
@@ -147,10 +148,14 @@ mod tests {
                     "[{triple}] sha256 is not 64 lowercase hex characters: {sha}"
                 ));
             }
+            if asset.is_none() && sha == PLACEHOLDER {
+                out.push(format!(
+                    "[{triple}] sha256 is the all-zero placeholder: paste the sha256 the build workflow printed"
+                ));
+            }
         }
 
-        // Our builds are distinct: no two of our tables share a url, or a sha256 other than the
-        // placeholder.
+        // Our builds are distinct: no two of our tables share a url or a sha256.
         let ours: Vec<(&str, &str, &str)> = ASSETS
             .iter()
             .filter(|(_, asset)| asset.is_none())
@@ -165,7 +170,7 @@ mod tests {
                 if url_a == url_b {
                     out.push(format!("[{first}] and [{second}] must carry distinct urls"));
                 }
-                if sha_a == sha_b && *sha_a != PLACEHOLDER {
+                if sha_a == sha_b {
                     out.push(format!(
                         "[{first}] and [{second}] must carry distinct sha256s"
                     ));
@@ -242,16 +247,9 @@ mod tests {
         );
 
         // Copy the x64 table's pinned sha256 into the ARM64 table: a real hash, not a placeholder.
-        let pinned = |triple: &str| -> String {
-            let table: toml::Table = toml::from_str(PIN).expect("the pin parses");
-            table[triple].as_table().expect("a table")["sha256"]
-                .as_str()
-                .expect("a sha256")
-                .to_owned()
-        };
         let (x64_sha, arm64_sha) = (
-            pinned("x86_64-pc-windows-msvc"),
-            pinned("aarch64-pc-windows-msvc"),
+            pinned_sha("x86_64-pc-windows-msvc"),
+            pinned_sha("aarch64-pc-windows-msvc"),
         );
         assert_ne!(
             x64_sha, arm64_sha,
@@ -266,6 +264,54 @@ mod tests {
                 .any(|p| p.contains("must carry distinct sha256s")),
             "{found:#?}"
         );
+    }
+
+    /// Our four tables, the ones that take our build (no upstream asset).
+    const OURS_TRIPLES: [&str; 4] = [
+        "x86_64-pc-windows-msvc",
+        "aarch64-pc-windows-msvc",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+    ];
+
+    /// The sha256 the pin holds for `triple`.
+    fn pinned_sha(triple: &str) -> String {
+        let table: toml::Table = toml::from_str(PIN).expect("the pin parses");
+        table[triple].as_table().expect("a table")["sha256"]
+            .as_str()
+            .expect("a sha256")
+            .to_owned()
+    }
+
+    /// An all-zero sha256 (the placeholder) is refused in each of our four tables, and nothing else
+    /// about the pin changes: the message names the triple.
+    #[test]
+    fn a_placeholder_is_refused_in_each_of_our_tables() {
+        for triple in OURS_TRIPLES {
+            let real = pinned_sha(triple);
+            let from = format!("sha256 = \"{real}\"");
+            let to = format!("sha256 = \"{PLACEHOLDER}\"");
+            let text = PIN.replacen(&from, &to, 1);
+            assert_ne!(text, PIN, "[{triple}] the test replaced its sha256");
+            let found = problems(&text);
+            let want = format!("[{triple}] sha256 is the all-zero placeholder");
+            assert!(found.iter().any(|p| p.starts_with(&want)), "{found:#?}");
+            assert_eq!(
+                found.len(),
+                1,
+                "only the placeholder is reported: {found:#?}"
+            );
+        }
+    }
+
+    /// An all-zero sha256 is not an allowance for upstream's tables: they keep the hex check only.
+    #[test]
+    fn a_zero_sha_on_upstreams_linux_table_is_not_this_check() {
+        let real = pinned_sha("x86_64-unknown-linux-gnu");
+        let from = format!("sha256 = \"{real}\"");
+        let to = format!("sha256 = \"{PLACEHOLDER}\"");
+        let found = problems(&PIN.replacen(&from, &to, 1));
+        assert!(found.is_empty(), "{found:#?}");
     }
 
     #[test]

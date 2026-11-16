@@ -34,8 +34,13 @@
 # (crates/desktop/agent-browser/README.md says why a rebuild may differ). A sha256 of 64 zeros is
 # the placeholder before the workflow has run, and the fetch refuses it.
 #
-# Linux keeps upstream's binary for now: it is used for development and CI only, and the stream
-# server is still on there. Its url is under
+# Linux keeps upstream's binary for now. release.yml builds a tier-2 Linux release (release.yml:468)
+# and puts upstream's agent-browser inside the shipped .deb (measured at release.yml:842ff). So a
+# Linux build today carries upstream's binary, whose stream server is on: an unauthenticated
+# loopback listener that can drive the browser, and the browser guard lets it run (crates/mcp
+# env.rs:43-48). No Linux release ships that listener: the launch build turns the browser off on
+# Linux (PR browser-off-linux) until our patched Linux binary, release
+# agent-browser-v0.41.1-clauseo.2 (Linux x86_64 only), is pinned. Its url is under
 # https://github.com/vercel-labs/agent-browser/releases/download/v<version>/, and its hashes were
 # taken from the release's downloads and match the digests GitHub lists for its assets (v0.41.1,
 # Apache-2.0). The fetch accepts either kind of url for any triple; the agent_browser_pin test
@@ -57,7 +62,7 @@ sha256 = "e0331a17e45f1276a21c34b09a54138d5d7c31d12e8068ca4f226f68825f58b7"
 url = "https://github.com/clauseo-ai/clauseo-acp/releases/download/agent-browser-v0.41.1-clauseo.1/agent-browser-x86_64-apple-darwin"
 sha256 = "63f4bdec756b2f7ec2568e4c9f33e47740b9ca32b5249275d9e00e67d33294db"
 
-# Upstream's binary (dev and CI only, the stream server still on), see the header.
+# Upstream's binary, shipped in the Linux .deb with the stream server on (see the header).
 [x86_64-unknown-linux-gnu]
 url = "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.1/agent-browser-linux-x64"
 sha256 = "2a89295b62ddd497986a9a80b52e1dbe4c1f6bd68ffde67eaae82eec2206af61"

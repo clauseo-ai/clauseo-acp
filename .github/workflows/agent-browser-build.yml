@@ -4,9 +4,10 @@
 # Windows triples, each native on its own runner (ARM64 included), and both macOS triples on
 # macos-15 (x86_64 cross-compiled, as release.yml builds the app). Linux keeps upstream's binary
 # for now, so there is no Linux leg. Each leg runs crates/desktop/sidecars/agent-browser-build.mjs,
-# which checks the source archive's SHA-256 against the pin, applies the patches, runs the patched
-# source's own `cargo test --locked`, then `cargo build --release --locked` with the
-# reproducibility settings its header lists (and crt-static on Windows). A Windows leg checks the
+# which checks the source archive's SHA-256 against the pin, applies the patches, runs
+# `cargo build --release --locked` with the reproducibility settings its header lists (and
+# crt-static on Windows) and writes the binary and its record, then runs the patched source's own
+# `cargo test --locked`. A failed test still fails the leg, so nothing is published. A Windows leg checks the
 # exe for VC++ runtime imports (pe-crt-imports.mjs). Each leg uploads the binary with its build
 # record (agent-browser-<triple>.json).
 #
