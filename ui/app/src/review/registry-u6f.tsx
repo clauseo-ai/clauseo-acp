@@ -8,11 +8,10 @@
 // long to read (StopReason too_long). U6F-19 to U6F-21 are agent.service_error's, and U6F-22 to U6F-24 agent.quiet's,
 // UC-531 to UC-533 agent.unreachable's (offline truth), never a send's refusal: the stop line under the answer so far,
 // with Try again. U6F-25 to U6F-27 are matter.folder_backslash's and U6F-28 to U6F-30 agent.folder_inaccessible's
+// UC-356 to UC-358 are agent.start_offline's, a start that failed on its connection with the host's probe agreeing;
+// UC-359 to UC-361 agent.answer_failed's, an error the agent answered the question with: the stop line, with Try again;
+// UC-362 to UC-364 agent.setting_refused's, the lawyer's mode or setting change the agent didn't accept.
 // (drafts), the same way.
-// agent.start_offline's, a start that failed on its connection with the host's probe agreeing.
-// agent.start_offline's, a start that failed on its connection with the host's probe agreeing, and U6F-28 to
-// U6F-30 agent.answer_failed's, an error the agent answered the question with: the stop line, with Try again.
-// U6F-31 to U6F-33 are agent.setting_refused's, the lawyer's mode or setting change the agent didn't accept.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { type AgentName, errorWords as sentence } from "@clauseo/components/lib/words-errors.ts";
@@ -83,6 +82,11 @@ const folderStopped = (code: ErrorCode, agent: AgentId) => () => (
         // matter.folder_backslash's line as on the Mac, for the matter folder's own name
         platform: "mac",
         matterFolder: "Documents/Acme\\ Traders",
+      })
+    }
+  />
+);
+
 /** A turn `agent` ended with agent.answer_failed (an error answer to the question): the stop line, with Try again. */
 const answerFailed = (agent: AgentId) => () => (
   <RoomOver
@@ -276,16 +280,72 @@ export const U6F: Entry[] = [
     render: nameless("agent.quiet"),
   },
   {
+    id: "UC-356",
+    words: errorWords(
+      "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.",
+    ),
+    screen: "room/composer",
+    render: refused("agent.start_offline", "codex-acp"),
+  },
+  {
+    id: "UC-357",
+    words: errorWords(
+      "You're offline, so {name} didn't start. Try again when you're back online. Your question is kept.",
+    ),
+    screen: "room/composer",
+    render: refused("agent.start_offline", "gemini"),
+  },
+  {
+    id: "UC-358",
+    words: errorWords(
+      "You're offline, so the AI didn't start. Try again when you're back online. Your question is kept.",
+    ),
+    screen: "room/composer",
+    render: nameless("agent.start_offline"),
+  },
+  {
+    id: "UC-359",
+    words: errorWords("ChatGPT stopped with an error. Try again."),
+    screen: "room/thread",
+    render: answerFailed("codex-acp"),
+  },
+  {
+    id: "UC-360",
+    words: errorWords("{name} stopped with an error. Try again."),
+    screen: "room/thread",
+    render: answerFailed("gemini"),
+  },
+  {
+    id: "UC-361",
+    words: errorWords("The AI stopped with an error. Try again."),
+    screen: "room/thread",
+    render: nameless("agent.answer_failed"),
+  },
+  {
+    id: "UC-362",
+    words: errorWords("ChatGPT didn't accept that change. Try again."),
+    screen: "room/composer",
+    render: refused("agent.setting_refused", "codex-acp"),
+  },
+  {
+    id: "UC-363",
+    words: errorWords("{name} didn't accept that change. Try again."),
+    screen: "room/composer",
+    render: refused("agent.setting_refused", "gemini"),
+  },
+  {
+    id: "UC-364",
+    words: errorWords("The AI didn't accept that change. Try again."),
+    screen: "room/composer",
+    render: nameless("agent.setting_refused"),
+  },
+  {
     id: "U6F-25",
     words: errorWords(
       "ChatGPT can't work in this matter's folder because its name has a backslash (\\). Rename the folder in Finder, then Try again.",
     ),
     screen: "room/thread",
     render: folderStopped("matter.folder_backslash", "codex-acp"),
-      "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.",
-    ),
-    screen: "room/composer",
-    render: refused("agent.start_offline", "codex-acp"),
   },
   {
     id: "U6F-26",
@@ -294,10 +354,6 @@ export const U6F: Entry[] = [
     ),
     screen: "room/thread",
     render: folderStopped("matter.folder_backslash", "gemini"),
-      "You're offline, so {name} didn't start. Try again when you're back online. Your question is kept.",
-    ),
-    screen: "room/composer",
-    render: refused("agent.start_offline", "gemini"),
   },
   {
     id: "U6F-27",
@@ -330,10 +386,6 @@ export const U6F: Entry[] = [
     ),
     screen: "room/thread",
     render: nameless("agent.folder_inaccessible"),
-      "You're offline, so the AI didn't start. Try again when you're back online. Your question is kept.",
-    ),
-    screen: "room/composer",
-    render: nameless("agent.start_offline"),
   },
   {
     id: "UC-531",
@@ -358,42 +410,6 @@ export const U6F: Entry[] = [
     ),
     screen: "room/thread",
     render: nameless("agent.unreachable"),
-  },
-  {
-    id: "U6F-28",
-    words: errorWords("ChatGPT stopped with an error. Try again."),
-    screen: "room/thread",
-    render: answerFailed("codex-acp"),
-  },
-  {
-    id: "U6F-29",
-    words: errorWords("{name} stopped with an error. Try again."),
-    screen: "room/thread",
-    render: answerFailed("gemini"),
-  },
-  {
-    id: "U6F-30",
-    words: errorWords("The AI stopped with an error. Try again."),
-    screen: "room/thread",
-    render: nameless("agent.answer_failed"),
-  },
-  {
-    id: "U6F-31",
-    words: errorWords("ChatGPT didn't accept that change. Try again."),
-    screen: "room/composer",
-    render: refused("agent.setting_refused", "codex-acp"),
-  },
-  {
-    id: "U6F-32",
-    words: errorWords("{name} didn't accept that change. Try again."),
-    screen: "room/composer",
-    render: refused("agent.setting_refused", "gemini"),
-  },
-  {
-    id: "U6F-33",
-    words: errorWords("The AI didn't accept that change. Try again."),
-    screen: "room/composer",
-    render: nameless("agent.setting_refused"),
   },
   {
     id: "U3-52",

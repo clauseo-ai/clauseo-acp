@@ -86,10 +86,12 @@ test("agent.exited before H10: the stopped line with its time, no Restart, no de
   expect(host.textContent).not.toContain("Details");
 });
 
-test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.start_offline and thread.interrupted only, and it calls restart", () => {
+test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.start_offline, agent.program_missing, agent.program_blocked and thread.interrupted only, and it calls restart", () => {
   expect([...RESTARTS].sort()).toEqual([
     "agent.exited",
     "agent.launch_failed",
+    "agent.program_blocked",
+    "agent.program_missing",
     "agent.start_offline",
     "thread.interrupted",
   ]);
@@ -113,11 +115,11 @@ test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.start
     "agent.unsupported_version",
     "agent.service_error",
     "agent.quiet",
+    "agent.answer_failed",
+    "agent.mode_missing",
     "matter.folder_backslash",
     "agent.folder_inaccessible",
     "agent.unreachable",
-    "agent.answer_failed",
-    "agent.mode_missing",
   ])
     expect(stoppedLine("en", brk(code), 0, { onRestart: () => {}, refused: null })).toBeNull();
   // and before H10 only agent.exited takes the line
@@ -158,13 +160,11 @@ test("the stopped question comes back only before H10, only for the codes asking
   expect(refillOf(brk("agent.exited"), false, null)).toBeNull();
   expect(refillOf(brk("agent.protocol_error"), true, null)).toBeNull();
   expect(refillOf(brk("agent.unsupported_version"), true, null)).toBeNull();
-  expect(refillOf(brk("agent.service_error"), true, null)).toBeNull();
-  expect(refillOf(brk("agent.quiet"), true, null)).toBeNull();
-  expect(refillOf(brk("matter.folder_backslash"), true, null)).toBeNull();
-  expect(refillOf(brk("agent.folder_inaccessible"), true, null)).toBeNull();
-  expect(refillOf(brk("agent.unreachable"), true, null)).toBeNull();
   expect(refillOf(brk("agent.answer_failed"), true, null)).toBeNull();
   expect(refillOf(brk("agent.mode_missing"), true, null)).toBeNull();
+  // A program missing or blocked keeps the question: it comes back to the field, as for a failed launch.
+  expect(refillOf(brk("agent.program_missing"), true, null)).toEqual({ key: "step:x", text: "Q" });
+  expect(refillOf(brk("agent.program_blocked"), true, null)).toEqual({ key: "step:x", text: "Q" });
   expect(refillOf(brk("agent.start_offline"), true, null)).toEqual({ key: "step:x", text: "Q" });
 });
 
@@ -183,6 +183,11 @@ test("agent.answer_failed: an error answer to the question is never called unrea
   expect(errorWords("en", "agent.start_offline")).toBe(
     "You're offline, so Claude didn't start. Try again when you're back online. Your question is kept.",
   );
+  expect(refillOf(brk("agent.service_error"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.quiet"), true, null)).toBeNull();
+  expect(refillOf(brk("matter.folder_backslash"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.folder_inaccessible"), true, null)).toBeNull();
+  expect(refillOf(brk("agent.unreachable"), true, null)).toBeNull();
 });
 
 test("agent.service_error (#1030): no Restart, no time mark, no working line, with H10 or without", () => {

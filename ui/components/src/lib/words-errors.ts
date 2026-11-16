@@ -6,6 +6,7 @@
 import type { Lang } from "./display.ts";
 import { wordsOf } from "./words-core.ts";
 import { BACKSLASH, backslashKey, byAgent, type BackslashPlace } from "./words-errors-backslash.ts";
+import { PROGRAM_BLOCKED, PROGRAM_MAC, PROGRAM_MISSING } from "./words-errors-program.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
 import type { VersionKey } from "./words-versions.ts";
@@ -117,6 +118,12 @@ export type ErrorCode =
   | "mcp.save_declined"
   | "agent.service_error"
   | "agent.quiet"
+  | "agent.start_offline"
+  | "agent.answer_failed"
+  | "agent.mode_missing"
+  | "agent.setting_refused"
+  | "agent.program_blocked"
+  | "agent.program_missing"
   | "agent.unreachable"
   | "mcp.import_too_large"
   | "matter.folder_backslash"
@@ -127,10 +134,6 @@ export type ErrorCode =
   | "blackline.too_large"
   | "blackline.format_unknown"
   | "word.too_large"
-  | "agent.start_offline"
-  | "agent.answer_failed"
-  | "agent.mode_missing"
-  | "agent.setting_refused"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -362,13 +365,6 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // an import whose servers are too long to show whole in one confirm: nothing was added
   "mcp.import_too_large":
     "There are too many tools to import at once, so nothing was imported. Add them one at a time.",
-  // the host didn't start Claude: the matter folder's path has a backslash, on macOS or Linux, where Claude Code can't
-  // start. Try again under the turn once the folder is renamed. Draft English (Rohan to approve); Hindi provisional
-  "matter.folder_backslash": BACKSLASH.finder.own.claude,
-  // Claude couldn't open the matter folder as it started ("Can't access working directory"): Try again, never
-  // Restart. Draft English (Rohan to approve); Hindi provisional
-  "agent.folder_inaccessible":
-    "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
   // the agent didn't start: its start request failed on its connection and the host's probe didn't get through either
   // (before-launch item 3); Try again once online, the question back in the field. Provisional
   "agent.start_offline":
@@ -382,6 +378,18 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // the agent answered the lawyer's own mode or setting change with an error; nothing changed (before-launch item
   // 3). Provisional
   "agent.setting_refused": "Claude didn't accept that change. Try again.",
+  // the host didn't start Claude: the matter folder's path has a backslash, on macOS or Linux, where Claude Code can't
+  // start. Try again under the turn once the folder is renamed. Draft English (Rohan to approve); Hindi provisional
+  "matter.folder_backslash": BACKSLASH.finder.own.claude,
+  // Claude couldn't open the matter folder as it started ("Can't access working directory"): Try again, never
+  // Restart. Draft English (Rohan to approve); Hindi provisional
+  "agent.folder_inaccessible":
+    "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+  // provisional (U3-err-agent.program_blocked, .program_missing): the computer refused to run the agent's program, or
+  // it is missing, so the agent didn't start; the Mac's blocked line is words-errors-program.ts's, the other agents'
+  // lines are in PLANNED
+  "agent.program_blocked": PROGRAM_BLOCKED.claude,
+  "agent.program_missing": PROGRAM_MISSING.claude,
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -435,6 +443,17 @@ const PLANNED: Partial<
     chatgpt: "ChatGPT didn't accept that change. Try again.",
     named: "{name} didn't accept that change. Try again.",
     nameless: "The AI didn't accept that change. Try again.",
+  },
+  // provisional (see ERROR_WORDS); agent.program_blocked's Mac lines are words-errors-program.ts's
+  "agent.program_blocked": {
+    chatgpt: PROGRAM_BLOCKED.chatgpt,
+    named: PROGRAM_BLOCKED.named,
+    nameless: PROGRAM_BLOCKED.nameless,
+  },
+  "agent.program_missing": {
+    chatgpt: PROGRAM_MISSING.chatgpt,
+    named: PROGRAM_MISSING.named,
+    nameless: PROGRAM_MISSING.nameless,
   },
   // provisional (before-launch item 3), as ERROR_WORDS' sentence
   "agent.start_offline": {
@@ -559,6 +578,12 @@ export function errorWords(
   if (code === "matter.folder_backslash" && place !== undefined) {
     const { key, slots } = backslashKey(agent, place);
     return own(lang, key as keyof typeof HI, slots);
+  }
+  const mac =
+    place?.platform === "mac" && Object.hasOwn(PROGRAM_MAC, code) ? PROGRAM_MAC[code] : undefined;
+  if (mac !== undefined) {
+    const { key, name } = byAgent(mac, agent);
+    return own(lang, key as keyof typeof HI, name === undefined ? undefined : { name });
   }
   const known = Object.hasOwn(ERROR_WORDS, code) ? (code as WordedCode) : "unknown";
   const { key, name } = plannedKey(known, agent);

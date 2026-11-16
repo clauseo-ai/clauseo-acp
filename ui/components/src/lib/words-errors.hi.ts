@@ -204,15 +204,6 @@ export const HI = {
   "{name} didn't accept that change. Try again.":
     "{name} ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
   "The AI didn't accept that change. Try again.": "AI ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
-  // agent.program_blocked: the agent's program is missing or not allowed to run (provisional Hindi)
-  "Claude's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.":
-    "Claude का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
-  "ChatGPT's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.":
-    "ChatGPT का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
-  "{name}'s program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.":
-    "{name} का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
-  "The AI's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.":
-    "AI का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
   // agent.start_offline: the start failed on its connection, confirmed by the host's probe (provisional Hindi)
   "You're offline, so Claude didn't start. Try again when you're back online. Your question is kept.":
     "आप ऑफ़लाइन हैं, इसलिए Claude शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
@@ -298,6 +289,31 @@ export const HI = {
   // word.too_large: a file over a size limit, in place of its tracked changes (provisional Hindi)
   "This file is too large for Clauseo to show its tracked changes.":
     "यह फ़ाइल इतनी बड़ी है कि Clauseo इसके ट्रैक किए गए बदलाव नहीं दिखा सकता।",
+  // provisional (U3-err-agent.program_missing and .program_blocked, their agents' and .mac lines): Hindi later
+  "A program Claude needs is missing from this computer, so Claude didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.":
+    null,
+  "A program ChatGPT needs is missing from this computer, so ChatGPT didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.":
+    null,
+  "A program {name} needs is missing from this computer, so {name} didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.":
+    null,
+  "A program the AI needs is missing from this computer, so the AI didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.":
+    null,
+  "This computer stopped a program Claude needs from starting, so Claude didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program ChatGPT needs from starting, so ChatGPT didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program {name} needs from starting, so {name} didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program the AI needs from starting, so the AI didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program Claude needs from starting, so Claude didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program ChatGPT needs from starting, so ChatGPT didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program {name} needs from starting, so {name} didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
+  "This computer stopped a program the AI needs from starting, so the AI didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

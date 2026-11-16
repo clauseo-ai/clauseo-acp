@@ -25,6 +25,8 @@ export const RESTARTS = new Set<string>([
   "agent.exited",
   "agent.launch_failed",
   "agent.start_offline",
+  "agent.program_missing",
+  "agent.program_blocked",
   "thread.interrupted",
 ]);
 

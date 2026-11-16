@@ -17,12 +17,12 @@ import { errorWords } from "./words.ts";
  * below. Only the false answer narrows: a key it refuses is never one of MARK_KEYS. */
 export const ownEntry = (code: ErrorCode, key: ErrorKey): key is (typeof MARK_KEYS)[number] =>
   code === "agent.offline" ||
+  code === "agent.answer_failed" ||
   code === "agent.service_error" ||
   code === "agent.quiet" ||
   code === "agent.unreachable" ||
   code === "matter.folder_backslash" ||
   code === "agent.folder_inaccessible" ||
-  code === "agent.answer_failed" ||
   (MARK_KEYS as readonly string[]).includes(key);
 
 /** agent.offline is never a send's refusal: the stop line under the answer so far, with Try again. */
@@ -121,13 +121,6 @@ const UNREACHABLE: Entry[] = [
   },
 ];
 
-/** A turn Claude couldn't start in the matter's folder, never a send's refusal: the question and the stop line under it,
- * with Try again and never Restart. Draft English (Rohan to approve). ChatGPT's, an agent's by its name and the
- * nameless line are U6F-25 to U6F-30. */
-const folderStop = (code: ErrorCode, key: Parameters<typeof errorWords>[0]): Entry[] => [
-  {
-    id: `U3-err-${code}`,
-    words: errorWords(key),
 /** agent.answer_failed is never a send's refusal either: Claude's stop line under the answer so far, with Try again
  * and never Restart. ChatGPT's, an agent's by its name and the nameless line are UC-359 to UC-361. */
 const ANSWER_FAILED: Entry[] = [
@@ -141,14 +134,35 @@ const ANSWER_FAILED: Entry[] = [
           threadHost({
             entries: [
               userMessage(5, 1, "What does clause nine of the lease say about notice?"),
+              agentText(6, 1, "Clause nine requires **notice in writing**, served at"),
+              step(9, { stop: "failed", failure: "agent.answer_failed" }),
+            ],
+          })
+        }
+      />
+    ),
+  },
+];
+
+/** A turn Claude couldn't start in the matter's folder, never a send's refusal: the question and the stop line under it,
+ * with Try again and never Restart. Draft English (Rohan to approve). ChatGPT's, an agent's by its name and the
+ * nameless line are U6F-25 to U6F-30. */
+const folderStop = (code: ErrorCode, key: Parameters<typeof errorWords>[0]): Entry[] => [
+  {
+    id: `U3-err-${code}`,
+    words: errorWords(key),
+    screen: "room/thread",
+    render: () => (
+      <RoomOver
+        host={() =>
+          threadHost({
+            entries: [
+              userMessage(5, 1, "What does clause nine of the lease say about notice?"),
               step(9, { stop: "failed", failure: code }),
             ],
             // matter.folder_backslash's line as on the Mac, for the matter folder's own name
             platform: "mac",
             matterFolder: "Documents/Acme\\ Traders",
-              agentText(6, 1, "Clause nine requires **notice in writing**, served at"),
-              step(9, { stop: "failed", failure: "agent.answer_failed" }),
-            ],
           })
         }
       />
@@ -161,6 +175,7 @@ const OWN: Partial<Record<ErrorCode, Entry[]>> = {
   "agent.offline": OFFLINE,
   "agent.service_error": SERVICE,
   "agent.quiet": QUIET,
+  "agent.answer_failed": ANSWER_FAILED,
   "agent.unreachable": UNREACHABLE,
   "matter.folder_backslash": folderStop(
     "matter.folder_backslash",
@@ -175,15 +190,3 @@ const OWN: Partial<Record<ErrorCode, Entry[]>> = {
 /** The entries in place of a refusal for a code `ownEntry` names: agent.offline's, agent.service_error's, agent.quiet's,
  * agent.unreachable's and the two folder codes' own, in their code's place. */
 export const ownEntries = (code: ErrorCode): Entry[] => OWN[code] ?? [];
-/** The entries in place of a refusal for a code `ownEntry` names: agent.offline's, agent.service_error's and
- * agent.quiet's own, in their code's place. */
-export const ownEntries = (code: ErrorCode): Entry[] =>
-  code === "agent.offline"
-    ? OFFLINE
-    : code === "agent.service_error"
-      ? SERVICE
-      : code === "agent.quiet"
-        ? QUIET
-        : code === "agent.answer_failed"
-          ? ANSWER_FAILED
-          : [];
