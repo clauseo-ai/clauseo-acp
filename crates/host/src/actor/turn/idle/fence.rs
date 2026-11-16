@@ -63,7 +63,9 @@ pub(in crate::actor::turn) fn stop_stale_at_turn_end(actor: &mut Actor, thread: 
 }
 
 /// Whether `thread`'s live launch took another fence key than a launch would take now, for a
-/// prompt about to reach it (`agents::ensure`).
+/// prompt about to reach it (`agents::ensure`): a read invite withdrawn or a matter added while
+/// the prompt waited on its command stops the agent first, and the prompt waits for the
+/// relaunch, so it never runs on the old rules.
 pub(in crate::actor::turn) fn fence_stale(actor: &Actor, thread: ThreadId) -> bool {
     stale(actor, thread, matters_hash(actor))
 }

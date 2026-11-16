@@ -170,10 +170,7 @@ pub(super) struct CodexAgent {
     pub(super) key_retry: KeyRetry,
 }
 
-/// Runs `waiting` once `thread`'s agent has a session, launching the agent first. A turn that
-/// finds a live agent whose fence between matters is out of date (a read invite withdrawn, a
-/// matter added, while its prompt waited on its command) stops that agent first and waits for
-/// the relaunch, so the prompt never runs on the old rules (`idle::fence_stale`).
+/// Runs `waiting` once `thread`'s agent has a session; a turn stops a stale-fenced agent first.
 pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
     let stale = matches!(waiting, Waiting::Turn(_)) && super::idle::fence_stale(actor, thread);
     let mut stop_first = false;

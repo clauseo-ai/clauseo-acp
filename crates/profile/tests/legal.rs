@@ -163,11 +163,8 @@ fn legal_word_budget() {
         .instructions();
     let line = clauseo_profile::instructions::STETDOC_CLI;
     assert_eq!(word_count(&stetdoc), word_count(&whole) + word_count(line));
-    assert!(
-        word_count(&stetdoc) <= 1850,
-        "{} words",
-        word_count(&stetdoc)
-    );
+    let words = word_count(&stetdoc);
+    assert!(words <= 1850, "{words} words");
 }
 
 #[test]
