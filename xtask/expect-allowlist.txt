@@ -391,6 +391,8 @@ crates/connectors/src/account.rs Account clippy::struct_field_names
 crates/connectors/src/pricing.rs Pack clippy::struct_field_names
 crates/connectors/src/recharge.rs Recharge clippy::struct_field_names
 crates/connectors/src/recharge.rs Amount clippy::struct_field_names
+# The backoff test times its 5 s wait on the monotonic clock (Instant::now), as the backoff does.
+crates/connectors/tests/client/calls.rs wait_recharge_retries_after_a_server_error clippy::disallowed_methods
 # The dependency test runs cargo metadata and rustc -vV to read the crate's tree for each target.
 crates/connectors/tests/dependencies.rs cargo_json clippy::disallowed_methods
 crates/connectors/tests/dependencies.rs host_triple clippy::disallowed_methods
