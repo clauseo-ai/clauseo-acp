@@ -8,10 +8,11 @@
 //! - what is read (`read.rs`): each version's body, headers, footers, footnotes and endnotes,
 //!   their tables' property elements with the noise left out;
 //! - which parts are compared: the body with the body, the footnotes with the footnotes, the
-//!   endnotes with the endnotes, and the headers and footers as stetdoc's compare pairs them
-//!   ([`pair_headers`]: the sections from the last one back, and in each pair of sections the
-//!   part on the same kind of page). A header or footer with tables and no counterpart may
-//!   differ, since what changed in its tables can't be told;
+//!   endnotes with the endnotes, and the headers and footers about as stetdoc's compare pairs
+//!   them ([`pair_headers`]: the sections from the last one back, and in each pair of sections
+//!   the part on the same kind of page; an approximation). A header or footer with tables and no
+//!   counterpart may differ, since what changed in its tables can't be told, and so may any
+//!   header or footer with tables when the versions have different numbers of sections;
 //! - which tables, rows and cells are paired ([`align`]): within a part (a table's rows, a row's
 //!   cells), by order when both versions have as many; otherwise by their text, the longest
 //!   run of equal texts in order, then the ones between two pairs by order where both sides
@@ -91,6 +92,10 @@ pub(crate) fn compare(old: &[u8], new: &[u8]) -> TablesCompared {
             .any(|(name, part)| !part.tables.is_empty() && !matched.contains(name.as_str()))
     };
     found.may_differ |= alone(&old, &headers.old) || alone(&new, &headers.new);
+    // The pairing only comes near stetdoc's when the versions have as many sections: with a
+    // section added or removed, a header with tables may pair with the wrong one.
+    let tabled = |package: &Package| package.headers.values().any(|part| !part.tables.is_empty());
+    found.may_differ |= old.sections.len() != new.sections.len() && (tabled(&old) || tabled(&new));
     let texts = |package: &Package| -> BTreeSet<String> {
         package
             .headers
@@ -148,9 +153,13 @@ struct HeaderPairs<'a> {
     new: BTreeSet<&'a str>,
 }
 
-/// Pairs the versions' header and footer parts as stetdoc's compare pairs them: the sections
-/// from the last one back, and in each pair of sections the parts on the same kind of page.
-/// Each part pairs once; a later pairing that names a part already paired is left out.
+/// Pairs the versions' header and footer parts the way stetdoc's compare comes near to: the
+/// sections from the last one back, and in each pair of sections the parts on the same kind of
+/// page. Each part pairs once; a later pairing that names a part already paired is left out.
+/// It is an approximation: stetdoc pairs the two last sections, and two others only when their
+/// ending paragraphs were paired in the body, so a section added at the end or in the middle
+/// pairs differently there. [`compare`] says the blackline may differ when the versions have
+/// different numbers of sections and a header or footer holds tables.
 fn pair_headers<'a>(old: &'a Package, new: &'a Package) -> HeaderPairs<'a> {
     let mut found = HeaderPairs::default();
     for (theirs, ours) in old.sections.iter().rev().zip(new.sections.iter().rev()) {
