@@ -13,7 +13,8 @@
 //! - what a table holds: its `w:tblPr` and `w:tblGrid`, each row's `w:trPr` and `w:tblPrEx`, and
 //!   each cell's `w:tcPr`, every property element as one canonical string (its name, its
 //!   attributes sorted, its children), leaving out the noise: `rsid` attributes, `w14:paraId`
-//!   and `w14:textId`, a tracked change's old properties (`*PrChange`) and the tracked marks
+//!   and `w14:textId`, a tracked change's old properties (`*PrChange`, `w:tblGridChange`,
+//!   `w:tblPrExChange`), Word's style marks for a row's place (`w:cnfStyle`), and the tracked marks
 //!   (`w:ins`, `w:del`, `w:cellIns`, `w:cellDel`, `w:cellMerge`); a row or cell whose deletion is
 //!   tracked is left out, as accepting it does; and the text of each table, row and cell (its
 //!   `w:t`), by which they are paired;
