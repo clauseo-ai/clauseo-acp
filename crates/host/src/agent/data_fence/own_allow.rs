@@ -55,9 +55,13 @@
 //! `cat "<notes>"/*/x`, would match an allow rule and run unjudged. The same goes for a glob
 //! anywhere else in an allowed command (`cat <matter>/*/x <notes>`), since the rule's `*`
 //! takes it. So beside the allow rules, deny rules ([`own_shell_glob_deny_rules`], in
-//! `permissions.deny` on every OS that has the allow) refuse each allowed command and path with
-//! a literal `*`, `?` or `[` before or after the path: `cat *\**<notes>*`, `cat *<notes>*\**`.
-//! A deny beats the allow, and Claude retries without the glob. Each rule names its command
+//! `permissions.deny` of a launch with no shell sandbox: Windows, or Claude's sandbox `Off`)
+//! refuse each allowed command and path with a literal `*`, `?` or `[` before or after the
+//! path: `cat *\**<notes>*`, `cat *<notes>*\**`. A deny beats the allow, and Claude retries
+//! without the glob. A deny is matched on the whole command too, so on Windows an own read piped
+//! through a glob (`cat <notes>/a.md | grep 'a.*b'`) is refused as well, until the own folders'
+//! shell rules go there (after #1098); a sandboxed launch gets none, as Seatbelt checks the real
+//! path a glob reaches. Each rule names its command
 //! (matched through `z_` like the allow), so no other command that names an own folder with a
 //! glob (`find <notes> -name '*.md'`, `cp <work>/*.docx <matter>`) is refused: those were never
 //! allowed and still go to a classifier. A brace (`<notes>/{a,b}/x`) needs no deny: no allow

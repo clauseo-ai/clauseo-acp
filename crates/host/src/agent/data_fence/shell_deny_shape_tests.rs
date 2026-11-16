@@ -268,7 +268,7 @@ fn sweep(per_shape: usize, alone: bool) {
             ..deny.clone()
         };
         let shell = windows_shell_deny_rules(&deny, &env);
-        let mut every = claude_deny_rules_on(&deny, true);
+        let mut every = claude_deny_rules_on(&deny, true, false);
         every.extend(shell.iter().cloned());
         let allow = claude_allow_rules_on(&deny, true);
         let bash = probes(&shell, "Bash", label, per_shape, alone);

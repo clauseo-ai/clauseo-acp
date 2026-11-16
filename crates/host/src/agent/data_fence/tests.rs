@@ -81,7 +81,7 @@ pub(super) fn text(path: &Path) -> String {
 /// plans a session needs (those of other sessions are named per launch, `launch_tests.rs`).
 #[test]
 fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
-    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![PathBuf::from("/d/ata")]));
+    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![PathBuf::from("/d/ata")]), false);
     for rule in [
         "Read(//d/ata/skill-packs/**)",
         "Edit(//d/ata/skill-packs/**)",
@@ -115,10 +115,10 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         };
         assert!(!rules.iter().any(|r| named(&r)), "{kept}: {rules:?}");
     }
-    let both = claude_deny_rules(&LaunchDeny::fixed(vec![
-        PathBuf::from("/a"),
-        PathBuf::from("/b"),
-    ]));
+    let both = claude_deny_rules(
+        &LaunchDeny::fixed(vec![PathBuf::from("/a"), PathBuf::from("/b")]),
+        false,
+    );
     assert_eq!(both.len(), rules.len() * 2);
 }
 

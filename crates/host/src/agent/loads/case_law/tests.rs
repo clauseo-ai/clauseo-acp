@@ -417,7 +417,7 @@ fn folders_start_with_the_no_case_law_sentence() {
 fn claude_is_denied_every_relay_token_file() {
     use crate::agent::data_fence::{LaunchDeny, claude_deny_rules};
     let data = std::env::temp_dir().join("clauseo-data");
-    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![data]));
+    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![data]), false);
     for tool in ["Read", "Edit"] {
         assert!(
             rules

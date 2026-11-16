@@ -88,7 +88,7 @@ fn a_launch_denies_what_exists_and_is_not_the_sessions_own() {
         );
     }
     let data = text(&root.join("data"));
-    let rules = claude_deny_rules(&deny);
+    let rules = claude_deny_rules(&deny, false);
     for target in ["agent-state/m2*/**", "run/s2*/**", "search.sqlite-wal"] {
         let base = super::rule_path(&data, cfg!(windows));
         for tool in ["Read", "Edit"] {
@@ -365,7 +365,7 @@ fn python_and_tools_are_readable_never_editable_and_their_siblings_stay_denied()
         );
     }
     let base = super::rule_path(&text(&data), cfg!(windows));
-    let rules = claude_deny_rules(&deny);
+    let rules = claude_deny_rules(&deny, false);
     let allow = claude_allow_rules(&deny);
     for place in ["agents/runtime/clauseo-python-*", "tools"] {
         assert!(READ_ONLY.contains(&place));
@@ -414,7 +414,10 @@ fn the_fixed_rules_deny_node_browser_and_every_shell_browser_config() {
         assert!(DENIED.contains(&target), "{target}");
     }
     assert!(!DENIED.contains(&"agents/runtime/**"));
-    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![std::path::PathBuf::from("/d")]));
+    let rules = claude_deny_rules(
+        &LaunchDeny::fixed(vec![std::path::PathBuf::from("/d")]),
+        false,
+    );
     for rule in [
         "Read(//d/run/*/agent-browser/config.json)",
         "Edit(//d/run/*/agent-browser/config.json)",
@@ -465,7 +468,10 @@ fn the_trust_roots_are_denied_to_claudes_file_tools() {
     let [folder, file] = crate::agent::loads::tls_roots::ROOTS_FILE;
     assert_eq!(folder, "tls");
     assert_eq!(file, "roots.pem");
-    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![std::path::PathBuf::from("/d")]));
+    let rules = claude_deny_rules(
+        &LaunchDeny::fixed(vec![std::path::PathBuf::from("/d")]),
+        false,
+    );
     for rule in ["Read(//d/tls/**)", "Edit(//d/tls/**)"] {
         assert!(rules.iter().any(|r| r == rule), "{rule}");
     }

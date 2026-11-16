@@ -160,7 +160,7 @@ fn a_glob_or_grep_pattern_into_the_data_folder_is_denied() {
 /// What Claude's home keeps across sessions, so across matters, is denied to its tools.
 #[test]
 fn claudes_cross_matter_records_are_denied() {
-    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![PathBuf::from("/d")]));
+    let rules = claude_deny_rules(&LaunchDeny::fixed(vec![PathBuf::from("/d")]), false);
     for target in [
         "history.jsonl",
         "file-history/**",

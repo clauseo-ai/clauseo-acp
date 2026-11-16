@@ -179,7 +179,7 @@ fn probe_cases(
     let Some(out) = std::env::var_os("CLAUSEO_RULE_PROBE_OUT") else {
         return;
     };
-    let mut every = claude_deny_rules_on(deny, true);
+    let mut every = claude_deny_rules_on(deny, true, false);
     every.extend(rules.iter().cloned());
     let allow = super::super::claude_allow_rules_on(deny, true);
     let mut cases = Vec::new();
@@ -271,8 +271,8 @@ fn claude_code_accepts_every_rule_a_launch_emits() {
     let default_env: &dyn Fn(&str) -> Option<OsString> = &super::cross_tests::env;
     let worst_env: &dyn Fn(&str) -> Option<OsString> = &long_env;
     for (deny, var) in [(laptop_deny, default_env), (worst(), worst_env)] {
-        let mut every = claude_deny_rules_on(&deny, true);
-        every.extend(claude_deny_rules_on(&deny, false));
+        let mut every = claude_deny_rules_on(&deny, true, false);
+        every.extend(claude_deny_rules_on(&deny, false, false));
         every.extend(super::super::claude_allow_rules_on(&deny, true));
         every.extend(super::super::claude_allow_rules_on(&deny, false));
         every.extend(windows_shell_deny_rules(&deny, var));
@@ -297,7 +297,7 @@ fn the_worst_realistic_launch_fits_the_settings_file() {
     let deny = worst();
     let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
     let allow = size(&super::super::claude_allow_rules_on(&deny, true));
-    let read_edit = size(&claude_deny_rules_on(&deny, true)) + allow;
+    let read_edit = size(&claude_deny_rules_on(&deny, true, false)) + allow;
     let full = size(&windows_shell_deny_rules(&deny, &long_env));
     let shed = size(&windows_shell_deny_rules_without_variables(
         &deny, &long_env,
@@ -333,7 +333,7 @@ fn a_launch_past_its_budget_sheds_the_variable_forms() {
         ..deny
     };
     let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
-    let spent = size(&claude_deny_rules_on(&deny, true));
+    let spent = size(&claude_deny_rules_on(&deny, true, false));
     let full = windows_shell_deny_rules(&deny, &long_env);
     let log = Log::default();
     let dispatch = log.dispatch();
