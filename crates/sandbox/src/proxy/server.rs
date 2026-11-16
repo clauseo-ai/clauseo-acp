@@ -1,9 +1,11 @@
 //! The proxy thread: the executor, the two accept loops, the rate cap's tick, and each request's
-//! checks up to the connect. The listener's credential check is in `server/auth.rs`, and the
-//! block list's, the lawyer's allowed sites first, in `server/blocked.rs`.
+//! checks up to the connect. The listener's credential check is in `server/auth.rs`, the block
+//! list's, the lawyer's allowed sites first, in `server/blocked.rs`, and the address check
+//! before an upstream, with open mode's name-only path, in `server/screen.rs`.
 
 mod auth;
 mod route;
+mod screen;
 
 use std::cell::{Cell, RefCell};
 use std::net::{IpAddr, SocketAddr, TcpListener};
@@ -23,6 +25,7 @@ use crate::proxy::allowlist::Name;
 use crate::proxy::head::{self, Head, HeadError, ParseError, Request, within};
 use crate::proxy::load::{Load, PendingSlot, SocketSlot};
 use crate::proxy::local_net::LocalNets;
+use crate::proxy::name_only::{FirmNames, Streak};
 use crate::proxy::net::Network;
 use crate::proxy::relay::{Idle, Stream, linger};
 use crate::proxy::target::{Kind, Target, classify};
@@ -57,6 +60,10 @@ pub(crate) struct Parts {
     pub(crate) record: Option<Record>,
     pub(crate) limits: Limits,
     pub(crate) local: LocalNets,
+    /// The firm's own suffixes, for open mode's name-only path (empty in other proxies).
+    pub(crate) firm: FirmNames,
+    /// The clock of the name-only path's [`Streak`].
+    pub(crate) dns_clock: SharedClock,
 }
 
 /// One proxy's state on its thread.
@@ -77,6 +84,11 @@ pub(crate) struct Ctx {
     remembered: route::Remembered,
     /// The machine's own networks, read at start, which no connection may reach.
     local: LocalNets,
+    /// The firm's own suffixes, which the name-only path refuses.
+    firm: FirmNames,
+    /// Failed local lookups in a row on the name-only path, on `dns_clock`.
+    streak: RefCell<Streak>,
+    dns_clock: SharedClock,
 }
 
 /// The connectivity count: no state until the first connect.
@@ -109,6 +121,9 @@ pub(crate) fn run(
         load: Rc::new(Load::default()),
         remembered: route::Remembered::default(),
         local: parts.local,
+        firm: parts.firm,
+        streak: RefCell::new(Streak::default()),
+        dns_clock: parts.dns_clock,
     });
     let executor = LocalExecutor::new();
     async_io::block_on(executor.run(async {
@@ -344,7 +359,7 @@ impl Ctx {
                 }
             },
             Route::Http { host, port } => {
-                if self.screen(&target, exchange).await.is_err() {
+                if screen::screen(self, &target, exchange).await.is_err() {
                     return self
                         .answer(client, exchange, 403, Verdict::Refused, "")
                         .await;
@@ -445,52 +460,6 @@ impl Ctx {
             return Err(403);
         }
         Ok(Way::Direct(addresses))
-    }
-
-    /// The address check before an upstream, which gets the name unresolved: an IP literal must
-    /// be public, and a name is resolved here too, under the connect timeout, and refused if
-    /// any local answer is not public (`PrivateAddress`). When local DNS fails, times out or
-    /// answers nothing, a request that met the allowlist still goes upstream (a desktop that
-    /// resolves only through the proxy), unchecked: a known gap. One let in without the list
-    /// (open mode's browser listener) is refused instead, as `DnsUnavailable`: its address
-    /// could not be checked. `Err` means refused, with the denial sent.
-    async fn screen(&self, target: &Target, exchange: &mut Exchange) -> Result<(), ()> {
-        // Unchecked names go upstream only when the list vouched for them.
-        let unchecked = !self.shared.listless(exchange.listener);
-        let refusal = match &target.name {
-            Name::Ip(ip) => (!self.reachable(*ip)).then_some(HostRefusal::PrivateAddress),
-            Name::Domain(domain) => {
-                let host = &target.name;
-                let found = match within(self.limits.connect, self.net.resolve(domain, target.port))
-                    .await
-                {
-                    Some(Ok(found)) => found,
-                    Some(Err(error)) => {
-                        tracing::debug!(%host, %error, unchecked, "egress: local DNS failed");
-                        Vec::new()
-                    }
-                    None => {
-                        tracing::debug!(%host, unchecked, "egress: local DNS timed out");
-                        Vec::new()
-                    }
-                };
-                if found.iter().any(|address| !self.reachable(address.ip())) {
-                    Some(HostRefusal::PrivateAddress)
-                } else if found.is_empty() && !unchecked {
-                    // No answer at all is no check either.
-                    Some(HostRefusal::DnsUnavailable)
-                } else {
-                    None
-                }
-            }
-        };
-        match refusal {
-            None => Ok(()),
-            Some(why) => {
-                self.refuse(exchange, why, false);
-                Err(())
-            }
-        }
     }
 
     /// Whether a connection may go to `ip`: a public address on none of the machine's own

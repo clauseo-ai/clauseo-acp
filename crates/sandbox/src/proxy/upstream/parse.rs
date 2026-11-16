@@ -174,6 +174,11 @@ impl NoProxy {
                 entry_port.is_none_or(|entry_port| entry_port == port) && is_within(host, entry)
             })
     }
+
+    /// The hosts of the entries, normalised, IP addresses and networks included.
+    pub(super) fn domains(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|(host, _)| host.as_str())
+    }
 }
 
 /// `host` is `domain` or one of its subdomains.
@@ -441,6 +446,11 @@ impl Bypass {
             list.patterns.push(entry.to_ascii_lowercase());
         }
         list
+    }
+
+    /// The patterns, lower case, `<local>` and any `scheme://` dropped.
+    pub(super) fn patterns(&self) -> &[String] {
+        &self.patterns
     }
 
     /// Whether `host` (already [`normal_host`]) on `port` goes direct.

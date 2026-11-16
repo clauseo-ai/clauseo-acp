@@ -111,6 +111,39 @@ pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, Failed
     Ok(parse::winhttp_proxy(&proxy).unwrap_or(Route::Direct))
 }
 
+/// The static proxy setting's bypass list, raw (empty when unset), for the firm's own names
+/// (`firm.rs`); `None` when the settings cannot be read.
+pub(super) fn bypass_list() -> Option<String> {
+    let config = IeConfig::current().ok()?;
+    Some(config.bypass.take_string().unwrap_or_default())
+}
+
+/// The machine's DNS suffixes the registry names, for the firm's own names (`firm.rs`): the
+/// primary suffix (`Domain`) and the search list of `Tcpip\Parameters`, and the search list
+/// Group Policy sets. A value that is missing adds nothing; one that cannot be read is logged by
+/// source only.
+pub(super) fn dns_search_list() -> Vec<String> {
+    let parameters = w!("SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters");
+    let policy = w!("SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient");
+    let mut found = Vec::new();
+    for (key, value) in [
+        (parameters, w!("Domain")),
+        (parameters, w!("SearchList")),
+        (policy, w!("SearchList")),
+    ] {
+        match crate::windows::read_registry_string(key, value) {
+            Ok(Some(text)) => found.extend(
+                text.split([',', ';', ' '])
+                    .filter(|entry| !entry.is_empty())
+                    .map(str::to_owned),
+            ),
+            Ok(None) => {}
+            Err(_unreadable) => super::firm::unread("tcpip_registry"),
+        }
+    }
+    found
+}
+
 /// A string `WinHTTP` allocated, freed with `GlobalFree` on drop.
 struct WinString(PWSTR);
 

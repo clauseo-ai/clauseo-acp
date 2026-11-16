@@ -54,7 +54,8 @@ const LATER: &str = "delhihighcourt.nic.in";
 
 /// What the proxy's resolver answers for [`LISTED`] and [`LATER`]: public documentation addresses
 /// (TEST-NET-3), on no machine's networks. A fixed table, not DNS: CI's offline step has no
-/// network, and the proxy refuses a name local DNS could not check (`DnsUnavailable`).
+/// network, and a name local DNS could not check skips the proxy's address check (it goes to the
+/// upstream by name alone).
 const SITES: [(&str, &[IpAddr]); 2] = [
     (LISTED, &[IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))]),
     (LATER, &[IpAddr::V4(Ipv4Addr::new(203, 0, 113, 11))]),
