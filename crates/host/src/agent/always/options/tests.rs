@@ -55,11 +55,16 @@ fn no_agent_option_that_keeps_anything_reaches_the_lawyer() {
         let mut options = offered.to_vec();
         agent_options(&mut options);
         assert_eq!(ids(&options), kept);
-        let always = options
+        assert!(
+            options.iter().all(|option| option.kind != AllowAlways),
+            "{options:?}"
+        );
+        // The session-only option carries its own kind, never the agent's `allow_always`.
+        let session = options
             .iter()
-            .filter(|option| option.kind == AllowAlways)
-            .all(|option| option.option_id.starts_with("clauseo.session:"));
-        assert!(always, "{options:?}");
+            .filter(|option| option.option_id.starts_with("clauseo.session:"))
+            .all(|option| option.kind == PermissionKind::AllowSession);
+        assert!(session, "{options:?}");
         with_always(&mut options);
         assert_eq!(options.get(1).map(|o| o.option_id.as_str()), Some(ALWAYS));
     }

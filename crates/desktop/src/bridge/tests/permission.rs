@@ -154,6 +154,7 @@ fn answer_permission_refuses_the_plan_exit_options_that_change_the_mode() {
 #[test]
 fn the_confirm_fails_closed_on_a_kind_it_does_not_know() {
     assert!(needs_confirm(PermissionKind::AllowAlways).unwrap());
+    assert!(needs_confirm(PermissionKind::AllowSession).unwrap());
     for kind in [
         PermissionKind::AllowOnce,
         PermissionKind::RejectOnce,

@@ -50,6 +50,10 @@ open_unit_enum! {
         RejectOnce,
         /// Reject this and every later call like it.
         RejectAlways,
+        /// Allow this and calls like it for the rest of this conversation, and no longer: the
+        /// host's name for an agent's session-only option (`clauseo.session:<id>`), never one an
+        /// agent sends.
+        AllowSession,
     }
     test mod permission_kind;
 }

@@ -162,6 +162,7 @@ reported it.
 | Permission option: always allow | `PermissionKind::AllowAlways` | as above |
 | Permission option: reject once | `PermissionKind::RejectOnce` | as above |
 | Permission option: always reject | `PermissionKind::RejectAlways` | as above |
+| Permission option: for this conversation (the host's `clauseo.session:<id>`) | `PermissionKind::AllowSession` | UC-817 "For this conversation"; never worded as "Always" |
 | Permission option of a kind from a newer Clauseo | `PermissionKind::Unknown` | the agent's label only |
 | Permission pending | `ViewEntry::Permission` with `PermissionState::Pending` | options, the tool call it is for, deliverable |
 | Permission the agent is waiting on | `Deliverable::Live` | as above |

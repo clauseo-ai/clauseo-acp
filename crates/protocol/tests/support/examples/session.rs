@@ -108,6 +108,34 @@ pub(super) fn session_events() -> Vec<DomainEvent> {
     ]
 }
 
+/// The host's session-only option (`allow_session`, "For this conversation"), on a permission
+/// request of its own, so the corpus writer finds a holder for the kind.
+pub(super) fn later_permission_kinds() -> Vec<DomainEvent> {
+    let option = |id: &str, kind, label: &str| PermissionOption {
+        option_id: short(id),
+        kind,
+        agent_label: label.to_owned(),
+    };
+    vec![
+        PermissionRequested {
+            request: permission_request_id(16),
+            tool_call: None,
+            options: vec![
+                option("allow_once", PermissionKind::AllowOnce, "Allow"),
+                option(
+                    "clauseo.session:allow_session",
+                    PermissionKind::AllowSession,
+                    "Allow for this session",
+                ),
+            ],
+            deliverable: Deliverable::Live,
+            about: None,
+            always: None,
+        }
+        .into(),
+    ]
+}
+
 /// The kinds of "Always" no example in [`session_events`] holds: a file edit, a site, a tool and
 /// a file read, each a permission request of its own, so the corpus writer finds a holder.
 pub(super) fn later_always_kinds() -> Vec<DomainEvent> {

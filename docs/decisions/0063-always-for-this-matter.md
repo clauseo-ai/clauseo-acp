@@ -160,8 +160,9 @@ Two host options take their place:
 
 - `clauseo.always` (kind `allow_always`), added when the request is eligible. Answering it keeps
   the entry and sends the agent its allow-once option.
-- `clauseo.session:<agent id>`: an agent's session-only option (Codex MCP `allow_session`),
-  shown as "For this conversation". Answering it sends the agent's own id.
+- `clauseo.session:<agent id>` (kind `allow_session`, not the agent's `allow_always`): an
+  agent's session-only option (Codex MCP `allow_session`), shown as "For this conversation".
+  Answering it sends the agent's own id; the desktop confirms it as it confirms `allow_always`.
 
 A tool that spends the lawyer's money (case law's `recharge`, `always::SPENDS`) offers neither:
 its card keeps only the agent's one-time options (`options::once_only`), for both agents,

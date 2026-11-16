@@ -95,12 +95,13 @@ fn tool_call_status() {
 
 #[test]
 fn permission_kind() {
-    use PermissionKind::{AllowAlways, AllowOnce, RejectAlways, RejectOnce};
+    use PermissionKind::{AllowAlways, AllowOnce, AllowSession, RejectAlways, RejectOnce};
     let cases = [
         (AllowOnce, "allow_once"),
         (AllowAlways, "allow_always"),
         (RejectOnce, "reject_once"),
         (RejectAlways, "reject_always"),
+        (AllowSession, "allow_session"),
     ];
     unit_enum(&PermissionKind::ALL, &cases, PermissionKind::Unknown);
 }

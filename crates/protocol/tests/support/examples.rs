@@ -219,6 +219,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .chain(later::stops())
     .chain(later::steers())
     .chain(session::later_always_kinds())
+    .chain(session::later_permission_kinds())
     .collect()
 }
 

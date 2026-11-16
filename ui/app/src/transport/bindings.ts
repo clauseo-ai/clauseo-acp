@@ -4772,6 +4772,12 @@ export type PermissionKind =
 "reject_once" | 
 /**  Reject this and every later call like it. */
 "reject_always" | 
+/**
+ *  Allow this and calls like it for the rest of this conversation, and no longer: the
+ *  host's name for an agent's session-only option (`clauseo.session:<id>`), never one an
+ *  agent sends.
+ */
+"allow_session" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 

@@ -80,6 +80,14 @@ test("offers: known kinds only, no plan-exit option, the first of each kind, in 
       opt("no", "reject_once"),
     ]).map((o) => o.answer),
   ).toEqual(["deny"]);
+  // the host's "For this conversation" is never offered as "Always"
+  expect(
+    offersOf([
+      opt("allow_once", "allow_once"),
+      opt("clauseo.session:allow_session", "allow_session"),
+      opt("decline", "reject_once"),
+    ]).map((o) => o.answer),
+  ).toEqual(["once", "deny"]);
 });
 
 test("the plan-exit options are the bridge's MODE_OPTIONS, one list in two homes", () => {

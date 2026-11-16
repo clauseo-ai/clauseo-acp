@@ -12,14 +12,16 @@ use super::{Bridge, MODE_OPTIONS, PRINCIPAL, invalid};
 use crate::dialogs::Confirm;
 
 /// Whether answering with an option of `kind` first needs the lawyer's native confirm. Fails
-/// closed: only the once kinds and `reject_always` skip it, `allow_always` needs it, and a
-/// kind this version does not know is refused with `command.invalid`.
+/// closed: only the once kinds and `reject_always` skip it, `allow_always` and `allow_session`
+/// need it, and a kind this version does not know is refused with `command.invalid`.
 pub(super) fn needs_confirm(kind: PermissionKind) -> Result<bool, HostError> {
     match kind {
         PermissionKind::AllowOnce | PermissionKind::RejectOnce | PermissionKind::RejectAlways => {
             Ok(false)
         }
-        PermissionKind::AllowAlways => Ok(true),
+        // `allow_session` (the host's "For this conversation") confirms as it did when it
+        // went out as `allow_always`.
+        PermissionKind::AllowAlways | PermissionKind::AllowSession => Ok(true),
         PermissionKind::Unknown => Err(invalid(
             "an option of a kind this version does not know cannot be answered",
         )),

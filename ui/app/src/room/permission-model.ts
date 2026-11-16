@@ -29,13 +29,19 @@ export const PLAN_EXIT_OPTIONS: readonly string[] = [
   "exit-plan-clear-auto",
 ];
 
+/** Kinds the prompt does not offer: one from a newer Clauseo, and the host's "For this conversation"
+ * (`allow_session`, UC-817), which waits for its own words here. */
+type Unworded = "unknown" | "allow_session";
+const unworded = (kind: PermissionKind): kind is Unworded =>
+  kind === "unknown" || kind === "allow_session";
+
 /** Each answer the prompt offers, in the prompt's order, by the ACP kind it stands for. */
 const ANSWER_OF = {
   allow_once: "once",
   allow_always: "always",
   reject_once: "deny",
   reject_always: "never",
-} as const satisfies Record<Exclude<PermissionKind, "unknown">, PermissionAnswer>;
+} as const satisfies Record<Exclude<PermissionKind, Unworded>, PermissionAnswer>;
 
 type KnownKind = keyof typeof ANSWER_OF;
 const KINDS = Object.keys(ANSWER_OF) as KnownKind[];
@@ -96,7 +102,7 @@ export type PermissionModel = {
 export function offersOf(options: readonly PermissionOption[]): Offer[] {
   const first = new Map<KnownKind, string>();
   for (const o of options) {
-    if (o.kind === "unknown" || PLAN_EXIT_OPTIONS.includes(o.option_id)) continue;
+    if (unworded(o.kind) || PLAN_EXIT_OPTIONS.includes(o.option_id)) continue;
     if (!first.has(o.kind)) first.set(o.kind, o.option_id);
   }
   const out: Offer[] = [];
@@ -151,7 +157,7 @@ function stateOf(
     if (typeof choice !== "string" && choice.selected !== undefined) {
       const kind = choice.selected.kind;
       return {
-        state: kind === "unknown" ? "gone" : ANSWER_OF[kind],
+        state: unworded(kind) ? "gone" : ANSWER_OF[kind],
         dataState: "resolved",
         dataAnswer: kind,
       };

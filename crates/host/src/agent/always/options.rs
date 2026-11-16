@@ -75,6 +75,9 @@ pub(crate) fn agent_options(options: &mut Vec<PermissionOption>) {
                 return false;
             }
             option.option_id = renamed.as_str().into();
+            // Its own kind, not the agent's `allow_always`: it keeps nothing past this
+            // conversation, and the app must not word it "Always for this matter".
+            option.kind = PermissionKind::AllowSession;
             return true;
         }
         let dropped = DROPPED.contains(&id) || id.starts_with(NETWORK_AMENDMENT);
