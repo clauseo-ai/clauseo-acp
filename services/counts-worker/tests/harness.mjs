@@ -171,8 +171,17 @@ export async function startWorker({ config = "wrangler.toml", vars = {} } = {}) 
   });
   const base = `http://127.0.0.1:${port}`;
 
-  /** Any request, as given. */
-  const send = (path, init = {}) => fetch(base + path, init);
+  /**
+   * Any request, as given, on a connection of its own. fetch keeps an idle socket for 4 s; a
+   * request sent on one after 3-4 s, with the event loop held by `sql`'s spawnSync, failed in CI
+   * with a bare "fetch failed" and no line from wrangler dev (rollup.test.mjs, 2026-11-16). No
+   * retry: a fresh connection each time, so a failure is the Worker's or the server's.
+   */
+  const send = (path, init = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set("connection", "close");
+    return fetch(base + path, { ...init, headers });
+  };
 
   /** A JSON value (or a string, sent as it is) gzipped with Content-Encoding: gzip. */
   const post = (path, body, { gzip = true, headers = {} } = {}) => {
