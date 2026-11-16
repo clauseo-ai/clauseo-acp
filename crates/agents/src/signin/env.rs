@@ -117,9 +117,13 @@ const STRIPPED_PREFIXES: [&str; 2] = ["SSH_", "CLAUDE_CODE_USE_"];
 
 /// Claude Code's route variables, dropped from every run so a sign-in, status or logout run
 /// talks to the vendor's own host with its own sign-in (decision record 0048, "A firm endpoint
-/// needs a key"): `ANTHROPIC_AUTH_TOKEN`, and every `ANTHROPIC_*BASE_URL`
-/// (`ANTHROPIC_BASE_URL`, `ANTHROPIC_BEDROCK_BASE_URL` and the like).
-const ROUTE_TOKEN: &str = "ANTHROPIC_AUTH_TOKEN";
+/// needs a key"): these, and every `ANTHROPIC_*BASE_URL` (`ANTHROPIC_BASE_URL`,
+/// `ANTHROPIC_BEDROCK_BASE_URL` and the like).
+const ROUTE_VARS: [&str; 3] = [
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_UNIX_SOCKET",
+    "CLAUDE_CODE_API_BASE_URL",
+];
 
 /// Names dropped from every run: the remote-session hints the CLIs read to skip the browser,
 /// and every variable this module sets itself, so an inherited one never survives a run that
@@ -248,7 +252,7 @@ fn stripped(name: &OsStr) -> bool {
         .iter()
         .any(|prefix| upper.starts_with(prefix))
         || STRIPPED.contains(&upper.as_str())
-        || upper == ROUTE_TOKEN
+        || ROUTE_VARS.contains(&upper.as_str())
         || (upper.starts_with("ANTHROPIC_") && upper.ends_with("BASE_URL"))
         || clauseo_process::is_node_env(name)
 }

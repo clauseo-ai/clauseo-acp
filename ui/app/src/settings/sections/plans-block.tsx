@@ -21,7 +21,11 @@ import { installLine } from "@clauseo/components/clauseo/first-launch/install.ts
 import { APP, FOUND, NAME } from "@clauseo/components/clauseo/first-launch/plan-names.ts";
 import { Heading } from "@clauseo/components/clauseo/heading.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
-import { endpointKeyWords, errorWords } from "@clauseo/components/lib/words-errors.ts";
+import {
+  endpointKeyWords,
+  errorWords,
+  unreadableEndpointWords,
+} from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { say } from "@clauseo/components/lib/words-ui.ts";
@@ -445,9 +449,11 @@ export function PlanBlock({
           <PlanCard
             plan={plan}
             note={
-              stand.host === undefined
-                ? errorWords(lang, stand.code)
-                : endpointKeyWords(lang, stand.host)
+              stand.host !== undefined
+                ? endpointKeyWords(lang, stand.host)
+                : stand.code === "agent.endpoint_key_needed"
+                  ? unreadableEndpointWords(lang)
+                  : errorWords(lang, stand.code)
             }
           >
             {null}

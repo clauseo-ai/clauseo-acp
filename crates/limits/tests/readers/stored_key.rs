@@ -413,3 +413,32 @@ fn claude_code_s_settings_files_count_for_the_read() {
     let (_, launched) = read("settings.json", url);
     assert_eq!(launched, 1, "settings.json is not the helper's");
 }
+
+/// With no Claude home, the helper's Claude Code reads the home folder's `.claude.json` and
+/// `~/.claude`'s remote settings: a base URL in either, with no key, launches nothing.
+#[test]
+fn with_no_claude_home_the_home_folder_s_files_count_for_the_read() {
+    let url = r#"{"env": {"ANTHROPIC_BASE_URL": "https://gw.firm.example"}}"#;
+    for (file, launches) in [
+        (".claude.json", 0),
+        (".claude/remote-settings.json", 0),
+        (".claude/settings.json", 1),
+    ] {
+        let setup = installed_setup();
+        let home = setup.root.join("home");
+        crate::write::create_dir_all(&home.join(".claude")).unwrap();
+        crate::write::write(&home.join(file), url).unwrap();
+        let settings = serde_json::json!({"agents": {
+            "claude-acp": {
+                "command": Setup::command(),
+                "args": [setup.script()],
+                "env": {"anthropic_api_key": "", "HOME": home, "USERPROFILE": home},
+            },
+        }});
+        crate::write::write(&setup.data().join("settings.json"), settings.to_string()).unwrap();
+        let launcher = TestLauncher::new(Play::Scenario("claude-api-key"));
+        let reader = setup.readers(&launcher, &SharedTimer::default());
+        let outcome = block_on(reader.read(AgentKind::Claude));
+        assert_eq!(launcher.specs().len(), launches, "{file}: {outcome:?}");
+    }
+}

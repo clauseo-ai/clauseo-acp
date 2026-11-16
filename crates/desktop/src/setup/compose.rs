@@ -52,6 +52,7 @@ use clauseo_protocol::{
 
 use super::SetupEvents;
 use super::admit::{SignInBar, sign_in_bar};
+use super::inherited::Inherited;
 use super::keys::KeyCache;
 use crate::bridge::lock;
 
@@ -74,9 +75,9 @@ pub(crate) struct Facts {
     /// Since when the agent's plan sends it to its endpoint with Claude Code's own sign-in on
     /// (`hook::sends_own_signin`), if it does: `agent.firm_key_needed` while no key is in memory.
     pub(crate) own_signin: Option<SystemTime>,
-    /// Since when its launches get a custom endpoint no plan set (`inherited.rs`), and that
-    /// endpoint's host, if they do: `agent.endpoint_key_needed` while no key is in memory.
-    pub(crate) inherited: Option<(SystemTime, String)>,
+    /// Since when its launches get a custom endpoint no plan set (`inherited.rs`), and its host
+    /// (none when unreadable), if they do: `agent.endpoint_key_needed` while no key is in memory.
+    pub(crate) inherited: Option<(SystemTime, Option<String>)>,
     /// Since when an automatic leave has been trying again, if one is (its first try's end).
     pub(crate) switching: Option<SystemTime>,
     /// Whether that leave has been trying for 2 minutes (`leave::hold::STUCK_AFTER`).
@@ -132,7 +133,7 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
         return Some(SignIn::Failed {
             code: ErrorCode::AgentEndpointKeyNeeded,
             at: timestamp(since),
-            host: Some(host),
+            host,
         });
     }
     if let Some(since) = facts.managed.or(facts.firm) {
@@ -469,15 +470,15 @@ impl Compose {
         });
     }
 
-    /// The host of the custom endpoint `agent`'s launches get with no plan setting one, if any.
-    pub(crate) fn set_inherited(&self, agent: &AgentId, host: Option<String>) {
+    /// The custom endpoint `agent`'s launches get with no plan setting one, if any.
+    pub(crate) fn set_inherited(&self, agent: &AgentId, endpoint: Option<Inherited>) {
         self.change(agent, |known, now| {
             let since = known
                 .facts
                 .inherited
                 .as_ref()
                 .map_or(now, |(since, _)| *since);
-            known.facts.inherited = host.map(|host| (since, host));
+            known.facts.inherited = endpoint.map(|endpoint| (since, endpoint.host));
         });
     }
 

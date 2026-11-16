@@ -15,6 +15,7 @@ use super::fakes::{HostCall, command, rig, rig_on};
 use super::key_reads::stored;
 use super::switching::shown;
 use super::{SETTINGS, claude, codex};
+use crate::setup::inherited::Inherited;
 use crate::setup::refresh::{SettingsRead, apply_settings};
 use crate::setup::refusal::settle_after_load;
 use crate::test_support::{Scratch, block_on};
@@ -76,7 +77,8 @@ fn an_endpoint_with_no_key_is_refused_and_a_key_a_cloud_provider_or_no_plan_laun
 fn an_endpoint_no_plan_set_with_no_key_is_refused_with_its_own_code() {
     let settle = |keychain: Keychain, own_signin: &[AgentId]| {
         let rig = rig_on(true, keychain);
-        let inherited = std::collections::BTreeMap::from([(claude(), "proxy.example".to_owned())]);
+        let host = Some("proxy.example".to_owned());
+        let inherited = std::collections::BTreeMap::from([(claude(), Inherited { host })]);
         block_on(settle_after_load(
             &*rig.host,
             &rig.backend.keys,

@@ -476,6 +476,17 @@ test("agent.endpoint_key_needed names the host on the card, never the firm's gat
   expect(t.setups()).toEqual([]);
 });
 
+test("agent.endpoint_key_needed with no host says the address can't be read, and sends to no key", async () => {
+  const t = await at({ failed: { code: "agent.endpoint_key_needed", at: AT } });
+  expect(block("claude")!.dataset["state"]).toBe("needs-key");
+  expect(words()).toContain(
+    "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address,",
+  );
+  expect(words()).not.toContain("Add the key");
+  expect(block("claude")!.querySelector('[data-testid="plans-sign-in"]')).toBeNull();
+  expect(t.setups()).toEqual([]);
+});
+
 test("keys: Sign out's confirm starts on Cancel, and Escape sends nothing and gives focus back to Sign out", async () => {
   const t = await at(signed());
   const opener = document.querySelector<HTMLElement>('[data-testid="plans-sign-out"]');

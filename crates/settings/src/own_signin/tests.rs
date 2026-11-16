@@ -52,6 +52,7 @@ fn from_settings(pairs: &[(&str, &str)], unsure: bool) -> SettingsEnv {
             .collect(),
         unsure,
         content: !pairs.is_empty(),
+        helper: false,
     }
 }
 
@@ -216,4 +217,47 @@ fn on_windows_the_last_spelling_of_a_name_wins() {
     assert!(!reaches_under(&lower_url, &none, false));
     let unset = [url, ("Anthropic_Base_Url", "")];
     assert!(!reaches_under(&unset, &none, true));
+}
+
+/// A key or token of only white space is no key, as Claude Code trims them: in the launch env
+/// and from the settings sources, under either name.
+#[test]
+fn a_blank_key_or_token_is_no_key() {
+    let url = ("ANTHROPIC_BASE_URL", "https://gateway.firm.example");
+    for name in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] {
+        for blank in [" ", "\t", " \t "] {
+            assert!(reaches(&[url, (name, blank)]), "{name}={blank:?}");
+            assert!(
+                reaches_under(&[url], &from_settings(&[(name, blank)], false), false),
+                "{name}={blank:?}"
+            );
+        }
+        assert!(!reaches(&[url, (name, " k ")]), "{name}");
+    }
+}
+
+/// `CLAUDE_CODE_API_BASE_URL` names the API's address as `ANTHROPIC_BASE_URL` does, and a unix
+/// socket for the API counts as a custom endpoint; a key turns either off.
+#[test]
+fn the_api_base_url_and_a_unix_socket_count_as_an_endpoint() {
+    let api = ("CLAUDE_CODE_API_BASE_URL", "https://api.firm.example");
+    let socket = ("ANTHROPIC_UNIX_SOCKET", "proxy.sock");
+    for var in [api, socket] {
+        assert!(reaches(&[var]), "{var:?}");
+        assert!(!reaches(&[var, ("ANTHROPIC_API_KEY", "k")]), "{var:?}");
+        assert!(
+            reaches_under(&[], &from_settings(&[var], false), false),
+            "{var:?}"
+        );
+    }
+    assert!(!reaches(&[(
+        "CLAUDE_CODE_API_BASE_URL",
+        "https://api.anthropic.com/"
+    )]));
+    assert!(!reaches(&[("ANTHROPIC_UNIX_SOCKET", "")]));
+    assert!(reaches_under(
+        &[("claude_code_api_base_url", "https://api.firm.example")],
+        &SettingsEnv::default(),
+        true
+    ));
 }

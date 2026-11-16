@@ -71,3 +71,21 @@ test("agent.endpoint_key_needed: with the settings window, Settings › Plans is
   await press(buttons[0] ?? null);
   expect(setups(t)).toEqual([]);
 });
+
+test("agent.endpoint_key_needed with no host: the address can't be read, and no button, even with the settings window", async () => {
+  const t = await mountFirstRun({
+    openSettings: true,
+    first: [
+      info(true),
+      install(CLAUDE, READY),
+      signIn(CLAUDE, { failed: { code: "agent.endpoint_key_needed", at: AT } }),
+    ],
+  });
+  const state = byId("signin-state")?.textContent ?? "";
+  expect(state).toContain(
+    "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address,",
+  );
+  expect(state).not.toContain("Settings › Plans");
+  expect(byId("signin-state")?.querySelectorAll("button")).toHaveLength(0);
+  expect(setups(t)).toEqual([]);
+});

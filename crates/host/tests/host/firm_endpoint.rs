@@ -153,6 +153,11 @@ fn claude_code_s_settings_files_count_as_the_launch_env_does() {
     assert_eq!(one_turn(&host, matter), refused);
     assert_eq!(launched(), before, "nothing launched");
 
+    // A key of only white space is no key.
+    hook.set(&[("ANTHROPIC_API_KEY", " \t")]);
+    assert_eq!(one_turn(&host, matter), refused);
+    assert_eq!(launched(), before, "nothing launched");
+
     // The firm's key stored: it launches.
     hook.set(&[("ANTHROPIC_API_KEY", "stored-key")]);
     assert_eq!(one_turn(&host, matter), (StopReason::EndTurn, None));
@@ -162,6 +167,14 @@ fn claude_code_s_settings_files_count_as_the_launch_env_does() {
     write::write(&managed, default.as_bytes());
     hook.set(&no_key);
     assert_eq!(one_turn(&host, matter), (StopReason::EndTurn, None));
+
+    // A policy helper in the policy file: its output takes the policy tier's place, the file's
+    // key included, so with no key of the launch's own it is refused.
+    let helper = r#"{"policyHelper": {"command": "x"}, "env": {"ANTHROPIC_API_KEY": "k"}}"#;
+    write::write(&managed, helper.as_bytes());
+    let before = launched();
+    assert_eq!(one_turn(&host, matter), refused);
+    assert_eq!(launched(), before, "nothing launched");
 
     // A policy file that does not parse, no key: refused; a key: it launches.
     write::write(&managed, b"{ not json");

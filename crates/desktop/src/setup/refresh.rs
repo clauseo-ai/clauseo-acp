@@ -29,6 +29,7 @@ use clauseo_settings::{Effective, Plan, SystemFiles, launch_is_clauseos};
 use super::backend::AgentsBackend;
 use super::firm_policy::firm_policy;
 use super::hook::{plans_of, sends_own_signin};
+use super::inherited::Inherited;
 use super::leave::restart_if_usable;
 use super::network::NetworkFacts;
 use crate::bridge::lock;
@@ -45,7 +46,7 @@ pub(crate) struct SettingsRead {
     pub(crate) own_signin: BTreeSet<AgentId>,
     /// Those whose launches get a custom endpoint from the app's own environment or their entry,
     /// with no plan setting one, to its host (`inherited.rs`): refused while no key is in memory.
-    pub(crate) inherited: BTreeMap<AgentId, String>,
+    pub(crate) inherited: BTreeMap<AgentId, Inherited>,
     /// Those an unreadable policy blocks.
     pub(crate) blocked: BTreeSet<AgentId>,
     /// Every plan, for the launch hook.

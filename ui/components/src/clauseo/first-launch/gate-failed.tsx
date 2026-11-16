@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import { IconOpen } from "../../icons/icons.tsx";
 import { useDisplay } from "../../lib/display.ts";
-import { endpointKeyWords, errorWords } from "../../lib/words-errors.ts";
+import { endpointKeyWords, errorWords, unreadableEndpointWords } from "../../lib/words-errors.ts";
 import type { FirstLaunchKey } from "../../lib/words-first-launch.ts";
 import { Button } from "../../ui/button.tsx";
 import { Say } from "../say.tsx";
@@ -136,14 +136,17 @@ export function Failed({
         </Act>
       );
     case "agent.endpoint_key_needed":
-      // the same, for an endpoint no plan set: named by its host, never as the firm's
+      // the same, for an endpoint no plan set: named by its host, never as the firm's. With no host the address
+      // can't be read: no part of it is shown, and no link, since a key wouldn't help
       return (
         <Act>
-          {linked(
-            view.host === undefined
-              ? errorWords(lang, "agent.endpoint_key_needed")
-              : endpointKeyWords(lang, view.host),
-            settings ? () => onAct({ act: "settings" }) : undefined,
+          {view.host === undefined ? (
+            <Say>{unreadableEndpointWords(lang)}</Say>
+          ) : (
+            linked(
+              endpointKeyWords(lang, view.host),
+              settings ? () => onAct({ act: "settings" }) : undefined,
+            )
           )}
         </Act>
       );

@@ -121,6 +121,10 @@ const ENDPOINT_KEY: Scene = {
     first: both({ failed: { code: "agent.endpoint_key_needed", at: AT, host: "proxy.example" } }),
   },
 };
+/** The same with an address Clauseo can't read: no host on the card (agent.endpoint_key_needed). */
+const ENDPOINT_UNREADABLE: Scene = {
+  setup: { first: both({ failed: { code: "agent.endpoint_key_needed", at: AT } }) },
+};
 const found = (f: string): Scene => ({
   setup: { first: both({ signed_out: { found: f as never } }) },
 });
@@ -202,5 +206,13 @@ export const UD2_PLANS: Entry[] = [
       "Claude can't start: this computer is set to send it to {host}, and no API key for that address is saved. Add the key in Settings › Plans.",
     ),
     ENDPOINT_KEY,
+  ),
+  // UC-849: the same card when the address can't be read, showing no part of it (firm endpoint fix)
+  entry(
+    "UC-849",
+    errorWords(
+      "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever set up this computer can correct or remove it; the setting is called ANTHROPIC_BASE_URL.",
+    ),
+    ENDPOINT_UNREADABLE,
   ),
 ];

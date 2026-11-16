@@ -297,6 +297,8 @@ fn every_run_drops_claude_code_s_route_variables() {
         ("ANTHROPIC_BEDROCK_BASE_URL", "https://bedrock.firm.example"),
         ("ANTHROPIC_VERTEX_BASE_URL", "https://vertex.firm.example"),
         ("ANTHROPIC_AUTH_TOKEN", "t"),
+        ("ANTHROPIC_UNIX_SOCKET", "/tmp/a.sock"),
+        ("Claude_Code_Api_Base_Url", "https://api.firm.example"),
         ("CLAUDE_CODE_USE_BEDROCK", "1"),
         ("Claude_Code_Use_Vertex", "1"),
         ("CLAUDE_CODE_USE_FOUNDRY", "1"),
@@ -309,7 +311,8 @@ fn every_run_drops_claude_code_s_route_variables() {
         let env = run_env(&inputs(&base, vendor, own()));
         for name in names(&env) {
             let upper = name.to_ascii_uppercase();
-            let route = upper == "ANTHROPIC_AUTH_TOKEN"
+            let route = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_UNIX_SOCKET"].contains(&upper.as_str())
+                || upper == "CLAUDE_CODE_API_BASE_URL"
                 || upper.starts_with("CLAUDE_CODE_USE_")
                 || (upper.starts_with("ANTHROPIC_") && upper.ends_with("BASE_URL"));
             assert!(!route, "{name} reached the child");

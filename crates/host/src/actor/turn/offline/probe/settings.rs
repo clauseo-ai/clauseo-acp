@@ -113,6 +113,7 @@ impl Reads {
         let sources = clauseo_settings::ClaudeSources {
             managed: &self.managed,
             config: claude_home,
+            global: claude_home,
             user: true,
             os_policy: self.os_policy,
         };

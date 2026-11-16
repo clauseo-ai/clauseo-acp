@@ -391,7 +391,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Settings › Tools: the lawyer chose Cancel in the confirm before a program was added or changed, so nothing was saved | `ErrorCode::McpSaveDeclined` | no |
 | Settings › Tools: an import's servers are too long to show whole in one confirm, so nothing was imported | `ErrorCode::McpImportTooLarge` | no |
 | Launch under a firm endpoint with no key (0048) | `ErrorCode::AgentFirmKeyNeeded` | no |
-| Launch under a custom endpoint no plan set, with no key (0048); the card names its host | `ErrorCode::AgentEndpointKeyNeeded` | no |
+| Launch under a custom endpoint no plan set, with no key (0048); the card names its host, or none when the address can't be read | `ErrorCode::AgentEndpointKeyNeeded` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

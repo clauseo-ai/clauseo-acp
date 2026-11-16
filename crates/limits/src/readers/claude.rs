@@ -5,8 +5,9 @@
 //! vendor's Claude Code process reads its own login. Its line is untrusted: unknown fields are
 //! ignored, and a field of the wrong type drops only what it holds.
 
+use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launcher, Timer};
@@ -125,17 +126,30 @@ fn prepare(
     // Claude Code would send its own sign-in (the lawyer's token) there, so the helper never runs.
     // Desktop refuses such a read first; this checks the helper's env and the `env` of Claude
     // Code's global config and policy tier (`settingSources: []` leaves out its settings.json).
-    let config = env
+    // With no `CLAUDE_CONFIG_DIR`, Claude Code reads `~/.claude.json` and `~/.claude`; with no
+    // home folder either, the read is unsure.
+    let (config, global) = match env
         .get(OsStr::new(CLAUDE_CONFIG_DIR))
         .filter(|dir| !dir.is_empty())
-        .map(Path::new);
+    {
+        Some(dir) => (Some(PathBuf::from(dir)), Some(PathBuf::from(dir))),
+        None => match home_folder(&env) {
+            Some(home) => (Some(home.join(".claude")), Some(home)),
+            None => (None, None),
+        },
+    };
     let managed = clauseo_settings::claude_managed_dir();
-    let settings = clauseo_settings::SettingsEnv::read(&clauseo_settings::ClaudeSources {
-        managed: &managed,
-        config,
-        user: false,
-        os_policy: !cfg!(test),
-    });
+    let settings = if global.is_some() {
+        clauseo_settings::SettingsEnv::read(&clauseo_settings::ClaudeSources {
+            managed: &managed,
+            config: config.as_deref(),
+            global: global.as_deref(),
+            user: false,
+            os_policy: !cfg!(test),
+        })
+    } else {
+        clauseo_settings::SettingsEnv::unknown()
+    };
     let pairs = env
         .iter()
         .map(|(name, value)| (name.as_os_str(), value.as_os_str()));
@@ -149,6 +163,16 @@ fn prepare(
         run_dir.to_owned(),
     )
     .map_err(|err| err.to_string())
+}
+
+/// The home folder Claude Code's `os.homedir()` finds for the helper's env: its `HOME`
+/// (`USERPROFILE` on Windows) when set, else this process's.
+fn home_folder(env: &BTreeMap<OsString, OsString>) -> Option<PathBuf> {
+    let name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    env.iter()
+        .find(|(key, value)| key.eq_ignore_ascii_case(name) && !value.is_empty())
+        .map(|(_, value)| PathBuf::from(value))
+        .or_else(std::env::home_dir)
 }
 
 /// What the helper's line says.

@@ -29,6 +29,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 
 use super::backend::AgentsBackend;
 use super::host_calls::SetupHost;
+use super::inherited::Inherited;
 use super::keys::{KeyCache, KeyNote};
 use crate::bridge::lock;
 
@@ -129,7 +130,7 @@ pub(crate) async fn settle_after_load<'a>(
     known: impl IntoIterator<Item = &'a AgentId>,
     blocked: &BTreeSet<AgentId>,
     firm: &BTreeSet<AgentId>,
-    (own_signin, inherited): (&BTreeSet<AgentId>, &BTreeMap<AgentId, String>),
+    (own_signin, inherited): (&BTreeSet<AgentId>, &BTreeMap<AgentId, Inherited>),
 ) {
     for agent in known.into_iter().filter(|agent| !blocked.contains(*agent)) {
         let code = in_force(

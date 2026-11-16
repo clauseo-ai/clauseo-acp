@@ -497,7 +497,7 @@ fn a_firm_endpoint_with_no_key_shows_firm_key_needed_until_a_key_is_in_memory() 
 fn an_endpoint_no_plan_set_with_no_key_names_its_host_until_a_key_is_in_memory() {
     let out = SigninState::SignedOut { found: None };
     let inherited = Facts {
-        inherited: Some((at(T), "proxy.example".to_owned())),
+        inherited: Some((at(T), Some("proxy.example".to_owned()))),
         ..Facts::default()
     };
     assert_eq!(

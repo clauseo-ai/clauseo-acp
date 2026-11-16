@@ -538,20 +538,36 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     (`readers/claude.rs`). What is checked is the launch's final env (inherited, the entry's,
     the hook's; on Windows the last spelling of a name in any case, as the spawn applies it) with
     the `env` Claude Code applies over it from its settings sources, read by the launch prep:
-    `managed-settings.json` and `managed-settings.d`, `remote-settings.json`, macOS managed
-    preferences, the Windows registry policy, the global config (`.claude.json` or
-    `.config.json`) and, for sessions only (`settingSources`), `<home>/settings.json`, the
-    policy tier last (`clauseo_settings::SettingsEnv`). A source there that cannot be read or
-    parsed counts as setting a base URL, so with no key the launch is refused. A base URL naming
+    the global config (`.config.json` or `.claude.json`) and, for sessions only
+    (`settingSources`), `<home>/settings.json`, then the policy tier
+    (`clauseo_settings::SettingsEnv`). The policy tier joins its tiers as Claude Code does: the
+    cached `remote-settings.json`, then the OS's (macOS managed preferences or the Windows
+    registry policy), then `managed-settings.json` and `managed-settings.d`. The first tier to
+    set a name, in any case, wins, and once a tier has set a key, token or provider switch, a
+    lower tier's is dropped. With no `CLAUDE_CONFIG_DIR` (the host's own limits reader), the
+    files are `~/.claude.json` and `~/.claude`'s. A source there that cannot be read or parsed
+    counts as setting a base URL, so with no key the launch is refused. So does a policy
+    document holding `policyHelper` or `policyHelpers`: Claude Code runs that helper at start
+    and its output takes the policy tier's place, env included, which Clauseo cannot read
+    before the launch. The cost: a firm that uses a policy helper must give lawyers a key. A
+    key or token of only white space is no key, as Claude Code trims them.
+    `CLAUDE_CODE_API_BASE_URL` counts as a base URL. `ANTHROPIC_UNIX_SOCKET` set counts as a
+    custom endpoint too, though Claude Code sends no claude.ai sign-in on the socket: this errs
+    toward refusing. A base URL naming
     the default address (`https://api.anthropic.com` in any case, with or without a trailing
     `/` or `:443`) is no custom endpoint, in a plan or an env. When no plan set the base URL (the
     app's own environment, an entry's env or a Claude Code settings source), the code is
     `agent.endpoint_key_needed`, and for the app's own environment or an entry's env desktop's
     card names the endpoint's host (`SignIn::Failed.host`, `setup/inherited.rs`), not the
-    firm's gateway. The check also covers the gap
+    firm's gateway. An address with no host Clauseo can read shows no part of itself, on the
+    card or in the log, as it may hold a path, a query or a token. That card says only that a
+    setting on this computer sends Claude to an address that is no web address. It has no link,
+    since no key can help: Claude Code builds each request's URL from that address, so every
+    request fails. The check also covers the gap
     between a settings change reaching the launch hook and desktop's `refusal::sync_all`. The
     sign-in, status and logout runs never get the route variables (`ANTHROPIC_BASE_URL`,
-    `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_*`, `ANTHROPIC_*_BASE_URL`; `signin/env.rs`),
+    `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_UNIX_SOCKET`, `CLAUDE_CODE_API_BASE_URL`,
+    `CLAUDE_CODE_USE_*`, `ANTHROPIC_*_BASE_URL`; `signin/env.rs`),
     so they talk to the vendor's own host. Unlike a failed key read under a firm plan, where the hook
     drops the endpoint and provider (`setup/hook.rs`, `setup_parts`), the endpoint stays: a
     launch with it dropped would go keyless to the vendor's own host on a personal sign-in.
@@ -562,6 +578,28 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     refused. Claude goes to the vendor's own host through that proxy, and a proxy that inspects
     TLS can read the sign-in. That is the firm's own proxy on the firm's machine, so
     `docs/firm-it.md` asks firms that inspect to give lawyers an API key for their gateway.
+
+    The check runs once, before the launch. Two gaps remain after it:
+    - *Server-managed settings.* Claude Code fetches its server-managed settings after it
+      starts, and applies their `env`. This happens on a first launch with no cached
+      `remote-settings.json`, and again whenever an admin changes them later. Those settings
+      come from the admin of the Claude organisation the lawyer is signed in to, so a token
+      Claude Code then offers goes to an address that organisation's own admin chose.
+    - *Settings changed mid-session.* Claude Code applies the `env` again when a settings
+      source changes during a session. Changing the managed files needs admin rights on the
+      machine.
+
+    The per-prompt re-run and the 2 s mid-turn poll planned in launch-never-weaker will narrow
+    both gaps to one prompt, or about 2 s mid-turn. This record changes to say so once that PR
+    merges.
+
+    Variables that move which files Claude Code reads (`CLAUDE_CODE_REMOTE_SETTINGS_PATH`,
+    `CLAUDE_CODE_USE_COWORK_PLUGINS`, `CLAUDE_CODE_CUSTOM_OAUTH_URL`,
+    `CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION`) never reach it from the app's inherited env:
+    launch-never-weaker's prefix scrub drops every inherited `CLAUDE_*` and `ANTHROPIC_*` name.
+    That cover depends on launch-never-weaker, which is a gate on the launch build, so neither
+    ships to lawyers without the other. Clauseo doesn't run Claude under WSL, so the check reads
+    only the host OS's sources.
 - *`LoginCheck::shared(&AgentId, agent_home: &Path) -> Shared`*, a second hook call, where
   `Shared` is `Yes`, `No` or `Unknown`. It asks whether the home's `auth.json` is the lawyer's
   file, whatever the link check says. A symlinked `auth.json` is `Split` to `check` (it is no
