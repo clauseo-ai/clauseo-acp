@@ -318,3 +318,24 @@ test("after an accepted send, Cmd+Z never brings the sent question's chips back"
   for (let i = 0; i < 3; i++) await h.key({ key: "z", metaKey: true });
   expect(chips()).toBe(0);
 });
+
+test("33 long pastes come back after a visit, each as it was, and the typed words stay words to edit", async () => {
+  const drafts: Drafts = new Map();
+  const sent: string[] = [];
+  const show = room(drafts, sent);
+  await show(A);
+  const pasted = Array.from({ length: 33 }, (_, i) => brief(PASTE_CHIP_MIN, `m${i}`));
+  for (const text of pasted) await paste(text);
+  await type("Summarise each.");
+  await show(B);
+  await show(A);
+  expect(chips()).toBe(33);
+  expect(field().value).toBe("Summarise each.");
+  await type("Summarise each, briefly.");
+  const back = drafts.get(A)!;
+  expect(back.typed).toBe("Summarise each, briefly.");
+  expect(back.pastes.length).toBe(33);
+  expect(back.pastes.every((t, i) => t === pasted[i])).toBe(true);
+  await enter();
+  expect(sent[0] === `${pasted.join("\n\n")}\n\nSummarise each, briefly.`).toBe(true);
+});
