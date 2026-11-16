@@ -424,3 +424,43 @@ test("a last turn that failed with agent.key_unreadable shows the key's line in 
   expect(document.body.textContent).not.toContain("Sign in with Claude first.");
   expect(document.body.textContent).not.toContain("sign-in has expired");
 });
+
+/** The regions named `name` (a section's role with an aria-label; the rig has no testing-library getByRole). */
+const regionsNamed = (name: string) =>
+  [...document.querySelectorAll("section[aria-label], [role=region][aria-label]")].filter(
+    (el) => el.getAttribute("aria-label") === name,
+  );
+const EXPIRED_NAME = "Your Claude sign-in has expired. Your question is kept.";
+
+// VM (Windows, 4d2d29744): under "Claude didn't accept the API key. Your question is kept." the
+// card's group was named "Your Claude sign-in has expired. Your question is kept.", so a screen
+// reader said the wrong cause
+test.each([
+  ["the sign-in expired", { failed: { code: "agent.auth_required", at: AT } }, EXPIRED_NAME],
+  [
+    "the key refused",
+    { signed_in: { method: "api_key", source: "own", at: AT } },
+    "Claude didn't accept the API key. Your question is kept.",
+  ],
+  [
+    "the firm's account refused",
+    { signed_in: { method: "firm", source: "own", at: AT } },
+    "Your firm's account didn't accept the question. Your question is kept.",
+  ],
+  [
+    "the key unreadable",
+    { failed: { code: "agent.key_unreadable", at: AT } },
+    `${errorWords("en", "agent.key_unreadable")} Your question is kept.`,
+  ],
+] satisfies [string, SignIn, string][])(
+  "the card's accessible name is the cause it shows: %s",
+  async (_, state, name) => {
+    await mount({ signIn: state, reason: "sign_in" });
+    const named = regionsNamed(name);
+    expect(named).toHaveLength(1);
+    expect(card()?.contains(named[0] ?? null)).toBe(true);
+    // the visible words say the same cause
+    for (const part of name.split(/(?<=\.) /)) expect(words()).toContain(part);
+    if (name !== EXPIRED_NAME) expect(regionsNamed(EXPIRED_NAME)).toEqual([]);
+  },
+);

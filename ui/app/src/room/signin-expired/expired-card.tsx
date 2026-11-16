@@ -237,26 +237,35 @@ export function ExpiredCard({
         />
       );
       break;
-    case "key":
+    // a key or the firm's account refused is no expired sign-in: the card is named by its own line
+    // (VM, Windows: it was named "Your Claude sign-in has expired…" under the key's words)
+    case "key": {
+      const line = sx(lang, "{name} didn't accept the API key. Your question is kept.", { name });
       card = (
         <Frame
           icon={<IconQuestion size={16} />}
-          label={label}
-          title={sx(lang, "{name} didn't accept the API key. Your question is kept.", { name })}
+          label={line}
+          title={line}
           sub={sx(lang, "To change it, open Settings, then Plans.")}
         />
       );
       break;
-    case "firm":
+    }
+    case "firm": {
+      const line = sx(
+        lang,
+        "Your firm's account didn't accept the question. Your question is kept.",
+      );
       card = (
         <Frame
           icon={<IconQuestion size={16} />}
-          label={label}
-          title={sx(lang, "Your firm's account didn't accept the question. Your question is kept.")}
+          label={line}
+          title={line}
           sub={fl(lang, "Your firm manages this account.")}
         />
       );
       break;
+    }
   }
   return (
     <div className="signin-expired" data-testid="signin-expired" data-state={e.kind}>

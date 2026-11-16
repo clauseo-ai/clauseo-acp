@@ -191,6 +191,12 @@ export function welcomeFoot(
       </span>
     ),
   });
+  // a row with its note (said under it) and the words a group says, when it has them
+  const noted = (row: WorkingState, note?: string, said?: string): WorkingState => ({
+    ...row,
+    ...(note === undefined ? {} : { note }),
+    ...(said === undefined ? {} : { said }),
+  });
   const signIn = {
     words: fl(lang, "Sign in with {name}", { name }),
     press: acts.signIn,
@@ -208,6 +214,24 @@ export function welcomeFoot(
             ...signIn,
             words: sx(lang, "Sign in again"),
           }),
+          lang,
+          name,
+          null,
+          "none",
+        );
+      // a saved key the keychain didn't give (agent.key_unreadable): the gate's words and Try again
+      // (gate-failed.tsx), never "is ready" with a sign-in (VM row A-K6); desktop refuses the press
+      // and reads the key again. The note says where the key can be changed; no tick, since the
+      // plan can't be used until the key reads
+      if (view.code === "agent.key_unreadable")
+        return named(
+          noted(
+            line(errorWords(lang, "agent.key_unreadable"), "key-unreadable", {
+              ...signIn,
+              words: fl(lang, "Try again"),
+            }),
+            sx(lang, "To change it, open Settings, then Plans."),
+          ),
           lang,
           name,
           null,
