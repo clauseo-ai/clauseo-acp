@@ -126,6 +126,9 @@ pub(super) struct Agent {
     /// A Claude agent's home, its `CLAUDE_CONFIG_DIR`, whose transcripts confirm a steer
     /// (`queue/confirm.rs`); `None` for any other agent.
     pub(super) claude_home: Option<PathBuf>,
+    /// Whether a Claude agent's launch found an admin policy tier with content, or the firm's
+    /// server-managed settings (`profile_loads/policy.rs` `admin`); `Present` until then.
+    pub(super) admin_tier: super::profile_loads::policy::AdminTier,
     /// The MCP servers Clauseo itself sent this session that may run unasked
     /// (`agent/mcp_trust.rs`), filled by `profile_loads::session_loads`: the lawyer's trusted
     /// servers, and `case-law` when our entry went. A server Codex got from anywhere else is
@@ -299,6 +302,7 @@ pub(super) fn launch_now(
         folder_check: prepared_folder,
         auto: session::Auto::default(),
         claude_home,
+        admin_tier: super::profile_loads::policy::AdminTier::Present,
         mcp_sent: (!unprotected).then(Vec::new),
         plan_notes,
         fence_vars,
@@ -447,7 +451,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             ..
         }
     ) || matches!(&reply, AgentReply::Steer(steered) if steered.closed());
-    if same && matches!(&reply, AgentReply::Config { .. } | AgentReply::Mode { .. }) {
+    let call = matches!(&reply, AgentReply::Config { .. } | AgentReply::Mode { .. });
+    if same && (call || matches!(&reply, AgentReply::ModelKept(_))) {
         super::idle::call_ended(actor, thread);
     }
     if same
@@ -477,6 +482,7 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         AgentReply::ModeReset(mode, result) => {
             super::forced_mode::on_mode_reset(actor, thread, same, mode, result);
         }
+        AgentReply::ModelKept(kept) => super::model_switch::on_kept(actor, thread, same, *kept),
         AgentReply::Initialized(_)
         | AgentReply::Session { .. }
         | AgentReply::Prepared { .. }
@@ -535,7 +541,11 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
     match waiting {
         Waiting::Turn(turn) => steps::on_launched(actor, thread, turn),
         Waiting::Config(ctx, option, value)
-            if forced && !agent::forced_ask::config_allowed(option.as_str(), select(&value)) =>
+            if forced
+                && !agent::forced_ask::config_allowed(
+                    option.as_str(),
+                    super::picks::select(&value),
+                ) =>
         {
             let error = Error::refused(
                 ErrorCode::CommandInvalid,
@@ -548,6 +558,7 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
         }
         Waiting::Config(ctx, option, value) => {
             super::idle::call_started(actor, thread);
+            super::model_switch::sending(actor, thread, &option);
             call(actor, thread, id, async move {
                 let result = client.set_config_option(&session, option.clone(), value.clone());
                 let (pick, result) = ((option, value), result.await);
@@ -571,14 +582,6 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
                 AgentReply::Mode { ctx, mode, result }
             });
         }
-    }
-}
-
-/// The choice id `value` names, for a select option; `None` for a boolean.
-fn select(value: &ConfigValue) -> Option<&str> {
-    match value {
-        ConfigValue::Select(choice) => Some(choice.as_str()),
-        ConfigValue::Boolean(_) => None,
     }
 }
 

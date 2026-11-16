@@ -172,7 +172,7 @@ pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnI
     tracing::warn!(
         %thread,
         error = %Cause(error),
-        "a Codex prompt was refused before it was sent"
+        "a prompt was refused by the host's checks (a Codex folder, Claude's settings)"
     );
     if let Some(current) = current(actor, thread) {
         current.prompt_call = None;

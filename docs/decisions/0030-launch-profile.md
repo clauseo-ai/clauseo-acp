@@ -226,7 +226,8 @@ whose policy turns it off counts no relative shell write), the pre-write guard's
   unfillable token, or a folder that is not UTF-8, fails the launch with
   `agent.launch_failed`, naming the token.
 - **Claude** (`agent/loads/profile.rs`, a `claude-acp` agent only). These are added after the
-  hook and before the guard's entry, so `hooks` and `disableAllHooks: false` still go last:
+  hook and before the guard's entry, so `hooks` and `disableAllHooks: false` still go last
+  (the security pins, "Launch never weaker" below, go after the guard's entry):
   - `disallowedTools` gains `WebSearch` and `WebFetch` while `tools.web_search` is off, and
     `allowedTools` loses every `WebSearch` and `WebFetch(...)` rule.
   - While it is on, `allowedTools` gains `WebSearch` (not on Bedrock) and one
@@ -256,7 +257,8 @@ whose policy turns it off counts no relative shell write), the pre-write guard's
   `config.toml`, which takes no profile input.
 - **`_meta` layering.** The hook's `_meta`, then the host's switches, then the guard. Each key
   the host sets replaces the hook's whole: `strictMcpConfig`, `settingSources`, the connector
-  variable, `disableSkillShellExecution`, `disableAllHooks`. The one append is the guard's
+  variable, `disableSkillShellExecution`, `disableAllHooks`, and last every key in
+  `agent/loads/pinned.rs`. The one append is the guard's
   `PreToolUse` entry, which goes after the hook's own entries, as the host thread pinned it. The guard's entry sitting after the hook's is safe while Claude Code applies deny over allow
   across hooks, and the hook is Clauseo's own profile, not the lawyer's.
 - **Substitution scope.** `{work_folder}`, `{matter_notes}` and the browser's tokens are
@@ -459,6 +461,21 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
 
 ### Claude's permission mode
 
+- **2026-11-16 (orchestrator; never silently weaker, audit row 4): a model switch that costs
+  `auto` is refused.** claude-agent-acp 0.89.1's model option doesn't say which models can run
+  auto, and for one that can't it moves the session to `acceptEdits` before it answers
+  `session/set_config_option` (`acp-agent.js` `applyConfigOptionValue`, `session-mode.js`
+  `reconcileForModel`). So when a lawyer's `SetConfigOption` of the model moves the session
+  off auto, the host sets the old model again, then `auto`, and logs the restored options,
+  `ModeChanged auto` and a notice naming both models (`NoticeKind::ModelSwitchRefused`,
+  `UC-TBD-model-switch`), with a warn line; the pick is not kept in the matter's prefs
+  (`actor/turn/model_switch.rs`). The lawyer can pick any other model. If the switch back
+  fails, the session stays in `acceptEdits` and the thread gets the `AutoModeUnavailable`
+  notice. **Rejected:** notice-and-continue, which keeps the weaker mode the rule forbids
+  without a refusal, when the lawyer loses nothing by picking again. A move to `acceptEdits`
+  with no switch of Clauseo's out (an "always allow" answer that sets the mode, or a model
+  switch the CLI makes itself, such as leaving plan mode onto a model without auto) is kept,
+  with a warn line.
 - **2026-11-11 (Rohan): `auto`, so a first read of a matter's papers never asks.** Outside
   forced ask a Claude session now starts in Claude Code's `auto` (`agent/loads.rs`
   `CLAUDE_MODE`), switched to with `session/set_mode auto` on `session/new`, `session/load`
@@ -791,6 +808,29 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   A forced-ask Claude launch with no guard hook to give (no guard program, as when
   `current_exe` failed, or a path that is not UTF-8) is refused with `agent.guard_missing`
   (#402; it was `agent.launch_failed` before).
+- **2026-11-16 (orchestrator; never silently weaker, audit rows 11 and 13; rows 19 and 21).**
+  The guard hook is what a launch rests on when it has no sandbox (Windows) as well as in forced
+  ask, so a Windows Claude launch with no guard hook to give is refused with
+  `agent.guard_missing` too (its words, "Reinstall Clauseo", fit both). The firm's admin policy
+  (`managed-settings.json` and its drop-ins, the macOS managed preferences, HKLM) setting
+  `disableAllHooks` or `allowManagedHooksOnly` to `true` drops the guard; each Claude launch
+  reads it and logs a warn line, and a launch resting on the guard is refused with
+  `agent.firm_hooks_off` (`UC-TBD-firm-hooks-off`, naming the setting). On macOS and Linux
+  outside forced ask the sandbox stays the baseline and the launch goes on. The firm's
+  server-managed settings, cached by Claude Code as `remote-settings.json` in Clauseo's own
+  Claude home, count for the same check; being in a folder the user can write, they never
+  switch the user tier's check off. Each launch keeps `Agent::admin_tier` (an admin tier or
+  server-managed settings with content) for later checks. The user tier
+  (`HKCU\SOFTWARE\Policies\ClaudeCode`, which any program the user runs can write and which
+  Claude Code takes as its policy when no admin tier has content) that sets anything under
+  `permissions`, `sandbox`, `hooks`, `disableAllHooks`, `allowManagedHooksOnly` or
+  `allowManagedPermissionRulesOnly` refuses the launch, and stops a live conversation at its
+  next prompt, with `agent.user_policy` (`UC-TBD-hkcu-policy`). Claude Code polls that key
+  every 30 minutes. (`actor/turn/profile_loads/policy.rs`,
+  `actor/turn/offline/probe/settings/policy_keys.rs`.) **Rejected:** a shell deny rule for
+  writing that key: text rules match a command's words, and `reg.exe`, PowerShell's
+  `New-ItemProperty`, `HKEY_CURRENT_USER` spellings or a script reach it alike, so the rule
+  would fence nothing; the per-prompt check is the backstop.
 - **2026-11-05 (orchestrator; accepted risk).** A `PermissionRequest` hook already in the
   lawyer's own settings or plugins can still approve in forced ask: Claude Code runs such hooks
   alongside the SDK's permission callback, and whichever decides first applies. The risk is
@@ -1345,6 +1385,61 @@ this record and firm-it §8.
 - The citations are offsets in the 2.1.293 binary's strings. Stage C's live checks on a Mac are
   listed in the PR. Clauseo's own macOS jail (parked) would nest Claude's sandbox inside it,
   where it can't start, and with `failIfUnavailable: true` Claude would fail at start-up.
+
+### Launch never weaker (Claude's user settings, the pins, the inherited env)
+
+Claude Code 2.1.293 reads `<CLAUDE_CONFIG_DIR>/settings.json` (Clauseo's own Claude home) under
+`--setting-sources=user` and merges it under the flag settings: arrays joined, objects merged
+key by key, a single value the higher source's (`S4`, read in the binary bundled with
+claude-agent-sdk 0.3.293). Its `env` is copied into the process environment, its `hooks` join
+Clauseo's, and it is re-read during the session (a watcher rebuilds the rules and the sandbox).
+So a launch could start weaker than Clauseo configured it: a file planted by an earlier
+session's tool, or by anything else on the computer, could add allow rules, write roots,
+excluded commands, hooks or env, or set a single value the flag settings left unset. Five
+parts close this:
+
+1. **The user file is rewritten at each launch** (`agent/home.rs` `write_claude_settings`,
+   called from `launch_checks.rs` off the actor). It holds `{"syncClaudeAiSkills": false}`
+   only; whatever was there is replaced, never merged. The write is atomic and a link at the
+   name is replaced, not followed. `cowork_settings.json` (what Claude Code reads instead when
+   `CLAUDE_CODE_USE_COWORK_PLUGINS` is set) is removed. A failed write refuses the launch
+   (`agent.launch_failed`); it was a warn line before.
+2. **Every single-value security key is pinned** in the flag settings
+   (`agent/loads/pinned.rs`, called last in `session_meta`): `disableAllHooks: false`, the
+   session's `permissions.defaultMode`, `permissions.disableBypassPermissionsMode: "disable"`,
+   `sandbox.enabled` (true with the sandbox, false on Windows), `autoAllowBashIfSandboxed`,
+   `allowUnsandboxedCommands: false`, `failIfUnavailable: true`, and `allowAppleEvents`,
+   `enableWeakerNestedSandbox`, `enableWeakerNetworkIsolation`, `network.allowLocalBinding`
+   and `network.allowAllUnixSockets` all false. The module doc lists the keys left out and why
+   (`disableAutoMode`, `blockReadsOutsideWorkingDirectories`, the policy-only
+   `allowManaged*` keys, the arrays).
+3. **No inherited `CLAUDE_*`, `ANTHROPIC_*` or `IS_SANDBOX` reaches any agent**
+   (`agent/spec.rs` `SCRUBBED_PREFIXES`, `SCRUBBED`). Several loosen a session
+   (`CLAUDE_CODE_BUBBLEWRAP`, `CLAUDE_CODE_SANDBOXED`, `CLAUDE_BG_SESSION_PERMISSION_RULES`,
+   `IS_SANDBOX`, …). What a launch needs Clauseo sets itself (forced, the agent's settings
+   entry, the profile hook, `_meta`), so only inherited values go. `Login::of` ignores an
+   inherited cloud variable for the same reason. The plan readers
+   (`crates/limits/src/readers/env.rs`) do not scrub these yet.
+4. **Each Claude prompt checks first** (`actor/turn/prompt/claude_settings.rs`): the user file
+   must still be the launch's (`claude_settings_intact`: a plain file, its JSON equal to what
+   was written apart from Claude Code's own keys (below), compared as JSON because Claude Code's own writer may reformat it, and no
+   cowork file), and the user-writable Windows policy must not apply
+   (`profile_loads/policy.rs` `user_policy_refusal`). A failure ends the turn
+   (`agent.settings_changed`, retryable, or `agent.user_policy`) before anything is sent and
+   stops the agent; the next message relaunches it, which rewrites the file.
+5. **While a prompt runs, both checks repeat every 2 s** (Claude Code's own fallback poll),
+   raced against the prompt call; a failure ends the turn the same way. Nothing watches between
+   turns: the next prompt's check covers that time. Accepted residual: Claude Code may apply a
+   change within the poll window before the turn stops.
+
+Claude Code writes some keys to the user file itself (`bn("userSettings", …)`): `model`,
+`fastMode`, `skipAutoPermissionPrompt`, and `permissions.defaultMode: "auto"` from the
+auto-mode nudge. The check lets exactly those pass, with safe values only (`agent/home.rs` `claude_own_key`: a
+string model, bools, and a `permissions` object holding only `defaultMode` set to `auto`,
+`default`, `acceptEdits` or `plan`, which the pinned mode outranks anyway). Any other key or
+value, `bypassPermissions` among them, still stops the conversation. Whether a real session
+writes anything else at start-up or on a mode switch is a VM check. The global config
+`<CLAUDE_CONFIG_DIR>/.claude.json` (its `env`) is not covered here.
 
 ## Consequences
 

@@ -1,7 +1,7 @@
 // The app's own line for a host notice, by its kind (NoticeEntry.kind): the words the lawyer reads in place of the
 // host's text. An agent's notice has no kind; a kind this version doesn't know (a newer host's, arriving as some other
 // string or as an object it doesn't read) gives null, and the row shows the notice's text as the host wrote it.
-import { listOf, namesOf } from "@clauseo/components/lib/words-core.ts";
+import { isolate, listOf, namesOf } from "@clauseo/components/lib/words-core.ts";
 import type { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import type { NoticeKind } from "../../transport/protocol.ts";
@@ -165,6 +165,21 @@ export function noticeLine(
       : undefined;
   if (came !== undefined)
     return came.files.length + came.more === 0 ? null : cameBack(came.files, came.more, w);
+  // the lawyer picked a model that can't run in Claude's automatic mode, so Clauseo kept the one it had: both models
+  // by the names the model menu shows, isolated as the app sets apart other names; either name missing gives null
+  const refused =
+    typeof kind === "object" && kind !== null && "model_switch_refused" in kind
+      ? kind.model_switch_refused
+      : undefined;
+  if (refused !== undefined) {
+    const { picked, kept } = refused;
+    if (typeof picked !== "string" || typeof kept !== "string" || !picked.trim() || !kept.trim())
+      return null;
+    return w.th(
+      "{picked} can't run in Claude's automatic mode, so Claude stays on {kept}. To use a different model, pick another one.",
+      { picked: isolate(picked), kept: isolate(kept) },
+    );
+  }
   const skipped =
     typeof kind === "object" && kind !== null && "skill_pack_not_loaded" in kind
       ? kind.skill_pack_not_loaded

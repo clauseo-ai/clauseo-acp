@@ -26,6 +26,7 @@ mod key_retry;
 mod known;
 mod launch_checks;
 mod logout;
+mod model_switch;
 mod note;
 mod offline;
 pub(crate) use offline::{probe::settings::claude_shell_carries, set_network};

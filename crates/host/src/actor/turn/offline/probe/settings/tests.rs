@@ -12,7 +12,7 @@ use crate::actor::turn::offline::probe::{ReachClass, Target};
 use crate::write;
 
 /// A fresh folder for `test`, with `managed` and `config` folders in it.
-fn folder(test: &str) -> PathBuf {
+pub(super) fn folder(test: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
         "clauseo-probe-settings-{}-{test}",
         std::process::id()

@@ -32,8 +32,8 @@ mod claude_mode;
 mod named;
 mod prepare;
 
-pub(super) use claude_mode::Auto;
 use claude_mode::claude_start;
+pub(super) use claude_mode::{AUTO_UNAVAILABLE, Auto};
 pub(super) use prepare::on_prepared;
 use prepare::{Switch, before_attach};
 

@@ -35,7 +35,7 @@ pub(crate) const AUTO_UNAVAILABLE: &str = "Claude's automatic mode isn't availab
      account, so Claude asks before running commands.";
 
 /// Where a Claude agent stands with `auto`.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) enum Auto {
     /// Not switched by the host, or switched and kept: `auto` is the mode it goes back to.
     #[default]
@@ -47,12 +47,17 @@ pub(crate) enum Auto {
     /// sandbox can't be built on macOS or Linux never gets here: it is refused,
     /// `agent::loads::sandbox::Off::refusal`.)
     Unavailable,
+    /// As `Wanted`, with a `SetConfigOption` of the model out (`model_switch.rs`): `from` is
+    /// the model option and the value it had, and `left` whether the agent has since moved the
+    /// session to `acceptEdits` (claude-agent-acp 0.89.1 does when the new model cannot run
+    /// auto, `session-mode.js:122-134`, before it answers).
+    Switching { from: Pick, left: bool },
 }
 
 impl Auto {
     /// Whether the session runs in `acceptEdits` instead of `auto`.
-    pub(crate) fn off(self) -> bool {
-        self == Self::Unavailable
+    pub(crate) fn off(&self) -> bool {
+        *self == Self::Unavailable
     }
 }
 

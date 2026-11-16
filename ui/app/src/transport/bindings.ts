@@ -1985,6 +1985,12 @@ export type ErrorCode =
 "agent.sandbox_wildcard" | 
 /** Claude's sandbox could not be set up for the launch on macOS or Linux (Claude's short temp folder could not be made, a folder to deny is not UTF-8, or Claude Code exited at start because its sandbox could not start), so Claude was not started without the sandbox. */
 "agent.sandbox_unavailable" | 
+/** The firm's managed settings for Claude Code on this computer turn hooks off (`disableAllHooks` or `allowManagedHooksOnly`), and this launch rests on Clauseo's guard hook (forced ask, or Windows), so Claude was not started. */
+"agent.firm_hooks_off" | 
+/** A Claude Code policy that any program run by the user can write (the Windows registry key HKCU\SOFTWARE\Policies\ClaudeCode) sets permissions, sandbox or hooks, and no administrator's policy outranks it, so Claude was not started, or was stopped. */
+"agent.user_policy" | 
+/** The Claude settings file Clauseo writes at each launch changed while Claude ran, so Clauseo stopped Claude; the next message starts it again with Clauseo's settings. */
+"agent.settings_changed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -4324,7 +4330,7 @@ export type NoticeKind =
 	files: MatterPath[],
 	/**  How many more came back beyond `files`. */
 	more: number,
-} }) & { guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { guard_steps_more?: never; held_open_blocked?: never; model_switch_refused?: never; skill_pack_not_loaded?: never } | 
 /**
  *  A skill pack the launch left out: which pack, and why. The app words it by kind; the
  *  notice's `text` is the fallback.
@@ -4334,7 +4340,7 @@ export type NoticeKind =
 	pack: PackId,
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
-} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never } | 
+} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; model_switch_refused?: never } | 
 /**
  *  Claude Code's `auto` permission mode is not available for this session (the account,
  *  the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
@@ -4366,7 +4372,7 @@ export type NoticeKind =
 	 *  line can show. A newer host sends no folder, an older one the whole path.
 	 */
 	file: MatterPath,
-} }) & { files_came_back?: never; guard_steps_more?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; guard_steps_more?: never; model_switch_refused?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Clauseo's pre-write guard refused a step of the agent's that would change the
  *  matter's `.codex` folder, the agent's own settings there.
@@ -4384,7 +4390,17 @@ export type NoticeKind =
 ({ guard_steps_more: {
 	/**  How many. */
 	more: number,
-} }) & { files_came_back?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; held_open_blocked?: never; model_switch_refused?: never; skill_pack_not_loaded?: never } | 
+/**
+ *  The lawyer picked a model that cannot run Claude Code's `auto` permission mode, so
+ *  Clauseo switched the session back to the model it had, and to `auto`.
+ */
+({ model_switch_refused: {
+	/**  The picked model's name, as the agent's model option shows it. */
+	picked: string,
+	/**  The name of the model the session stays on. */
+	kept: string,
+} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

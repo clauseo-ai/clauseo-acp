@@ -49,7 +49,7 @@ pub(super) fn moved() -> bool {
 }
 
 /// The managed-preferences files Claude Code reads on this machine: none but on macOS.
-fn plist_paths() -> Vec<PathBuf> {
+pub(super) fn plist_paths() -> Vec<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         let user = clauseo_settings::policy::managed_prefs::login_user()
@@ -71,7 +71,7 @@ fn plist_paths_for(user: Option<&str>) -> Vec<PathBuf> {
 }
 
 /// The registry's `Settings` values, HKLM's then HKCU's: none but on Windows.
-fn registry_values() -> Vec<TierRead> {
+pub(super) fn registry_values() -> Vec<TierRead> {
     #[cfg(windows)]
     {
         registry::settings_values()

@@ -98,6 +98,14 @@ const OFFLINE_NO_SEARCH_NOTICE = notice(6, {
   text: "Clauseo stopped a step: ChatGPT tried to go online by running a command.",
   kind: "shell_network_blocked_no_web_search",
 });
+const MODEL_KEPT =
+  "{picked} can't run in Claude's automatic mode, so Claude stays on {kept}. To use a different model, pick another one.";
+/** The lawyer picked a model that can't run in Claude's automatic mode, so Clauseo kept the one it had. */
+const MODEL_KEPT_NOTICE = notice(6, {
+  level: "warning",
+  text: "Haiku can't run in Claude's automatic mode, so Claude stays on Opus. To use a different model, pick another one.",
+  kind: { model_switch_refused: { picked: "Haiku", kept: "Opus" } },
+});
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
   kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
@@ -209,5 +217,11 @@ export const TN: Entry[] = [
         <p>{th(lang, OFFLINE_NO_SEARCH_ALONE)}</p>
       </main>
     ),
+  },
+  {
+    id: "UC-473",
+    words: threadWords(MODEL_KEPT),
+    screen: "room/thread",
+    render: thread(MODEL_KEPT_NOTICE),
   },
 ];

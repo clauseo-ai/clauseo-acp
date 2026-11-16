@@ -47,6 +47,7 @@ use crate::actor::turn::launch_checks::CodexPrepared;
 use super::ReachClass;
 
 mod os_policy;
+pub(crate) mod policy_keys;
 
 /// The largest settings file read: a larger one is not read, and counts as moving the agent.
 pub(crate) const MAX_FILE: u64 = 1 << 20;

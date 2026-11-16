@@ -65,6 +65,14 @@ pub(crate) struct Picked {
     stale: Vec<Pick>,
 }
 
+/// The choice id `value` names, for a select option; `None` for a boolean.
+pub(super) fn select(value: &ConfigValue) -> Option<&str> {
+    match value {
+        ConfigValue::Select(choice) => Some(choice.as_str()),
+        ConfigValue::Boolean(_) => None,
+    }
+}
+
 /// Whether the pickers set options of `category`.
 fn picked_category(category: ConfigCategory) -> bool {
     matches!(
@@ -90,7 +98,7 @@ fn header(actor: &Actor, thread: ThreadId) -> Option<&HeaderEntry> {
 /// from the start's options, so none is set; the held update is released at the attach and
 /// logged; from then on it is what this returns, and the picks are not tried again. Neither
 /// claude-agent-acp nor codex-acp answers that way (test `an_answer_without_options_...`).
-fn logged(actor: &Actor, thread: ThreadId) -> Option<&[ConfigOption]> {
+pub(super) fn logged(actor: &Actor, thread: ThreadId) -> Option<&[ConfigOption]> {
     // Set by the attach commit alone (`session.rs`), and kept: a reopened thread has it.
     actor.threads.get(&thread)?.row.acp_session_id.as_ref()?;
     let options = &header(actor, thread)?.config_options;

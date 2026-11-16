@@ -42,7 +42,8 @@ const CODEX_DROPPED: [&str; 4] = [
 const INHERITED_CODEX_HOME: &str = "/elsewhere/codex-home";
 
 /// An inherited `CLAUDE_CONFIG_DIR`. A Claude agent gets Clauseo's own instead (`agent/home.rs`,
-/// `agent_homes.rs`); an agent of no kind, which does not read it, gets it as it is.
+/// `agent_homes.rs`); no other agent gets it at all: no inherited `CLAUDE_*` reaches an agent
+/// (`agent::spec::SCRUBBED_PREFIXES`).
 const INHERITED_CLAUDE_CONFIG_DIR: &str = "/elsewhere/claude";
 
 /// What `/bin/sh` itself may add to the environment it runs `env` in.
@@ -206,9 +207,8 @@ fn the_child_gets_the_spec_and_nothing_dropped() {
         codex.child.get("CODEX_HOME"),
         Some(&codex_home.display().to_string())
     );
-    // An agent of no kind is not Claude Code: the host forces no config folder on it.
-    assert_eq!(
-        fake.child.get("CLAUDE_CONFIG_DIR").map(String::as_str),
-        Some(INHERITED_CLAUDE_CONFIG_DIR)
-    );
+    // An agent of no kind is not Claude Code: the host forces no config folder on it, and the
+    // inherited one is scrubbed.
+    assert_eq!(fake.child.get("CLAUDE_CONFIG_DIR"), None);
+    assert_eq!(codex.child.get("CLAUDE_CONFIG_DIR"), None);
 }

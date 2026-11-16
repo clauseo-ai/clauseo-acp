@@ -23,6 +23,7 @@ pub(crate) mod lawyer;
 mod lawyer_tests;
 #[cfg(test)]
 mod layering_tests;
+pub(crate) mod pinned;
 pub(crate) mod profile;
 #[cfg(test)]
 mod profile_keys_tests;
@@ -202,6 +203,9 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   precedence). It also turns the user's own hooks back on when their `disableAllHooks` had
 ///   them off. A hook value at `settings`, `hooks` or `PreToolUse` of another type is
 ///   replaced.
+/// - With `keys`, last: every single-value security key in `settings`
+///   ([`pinned::pin_security_keys`]: `disableAllHooks: false` with or without a guard, the
+///   mode, bypass disabled, and the sandbox's switches), so no user settings value counts.
 pub(crate) fn session_meta(
     hook: Option<Map<String, Value>>,
     control: McpControl,
@@ -249,10 +253,11 @@ pub(crate) fn session_meta(
         settings.insert("disableAllHooks".to_owned(), Value::Bool(false));
         options.insert("settings".to_owned(), Value::Object(settings));
     }
-    if keys.is_some() {
+    if let Some(keys) = keys {
         // Claude Code applies a settings `env` over the process env, so the variable goes in
         // the flag settings too: a user's or project's settings `env` cannot undo it.
         let mut settings = take_object(&mut options, "settings");
+        pinned::pin_security_keys(&mut settings, keys.sandbox.is_some(), keys.forced_ask);
         let mut settings_env = take_object(&mut settings, "env");
         settings_env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
         settings.insert("env".to_owned(), Value::Object(settings_env));
