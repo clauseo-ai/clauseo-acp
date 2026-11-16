@@ -379,6 +379,11 @@ error_codes! {
     BlacklineFormatUnknown = "blackline.format_unknown", retryable: false, meaning: "stetdoc's \
         view of the blackline is in a format this Clauseo does not know (a header other than \
         `stet 1`, or none), so nothing is shown rather than a guess.";
+    MatterHoldsOtherMatter = "matter.holds_other_matter", retryable: false, meaning: "A \
+        conversation's turn did not run: another matter on Clauseo's list lies inside its \
+        matter's folder (folders moved outside Clauseo), at its launch, its resume or before \
+        its prompt. The error's `matter` names the inner matter; a `MatterInside` notice before \
+        the failure names it to the lawyer. The question is kept.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

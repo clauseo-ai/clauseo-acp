@@ -155,6 +155,10 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentFolderInaccessible,
             "the agent could not open the matter folder as its working folder",
         ),
+        failed(
+            ErrorCode::MatterHoldsOtherMatter,
+            "another matter on Clauseo's list lies inside this matter's folder",
+        ),
     ]
 }
 
@@ -321,6 +325,16 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                    read and edit them."
                 .to_owned(),
             kind: Some(NoticeKind::ShellLimited),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Sub is inside this matter's folder. Move Sub's folder out of it, or remove one \
+                   of the two matters from Clauseo."
+                .to_owned(),
+            kind: Some(NoticeKind::MatterInside {
+                matter: matter_id(4),
+                name: "Sub".to_owned(),
+            }),
         },
     ];
     notices.extend(

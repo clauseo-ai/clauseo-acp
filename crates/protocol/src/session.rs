@@ -345,6 +345,15 @@ open_data_enum! {
         /// folder could only be denied through a folder above it. Claude's file tools still
         /// read and edit the matter. Once a launch.
         ShellLimited = "shell_limited",
+        /// Another matter on Clauseo's list lies inside this conversation's matter folder
+        /// (folders moved outside Clauseo), so Clauseo runs no turn here: given with each turn
+        /// that fails `matter.holds_other_matter`, before the failure.
+        MatterInside = "matter_inside" {
+            /// The inner matter.
+            matter: MatterId,
+            /// Its name when the host gave the notice (display only; it may have changed).
+            name: String,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -373,6 +382,11 @@ open_data_enum! {
             matters: vec![MatterId::new(uuid::Uuid::from_u128((0x0190_0000_0000 << 80) | (0x7 << 76) | (0b10 << 62) | 8))
                 .unwrap()],
             more: 3,
+        },
+        NoticeKind::MatterInside {
+            matter: MatterId::new(uuid::Uuid::from_u128((0x0190_0000_0000 << 80) | (0x7 << 76) | (0b10 << 62) | 9))
+                .unwrap(),
+            name: "Sub".to_owned(),
         },
     ];
 }
