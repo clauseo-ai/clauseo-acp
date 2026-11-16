@@ -3,11 +3,17 @@
 //!
 //! - `compare`: copies its two inputs beside itself as `seen-old.docx` and `seen-new.docx`,
 //!   writes its arguments, one per line, to `args-compare.txt`, writes the `-o` file, and prints
-//!   `{}`; with `compare-exit.txt` beside it, exits with the code in it instead, first printing
-//!   `compare-out.json` from beside itself when there is one (stetdoc's JSON error).
+//!   `compare.json` from beside itself (stetdoc's answer, its receipt's warnings with it), or,
+//!   with none there, a receipt with no warnings; with `compare-exit.txt` beside it, exits with
+//!   the code in it instead, first printing `compare-out.json` from beside itself when there is
+//!   one (stetdoc's JSON error).
 //! - `view` of the redline: writes its arguments to `args-view.txt` and prints `view.json` from
 //!   beside itself; `view-mode.txt` may say `hang` (never answers), `big` (prints 9 MiB) or
 //!   `exit <code>`.
+//! - `view --story notes` or `--story headers` of the redline: writes its arguments to
+//!   `args-view-story-notes.txt` or `args-view-story-headers.txt` and prints
+//!   `view-story-notes.json` or `view-story-headers.json` from beside itself, or, with none
+//!   there, a view of an empty story; `view-story-mode.txt` may say `exit <code>`.
 //! - `view` of a version (`old.docx`, `new.docx`): writes its arguments to `args-view-old.txt`
 //!   or `args-view-new.txt` and prints `view-old.json` or `view-new.json` from beside itself, or,
 //!   with none there, a view of an empty document.
@@ -60,9 +66,21 @@ fn compare(dir: &Path, args: &[String]) -> Option<ExitCode> {
     std::fs::write(dir.join("seen-old.docx"), &old).ok()?;
     std::fs::write(dir.join("seen-new.docx"), &new).ok()?;
     std::fs::write(PathBuf::from(out), &new).ok()?;
-    std::io::stdout().write_all(b"{}").ok()?;
+    let answer = std::fs::read(dir.join("compare.json"))
+        .unwrap_or_else(|_none| NO_WARNINGS.as_bytes().to_vec());
+    std::io::stdout().write_all(&answer).ok()?;
     Some(ExitCode::SUCCESS)
 }
+
+/// stetdoc's answer to a compare that warns of nothing: the fields the host reads.
+const NO_WARNINGS: &str = r#"{"output":"redline.docx","receipt":{"warnings":[]}}"#;
+
+/// A story view of the redline with nothing in it, as stetdoc 0.9.3 prints one; `STORY` stands
+/// for the story's name.
+const EMPTY_STORY: &str = concat!(
+    r#"{"mode":"redline","next":null,"position":{"shown":0,"total":0},"warnings":[],"#,
+    r#""text":"{stet 1 view=STORY mode=redline}\n{summary: 1 section}\n"}"#
+);
 
 /// A view of an empty document, for a version with no view of its own beside the stand-in.
 const EMPTY_VIEW: &str = r#"{"mode":"final","next":null,"text":"{stet 1 view=body mode=final}\n"}"#;
@@ -90,6 +108,13 @@ fn view(dir: &Path, args: &[String]) -> Option<ExitCode> {
         std::io::stdout().write_all(&out).ok()?;
         return Some(ExitCode::SUCCESS);
     }
+    if let Some(story) = args
+        .iter()
+        .position(|arg| arg == "--story")
+        .and_then(|at| args.get(at + 1))
+    {
+        return view_story(dir, args, story);
+    }
     std::fs::write(dir.join("args-view.txt"), args.join("\n")).ok()?;
     let mode = std::fs::read_to_string(dir.join("view-mode.txt")).unwrap_or_default();
     let mode = mode.trim();
@@ -113,5 +138,22 @@ fn view(dir: &Path, args: &[String]) -> Option<ExitCode> {
     stdout
         .write_all(&std::fs::read(dir.join("view.json")).ok()?)
         .ok()?;
+    Some(ExitCode::SUCCESS)
+}
+
+/// The `view --story <story>` run on the redline.
+fn view_story(dir: &Path, args: &[String], story: &str) -> Option<ExitCode> {
+    std::fs::write(
+        dir.join(format!("args-view-story-{story}.txt")),
+        args.join("\n"),
+    )
+    .ok()?;
+    let mode = std::fs::read_to_string(dir.join("view-story-mode.txt")).unwrap_or_default();
+    if let Some(code) = mode.trim().strip_prefix("exit ") {
+        return Some(ExitCode::from(code.parse::<u8>().ok()?));
+    }
+    let out = std::fs::read(dir.join(format!("view-story-{story}.json")))
+        .unwrap_or_else(|_none| EMPTY_STORY.replace("STORY", story).into_bytes());
+    std::io::stdout().write_all(&out).ok()?;
     Some(ExitCode::SUCCESS)
 }

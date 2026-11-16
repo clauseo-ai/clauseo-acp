@@ -1,0 +1,94 @@
+{
+  "existing": [
+    {
+      "author": "Clauseo",
+      "changes": [
+        {
+          "block": "p3",
+          "date": "2026-11-16T08:22:30Z",
+          "ids": [
+            3
+          ],
+          "kind": "deletion"
+        },
+        {
+          "block": "p3",
+          "date": "2026-11-16T08:22:30Z",
+          "ids": [
+            2
+          ],
+          "kind": "insertion"
+        },
+        {
+          "block": "p4",
+          "date": "2026-11-16T08:22:30Z",
+          "ids": [
+            5
+          ],
+          "kind": "deletion"
+        },
+        {
+          "block": "p4",
+          "date": "2026-11-16T08:22:30Z",
+          "ids": [
+            4
+          ],
+          "kind": "insertion"
+        },
+        {
+          "block": "p5",
+          "date": "2026-11-16T08:22:30Z",
+          "ids": [
+            7
+          ],
+          "kind": "deletion"
+        },
+        {
+          "block": "p5",
+          "date": "2026-11-16T08:22:30Z",
+          "ids": [
+            6
+          ],
+          "kind": "insertion"
+        },
+        {
+          "block": "p6",
+          "date": "2026-11-16T08:22:30Z",
+          "ids": [
+            9
+          ],
+          "kind": "deletion"
+        },
+        {
+          "block": "p6",
+          "date": "2026-11-16T08:22:30Z",
+          "ids": [
+            8
+          ],
+          "kind": "insertion"
+        }
+      ],
+      "counts": [
+        [
+          "insertion",
+          4
+        ],
+        [
+          "deletion",
+          4
+        ]
+      ]
+    }
+  ],
+  "exit_status": 0,
+  "report": {
+    "by_code": [],
+    "findings": [],
+    "notes": 0,
+    "ok": true,
+    "parts": 5,
+    "unchecked": 0,
+    "violations": 0
+  },
+  "strict": false
+}

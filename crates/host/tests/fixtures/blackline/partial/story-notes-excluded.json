@@ -1,0 +1,35 @@
+{
+  "base": "c7cced9950b7a7a1:0:c7cced9950b7a7a1",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Clauseo",
+        "count": 1
+      }
+    ],
+    "count": 1,
+    "first": [
+      {
+        "author": "Clauseo",
+        "block": "p2",
+        "change": 0,
+        "deleted": null,
+        "inserted": "End of the section",
+        "kind": "insert"
+      }
+    ]
+  },
+  "position": {
+    "first": null,
+    "last": null,
+    "remaining_tokens": 0,
+    "scope": "notes",
+    "shown": 0,
+    "total": 0
+  },
+  "text": "{stet 1 view=notes base=c7cced9950b7a7a1:0:c7cced9950b7a7a1 mode=redline common-style=\"Normal\"}\n{summary: 1 tracked change (C 1) · 2 sections}\n{position: nothing of notes (0 of 0 blocks)}\n",
+  "tokens": 48,
+  "warnings": []
+}

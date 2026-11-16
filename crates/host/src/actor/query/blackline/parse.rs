@@ -29,8 +29,9 @@
 //! - what is not shown: an `{opaque …}` line (content stetdoc collapses, such as a table of
 //!   contents) is left out; and when stetdoc's summary counts more tracked changes than the
 //!   body's lines name (`count.rs`), the others are in headers, footers, notes or comments,
-//!   which the view does not mark, so the blackline says so
-//!   ([`BlacklineNotice::ChangesOutsideText`]);
+//!   which the body's view does not mark, so the blackline says so
+//!   ([`BlacklineNotice::ChangesOutsideText`]) until the notes and headers are read
+//!   (`story.rs`, which counts their lines' ids too);
 //! - what a line of the view's own that the reader does not know means: nothing it can show, so
 //!   it is skipped with [`BlacklineNotice::MayDiffer`], as a table's format change is.
 //!
@@ -58,7 +59,9 @@ pub(crate) use text::read_text;
 mod count;
 pub(crate) mod ledger;
 mod line;
+pub(crate) mod receipt;
 pub(crate) mod sides;
+pub(crate) mod story;
 mod text;
 
 /// The deepest table the reader shows, counting a top-level table as 1. stetdoc reads no XML
@@ -125,9 +128,11 @@ pub(crate) struct Read {
     pub(crate) first_skip: Option<Unreadable>,
     /// stetdoc's warnings by code alone (`other` for a code that is not a plain word).
     pub(crate) warnings: Vec<String>,
-    /// The ids of the changes the body's lines name, for the check against stetdoc's own list
-    /// (`ledger.rs`).
+    /// The ids of the changes the body's lines name, and the lines of the parts shown
+    /// (`story.rs`), for the check against stetdoc's own list (`ledger.rs`).
     pub(crate) ids: BTreeSet<u64>,
+    /// How many tracked changes stetdoc's summary counts, in every story.
+    pub(crate) counted: usize,
 }
 
 /// The fields of the view's JSON the read needs; the others are ignored.
@@ -214,6 +219,7 @@ pub(crate) fn read_view(json: &str) -> Result<Read, ViewFailure> {
         first_skip: text.first_skip,
         warnings,
         ids: text.ids,
+        counted: text.counted,
     })
 }
 

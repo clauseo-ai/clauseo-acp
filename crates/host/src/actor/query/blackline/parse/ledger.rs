@@ -5,13 +5,15 @@
 //! - which changes there are: every id of `existing[].changes[].ids`, with its change's `kind`.
 //!   The list is counted by id, never by entry or by the ledger's `{changes: N}`: a move is one
 //!   entry with two ids, and so is a paragraph whose mark changed with its text;
-//! - what a change the body does not name means, by its kind: a cell's format change
+//! - which changes the blackline shows: those whose ids the body's lines name, or the lines of
+//!   a footnote, endnote, header or footer it reads (`story.rs`);
+//! - what a change the blackline does not show means, by its kind: a cell's format change
 //!   (`cell_format`) is one the view never marks ([`BlacklineNotice::CellFormatChanged`]); a
 //!   section's (`section_format`) is the body's, so the blackline may differ
-//!   ([`BlacklineNotice::MayDiffer`]); any other is in a header, a footer or a note, which the
-//!   blackline does not show yet ([`BlacklineNotice::ChangesOutsideText`]), unless the page was
-//!   cut short and says so already;
-//! - what a change the body names and the list does not hold means: the view and the list
+//!   ([`BlacklineNotice::MayDiffer`]); any other is in a comment, or in a part whose view did not
+//!   run or read ([`BlacklineNotice::ChangesOutsideText`]), unless the page was cut short and
+//!   says so already;
+//! - what a change the blackline names and the list does not hold means: the view and the list
 //!   disagree, so the blackline may differ.
 //!
 //! With the list, the summary's count (`count.rs`) is not needed, and its notice is replaced; a

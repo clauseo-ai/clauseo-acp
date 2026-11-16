@@ -1,0 +1,51 @@
+{
+  "base": "f7bd4d4a9dbd1d97:0:f7bd4d4a9dbd1d97",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Clauseo",
+        "count": 8
+      }
+    ],
+    "count": 8,
+    "first": [
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "change": 0,
+        "deleted": "one",
+        "inserted": null,
+        "kind": "delete"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "change": 1,
+        "deleted": null,
+        "inserted": "two",
+        "kind": "insert"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p4",
+        "change": 2,
+        "deleted": "one",
+        "inserted": null,
+        "kind": "delete"
+      }
+    ]
+  },
+  "position": {
+    "first": "p5",
+    "last": "p6",
+    "remaining_tokens": 0,
+    "scope": "p5..p6",
+    "shown": 2,
+    "total": 2
+  },
+  "text": "{stet 1 view=notes base=f7bd4d4a9dbd1d97:0:f7bd4d4a9dbd1d97 mode=redline common-style=\"Normal\" range=p5..p6}\n{authors: C \"Clauseo\"}\n{summary: 8 tracked changes (C 8) · 1 footnote · 1 endnote · 2 sections}\n{footnote 1}\np5 Footnote {--one--}{#7 C}{++two++}{#6 C}.\n{endnote 1}\np6 Endnote {--one--}{#9 C}{++two++}{#8 C}.\n{position: p5..p6 of p5..p6 (2 of 2 blocks)}\n",
+  "tokens": 93,
+  "warnings": []
+}

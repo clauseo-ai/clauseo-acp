@@ -1,0 +1,99 @@
+{
+  "next": "stetdoc view unmatched-red.docx --revisions",
+  "output": "unmatched-red.docx",
+  "receipt": {
+    "added": [],
+    "added_count": 0,
+    "base": "b96f779321b1c34e:0:b96f779321b1c34e",
+    "blocks": [],
+    "blocks_omitted": 0,
+    "comments": [],
+    "dry_run": false,
+    "moves": [],
+    "operations": [],
+    "retired": [],
+    "revisions": [
+      {
+        "author": "Clauseo",
+        "changes": [
+          {
+            "block": "p1",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              1
+            ],
+            "kind": "deletion"
+          },
+          {
+            "block": "p1",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              0
+            ],
+            "kind": "insertion"
+          }
+        ],
+        "counts": [
+          [
+            "insertion",
+            1
+          ],
+          [
+            "deletion",
+            1
+          ]
+        ]
+      }
+    ],
+    "stamp": {
+      "author": "Clauseo",
+      "date": "2026-11-16T08:22:30Z"
+    },
+    "text": "compared: 2 revisions, tracked as Clauseo 2026-11-16T08:22:30Z. base b96f779321b1c34e:0:b96f779321b1c34e\nClauseo: insertion 1, deletion 1\nwarning compare_story_unmatched: headers and footers that exist on one side only were not compared (1).\nvalidated 1 unit: no problems, and this file needs no separate check.\n",
+    "tracked": true,
+    "validation": {
+      "carried": [],
+      "carried_total": 0,
+      "notes": [],
+      "parts": 1,
+      "units": 1
+    },
+    "warnings": [
+      {
+        "code": "compare_story_unmatched",
+        "message": "headers and footers that exist on one side only were not compared (1)."
+      }
+    ]
+  },
+  "saved": {
+    "base": "ce416d2c42b459d5:1:426c67f1897efb47",
+    "edited": true,
+    "revisions": [
+      {
+        "author": "Clauseo",
+        "block": "p1",
+        "date": "2026-11-16T08:22:30Z",
+        "deleted": "one year",
+        "ids": [
+          1
+        ],
+        "kind": "deletion",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p1",
+        "date": "2026-11-16T08:22:30Z",
+        "ids": [
+          0
+        ],
+        "inserted": "two years",
+        "kind": "insertion",
+        "story": "body",
+        "text_truncated": false
+      }
+    ],
+    "sha256": "b129cabe5edf98993b42991a29f7ed76ff9b8092608fa0f56cdef903fe20cd34"
+  }
+}

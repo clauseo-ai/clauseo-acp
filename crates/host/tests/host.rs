@@ -41,6 +41,9 @@ mod blackline_crossed;
 #[path = "host/blackline_partial.rs"]
 mod blackline_partial;
 #[cfg(test)]
+#[path = "host/blackline_parts.rs"]
+mod blackline_parts;
+#[cfg(test)]
 #[path = "host/blobs.rs"]
 mod blobs;
 #[cfg(test)]

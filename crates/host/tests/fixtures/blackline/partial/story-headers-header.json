@@ -1,0 +1,43 @@
+{
+  "base": "d8d64640797b1c45:0:d8d64640797b1c45",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Clauseo",
+        "count": 2
+      }
+    ],
+    "count": 2,
+    "first": [
+      {
+        "author": "Clauseo",
+        "block": "p2",
+        "change": 0,
+        "deleted": "one year",
+        "inserted": null,
+        "kind": "delete"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p2",
+        "change": 1,
+        "deleted": null,
+        "inserted": "two years",
+        "kind": "insert"
+      }
+    ]
+  },
+  "position": {
+    "first": "p2",
+    "last": "p2",
+    "remaining_tokens": 0,
+    "scope": "p2..p2",
+    "shown": 1,
+    "total": 1
+  },
+  "text": "{stet 1 view=headers base=d8d64640797b1c45:0:d8d64640797b1c45 mode=redline common-style=\"Normal\" range=p2..p2}\n{authors: C \"Clauseo\"}\n{summary: 2 tracked changes (C 2) · 1 footnote · 1 section}\n{header default sections=1}\np2 Header {--one year--}{#3 C}{++two years++}{#2 C}.\n{position: p2..p2 of p2..p2 (1 of 1 blocks)}\n",
+  "tokens": 82,
+  "warnings": []
+}

@@ -74,12 +74,18 @@ const HEAD: [&str; 5] = ["{stet ", "{rules:", "{authors:", "{summary:", "{warnin
 
 /// The paragraphs of a redline view's text, in order, and what was left out.
 pub(crate) fn read_text(text: &str) -> Text {
+    read_lines(logical_lines(text))
+}
+
+/// The paragraphs of `lines`, a redline view's logical lines each with its number, in order,
+/// and what was left out: [`read_text`] on the whole text, and `story.rs` on one part's lines.
+pub(crate) fn read_lines(lines: impl IntoIterator<Item = (usize, String)>) -> Text {
     let mut read = Text::default();
     // The open tables, outermost first, each with its current row's and cell's change, to the
     // depth cap; `past` counts the tables open past it.
     let mut levels: Vec<Level> = Vec::new();
     let mut past = 0_usize;
-    for (number, line) in logical_lines(text) {
+    for (number, line) in lines {
         let line = line.as_str();
         let at = |why| Unreadable { line: number, why };
         if line.is_empty() {

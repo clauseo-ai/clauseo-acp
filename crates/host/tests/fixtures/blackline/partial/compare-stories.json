@@ -1,0 +1,214 @@
+{
+  "next": "stetdoc view stories-red.docx --revisions",
+  "output": "stories-red.docx",
+  "receipt": {
+    "added": [],
+    "added_count": 0,
+    "base": "f7bd4d4a9dbd1d97:0:f7bd4d4a9dbd1d97",
+    "blocks": [],
+    "blocks_omitted": 0,
+    "comments": [],
+    "dry_run": false,
+    "moves": [],
+    "operations": [],
+    "retired": [],
+    "revisions": [
+      {
+        "author": "Clauseo",
+        "changes": [
+          {
+            "block": "p3",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              3
+            ],
+            "kind": "deletion"
+          },
+          {
+            "block": "p3",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              2
+            ],
+            "kind": "insertion"
+          },
+          {
+            "block": "p4",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              5
+            ],
+            "kind": "deletion"
+          },
+          {
+            "block": "p4",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              4
+            ],
+            "kind": "insertion"
+          },
+          {
+            "block": "p5",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              7
+            ],
+            "kind": "deletion"
+          },
+          {
+            "block": "p5",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              6
+            ],
+            "kind": "insertion"
+          },
+          {
+            "block": "p6",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              9
+            ],
+            "kind": "deletion"
+          },
+          {
+            "block": "p6",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              8
+            ],
+            "kind": "insertion"
+          }
+        ],
+        "counts": [
+          [
+            "insertion",
+            4
+          ],
+          [
+            "deletion",
+            4
+          ]
+        ]
+      }
+    ],
+    "stamp": {
+      "author": "Clauseo",
+      "date": "2026-11-16T08:22:30Z"
+    },
+    "text": "compared: 8 revisions, tracked as Clauseo 2026-11-16T08:22:30Z. base f7bd4d4a9dbd1d97:0:f7bd4d4a9dbd1d97\nClauseo: insertion 4, deletion 4\nvalidated 4 units: no problems, and this file needs no separate check.\n",
+    "tracked": true,
+    "validation": {
+      "carried": [],
+      "carried_total": 0,
+      "notes": [],
+      "parts": 4,
+      "units": 4
+    },
+    "warnings": []
+  },
+  "saved": {
+    "base": "7b8f9db38fba2f73:1:66842a9355aa4761",
+    "edited": true,
+    "revisions": [
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "date": "2026-11-16T08:22:30Z",
+        "deleted": "one",
+        "ids": [
+          3
+        ],
+        "kind": "deletion",
+        "story": "headers",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "date": "2026-11-16T08:22:30Z",
+        "ids": [
+          2
+        ],
+        "inserted": "two",
+        "kind": "insertion",
+        "story": "headers",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p4",
+        "date": "2026-11-16T08:22:30Z",
+        "deleted": "one",
+        "ids": [
+          5
+        ],
+        "kind": "deletion",
+        "story": "headers",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p4",
+        "date": "2026-11-16T08:22:30Z",
+        "ids": [
+          4
+        ],
+        "inserted": "two",
+        "kind": "insertion",
+        "story": "headers",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p5",
+        "date": "2026-11-16T08:22:30Z",
+        "deleted": "one",
+        "ids": [
+          7
+        ],
+        "kind": "deletion",
+        "story": "notes",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p5",
+        "date": "2026-11-16T08:22:30Z",
+        "ids": [
+          6
+        ],
+        "inserted": "two",
+        "kind": "insertion",
+        "story": "notes",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p6",
+        "date": "2026-11-16T08:22:30Z",
+        "deleted": "one",
+        "ids": [
+          9
+        ],
+        "kind": "deletion",
+        "story": "notes",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p6",
+        "date": "2026-11-16T08:22:30Z",
+        "ids": [
+          8
+        ],
+        "inserted": "two",
+        "kind": "insertion",
+        "story": "notes",
+        "text_truncated": false
+      }
+    ],
+    "sha256": "a06668ff1b4330c202ddfb769d7d36024463ce94d5ce4924bce47095dcb05876"
+  }
+}

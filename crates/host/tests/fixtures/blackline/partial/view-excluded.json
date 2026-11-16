@@ -1,0 +1,35 @@
+{
+  "base": "c7cced9950b7a7a1:0:c7cced9950b7a7a1",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Clauseo",
+        "count": 1
+      }
+    ],
+    "count": 1,
+    "first": [
+      {
+        "author": "Clauseo",
+        "block": "p2",
+        "change": 0,
+        "deleted": null,
+        "inserted": "End of the section",
+        "kind": "insert"
+      }
+    ]
+  },
+  "position": {
+    "first": "p1",
+    "last": "p2",
+    "remaining_tokens": 0,
+    "scope": "p1..p2",
+    "shown": 2,
+    "total": 2
+  },
+  "text": "{stet 1 view=body base=c7cced9950b7a7a1:0:c7cced9950b7a7a1 mode=redline common-style=\"Normal\" range=p1..p2}\n{authors: C \"Clauseo\"}\n{summary: 1 tracked change (C 1) · 2 sections}\np1 The tenant shall keep the premises in good repair throughout the term of this lease.\np2 {++End of the section++}{#0 C}\n{section 1 ends: next-page}\n{position: p1..p2 of p1..p2 (2 of 2 blocks)}\n",
+  "tokens": 94,
+  "warnings": []
+}

@@ -1,0 +1,16 @@
+{
+  "base": "2c268c34412340a4:0:2c268c34412340a4",
+  "mode": "final",
+  "next": null,
+  "position": {
+    "first": "p1",
+    "last": "p2",
+    "remaining_tokens": 0,
+    "scope": "p1..p2",
+    "shown": 2,
+    "total": 2
+  },
+  "text": "{stet 1 view=body base=2c268c34412340a4:0:2c268c34412340a4 mode=final common-style=\"Normal\" range=p1..p2}\n{summary: 2 sections}\np1 The tenant shall keep the premises in good repair throughout the term of this lease.\np2 End of the section\n{section 1 ends: next-page}\n{position: p1..p2 of p1..p2 (2 of 2 blocks)}\n",
+  "tokens": 78,
+  "warnings": []
+}

@@ -1,0 +1,43 @@
+{
+  "base": "f05ea277928ecaed:0:f05ea277928ecaed",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Clauseo",
+        "count": 2
+      }
+    ],
+    "count": 2,
+    "first": [
+      {
+        "author": "Clauseo",
+        "block": "p1",
+        "change": 0,
+        "deleted": "one year",
+        "inserted": null,
+        "kind": "delete"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p1",
+        "change": 1,
+        "deleted": null,
+        "inserted": "two years",
+        "kind": "insert"
+      }
+    ]
+  },
+  "position": {
+    "first": null,
+    "last": null,
+    "remaining_tokens": 0,
+    "scope": "headers",
+    "shown": 0,
+    "total": 0
+  },
+  "text": "{stet 1 view=headers base=f05ea277928ecaed:0:f05ea277928ecaed mode=redline common-style=\"Normal\"}\n{summary: 2 tracked changes (C 2) · 1 section}\n{position: nothing of headers (0 of 0 blocks)}\n",
+  "tokens": 49,
+  "warnings": []
+}
