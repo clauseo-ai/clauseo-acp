@@ -32,7 +32,7 @@ const PER_SHAPE: usize = 3;
 const DATA: &str = r"C:\Users\clauseo-lawyer\AppData\Local\ai.clauseo.desktop";
 
 /// A configured data folder under `%APPDATA%`.
-const CONFIGURED: &str = r"C:\Users\clauseo-lawyer\AppData\Roaming\Clauseo Data";
+const CONFIGURED: &str = r"C:\Users\clauseo-lawyer\AppData\Roaming\Records Data";
 
 /// The laptop's variables.
 fn env(name: &str) -> Option<OsString> {
@@ -54,8 +54,8 @@ fn lead(text: &str) -> (String, &str) {
     if let Some(word) = tails.iter().find(|word| text.starts_with(*word)) {
         return (format!("tail {word}"), text);
     }
-    let name = "Clauseo Data";
-    let Some(at) = text.find(name).or_else(|| text.find("clauseo data")) else {
+    let name = "Records Data";
+    let Some(at) = text.find(name).or_else(|| text.find("records data")) else {
         return ("other".to_owned(), text);
     };
     let (head, rest) = text.split_at(at + name.len());

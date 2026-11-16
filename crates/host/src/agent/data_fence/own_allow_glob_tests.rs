@@ -18,7 +18,7 @@ use crate::agent::data_fence::{LaunchDeny, claude_allow_rules_on, claude_deny_ru
 use crate::pipeline::tests::support::TempDir;
 
 /// A configured data folder, spelled as configured and in lower case.
-const CONFIGURED: [&str; 2] = [r"D:\FirmData\Clauseo", r"d:\firmdata\clauseo"];
+const CONFIGURED: [&str; 2] = [r"D:\FirmData\Records", r"d:\firmdata\records"];
 
 /// A PowerShell command's first word as Claude Code 2.1.293's `yt` compares it with a rule's:
 /// a module qualifier dropped (`PJn`, for a deny), then an alias mapped to its cmdlet (`z_`),

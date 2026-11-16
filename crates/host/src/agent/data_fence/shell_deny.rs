@@ -63,18 +63,21 @@
 //! (`agent-state\<id>`, `claude-acp\home\projects\<key>`, `run\<id>`), whatever spelling of
 //! `<data>` is before it: no folder of the lawyer's holds those names, and with `launch.rs`
 //! naming the siblings of a busy folder in groups, a launch's rules hardly grow with the matters
-//! (the settings file Claude Code reads is at most 2 MiB, `agent::launch_settings`). The
-//! default data folder is written as Clauseo's own folder name alone
-//! (`clauseo_settings::IDENTIFIER`), which every other way of writing it (a drive, a share or
-//! device path, `%LOCALAPPDATA%` in any case, `~`, `$HOME`, …) ends in.
+//! (the settings file Claude Code reads is at most 2 MiB, `agent::launch_settings`; the
+//! auto-mode context Claude Code sends with each call is the tighter bound,
+//! `shell_deny_budget_tests.rs`). A data folder whose name holds Clauseo's
+//! (`clauseo_settings::IDENTIFIER`, a configured `Clauseo Data`, and the 8.3 short form of
+//! either, `AICLAU~1.DES`) is written as that name alone (`forms::alone_name`), which every
+//! other way of writing it (a drive, a share or device path, `%LOCALAPPDATA%` in any case, `~`,
+//! `$HOME`, a mix of long and short names, …) ends in; a generic name gets its path forms.
 //!
 //! A deny list is not a fence. Not caught, the accepted residual of `auto` on Windows (decision
 //! record 0030): a path built at run time, a variable of the agent's own, a `cd` first (a `cd`
 //! into the own run folder, then `cd ..` twice), a glob inside a name (`run\01a1*`), other
-//! letter cases in Bash (`AI.CLAUSEO.DESKTOP`), an 8.3 short name, a script that opens the file,
-//! a run folder, matter or project made after the launch whose name starts no group, and, for a
-//! configured data folder (not `ai.clauseo.desktop`) alone, its own path written other than
-//! whole: a `..` or `.\` step or a mixed separator inside it (`D:\FirmData\.\Clauseo`), a share or
+//! letter cases in Bash (`AI.CLAUSEO.DESKTOP`), an 8.3 short name of a name under the data
+//! folder, a script that opens the file, a run folder, matter or project made after the launch
+//! whose name starts no group, and, for a data folder written by its path (a generic name), its own path written other than
+//! whole: a `..` or `.\` step or a mixed separator inside it (`D:\FirmData\.\Records`), a share or
 //! device path to it (`\\localhost\D$\…`) or a variable other than `forms::VARS` naming part of
 //! it. Denied beyond the data folder (accepted): any command naming `claude-acp` or
 //! `agent-state` alone (`npm ls claude-acp`), and in PowerShell, which ignores case, a path such
@@ -85,13 +88,10 @@ use std::ffi::OsString;
 
 use super::LaunchDeny;
 use forms::{Shells, forms};
-pub(crate) use matters::windows_matter_shell_rules;
 pub(crate) use own_allow::{own_shell_allow_rules, own_shell_glob_deny_rules};
 
 #[path = "shell_deny_forms.rs"]
 mod forms;
-#[path = "shell_deny_matters.rs"]
-mod matters;
 #[path = "own_allow.rs"]
 mod own_allow;
 
@@ -115,7 +115,7 @@ const AFTER: [&str; 19] = [
 /// `<data>\/agents`). Not `\`
 /// after `\`: `\\` is the escaped form's separator, which the rules name in its own right.
 /// A `strict` folder is one no own path is written past in the escaped form with a single `\`
-/// after it (a configured folder's path, `D:\FirmData\Clauseo\\x`): there `\` after `\` is a run.
+/// after it (a configured folder's path, `D:\FirmData\Records\\x`): there `\` after `\` is a run.
 fn after_sep(end: &str, strict: bool) -> &'static [&'static str] {
     match end {
         "\\" if strict => &["\"", "'", " ", "/", ".", "$", "{", "`", "\\"],
@@ -218,9 +218,9 @@ fn rules(
         for dots in DOTS {
             contents.push(join(&[&lead, &[Piece::Any], &text(dots), &text("..")]));
         }
-        // Clauseo's own folder name ends the escaped form too (`…\\ai.clauseo.desktop\\run`),
-        // and the escaped form is written with `\\` throughout.
-        let strict = form.lead != clauseo_settings::IDENTIFIER && !form.lead.contains("\\\\");
+        // A folder named alone ends the escaped form too (`…\\ai.clauseo.desktop\\run`), and
+        // the escaped form is written with `\\` throughout.
+        let strict = !form.alone && !form.lead.contains("\\\\");
         alone(&lead, strict, &mut contents, &mut ends);
         for junction in form.junctions {
             let lead_sep = text(&format!("{}{junction}", form.lead));
@@ -537,6 +537,9 @@ fn render(pieces: &[Piece], end: bool) -> String {
     content
 }
 
+#[cfg(test)]
+#[path = "shell_deny_alone_tests.rs"]
+mod alone_tests;
 #[cfg(test)]
 #[path = "shell_deny_cross_tests.rs"]
 mod cross_tests;

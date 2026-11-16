@@ -18,7 +18,7 @@ use crate::pipeline::tests::support::TempDir;
 const DATA: &str = r"C:\Users\clauseo-lawyer\AppData\Local\ai.clauseo.desktop";
 
 /// A configured data folder (stage C's example).
-const CONFIGURED: &str = r"D:\FirmData\Clauseo";
+const CONFIGURED: &str = r"D:\FirmData\Records";
 
 pub(super) fn env(name: &str) -> Option<OsString> {
     match name {
@@ -96,7 +96,7 @@ fn configured_leads() -> Vec<String> {
         CONFIGURED.to_owned(),
         CONFIGURED.replace('\\', "/"),
         CONFIGURED.replace('\\', r"\\"),
-        "/d/FirmData/Clauseo".to_owned(),
+        "/d/FirmData/Records".to_owned(),
         format!("{CONFIGURED}."),
     ]
 }
@@ -346,7 +346,7 @@ fn every_generated_spelling_of_a_protected_place_is_denied() {
     );
 }
 
-/// A configured folder (`D:\FirmData\Clauseo`): its spellings the rules know are denied for
+/// A configured folder (`D:\FirmData\Records`): its spellings the rules know are denied for
 /// every protected place, stage C's examples among them; a folder whose name only starts the
 /// same stays open; the accepted residuals still pass, so a change that closes or opens one
 /// shows here.
@@ -356,18 +356,18 @@ fn a_configured_folders_spellings_are_denied_and_its_residuals_listed() {
     let (_, rules) = launch(dir.path(), CONFIGURED);
     let mut denied = generated(&configured_leads(), 4);
     for example in [
-        r"type D:\FirmData\Clauseo/settings.json",
-        r"type D:\FirmData\Clauseo/state.sqlite",
-        r"type D:\FirmData\Clauseo/logs\host.log",
-        r"type D:\FirmData\Clauseo/launch-settings\own.json",
-        r"type D:\FirmData\Clauseo/run\01a1d5be-5efa-73f6-a24b-dc90c01883d9-10\relay-token",
-        r"type D:\FirmData\Clauseo/matters\x",
-        r"copy /y evil.exe D:\FirmData\Clauseo/tools\agent-browser\agent-browser",
-        r"type D:\FirmData\Clauseo.\settings.json",
-        r"type D:\FirmData\Clauseo \settings.json",
-        r"type D:\FirmData\Clauseo\settings.json::$DATA",
-        r"type \\?\D:\FirmData\Clauseo\settings.json",
-        r"type \\.\D:\FirmData\Clauseo\settings.json",
+        r"type D:\FirmData\Records/settings.json",
+        r"type D:\FirmData\Records/state.sqlite",
+        r"type D:\FirmData\Records/logs\host.log",
+        r"type D:\FirmData\Records/launch-settings\own.json",
+        r"type D:\FirmData\Records/run\01a1d5be-5efa-73f6-a24b-dc90c01883d9-10\relay-token",
+        r"type D:\FirmData\Records/matters\x",
+        r"copy /y evil.exe D:\FirmData\Records/tools\agent-browser\agent-browser",
+        r"type D:\FirmData\Records.\settings.json",
+        r"type D:\FirmData\Records \settings.json",
+        r"type D:\FirmData\Records\settings.json::$DATA",
+        r"type \\?\D:\FirmData\Records\settings.json",
+        r"type \\.\D:\FirmData\Records\settings.json",
     ] {
         denied.push(("Bash", example.to_owned()));
         denied.push(("PowerShell", example.to_owned()));
@@ -379,22 +379,22 @@ fn a_configured_folders_spellings_are_denied_and_its_residuals_listed() {
     }
     let mut passed = own_commands(CONFIGURED, "\\", 3);
     passed.extend(own_commands(&CONFIGURED.replace('\\', r"\\"), r"\\", 2));
-    passed.push(("PowerShell", r"type D:\FirmData\ClauseoBackup\x".to_owned()));
-    passed.push(("Bash", r"type D:\FirmData\ClauseoBackup\x".to_owned()));
+    passed.push(("PowerShell", r"type D:\FirmData\RecordsBackup\x".to_owned()));
+    passed.push(("Bash", r"type D:\FirmData\RecordsBackup\x".to_owned()));
     // The accepted residuals (decision 0030): the configured path written other than whole, a
     // share path to it, a variable naming part of it, Bash's letter case. (A device path,
     // `\\?\D:\…`, holds the drive path and is denied above.)
     for residual in [
-        r"type D:\FirmData\Other\..\Clauseo\settings.json",
-        r"type D:\FirmData\.\Clauseo\settings.json",
-        r"type D:\FirmData/Clauseo\settings.json",
-        r"type \\localhost\D$\FirmData\Clauseo\settings.json",
-        r"type %FIRMDATA%\Clauseo\settings.json",
+        r"type D:\FirmData\Other\..\Records\settings.json",
+        r"type D:\FirmData\.\Records\settings.json",
+        r"type D:\FirmData/Records\settings.json",
+        r"type \\localhost\D$\FirmData\Records\settings.json",
+        r"type %FIRMDATA%\Records\settings.json",
     ] {
         passed.push(("PowerShell", residual.to_owned()));
         passed.push(("Bash", residual.to_owned()));
     }
-    passed.push(("Bash", r"type d:\firmdata\clauseo\settings.json".to_owned()));
+    passed.push(("Bash", r"type d:\firmdata\records\settings.json".to_owned()));
     for (tool, command) in &passed {
         assert!(!rules.denies(tool, command), "{tool} denies: {command:?}");
     }

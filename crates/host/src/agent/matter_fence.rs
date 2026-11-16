@@ -34,11 +34,16 @@
 //! folders (`agent::loads::sandbox::deny_form`).
 //!
 //! Who uses which: Claude's `Read` deny rules and Codex's profile name the fence paths of the
-//! matters not invited, Claude's `Edit` deny rules and its Windows shell rules those of every
-//! other matter (an invite is read-only), and Claude's `Read` allow rules the folders of the
-//! invited ones (`data_fence::claude_deny_rules`, `claude_allow_rules`, `codex_fence::rules`,
-//! `data_fence::shell_deny::matters`). On Windows Claude reads an invited matter through its
-//! file tools only, and on macOS and Linux too: an invited matter is in no `denyRead` of its
+//! matters not invited, Claude's `Edit` deny rules those of every other matter (an invite is
+//! read-only), and Claude's `Read` allow rules the folders of the invited ones
+//! (`data_fence::claude_deny_rules`, `claude_allow_rules`, `codex_fence::rules`). Windows has
+//! no shell rules for other matters (they outgrew the auto-mode context Claude Code sends,
+//! `data_fence::shell_deny_budget_tests`): Claude Code checks the file paths of its common file
+//! commands (`cat`, `cp`, PowerShell's file cmdlets, relative paths too) against the `Read`
+//! and `Edit` denies, and a script, a built path or an uncommon program naming another matter's
+//! folder is caught only by Anthropic's classifier; a command that reads an invited matter
+//! passes, one that writes it is checked against the `Edit` denies. On macOS and Linux Claude
+//! reads an invited matter through its file tools only: an invited matter is in no `denyRead` of its
 //! own, but nothing re-opens it for the sandbox (its `allowRead` names only the session's
 //! folders, `agent::loads::sandbox`), so where the lawyer's home, `/Volumes` or
 //! `/Users/Shared` holds it, as matters are kept, a shell command (`cat ../B/f.txt`) is refused
@@ -64,7 +69,7 @@ use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, touchable};
 pub(crate) struct Other {
     /// Its id.
     pub(crate) id: MatterId,
-    /// Its name at the launch, for the lawyer's line when its shell rules did not fit.
+    /// Its name at the launch, for the lawyer's line.
     pub(crate) name: String,
     /// Its folder as stored.
     pub(crate) folder: PathBuf,
@@ -144,8 +149,7 @@ impl MatterFence {
     };
 
     /// The fence before the launch prep resolves it: `others`, sorted by id, so a launch's rules
-    /// and the matters its shell rules keep (`agent::loads::profile`) do not depend on a map's
-    /// order.
+    /// do not depend on a map's order.
     pub(crate) fn asked(mut others: Vec<Other>) -> Self {
         others.sort_by_key(|other| other.id);
         Self {

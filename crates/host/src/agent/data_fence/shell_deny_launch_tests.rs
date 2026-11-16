@@ -293,12 +293,13 @@ fn the_settings_files_are_denied_to_every_tool() {
 /// The rules' size (Read and Edit with the shell rules, as JSON) for 60 and 1,000 matters, each
 /// with notes and a Claude project, with the default folder and with a configured one spelled
 /// two ways (no folder name to share): the siblings go in groups (`launch.rs`), so 1,000 matters
-/// stay under half of Claude Code's 2 MiB settings file.
+/// add only a few dozen bytes a matter. What the rules may cost in all is the auto-mode
+/// context's bound, `shell_deny_budget_tests.rs`, far under the settings file's.
 #[test]
-fn a_thousand_matter_launch_stays_under_half_the_settings_file_cap() {
+fn a_thousand_matter_launch_grows_by_the_groups_not_the_matters() {
     let configured = [
-        PathBuf::from(r"D:\Firm Data\Clauseo Store"),
-        PathBuf::from(r"C:\Users\clauseo-lawyer\AppData\Roaming\Clauseo Store"),
+        PathBuf::from(r"D:\Firm Data\Records Store"),
+        PathBuf::from(r"C:\Users\clauseo-lawyer\AppData\Roaming\Records Store"),
     ];
     let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
     let mut sizes = Vec::new();
@@ -328,7 +329,6 @@ fn a_thousand_matter_launch_stays_under_half_the_settings_file_cap() {
     let [sixty_one, sixty_two, thousand_one, thousand_two] = sizes.as_slice() else {
         panic!("{sizes:?}");
     };
-    assert!(*thousand_two < 1024 * 1024, "{sizes:?}");
     // At most a few dozen bytes a matter: the groups, not the matters.
     assert!(thousand_one - sixty_one < 100 * 940, "{sizes:?}");
     assert!(thousand_two - sixty_two < 100 * 940, "{sizes:?}");

@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 use clauseo_protocol::MatterId;
 
+use super::windows_shell_deny_rules;
 use super::{LaunchDeny, claude_allow_rules_on, claude_deny_rules_on, matters};
-use super::{windows_matter_shell_rules, windows_shell_deny_rules};
 use crate::agent::matter_fence::{MatterFence, Other};
 
 const MATTERS: &str = r"C:\Users\clauseo-lawyer\Matters";
@@ -91,14 +91,6 @@ fn rendered() -> String {
     section("deny", claude_deny_rules_on(&deny, true, false));
     section("allow", claude_allow_rules_on(&deny, true));
     section("data shell", windows_shell_deny_rules(&deny, &env));
-    for variables in [true, false] {
-        let lists = windows_matter_shell_rules(&deny, &env, variables);
-        let lines = lists
-            .into_iter()
-            .flat_map(|(matter, rules)| std::iter::once(format!("# {matter}")).chain(rules))
-            .collect();
-        section(&format!("matter shell, variables {variables}"), lines);
-    }
     let fenced: Vec<(MatterId, Vec<PathBuf>)> = deny
         .matters
         .others

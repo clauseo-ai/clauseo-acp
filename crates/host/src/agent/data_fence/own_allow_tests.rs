@@ -179,7 +179,7 @@ fn own_reads_commands(spelling: &str) -> Vec<(&'static str, String)> {
 #[test]
 fn every_own_allow_rule_loads_and_starts_with_its_command() {
     let dir = TempDir::new("own-allow-load");
-    let configured = r"D:\FirmData\Clauseo";
+    let configured = r"D:\FirmData\Records";
     let lower = configured.to_lowercase();
     let unix = crate::testing::abs("/Users/asha/Library/Application Support/ai.clauseo.desktop");
     let base = launch(&dir, &[]).deny;
@@ -232,7 +232,7 @@ fn listing_and_reading_the_own_folders_skips_the_classifiers() {
     let dir = TempDir::new("own-allow-own");
     for spellings in [
         vec![DATA],
-        vec![r"D:\FirmData\Clauseo", r"d:\firmdata\clauseo"],
+        vec![r"D:\FirmData\Records", r"d:\firmdata\records"],
     ] {
         let Launch {
             shell: deny, allow, ..
