@@ -53,14 +53,22 @@ export const LONG_RESULT = opaque(
   ),
 );
 export const HUGE_RESULT = opaque(Array.from({ length: 2_500 }, (_, i) => i + 1));
-/** MCP text with two pictures and one other block, counted, not drawn. */
+/** MCP text with two pictures of a type not drawn (SVG) and one other block, counted, not drawn. */
 export const MCP_MIXED = opaque({
   content: [
     text("The page has two figures."),
-    { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
-    { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+    { type: "image", data: "PHN2Zy8+", mimeType: "image/svg+xml" },
+    { type: "image", data: "PHN2Zy8+", mimeType: "image/svg+xml" },
     { type: "resource", resource: { uri: "file:///x", text: "x" } },
   ],
+});
+
+/** A one-pixel PNG, as a screenshot's base64 comes. */
+export const PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+/** MCP text and a screenshot, small enough to come inline. */
+export const MCP_SHOT = opaque({
+  content: [text("Took a screenshot."), { type: "image", data: PNG, mimeType: "image/png" }],
 });
 
 /** Inline errors: opaque error (with status completed and failed), and MCP's isError. */
@@ -91,6 +99,18 @@ export const BLOB_LARGE = blobOf("b2".repeat(32), 65_537);
 export const BLOB_REFUSED = blobOf("b3".repeat(32), 20_000);
 /** What reading BLOB gives. */
 export const BLOB_TEXT = JSON.stringify({ result: { content: [text(JUDGMENTS)] }, error: null });
+
+/** A full-page screenshot's result, as agent-browser's comes through codex-acp: 1.5 MB, past 64 KB and past one 1 MB
+ * read, its image block in the preview. Its base64 is padding, not a real picture. */
+export const BLOB_SHOT_TEXT = JSON.stringify({
+  result: { content: [{ type: "image", data: "A".repeat(1_500_000), mimeType: "image/png" }] },
+  error: null,
+});
+export const BLOB_SHOT: BlobRef = {
+  hash: "b4".repeat(32),
+  size_bytes: BLOB_SHOT_TEXT.length,
+  preview: BLOB_SHOT_TEXT.slice(0, 512),
+};
 
 /** Hostile outputs: markup, a script link, a bare URL, RTL marks and one 10,000-character line. */
 export const HOSTILE: Record<string, TextOrBlob> = {
