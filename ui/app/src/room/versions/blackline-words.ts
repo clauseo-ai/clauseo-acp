@@ -4,7 +4,7 @@
 // from words.ts to keep that file under the size limit. Pure: the language comes in as an argument.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { listOf, vt, type VersionKey } from "@clauseo/components/lib/words-versions.ts";
+import { vt, type VersionKey } from "@clauseo/components/lib/words-versions.ts";
 import type {
   BlacklineNotice,
   BlacklinePart,
@@ -138,8 +138,8 @@ const FORMAT_WORDS: Readonly<Record<TableFormat, VersionKey>> = {
   unknown: "other formatting",
 };
 
-/** One changed table in words: its place and number, then what changed in brackets, "table 2 (borders, shading)",
- * "table 1 in the header (first page) (merged cells)"; null for a place this version doesn't know. A table outside the
+/** One changed table in words: its place and number, then what changed after a colon, "table 2: borders, shading",
+ * "table 1 in the header (first page): merged cells"; null for a place this version doesn't know. A table outside the
  * body always says where it is, so it can't be read as the body's. */
 function tableWords(lang: Lang, t: ChangedTable, sides: (s: Side) => string): string | null {
   const n = t.number;
@@ -158,14 +158,14 @@ function tableWords(lang: Lang, t: ChangedTable, sides: (s: Side) => string): st
               vt(lang, "table {n} in the {part}", { part: sides(side).toLocaleLowerCase(lang), n });
   if (where === null) return null;
   const formats = [...new Set(t.formats.map((f) => vt(lang, FORMAT_WORDS[f])))];
-  return formats.length === 0 ? where : `${where} (${formats.join(", ")})`;
+  return formats.length === 0 ? where : `${where}: ${formats.join(", ")}`;
 }
 
 /** The most tables the table line names before it ends with how many more. */
 const TABLES_NAMED = 4;
 
-/** The line for the table notice (cell_format_changed): each table the host names, with what changed in it, up to
- * four; past four, the first three and how many more, counted from total (the host's count of every changed table,
+/** The line for the table notice (cell_format_changed): each table the host names, with what changed in it, the
+ * tables apart by semicolons, since each lists its groups with commas, up to four; past four, the first three and how many more, counted from total (the host's count of every changed table,
  * of which it names only the first ones; the tables named when it gives none). A table in a place this version
  * doesn't know counts among the more. With none named, the notice's own line, which names no table. */
 export function tablesLine(
@@ -179,10 +179,10 @@ export function tablesLine(
   const named = tables.map((t) => tableWords(lang, t, sides)).filter((w) => w !== null);
   if (named.length === 0) return noticeLine(lang, "cell_format_changed");
   if (named.length === all && all <= TABLES_NAMED)
-    return vt(lang, "Formatting changed in {tables}.", { tables: listOf(lang, named) });
+    return vt(lang, "Formatting changed in {tables}.", { tables: named.join("; ") });
   const shown = named.slice(0, TABLES_NAMED - 1);
-  return vt(lang, "Formatting changed in {tables} and {n} more.", {
-    tables: shown.join(", "),
+  return vt(lang, "Formatting changed in {tables}; and {n} more.", {
+    tables: shown.join("; "),
     n: all - shown.length,
   });
 }

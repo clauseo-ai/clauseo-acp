@@ -118,18 +118,18 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "over the blackline sheet in place of UC-391 when the host names the tables whose formatting changed (WordBlackline changed_tables, up to four): {tables} lists each as its place (UC-454 to UC-457) with what changed in brackets (UC-458 to UC-464), e.g. 'table 2 (borders, shading)'"
+    "note": "over the blackline sheet in place of UC-391 when the host names the tables whose formatting changed (WordBlackline changed_tables, up to four): {tables} lists each as its place (UC-454 to UC-457), then a colon and what changed (UC-458 to UC-464), the tables apart by semicolons, e.g. 'table 2: borders, shading; table 1 in the header (first page): merged cells'. The item form changed after review round 2 (was 'table 2 (borders, shading)', which gave two brackets in a row after a header's heading)"
   },
   "UC-453": {
-    "en": "Formatting changed in {tables} and {n} more.",
-    "hi": "{tables} और {n} अन्य में फ़ॉर्मैटिंग बदल गई है।",
+    "en": "Formatting changed in {tables}; and {n} more.",
+    "hi": "{tables}; और {n} अन्य में फ़ॉर्मैटिंग बदल गई है।",
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "blackline-notes-tables (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "as UC-452 when more than four tables changed, or one is in a place this version can't name: the first three, comma-joined, then how many more ({n})"
+    "note": "as UC-452 when more than four tables changed, or one is in a place this version can't name: the first three, apart by semicolons, then how many more ({n}: the host's count of every changed table, changed_tables_total, minus the three named). Reworded after review round 2 (was '{tables} and {n} more.'), to match the semicolons"
   },
   "UC-454": {
     "en": "table {n}",
@@ -184,7 +184,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "in brackets after a table in the table line: its, a row's or a cell's borders changed (TableFormat borders)"
+    "note": "after a table's colon in the table line: its, a row's or a cell's borders changed (TableFormat borders)"
   },
   "UC-459": {
     "en": "shading",
@@ -195,7 +195,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "in brackets after a table: shading changed (TableFormat shading)"
+    "note": "after a table's colon: shading changed (TableFormat shading)"
   },
   "UC-460": {
     "en": "widths",
@@ -206,7 +206,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "in brackets after a table: the table's, a column's or a cell's width, or the table's indent, changed (TableFormat widths)"
+    "note": "after a table's colon: the table's, a column's or a cell's width, or the table's indent, changed (TableFormat widths)"
   },
   "UC-461": {
     "en": "alignment",
@@ -217,7 +217,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "in brackets after a table: the table's alignment on the page, a row's, or a cell's text from top to bottom changed (TableFormat alignment)"
+    "note": "after a table's colon: the table's alignment on the page, a row's, or a cell's text from top to bottom changed (TableFormat alignment)"
   },
   "UC-462": {
     "en": "merged cells",
@@ -228,7 +228,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "in brackets after a table: which cells are merged changed (TableFormat merged_cells)"
+    "note": "after a table's colon: which cells are merged changed (TableFormat merged_cells)"
   },
   "UC-463": {
     "en": "row height",
@@ -239,7 +239,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "in brackets after a table: a row's height changed (TableFormat row_height)"
+    "note": "after a table's colon: a row's height changed (TableFormat row_height)"
   },
   "UC-464": {
     "en": "other formatting",
@@ -250,6 +250,6 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "in brackets after a table: anything else, such as the table's style, cell margins or a repeated heading row, and a kind this version doesn't know (TableFormat other, unknown)"
+    "note": "after a table's colon: anything else, such as the table's style, cell margins or a repeated heading row, and a kind this version doesn't know (TableFormat other, unknown)"
   }
 }
