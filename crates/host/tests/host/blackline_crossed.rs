@@ -28,13 +28,14 @@ fn partial(name: &str) -> Vec<u8> {
 /// The blackline of the pair `<pair>-old.docx`, `<pair>-new.docx` (`old` and `new` when given),
 /// through the stand-in stetdoc answering the pair's fixtures: `view-<pair>.json`,
 /// `check-<pair>.json` and `final-<pair>-old.json`, `final-<pair>-new.json` where there are
-/// some, and `extra` files (name, bytes) beside it.
+/// some, and `extra` files (name, bytes) beside it. The test keeps the `Dir` while it reads the
+/// stand-in's folder: dropping it deletes the folder.
 fn through_fake(
     name: &str,
     pair: &str,
     sides: Option<(&[u8], &[u8])>,
     extra: &[(&str, &[u8])],
-) -> (WordBlackline, PathBuf) {
+) -> (WordBlackline, PathBuf, Dir) {
     let dir = Dir::new(name, &[(FAKE, Scenario::Bundled("prompt-stream"))]);
     let stetdoc = fake_stetdoc(&dir);
     let fake = stetdoc.parent().unwrap().to_owned();
@@ -62,7 +63,7 @@ fn through_fake(
     let answer = blackline(host.query(query(matter, DOC, from, None)));
     assert_eq!(temp_entries(&dir), Vec::<PathBuf>::new());
     host.shutdown();
-    (answer, fake)
+    (answer, fake, dir)
 }
 
 /// The bank-details pair: only the address behind "the account" changes (acct-111 to acct-999).
@@ -70,7 +71,7 @@ fn through_fake(
 /// both sides names nothing, and no version is viewed.
 #[test]
 fn a_link_whose_address_alone_changed_is_named() {
-    let (answer, fake) = through_fake("blackline_link_named", "link", None, &[]);
+    let (answer, fake, _dir) = through_fake("blackline_link_named", "link", None, &[]);
     assert_eq!(answer.changed_links, ["the account"]);
     assert_eq!(answer.notices, []);
     assert!(
@@ -91,20 +92,21 @@ fn a_link_whose_address_alone_changed_is_named() {
     );
 
     let new = partial("link-new.docx");
-    let (same, fake) = through_fake("blackline_link_same_file", "link", Some((&new, &new)), &[]);
+    let (same, fake, _same_dir) =
+        through_fake("blackline_link_same_file", "link", Some((&new, &new)), &[]);
     assert_eq!((same.changed_links.len(), same.notices.len()), (0, 0));
     assert!(!fake.join("args-view-old.txt").exists());
 }
 
 #[test]
 fn a_comment_whose_text_changed_is_noted() {
-    let (answer, _) = through_fake("blackline_comment", "comment", None, &[]);
+    let (answer, _, _) = through_fake("blackline_comment", "comment", None, &[]);
     assert_eq!(answer.notices, [CommentChanged]);
 }
 
 #[test]
 fn a_text_box_whose_text_changed_is_noted() {
-    let (answer, _) = through_fake("blackline_textbox", "textbox", None, &[]);
+    let (answer, _, _) = through_fake("blackline_textbox", "textbox", None, &[]);
     assert_eq!(answer.notices, [TextBoxChanged]);
     assert_eq!(answer.paragraphs[1].change, ParagraphChange::Changed);
 }
@@ -115,7 +117,7 @@ fn a_text_box_whose_text_changed_is_noted() {
 #[test]
 fn a_footnote_or_header_change_alone_is_noted() {
     for pair in ["footnote", "header"] {
-        let (answer, _) = through_fake(&format!("blackline_{pair}_only"), pair, None, &[]);
+        let (answer, _, _) = through_fake(&format!("blackline_{pair}_only"), pair, None, &[]);
         assert_eq!(answer.notices, [ChangesOutsideText], "{pair}");
         assert!(
             answer
@@ -123,7 +125,7 @@ fn a_footnote_or_header_change_alone_is_noted() {
                 .iter()
                 .all(|p| p.change == ParagraphChange::Same)
         );
-        let (by_summary, _) = through_fake(
+        let (by_summary, _, _) = through_fake(
             &format!("blackline_{pair}_summary"),
             pair,
             None,
@@ -137,7 +139,7 @@ fn a_footnote_or_header_change_alone_is_noted() {
 /// blackline, still shown, may differ.
 #[test]
 fn versions_that_can_not_be_compared_may_differ() {
-    let (answer, _) = through_fake(
+    let (answer, _, _) = through_fake(
         "blackline_sides_unread",
         "link",
         None,
