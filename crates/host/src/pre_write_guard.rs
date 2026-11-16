@@ -174,6 +174,7 @@ mod ask;
 mod canary;
 mod codex;
 mod names;
+mod outcome;
 mod reach;
 pub(crate) mod record;
 pub(crate) mod selftest;
@@ -190,6 +191,7 @@ use clauseo_protocol::MatterPath;
 use serde_json::Value;
 
 use codex::{has_codex_part, in_codex_folder, patch_targets};
+use outcome::{Ignored, Refusal, UNASKED_MODES};
 // The data folder fence reads a command's `sh -c` scripts as this guard does
 // (`agent/data_fence/command.rs`).
 use reach::Reach;
@@ -313,40 +315,6 @@ fn run_timed(
 /// The start of the stderr line saying the guard ignored its input ([`Ignored::line`]).
 pub const IGNORED: &str = "Clauseo's pre-write guard ignored its input";
 
-/// Why the guard let a tool go without reading what it writes: input it could not read, or a
-/// shape it does not know. The tool goes on (fail open: see the module doc), with one stderr
-/// line saying why.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Ignored {
-    /// Reading stdin failed.
-    Unreadable,
-    /// Stdin was empty or only whitespace.
-    Empty,
-    /// Stdin was not JSON, or was cut short.
-    NotJson,
-    /// No absolute `cwd` and no `--matter` folder.
-    NoFolder,
-    /// No `tool_name` string or no `tool_input`.
-    NoTool,
-    /// A known tool's `tool_input` lacked the field it names.
-    Shape(&'static str),
-}
-
-impl Ignored {
-    /// The stderr line, without its newline. It names no input content.
-    fn line(self) -> String {
-        let why = match self {
-            Self::Unreadable => "stdin could not be read".to_owned(),
-            Self::Empty => "stdin was empty".to_owned(),
-            Self::NotJson => "stdin was not JSON, or was cut short".to_owned(),
-            Self::NoFolder => "it has no absolute cwd and no --matter was given".to_owned(),
-            Self::NoTool => "it has no tool_name or tool_input".to_owned(),
-            Self::Shape(wanted) => format!("its tool_input has no {wanted}"),
-        };
-        format!("{IGNORED}: {why}. The tool goes on unchecked.")
-    }
-}
-
 /// The folder after [`MATTER_FLAG`], when `args` start with it and it is absolute.
 fn matter_arg(args: &[OsString]) -> Option<PathBuf> {
     match args {
@@ -354,49 +322,6 @@ fn matter_arg(args: &[OsString]) -> Option<PathBuf> {
             Some(PathBuf::from(folder)).filter(|folder| folder.is_absolute())
         }
         _ => None,
-    }
-}
-
-/// Why the guard refuses a tool.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Refusal {
-    /// A target is held open by Word or another program.
-    HeldOpen(MatterPath),
-    /// A Codex patch writes in the matter's `.codex` folder, or a Codex shell command names a
-    /// `.codex` folder.
-    CodexFolder,
-    /// A shell command runs `stetdoc mcp` or `stetdoc init`.
-    StetdocServe,
-    /// The hook input's `permission_mode` is one of [`UNASKED_MODES`].
-    UnaskedMode,
-}
-
-/// The permission modes in which Claude Code runs every tool unasked (`bypassPermissions`) or
-/// refuses every ask unseen (`dontAsk`): Clauseo never offers either and switches a session back
-/// from them (`actor/turn/forced_mode.rs`), and meanwhile the guard refuses every tool it checks.
-/// `acceptEdits` and `plan` are Clauseo's own and go on.
-const UNASKED_MODES: [&str; 2] = ["bypassPermissions", "dontAsk"];
-
-impl Refusal {
-    /// What the agent is told.
-    fn reason(&self) -> String {
-        match self {
-            Self::HeldOpen(path) => format!(
-                "{path} is open in Word or another program on this computer. A change made now \
-                 would be lost when that program saves it. Ask the lawyer to close it, or write \
-                 to a copy with another name."
-            ),
-            Self::CodexFolder => "Clauseo doesn't let the agent change the .codex folder in a \
-                                  matter: files there change what the agent loads and runs."
-                .to_owned(),
-            Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
-                                   in its shell: run the stetdoc command you need directly."
-                .to_owned(),
-            Self::UnaskedMode => "Clauseo doesn't let the agent change files in a permission mode \
-                                  that skips the lawyer's approval. Wait until Clauseo has put \
-                                  the session back in its own mode."
-                .to_owned(),
-        }
     }
 }
 
