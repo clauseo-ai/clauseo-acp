@@ -511,3 +511,76 @@ fn undoing_a_restore_removes_what_it_brought_back_and_the_conversation_records_b
     );
     assert!(!notes.exists());
 }
+
+/// Undoing a restore of one file puts back that file alone, though the request asks for the
+/// whole matter (a Versions that hasn't paged in the restore's marker): the host takes the
+/// undo's scope from the restore it undoes, as the log records it. The preview lists the same.
+#[test]
+fn undoing_a_one_file_restore_touches_only_that_file_whatever_the_request_says() {
+    let dir = Dir::new(
+        "undoing_a_one_file_restore_touches_only_that_file",
+        &[(FAKE, Scenario::Local("restore-note"))],
+    );
+    let host = dir.start(0);
+    let (matter, _thread, folder) = matter_with_thread(
+        &dir,
+        &host,
+        "m",
+        &[("brief.txt", "Clause 4 draft\n"), ("other.txt", "first\n")],
+        FAKE,
+    );
+    let import = matter_events(&host, matter)
+        .checkpoint(CheckpointKind::Import)
+        .unwrap();
+    let (brief, other) = (folder.join("brief.txt"), folder.join("other.txt"));
+    write::write(&brief, b"Clause 4 redrafted\n");
+    write::write(&other, b"second\n");
+    let CommandOutcome::VersionRestored {
+        checkpoint: brought,
+    } = host.ok(restore_brief(matter, import))
+    else {
+        panic!("the restore wrote nothing");
+    };
+    assert_eq!(std::fs::read_to_string(&brief).unwrap(), "Clause 4 draft\n");
+    assert_eq!(std::fs::read_to_string(&other).unwrap(), "second\n");
+    // the version just before the restore: the outside edits it kept
+    let before = matter_events(&host, matter)
+        .checkpoint(CheckpointKind::OutsideEdits)
+        .unwrap();
+    write::write(&other, b"third, after the restore\n");
+
+    let previewed = host
+        .query(HostQuery::PreviewRestore {
+            matter,
+            checkpoint: before,
+            scope: RestoreRequest::Matter,
+            undoes: Some(brought),
+        })
+        .unwrap();
+    let QueryResult::RestorePreview(preview) = previewed else {
+        panic!("PreviewRestore answered {previewed:?}");
+    };
+    let listed: Vec<&str> = preview
+        .changes
+        .iter()
+        .map(|change| change.path().as_str())
+        .collect();
+    assert_eq!(listed, ["brief.txt"], "{preview:?}");
+
+    host.ok(HostCommand::RestoreVersion {
+        matter,
+        checkpoint: before,
+        scope: RestoreRequest::Matter,
+        undoes: Some(brought),
+        thread: None,
+    });
+    assert_eq!(
+        std::fs::read_to_string(&brief).unwrap(),
+        "Clause 4 redrafted\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&other).unwrap(),
+        "third, after the restore\n",
+        "the undo left the other file's later edit alone"
+    );
+}

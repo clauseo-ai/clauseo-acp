@@ -17,7 +17,7 @@ use clauseo_protocol::{
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::MatterTag;
-use super::super::query::own_versions;
+use super::super::query::{own_versions, undone_scope};
 use super::super::{Actor, Tag, counting, last_exit};
 use super::{Holder, end, known, lost, undo};
 use crate::error::Error;
@@ -81,6 +81,13 @@ pub(crate) fn restore_version(actor: &mut Actor, ctx: CommandCtx, command: HostC
                 give_up(actor, matter, ctx, error);
                 actor.release(stream);
                 return;
+            }
+            // An undo of a restore of chosen files puts back those alone, as the log records
+            // that restore, whatever the request's scope: a Versions that hasn't paged in its
+            // marker asks for the whole matter.
+            let mut ask = ask;
+            if let Some(undone) = undone_scope(actor, matter, undoes) {
+                ask.scope = undone;
             }
             // Recorded first (`last_exit.rs`): sent once the record is durable.
             let files = match &ask.scope {

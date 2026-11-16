@@ -15,15 +15,10 @@ import {
 } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type {
-  BlacklineNotice,
-  BlacklinePart,
-  BlacklineParagraph,
-  ChangedTable,
   CheckpointKind,
   FileChange,
   FolderPlace,
   MatterSummary,
-  QueryResult,
   RestorePreview,
   RestoreScope,
   SkippedFile,
@@ -34,6 +29,7 @@ import type {
 import type { Entry } from "./entry.ts";
 import { detailed, fakeNext } from "../room/fake-next.ts";
 import { NO_STAND_INS, type StandIns } from "../room/versions/stand-ins.ts";
+import { marking, type Mark } from "./registry-u8-mark.ts";
 import { RoomClicking } from "./states.tsx";
 import { threadWords, versionWords, type WordsRef } from "./words.ts";
 
@@ -141,16 +137,9 @@ export type Matter = {
   openable?: boolean;
   /** preview_restore names these as locked, and the restore is refused with matter.file_locked (U9). */
   locked?: string[];
-  /** word_blackline's answer for a Word document compared with now: marked up (by default, whole), with notices,
-   * links whose web address changed or paragraphs of its own, left unanswered, or refused with a code. */
-  mark?:
-    | "hold"
-    | { truncated: boolean }
-    | { notices: BlacklineNotice[]; changed_tables?: ChangedTable[] }
-    | { parts: BlacklinePart[] }
-    | { changed_links: string[] }
-    | { paragraphs: BlacklineParagraph[] }
-    | { refused: string; retryable: boolean };
+  /** word_blackline's answer for a Word document compared with now: marked up (by default, whole), with notices or
+   * paragraphs of its own, left unanswered, or refused with a code. */
+  mark?: Mark;
   /** The lawyer accepted or rejected tracked changes in these files after the next turn: version cp6 (UC). */
   revisions?: FileChange[];
   /** The newest version is a restore to the turn's version three days ago, cp7, marked by the host. */
@@ -167,45 +156,16 @@ export type Matter = {
   /**  Where list_papers says the folder lives (local by default): its sync service names the
    * cloud-only lines. */
   place?: FolderPlace;
+  /** The computer the host says it runs on (the Mac by default). */
+  platform?: "mac" | "windows";
+  /** The paper changes while the restore dialog is open: the first preview_restore writes nothing, then the matter
+   * moves (a new version) and the next writes `changes`. */
+  movesWhileOpen?: boolean;
+  /** preview_restore's changes when it is asked to undo a restore (`changes` by default). */
+  undoChanges?: FileChange[];
+  /** restore_version is refused with matter.file_folder_clash, naming this entry in the way. */
+  clash?: string;
 };
-
-/** The host's Word tool's marking up of the notice: a word out and a word in, and a paragraph added. */
-const MARKED_NOTICE: BlacklineParagraph[] = [
-  {
-    change: "same",
-    runs: [{ kind: "same", text: "To the Branch Manager, State Bank of India, Connaught Place." }],
-  },
-  {
-    change: "changed",
-    runs: [
-      { kind: "same", text: "My client asks that the account be restored within " },
-      { kind: "del", text: "thirty" },
-      { kind: "ins", text: "fifteen" },
-      { kind: "same", text: " days of this notice." },
-    ],
-  },
-  {
-    change: "added",
-    runs: [{ kind: "ins", text: "A copy of the statement of 3 March is annexed." }],
-  },
-];
-
-/** word_blackline's answer, as `mark` asks. */
-function marking(mark: Matter["mark"]): QueryResult | Promise<QueryResult> {
-  if (mark === "hold") return new Promise<QueryResult>(() => {});
-  if (mark !== undefined && "refused" in mark)
-    return Promise.reject({ code: mark.refused, message: "", retryable: mark.retryable });
-  const truncated = mark !== undefined && "truncated" in mark && mark.truncated;
-  const notices = mark !== undefined && "notices" in mark ? mark.notices : [];
-  const paragraphs = mark !== undefined && "paragraphs" in mark ? mark.paragraphs : MARKED_NOTICE;
-  const changed_links = mark !== undefined && "changed_links" in mark ? mark.changed_links : [];
-  const parts = mark !== undefined && "parts" in mark ? mark.parts : [];
-  const changed_tables =
-    mark !== undefined && "changed_tables" in mark ? (mark.changed_tables ?? []) : [];
-  return {
-    word_blackline: { paragraphs, truncated, notices, changed_links, parts, changed_tables },
-  };
-}
 
 /** The matter's history: its papers brought in three days ago, a turn of the conversation's that morning, the
  * lawyer's edits outside Clauseo this hour, and the conversation's next turn, now. */
@@ -268,7 +228,26 @@ export function versionsHost(m: Matter): FakeTransport {
     size: f.size_bytes,
     modified: today(0),
   }));
+  // the stream's batches in order: the first is its reset
+  let seq = 1;
+  let previews = 0;
+  // the paper changed outside Clauseo: a version of the outside edits, which moves the matter
+  const moveMatter = () =>
+    queueMicrotask(() => {
+      seq += 1;
+      transport.deliver(
+        event(
+          batch(
+            seq,
+            [upsert(version(8, "outside_edits", Date.now(), [file(NOTICE)]))],
+            undefined,
+            MATTER_STREAM,
+          ),
+        ),
+      );
+    });
   const transport: FakeTransport = new FakeTransport({
+    ...(m.platform === undefined ? {} : { platform: m.platform }),
     ...(m.openable === true || m.place !== undefined
       ? {
           next: fakeNext({
@@ -290,13 +269,19 @@ export function versionsHost(m: Matter): FakeTransport {
         };
       if (query.compare_versions !== undefined) return { file_changes: m.compare ?? [] };
       // a restore's added files: asked to undo it, they go; asked to restore the version before it alone, they stay
-      if (query.preview_restore !== undefined)
+      if (query.preview_restore !== undefined) {
+        previews += 1;
+        if (m.movesWhileOpen === true && previews === 1) {
+          moveMatter();
+          return { restore_preview: { ...preview, changes: [] } };
+        }
         return {
           restore_preview:
             query.preview_restore.undoes === undefined
               ? { ...preview, added_since: [...preview.added_since, ...(m.removes ?? [])] }
-              : { ...preview, removes: m.removes ?? [] },
+              : { ...preview, changes: m.undoChanges ?? preview.changes, removes: m.removes ?? [] },
         };
+      }
       if (query.word_blackline !== undefined) return marking(m.mark);
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
@@ -306,12 +291,21 @@ export function versionsHost(m: Matter): FakeTransport {
       if (to === undefined) return "done";
       if ((m.locked?.length ?? 0) > 0)
         throw { code: "matter.file_locked", message: "held", retryable: true };
+      if (m.clash !== undefined)
+        throw {
+          code: "matter.file_folder_clash",
+          message: "clash",
+          retryable: false,
+          files: [m.clash],
+        };
       // the host writes the restore's version and its marker, then answers
+      seq += 1;
+      const at = seq;
       queueMicrotask(() =>
         transport.deliver(
           event(
             batch(
-              2,
+              at,
               [
                 upsert(version(5, "restore", Date.now())),
                 upsert(

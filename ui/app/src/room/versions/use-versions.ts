@@ -223,6 +223,7 @@ export function useVersions({
       onPanel: panel ? null : onPanel,
       onAway: panel ? putAway : null,
       place: papers?.place,
+      platform,
     }),
     toolbar: {
       onVersions: panel ? close : onPanel,

@@ -62,7 +62,8 @@ impl Error {
 
     /// The wire form ([`HostError`]'s `From`), without taking the error: a refusal as it was
     /// made; a matter's `FileLocked` with its files in `HostError::files` and their count, not
-    /// their paths, in the message; anything else with its `Display` text as the message.
+    /// their paths, in the message; a matter's `FileFolderClash` with the entry in the way in
+    /// `HostError::files`; anything else with its `Display` text as the message.
     pub(crate) fn to_wire(&self) -> HostError {
         match self {
             Self::Refused(refusal) => refusal.clone(),
@@ -74,6 +75,9 @@ impl Error {
                 },
             )
             .with_files(paths.clone()),
+            Self::Matters(clauseo_matters::Error::FileFolderClash { in_way, .. }) => {
+                HostError::new(self.code(), self.to_string()).with_files(vec![in_way.clone()])
+            }
             Self::Invalid(_)
             | Self::Reducer(_)
             | Self::Store(_)

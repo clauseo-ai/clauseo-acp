@@ -284,9 +284,12 @@ fn plan(
     for candidate in draft.candidates {
         // A chosen file meeting a folder of its name, or a file where its folder goes, is
         // refused: the lawyer named it, so keeping it silently would restore nothing.
-        if chosen.is_some() && writeback::clash(folder, &candidate.path)? {
+        if chosen.is_some()
+            && let Some(in_way) = writeback::clash(folder, &candidate.path)?
+        {
             return Err(Error::FileFolderClash {
                 path: candidate.path,
+                in_way,
             });
         }
         let size = core.size_of(candidate.path.as_str(), candidate.blob)?;
@@ -463,7 +466,9 @@ pub(crate) fn restore(
             kept: plan.kept,
         });
     }
-    // 5. Stage, check again, rename.
+    // 5. Stage, check again, rename; a folder made since the plan where a file goes, or a file
+    // where its folder goes, is the clash it is, not a file another program moved.
+    clashed_since(folder, &plan.writes)?;
     let ops = plan.ops();
     let ops: Vec<&Op> = ops.iter().collect();
     writeback::apply(core, folder, settings.trash.as_ref(), &ops)?;
@@ -481,6 +486,21 @@ pub(crate) fn restore(
         added_since: plan.added_since,
         kept: plan.kept,
     })
+}
+
+/// `FileFolderClash` for the first of `writes` that now meets an entry of the other kind
+/// ([`writeback::clash`]): one made after the plan checked it. A whole-matter restore keeps such
+/// a file when the plan sees it, and refuses it here, since the write would fail on it.
+fn clashed_since(folder: &Path, writes: &[Write]) -> Result<(), Error> {
+    for write in writes {
+        if let Some(in_way) = writeback::clash(folder, &write.path)? {
+            return Err(Error::FileFolderClash {
+                path: write.path.clone(),
+                in_way,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// The spec of a restore's `outside-edits` or `restore` checkpoint: no thread, no turn.

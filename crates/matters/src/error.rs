@@ -99,10 +99,13 @@ pub enum Error {
     /// A restore of chosen files names a file whose name the folder now holds as a folder, or
     /// one of whose folders the folder now holds as a file (`matter.file_folder_clash`). Nothing
     /// was written. A whole-matter restore keeps such a file instead (its plan's `kept`).
-    #[error("{path} is now a folder, or one of its folders is now a file")]
+    #[error("{in_way}, now of the other kind, is in the way of {path}")]
     FileFolderClash {
         /// The chosen file.
         path: MatterPath,
+        /// The entry in the way: `path` itself when a folder now has its name, else the folder
+        /// of it that is now a file.
+        in_way: MatterPath,
     },
     /// [`Matter::create`](crate::Matter::create) was given a folder that already exists
     /// (`command.invalid`); an existing folder is imported instead.

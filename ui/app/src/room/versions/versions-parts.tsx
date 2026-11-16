@@ -32,7 +32,7 @@ import { PAPER_GONE, refusalOf } from "../open.ts";
 import { markable, markAskOf, type Blacklines } from "./blackline.ts";
 import { MarkedDesk } from "./blackline-sheet.tsx";
 import type { VersionsController } from "./controller.ts";
-import { restorable, restoreOf, type Snapshot } from "./state.ts";
+import { restorable, restoreOf, writesNothing, type Snapshot } from "./state.ts";
 import type { StandIns } from "./stand-ins.ts";
 import { calendarOf, fileName, undoable } from "./timeline.ts";
 import {
@@ -153,11 +153,12 @@ export function VersionsRail({
   );
 }
 
-/** Whether a version's change can be taken back from the band: a turn's, with undo_step, or a restore, by restoring
- * the version before it through the restore dialog. */
+/** Whether a version's change can be taken back from the band: a turn's, with undo_step, or a restore the matter's
+ * stream has a marker for (it says what the restore put back), by restoring the version before it through the restore
+ * dialog. */
 const takesBack = (s: Snapshot, v: Version): boolean => {
   const m = s.timeline.meta.get(v.id);
-  return undoable(m) || m?.kind === "restore";
+  return undoable(m) || (m?.kind === "restore" && s.restores.has(v.id));
 };
 
 /** The band over the work, the comparison under it, and the restore dialog. */
@@ -171,6 +172,7 @@ export function VersionsCentre({
   onPanel,
   onAway,
   place,
+  platform = "mac",
 }: {
   controller: VersionsController;
   /** The Word documents' marked-up changes, kept while Versions is open. */
@@ -188,6 +190,8 @@ export function VersionsCentre({
    * that was only in the cloud has an earlier copy, after an undo. Undefined until the papers are
    * listed. */
   place?: FolderPlace | undefined;
+  /** The computer's: an undo that removed a paper names its bin. */
+  platform?: Platform;
 }) {
   const w = useVersionWords();
   const { lang } = w;
@@ -251,7 +255,8 @@ export function VersionsCentre({
     const restore = done === null ? null : restoreOf(s, done);
     // after an undo, a file it kept because Clauseo had no earlier copy says so on a line of its
     // own
-    for (const [i, line] of (done === null ? [] : doneLines(lang, cal, s, done, place)).entries())
+    const lines = done === null ? [] : doneLines(lang, cal, s, done, place, platform);
+    for (const [i, line] of lines.entries())
       notices.push({
         tone: line.kept ? "failed" : "done",
         text: line.text,
@@ -282,7 +287,7 @@ export function VersionsCentre({
     s.failed !== "matter.turn_running" &&
     s.failed !== "thread.turn_running" &&
     s.ask?.stage !== "word"
-      ? failedLine(lang, s.failed)
+      ? failedLine(lang, s.failed, s.clash)
       : null;
   // a folder gone, or not the matter's: Locate folder beside the words (act-refusals.ts)
   const locateAct =
@@ -324,11 +329,14 @@ export function VersionsCentre({
     );
   // the document in view, which Restore this document puts back alone as it was then
   const back = inView === undefined ? null : restorable(inView);
-  // an undo waits while the host checks what changed since, and while it would put nothing back
+  // an undo waits while the host checks what changed since, and while it would put nothing back; so does a one-file
+  // restore that would write nothing (the paper is the same, or the host keeps it as it is)
+  const pending = s.ask;
   const held =
-    s.ask?.act === "undo" &&
-    s.ask.stage === "confirm" &&
-    (s.ask.checking === true || ![...s.ask.choices.values()].includes("undo"));
+    pending?.stage === "confirm" &&
+    (pending.act === "undo"
+      ? pending.checking === true || ![...pending.choices.values()].includes("undo")
+      : pending.file !== null && pending.undoes === null && writesNothing(pending.preview));
   return (
     <div className="ver-room-band">
       <VersionBand

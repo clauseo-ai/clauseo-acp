@@ -98,6 +98,22 @@ fn file_locked_names_its_files_and_no_path_in_the_message() {
     assert_eq!(wire(Error::Closed).files(), []);
 }
 
+/// A matter's `FileFolderClash` names the entry in the way in `files`, for the app to name the
+/// folder or file to rename.
+#[test]
+fn a_file_folder_clash_names_the_entry_in_the_way() {
+    let clash = || {
+        Error::from(clauseo_matters::Error::FileFolderClash {
+            path: MatterPath::new("Drafts/Notice.docx").unwrap(),
+            in_way: MatterPath::new("Drafts").unwrap(),
+        })
+    };
+    for error in [wire(clash()), clash().to_wire()] {
+        assert_eq!(error.code(), ErrorCode::MatterFileFolderClash);
+        assert_eq!(error.files(), [MatterPath::new("Drafts").unwrap()]);
+    }
+}
+
 /// A matter's `FolderMissing` reaches a failure's detail with its reason, never the folder's
 /// path, and the wire with its code; a gone folder is `folder_missing`, one without its marker
 /// `folder_not_a_matter`.

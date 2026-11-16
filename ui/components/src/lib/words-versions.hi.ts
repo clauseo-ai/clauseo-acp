@@ -192,12 +192,26 @@ const OWN = {
     "इससे '{paper}' का अभी वाला रूप बदल जाएगा। आपकी अभी वाली प्रति संस्करणों में रहेगी, इसलिए आप इसे पूर्ववत कर सकते हैं।",
   "'{paper}' comes back as it was then. You can undo this.":
     "'{paper}' वैसा ही वापस आ जाएगा जैसा तब था। आप इसे पूर्ववत कर सकते हैं।",
+  "'{paper}' comes back as it was then, next to '{current}', which stays as it is. You can undo this.":
+    "'{paper}' वैसा ही वापस आ जाएगा जैसा तब था, और उसके साथ '{current}' भी जैसा है वैसा ही रहेगा। आप इसे पूर्ववत कर सकते हैं।",
   "Nothing will change.": "कुछ नहीं बदलेगा।",
   "Nothing will change. '{paper}' is already the same as it was then.":
     "कुछ नहीं बदलेगा। '{paper}' पहले से वैसा ही है जैसा तब था।",
   "Restored '{paper}'.": "'{paper}' पुनर्स्थापित किया गया।",
   "Undid the restore. '{paper}' is back as it was before.":
-    "पुनर्स्थापना पूर्ववत की गई। '{paper}' फिर से वैसा है जैसा वह पहले था।",
+    "पुनर्स्थापन पूर्ववत किया गया। '{paper}' फिर से वैसा है जैसा वह पहले था।",
+  "'{paper}' had changed since you opened this, so Clauseo restored it as it was then. Your newer version is kept in Versions.":
+    "इसे खोलने के बाद '{paper}' बदल गया था, इसलिए Clauseo ने उसे वैसा पुनर्स्थापित किया जैसा वह तब था। आपका नया रूप संस्करणों में रखा गया है।",
+  "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Trash.":
+    "पुनर्स्थापन पूर्ववत किया गया। '{paper}' उससे पहले इस मामले में नहीं था, इसलिए Clauseo ने उसे Trash में डाल दिया।",
+  "Undid the restore. '{paper}' wasn't in this matter before it, so Clauseo moved it to the Recycle Bin.":
+    "पुनर्स्थापन पूर्ववत किया गया। '{paper}' उससे पहले इस मामले में नहीं था, इसलिए Clauseo ने उसे Recycle Bin में डाल दिया।",
+  "Nothing was undone: '{paper}' has changed since the restore, so Clauseo left it as it is.":
+    "कुछ पूर्ववत नहीं हुआ: पुनर्स्थापन के बाद '{paper}' बदल गया है, इसलिए Clauseo ने उसे जैसा है वैसा ही छोड़ दिया।",
+  "Clauseo can't restore this paper: there's now a folder called '{name}' where it was. Nothing has changed. Rename or move that folder, then try again.":
+    "Clauseo यह दस्तावेज़ पुनर्स्थापित नहीं कर सकता: जहाँ यह था, वहाँ अब '{name}' नाम का एक फ़ोल्डर है। कुछ नहीं बदला है। उस फ़ोल्डर का नाम बदलें या उसे कहीं और ले जाएँ, फिर दोबारा प्रयास करें।",
+  "Clauseo can't restore this paper: '{name}', the folder it was in, is now a file. Nothing has changed. Rename or move that file, then try again.":
+    "Clauseo यह दस्तावेज़ पुनर्स्थापित नहीं कर सकता: '{name}', जिस फ़ोल्डर में यह था, अब एक फ़ाइल है। कुछ नहीं बदला है। उस फ़ाइल का नाम बदलें या उसे कहीं और ले जाएँ, फिर दोबारा प्रयास करें।",
   "Restored {paper} to how it was at {time} today.":
     "{paper} को वैसा पुनर्स्थापित किया गया जैसा वह आज {time} बजे था।",
   "Restored {paper} to how it was at {time} on {date}.":

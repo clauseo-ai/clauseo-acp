@@ -12,8 +12,9 @@
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
-    AgentId, AgentKind, AgentSummary, CheckpointId, ErrorCode, FolderState, HostQuery, MatterId,
-    Principal, QueryResult, RestorePreview, StreamId, UndoPreview, ViewEntry,
+    AgentId, AgentKind, AgentSummary, CheckpointId, ErrorCode, FolderState, HostQuery, MarkerKind,
+    MatterId, Principal, QueryResult, RestorePreview, RestoreRequest, RestoreScope, StreamId,
+    UndoPreview, ViewEntry,
 };
 
 use std::path::PathBuf;
@@ -237,6 +238,14 @@ fn matter_query(
             let checked = loaded
                 .and_then(|()| own_versions(actor, matter, &versions))
                 .and_then(|()| actor.matter_worker(matter));
+            // an undo's preview lists what the undo writes: that restore's files alone, if it
+            // put back chosen files (as `turn/restore.rs` restores them)
+            let mut job = job;
+            if let MatterJob::Preview { scope, undoes, .. } = &mut job
+                && let Some(undone) = undone_scope(actor, matter, *undoes)
+            {
+                *scope = undone;
+            }
             match checked {
                 // A refused send drops the tag and with it `reply`: the caller sees the host
                 // closed.
@@ -388,4 +397,29 @@ pub(super) fn own_versions(
         }
     }
     Ok(())
+}
+
+/// The files the restore `undoes` put back, as the matter's log records it, for an undo of it to
+/// put back those alone whatever its request says: `None` for a whole-matter restore, for no
+/// `undoes`, and for one the loaded log doesn't hold (`own_versions` refuses that one).
+pub(super) fn undone_scope(
+    actor: &Actor,
+    matter: MatterId,
+    undoes: Option<CheckpointId>,
+) -> Option<RestoreRequest> {
+    let undoes = undoes?;
+    let state = actor.loaded(StreamId::Matter(matter))?.state.as_matter()?;
+    state.entries().values().find_map(|entry| match entry {
+        ViewEntry::Marker(marker) => match &marker.kind {
+            MarkerKind::VersionRestored {
+                checkpoint,
+                scope: RestoreScope::Files { paths },
+                ..
+            } if *checkpoint == undoes => Some(RestoreRequest::Files {
+                paths: paths.clone(),
+            }),
+            _ => None,
+        },
+        _ => None,
+    })
 }
