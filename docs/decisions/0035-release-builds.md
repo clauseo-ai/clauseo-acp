@@ -315,9 +315,10 @@ silent fall-through:
   Anyway, since macOS 15 dropped the right-click Open bypass, and the "damaged" fix
   `xattr -dr com.apple.quarantine /Applications/Clauseo.app`; Windows: More info, Run anyway, while
   SignPath is off) only in an unsigned beta, in the words of `docs/install/macos.md` and
-  `windows.md`, which they link. Release notes are not registered strings, so they take no copy
-  approval id (`copy:check` fails on an approved id the registry lacks); Rohan reads them on the
-  draft before he approves `publish`.
+  `windows.md`, which they link. Each line of the block is a copy review string, UC-751 to UC-755
+  (`registry-release-notes.tsx`, English only), approved like any other before a `v*` release
+  ships; `latest-json.test.mjs` fails unless the block, read as GitHub shows it, says exactly the
+  registered strings.
 - A job sees only the secrets its environment gives it: `assemble` (no environment) the
   repository's, `publish` those and `release-publish`'s. Apple secrets kept only in the `release`
   environment, where `build` would sign, are invisible to both: `publish`'s ad hoc check still

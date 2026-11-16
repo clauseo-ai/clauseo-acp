@@ -27,6 +27,9 @@
 // `blocklist` and downloading blocklist-snapshot, behind the same switch, before it builds or
 // bundles; and every step of `blocklist` but its off-notice behind the switch, with no job-level
 // `if:`, so with the switch off it runs as a no-op and every job below it runs as with it on.
+// The release notes' "Opening Clauseo the first time" block must say, line by line as GitHub
+// shows it, the strings the copy review registers for it (registry-release-notes.tsx) and
+// copy-approvals holds, so the published words are the reviewed ones.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -1447,4 +1450,49 @@ test("importing latest-json.mjs with a non-path argv[1] runs nothing and does no
   );
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /^\d+\n$/);
+});
+
+// The first-open block's lines as GitHub shows them: each `echo "..."` from its heading to the next
+// heading, the shell's escapes undone, then the Markdown (heading, bullet, bold, link, code) read
+// as plain text, as the copy review registers them.
+const firstOpenLines = (text) => {
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => l.trim() === 'echo "## Opening Clauseo the first time"');
+  assert.ok(start >= 0, "release.yml has no first-open heading");
+  const end = lines.findIndex((l, i) => i > start && /^\s*echo "## /.test(l));
+  assert.ok(end > start, "release.yml's first-open block has no heading after it");
+  return lines
+    .slice(start, end)
+    .map((l) => /^\s*echo "(.+)"$/.exec(l)?.[1])
+    .filter((l) => l !== undefined)
+    .map((l) =>
+      l
+        .replace(/\\(["`$\\])/g, "$1")
+        .replace(/^## /, "")
+        .replace(/^- /, "")
+        .replace(/\*\*(.+?)\*\*/g, "$1")
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+        .replace(/`([^`]+)`/g, "$1"),
+    );
+};
+
+test("the first-open block says what the copy review registers and copy-approvals holds", () => {
+  const ui = join(here, "..", "..", "ui", "app");
+  const shown = firstOpenLines(readFileSync(RELEASE_YML, "utf8"));
+  assert.equal(shown.length, 5);
+  for (const line of shown)
+    assert.doesNotMatch(line, /[*[\]`$]/, `Markdown or a slot left in: ${line}`);
+  const registry = readFileSync(join(ui, "src", "review", "registry-release-notes.tsx"), "utf8");
+  const call = /notesWords\(\s*(?:"((?:[^"\\]|\\.)*)"|'([^'\\]*)')\s*,?\s*\)/g;
+  const registered = [...registry.matchAll(call)].map(([, double, single]) =>
+    double === undefined ? single : JSON.parse(`"${double}"`),
+  );
+  assert.deepEqual(shown, registered);
+  const approvals = JSON.parse(
+    readFileSync(join(ui, "copy-approvals", "UC-release-latest-check.json"), "utf8"),
+  );
+  assert.deepEqual(
+    Object.keys(approvals).sort().map((id) => approvals[id].en),
+    shown,
+  );
 });
