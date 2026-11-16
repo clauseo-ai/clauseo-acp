@@ -149,9 +149,9 @@ pub(crate) struct RunFolders {
     /// session has it once [`Self::chrome`] is found and its two folders below are made.
     pub(crate) browser_shell: bool,
     /// `<root>/agent-browser` (`browser::SESSION_DIR`): the shell tool's own folder, holding
-    /// `config.json` (`AGENT_BROWSER_CONFIG`), `downloads` (`AGENT_BROWSER_DOWNLOAD_PATH`) and
-    /// `profile` (`AGENT_BROWSER_PROFILE`): made only for the shell tool, gone with the run
-    /// folder. Inside the run folder, so the data fences reopen it for this session only.
+    /// `config.json` (`AGENT_BROWSER_CONFIG`) and `profile` (`AGENT_BROWSER_PROFILE`), gone with
+    /// the run folder; its `downloads` (`AGENT_BROWSER_DOWNLOAD_PATH`) are `<work>/downloads`, kept
+    /// with the work folder. Each made only for the shell tool, in the session's own folders.
     pub(crate) agent_browser: PathBuf,
     pub(crate) browser_config: PathBuf,
     pub(crate) downloads: PathBuf,
@@ -219,11 +219,11 @@ impl RunFolders {
         let agent_browser = root.join(crate::browser::SESSION_DIR);
         Self {
             key,
+            downloads: folders::work_dir(data, key.matter, key.thread).join("downloads"),
             work: folders::work_dir(data, key.matter, key.thread),
             browser: browser_run_dir(data).join(key.id()),
             guard: None,
             browser_config: agent_browser.join(crate::browser::SESSION_CONFIG),
-            downloads: agent_browser.join("downloads"),
             browser_profile: agent_browser.join("profile"),
             agent_browser,
             skill_packs: root.join("skill-packs"),

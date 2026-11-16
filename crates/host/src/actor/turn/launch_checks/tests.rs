@@ -502,9 +502,9 @@ fn the_shell_browser_env_is_reachable_under_its_own_codex_fence_only() {
             path.display()
         );
     }
-    for path in &paths(&run)[..3] {
-        assert!(path.starts_with(&run.agent_browser), "{}", path.display());
-    }
+    let [config, downloads, profile] = [0, 1, 2].map(|at| paths(&run)[at].clone());
+    assert!(config.starts_with(&run.agent_browser) && profile.starts_with(&run.agent_browser));
+    assert_eq!(downloads, run.work.join("downloads"));
     let tools = data.join(clauseo_profile::paths::TOOLS_DIR);
     let copy = tools.join(clauseo_profile::paths::AGENT_BROWSER_COMMAND);
     assert_eq!(session_access(&fence, &own, &copy), "read");
@@ -530,8 +530,8 @@ fn the_shell_browser_env_is_reachable_under_its_own_codex_fence_only() {
     write::remove_dir_all(&root).unwrap();
 }
 
-/// The shell tool's folders and config are made in the run folder's own `agent-browser`
-/// folder, the config `{}` and private, a planted one replaced at the next launch.
+/// The shell tool's config and profile are made in the run folder's own `agent-browser` folder
+/// and its downloads in the work folder, the config `{}` and private, whatever was there replaced.
 #[test]
 fn the_shell_browser_folders_and_config_are_made_in_the_own_agent_browser_folder() {
     let data = scratch("agent-browser");
@@ -543,10 +543,7 @@ fn the_shell_browser_folders_and_config_are_made_in_the_own_agent_browser_folder
     assert_eq!(run.agent_browser, run.root.join("agent-browser"));
     assert!(run.downloads.is_dir() && run.browser_profile.is_dir());
     assert_eq!(std::fs::read(&run.browser_config).unwrap(), b"{}\n");
-    assert_eq!(
-        names(&run.agent_browser),
-        ["config.json", "downloads", "profile"]
-    );
+    assert_eq!(names(&run.agent_browser), ["config.json", "profile"]);
     assert!(!data.join(crate::browser::CONFIG_DIR).exists());
     #[cfg(unix)]
     {

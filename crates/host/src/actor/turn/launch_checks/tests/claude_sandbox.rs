@@ -48,6 +48,6 @@ fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
         }
     }
     assert!(sandbox.allow_read.contains(&text(&run.downloads)));
-    assert!(text(&run.downloads).ends_with("agent-browser/downloads"));
+    assert_eq!(run.downloads, run.work.join("downloads"));
     assert!(sandbox.deny_read.contains(&text(&data)));
 }

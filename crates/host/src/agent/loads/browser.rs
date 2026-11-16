@@ -381,7 +381,7 @@ pub(crate) struct ShellInputs<'a> {
     pub(crate) session: &'a str,
     /// `<data>/run/<session id>/agent-browser/config.json` (`browser::write_session_config`).
     pub(crate) config: &'a Path,
-    /// `<data>/run/<session id>/agent-browser/downloads`.
+    /// `<data>/agent-state/<matter id>/work/<thread>/downloads`, kept across relaunches.
     pub(crate) downloads: &'a Path,
     /// `<data>/run/<session id>/agent-browser/profile`.
     pub(crate) profile: &'a Path,
