@@ -29,6 +29,7 @@ import { useAgentPlan } from "./agent-plan.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
 import { pausedPick } from "./limit-words.ts";
 import { useBusy } from "./live.ts";
+import { useStarting } from "./starting-hint.ts";
 import { asksPick, doingPick } from "./step-names.ts";
 import {
   ThreadActionsContext,
@@ -145,6 +146,8 @@ export function Work({
   const stream = session.actions.stream;
   useWatch(store, stream);
   const busy = useBusy(stream, session.sentTurn);
+  // UC-873: the header says Starting, for the working line's hint once it has held STARTING_HINT_MS (starting-hint.ts)
+  const starting = useStarting(store, stream);
   const failed = useStreamError(store, stream);
   // the agent's commands for the composer's `/` menu, as the thread's header has them
   const [pickCommands] = useState(commandsPick);
@@ -290,6 +293,7 @@ export function Work({
           mentions={mentions}
           disabled={matter === null}
           busy={busy}
+          starting={starting}
           doing={doing}
           asks={asks}
           refused={shownRefused}

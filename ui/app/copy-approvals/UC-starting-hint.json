@@ -1,0 +1,11 @@
+{
+  "UC-873": {
+    "en": "{agent} is taking longer than usual to start.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (provisional)",
+    "note": "Orchestrator 16 Nov: after 8 s in Starting; the guard self-test, session/new and settings check send no events, worst case ~40 s before a refusal."
+  }
+}
