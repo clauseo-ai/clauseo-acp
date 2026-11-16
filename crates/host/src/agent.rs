@@ -484,16 +484,29 @@ async fn own(
     } else {
         // Listed off the actor first (Unix only: Windows ends the whole job): the tree kill
         // ends a descendant that left the agent's group, as a Codex command does.
+        // A listing that misses its wait is still ended once it comes (`leftovers::end_late`).
         owner.enter(pid, OwnerStep::Listing);
-        let listed = if cfg!(unix) {
-            leftovers::snapshot(handle.descendants(), Arc::clone(clock)).await
+        let listing = if cfg!(unix) {
+            let descendants = handle.descendants();
+            leftovers::listing(descendants, Arc::clone(clock), leftovers::STOP_LIST_WAIT).await
         } else {
-            None
+            leftovers::Listed::Failed
+        };
+        let (listed, late) = match listing {
+            leftovers::Listed::Taken(snapshot) => (Some(snapshot), None),
+            late @ leftovers::Listed::Late(_) => (None, Some(late)),
+            leftovers::Listed::Failed => (None, None),
         };
         owner.enter(pid, OwnerStep::Ladder);
         let outcome = handle
             .shutdown(&ProcessTimer(Arc::clone(clock)), listed)
             .await;
+        #[cfg(unix)]
+        if let Some(late) = late {
+            leftovers::end_late(late, Arc::clone(clock));
+        }
+        #[cfg(not(unix))]
+        drop(late);
         let step = StopStep::of(&outcome);
         if step == StopStep::Unresponsive {
             tracing::warn!(

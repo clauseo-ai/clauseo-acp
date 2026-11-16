@@ -59,9 +59,10 @@ impl End {
     }
 }
 
-/// Where the prompt's task leaves the listing of the agent's descendants; `None` until it is
-/// taken, and when it failed.
-pub(super) type BeforePrompt = std::rc::Rc<std::cell::RefCell<Option<clauseo_process::Snapshot>>>;
+/// Where the prompt's task leaves the listing of the agent's descendants (taken, or late and kept
+/// for the sweep to wait on); `None` until the prompt's wait for it ends.
+pub(super) type BeforePrompt =
+    std::rc::Rc<std::cell::RefCell<Option<crate::agent::leftovers::Listed>>>;
 
 impl Current {
     pub(super) fn new(

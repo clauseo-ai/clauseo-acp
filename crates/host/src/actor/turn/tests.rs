@@ -32,6 +32,7 @@ mod own_restart;
 mod papers;
 mod profile_live;
 mod queue;
+mod refused_requeue;
 mod relocate;
 mod removal;
 mod repair;

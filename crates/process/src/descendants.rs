@@ -196,6 +196,21 @@ impl Snapshot {
         }
     }
 
+    /// Kills each process the listing holds that still runs with the start it was listed with
+    /// (SIGKILL, its group too when it leads one; a reused pid is never signalled). For a stop
+    /// whose listing came back only after its ladder. Returns how many were signalled; none when
+    /// the listing failed.
+    #[cfg(unix)]
+    pub fn kill_listed(&self) -> usize {
+        match &self.listing {
+            Listing::Failed => 0,
+            Listing::Taken(processes) => processes
+                .iter()
+                .filter(|process| os::signal(process, os::Ask::Kill))
+                .count(),
+        }
+    }
+
     /// The processes it holds, for the stop's kill; `None` when the listing failed.
     #[cfg(unix)]
     pub(crate) fn into_processes(self) -> Option<Vec<Proc>> {

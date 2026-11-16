@@ -109,10 +109,13 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             // cancelled turn ends what is new since this listing.
             let (checked, listed) = join(
                 codex::prepare::recheck(clock, matter, check),
-                leftovers::snapshot(descendants, list_clock),
+                leftovers::listing(descendants, list_clock, leftovers::SNAPSHOT_WAIT),
             )
             .await;
-            *before.borrow_mut() = listed;
+            *before.borrow_mut() = match listed {
+                leftovers::Listed::Failed => None,
+                kept @ (leftovers::Listed::Taken(_) | leftovers::Listed::Late(_)) => Some(kept),
+            };
             if let Err(error) = checked {
                 return AgentReply::PromptRefused { turn, error };
             }

@@ -28,6 +28,7 @@
 //! turn's tail and is dropped, as `Origin::Late` is.
 
 mod late;
+pub(super) mod refused;
 mod restart;
 
 use std::time::Duration;
@@ -65,6 +66,9 @@ pub(crate) struct Held {
     cancelled_at: Option<Duration>,
     /// The late window of a cancelled agent-started turn, while it is open.
     late: Option<late::Late>,
+    /// The run of agent-started turns refused before they started, no turn starting between:
+    /// their code and how many (`refused.rs`, `refused::CAP`).
+    failed: Option<(clauseo_protocol::ErrorCode, u32)>,
 }
 
 #[cfg(test)]
