@@ -373,8 +373,8 @@ fn a_matter_named_muller_is_checked_by_name() {
 /// `PE\0\0` signature (whose offset is at 0x3C), and the field is 68 bytes into it.
 #[cfg(test)]
 fn subsystem_at(image: &[u8]) -> usize {
-    let at = image.get(0x3C..0x40).unwrap();
-    let pe = usize::try_from(u32::from_le_bytes(at.try_into().unwrap())).unwrap();
+    let at: [u8; 4] = image[0x3C..0x40].try_into().unwrap();
+    let pe = usize::try_from(u32::from_le_bytes(at)).unwrap();
     assert_eq!(image.get(pe..pe + 4), Some(&b"PE\0\0"[..]), "a PE image");
     pe + 24 + 68
 }
@@ -408,9 +408,11 @@ fn the_guard_is_a_console_program() {
     assert_eq!(subsystem(Path::new(GUARD)), 3, "{GUARD}");
 }
 
-/// The control: the same line run against a GUI twin of the guard gives no answer of the guard's
-/// (PowerShell does not wait for a GUI program or take its exit code), so the tests above would
-/// fail for a GUI target: a listing doesn't end with 0, and a held file's refusal doesn't name it.
+/// The control: the same line run against a GUI twin of the guard never takes the guard's exit
+/// code (PowerShell sets no `$LASTEXITCODE` for a GUI program), so the tests above would fail for
+/// a GUI target: on every shell a listing doesn't end with 0. Under Windows PowerShell 5.1 the held
+/// file's refusal doesn't name it either; PowerShell 7 was seen passing the GUI program's stderr
+/// through (the guard's reason, then the shared line), so that half is 5.1's alone.
 #[test]
 fn a_gui_twin_of_the_guard_gives_no_answer_of_the_guards() {
     let root = tempfile::Builder::new()
@@ -427,9 +429,11 @@ fn a_gui_twin_of_the_guard_gives_no_answer_of_the_guards() {
         let input = codex_input(matter.path(), "Bash", "dir");
         let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
         assert_ne!(output.status.code(), Some(0), "{shell}: {output:?}");
-        let input = codex_input(matter.path(), "apply_patch", &patch("अनुबंध.docx"));
-        let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
-        let errors = String::from_utf8_lossy(&output.stderr);
-        assert!(!errors.contains(named), "{shell}: {errors}");
+        if shell.to_ascii_lowercase().ends_with("powershell.exe") {
+            let input = codex_input(matter.path(), "apply_patch", &patch("अनुबंध.docx"));
+            let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
+            let errors = String::from_utf8_lossy(&output.stderr);
+            assert!(!errors.contains(named), "{shell}: {errors}");
+        }
     }
 }

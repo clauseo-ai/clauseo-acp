@@ -196,8 +196,23 @@ pub(crate) fn host_config(effective: Effective) -> HostConfig {
         .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs));
     // With no path to this executable no guard hook goes; the permission check remains.
     match std::env::current_exe() {
-        Ok(exe) => config.with_pre_write_guard(exe),
+        Ok(exe) => {
+            warn_without_codex_guard(&exe);
+            config.with_pre_write_guard(exe)
+        }
         Err(_) => config,
+    }
+}
+
+/// On Windows, once at start: a warning when Codex's guard program isn't beside the app (a build
+/// without the host crate's programs), since the hook line then refuses every Codex step.
+/// Elsewhere Codex's hook runs the app itself.
+fn warn_without_codex_guard(exe: &std::path::Path) {
+    if cfg!(windows) && !clauseo_host::codex_guard_program(exe).is_file() {
+        tracing::warn!(
+            "Codex's guard program is not beside the app, so the guard refuses every Codex step \
+             (a build without the host's programs)"
+        );
     }
 }
 
