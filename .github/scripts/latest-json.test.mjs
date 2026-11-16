@@ -1155,13 +1155,16 @@ test("an unsigned beta goes out only with CLAUSEO_UNSIGNED_BETA 'true' and no Ap
     assert.notEqual(index, -1, line);
     return index;
   };
-  // custody decides it once: the variable and the Apple secrets are read there and nowhere else,
-  // as booleans, into its outputs has_apple and unsigned_beta, in every mode.
+  // custody decides it once: the variable and every Apple secret's name are read there, as
+  // booleans, into its outputs has_apple and unsigned_beta, in every mode. (Where else an Apple
+  // secret may appear, the Developer ID path's steps, is release-apple.test.mjs's.)
   const variable = "BETA_VARIABLE: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}";
   const appleSecrets =
-    "HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}";
+    "HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_CERTIFICATE_PASSWORD != '' || " +
+    "secrets.APPLE_SIGNING_IDENTITY != '' || secrets.APPLE_API_KEY != '' || secrets.APPLE_API_ISSUER != '' || " +
+    "secrets.APPLE_API_KEY_P8 != '' || secrets.APPLE_ID != '' || secrets.APPLE_PASSWORD != '' || secrets.APPLE_TEAM_ID != '' }}";
   assert.deepEqual(lines.filter((line) => line.includes("CLAUSEO_UNSIGNED_BETA") && line.includes("vars.")), [variable]);
-  assert.deepEqual(lines.filter((line) => /secrets\.APPLE_/.test(line)), [appleSecrets]);
+  assert.deepEqual(lines.filter((line) => /^HAS_APPLE:.*\bsecrets\./.test(line)), [appleSecrets]);
   const custody = jobCommands(text, "custody");
   const decide = at(custody, "- name: Decide the unsigned beta");
   assert.deepEqual(custody.slice(decide + 1, decide + 5), ["id: beta", "env:", variable, appleSecrets]);
@@ -1500,8 +1503,10 @@ test("custody checks the release key against tauri.conf.json's pubkey before any
   const environment = custody.indexOf("environment: ${{ needs.check.outputs.mode == 'release' && 'release' || '' }}");
   assert.ok(environment !== -1 && environment < custody.indexOf("steps:"), "custody's environment");
   const secrets = custody.filter((line) => /\bsecrets\b/.test(line));
-  assert.deepEqual(secrets, [
-    "HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}",
+  assert.deepEqual(secrets.filter((line) => !/^[A-Z0-9_]+: \$\{\{ .*secrets\.APPLE_/.test(line) || line.startsWith("HAS_APPLE: ")), [
+    "HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_CERTIFICATE_PASSWORD != '' || " +
+    "secrets.APPLE_SIGNING_IDENTITY != '' || secrets.APPLE_API_KEY != '' || secrets.APPLE_API_ISSUER != '' || " +
+    "secrets.APPLE_API_KEY_P8 != '' || secrets.APPLE_ID != '' || secrets.APPLE_PASSWORD != '' || secrets.APPLE_TEAM_ID != '' }}",
     "TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}",
     "TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}",
   ]);

@@ -40,6 +40,8 @@ extend-ignore-re = [
 ]
 
 [default.extend-words]
+# openssl's -passin option (the password's source), in release.yml's custody Apple check.
+passin = "passin"
 # HTML's named character reference for ¤ (the currency sign), in ui/patches/'s entity decoder.
 curren = "curren"
 # Win32's TrackMouseEvent flags (TME_LEAVE, TME_NONCLIENT), in crates/desktop/src/window_frame/.
