@@ -7,11 +7,13 @@
 //!   whose second line decodes to 42 bytes, `Ed`, the key id (8 bytes, little-endian) and the
 //!   Ed25519 key, and whose untrusted comment names that same id (`Fix::PubkeyFormat`). A secret
 //!   key pasted by mistake fails here with its own message.
-//! - The key is neither R23 PR 6's placeholder ([`PLACEHOLDER_KEY_ID`]) nor the throwaway test key
-//!   ([`TEST_KEY_ID`]), each recognised by the id read from the key's bytes
-//!   (`Fix::PubkeyPlaceholder`, `Fix::PubkeyTest`). The placeholder fails until Rohan's key
-//!   replaces it, so PR 6 cannot merge by accident; release.yml's `check` job refuses the same
-//!   keys in a `release` run.
+//! - The key is not the throwaway test key ([`TEST_KEY_ID`], recognised by the id read from the
+//!   key's bytes; `Fix::PubkeyTest`).
+//! - R23 PR 6's placeholder ([`PLACEHOLDER_KEY_ID`]) passes with a note ([`placeholder_note`]):
+//!   a static check runs before every push, and a branch that failed it by design could not be
+//!   pushed. The gates that keep it from shipping are the desktop test
+//!   `the_release_pubkey_is_not_the_placeholder` (red in CI until Rohan's key, so PR 6 cannot
+//!   merge) and release.yml's `check` job, which refuses it in a `release` run.
 //! - `bundle.createUpdaterArtifacts` is not `"v1Compatible"`, which needs the updater's `zip`
 //!   feature that the workspace leaves off.
 
@@ -68,11 +70,6 @@ pub(super) fn updater_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
                 format!("plugins.updater.pubkey is not a minisign public key: {why}"),
                 Fix::PubkeyFormat,
             )),
-            Ok(id) if id == PLACEHOLDER_KEY_ID => found.push(at(
-                &pubkey_at,
-                format!("plugins.updater.pubkey is R23 PR 6's placeholder key ({id})"),
-                Fix::PubkeyPlaceholder,
-            )),
             Ok(id) if id == TEST_KEY_ID => found.push(at(
                 &pubkey_at,
                 format!("plugins.updater.pubkey is the throwaway test key ({id})"),
@@ -89,6 +86,19 @@ pub(super) fn updater_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
         ));
     }
     found
+}
+
+/// The note printed while `plugins.updater.pubkey` is R23 PR 6's placeholder: it passes, since the
+/// desktop guard test and release.yml's `check` job are the gates.
+pub(super) fn placeholder_note(conf: &Value) -> Option<String> {
+    let pubkey = conf.pointer("/plugins/updater/pubkey")?.as_str()?;
+    (key_id(pubkey.trim()).ok()? == PLACEHOLDER_KEY_ID).then(|| {
+        format!(
+            "plugins.updater.pubkey is still R23 PR 6's placeholder key ({PLACEHOLDER_KEY_ID}): \
+             the desktop test the_release_pubkey_is_not_the_placeholder and a v* release refuse \
+             it until Rohan's key replaces it"
+        )
+    })
 }
 
 /// The minisign key id of `pubkey` (Tauri's form), read from the key's own bytes and checked

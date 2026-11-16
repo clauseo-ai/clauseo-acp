@@ -7,9 +7,10 @@
 //! replaces it. The swap is one line: his `.pub` text as `plugins.updater.pubkey` in
 //! `tauri.conf.json` (0037, "The swap"). The guard stays: it refuses the placeholder by its key
 //! id, held here, so the placeholder can never come back. The key id is read from the key's own
-//! bytes and must match the comment's ([`key_id`]). xtask's `tauri-config` check refuses the same
-//! keys in the fast lane, and `release.yml`'s check job in a release run, which is the control a
-//! merge cannot skip.
+//! bytes and must match the comment's ([`key_id`]). This test is the gate that keeps PR 6 from
+//! merging (xtask's `tauri-config` check only notes the placeholder, so the branch can be pushed);
+//! `release.yml`'s check job refuses the same keys in a release run, which is the control a merge
+//! cannot skip.
 
 use serde_json::Value;
 
