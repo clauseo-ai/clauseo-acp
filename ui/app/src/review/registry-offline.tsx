@@ -120,10 +120,10 @@ const folderStop = (code: ErrorCode, key: Parameters<typeof errorWords>[0]): Ent
 ];
 
 /** matter.holds_other_matter is never a send's refusal: the stop line under the question, after the notice naming the
- * matter inside (UC-387), with Try again. Provisional (UC-386). */
+ * matter inside (UC-387), with Try again. Provisional. */
 const HELD: Entry[] = [
   {
-    id: "UC-386",
+    id: "U3-err-matter.holds_other_matter",
     words: errorWords(
       "Clauseo won't work in this matter while another matter's folder is inside its folder. Your question is kept.",
     ),

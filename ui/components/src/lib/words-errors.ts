@@ -358,7 +358,7 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "agent.folder_inaccessible":
     "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
   // no turn runs in a matter whose folder holds another matter on the list (folders moved outside Clauseo); a notice
-  // before it names that matter and what to do. Provisional (UC-386); Hindi provisional
+  // before it names that matter and what to do. Provisional (U3-err-matter.holds_other_matter); Hindi provisional
   "matter.holds_other_matter":
     "Clauseo won't work in this matter while another matter's folder is inside its folder. Your question is kept.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
