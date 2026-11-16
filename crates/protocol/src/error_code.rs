@@ -387,6 +387,9 @@ error_codes! {
         service, or a proxy or firewall in front of it, refused, timed out or blocked the \
         connection, or its name did not resolve. The answer so far is kept; asking again can \
         work.";
+    AgentToolMissing = "agent.tool_missing", retryable: false, meaning: "A program Clauseo puts \
+        on the agent's PATH is missing or changed (a virus scanner may have quarantined it), so \
+        the agent was not started; the app copies it again when it is opened.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

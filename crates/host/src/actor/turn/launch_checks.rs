@@ -303,7 +303,7 @@ pub(super) fn prepare(
         mut run,
         skills,
         packs,
-        claims,
+        mut claims,
     } = match paths {
         Ok(paths) => paths,
         Err(error) => {
@@ -344,6 +344,8 @@ pub(super) fn prepare(
             job,
             move || {
                 data_folder::refuse_data_folder(&stored, &data)?;
+                // The `git` that does nothing first on the agent's `PATH`, or no launch.
+                claims.path.check_no_git()?;
                 // The working folder the agent starts in, unless too deep or named with a `\`.
                 let cwd = crate::agent::folder_name::launch_cwd(claims.path.kind, &stored)?;
                 let mut answer = None;
@@ -576,6 +578,7 @@ pub(super) use packs::{PackNotices, pack_notices};
 mod folders;
 use folders::{browser_run_dir, launch_deny, make_guard, notes_dir, remove_tree, run_dir};
 mod paths;
+pub(super) use paths::no_git_check;
 use paths::{LaunchPaths, launch_paths};
 mod skill_wait;
 

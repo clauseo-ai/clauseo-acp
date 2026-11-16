@@ -431,6 +431,14 @@ fn skills_are_written_before_the_launch_and_a_failure_is_no_failed_launch() {
     host.shutdown();
 }
 
+/// A firm's folder for Claude's settings `PATH`, absolute on this OS (a rootless one never
+/// reaches an agent).
+const FIRM_BIN: &str = if cfg!(windows) {
+    r"C:\firm\bin"
+} else {
+    "/opt/firm/bin"
+};
+
 /// Both agents launch with stetdoc's folder first on `PATH`.
 #[test]
 fn stetdoc_goes_first_on_both_agents_path() {
@@ -444,7 +452,7 @@ fn stetdoc_goes_first_on_both_agents_path() {
     settings(
         &dir,
         agents(&[
-            (CLAUDE, &claude, json!({"PATH": "/opt/firm/bin"})),
+            (CLAUDE, &claude, json!({"PATH": FIRM_BIN})),
             (CODEX, &codex, json!({})),
         ]),
         json!({}),
@@ -475,7 +483,7 @@ fn stetdoc_goes_first_on_both_agents_path() {
             .collect();
         assert_eq!(parts.first(), Some(&folder), "launch {at}");
         if at == 0 {
-            assert_eq!(parts.get(1), Some(&PathBuf::from("/opt/firm/bin")));
+            assert_eq!(parts.get(1), Some(&PathBuf::from(FIRM_BIN)));
             assert_eq!(parts.len(), 2);
         }
     }

@@ -11,6 +11,23 @@ use crate::error::ProfileError;
 /// ([`ProfilePaths::tools`]).
 pub const TOOLS_DIR: &str = "tools";
 
+/// The folder under [`TOOLS_DIR`] holding the `git` that does nothing alone
+/// ([`ProfilePaths::no_git_command`]).
+pub const NO_GIT_DIR: &str = "no-git";
+
+/// [`ProfilePaths::no_git_command`] under the data folder `data`, for a caller with no
+/// [`ProfilePaths`] (the app's own executable was not found), which must still name it.
+pub fn no_git_command(data: &Path) -> PathBuf {
+    no_git_in(&data.join(TOOLS_DIR))
+}
+
+/// `<tools>/no-git/git` with the OS's executable suffix.
+fn no_git_in(tools: &Path) -> PathBuf {
+    tools
+        .join(NO_GIT_DIR)
+        .join(format!("git{}", std::env::consts::EXE_SUFFIX))
+}
+
 /// The name the agents run agent-browser by, without the OS's suffix.
 pub const AGENT_BROWSER_COMMAND: &str = "agent-browser";
 
@@ -131,6 +148,13 @@ impl ProfilePaths {
             "{AGENT_BROWSER_COMMAND}{}",
             std::env::consts::EXE_SUFFIX
         ))
+    }
+
+    /// The `git` that does nothing, `<data>/tools/no-git/git` with the OS's executable suffix:
+    /// a copy of the bundled `clauseo-mcp`, which does nothing when run by that name
+    /// (`crate::tools::install_no_git`). Its folder goes first on every agent's `PATH`.
+    pub fn no_git_command(&self) -> PathBuf {
+        no_git_in(&self.tools)
     }
 
     /// The plugin's skills folder, `claude_plugin/skills`.

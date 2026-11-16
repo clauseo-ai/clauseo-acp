@@ -2,7 +2,8 @@
 //! bundled agent-browser sidecar there as `agent-browser`, so the command has the name its skill
 //! and the instructions use, in a folder that holds nothing else for the agents' `PATH`. A copy,
 //! never a link: a link would reach into the app's own folder, and the folder holds a program
-//! only the app writes.
+//! only the app writes. The same way it copies the bundled `clauseo-mcp` to
+//! `<data>/tools/no-git/git` ([`install_no_git`]), the `git` first on every agent's `PATH`.
 
 use std::path::{Path, PathBuf};
 
@@ -49,21 +50,88 @@ pub fn install_agent_browser(
     paths: &ProfilePaths,
 ) -> Result<(PathBuf, Installed), ProfileError> {
     let target = paths.agent_browser_command();
-    crate::write::sweep_old(paths.tools());
-    let bytes = std::fs::read(source).map_err(|err| ProfileError::io("read", source, err))?;
-    let want = Sha256::digest(&bytes);
-    let held = std::fs::read(&target)
-        .ok()
-        .map(|held| Sha256::digest(&held));
-    if held.as_ref() == Some(&want) {
-        return Ok((target, Installed::UpToDate));
+    let (installed, _) = install_copy(source, &target)?;
+    Ok((target, installed))
+}
+
+/// Copies `source` (the bundled `clauseo-mcp`) to [`ProfilePaths::no_git_command`], the way
+/// [`install_agent_browser`] copies its program: only when the copy is missing, is not a
+/// regular file, or its SHA-256 differs. Returns what it did and `source`'s SHA-256, which the
+/// host checks the copy against at every launch (`HostConfig::with_no_git`). Anything else in
+/// the copy's folder is removed ([`sweep_beside`]). At app start,
+/// off the host thread. An error leaves no sound copy; the caller logs it, and the host then
+/// refuses every agent launch.
+pub fn install_no_git(
+    source: &Path,
+    paths: &ProfilePaths,
+) -> Result<(Installed, [u8; 32]), ProfileError> {
+    let target = paths.no_git_command();
+    let swept = sweep_beside(&target);
+    let installed = install_copy(source, &target)?;
+    swept.map(|()| installed)
+}
+
+/// Removes everything in `target`'s folder but `target` (its name compared ignoring case on
+/// macOS and Windows, whose disks do) and names starting with `.` (the copy's own temp files
+/// and, on Windows, a running copy set aside, which [`install_copy`]'s sweep removes once
+/// nothing runs it; no lookup of `git` finds them): the host refuses a launch while the folder
+/// holds anything else. Run before
+/// the copy, so a case variant of the program's name is the program, not swept after it. A
+/// folder there is removed whole and a read-only file made writable first; every entry is
+/// tried, and the first failure comes back as the error.
+fn sweep_beside(target: &Path) -> Result<(), ProfileError> {
+    let (Some(folder), Some(name)) = (target.parent(), target.file_name()) else {
+        return Ok(());
+    };
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        // No folder yet: the copy makes it.
+        return Ok(());
+    };
+    let fold = cfg!(any(windows, target_os = "macos"));
+    let mut failed = None;
+    for entry in entries.flatten() {
+        let other = entry.file_name();
+        let same = if fold {
+            other.eq_ignore_ascii_case(name)
+        } else {
+            other == name
+        };
+        if same || other.as_encoded_bytes().starts_with(b".") {
+            continue;
+        }
+        let path = entry.path();
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            crate::write::remove_dir_all(&path);
+        } else if let Err(err) = crate::write::remove_file_forced(&path) {
+            failed = failed.or(Some(err));
+        }
     }
-    let installed = if crate::write::replace_program(&target, &bytes)? {
+    failed.map_or(Ok(()), Err)
+}
+
+/// Makes `target` a copy of the program `source`, through a temp file beside it and a
+/// rename, mode 0755 on Unix, unless it is already a regular file holding the same bytes; old
+/// copies set aside in its folder are swept first. Returns what it did and the SHA-256.
+fn install_copy(source: &Path, target: &Path) -> Result<(Installed, [u8; 32]), ProfileError> {
+    if let Some(folder) = target.parent() {
+        crate::write::sweep_old(folder);
+    }
+    let bytes = std::fs::read(source).map_err(|err| ProfileError::io("read", source, err))?;
+    let want: [u8; 32] = Sha256::digest(&bytes).into();
+    let regular = std::fs::symlink_metadata(target).is_ok_and(|meta| meta.file_type().is_file());
+    let held = std::fs::read(target)
+        .ok()
+        .filter(|_| regular)
+        .map(|held| <[u8; 32]>::from(Sha256::digest(&held)));
+    if held == Some(want) {
+        return Ok((Installed::UpToDate, want));
+    }
+    let installed = if crate::write::replace_program(target, &bytes)? {
         Installed::CopiedAside
     } else {
         Installed::Copied
     };
-    Ok((target, installed))
+    Ok((installed, want))
 }
 
 /// What [`remove_stale_browser`] removed, for the app's support line.

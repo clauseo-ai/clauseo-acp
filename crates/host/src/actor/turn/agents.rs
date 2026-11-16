@@ -498,7 +498,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             picked,
             fell_back,
         } => session::on_prepared(actor, thread, start, (loaded, fell_back), &picked),
-        // `Refused`: a session call's `.codex` re-check refused it, so no call was sent.
+        // `Refused`: a session call's re-check (`.codex`, the `git` that does nothing) refused it,
+        // so no call was sent.
         AgentReply::Prepared {
             result: Err(error), ..
         }

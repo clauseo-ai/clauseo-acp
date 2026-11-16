@@ -184,3 +184,39 @@ fn launch_spec_drops_node_options_and_node_path_from_every_source() {
     let names: Vec<_> = spec.env().keys().map(|k| k.to_str().unwrap()).collect();
     assert_eq!(names, ["PATH"]);
 }
+
+/// Empty and relative `PATH` entries (`.`, `bin`, `../tools`, an empty one, on Windows
+/// `\tools` and `C:tools`) never reach an agent, with folders put first or none.
+#[test]
+fn launch_spec_drops_empty_and_relative_path_entries() {
+    let agent = AgentLaunch {
+        command: absolute_program(),
+        args: Vec::new(),
+        env: BTreeMap::new(),
+    };
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let rooted = std::env::temp_dir().join("tools");
+    let mut parts = vec![".", "", "bin", "../tools"];
+    if cfg!(windows) {
+        parts.extend([r"\tools", "C:tools"]);
+    }
+    parts.push(rooted.to_str().unwrap());
+    let inherited = parts.join(sep);
+    let path_of = |prepend: &[std::path::PathBuf]| {
+        let spec = launch_spec(
+            &agent,
+            BTreeMap::new(),
+            BTreeMap::new(),
+            &[],
+            [(OsString::from("PATH"), OsString::from(&inherited))].into_iter(),
+            std::env::temp_dir(),
+            prepend,
+        )
+        .unwrap();
+        let path = spec.env().get(&OsString::from("PATH")).unwrap().clone();
+        std::env::split_paths(&path).collect::<Vec<_>>()
+    };
+    assert_eq!(path_of(&[]), [rooted.clone()]);
+    let first = std::env::temp_dir().join("no-git");
+    assert_eq!(path_of(std::slice::from_ref(&first)), [first, rooted]);
+}

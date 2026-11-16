@@ -322,6 +322,9 @@ mod mcp_tools_failures;
 #[path = "host/mcp_trust.rs"]
 mod mcp_trust;
 #[cfg(test)]
+#[path = "host/no_git.rs"]
+mod no_git;
+#[cfg(test)]
 #[path = "host/not_allowed.rs"]
 mod not_allowed;
 #[cfg(all(test, unix))]

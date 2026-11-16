@@ -218,7 +218,7 @@ pub(crate) fn merge_add_only(config: &mut Map<String, Value>, keys: Map<String, 
 
 /// Sets `value` at the dotted `key` (`a.b.c`), making each object on the way and replacing any
 /// value there that is not one.
-fn insert_dotted(config: &mut Map<String, Value>, key: &str, value: Value) {
+pub(crate) fn insert_dotted(config: &mut Map<String, Value>, key: &str, value: Value) {
     let mut parts = key.split('.').peekable();
     let mut at = config;
     while let Some(part) = parts.next() {

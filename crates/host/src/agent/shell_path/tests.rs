@@ -51,6 +51,7 @@ fn codex_config(env: &BTreeMap<OsString, OsString>) -> Value {
 fn codex_path(dirs: Vec<PathBuf>, etc_paths: Vec<PathBuf>) -> SessionPath {
     SessionPath {
         dirs,
+        no_git: false,
         hook_path: true,
         codex: true,
         etc_paths,

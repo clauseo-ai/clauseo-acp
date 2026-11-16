@@ -105,6 +105,11 @@ pub(super) fn launch(
     let short = prepared.run.claude_tmp.as_deref();
     let temp = agent::temp::session_env(&prepared.run.root, short, cfg!(windows));
     forced.extend(temp);
+    // git's variables for an agent with a kind (`agent/no_git.rs`).
+    forced.extend(agent::no_git::launch_env(
+        AgentKind::of(&row.agent),
+        &folder,
+    ));
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     let session_folder = agent::session_folder(&folder);
     let matter_spellings = start_failure::spellings_at_launch(actor, &folder, &session_folder);
@@ -132,6 +137,9 @@ pub(super) fn launch(
     // On Windows Claude's one shell is PowerShell (`agent/one_shell.rs`).
     if claude {
         agent::one_shell::apply_env(&mut env, agent::shell_path::Os::host());
+    }
+    if codex.is_some() {
+        agent::no_git::codex_shell_path(&mut env, prepared.run.path.no_git);
     }
     let spec = agent::spec_of(settings, env, session_folder)
         .map_err(super::super::launch_checks::folder::gone_at_spawn)?

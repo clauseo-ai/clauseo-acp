@@ -2,7 +2,7 @@
 
 use std::ffi::OsString;
 
-use clauseo_mcp::{Failure, browser_guard, connector};
+use clauseo_mcp::{Failure, browser_guard, connector, no_git};
 
 /// A mode's entry point: the arguments after the mode's name, and the exit code or a failure.
 type Run = fn(&[OsString]) -> Result<i32, Failure>;
@@ -32,7 +32,12 @@ fn usage() -> String {
     reason = "main prints a mode's failure on stderr; stdout carries the protocol"
 )]
 fn main() {
+    // First: run as `git`, the program does nothing at all (`no_git.rs`).
+    let argv0 = std::env::args_os().next();
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if no_git::requested(std::env::current_exe().ok().as_deref(), argv0.as_deref()) {
+        std::process::exit(no_git::exit_code(&args));
+    }
     let mode = args
         .first()
         .and_then(|name| MODES.iter().find(|(mode, _)| name.as_os_str() == *mode));

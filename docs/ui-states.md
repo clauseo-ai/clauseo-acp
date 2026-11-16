@@ -345,6 +345,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Agent | `ErrorCode::AgentLaunchFailed`, `ErrorCode::AgentExited` | yes |
 | Agent | `ErrorCode::AgentProtocolError`, `ErrorCode::AgentAuthRequired`, `ErrorCode::AgentUnsupportedVersion` | no |
 | Claude refused: its guard can't be set up in a forced-ask folder (reinstall) | `ErrorCode::AgentGuardMissing` | no |
+| Agent refused: a program Clauseo puts on its PATH is missing or changed (allow Clauseo in the antivirus, quit and open again) | `ErrorCode::AgentToolMissing` | no |
 | Store | `ErrorCode::StoreIo` | yes |
 | Store | `ErrorCode::StoreDiskFull`, `ErrorCode::StoreCorrupt`, `ErrorCode::StoreLocked`, `ErrorCode::StoreNewerVersion` | no |
 | Matter | `ErrorCode::MatterCheckpointFailed`, `ErrorCode::MatterFileLocked`, `ErrorCode::MatterTurnRunning` | yes |

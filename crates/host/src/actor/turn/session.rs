@@ -107,6 +107,7 @@ pub(super) fn on_replay_log(
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
+    let no_git = super::prompt::no_git_of(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -125,6 +126,7 @@ pub(super) fn on_replay_log(
         Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
+        no_git,
     );
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
@@ -167,6 +169,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
+    let no_git = super::prompt::no_git_of(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -176,6 +179,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
         Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
+        no_git,
     );
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
@@ -214,6 +218,7 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
+    let no_git = super::prompt::no_git_of(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -223,6 +228,7 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
         Arc::clone(&clock),
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
+        no_git,
     );
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {

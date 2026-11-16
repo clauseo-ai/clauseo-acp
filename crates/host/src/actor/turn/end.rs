@@ -160,9 +160,9 @@ fn too_long_stops(actor: &Actor, thread: ThreadId, kind: clauseo_acp::TooLong) -
     stops
 }
 
-/// A Codex prompt's `.codex` re-check refused it, so nothing reached the agent: the agent is
-/// stopped (its app-server would load the folder's settings on any restart) and the turn ends
-/// failed with the refusal's code.
+/// A prompt's re-check (a Codex agent's `.codex`, any agent's `git` that does nothing) refused
+/// it, so nothing reached the agent: the agent is stopped (a Codex app-server would load the
+/// folder's settings on any restart) and the turn ends failed with the refusal's code.
 pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnId, error: &Error) {
     let prompting = current(actor, thread)
         .is_some_and(|current| current.turn == turn && current.phase == TurnPhase::Prompting);
@@ -172,7 +172,7 @@ pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnI
     tracing::warn!(
         %thread,
         error = %Cause(error),
-        "a Codex prompt was refused before it was sent"
+        "a prompt was refused by its re-check before it was sent"
     );
     if let Some(current) = current(actor, thread) {
         current.prompt_call = None;
