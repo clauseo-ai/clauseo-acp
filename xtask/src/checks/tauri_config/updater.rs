@@ -95,7 +95,9 @@ pub(super) fn updater_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
 /// against the id its untrusted comment names; an error says what is wrong.
 pub(crate) fn key_id(pubkey: &str) -> Result<String, String> {
     let text = base64(pubkey).ok_or("it is not base64")?;
-    let text = String::from_utf8(text).map_err(|_| "it is not UTF-8 once decoded")?;
+    let text = String::from_utf8(text)
+        .ok()
+        .ok_or("it is not UTF-8 once decoded")?;
     let mut lines = text.lines();
     let comment = lines.next().unwrap_or_default().trim_end();
     if comment.contains("secret key") {
@@ -111,11 +113,10 @@ pub(crate) fn key_id(pubkey: &str) -> Result<String, String> {
             key.len()
         ));
     }
-    let id: String = key[2..10]
-        .iter()
-        .rev()
-        .map(|byte| format!("{byte:02X}"))
-        .collect();
+    let id_bytes = <[u8; 8]>::try_from(&key[2..10])
+        .ok()
+        .ok_or("its key line has no key id")?;
+    let id = format!("{:016X}", u64::from_le_bytes(id_bytes));
     if named != id {
         return Err(format!(
             "its comment names key id {named}, but the key's own id is {id}"
