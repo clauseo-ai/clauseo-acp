@@ -1,12 +1,12 @@
 //! The web records folded into their tool call (0041): a search sets the call's `web.search`,
 //! pages append in order up to 50, a record for a call the thread does not hold changes nothing,
-//! and a replay from the log gives the live view.
+//! and a replay from the log gives the live view. A `ToolCallCharged` sets the call's `charge`.
 
 use std::collections::BTreeMap;
 
 use clauseo_protocol::{
-    AgentId, DomainEvent, EntryId, PageVia, PageVisited, ToolCallEntry, ToolCallId, ToolCallStatus,
-    TurnId, ViewEntry, WebResult, WebSearchRecorded,
+    AgentId, DomainEvent, EntryId, PageVia, PageVisited, ToolCallCharge, ToolCallCharged,
+    ToolCallEntry, ToolCallId, ToolCallStatus, TurnId, ViewEntry, WebResult, WebSearchRecorded,
 };
 use clauseo_reducer::{Applied, StreamState, ViewChange, apply, view_snapshot};
 
@@ -248,5 +248,54 @@ fn a_replay_from_the_log_gives_the_live_view() {
     assert_eq!(web.search.unwrap().query, "second");
     assert_eq!(web.pages.len(), 2);
     // A snapshot of the state reads back equal, web and all.
+    assert_eq!(round_trip(&state), state);
+}
+
+/// A charge, refused or not, sets the call's `charge` and sends the row again; the same charge
+/// again sends nothing; one for a call the thread does not hold changes nothing; a replay gives
+/// the same row.
+#[test]
+fn a_charge_sets_the_charge_of_its_row() {
+    let (mut log, turn, call) = running_call(65);
+    let mut state = fold(log.events());
+    push_apply(
+        &mut log,
+        &mut state,
+        tool_status(call, ToolCallStatus::Completed),
+    );
+    assert_eq!(call_entry(&state, call).charge, None);
+    let charged = |tool_call, credits, refused| ToolCallCharged {
+        turn,
+        tool_call,
+        credits,
+        refused,
+    };
+    let applied = push_apply(&mut log, &mut state, charged(call, 40, false));
+    let sent = sent_call(&applied);
+    assert_eq!(
+        sent.charge,
+        Some(ToolCallCharge {
+            credits: 40,
+            refused: false,
+        })
+    );
+    assert_eq!(call_entry(&state, call), sent);
+    let again = push_apply(&mut log, &mut state, charged(call, 40, false));
+    assert_eq!(again, Applied::default());
+    let refused = push_apply(&mut log, &mut state, charged(call, 0, true));
+    assert_eq!(
+        sent_call(&refused).charge,
+        Some(ToolCallCharge {
+            credits: 0,
+            refused: true,
+        })
+    );
+    let stranger: ToolCallId = log.fresh().unwrap();
+    let before = state.entries().clone();
+    let applied = push_apply(&mut log, &mut state, charged(stranger, 1, false));
+    assert_eq!(applied, Applied::default());
+    assert_eq!(state.entries(), &before);
+    let replayed = fold(log.events());
+    assert_eq!(replayed, state);
     assert_eq!(round_trip(&state), state);
 }

@@ -224,6 +224,24 @@ impl WebResult {
     }
 }
 
+/// What a case-law tool call cost, as the connector reported it in that call's own result
+/// (`_meta["chat.clauseo/credits"]`), joined to the call by the host when it finished.
+/// At most one per call; logged only for a call that was charged (`credits` above 0) or
+/// refused (an error that charged 0). A free success, a result with no such report (an older
+/// connector) and a call the host could not match log none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ToolCallCharged {
+    /// The turn it ran in.
+    pub turn: TurnId,
+    /// The tool call it was.
+    pub tool_call: ToolCallId,
+    /// The credits charged (1 credit = ₹0.10); 0 when `refused`.
+    pub credits: u32,
+    /// The call was refused or failed (`isError`) and charged nothing.
+    pub refused: bool,
+}
+
 /// A page the agent opened. Built with [`PageVisited::new`], which applies the caps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

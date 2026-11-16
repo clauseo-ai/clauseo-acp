@@ -125,6 +125,11 @@ export const HI = {
   "Checked your case-law credits {n} times.": null,
   "Got a payment link for case-law credits once.": null,
   "Got {n} payment links for case-law credits.": null,
+  // a case-law step's cost, after its done or tried line and a space: {n} is the credits the Indian Kanoon server
+  // reported for that call (UC-488 to UC-490; hi: later)
+  "· {n} credits": null,
+  "· 1 credit": null,
+  "· nothing charged": null,
 } as const;
 
 /** Every key, for the banned-words screen in the tests (null: hi: later). */

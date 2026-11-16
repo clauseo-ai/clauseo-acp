@@ -179,6 +179,7 @@ impl Layer {
             | DomainEvent::StepUndone(_)
             | DomainEvent::WebSearchRecorded(_)
             | DomainEvent::PageVisited(_)
+            | DomainEvent::ToolCallCharged(_)
             | DomainEvent::MatterCreated(_)
             | DomainEvent::CheckpointRecorded(_)
             | DomainEvent::OutsideEdits(_)

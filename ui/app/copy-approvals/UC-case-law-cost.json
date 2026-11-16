@@ -1,0 +1,29 @@
+{
+  "UC-488": {
+    "en": "· {n} credits",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; Rohan batch review)",
+    "note": "Step row of a case-law call (Indian Kanoon), n credits charged (n is never 1; 0 on a success shows nothing). Follows the done or tried line after \" \" (\"Searched case law. · 40 credits\"). {n} is the credits the Indian Kanoon server reported for that call in its own result (_meta chat.clauseo/credits, 1 credit = ₹0.10), never worked out from the price list; no report shows the plain line. A folded group shows no sum."
+  },
+  "UC-489": {
+    "en": "· 1 credit",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; Rohan batch review)",
+    "note": "Step row of a case-law call (Indian Kanoon), 1 credit charged. Follows the done or tried line after \" \" (\"Searched case law. · 40 credits\"). {n} is the credits the Indian Kanoon server reported for that call in its own result (_meta chat.clauseo/credits, 1 credit = ₹0.10), never worked out from the price list; no report shows the plain line. A folded group shows no sum."
+  },
+  "UC-490": {
+    "en": "· nothing charged",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "stage E (provisional; Rohan batch review)",
+    "note": "Step row of a case-law call (Indian Kanoon), refused or failed (isError) with charged 0, shown only when the server's report is present. Follows the done or tried line after \" \" (\"Searched case law. · 40 credits\"). The words stand for the charge of 0 the Indian Kanoon server reported for that call in its own result (no {n}; elsewhere {n} is the credits it reported) (_meta chat.clauseo/credits, 1 credit = ₹0.10), never worked out from the price list; no report shows the plain line. A folded group shows no sum."
+  }
+}

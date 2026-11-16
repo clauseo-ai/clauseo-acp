@@ -242,6 +242,7 @@ mod domain_event {
         ToolCallUpdated => tool_call_updated: event("tool_call_updated");
         WebSearchRecorded => web_search_recorded: event("web_search_recorded");
         PageVisited => page_visited: event("page_visited");
+        ToolCallCharged => tool_call_charged: event("tool_call_charged");
         PermissionRequested => permission_requested: event("permission_requested");
         PermissionResolved => permission_resolved: event("permission_resolved");
         PermissionExpired => permission_expired: event("permission_expired");

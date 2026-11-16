@@ -518,6 +518,9 @@ fn on_relay(actor: &mut Actor, event: RelayEvent) {
             resumed_balance,
             ..
         } => recharged(actor, recharge_id, (balance_credits, resumed_balance)),
+        RelayEvent::BalanceReported {
+            balance_credits, ..
+        } => recharged::reported(actor, balance_credits),
         RelayEvent::CaseLawFound { session, found } => {
             super::turn::case_law::found(actor, session.thread, found);
             return;

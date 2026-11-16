@@ -1,8 +1,10 @@
-//! The relay's half of the sources join (R24, PR6). For a `search_law` or `read_document` call,
-//! the relay keeps the join key ([`Join`]: SHA-256 of the tool and the canonical JSON of its
-//! arguments, never the arguments themselves), and when the call answers without an error it
-//! reads the titles and links out of the raw result ([`found`]) and tells the host, which joins
-//! them to the agent's own tool call (`sources/case_law.rs`).
+//! The relay's half of the sources join (R24, PR6) and of the step's charge. For a `search_law`,
+//! `read_document`, `citator` or `check_citations` call, the relay keeps the join key ([`Join`]:
+//! SHA-256 of the tool and the canonical JSON of its arguments, never the arguments themselves),
+//! and when the call answers it tells the host ([`found`]) whether it was an error, what the
+//! connector said it charged (`_meta`, read in `credits.rs`) and, for a search or a read that
+//! answered without an error, the titles and links in the raw result. The host joins that to the
+//! agent's own tool call (`sources/case_law.rs`).
 //!
 //! Two shapes are read, never merged. First the structured one, the fake connector's:
 //! `structuredContent.results[]` for a search and `structuredContent.documents[]` for a read.
@@ -96,24 +98,36 @@ struct Item<'a> {
     link: Option<&'a RawValue>,
 }
 
-/// What the call found, when its result is no error. A result with no readable list still
-/// counts (no links): the call ran, and its record names the query. The structured lists win
-/// when they give a link; otherwise the text content is read.
-pub(super) fn found(join: &Join, result: &RawValue) -> Option<CaseLawFound> {
+/// What the call found and cost, `charged` being the result's `_meta` charge. An error result
+/// (`isError` anything but `false`) has no links. A result with no readable list still counts
+/// (no links): the call ran, and its record names the query. The structured lists win when they
+/// give a link; otherwise the text content is read. `None` when the result is not an object.
+pub(super) fn found(join: &Join, result: &RawValue, charged: Option<u32>) -> Option<CaseLawFound> {
     let read = object::<CaseLawResult<'_>>(result)?;
     let is_error = read
         .is_error
         .is_some_and(|raw| serde_json::from_str::<bool>(raw.get()).unwrap_or(true));
     if is_error {
-        return None;
+        return Some(CaseLawFound {
+            tool: join.tool,
+            key: join.key,
+            links: Vec::new(),
+            failed: true,
+            charged,
+        });
     }
     let lists = read.structured.and_then(object::<Lists<'_>>);
     let list = lists.and_then(|lists| match join.tool {
         CaseLawTool::SearchLaw => lists.results,
         CaseLawTool::ReadDocument => lists.documents,
+        CaseLawTool::Citator | CaseLawTool::CheckCitations => None,
     });
     let mut links = list.map(links).unwrap_or_default();
-    if links.is_empty() {
+    let sources = matches!(
+        join.tool,
+        CaseLawTool::SearchLaw | CaseLawTool::ReadDocument
+    );
+    if links.is_empty() && sources {
         links = read
             .content
             .map(|content| text::links(join.tool, content))
@@ -123,6 +137,8 @@ pub(super) fn found(join: &Join, result: &RawValue) -> Option<CaseLawFound> {
         tool: join.tool,
         key: join.key,
         links,
+        failed: false,
+        charged,
     })
 }
 

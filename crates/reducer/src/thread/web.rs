@@ -2,10 +2,13 @@
 //! `WebSearchRecorded` sets the call's `web.search`, and a `PageVisited` appends to its
 //! `web.pages`. Each is matched by `tool_call`. A record whose call has no entry is ignored: it
 //! changes nothing and is no anomaly, as a log may hold a record before its call's start.
+//!
+//! A `ToolCallCharged` sets the call's `charge` the same way (a later one for the call replaces
+//! it); it lives here because it is the same host join (`sources/case_law.rs`).
 
 use clauseo_protocol::{
-    PageVisited, ToolCallId, ToolCallPage, ToolCallSearch, ToolCallWeb, ViewEntry,
-    WebSearchRecorded,
+    PageVisited, ToolCallCharge, ToolCallCharged, ToolCallId, ToolCallPage, ToolCallSearch,
+    ToolCallWeb, ViewEntry, WebSearchRecorded,
 };
 
 use crate::Applied;
@@ -44,6 +47,28 @@ pub(super) fn page_visited(state: &mut ThreadState, event: &PageVisited, out: &m
         });
         true
     });
+}
+
+/// What a case-law call cost: set on the call's entry, replacing an earlier charge. A call with
+/// no entry is left alone; one with the same charge already is not upserted again.
+pub(super) fn charged(state: &mut ThreadState, event: &ToolCallCharged, out: &mut Applied) {
+    let found = state.index.tool_calls.get(&event.tool_call).copied();
+    let Some(ViewEntry::ToolCall(entry)) = found.and_then(|order| state.entries.get_mut(&order))
+    else {
+        return;
+    };
+    let charge = ToolCallCharge {
+        credits: event.credits,
+        refused: event.refused,
+    };
+    if entry.charge == Some(charge) {
+        return;
+    }
+    entry.charge = Some(charge);
+    out.changes
+        .push(ViewChange::Upsert(Box::new(ViewEntry::ToolCall(
+            entry.clone(),
+        ))));
 }
 
 /// Applies `change` to the call's web and emits the call's `Upsert` when it changed. A call with

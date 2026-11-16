@@ -30,6 +30,9 @@ pub(super) struct ApiState {
     pub(super) pay_url: Option<String>,
     /// An out-of-credit answer opens a new recharge instead of naming the open one.
     pub(super) fresh_recharge: bool,
+    /// Results of the paid tools and `account` carry the live server's
+    /// `_meta["chat.clauseo/credits"]` (`report_credits`); off, the shape of an older server.
+    pub(super) report_credits: bool,
     recharges: BTreeMap<String, FakeRecharge>,
     next_recharge: u64,
     next_pending: u64,
@@ -65,6 +68,7 @@ impl ApiState {
             wait_cap: Duration::from_secs(2),
             pay_url: None,
             fresh_recharge: false,
+            report_credits: false,
             recharges: BTreeMap::new(),
             next_recharge: 1,
             next_pending: 1,
@@ -497,6 +501,7 @@ fn tool_call(shared: &Shared, params: &Value) -> ToolAnswer {
             raw @ Fixture::Raw { .. } => ToolAnswer::Http(fixture_response(&raw, base)),
         };
     }
+    let mut charged = 0;
     if let Some(price) = price(base, name) {
         if state.api.balance <= 0 {
             let body = state.api.out_of_credit(base);
@@ -504,11 +509,13 @@ fn tool_call(shared: &Shared, params: &Value) -> ToolAnswer {
             result["content"] =
                 json!([{"type": "text", "text": body["message_for_human"].clone()}]);
             result["structuredContent"] = resume::hold(&mut state.api, body, name);
+            credits(&state.api, &mut result, 0);
             return ToolAnswer::Result(result);
         }
+        charged = price.min(state.api.balance);
         state.api.balance = state.api.balance.saturating_sub(price).max(0);
     }
-    let result = match name {
+    let mut result = match name {
         "search_law" | "read_document" | "citator" | "check_citations" => paid_result(base, name),
         "account" => {
             let account = state.api.account_json(base);
@@ -519,7 +526,19 @@ fn tool_call(shared: &Shared, params: &Value) -> ToolAnswer {
             json!({"content": [{"type": "text", "text": format!("Unknown tool: {name}")}], "isError": true})
         }
     };
+    if price(base, name).is_some() || name == "account" {
+        credits(&state.api, &mut result, charged);
+    }
     ToolAnswer::Result(result)
+}
+
+/// With `report_credits` on, `result._meta["chat.clauseo/credits"]` as the live server writes
+/// it: what this call charged and the balance after it.
+fn credits(api: &ApiState, result: &mut Value, charged: i64) {
+    if api.report_credits {
+        result["_meta"] = json!({"chat.clauseo/credits":
+            {"charged_credits": charged, "balance_credits": api.balance}});
+    }
 }
 
 /// What a paid tool spends, by `pricing-live.json`'s `prices`; `None` for a free one.

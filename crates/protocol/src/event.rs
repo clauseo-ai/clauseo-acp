@@ -28,9 +28,9 @@ pub use payload::{
     ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
     ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
     PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended,
-    ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, ToolCallStarted,
-    ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
-    UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
+    ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, ToolCallCharged,
+    ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued, TurnStarted,
+    TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 /// `true` for the `matter` stream, `false` for `thread`; any other word does not compile.
@@ -232,6 +232,8 @@ domain_events! {
     WebSearchRecorded(Box<WebSearchRecorded>) = "web_search_recorded", thread;
     /// A page the agent opened (acp).
     PageVisited(PageVisited) = "page_visited", thread;
+    /// What a case-law tool call cost, from the connector's own report (host).
+    ToolCallCharged(ToolCallCharged) = "tool_call_charged", thread;
     /// The agent asked for permission (acp).
     PermissionRequested(PermissionRequested) = "permission_requested", thread;
     /// A permission request was answered (host).

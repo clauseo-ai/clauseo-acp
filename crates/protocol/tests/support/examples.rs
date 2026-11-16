@@ -17,10 +17,10 @@ use clauseo_protocol::{
     QueuedPromptEdited, RawFrom, RenameSource, RestoreScope, SessionCapabilities, SkippedFile,
     SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved, SteeringCapability, StepUndone,
     StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadDone,
-    ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
-    ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued,
-    TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage, VersionRestored,
-    WebResult, WebSearchRecorded,
+    ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallCharged, ToolCallContent, ToolCallPatch,
+    ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded,
+    TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage,
+    VersionRestored, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
@@ -380,6 +380,13 @@ fn streaming_events() -> Vec<DomainEvent> {
             Some("Limitations Act, 2002".to_owned()),
             PageVia::Browser,
         )
+        .into(),
+        ToolCallCharged {
+            turn,
+            tool_call: tool_call_id(4),
+            credits: 40,
+            refused: false,
+        }
         .into(),
     ]
 }

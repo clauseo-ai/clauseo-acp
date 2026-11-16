@@ -18,9 +18,18 @@
 //!
 //! No entry (the relay's result came after the update, or more than five minutes before it):
 //! a search still records its query, with no results; a read records nothing. A call whose
-//! result is an error (`isError`, Codex's `error`) records nothing. `citator`,
-//! `check_citations`, `account` and `recharge` record nothing. `Origin::Late` and
-//! `Origin::Replay` never reach here (`actor/turn/updates.rs`), so a replay adds nothing.
+//! result is an error (`isError`, Codex's `error`, or a failed status) records no source.
+//! `account` and `recharge` record nothing. `Origin::Late` and `Origin::Replay` never reach
+//! here (`actor/turn/updates.rs`), so a replay adds nothing.
+//!
+//! The step's charge: a `search_law`, `read_document`, `citator` or `check_citations` call
+//! that completed or failed, whose entry carries the connector's `_meta` charge, also logs
+//! `ToolCallCharged` ([`charge_of`]): the credits when more than 0, or `refused` when the
+//! result was an error that charged 0. A success that charged 0 (a free repeat) logs nothing, as
+//! does an entry with no charge (an older connector, a malformed one) and a call with no entry.
+//! A call still running never gets one. Two results waiting under one key (the same tool with
+//! the same arguments, in flight together) whose charges differ cannot be told apart: neither
+//! call gets a charge ([`CaseLaw::take`]).
 
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
@@ -28,7 +37,8 @@ use std::time::Duration;
 use clauseo_acp::ToolCall;
 use clauseo_protocol::{
     AgentId, CompactString, DomainEvent, MAX_SEARCH_QUERY_CHARS, PageVia, PageVisited,
-    SearchSource, ToolCallId, ToolCallPatch, ToolCallStatus, TurnId, WebResult, WebSearchRecorded,
+    SearchSource, ToolCallCharged, ToolCallId, ToolCallPatch, ToolCallStatus, TurnId, WebResult,
+    WebSearchRecorded,
 };
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
@@ -107,6 +117,8 @@ pub(crate) struct CaseLaw {
 struct Entry {
     at: Duration,
     found: CaseLawFound,
+    /// Another entry under its key carried a different charge: its charge is not shown.
+    ambiguous: bool,
 }
 
 /// One case-law call as its latest start or update left it.
@@ -128,7 +140,11 @@ impl CaseLaw {
         if self.entries.len() >= MAX_ENTRIES {
             self.entries.pop_front();
         }
-        self.entries.push_back(Entry { at: now, found });
+        self.entries.push_back(Entry {
+            at: now,
+            found,
+            ambiguous: false,
+        });
     }
 
     /// A tool call started: `None` when it is no case-law call this module records (the other
@@ -154,7 +170,8 @@ impl CaseLaw {
         };
         Some(match call.status {
             ToolCallStatus::Completed => self.finished(now, agent, &pending),
-            ToolCallStatus::Failed | ToolCallStatus::Cancelled => Vec::new(),
+            ToolCallStatus::Failed => self.failed(now, &pending),
+            ToolCallStatus::Cancelled => Vec::new(),
             ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Unknown => {
                 if self.calls.len() >= MAX_CALLS {
                     // Calls an agent never finished are let go.
@@ -192,7 +209,11 @@ impl CaseLaw {
                 Some(pending) => self.finished(now, agent, &pending),
                 None => Vec::new(),
             },
-            Some(ToolCallStatus::Failed | ToolCallStatus::Cancelled) => {
+            Some(ToolCallStatus::Failed) => match self.calls.remove(acp_id) {
+                Some(pending) => self.failed(now, &pending),
+                None => Vec::new(),
+            },
+            Some(ToolCallStatus::Cancelled) => {
                 self.calls.remove(acp_id);
                 Vec::new()
             }
@@ -215,58 +236,114 @@ impl CaseLaw {
             .retain(|entry| now.saturating_sub(entry.at) <= ENTRY_LIFE);
     }
 
-    /// Takes the entry for `tool` with `key`, if one is young enough.
+    /// Takes the entry for `tool` with `key`, if one is young enough. When another entry waits
+    /// under the same key with a different charge (or one taken before it was marked so), the
+    /// two calls cannot be told apart: the taken entry's charge is dropped and the others are
+    /// marked, so their calls show none either. The links stay: they are only sources.
     fn take(&mut self, now: Duration, tool: CaseLawTool, key: &[u8; 32]) -> Option<CaseLawFound> {
         self.expire(now);
-        let index = self
+        let same = |entry: &Entry| entry.found.tool == tool && entry.found.key == *key;
+        let index = self.entries.iter().position(same)?;
+        let mut taken = self.entries.remove(index)?;
+        let charge = |entry: &Entry| (entry.found.charged, entry.found.failed);
+        let differs = self
             .entries
             .iter()
-            .position(|entry| entry.found.tool == tool && entry.found.key == *key)?;
-        self.entries.remove(index).map(|entry| entry.found)
+            .any(|other| same(other) && charge(other) != charge(&taken));
+        if differs {
+            for other in self.entries.iter_mut().filter(|entry| same(entry)) {
+                other.ambiguous = true;
+            }
+        }
+        if differs || taken.ambiguous {
+            tracing::debug!(
+                tool = tool.name(),
+                "two case-law results under one key differ in charge; neither shows one"
+            );
+            taken.found.charged = None;
+        }
+        Some(taken.found)
     }
 
-    /// The records a completed call adds.
-    fn finished(&mut self, now: Duration, agent: &AgentId, call: &Pending) -> Vec<DomainEvent> {
-        if call.output.as_ref().is_some_and(is_error) {
-            tracing::debug!(tool_call = %call.tool_call, "a case-law call that failed is not recorded");
-            return Vec::new();
-        }
+    /// The record a call whose agent said it failed adds: its charge only.
+    fn failed(&mut self, now: Duration, call: &Pending) -> Vec<DomainEvent> {
         let arguments = arguments_of(call);
         let entry = self.take(now, call.tool, &join_key(call.tool, &arguments));
-        let links = entry.map(|found| found.links).unwrap_or_default();
-        match call.tool {
-            CaseLawTool::SearchLaw => {
-                let Some(query) = query_of(&arguments) else {
-                    return Vec::new();
-                };
-                let results = links.iter().filter_map(result_of).collect();
-                let record = WebSearchRecorded::new(
+        entry
+            .and_then(|found| charge_of(call, &found))
+            .into_iter()
+            .collect()
+    }
+
+    /// The records a completed call adds: its sources, then its charge.
+    fn finished(&mut self, now: Duration, agent: &AgentId, call: &Pending) -> Vec<DomainEvent> {
+        let arguments = arguments_of(call);
+        let entry = self.take(now, call.tool, &join_key(call.tool, &arguments));
+        let charge = entry.as_ref().and_then(|found| charge_of(call, found));
+        let mut records = sources(agent, call, &arguments, entry);
+        records.extend(charge);
+        records
+    }
+}
+
+/// The sources a completed call adds, from its entry if any.
+fn sources(
+    agent: &AgentId,
+    call: &Pending,
+    arguments: &Value,
+    entry: Option<CaseLawFound>,
+) -> Vec<DomainEvent> {
+    let failed = entry.as_ref().is_some_and(|found| found.failed);
+    if failed || call.output.as_ref().is_some_and(is_error) {
+        tracing::debug!(tool_call = %call.tool_call, "a case-law call that failed is not recorded");
+        return Vec::new();
+    }
+    let links = entry.map(|found| found.links).unwrap_or_default();
+    match call.tool {
+        CaseLawTool::SearchLaw => {
+            let Some(query) = query_of(arguments) else {
+                return Vec::new();
+            };
+            let results = links.iter().filter_map(result_of).collect();
+            let record =
+                WebSearchRecorded::new(call.turn, call.tool_call, agent.clone(), &query, results)
+                    .with_source(SearchSource::CaseLaw, Some(call.tool.name()));
+            vec![record.into()]
+        }
+        CaseLawTool::ReadDocument => links
+            .iter()
+            .filter_map(result_of)
+            .map(|page| {
+                let title = Some(page.title).filter(|title| *title != page.url);
+                PageVisited::new(
                     call.turn,
                     call.tool_call,
-                    agent.clone(),
-                    &query,
-                    results,
+                    &page.url,
+                    title,
+                    PageVia::CaseLaw,
                 )
-                .with_source(SearchSource::CaseLaw, Some(call.tool.name()));
-                vec![record.into()]
-            }
-            CaseLawTool::ReadDocument => links
-                .iter()
-                .filter_map(result_of)
-                .map(|page| {
-                    let title = Some(page.title).filter(|title| *title != page.url);
-                    PageVisited::new(
-                        call.turn,
-                        call.tool_call,
-                        &page.url,
-                        title,
-                        PageVia::CaseLaw,
-                    )
-                    .into()
-                })
-                .collect(),
-        }
+                .into()
+            })
+            .collect(),
+        CaseLawTool::Citator | CaseLawTool::CheckCitations => Vec::new(),
     }
+}
+
+/// The charge a call's entry gives its step: the credits when more than 0; `refused` when the
+/// result was an error that charged 0; nothing for a success that charged 0 or an entry with no
+/// charge.
+fn charge_of(call: &Pending, found: &CaseLawFound) -> Option<DomainEvent> {
+    let credits = found.charged?;
+    let refused = found.failed && credits == 0;
+    (credits > 0 || refused).then(|| {
+        ToolCallCharged {
+            turn: call.turn,
+            tool_call: call.tool_call,
+            credits,
+            refused,
+        }
+        .into()
+    })
 }
 
 /// The case-law tool a call is, by its name or title, and whether it is Codex's form.

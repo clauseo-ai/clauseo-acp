@@ -20,8 +20,8 @@ pub use thread::{
 };
 pub use tool::{
     ElicitationExpired, ElicitationRequested, ElicitationResolved, PageVisited, PermissionExpired,
-    PermissionRequested, PermissionResolved, ToolCallStarted, ToolCallUpdated, WebResult,
-    WebSearchRecorded,
+    PermissionRequested, PermissionResolved, ToolCallCharged, ToolCallStarted, ToolCallUpdated,
+    WebResult, WebSearchRecorded,
 };
 pub use turn::{
     ContentAppended, FilesChanged, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended,

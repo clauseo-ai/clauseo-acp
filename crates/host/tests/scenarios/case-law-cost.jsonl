@@ -1,0 +1,21 @@
+{"scenario":"case-law-cost","description":"A case-law step's cost: a paid Claude search_law, a free read_document, a refused citator (failed), a search_law with no _meta, two read_documents with the same arguments, and a Codex check_citations still running when the turn ends","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-plain","title":"mcp__case-law__search_law","name":"mcp__case-law__search_law","kind":"other","status":"in_progress","rawInput":{"query":"plain"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-plain","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-paid","title":"mcp__case-law__search_law","name":"mcp__case-law__search_law","kind":"other","status":"in_progress","rawInput":{"query":"paid"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-paid","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-free","title":"mcp__case-law__read_document","name":"mcp__case-law__read_document","kind":"other","status":"in_progress","rawInput":{"doc_id":"1"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-free","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-refused","title":"mcp__case-law__citator","name":"mcp__case-law__citator","kind":"other","status":"in_progress","rawInput":{"doc_id":"2"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-refused","status":"failed","rawOutput":{"isError":true}}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-twin-a","title":"mcp__case-law__read_document","name":"mcp__case-law__read_document","kind":"other","status":"in_progress","rawInput":{"doc_id":"3"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-twin-a","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-twin-b","title":"mcp__case-law__read_document","name":"mcp__case-law__read_document","kind":"other","status":"in_progress","rawInput":{"doc_id":"3"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-twin-b","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-running","title":"mcp.case-law.check_citations","kind":"other","status":"in_progress","rawInput":{"server":"case-law","tool":"check_citations","arguments":{"text":"AIR 1973 SC 1461"}}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{"type":"text","text":"Kesavananda Bharati is the leading case."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

@@ -81,6 +81,7 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         }
         DomainEvent::WebSearchRecorded(event) => web::search_recorded(state, event, out),
         DomainEvent::PageVisited(event) => web::page_visited(state, event, out),
+        DomainEvent::ToolCallCharged(event) => web::charged(state, event, out),
         DomainEvent::Unknown { .. } => {}
         DomainEvent::AgentSessionDetached(event) => {
             turn::detached(state, &event.reason, ts, out);
@@ -380,6 +381,7 @@ fn tool_call_started(
         finished_at: queue::final_time(event.status, ts),
         background: None,
         web: None,
+        charge: None,
     };
     insert_new(state, seq, ViewEntry::ToolCall(Box::new(entry)), out);
 }

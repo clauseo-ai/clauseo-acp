@@ -106,8 +106,18 @@ pub enum RelayEvent {
         /// Whether it started or ended.
         call: RelayCall,
     },
-    /// A `search_law` or `read_document` call answered without an error: what it found, for
-    /// the thread's sources (`sources/case_law.rs` joins it to the agent's tool call).
+    /// A paid or free case-law tool's result (not `recharge`'s) carried a whole-number
+    /// `_meta["chat.clauseo/credits"].balance_credits`: the balance after that call, as the
+    /// connector booked it. Sent before the call's `OutOfCredit` or `PaidResult`.
+    BalanceReported {
+        /// The session whose call it was.
+        session: SessionKey,
+        /// The balance the result reported.
+        balance_credits: i64,
+    },
+    /// A `search_law`, `read_document`, `citator` or `check_citations` call answered, an error
+    /// included: what it found and what it cost, for the thread's sources and the step's charge
+    /// (`sources/case_law.rs` joins it to the agent's tool call).
     CaseLawFound {
         /// The session whose call it was.
         session: SessionKey,
@@ -125,13 +135,18 @@ pub enum RelayCall {
     Ended,
 }
 
-/// The case-law tools whose results become sources.
+/// The case-law tools whose results the host joins to the agent's tool call: for sources
+/// (`search_law`, `read_document`) and for the step's charge (all four).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaseLawTool {
     /// `search_law`: a `WebSearchRecorded { source: CaseLaw }`.
     SearchLaw,
     /// `read_document`: one `PageVisited { via: CaseLaw }` per document.
     ReadDocument,
+    /// `citator`: its charge only.
+    Citator,
+    /// `check_citations`: its charge only.
+    CheckCitations,
 }
 
 impl CaseLawTool {
@@ -140,6 +155,8 @@ impl CaseLawTool {
         match name {
             "search_law" => Some(Self::SearchLaw),
             "read_document" => Some(Self::ReadDocument),
+            "citator" => Some(Self::Citator),
+            "check_citations" => Some(Self::CheckCitations),
             _ => None,
         }
     }
@@ -149,6 +166,8 @@ impl CaseLawTool {
         match self {
             Self::SearchLaw => "search_law",
             Self::ReadDocument => "read_document",
+            Self::Citator => "citator",
+            Self::CheckCitations => "check_citations",
         }
     }
 }
@@ -164,8 +183,15 @@ pub struct CaseLawFound {
     /// SHA-256 of the tool's name and the canonical JSON of its arguments (sorted keys): the join
     /// key, so the host keeps no argument text.
     pub key: [u8; 32],
-    /// The titles and links, in the connector's order; at most `MAX_SEARCH_RESULTS`.
+    /// The titles and links, in the connector's order; at most `MAX_SEARCH_RESULTS`. Empty for
+    /// an error result, and for `citator` and `check_citations`.
     pub links: Vec<FoundLink>,
+    /// Whether the result said `isError` (a refused or failed call).
+    pub failed: bool,
+    /// `_meta["chat.clauseo/credits"].charged_credits`, when present as a whole number 0 or
+    /// more: what the connector charged for this call. `None` when the key is missing (an older
+    /// connector) or malformed: the step then shows no charge.
+    pub charged: Option<u32>,
 }
 
 impl std::fmt::Debug for CaseLawFound {
@@ -174,6 +200,8 @@ impl std::fmt::Debug for CaseLawFound {
         f.debug_struct("CaseLawFound")
             .field("tool", &self.tool)
             .field("links", &self.links.len())
+            .field("failed", &self.failed)
+            .field("charged", &self.charged)
             .finish_non_exhaustive()
     }
 }

@@ -231,6 +231,22 @@ pub struct ToolCallEntry {
     /// measures the cost).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub web: Option<Box<ToolCallWeb>>,
+    /// What the call cost, from the log's `ToolCallCharged` for it: a case-law call that
+    /// was charged, or refused with nothing charged. Missing and `None` both mean no charge to
+    /// show (still running, free, not reported, or not matched), so a call without one is
+    /// written as before.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub charge: Option<ToolCallCharge>,
+}
+
+/// What a tool call cost, as its `ToolCallCharged` has it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ToolCallCharge {
+    /// The credits charged; 0 when `refused`.
+    pub credits: u32,
+    /// Refused or failed, with nothing charged.
+    pub refused: bool,
 }
 
 /// A tool call that carried on in the background while its turn answered a steered message.
