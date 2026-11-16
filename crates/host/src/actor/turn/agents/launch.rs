@@ -13,7 +13,7 @@ use clauseo_protocol::{AgentKind, ErrorCode, ThreadId};
 use super::super::super::Actor;
 use super::super::super::input::Input;
 use super::super::key_retry::{KeyRetry, own_login};
-use super::super::launch_checks::Prepared;
+use super::super::launch_checks::{Prepared, RunFolders};
 use super::super::offline::probe::Target;
 use super::{CodexAgent, path, start_failure};
 use crate::agent::{self, AgentLink};
@@ -52,27 +52,7 @@ pub(super) fn launch(
             format!("no agent {} in the settings", row.agent),
         )
     })?;
-    // The relay token and the browser proxy's password reach the agent's tree in files; its
-    // stderr tail hides them all the same. So are the lawyer's MCP values and remote URLs, which
-    // reach it in `session/new`.
-    let mut redacted = super::super::launch_checks::relay::redacted(&prepared.run);
-    redacted.extend(agent::loads::lawyer::redacted(&prepared.run.lawyer.servers));
-    redacted.extend(
-        prepared
-            .run
-            .egress
-            .as_ref()
-            .and_then(|egress| egress.secret())
-            .into_iter()
-            .flat_map(|credential| {
-                // The password, and the `Proxy-Authorization: Basic` value it makes.
-                let basic = format!("{}:{}", credential.user(), credential.password());
-                [
-                    credential.password().to_owned(),
-                    base64::engine::general_purpose::STANDARD.encode(basic),
-                ]
-            }),
-    );
+    let redacted = redacted(&prepared.run);
     let folder = prepared.stored;
     let claude_home = prepared.claude_home.clone();
     let record = prepared
@@ -95,11 +75,15 @@ pub(super) fn launch(
         (forced, Some((codex, prepared.login)))
     } else {
         // A Claude agent's home goes in before `plans_folder` reads the merged map below.
-        let forced = prepared
+        let mut forced = prepared
             .claude_home
             .as_deref()
-            .map(agent::home::claude_launch_env);
-        (forced.unwrap_or_default(), None)
+            .map(agent::home::claude_launch_env)
+            .unwrap_or_default();
+        if AgentKind::of(&row.agent) == Some(AgentKind::Claude) {
+            forced.extend(agent::loads::claude_launch_vars());
+        }
+        (forced, None)
     };
     // Every agent's temp folder is its session's own, gone with the run folder.
     let short = prepared.run.claude_tmp.as_deref();
@@ -171,6 +155,29 @@ pub(super) fn launch(
         fence_vars,
         probe,
     ))
+}
+
+/// What the agent's stderr tail hides. The relay token and the browser proxy's password reach the
+/// agent's tree in files; its stderr tail hides them all the same. So are the lawyer's MCP values
+/// and remote URLs, which reach it in `session/new`.
+fn redacted(run: &RunFolders) -> Vec<String> {
+    let mut redacted = super::super::launch_checks::relay::redacted(run);
+    redacted.extend(agent::loads::lawyer::redacted(&run.lawyer.servers));
+    redacted.extend(
+        run.egress
+            .as_ref()
+            .and_then(|egress| egress.secret())
+            .into_iter()
+            .flat_map(|credential| {
+                // The password, and the `Proxy-Authorization: Basic` value it makes.
+                let basic = format!("{}:{}", credential.user(), credential.password());
+                [
+                    credential.password().to_owned(),
+                    base64::engine::general_purpose::STANDARD.encode(basic),
+                ]
+            }),
+    );
+    redacted
 }
 
 /// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
