@@ -239,7 +239,7 @@ pub(super) fn session_loads(
              each change could not be set up",
         ));
     }
-    let mut meta = loads::session_meta(
+    let (mut meta, shed) = loads::session_meta_shed(
         actor
             .profile
             .session_meta(&agent_id, run.packs_written.as_deref()),
@@ -248,10 +248,7 @@ pub(super) fn session_loads(
         claude.as_ref(),
     );
     profile::fill_meta(&mut meta, folders)?;
-    if kind == Some(AgentKind::Claude) {
-        // Ask mode when the auto-mode context would be over budget (`session/ask_mode.rs`).
-        super::session::ask_mode::at_launch(actor, thread, &meta);
-    }
+    super::session::ask_mode::at_launch(actor, thread, (kind, shed), &meta);
     super::offline::probe::session_meta(actor, thread, &meta);
     if run.browser_policy_read {
         // What the app heard from a "Try again" follows this newer read.

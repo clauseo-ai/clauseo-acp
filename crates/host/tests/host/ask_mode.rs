@@ -3,9 +3,13 @@
 //!
 //! - a launch whose flag settings would give Claude Code an auto-mode context over budget is
 //!   switched to `default`, never `auto`, with one UC-491 notice; one under budget goes to `auto`;
-//! - a tool result carrying Claude Code's refusal for want of that context gives one UC-492
-//!   notice and marks the agent: the next prompt relaunches it in `default`, and neither the
-//!   replayed refusal nor a later answer quoting it does anything more (no loop);
+//! - a tool result carrying Claude Code's refusal because the request carried no auto-mode
+//!   context (the withheld kind) gives one UC-492 notice and marks the agent: the next prompt
+//!   relaunches it in `default`, and neither the replayed refusal nor a later answer quoting it
+//!   does anything more (no loop);
+//! - a service blip ("gave no verdict (error)") with a small rule list never changes the mode: a
+//!   turn that ends on one gets one UC-800 line, one whose retry runs gets none; at an estimate
+//!   of 80% of the limit or more, a turn that ends on a blip relaunches in `default`;
 //! - each notice shows once per conversation: a host started again that runs into the refusal
 //!   once more switches without a second UC-492, and none follows a UC-491.
 
@@ -53,6 +57,10 @@ impl ProfileHook for DenyRules {
 
 /// Enough rules for about 1 MB of auto-mode context, over the 900,000 B budget.
 const OVER: usize = 5_000;
+
+/// Rules for 836,040 B of auto-mode context: past 80% of the limit (832,000 B) alone, and under
+/// the budget with the data folder's own rules (about 40-60 KB here).
+const LARGE: usize = 4_272;
 
 /// Every `ModeChanged`'s mode, in order.
 fn modes(events: &Events) -> Vec<String> {
@@ -192,5 +200,74 @@ fn a_refusal_for_want_of_the_checks_relaunches_in_default_once() {
         "{}",
         events.dump()
     );
+    host.shutdown();
+}
+
+#[test]
+fn a_blip_with_a_small_rule_list_gets_a_plain_line_once_a_turn_and_no_mode_change() {
+    let dir = Dir::new(
+        "ask_mode_blip",
+        &[(CLAUDE, Scenario::Local("ask-mode-blip"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+    // Two blips, the turn ends on them: one line.
+    let events = turn(&host, thread, "Convert the memo.");
+    assert_eq!(
+        notices(&events, &NoticeKind::SafetyCheckNoAnswer),
+        1,
+        "{}",
+        events.dump()
+    );
+    // A blip, then Claude's retry runs: none.
+    let events = turn(&host, thread, "Edit the memo.");
+    assert_eq!(
+        notices(&events, &NoticeKind::SafetyCheckNoAnswer),
+        1,
+        "{}",
+        events.dump()
+    );
+    // The hard-failure kind, which Claude does not retry: one more, at the turn's end.
+    let events = turn(&host, thread, "Edit it again.");
+    assert_eq!(
+        notices(&events, &NoticeKind::SafetyCheckNoAnswer),
+        2,
+        "{}",
+        events.dump()
+    );
+    // Never a mode change, and no relaunch (the scenario takes no second launch).
+    assert_eq!(modes(&events), ["auto"], "{}", events.dump());
+    assert_eq!(notices(&events, &NoticeKind::AskModeChecksStopped), 0);
+    assert_eq!(notices(&events, &NoticeKind::AskModeTooManyMatters), 0);
+    host.shutdown();
+}
+
+#[test]
+fn a_turn_ending_on_blips_at_a_large_estimate_relaunches_in_default() {
+    let dir = Dir::new(
+        "ask_mode_blip_large",
+        &[(CLAUDE, Scenario::Local("ask-mode-blip-large"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_profile_hook(Box::new(DenyRules { rules: LARGE }))
+    });
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+    let events = turn(&host, thread, "Edit the memo.");
+    assert_eq!(modes(&events), ["auto"], "{}", events.dump());
+    assert_eq!(
+        notices(&events, &NoticeKind::AskModeChecksStopped),
+        1,
+        "{}",
+        events.dump()
+    );
+    assert_eq!(
+        notices(&events, &NoticeKind::SafetyCheckNoAnswer),
+        0,
+        "{}",
+        events.dump()
+    );
+    let events = turn(&host, thread, "Try again.");
+    assert_eq!(modes(&events), ["auto", "default"], "{}", events.dump());
+    assert_eq!(notices(&events, &NoticeKind::AskModeChecksStopped), 1);
     host.shutdown();
 }

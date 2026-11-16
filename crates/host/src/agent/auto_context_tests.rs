@@ -1,13 +1,16 @@
 //! The estimate against the fake-API measurements of Claude Code 2.1.293 (private
 //! `hostfu/b4l-autoctx.md`): main's launch at 8 matters (372,259 B sent) and #1085's at 200
-//! (943,153 B sent), each within 5%; and its parts on small settings.
+//! (943,153 B sent), each within 5%; its parts on small settings; the Claude Code pin the
+//! factors were measured on; and that nothing but the estimate meets the limits.
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
-use super::{BUDGET, WITHHELD_ABOVE, estimate, settings_of};
+use super::{
+    ASK_MODE_AT, CONTEXT_LIMIT, TEST_BUDGET_AT_8, TEST_BUDGET_AT_200, estimate, settings_of,
+};
 use crate::agent::data_fence::big_folder::laptop;
 use crate::agent::data_fence::{
     LaunchDeny, claude_allow_rules_on, claude_deny_rules_on, rule_path, windows_shell_deny_rules,
@@ -31,7 +34,7 @@ fn env(name: &str) -> Option<OsString> {
 }
 
 /// Flag settings holding `deny` and `allow` as `permissions`.
-fn settings(deny: Vec<String>, allow: Vec<String>) -> Map<String, Value> {
+fn settings(deny: &[String], allow: &[String]) -> Map<String, Value> {
     let value = json!({"permissions": {"deny": deny, "allow": allow}});
     value.as_object().cloned().unwrap_or_default()
 }
@@ -147,14 +150,14 @@ fn main_at_8_matters_is_within_5_percent_of_what_claude_code_sent() {
     let (deny, allow) = main_launch(&dir, 8, false);
     // The measured render: 254 Read and Edit, 3,448 shell, 2 marker rules.
     assert_eq!(deny.len(), 3_704);
-    let estimated = estimate(&settings(deny, allow));
+    let estimated = estimate(&settings(&deny, &allow));
     eprintln!("main-8 as measured: estimated {estimated}, sent 372,259");
     assert!(near(estimated, 372_259), "estimated {estimated}");
     // Main today adds the own folders' glob denies: still far under the budget.
     let (deny, allow) = main_launch(&dir, 8, true);
-    let today = estimate(&settings(deny.clone(), allow));
+    let today = estimate(&settings(&deny, &allow));
     eprintln!("main-8 today: {} deny rules, estimated {today}", deny.len());
-    assert!(today < BUDGET, "estimated {today}");
+    assert!(today <= TEST_BUDGET_AT_8, "estimated {today}");
 }
 
 #[test]
@@ -175,19 +178,21 @@ fn pr_1085_at_200_matters_is_within_5_percent_of_what_claude_code_sent() {
     eprintln!("pr-200 other matters' rules: {bytes} B of settings, measured 320,901");
     assert!(bytes.abs_diff(320_901) * 33 <= 320_901, "{bytes} B");
     deny.extend(others);
-    let estimated = estimate(&settings(deny, allow));
+    let estimated = estimate(&settings(&deny, &allow));
     eprintln!("pr-200 as measured: estimated {estimated}, sent 943,153");
     assert!(near(estimated, 943_153), "estimated {estimated}");
-    assert!(estimated > BUDGET && estimated < WITHHELD_ABOVE);
+    assert!(estimated > ASK_MODE_AT && estimated < CONTEXT_LIMIT);
+    // As measured, #1085 at 200 matters is over the budget its own test must hold it to.
+    assert!(estimated > TEST_BUDGET_AT_200);
 }
 
 #[test]
 fn allow_rules_count_nothing_and_ask_rules_count_as_deny_rules() {
     let rule = r"Bash(*C:\Users\x*)".to_owned();
-    let empty = estimate(&settings(Vec::new(), Vec::new()));
-    let allowed = estimate(&settings(Vec::new(), vec![rule.clone(); 100]));
+    let empty = estimate(&settings(&[], &[]));
+    let allowed = estimate(&settings(&[], &vec![rule.clone(); 100]));
     assert_eq!(allowed, empty);
-    let denied = estimate(&settings(vec![rule.clone()], Vec::new()));
+    let denied = estimate(&settings(std::slice::from_ref(&rule), &[]));
     let value = json!({"permissions": {"ask": [rule]}});
     let asked = estimate(value.as_object().unwrap());
     assert_eq!(asked, denied);
@@ -198,7 +203,7 @@ fn allow_rules_count_nothing_and_ask_rules_count_as_deny_rules() {
 #[test]
 fn a_read_rule_costs_its_root_and_pattern_too() {
     let empty = estimate(&Map::new());
-    let read = estimate(&settings(vec!["Read(//c/a/**)".to_owned()], Vec::new()));
+    let read = estimate(&settings(&["Read(//c/a/**)".to_owned()], &[]));
     // The rule's JSON (16) and wrapper (33), the root `"/"` (3), the pattern `"/c/a/**"` (9)
     // and their wrapper (20).
     assert_eq!(read - empty, 16 + 33 + 3 + 9 + 20);
@@ -210,4 +215,98 @@ fn settings_are_found_in_the_session_meta_only_as_an_object() {
     assert!(settings_of(meta.as_object().unwrap()).is_some());
     let moved = json!({"claudeCode": {"options": {"settings": "/data/launch-settings/r.json"}}});
     assert!(settings_of(moved.as_object().unwrap()).is_none());
+}
+
+/// The Claude Code the factors were measured on: `@anthropic-ai/claude-agent-sdk` 0.3.293,
+/// whose binary is Claude Code 2.1.293, in the one home of the adapters' npm pins.
+const MEASURED_SDK: &str = "0.3.293";
+
+#[test]
+fn the_factors_were_measured_on_the_pinned_claude_code() {
+    let lock: Value =
+        serde_json::from_str(include_str!("../../../limits/tests/live/package-lock.json")).unwrap();
+    let pinned = lock["packages"]["node_modules/@anthropic-ai/claude-agent-sdk"]["version"]
+        .as_str()
+        .unwrap_or("none");
+    assert_eq!(
+        pinned, MEASURED_SDK,
+        "Claude Code's pin moved: re-measure auto_context factors (its module doc says how)"
+    );
+}
+
+/// The names of the limits, and their values written out.
+const LIMITS: [&str; 9] = [
+    "ASK_MODE_AT",
+    "ASK_ON_BLIP_AT",
+    "CONTEXT_LIMIT",
+    "832_000",
+    "832000",
+    "1_040_000",
+    "1040000",
+    "900_000",
+    "900000",
+];
+
+/// Whether `line` holds `word` with no word character either side.
+fn names(line: &str, word: &str) -> bool {
+    let word_char = |c: char| c.is_alphanumeric() || c == '_';
+    line.match_indices(word).any(|(at, _)| {
+        let before = line.get(..at).and_then(|text| text.chars().next_back());
+        let after = line
+            .get(at + word.len()..)
+            .and_then(|text| text.chars().next());
+        !before.is_some_and(word_char) && !after.is_some_and(word_char)
+    })
+}
+
+/// Every `.rs` file under `dir`.
+fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            sources(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            out.push(path);
+        }
+    }
+}
+
+/// The context limit is met by the estimate alone: outside this module, a line that names a
+/// limit (or writes one out) must name `estimate` too, so no one weighs settings bytes against
+/// it again; `SHED_AT` is the settings file's own limit.
+#[test]
+fn only_the_estimate_meets_the_context_limits() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    sources(&root.join("src"), &mut files);
+    sources(&root.join("tests"), &mut files);
+    let mut met = 0;
+    let mut wrong = Vec::new();
+    for file in &files {
+        let name = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        if name.starts_with("auto_context") {
+            continue;
+        }
+        let text = std::fs::read_to_string(file).unwrap();
+        for (n, line) in text.lines().enumerate() {
+            if !LIMITS.iter().any(|limit| names(line, limit)) || line.trim_start().starts_with("//")
+            {
+                continue;
+            }
+            if line.contains("estimate") {
+                met += 1;
+            } else {
+                wrong.push(format!("{}:{}: {}", file.display(), n + 1, line.trim()));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "a limit met by something but the estimate: {wrong:#?}"
+    );
+    // The ask-mode decision is one of them.
+    assert!(met > 0, "no line meets a limit with the estimate");
 }

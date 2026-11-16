@@ -16,5 +16,14 @@
     "at": "2026-11-16",
     "by": "host follow-ups autoask (provisional; app thread's words)",
     "note": "Host notice NoticeKind::AskModeChecksStopped: Claude Code refused a call for want of its automatic checks; the conversation relaunches in ask mode (actor/turn/session/ask_mode.rs)"
+  },
+  "UC-800": {
+    "en": "Claude's safety check didn't answer, so Claude didn't do this. Try again in a moment.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "host follow-ups autoask (provisional; app thread's words)",
+    "note": "Host notice NoticeKind::SafetyCheckNoAnswer: a Claude turn ended on a blip of the auto-mode safety check (a no-verdict that is not the withheld kind), after Claude's own retry; shown right after the refused tool row, no mode change (actor/turn/session/ask_mode.rs)"
   }
 }

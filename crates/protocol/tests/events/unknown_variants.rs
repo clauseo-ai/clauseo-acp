@@ -176,6 +176,7 @@ fn notice_kind() {
             NoticeKind::AskModeTooManyMatters,
         ),
         ("ask_mode_checks_stopped", NoticeKind::AskModeChecksStopped),
+        ("safety_check_no_answer", NoticeKind::SafetyCheckNoAnswer),
     ];
     for (wire, kind) in &units {
         decodes_in_both(&format!("\"{wire}\""), kind);

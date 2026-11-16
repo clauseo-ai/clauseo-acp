@@ -344,11 +344,15 @@ fn a_launch_past_its_budget_sheds_the_variable_forms() {
     );
     assert!(size(&shed) < size(&full) && size(&full) < SHED_AT);
     let fits = SHED_AT - size(&full);
-    let (kept, quiet) = logged(|| shell_rules_within(&deny, &long_env, fits, SHED_AT));
+    let ((kept, kept_shed), quiet) = logged(|| shell_rules_within(&deny, &long_env, fits, SHED_AT));
     assert_eq!(kept, full);
+    assert!(!kept_shed);
     assert!(!quiet.contains("shed="), "{quiet}");
-    let (got, text) = logged(|| shell_rules_within(&deny, &long_env, fits + 1, SHED_AT));
+    let ((got, got_shed), text) =
+        logged(|| shell_rules_within(&deny, &long_env, fits + 1, SHED_AT));
     assert_eq!(got, shed);
+    // A shed launch runs in ask mode (`actor/turn/session/ask_mode.rs`).
+    assert!(got_shed);
     assert!(fits + 1 + size(&got) <= SHED_AT);
     assert!(
         text.contains("shed=\"vars\"") || text.contains("shed=vars"),
@@ -369,8 +373,9 @@ fn a_launch_past_its_budget_sheds_the_variable_forms() {
         }
     }
     // Within its budget a launch keeps them.
-    let roomy = shell_rules_within(&deny, &long_env, 0, usize::MAX);
+    let (roomy, roomy_shed) = shell_rules_within(&deny, &long_env, 0, usize::MAX);
     assert_eq!(roomy, full);
+    assert!(!roomy_shed);
 }
 
 /// `run` under a log of its own, and what it logged. The cached interest of every callsite is

@@ -200,12 +200,16 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   precedence). It also turns the user's own hooks back on when their `disableAllHooks` had
 ///   them off. A hook value at `settings`, `hooks` or `PreToolUse` of another type is
 ///   replaced.
-pub(crate) fn session_meta(
+///
+/// Also whether its Claude flag settings shed the data folder's shell rules to fit the settings
+/// file (`profile::SHED_AT`), which puts the launch in ask mode (`session/ask_mode.rs`).
+pub(crate) fn session_meta_shed(
     hook: Option<Map<String, Value>>,
     control: McpControl,
     guard: Option<GuardHook<'_>>,
     keys: Option<&profile::ClaudeKeys<'_>>,
-) -> Map<String, Value> {
+) -> (Map<String, Value>, bool) {
+    let mut shed = false;
     let mut meta = hook.unwrap_or_default();
     let mut claude = take_object(&mut meta, "claudeCode");
     let mut options = take_object(&mut claude, "options");
@@ -231,7 +235,7 @@ pub(crate) fn session_meta(
     options.insert("strictMcpConfig".to_owned(), Value::Bool(strict));
     options.insert("settingSources".to_owned(), Value::from(sources.to_vec()));
     if let Some(keys) = keys {
-        profile::claude_options(&mut options, keys);
+        shed = profile::claude_options(&mut options, keys);
         subagents::subagent_meta(&mut meta, &mut options, keys.login, keys.web_search.on);
     }
     if let Some(entry) = guard.and_then(guard_entry) {
@@ -258,7 +262,18 @@ pub(crate) fn session_meta(
     }
     claude.insert("options".to_owned(), Value::Object(options));
     meta.insert("claudeCode".to_owned(), Value::Object(claude));
-    meta
+    (meta, shed)
+}
+
+/// [`session_meta_shed`]'s `_meta` alone, for the tests about it.
+#[cfg(test)]
+pub(crate) fn session_meta(
+    hook: Option<Map<String, Value>>,
+    control: McpControl,
+    guard: Option<GuardHook<'_>>,
+    keys: Option<&profile::ClaudeKeys<'_>>,
+) -> Map<String, Value> {
+    session_meta_shed(hook, control, guard, keys).0
 }
 
 /// Whether the `extraArgs` key `flag` becomes `--<name>`: the SDK writes `--<key>`, then the

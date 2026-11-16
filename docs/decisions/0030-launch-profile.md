@@ -473,16 +473,24 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   the fallback.
 - **2026-11-16: ask mode when the auto-mode context would not be sent.** Claude Code 2.1.293
   sends auto mode's context (its JSON holds the permission rules) only while it is at most
-  1,040,000 bytes; above that every `Edit` and `Bash` of the launch is refused ("no server
-  verdict for this call (server_not_requested)"). A Claude launch outside forced ask whose flag
+  1,040,000 bytes; above that every `Edit` and `Bash` of the launch is refused (the tool
+  result: "The server-side auto mode classifier gave no verdict for Edit: the request that
+  produced this action did not ask for one"; the debug log: `server_not_requested`). A Claude launch outside forced ask whose flag
   settings would give a context over 900,000 bytes (`agent/auto_context.rs`: each deny or ask
   rule's JSON with doubled backslashes plus 33 B, a file rule's root and pattern on top, allow
   rules 0, 3 KB fixed; within 5% of the fake-API numbers for main at 8 matters and #1085 at
   200) runs in `default` instead, with every rule kept and one notice
-  (`NoticeKind::AskModeTooManyMatters`, UC-491). A refusal seen anyway in a tool result, an
-  answer or a notice of a session in `auto` gives one notice (`NoticeKind::AskModeChecksStopped`,
-  UC-492, not after UC-491) and relaunches the conversation at its next prompt in `default`,
-  kept for every launch of it until the host starts again (`actor/turn/session/ask_mode.rs`).
+  (`NoticeKind::AskModeTooManyMatters`, UC-491); so does one whose data folder's shell rules
+  were shed to fit the settings file (`SHED_AT`, a different limit: the file's bytes against
+  Claude Code's 2 MiB read), whatever the estimate. That withheld refusal seen anyway in a
+  tool result (or an answer) of a session in `auto` gives one notice
+  (`NoticeKind::AskModeChecksStopped`, UC-492, not after UC-491) and relaunches the
+  conversation at its next prompt in `default`, kept for every launch of it until the host
+  starts again (`actor/turn/session/ask_mode.rs`). Any other "gave no verdict" (such as
+  "(error)") is a service blip, which a tiny rule list gets too: Claude Code retries it itself,
+  and a turn that ends on one gets a plain line (`NoticeKind::SafetyCheckNoAnswer`, UC-800) and
+  no mode change, unless the estimate is at least 832,000 bytes (80% of the limit), where it
+  goes to ask mode as above.
   In ask mode `default`, `acceptEdits` and `plan` are kept and `auto` goes back to `default`.
   No rule is trimmed and no launch refused.
 - **2026-11-11: Windows stays in `auto`, with shell deny rules.** Claude has no browser on

@@ -194,6 +194,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     // Claude's suspected connection line goes back into the answer unless the turn ends
     // offline: a cancel (one the agent never answered too) or any other end.
     offline::turn_ending(actor, thread, end.failure.as_ref().map(|(code, _)| *code));
+    super::session::ask_mode::turn_ending(actor, thread);
     cancel::sweep_leftovers(actor, thread, end.stop);
     let Some(current) = current(actor, thread) else {
         return;

@@ -163,6 +163,10 @@ export function noticeLine(
       return w.th(
         "Claude now asks before each change in this conversation, because its automatic checks stopped working here. Clauseo's own protections still apply.",
       );
+    if (kind === "safety_check_no_answer")
+      return w.th(
+        "Claude's safety check didn't answer, so Claude didn't do this. Try again in a moment.",
+      );
     return null;
   }
   // read by shape: a value from a newer host, or none (null), that this version doesn't know gives null. The field

@@ -198,8 +198,10 @@ pub(crate) struct ClaudeKeys<'a> {
     pub(crate) trusted_servers: &'a [String],
 }
 
-/// Adds [`ClaudeKeys`] to `claudeCode.options` (see the module doc).
-pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys<'_>) {
+/// Adds [`ClaudeKeys`] to `claudeCode.options` (see the module doc). Whether the data folder's
+/// shell rules were shed to fit the settings file ([`SHED_AT`]): such a launch runs in ask mode
+/// (`actor/turn/session/ask_mode.rs`).
+pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys<'_>) -> bool {
     let mut disallowed = take_array(options, "disallowedTools");
     let mut allowed = take_array(options, "allowedTools");
     if keys.web_search.on {
@@ -250,7 +252,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     if keys.login != Login::FirstParty {
         settings.insert("skipWebFetchPreflight".to_owned(), Value::Bool(true));
     }
-    deny_data_folder(&mut settings, keys.data, keys.sandbox.is_some());
+    let shed = deny_data_folder(&mut settings, keys.data, keys.sandbox.is_some());
     if keys.browser {
         browser_ask_settings(&mut settings);
     }
@@ -265,6 +267,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         forced_ask_settings(&mut settings);
     }
     options.insert("settings".to_owned(), Value::Object(settings));
+    shed
 }
 
 /// The size past which a launch's settings shed the data folder's variable forms from its shell
@@ -279,15 +282,17 @@ pub(crate) const SHED_AT: usize = 1_887_436;
 /// and reading (`data_fence::claude_allow_rules`), each after any the hook put there. The own
 /// folders' glob denies go in only without Claude's shell sandbox (`sandboxed`, `keys.sandbox`:
 /// on Windows, or with the sandbox `Off`). A hook value at `permissions`, `deny` or `allow` of
-/// another type is replaced. With no spelling (a unit test's keys) nothing changes.
+/// another type is replaced. With no spelling (a unit test's keys) nothing changes. Whether the
+/// shell rules were shed.
 fn deny_data_folder(
     settings: &mut Map<String, Value>,
     data: &crate::agent::data_fence::LaunchDeny,
     sandboxed: bool,
-) {
+) -> bool {
     if data.spellings.is_empty() {
-        return;
+        return false;
     }
+    let mut shed = false;
     let mut permissions = take_object(settings, "permissions");
     let mut deny = take_array(&mut permissions, "deny");
     for rule in crate::agent::data_fence::claude_deny_rules(data, sandboxed) {
@@ -300,7 +305,8 @@ fn deny_data_folder(
     if cfg!(windows) {
         let var = |name: &str| std::env::var_os(name);
         let spent = json_len(&*settings) + json_len(&deny) + json_len(&allow);
-        let shell = shell_rules_within(data, &var, spent, SHED_AT);
+        let shell;
+        (shell, shed) = shell_rules_within(data, &var, spent, SHED_AT);
         // A set, not `push_new`: a busy data folder gives a few thousand of these.
         let mut known: std::collections::HashSet<String> = deny
             .iter()
@@ -315,22 +321,24 @@ fn deny_data_folder(
     permissions.insert("deny".to_owned(), Value::Array(deny));
     permissions.insert("allow".to_owned(), Value::Array(allow));
     settings.insert("permissions".to_owned(), Value::Object(permissions));
+    shed
 }
 
 /// The data folder's Windows shell rules for a launch whose other settings take `spent` bytes as
 /// JSON: all of them, or without the variable forms
 /// (`data_fence::windows_shell_deny_rules_without_variables`) when all of them would take the
-/// settings past `budget` ([`SHED_AT`]), logged with fixed fields only.
+/// settings past `budget` ([`SHED_AT`]), logged with fixed fields only; and whether they were
+/// shed.
 pub(crate) fn shell_rules_within(
     data: &crate::agent::data_fence::LaunchDeny,
     var: &dyn Fn(&str) -> Option<OsString>,
     spent: usize,
     budget: usize,
-) -> Vec<String> {
+) -> (Vec<String>, bool) {
     let shell = crate::agent::data_fence::windows_shell_deny_rules(data, var);
     let total = spent + json_len(&shell);
     if total <= budget {
-        return shell;
+        return (shell, false);
     }
     tracing::warn!(
         settings_bytes = total,
@@ -338,7 +346,8 @@ pub(crate) fn shell_rules_within(
         shed = "vars",
         "Claude's settings outgrew their budget; the data folder's variable forms are shed"
     );
-    crate::agent::data_fence::windows_shell_deny_rules_without_variables(data, var)
+    let shed = crate::agent::data_fence::windows_shell_deny_rules_without_variables(data, var);
+    (shed, true)
 }
 
 /// `value`'s length as JSON (0 if it can't be written, which a map of JSON values never is).

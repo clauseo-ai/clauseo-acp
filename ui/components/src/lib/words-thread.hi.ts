@@ -204,6 +204,8 @@ export const HI = {
     null,
   "Claude now asks before each change in this conversation, because its automatic checks stopped working here. Clauseo's own protections still apply.":
     null,
+  // a turn ended on a blip of Claude's safety check (UC-800): no Hindi yet (hi: later)
+  "Claude's safety check didn't answer, so Claude didn't do this. Try again in a moment.": null,
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

@@ -157,6 +157,9 @@ test("Claude's ask mode notices give the app's lines, in English (no Hindi yet: 
   expect(noticeLine("ask_mode_checks_stopped", en)).toBe(
     "Claude now asks before each change in this conversation, because its automatic checks stopped working here. Clauseo's own protections still apply.",
   );
+  expect(noticeLine("safety_check_no_answer", en)).toBe(
+    "Claude's safety check didn't answer, so Claude didn't do this. Try again in a moment.",
+  );
   // no Hindi yet: hi: later, so the Hindi page shows the English as well
   expect(noticeLine("ask_mode_checks_stopped", words("hi"))).toBe(
     "Claude now asks before each change in this conversation, because its automatic checks stopped working here. Clauseo's own protections still apply.",

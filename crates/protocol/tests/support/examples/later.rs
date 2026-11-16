@@ -342,6 +342,13 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::AskModeChecksStopped),
         },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Claude's safety check didn't answer, so Claude didn't do this. Try again in a \
+                   moment."
+                .to_owned(),
+            kind: Some(NoticeKind::SafetyCheckNoAnswer),
+        },
     ];
     notices.extend(
         [

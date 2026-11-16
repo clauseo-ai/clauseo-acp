@@ -113,6 +113,14 @@ const ASK_STOPPED_NOTICE = notice(6, {
   text: ASK_STOPPED,
   kind: "ask_mode_checks_stopped",
 });
+const NO_ANSWER =
+  "Claude's safety check didn't answer, so Claude didn't do this. Try again in a moment.";
+/** A turn ended on a blip of Claude's automatic safety check: a plain line, right after the refused row (UC-800). */
+const NO_ANSWER_NOTICE = notice(6, {
+  level: "warning",
+  text: NO_ANSWER,
+  kind: "safety_check_no_answer",
+});
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
   kind: { files_came_back: { files: ["Pleadings/Reply.docx"], more: 0 } },
@@ -236,5 +244,11 @@ export const TN: Entry[] = [
     words: threadWords(ASK_STOPPED),
     screen: "room/thread",
     render: thread(ASK_STOPPED_NOTICE),
+  },
+  {
+    id: "UC-800",
+    words: threadWords(NO_ANSWER),
+    screen: "room/thread",
+    render: thread(NO_ANSWER_NOTICE),
   },
 ];

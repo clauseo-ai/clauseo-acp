@@ -1,0 +1,26 @@
+{"scenario":"ask-mode-blip","description":"One launch in auto, a small rule list, three prompts and never a relaunch (a session/load here would be a mismatch). Prompt 1: Claude's Bash gets stage C's service blip ('gave no verdict (error)', transient), Claude retries and gets it again, and the turn ends on it. Prompt 2: a blip, then Claude's retry runs (the third try worked). Prompt 3: the hard-failure blip ('Don't retry it'), no retry, the turn ends on it","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/set_mode","as":"to-auto","params":{"sessionId":"sess-1","modeId":"auto"}}}
+{"respond":{"to":"to-auto","result":{}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"Run pandoc","kind":"execute","status":"pending"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"failed","content":[{"type":"content","content":{"type":"text","text":"The server-side auto mode classifier gave no verdict (error), so auto mode cannot determine the safety of Bash. This is a transient failure of the check, not a judgment about the action: a later response may get a verdict. You may try the action again once, as-is. Repeated attempts are slowed by a growing delay, and after 10 responses in a row without a verdict the turn stops."}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-2","title":"Run pandoc","kind":"execute","status":"pending"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-2","status":"failed","content":[{"type":"content","content":{"type":"text","text":"The server-side auto mode classifier gave no verdict (error), so auto mode cannot determine the safety of Bash. This is a transient failure of the check, not a judgment about the action: a later response may get a verdict. You may try the action again once, as-is. Repeated attempts are slowed by a growing delay, and after 10 responses in a row without a verdict the turn stops."}}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-1","content":{"type":"text","text":"The safety check did not answer."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-3","title":"Edit memo.md","kind":"execute","status":"pending"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-3","status":"failed","content":[{"type":"content","content":{"type":"text","text":"The server-side auto mode classifier gave no verdict (error), so auto mode cannot determine the safety of Edit. This is a transient failure of the check, not a judgment about the action: a later response may get a verdict. You may try the action again once, as-is. Repeated attempts are slowed by a growing delay, and after 10 responses in a row without a verdict the turn stops."}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-4","title":"Edit memo.md","kind":"execute","status":"pending"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-4","status":"completed","content":[{"type":"content","content":{"type":"text","text":"done"}}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-2","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/prompt","as":"p3","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-5","title":"Edit memo.md","kind":"execute","status":"pending"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-5","status":"failed","content":[{"type":"content","content":{"type":"text","text":"The server-side auto mode classifier gave no verdict (error), so auto mode cannot determine the safety of Edit. This is a hard failure, not a transient one: the check cannot or does not judge this request, so retrying this action will get the same answer. Don't retry it."}}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-3","content":{"type":"text","text":"The safety check could not judge it."}}}}
+{"respond":{"to":"p3","result":{"stopReason":"end_turn"}}}

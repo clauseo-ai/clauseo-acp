@@ -348,6 +348,10 @@ open_data_enum! {
         /// relaunches in ask mode (`default`). Once a conversation, and not after
         /// `ask_mode_too_many_matters`.
         AskModeChecksStopped = "ask_mode_checks_stopped",
+        /// Claude's automatic safety check gave no verdict for an action, Claude's own retry did
+        /// not get one either, and the turn ended, so the action did not run. A plain line, no
+        /// mode change. Once a turn, right after the refused tool call.
+        SafetyCheckNoAnswer = "safety_check_no_answer",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -374,6 +378,7 @@ open_data_enum! {
         NoticeKind::AutoModeUnavailable,
         NoticeKind::AskModeTooManyMatters,
         NoticeKind::AskModeChecksStopped,
+        NoticeKind::SafetyCheckNoAnswer,
     ];
 }
 

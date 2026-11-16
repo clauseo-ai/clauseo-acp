@@ -4391,6 +4391,12 @@ export type NoticeKind =
  *  `ask_mode_too_many_matters`.
  */
 "ask_mode_checks_stopped" | 
+/**
+ *  Claude's automatic safety check gave no verdict for an action, Claude's own retry did
+ *  not get one either, and the turn ended, so the action did not run. A plain line, no
+ *  mode change. Once a turn, right after the refused tool call.
+ */
+"safety_check_no_answer" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 
