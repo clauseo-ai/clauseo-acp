@@ -247,6 +247,12 @@ its step card, and compare (below) lists the files between any two versions.
 | Restore the whole matter | `RestoreRequest::Matter` | `HostCommand::RestoreVersion` |
 | Restore some files | `RestoreRequest::Files` | the chosen paths |
 | Restore or undo refused: a file is open in another program | `ErrorCode::MatterFileLocked` | retryable; `HostError.files`, the files to close |
+| Restore, undo, or accepting or rejecting tracked changes: the folder refused some files (each as it was; everything else done, with its checkpoint and marker; `of` 1 means the action was on that file alone) | `ErrorCode::MatterFileRefused` | retryable; `HostError.files`, the refused files (at most 50), the one to name first; `HostError.refusal`: `refused`, how many; `of`, the action's file count (deletions included); `because`, the cause they share, missing when they differ (the line with no reason) |
+| Restore, undo, or accepting or rejecting tracked changes: a file written in place failed partway, so the action stopped there with no checkpoint of it (`HostError.write_failure.put_back`: the file is as it was; otherwise it may be damaged; `of` 1: nothing else changed) | `ErrorCode::MatterFileWriteFailed` | retryable; `HostError.files`, the file; the line points to the version from just before in Versions unless nothing changed |
+| Refused because the file's permissions refuse the change | `RefusedBecause::Permissions` | the line "set so it can't be changed" |
+| Refused because the file has a second name (a hard link) | `RefusedBecause::SecondName` | the line "also appears somewhere else on this computer" |
+| Refused because Clauseo could not first check its saved copy of the file | `RefusedBecause::SavedCopyUnconfirmed` | the line "couldn't first check its saved copy"; try again |
+| Refused for a cause from a newer Clauseo | `RefusedBecause::Unknown` | the permissions line |
 | Restore refused: a turn runs in the matter | `ErrorCode::MatterTurnRunning` | retryable |
 | Folder missing (the locate-folder flow) | `ErrorCode::MatterFolderMissing` | the matter's name |
 | Folder there without its `.clauseo/matter.json`, or with another matter's (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | the matter's name |
@@ -352,7 +358,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Claude refused: its guard can't be set up in a forced-ask folder (reinstall) | `ErrorCode::AgentGuardMissing` | no |
 | Store | `ErrorCode::StoreIo` | yes |
 | Store | `ErrorCode::StoreDiskFull`, `ErrorCode::StoreCorrupt`, `ErrorCode::StoreLocked`, `ErrorCode::StoreNewerVersion` | no |
-| Matter | `ErrorCode::MatterCheckpointFailed`, `ErrorCode::MatterFileLocked`, `ErrorCode::MatterTurnRunning` | yes |
+| Matter | `ErrorCode::MatterCheckpointFailed`, `ErrorCode::MatterFileLocked`, `ErrorCode::MatterFileRefused`, `ErrorCode::MatterFileWriteFailed`, `ErrorCode::MatterTurnRunning` | yes |
 | Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterCodexFolder`; `ErrorCode::MatterFolderRefused` only from a host before decision record 0022 | no |
 | Codex refused: its sandbox can't work in the folder (Windows) | `ErrorCode::MatterFolderNetwork`, `ErrorCode::MatterFolderNoPermissions` | no |
 | Matter folder refused (0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderIsMatter`, `ErrorCode::MatterFolderInMattersRoot`, `ErrorCode::MatterFolderInClauseoData`, `ErrorCode::MatterFolderInsideMatter`, `ErrorCode::MatterFolderHoldsMatter`, `ErrorCode::MatterFolderTooDeep` (Windows) | no |

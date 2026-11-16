@@ -122,6 +122,13 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::MatterFolderPermission,
             "the privacy settings keep Clauseo from opening the matter folder",
         ),
+        // Never a turn's failure in practice (a restore's, an undo's or a decision's answer);
+        // here for the corpus.
+        failed(ErrorCode::MatterFileRefused, "matter: 1 of 3 files refused"),
+        failed(
+            ErrorCode::MatterFileWriteFailed,
+            "matter: a write in place failed; the file was put back",
+        ),
     ]
     .into_iter()
     .chain(agent_failures())

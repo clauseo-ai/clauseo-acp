@@ -120,6 +120,134 @@ fn a_file_folder_clash_names_the_entry_in_the_way() {
     }
 }
 
+/// A matter's `FilesRefused` reaches the wire as `matter.file_refused` with its paths in
+/// `HostError::files` (sorted, the named one first), in `HostError::refusal` the cause they share
+/// (none when they differ, so no file's cause is given for another's), how many were refused
+/// and the operation's count, and counts only in the message and the detail.
+#[test]
+fn files_refused_names_its_files_and_cause_and_no_path_in_the_message() {
+    use clauseo_matters::RefusedBecause as Because;
+    let brief = MatterPath::new("Brief.docx").unwrap();
+    let memo = MatterPath::new("sub/Memo.docx").unwrap();
+    let refused = |second| {
+        Error::from(clauseo_matters::Error::FilesRefused {
+            files: vec![(brief.clone(), Because::SecondName), (memo.clone(), second)],
+            of: 3,
+        })
+    };
+    for error in [
+        wire(refused(Because::Permissions)),
+        refused(Because::Permissions).to_wire(),
+    ] {
+        assert_eq!(error.code(), ErrorCode::MatterFileRefused);
+        assert!(error.retryable());
+        assert_eq!(error.files(), [brief.clone(), memo.clone()].as_slice());
+        assert_eq!(error.message(), "matter: 2 of 3 files refused");
+        assert_eq!(
+            error.refusal(),
+            Some(clauseo_protocol::FileRefusal {
+                because: None,
+                refused: 2,
+                of: 3,
+            })
+        );
+    }
+    let shared = refused(Because::SecondName).to_wire().refusal();
+    assert_eq!(
+        shared.and_then(|r| r.because),
+        Some(clauseo_protocol::RefusedBecause::SecondName)
+    );
+    assert_eq!(
+        refused(Because::Permissions).detail(),
+        "matter: 2 of 3 files refused"
+    );
+    let causes = [
+        (
+            Because::Permissions,
+            clauseo_protocol::RefusedBecause::Permissions,
+        ),
+        (
+            Because::SecondName,
+            clauseo_protocol::RefusedBecause::SecondName,
+        ),
+        (
+            Because::SavedCopyUnconfirmed,
+            clauseo_protocol::RefusedBecause::SavedCopyUnconfirmed,
+        ),
+    ];
+    for (because, wired) in causes {
+        let only = Error::from(clauseo_matters::Error::FilesRefused {
+            files: vec![(brief.clone(), because)],
+            of: 1,
+        })
+        .to_wire();
+        assert_eq!(only.message(), "matter: 1 file refused");
+        assert_eq!(
+            only.refusal().map(|r| (r.because, r.refused, r.of)),
+            Some((Some(wired), 1, 1))
+        );
+        assert!(!only.message().contains("Brief"), "{}", only.message());
+    }
+}
+
+/// Many refused files: the wire names the first `MAX_ERROR_FILES` of them, and `refusal`
+/// counts them all.
+#[test]
+fn files_refused_names_at_most_the_cap_and_counts_them_all() {
+    let files: Vec<_> = (0..clauseo_protocol::MAX_ERROR_FILES + 5)
+        .map(|n| {
+            let path = MatterPath::new(&format!("f{n:03}.docx")).unwrap();
+            (path, clauseo_matters::RefusedBecause::Permissions)
+        })
+        .collect();
+    let count = files.len();
+    let error = Error::from(clauseo_matters::Error::FilesRefused {
+        files: files.clone(),
+        of: count + 1,
+    })
+    .to_wire();
+    assert_eq!(error.files().len(), clauseo_protocol::MAX_ERROR_FILES);
+    assert_eq!(error.files().first(), files.first().map(|(path, _)| path));
+    let refusal = error.refusal().unwrap();
+    assert_eq!(
+        (refusal.refused, refusal.of),
+        (
+            u32::try_from(count).unwrap(),
+            u32::try_from(count + 1).unwrap()
+        )
+    );
+}
+
+/// A write in place that failed part way reaches the wire as `matter.file_write_failed`,
+/// naming the file in `HostError::files`, whether it was put back and the operation's count in
+/// `HostError::write_failure`, and no path in the message or the detail.
+#[test]
+fn a_partly_written_file_is_named_with_whether_it_was_put_back() {
+    let lease = MatterPath::new("Leases/Lease.docx").unwrap();
+    for put_back in [true, false] {
+        let error = || {
+            Error::from(clauseo_matters::Error::PartlyWritten {
+                path: lease.clone(),
+                put_back,
+                of: 3,
+                source: std::io::Error::other("disk full"),
+            })
+        };
+        let wired = wire(error());
+        assert_eq!(wired.code(), ErrorCode::MatterFileWriteFailed);
+        assert!(wired.retryable());
+        assert_eq!(wired.files(), [lease.clone()].as_slice());
+        assert_eq!(
+            wired.write_failure(),
+            Some(clauseo_protocol::WriteFailure { put_back, of: 3 })
+        );
+        assert_eq!(wired.refusal(), None);
+        for text in [wired.message().to_owned(), error().detail()] {
+            assert!(!text.contains("Lease"), "{text}");
+        }
+    }
+}
+
 /// A matter's `FolderMissing` reaches a failure's detail with its reason, never the folder's
 /// path, and the wire with its code; a gone folder is `folder_missing`, one without its marker
 /// `folder_not_a_matter`.

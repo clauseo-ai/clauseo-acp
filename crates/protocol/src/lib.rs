@@ -153,6 +153,7 @@ mod error;
 mod error_code;
 mod event;
 mod excluded;
+mod host_error;
 mod ids;
 mod last_exit;
 mod limits;
@@ -228,7 +229,8 @@ wire_types! {
     content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
     details::{ClientName, Date, MatterStatus, PackId, PackList},
     envelope::{Envelope},
-    error_code::{ErrorCode, HostError},
+    error_code::{ErrorCode},
+    host_error::{FileRefusal, HostError, RefusedBecause, WriteFailure},
     event::{
         AgentNamed, AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
         CompactionChanged, ConfigOptionsReplaced, ContentAppended, DomainEvent, ElicitationExpired,
@@ -364,6 +366,7 @@ pub use number::MAX_SAFE;
 // The most picks a `ConfigPicks` holds: a constant, so outside `wire_types!`.
 pub use picks::MAX_CONFIG_PICKS;
 // The kind a catch-all holds; the catch-all variants holding it export as `string`.
+pub use host_error::MAX_ERROR_FILES;
 pub use open_enum::UnknownKind;
 pub use query::{MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES, MAX_PAPERS};
 pub use raw::{MAX_MSGPACK_DEPTH, MAX_RAW_DEPTH, MAX_RAW_ENCODE_DEPTH};

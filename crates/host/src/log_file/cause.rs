@@ -10,8 +10,8 @@ use std::io;
 use clauseo_protocol::{ErrorCode, HostError};
 
 /// Writes the codes along an error's source chain: each layer this crate knows gives its
-/// `ErrorCode` (repeats are left out), a `ProfileError` its `log_text`, and each `io::Error`
-/// its kind and OS code. A layer it
+/// `ErrorCode` (repeats are left out), a matters `Io` its `op` (`op:rename`, spaces as `_`),
+/// a `ProfileError` its `log_text`, and each `io::Error` its kind and OS code. A layer it
 /// does not know gives nothing, so nothing unknown ever reaches the log; a chain of none of
 /// them writes `unknown`.
 pub(crate) struct Cause<'a>(pub(crate) &'a (dyn StdError + 'static));
@@ -31,6 +31,10 @@ impl fmt::Display for Cause<'_> {
                     wrote = true;
                 }
                 last = Some(code);
+                if let Some(op) = matters_op(error) {
+                    // An op is a fixed word or two ("write in place"), never a path.
+                    write!(f, " op:{}", op.replace(' ', "_"))?;
+                }
             } else if let Some(profile) = error.downcast_ref::<clauseo_profile::ProfileError>() {
                 if wrote {
                     f.write_str(" ")?;
@@ -54,6 +58,15 @@ impl fmt::Display for Cause<'_> {
         }
         Ok(())
     }
+}
+
+/// The `op` of a matters `Io` layer: a fixed text of the matters crate, never its path.
+fn matters_op(error: &(dyn StdError + 'static)) -> Option<&'static str> {
+    let clauseo_matters::Error::Io { op, .. } = error.downcast_ref::<clauseo_matters::Error>()?
+    else {
+        return None;
+    };
+    Some(op)
 }
 
 /// The code of one layer, for the error types whose codes the host knows.

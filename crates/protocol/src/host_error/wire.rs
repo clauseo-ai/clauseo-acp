@@ -3,9 +3,9 @@
 
 use serde::{Deserialize, Deserializer};
 
-use super::{ErrorCode, HostError};
+use super::{FileRefusal, HostError, WriteFailure};
 use crate::serde_util::BorrowedStr;
-use crate::{MatterId, MatterPath};
+use crate::{ErrorCode, MatterId, MatterPath};
 
 /// `HostError` as read, before its code is looked up.
 #[derive(Deserialize)]
@@ -18,6 +18,10 @@ struct HostErrorWire<'a> {
     matter: Option<MatterId>,
     #[serde(default)]
     files: Vec<MatterPath>,
+    #[serde(default)]
+    refusal: Option<FileRefusal>,
+    #[serde(default)]
+    write_failure: Option<WriteFailure>,
 }
 
 impl<'de> Deserialize<'de> for HostError {
@@ -37,6 +41,8 @@ impl<'de> Deserialize<'de> for HostError {
                 },
                 matter: wire.matter,
                 files: wire.files,
+                refusal: wire.refusal,
+                write_failure: wire.write_failure,
             },
             None => Self {
                 code: ErrorCode::Unknown,
@@ -44,6 +50,8 @@ impl<'de> Deserialize<'de> for HostError {
                 retryable: wire.retryable,
                 matter: wire.matter,
                 files: wire.files,
+                refusal: wire.refusal,
+                write_failure: wire.write_failure,
             },
         })
     }
