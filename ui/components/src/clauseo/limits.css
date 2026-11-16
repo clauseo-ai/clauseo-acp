@@ -308,6 +308,10 @@
   .lim-field-note:not([data-wait]) {
     padding-left: calc(var(--s4) + var(--size-icon-line) + var(--s2));
   }
+  /* under an answer (the running-low line), flush with the answer's words, not the composer's field */
+  .step-answer .lim-field-note:not([data-wait]) {
+    padding-left: 0;
+  }
   .lim-field-icon {
     flex: none;
     margin-top: var(--perm-icon-drop);
