@@ -570,20 +570,8 @@ fn a_kept_rules_file_made_after_the_launch_is_denied_by_the_glob() {
     assert_eq!(scoped.get(KEPT_RULES_GLOB), Some(&json!("deny")));
     // The glob names exactly the file the host keeps, for this matter and any other.
     for matter in ["m1", "m2", "m9"] {
-        let file = data()
-            .join("agent-state")
-            .join(matter)
-            .join(crate::agent::always::FILE);
-        let relative = file
-            .strip_prefix(data())
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned();
-        assert_eq!(
-            KEPT_RULES_GLOB.replace('*', matter),
-            relative.replace('\\', "/")
-        );
+        let relative = format!("agent-state/{matter}/{}", crate::agent::always::FILE);
+        assert_eq!(KEPT_RULES_GLOB.replace('*', matter), relative);
     }
     assert_eq!(
         own.join(crate::agent::always::FILE),

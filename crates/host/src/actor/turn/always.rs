@@ -84,6 +84,18 @@ pub(super) struct Always {
 }
 
 impl Always {
+    /// [`Self::at_launch`] for `thread`'s agent, its kind read from the thread's row.
+    pub(super) fn for_launch(
+        actor: &Actor,
+        thread: ThreadId,
+        run: &RunFolders,
+        forced_ask: bool,
+    ) -> Self {
+        let kind = actor.check_thread(thread).ok();
+        let kind = kind.and_then(|entry| AgentKind::of(&entry.row.agent));
+        Self::at_launch(run, kind, forced_ask, &actor.kept)
+    }
+
     /// For a launch of an agent of `kind`: the rules its prep read (`RunFolders::always`), for
     /// Claude outside forced ask only, without those the lawyer removed since (`kept`, the
     /// actor's ledger): the prep read the file off the actor, maybe before a removal's write.
