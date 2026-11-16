@@ -54,9 +54,13 @@ fn a_vanished_program_is_refused_with_its_own_code() {
     let error = refusal(Unusable::Missing);
     assert_eq!(error.code(), ErrorCode::AgentToolMissing);
     assert!(!error.to_string().contains(&*root.to_string_lossy()));
-    for word in ["missing", "PATH", "git"] {
-        assert!(!error.to_string().contains(word), "{word}: {error}");
-    }
+    // The lawyer-facing text is the neutral sentence; the reason is `check`'s answer above.
+    let text = error.to_string();
+    assert!(
+        text.contains("A file Clauseo keeps for the agent isn't as Clauseo left it."),
+        "{text}"
+    );
+    assert!(!text.contains("PATH"), "{text}");
     drop(write::remove_dir_all(&root));
 }
 
@@ -249,7 +253,7 @@ fn a_build_for_the_lawyer_refuses_a_launch_with_no_program_named() {
     assert_eq!(required(None, false), Err(Unusable::NotWired));
     assert_eq!(required(None, true), Ok(None));
     assert_eq!(required(Some(&no_git), false), Ok(Some(&no_git)));
-    assert!(super::TEST_BUILD, "unit tests are a test build");
+    const { assert!(super::TEST_BUILD, "unit tests are a test build") };
 }
 
 /// A Codex install laid out as `@openai/codex` 0.162.1's Windows package is, under `root`:

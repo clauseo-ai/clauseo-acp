@@ -40,7 +40,8 @@ fn var<'a>(env: &'a std::collections::BTreeMap<OsString, OsString>, name: &str) 
 
 /// The folders of a `PATH` value.
 fn parts(path: &str) -> Vec<PathBuf> {
-    std::env::split_paths(path).collect()
+    let separator = if cfg!(windows) { ';' } else { ':' };
+    path.split(separator).map(PathBuf::from).collect()
 }
 
 #[test]
@@ -91,7 +92,7 @@ fn both_agents_find_the_program_first_and_the_host_does_not() {
     assert_eq!(var(&claude.env, "GIT_CEILING_DIRECTORIES"), None);
     let parent = matter_folder.parent().unwrap();
     let ceiling = var(&codex.env, "GIT_CEILING_DIRECTORIES").expect("the ceiling");
-    let same = |path: &Path| std::fs::canonicalize(path).unwrap();
+    let same = |path: &Path| dunce::canonicalize(path).unwrap();
     assert_eq!(same(Path::new(ceiling)), same(parent));
     let config = codex.codex_config().expect("a CODEX_CONFIG");
     let shell = config["shell_environment_policy"]["set"]["PATH"]
@@ -101,7 +102,7 @@ fn both_agents_find_the_program_first_and_the_host_does_not() {
     assert_eq!(parts(shell).first(), Some(&folder));
     // The host's own process never gets the folder.
     let own = std::env::var_os("PATH").unwrap_or_default();
-    assert!(!std::env::split_paths(&own).any(|part| part == folder));
+    assert!(!parts(&own.to_string_lossy()).contains(&folder));
 }
 
 #[test]
@@ -113,7 +114,7 @@ fn a_vanished_or_changed_program_refuses_both_agents_before_anything_starts() {
                 (|program: &Path| write::remove_file(program)) as fn(&Path),
             ),
             ("changed", |program: &Path| {
-                write::write(program, b"other bytes")
+                write::write(program, b"other bytes");
             }),
         ] {
             let dir = Dir::new(&format!("no_git_{case}_{label}"), &[]);
