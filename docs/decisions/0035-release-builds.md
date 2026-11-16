@@ -56,8 +56,9 @@ Developer ID.
   must decode to 42 bytes starting `Ed`, the key id is bytes 2 to 10 read little-endian
   (`%016X`), and the untrusted comment must name that id. It refuses, each with its own
   `::error::`, an empty key, one that does not decode so, R23 PR 6's placeholder
-  (`AC986E7C6BA67AB9`) and the test key (its id read from `updater-test.pub`). Dry and test runs
-  are left alone: a dry run makes its own key and a test run signs with the test key. Unlike the
+  (`AC986E7C6BA67AB9`) and the test key (its id read from `updater-test.pub`). Every mode decodes
+  both keys the same way, so each dry run exercises the decoder; dry and test runs only warn on
+  the placeholder: a dry run makes its own key and a test run signs with the test key. Unlike the
   desktop test that refuses the same keys, this check is the one a merge cannot skip. Checked
   locally (2026-11-06): the placeholder, the test key and a doctored comment are refused; a fresh
   throwaway key passes.
@@ -70,10 +71,11 @@ Developer ID.
   purpose. The desktop tests' own checks (0037) cover only the source text and the test binary.
   The same step fails on any e2e-only string, named in the `::error::`: the variables only the
   `e2e` build reads (`E2E_AGENTS_MANAGED`, `E2E_UPDATE_ENDPOINT`, `E2E_FAKE_UPDATE`,
-  `E2E_FAKE_SIGNIN`), the counts' endpoint override only debug and `e2e` builds read
+  `E2E_FAKE_SIGNIN`, `E2E_FAKE_INSTALL`, `E2E_FAKE_STATUS`, `E2E_CONFIRM_ALWAYS`,
+  `E2E_DISABLE_GPU`, `E2E_MATTER_DIR`; a name also covers the longer ones it starts, such as
+  `E2E_FAKE_INSTALLED`), the counts' endpoint override only debug and `e2e` builds read
   (`CLAUSEO_COUNTS_URL`), and the `e2e` build's marker, `CLAUSEO-E2E-BUILD-MARKER` (a `#[used]`
-  static in `src/e2e.rs`, read at every
-  `e2e` start so the linker keeps it). The marker catches any `e2e` code that reached a release
+  static in `src/e2e.rs`, read at every `e2e` start so the linker keeps it). The marker catches any `e2e` code that reached a release
   binary, whatever its own strings. Checked locally (2026-11-06): the `e2e` app and unit-test
   binaries hold the marker and the plain ones do not; the scan passes a clean binary and fails one
   with each string, in ASCII or UTF-16LE.
