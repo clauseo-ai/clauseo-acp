@@ -131,7 +131,7 @@ fn a_removed_rule_leaves_the_file_and_the_running_agent() {
     keep(
         &dir,
         matter,
-        &["Bash(wc -l notes.txt)", "Bash(npm run lint)"],
+        &["Bash(wc -l notes.txt)", "Bash(wc -c notes.txt)"],
     );
     let mut events = host.events(StreamId::Thread(thread));
     // The first wc -l notes.txt is the host's to allow, from the kept rule.
@@ -148,7 +148,7 @@ fn a_removed_rule_leaves_the_file_and_the_running_agent() {
     // Removing a rule that isn't there does nothing.
     assert_eq!(remove("Bash(wc -l notes.txt)"), CommandOutcome::Done);
     let left: Vec<String> = kept(&host, matter).into_iter().map(|k| k.rule).collect();
-    assert_eq!(left, ["Bash(npm run lint)"]);
+    assert_eq!(left, ["Bash(wc -c notes.txt)"]);
     // The same session asks the lawyer again; the scenario expects the lawyer's reject.
     let (turn, _) = host.prompt(thread, "Run them again.");
     answer_from(&host, &mut events, thread, 1, &["reject"]);
