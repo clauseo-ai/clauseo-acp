@@ -20,21 +20,18 @@ const ECHO: &str = "CLAUSEO_PS_LINE_ECHO_CHILD";
 /// This test's own name, for the echo child's command line.
 const ECHO_TEST: &str = "agent::loads::codex::windows_tests::echo_child";
 
-/// The shells to run the line under: Windows PowerShell, and PowerShell 7 when it is on `PATH`.
-fn shells() -> Vec<&'static str> {
-    let mut shells = vec!["powershell.exe"];
-    if which("pwsh.exe") {
-        shells.push("pwsh.exe");
-    } else {
-        eprintln!("SKIPPED pwsh.exe: not installed");
+/// The shells to run the line under: Windows PowerShell, and PowerShell 7 where it is installed
+/// in its usual place.
+fn shells() -> Vec<String> {
+    let mut shells = vec!["powershell.exe".to_owned()];
+    let pwsh = std::env::var_os("ProgramFiles")
+        .map(|folder| Path::new(&folder).join(r"PowerShell\7\pwsh.exe"))
+        .filter(|pwsh| pwsh.is_file());
+    match pwsh {
+        Some(pwsh) => shells.push(pwsh.to_string_lossy().into_owned()),
+        None => eprintln!("SKIPPED pwsh.exe: not installed"),
     }
     shells
-}
-
-fn which(program: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|folder| folder.join(program).is_file())
-    })
 }
 
 /// Runs `line` as Codex runs a hook under `shell`, `input` on stdin, from `cwd`; the output and
@@ -102,7 +99,7 @@ fn exit_with(code: i32) {
 #[test]
 fn the_line_passes_0_through_and_turns_every_other_ending_but_2_into_a_refusal() {
     let cwd = std::env::temp_dir();
-    for shell in shells() {
+    for shell in &shells() {
         let mut times = Vec::new();
         for _ in 0..5 {
             let (output, took) = as_codex_runs_it(shell, &cmd("exit 0"), b"{}", &cwd);
@@ -150,7 +147,7 @@ fn the_programs_2_stdin_stdout_and_stderr_pass_byte_for_byte() {
     ]);
     assert!(line.contains("O''Brien"), "{line}");
     let input = r#"{"tool_name":"apply_patch","tool_input":{"command":"*** Update File: अनुबंध.docx"},"cwd":"C:\\मामला"}"#;
-    for shell in shells() {
+    for shell in &shells() {
         let output = Command::new(shell)
             .args(["-NoProfile", "-Command", &line])
             .env_clear()
