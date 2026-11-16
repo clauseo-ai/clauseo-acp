@@ -899,3 +899,112 @@ fn a_kept_edit_all_never_follows_a_link_out_of_the_matter() {
     assert_eq!(offers(&events), [None, None, None, None]);
     host.shutdown();
 }
+
+/// One Claude prompt asking once to run `wc -l notes.txt`, answered `allow-once` (the lawyer's
+/// `clauseo.always` reaches the agent so too), as scenario `name` of `dir`.
+fn one_wc(dir: &Dir, name: &str) -> Scenario {
+    let wc = json!({"command": "wc -l notes.txt"});
+    let turn = ask("wc", "Bash", &wc, &bash_options(), "allow-once").to_vec();
+    claude_scenario(dir, name, false, turn)
+}
+
+/// Keeps `Bash(wc -l notes.txt)` for `thread`'s matter through the lawyer's `clauseo.always`,
+/// and waits for the rules file to hold it.
+fn keep_wc(dir: &Dir, host: &Running, matter: MatterId, thread: ThreadId) {
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Count the lines.");
+    answer_from(host, &mut events, thread, 0, &[ALWAYS]);
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    until_kept(dir, matter, 1);
+}
+
+/// A rule kept through "Always" outlives the host: after a restart on the same data folder (and
+/// the same key in the secret store), a new thread of the matter gets the same request answered
+/// `allow-once` by the host, with no card for the lawyer.
+#[test]
+fn a_kept_rule_survives_a_restart() {
+    let dir = Dir::new("always_restart", &[]);
+    dir.set_agents(&[(CLAUDE, one_wc(&dir, "claude-one-wc"))]);
+    let host = dir.start(0);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
+    keep_wc(&dir, &host, matter, thread);
+    host.shutdown();
+
+    let host = dir.start(1);
+    let thread = host.create_thread(matter, CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Count them again.");
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(
+        resolutions(&events),
+        [(
+            ["allow-once", "reject"].map(String::from).to_vec(),
+            Some(("allow-once".to_owned(), PermissionKind::AllowOnce))
+        )],
+        "{}",
+        events.dump()
+    );
+    assert_eq!(kept_rules(&host, matter), ["Bash(wc -l notes.txt)"]);
+    host.shutdown();
+}
+
+/// A rule answers only its own matter's threads: a thread of another matter gets the identical
+/// request as a card for the lawyer, still offering "Always", and answering it once changes
+/// neither matter's list.
+#[test]
+fn a_kept_rule_stays_in_its_matter() {
+    let dir = Dir::new("always_own_matter", &[]);
+    dir.set_agents(&[(CLAUDE, one_wc(&dir, "claude-one-wc"))]);
+    let host = dir.start(0);
+    let (a, thread_a, _) = matter_with_thread(&dir, &host, "a", &[], CLAUDE);
+    keep_wc(&dir, &host, a, thread_a);
+
+    let (b, thread_b, _) = matter_with_thread(&dir, &host, "b", &[], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread_b));
+    let (turn, _) = host.prompt(thread_b, "Count the lines.");
+    answer_from(&host, &mut events, thread_b, 0, &["allow-once"]);
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(
+        resolutions(&events),
+        [(
+            ["allow-once", ALWAYS, "reject"].map(String::from).to_vec(),
+            Some(("allow-once".to_owned(), PermissionKind::AllowOnce))
+        )],
+        "{}",
+        events.dump()
+    );
+    assert_eq!(offers(&events), [Some(wc_offer("wc -l notes.txt"))]);
+    host.settle();
+    assert_eq!(kept_rules(&host, a), ["Bash(wc -l notes.txt)"]);
+    assert_eq!(kept_rules(&host, b), Vec::<String>::new());
+    assert!(!rules_file(&dir, b).exists());
+    host.shutdown();
+}
+
+/// Forgetting a matter deletes its kept rules file.
+#[test]
+fn a_forgotten_matter_takes_its_kept_rules_with_it() {
+    let dir = Dir::new("always_forget", &[]);
+    dir.set_agents(&[(CLAUDE, one_wc(&dir, "claude-one-wc"))]);
+    let host = dir.start(0);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
+    keep_wc(&dir, &host, matter, thread);
+    host.settle();
+    assert_eq!(
+        host.ok(HostCommand::ForgetMatter { matter }),
+        clauseo_protocol::CommandOutcome::Done
+    );
+    let file = rules_file(&dir, matter);
+    crate::support::wait("the kept rules file gone", async {
+        while file.exists() {
+            async_io::Timer::after(std::time::Duration::from_millis(20)).await;
+        }
+    });
+    host.shutdown();
+}
