@@ -111,6 +111,14 @@ export function Failed({
           <Ways>{way(w("Use a code instead"), { act: "device" })}</Ways>
         </>
       );
+    // a saved API key the keychain didn't give (a macOS prompt unanswered or denied): no sign-in failed, so the key's
+    // own words, and Try again, whose press desktop refuses with this code and reads the key again (never a sign-in)
+    case "agent.key_unreadable":
+      return (
+        <Act act={signIn(w("Try again"))}>
+          <Say>{errorWords(lang, "agent.key_unreadable")}</Say>
+        </Act>
+      );
     case "signin.policy_unreadable":
       return (
         <Act>

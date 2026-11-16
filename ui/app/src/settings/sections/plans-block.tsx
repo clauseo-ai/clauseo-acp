@@ -423,7 +423,8 @@ export function PlanBlock({
       case "failed":
         body = (
           <PlanCard plan={plan} note={errorWords(lang, stand.code)}>
-            <MainAct label={s("Sign in again")} onClick={signIn} testId="plans-sign-in" />
+            {/* the key unreadable: Try again reads it again (desktop refuses the press with the code), never a sign-in */}
+            <MainAct label={fl(lang, "Try again")} onClick={signIn} testId="plans-sign-in" />
           </PlanCard>
         );
         break;
@@ -479,7 +480,12 @@ export function PlanBlock({
         {name}
       </Heading>
       {body}
-      <Refused refused={refusalView(setup)} />
+      {/* a refused Try again on an unreadable key says what the card says already: once */}
+      <Refused
+        refused={
+          stand.kind === "failed" && setup?.refused === stand.code ? null : refusalView(setup)
+        }
+      />
       {ways && (
         <PlansKey
           plan={plan}

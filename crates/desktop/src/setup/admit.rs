@@ -99,6 +99,11 @@ pub(crate) fn key_stored(agent: &AgentId) -> HostError {
 /// an endpoint then hides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SignInBar {
+    /// Its stored key could not be read (the card's `Failed { agent.key_unreadable }`, rule 3
+    /// of `compose.rs`): `agent.key_unreadable`, and the key is read again
+    /// (`AgentsBackend::barred`). A lawyer on a firm key is never sent to a plan login by an
+    /// unanswered or denied keychain prompt (VM rows D7, A-K6, K11).
+    KeyUnreadable,
     /// A firm endpoint set by policy: `signin.firm_managed`.
     FirmManaged,
     /// An API key stored: `signin.key_in_use`.
@@ -108,7 +113,8 @@ pub(crate) enum SignInBar {
 }
 
 /// The bar on a sign-in, if any, from what holds: the firm's policy wins, then a key, then an
-/// endpoint the lawyer set.
+/// endpoint the lawyer set. A stored key that could not be read goes before all three
+/// (`Compose::sign_in_bar`), so its Try again reads it again, under a firm plan too.
 pub(crate) fn sign_in_bar(firm_policy: bool, key: bool, endpoint: bool) -> Option<SignInBar> {
     if firm_policy {
         Some(SignInBar::FirmManaged)
@@ -125,6 +131,10 @@ pub(crate) fn sign_in_bar(firm_policy: bool, key: bool, endpoint: bool) -> Optio
 /// a host.
 pub(crate) fn sign_in_barred(agent: &AgentId, bar: SignInBar) -> HostError {
     let (code, why) = match bar {
+        SignInBar::KeyUnreadable => (
+            ErrorCode::AgentKeyUnreadable,
+            "its stored API key could not be read; it is read again",
+        ),
         SignInBar::FirmManaged => (
             ErrorCode::SigninFirmManaged,
             "a firm endpoint is set by policy",
