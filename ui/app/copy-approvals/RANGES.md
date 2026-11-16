@@ -18,6 +18,7 @@ Every lawyer-facing string has an id registered in `ui/app/src/review/registry*.
 | stage D   | 600 to 699                            |
 | stage E   | 500 to 599                            |
 | stage F   | 260 to 261 (reserved), and 750 to 799 |
+| always    | 810 to 820 (`always-for-this-matter`) |
 
 ## Other prefixes: closed to new ids
 
