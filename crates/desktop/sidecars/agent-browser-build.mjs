@@ -15,18 +15,23 @@
 // both give the crate the version `patched_tag` names (0003 sets it), so a rebuild that counts
 // the tag up cannot report the old version. The temporary folder is removed whatever happens.
 //
-// `build` does the same, then runs the patched source's own test suite for one of the six
-// release triples (`cargo test --locked --target <triple>`, as upstream's CI runs it; on Windows
-// this is where the pipe's restricted-token, session key and hardening tests run), builds it with
-// `cargo build --release --locked --target <triple>` in its cli/ folder, and writes
+// `build` does the same, then builds the patched source for one of the six release triples with
+// `cargo build --release --locked --target <triple>` in its cli/ folder, writes
 // `<dir>/agent-browser-<triple>[.exe]` and `<dir>/agent-browser-<triple>.json`, the build record:
 // the triple, the exe's SHA-256 and size, `rustc -vV`, the MSVC tools and linker versions where
-// they can be found, the upstream commit, the archive's and each patch's SHA-256. It prints the
-// pin's two lines for that triple. .github/workflows/agent-browser-build.yml runs it on a runner
-// per triple (native, except x64 macOS, cross-compiled on an ARM64 Mac).
+// they can be found, the upstream commit, the archive's and each patch's SHA-256, and prints the
+// pin's two lines for that triple. Then it runs the patched source's own test suite
+// (`cargo test --locked --target <triple>`, as upstream's CI runs it; on Windows this is where the
+// pipe's restricted-token, session key and hardening tests run). The tests come after the binary
+// so a failing test still leaves it for later jobs (a real-Intel job tests the x64 macOS one), but
+// `build` then still exits non-zero, so the leg stays red and nothing is published
+// (`releaseThenTest`). A failed release build exits non-zero without running the tests.
+// .github/workflows/agent-browser-build.yml runs it on a runner per triple (native, except x64
+// macOS, cross-compiled on an ARM64 Mac).
 //
 // An x86_64 macOS build tested on an ARM64 Mac runs its tests under Rosetta, so its CLI subprocess
-// tests get 60 s each instead of 10 (`testEnv`).
+// tests get 60 s each instead of 10, and AB_TEST_ROSETTA=1 turns off the one test that outlasts
+// a fixed timeout (`testEnv`).
 //
 // `build` refuses to run when `git status` shows uncommitted changes in the patches folder, and
 // when the toolchain's `rustc -vV` commit-hash is not the pin's `rustc_commit`.
@@ -375,14 +380,21 @@ export const ROSETTA_TEST_TIMEOUT_SECS = '60';
 /**
  * `env` for `cargo test`: an x86_64 macOS build tested on an ARM64 Mac runs its tests under
  * Rosetta, where the first launches of the binary are slow, so the CLI subprocess tests get
- * AB_TEST_SUBPROCESS_TIMEOUT_SECS=60 instead of their 10 s, unless it is set already. Here and
+ * AB_TEST_SUBPROCESS_TIMEOUT_SECS=60 instead of their 10 s, unless it is set already. It also sets
+ * AB_TEST_ROSETTA=1, which turns off tests/session_validation_cli.rs's MCP doctor test (patch
+ * 0002): the doctor outlasts the MCP call's 120 s command timeout, a constant in upstream's code
+ * (DEFAULT_TIMEOUT_MS in src/mcp.rs) that no variable raises. Here and
  * not in the workflow: the workflow file is read from the branch it is dispatched on, this
  * script from the commit it builds.
  */
 export function testEnv(env, triple, host = { platform: process.platform, arch: process.arch }) {
   const rosetta = triple === 'x86_64-apple-darwin' && host.platform === 'darwin' && host.arch === 'arm64';
-  if (!rosetta || env.AB_TEST_SUBPROCESS_TIMEOUT_SECS) return env;
-  return { ...env, AB_TEST_SUBPROCESS_TIMEOUT_SECS: ROSETTA_TEST_TIMEOUT_SECS };
+  if (!rosetta) return env;
+  return {
+    ...env,
+    AB_TEST_SUBPROCESS_TIMEOUT_SECS: env.AB_TEST_SUBPROCESS_TIMEOUT_SECS || ROSETTA_TEST_TIMEOUT_SECS,
+    AB_TEST_ROSETTA: '1',
+  };
 }
 
 /** The value of `key = "..."` among the lines of the first section headed `header` that `match`es. */
@@ -450,40 +462,63 @@ async function build({ target, out }, { pin, patchDir, log, fetch }) {
     if (found !== pin.rustcCommit) {
       throw new Error(`agent-browser: rustc's commit-hash is ${found}, the pin's rustc_commit is ${pin.rustcCommit}`);
     }
-    // The tests first: a failing one stops the build, so nothing untested is published.
-    run('cargo', ['test', '--locked', '--target', target], { cwd: join(src, 'cli'), env: testEnv(env, target) });
-    run('cargo', ['build', '--release', '--locked', '--target', target], { cwd: join(src, 'cli'), env });
-
-    const outDir = resolve(out);
-    await mkdir(outDir, { recursive: true });
-    const name = `agent-browser-${target}${exe(target)}`;
-    const binary = join(outDir, name);
-    await copyFile(join(targetDir, target, 'release', `agent-browser${exe(target)}`), binary);
-    const bytes = await readFile(binary);
-    const digest = sha256(bytes);
-    const record = {
-      triple: target,
-      sha256: digest,
-      size: bytes.length,
-      patched_tag: pin.patchedTag,
-      version: pin.version,
-      upstream_commit: pin.upstreamCommit,
-      upstream_tarball_sha256: pin.upstreamTarballSha256,
-      patches,
-      source_date_epoch: epoch,
-      rustflags: env.CARGO_ENCODED_RUSTFLAGS.split('\x1f'),
-      rustc: verbose.stdout.trim(),
-      ...linkerVersions(process.env),
-      runner_image: process.env.ImageOS ? `${process.env.ImageOS} ${process.env.ImageVersion}` : null,
-    };
-    await writeFile(join(outDir, `agent-browser-${target}.json`), `${JSON.stringify(record, null, 2)}\n`);
-    log(`${name} sha256 ${digest} (${bytes.length} bytes)`);
-    log(`the pin's lines for [${target}], once the release is published:`);
-    log(pinLines(target, pin, digest));
-    return record;
+    const cli = join(src, 'cli');
+    return await releaseThenTest({
+      release: () => release({ target, out, cli, pin, patches, epoch, targetDir, env, verbose, log }),
+      test: () => run('cargo', ['test', '--locked', '--target', target], { cwd: cli, env: testEnv(env, target) }),
+    });
   } finally {
     await cleanup(work, log);
   }
+}
+
+/**
+ * `build`'s order: the release build (with the binary, its record and the pin lines) first, then
+ * the tests. A failed release build rejects before the tests run. Failed tests reject too, after
+ * the binary is in place, so the command exits non-zero and the leg stays red (publishing needs
+ * every leg green), while a later job can still test the binary. Resolves to the record.
+ */
+export async function releaseThenTest({ release, test }) {
+  const record = await release();
+  try {
+    await test();
+  } catch (error) {
+    throw new Error(`agent-browser: the tests failed (the binary was written, not to be published): ${error.message}`);
+  }
+  return record;
+}
+
+/** The release build of `build`: the binary and its record in `out`; returns the record. */
+async function release({ target, out, cli, pin, patches, epoch, targetDir, env, verbose, log }) {
+  run('cargo', ['build', '--release', '--locked', '--target', target], { cwd: cli, env });
+
+  const outDir = resolve(out);
+  await mkdir(outDir, { recursive: true });
+  const name = `agent-browser-${target}${exe(target)}`;
+  const binary = join(outDir, name);
+  await copyFile(join(targetDir, target, 'release', `agent-browser${exe(target)}`), binary);
+  const bytes = await readFile(binary);
+  const digest = sha256(bytes);
+  const record = {
+    triple: target,
+    sha256: digest,
+    size: bytes.length,
+    patched_tag: pin.patchedTag,
+    version: pin.version,
+    upstream_commit: pin.upstreamCommit,
+    upstream_tarball_sha256: pin.upstreamTarballSha256,
+    patches,
+    source_date_epoch: epoch,
+    rustflags: env.CARGO_ENCODED_RUSTFLAGS.split('\x1f'),
+    rustc: verbose.stdout.trim(),
+    ...linkerVersions(process.env),
+    runner_image: process.env.ImageOS ? `${process.env.ImageOS} ${process.env.ImageVersion}` : null,
+  };
+  await writeFile(join(outDir, `agent-browser-${target}.json`), `${JSON.stringify(record, null, 2)}\n`);
+  log(`${name} sha256 ${digest} (${bytes.length} bytes)`);
+  log(`the pin's lines for [${target}], once the release is published:`);
+  log(pinLines(target, pin, digest));
+  return record;
 }
 
 /**

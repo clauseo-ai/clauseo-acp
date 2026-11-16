@@ -42,6 +42,12 @@ only; macOS and Linux behave as upstream (plus 0001).
   AB_TEST_SUBPROCESS_TIMEOUT_SECS, which agent-browser-build.mjs sets for x86_64 macOS under Rosetta;
   the user-config test does not run on Windows, where dirs::home_dir() ignores HOME and
   USERPROFILE.
+- tests/tls_cli.rs (every OS, test only): on Windows ARM64, which has no Chrome for Testing
+  build, the install test expects upstream's "Unsupported platform" refusal after a trusted
+  manifest fetch instead of "No download URL found".
+- tests/session_validation_cli.rs (every OS, test only): the MCP doctor test returns early when
+  AB_TEST_ROSETTA is set (agent-browser-build.mjs sets it for x86_64 macOS under Rosetta, where
+  the doctor outlasts the MCP call's fixed 120 s command timeout).
 
 diff --git a/cli/Cargo.toml b/cli/Cargo.toml
 index c474f89..e9200b0 100644
@@ -3801,8 +3807,26 @@ index 6c7da16..55e0b53 100644
          .collect()
  }
  
+diff --git a/cli/tests/session_validation_cli.rs b/cli/tests/session_validation_cli.rs
+index 64e1ff7..693634e 100644
+--- a/cli/tests/session_validation_cli.rs
++++ b/cli/tests/session_validation_cli.rs
+@@ -80,6 +80,13 @@ fn invalid_session_is_rejected_before_session_dependent_local_commands() {
+ 
+ #[test]
+ fn mcp_doctor_ignores_invalid_inherited_session() {
++    // AB_TEST_ROSETTA: an x86_64 macOS build tested on an ARM64 Mac (agent-browser-build.mjs
++    // sets it). Every subprocess start is so slow under Rosetta that the doctor passes the MCP
++    // call's 120 s command timeout. The ARM64 Mac leg and a real Intel job run this test.
++    if std::env::var_os("AB_TEST_ROSETTA").is_some() {
++        eprintln!("skipped under Rosetta (AB_TEST_ROSETTA): the doctor outlasts the 120 s MCP command timeout");
++        return;
++    }
+     let home = TempDir::new().unwrap();
+     let output = command(&home, "AGENT_BROWSER_SESSION")
+         .args([
 diff --git a/cli/tests/tls_cli.rs b/cli/tests/tls_cli.rs
-index 8908f4d..169e95a 100644
+index 8908f4d..41eaa5f 100644
 --- a/cli/tests/tls_cli.rs
 +++ b/cli/tests/tls_cli.rs
 @@ -12,6 +12,8 @@ use serde_json::Value;
@@ -3822,3 +3846,30 @@ index 8908f4d..169e95a 100644
              .env("NO_COLOR", "1")
              .args(["--session", "tls", "--json"]);
          if let Some(path) = &self.system_bundle {
+@@ -354,6 +357,13 @@ fn install_fetches_manifest_with_explicit_and_native_trust() {
+     let session = Session::new();
+     let ca = session.ca("installer.pem", cert);
+     let url = format!("http://127.0.0.1:{}", proxy.port);
++    // What a trusted manifest fetch ends in. Chrome for Testing has no Windows ARM64 build:
++    // there upstream's install refuses (it panics in platform_key) once the manifest is fetched.
++    let fetched = if cfg!(all(windows, target_arch = "aarch64")) {
++        "Unsupported platform for Chrome for Testing download"
++    } else {
++        "No download URL found"
++    };
+     for (args, trusted) in [
+         (vec!["install"], false),
+         (vec!["--ca-cert", ca.to_str().unwrap(), "install"], true),
+@@ -367,11 +377,7 @@ fn install_fetches_manifest_with_explicit_and_native_trust() {
+         let out = cmd.args(&args).output().unwrap();
+         let error = String::from_utf8_lossy(&out.stderr);
+         assert!(!out.status.success(), "fixture has no download URL");
+-        assert_eq!(
+-            error.contains("No download URL found"),
+-            trusted,
+-            "{args:?}: {error}"
+-        );
++        assert_eq!(error.contains(fetched), trusted, "{args:?}: {error}");
+     }
+     assert_eq!(proxy.requests.load(Ordering::SeqCst), 2);
+     assert!(!session.tmp.path().join("sockets/tls.pid").exists());

@@ -208,6 +208,14 @@ anything the agent starts.
   included ([0030](decisions/0030-launch-profile.md)). Gaps: `run.old-*` when the data folder's
   path holds a glob character; none of it on Windows, where Codex's unelevated sandbox
   can't enforce a read deny (until S15)
+- `built` (Windows, our agent-browser build): agent-browser's daemon serves only a client that
+  proves the per-session key, over a pipe whose DACL admits the user and SYSTEM, and refuses a
+  restricted (sandboxed) token. Limit: the key stops the bundled CLI run by hand and raw pipe
+  clients, not an unsandboxed process of the same user that injects code. Some threads of the
+  hardened processes (the MCP server's output reader, loader and thread-pool threads from
+  process start) keep the default thread DACL, so such a process can take one over and read the
+  key, and the install is per-user, so it could replace the binary anyway
+  ([README](../crates/desktop/agent-browser/README.md))
 
 ## Egress proxy
 
