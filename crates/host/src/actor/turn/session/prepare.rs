@@ -121,7 +121,7 @@ pub(crate) fn on_prepared(
     picked: &Picked,
 ) {
     claude_mode::prepared(actor, thread, fell_back);
-    super::super::picks::after(actor, thread, picked);
+    super::super::picks::after(actor, thread, picked, &start.config_options);
     let late = super::super::picks::late(actor, thread, &start.config_options, picked);
     if !late.is_empty() {
         before_attach(actor, thread, (start, loaded), (None, None, late));

@@ -43,7 +43,7 @@ use super::out::Out;
 use super::{Then, state};
 use crate::agent::forced_ask::config_allowed;
 use crate::error::Error;
-use crate::log_file::Cause;
+use crate::log_file::{Cause, LIFECYCLE};
 
 /// The JSON-RPC code of an agent refusing a value as invalid.
 const INVALID_PARAMS: i32 = -32602;
@@ -343,18 +343,38 @@ pub(super) async fn apply(
     picked
 }
 
-/// The start's picks were set: the options updates held meanwhile go (the start's options are
-/// newer), and each stale pick is logged and leaves `CreateThread`'s config and the matter's
-/// prefs, whose new row is written in a commit of its own.
-pub(super) fn after(actor: &mut Actor, thread: ThreadId, picked: &Picked) {
-    if !picked.set.is_empty() {
-        let picks = picked
-            .set
+/// The model and the effort among `picks`, by their options' categories in `options`; `-` for
+/// none. All a host.log line about picks carries besides the agent id: no other option.
+fn model_and_effort<'a>(options: &[ConfigOption], picks: &'a [Pick]) -> (&'a str, &'a str) {
+    let of = |category: ConfigCategory| {
+        picks
             .iter()
-            .map(|(option, value)| format!("{option}={value}"))
-            .collect::<Vec<_>>()
-            .join(" ");
-        tracing::info!(%thread, %picks, "picks sent before first prompt");
+            .find(|(id, _)| {
+                (options.iter())
+                    .any(|option| option.id == id.as_str() && option.category == category)
+            })
+            .map_or("-", |(_, value)| value.as_str())
+    };
+    (of(ConfigCategory::Model), of(ConfigCategory::ThoughtLevel))
+}
+
+/// The start's picks were set: host.log says which (the agent id, the model and the effort, as
+/// `options`, the start's, file them), the options updates held meanwhile go (the start's
+/// options are newer), and the stale picks are logged the same way and leave `CreateThread`'s
+/// config and the matter's prefs, whose new row is written in a commit of its own.
+pub(super) fn after(
+    actor: &mut Actor,
+    thread: ThreadId,
+    picked: &Picked,
+    options: &[ConfigOption],
+) {
+    let agent = actor
+        .threads
+        .get(&thread)
+        .map_or_else(String::new, |entry| entry.row.agent.as_str().to_owned());
+    if !picked.set.is_empty() {
+        let (model, effort) = model_and_effort(options, &picked.set);
+        tracing::info!(target: LIFECYCLE, %agent, %model, %effort, "picks sent before first prompt");
     }
     if picked.sent {
         drop_held(actor, thread, "a pick was set since");
@@ -363,9 +383,8 @@ pub(super) fn after(actor: &mut Actor, thread: ThreadId, picked: &Picked) {
     if picked.stale.is_empty() {
         return;
     }
-    for (option, value) in &picked.stale {
-        tracing::info!(%thread, %option, %value, "the agent does not take a config pick; dropped");
-    }
+    let (model, effort) = model_and_effort(options, &picked.stale);
+    tracing::info!(target: LIFECYCLE, %agent, %model, %effort, "the agent does not take a config pick; dropped");
     let drop_stale = |picks: &mut ConfigPicks| {
         let mut changed = false;
         for (option, value) in &picked.stale {
@@ -466,7 +485,7 @@ pub(super) fn drop_held(actor: &mut Actor, thread: ThreadId, why: &'static str) 
     agent.replayed.retain(|event| !options_update(event));
     let dropped = before - agent.replayed.len();
     if dropped > 0 {
-        tracing::info!(%thread, dropped, why, "held config options updates dropped");
+        tracing::info!(target: LIFECYCLE, %thread, dropped, why, "held config options updates dropped");
     }
 }
 
@@ -475,7 +494,7 @@ pub(super) fn drop_held(actor: &mut Actor, thread: ThreadId, why: &'static str) 
 pub(super) fn released(thread: ThreadId, held: &[AcpEvent]) {
     let released = held.iter().filter(|event| options_update(event)).count();
     if released > 0 {
-        tracing::info!(%thread, released, "held config options updates released");
+        tracing::info!(target: LIFECYCLE, %thread, released, "held config options updates released");
     }
 }
 
