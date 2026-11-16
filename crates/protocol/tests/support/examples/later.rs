@@ -327,29 +327,8 @@ pub(super) fn notices() -> Vec<DomainEvent> {
             text: "Clauseo stopped 3 more steps.".to_owned(),
             kind: Some(NoticeKind::GuardStepsMore { more: 3 }),
         },
-        Notice {
-            level: NoticeLevel::Info,
-            text: "Claude will ask before each change in this conversation. Clauseo is protecting \
-                   more matters than Claude's automatic checks can handle at once, so Claude asks \
-                   you instead."
-                .to_owned(),
-            kind: Some(NoticeKind::AskModeTooManyMatters),
-        },
-        Notice {
-            level: NoticeLevel::Warning,
-            text: "Claude now asks before each change in this conversation, because its automatic \
-                   checks stopped working here. Clauseo's own protections still apply."
-                .to_owned(),
-            kind: Some(NoticeKind::AskModeChecksStopped),
-        },
-        Notice {
-            level: NoticeLevel::Warning,
-            text: "Claude's safety check didn't answer, so Claude didn't do this. Try again in a \
-                   moment."
-                .to_owned(),
-            kind: Some(NoticeKind::SafetyCheckNoAnswer),
-        },
     ];
+    notices.extend(ask_mode_notices());
     notices.extend(
         [
             (
@@ -381,6 +360,35 @@ pub(super) fn notices() -> Vec<DomainEvent> {
         .map(|(reason, words)| skill_pack_notice(reason, words)),
     );
     notices.into_iter().map(DomainEvent::from).collect()
+}
+
+/// The notices of Claude's ask mode and its safety check (UC-491, UC-492, UC-800), in
+/// [`notices`] after the guard's.
+fn ask_mode_notices() -> [Notice; 3] {
+    [
+        Notice {
+            level: NoticeLevel::Info,
+            text: "Claude will ask before each change in this conversation. Clauseo is protecting \
+                   more matters than Claude's automatic checks can handle at once, so Claude asks \
+                   you instead."
+                .to_owned(),
+            kind: Some(NoticeKind::AskModeTooManyMatters),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Claude now asks before each change in this conversation, because its automatic \
+                   checks stopped working here. Clauseo's own protections still apply."
+                .to_owned(),
+            kind: Some(NoticeKind::AskModeChecksStopped),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Claude's safety check didn't answer, so Claude didn't do this. Try again in a \
+                   moment."
+                .to_owned(),
+            kind: Some(NoticeKind::SafetyCheckNoAnswer),
+        },
+    ]
 }
 
 /// A host notice of kind `SkillPackNotLoaded` for the pack `nda-kit`, left out for `reason`.
