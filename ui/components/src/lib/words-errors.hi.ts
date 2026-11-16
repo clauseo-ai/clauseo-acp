@@ -314,8 +314,8 @@ export const HI = {
     null,
   "This computer stopped a program the AI needs from starting, so the AI didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.":
     null,
-  "Clauseo can't restore this document: a folder now has its name, or the folder it was in is now a file. Rename or move that folder or file, then try again. Nothing has changed.":
-    "Clauseo यह दस्तावेज़ पुनर्स्थापित नहीं कर सकता: अब एक फ़ोल्डर का यही नाम है, या जिस फ़ोल्डर में यह था वह अब एक फ़ाइल है। उस फ़ोल्डर या फ़ाइल का नाम बदलें या उसे कहीं और ले जाएँ, फिर दोबारा प्रयास करें। कुछ नहीं बदला है।",
+  "Clauseo can't restore this paper: a folder now has its name, or the folder it was in is now a file. Nothing has changed. Rename or move that folder or file, then try again.":
+    "Clauseo यह दस्तावेज़ पुनर्स्थापित नहीं कर सकता: अब एक फ़ोल्डर का यही नाम है, या जिस फ़ोल्डर में यह था वह अब एक फ़ाइल है। कुछ नहीं बदला है। उस फ़ोल्डर या फ़ाइल का नाम बदलें या उसे कहीं और ले जाएँ, फिर दोबारा प्रयास करें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

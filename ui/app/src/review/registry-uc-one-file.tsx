@@ -83,12 +83,12 @@ export const UC_ONE_FILE: Entry[] = [
   // Undo on the done line, through the undo's own dialog
   state(
     "UC-325",
-    versionWords("Undid the restore. '{paper}' is back as it was at {time}."),
+    versionWords("Undid the restore. '{paper}' is back as it was before."),
     MODIFIED,
     [...ASK_TODAY, CONFIRM, UNDO_DONE, CONFIRM],
   ),
   // the version restored to has left the matter's window by the time the line is said
-  state("UC-428", versionWords("Restored {paper}."), { ...MODIFIED, forgets: true }, [
+  state("UC-428", versionWords("Restored '{paper}'."), { ...MODIFIED, forgets: true }, [
     ...ASK_EARLIER,
     CONFIRM,
   ]),

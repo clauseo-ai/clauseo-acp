@@ -195,9 +195,9 @@ const OWN = {
   "Nothing will change.": "कुछ नहीं बदलेगा।",
   "Nothing will change. '{paper}' is already the same as it was then.":
     "कुछ नहीं बदलेगा। '{paper}' पहले से वैसा ही है जैसा तब था।",
-  "Restored {paper}.": "{paper} पुनर्स्थापित किया गया।",
-  "Undid the restore. '{paper}' is back as it was at {time}.":
-    "पुनर्स्थापना पूर्ववत की गई। '{paper}' फिर से वैसा है जैसा वह {time} बजे था।",
+  "Restored '{paper}'.": "'{paper}' पुनर्स्थापित किया गया।",
+  "Undid the restore. '{paper}' is back as it was before.":
+    "पुनर्स्थापना पूर्ववत की गई। '{paper}' फिर से वैसा है जैसा वह पहले था।",
   "Restored {paper} to how it was at {time} today.":
     "{paper} को वैसा पुनर्स्थापित किया गया जैसा वह आज {time} बजे था।",
   "Restored {paper} to how it was at {time} on {date}.":

@@ -147,7 +147,7 @@ test("a file whose name is now a folder is refused in plain words, and nothing i
   expect(h.sent("restore_version")).toEqual([]);
   const words = errorWords("en", "matter.file_folder_clash");
   expect(words).toBe(
-    "Clauseo can't restore this document: a folder now has its name, or the folder it was in is now a file. Rename or move that folder or file, then try again. Nothing has changed.",
+    "Clauseo can't restore this paper: a folder now has its name, or the folder it was in is now a file. Nothing has changed. Rename or move that folder or file, then try again.",
   );
   expect(document.body.textContent).toContain(words);
 });
@@ -282,7 +282,7 @@ test("Undo of a one-document restore says that document is back as it was", asyn
     thread: THREAD,
   });
   expect(document.body.textContent).toMatch(
-    /Undid the restore\. '\u2068brief\.txt\u2069' is back as it was at .+\./,
+    /Undid the restore\. '\u2068brief\.txt\u2069' is back as it was before\./,
   );
 });
 
@@ -298,5 +298,5 @@ test("a done line whose version is no longer in the timeline names the document 
       file: "Drafts/brief.txt",
       outcome: { kind: "nothing" },
     }),
-  ).toBe("Restored \u2068brief.txt\u2069.");
+  ).toBe("Restored '\u2068brief.txt\u2069'.");
 });
