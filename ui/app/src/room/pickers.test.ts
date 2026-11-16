@@ -176,14 +176,14 @@ const seedShown = (options: ConfigOption[], plan?: string) =>
     plan,
   ).map((m) => [m.id, m.value, m.options.map((o) => [o.name, o.note, o.description])]);
 
-test("the seed reads as the plan's own default, on the closed picker and in the menu", () => {
+test("the seed's model reads as the plan's own default, its effort as the default effort", () => {
   expect(seedShown(SEED_CLAUDE, "Claude")).toEqual([
     ["model", AGENT_DEFAULT_VALUE, [["Claude's default", undefined, undefined]]],
-    ["effort", AGENT_DEFAULT_VALUE, [["Claude's default", undefined, undefined]]],
+    ["effort", AGENT_DEFAULT_VALUE, [["Default effort", undefined, undefined]]],
   ]);
   expect(seedShown(SEED_CODEX, "ChatGPT")).toEqual([
     ["model", AGENT_DEFAULT_VALUE, [["ChatGPT's default", undefined, undefined]]],
-    ["reasoning_effort", AGENT_DEFAULT_VALUE, [["ChatGPT's default", undefined, undefined]]],
+    ["reasoning_effort", AGENT_DEFAULT_VALUE, [["Default effort", undefined, undefined]]],
   ]);
   // with no plan to name (a conversation's own menus never see the seed), the agent's name stands
   expect(seedShown(SEED_CLAUDE)[0]![2]).toEqual([["Default", undefined, undefined]]);
