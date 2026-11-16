@@ -1,12 +1,15 @@
 //! The tables of headers, footers and notes compared: a header's table, headers paired from the
 //! last section back, a header with tables and no counterpart, the header texts one version only
-//! has, and the notes' place.
+//! has, the notes' place, and where a header is, as stetdoc's view says and as the table
+//! comparison says.
 
 use clauseo_protocol::TableFormat::{Alignment, Shading};
-use clauseo_protocol::{ChangedTable, HeaderSlot, HeaderUse, TablePlace};
+use clauseo_protocol::{BlacklinePartKind, ChangedTable, HeaderSlot, HeaderUse, TablePlace};
 
+use super::super::read::{Where, read_package};
 use super::super::{TablesCompared, compare};
 use super::{COLS, REL, SHADED, W, body, cell, docx_with, grid, p, row, table};
+use crate::actor::query::blackline::parse::story::{Story, read_story};
 
 /// A header's table, its header found by the section's reference.
 #[test]
@@ -178,5 +181,42 @@ fn a_tables_change_in_the_notes_names_the_notes() {
             in_notes(TablePlace::Footnotes),
             in_notes(TablePlace::Endnotes),
         ]
+    );
+}
+
+/// Where each header and footer of the two-section pair is: the parts its headers' view shows
+/// (stetdoc's `{header default sections=1,2}`, `{footer first sections=2}`) and the places the
+/// table comparison works out from the sections' references agree.
+#[test]
+fn a_parts_uses_and_the_table_comparisons_agree() {
+    let file = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/blackline/partial/stories-new.docx"
+    ));
+    let view = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/blackline/partial/story-headers-stories.json"
+    ));
+    let package = read_package(file).unwrap();
+    let ours: Vec<Where> = package
+        .headers
+        .values()
+        .map(|part| part.place.clone())
+        .collect();
+    let stetdocs: Vec<Where> = read_story(view, Story::Headers)
+        .unwrap()
+        .parts
+        .into_iter()
+        .map(|part| match part.kind {
+            BlacklinePartKind::Header { uses } => Where::Header(uses),
+            BlacklinePartKind::Footer { uses } => Where::Footer(uses),
+            other => panic!("not a header or footer: {other:?}"),
+        })
+        .collect();
+    assert_eq!(stetdocs.len(), 2);
+    assert_eq!(ours.len(), stetdocs.len());
+    assert!(
+        stetdocs.iter().all(|place| ours.contains(place)),
+        "{ours:?}"
     );
 }
