@@ -34,7 +34,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -380,9 +380,9 @@ test("release.yml's arm64 install smoke runs after sign-windows on windows-11-ar
   assert.ok(smoke.includes("runs-on: windows-11-arm"));
   // Blocking: it may not fail (no continue-on-error), and assemble, so the release, needs it.
   assert.ok(!smoke.some((line) => line.startsWith("continue-on-error:")), smoke.join("\n"));
-  assert.ok(jobCommands(text, "assemble").includes("needs: [check, build, sign-windows, arm64-install-smoke]"));
+  assert.ok(jobCommands(text, "assemble").includes("needs: [check, custody, build, sign-windows, arm64-install-smoke]"));
   const needers = text.split("\n").filter((line) => /^\s+needs:.*\barm64-install-smoke\b/.test(stripComment(line)));
-  assert.deepEqual(needers, ["    needs: [check, build, sign-windows, arm64-install-smoke]"]);
+  assert.deepEqual(needers, ["    needs: [check, custody, build, sign-windows, arm64-install-smoke]"]);
   // x64 first, then arm64 over it, then the registered silent uninstall; ARM64 is checked.
   const script = smoke.join("\n");
   const order = ["_x64-machine-setup.exe", "_arm64-machine-setup.exe", "0xAA64", "QuietUninstallString"];
@@ -997,6 +997,9 @@ test("release.yml bundles the block-list snapshot only behind its one switch, of
   ]);
 });
 
+const LATEST_IF = "if: always() && needs.check.outputs.mode == 'release' && needs.publish.outputs.public == 'true'";
+const PUBLISH_LINE = 'gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest';
+
 test("sign-windows runs without the macOS and Linux legs; assemble and publish need every job", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
   // The job's own keys: its lines up to `runs-on:`, comments dropped.
@@ -1012,12 +1015,13 @@ test("sign-windows runs without the macOS and Linux legs; assemble and publish n
     ),
     sign.join("\n"),
   );
-  // No always(), no !cancelled() and no failure() in assemble, publish or latest: the default
-  // success() keeps a release, or dist-assets, from going out with a leg missing, and latest
-  // from checking a release publish did not publish.
+  // No always(), no !cancelled() and no failure() in assemble or publish: the default success()
+  // keeps a release, or dist-assets, from going out with a leg missing. latest's one always()
+  // goes with publish's output public, so it checks only a release publish made public.
   for (const job of ["assemble", "publish", "latest"]) {
     const ifs = jobCommands(text, job).filter((line) => /^if:/.test(line));
-    assert.deepEqual(ifs.filter((line) => /always\(\)|cancelled\(\)|failure\(\)/.test(line)), [], job);
+    const allowed = job === "latest" ? [LATEST_IF] : [];
+    assert.deepEqual(ifs.filter((line) => /always\(\)|cancelled\(\)|failure\(\)/.test(line)), allowed, job);
   }
 });
 
@@ -1040,17 +1044,40 @@ test("release.yml makes a published v* release the latest explicitly, and checks
   // --latest only where it is meant: publish makes the release the latest, a test pre-release
   // says it is not; nowhere else.
   const publish = jobCommands(text, "publish");
-  assert.ok(publish.includes('run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest'), "publish");
+  const edit = publish.indexOf(PUBLISH_LINE);
+  assert.notEqual(edit, -1, "publish");
   const assemble = jobCommands(text, "assemble");
   assert.ok(
-    assemble.includes('if [ "$MODE" = release ]; then kind=(--draft); else kind=(--prerelease --latest=false); fi'),
+    assemble.includes('if [ "$MODE" = release ]; then kind=(--draft); else kind=(--prerelease); fi'),
     "assemble's create",
   );
+  assert.ok(
+    assemble.some((line) =>
+      line.startsWith('gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag "${kind[@]}" --latest=false '),
+    ),
+    "assemble's create says --latest=false",
+  );
   assert.equal(lines.filter((line) => /--latest\b/.test(line)).length, 2, "--latest elsewhere");
-  // `latest` runs after publish, in release mode, with a read token, no environment and no secret.
+  // publish's output public is set right after the edit succeeds, in the same step, nowhere else.
+  assert.ok(jobHead(text, "publish").length > 0);
+  const outputs = publish.indexOf("outputs:");
+  assert.ok(outputs !== -1 && outputs < publish.indexOf("steps:"), "publish's outputs");
+  assert.equal(publish[outputs + 1], "public: ${{ steps.public.outputs.public }}");
+  assert.equal(publish[edit + 1], 'echo "public=true" >> "$GITHUB_OUTPUT"');
+  assert.deepEqual(publish.slice(edit - 6, edit), [
+    "- name: Publish the draft as the latest release",
+    "id: public",
+    "env:",
+    "GH_TOKEN: ${{ github.token }}",
+    "run: |",
+    "set -euo pipefail",
+  ]);
+  assert.equal(publish.filter((line) => line.includes("public=")).length, 1, "public set once");
+  // `latest` runs after publish, in release mode, whenever publish made the release public (a
+  // later step of publish may fail), with a read token, no environment and no secret.
   const head = jobHead(text, "latest");
   assert.deepEqual(jobNeeds(text, "latest"), ["check", "publish"]);
-  assert.ok(head.includes("if: needs.check.outputs.mode == 'release'"), head.join("\n"));
+  assert.deepEqual(head.filter((line) => line.startsWith("if:")), [LATEST_IF], head.join("\n"));
   const latest = jobCommands(text, "latest");
   const permissions = latest.indexOf("permissions:");
   assert.deepEqual(latest.slice(permissions + 1, permissions + 3), ["contents: read", "env:"]);
@@ -1061,6 +1088,26 @@ test("release.yml makes a published v* release the latest explicitly, and checks
   assert.deepEqual(pin("latest"), pin("blocklist"));
   // The tier 1 platforms latest-json.mjs requires, each of which must be in the served latest.json.
   assert.ok(latest.includes(`TIER1="${tier1Platforms("1.2.3").join(" ")}"`), "TIER1 is tier1Platforms");
+  assert.equal(latest.filter((line) => line.startsWith("TIER1=")).length, 1, "TIER1 once");
+  const tierLoop = latest.indexOf("for want in $TIER1; do");
+  assert.notEqual(tierLoop, -1, "every tier 1 platform is looked for");
+  assert.equal(
+    latest[tierLoop + 1],
+    'grep -qxF "$want" <<< "$platforms" || fail "latest.json has no $want (tier 1)"',
+  );
+  assert.equal(latest[tierLoop - 1], "platforms=$(jq -r '.platforms // {} | keys[]' \"$manifest\")");
+  // Each platform's signature verifies, and its trusted comment names the file and the version.
+  const verify = latest.indexOf(
+    'out=$(minisign -V -p "$work/updater.pub" -m "$work/assets/$name" -x "$work/$platform.minisig") ||',
+  );
+  assert.deepEqual(latest.slice(verify + 1, verify + 6), [
+    'fail "$platform: $name does not verify with plugins.updater.pubkey"',
+    "comment=$(sed -n 's/^Trusted comment: //p' <<< \"$out\" | tr '\\t' '\\n')",
+    'grep -qxF "file:$name" <<< "$comment" && grep -qxF "version:$VERSION" <<< "$comment" ||',
+    'fail "$platform: $name\'s signed comment does not name file:$name and version:$VERSION"',
+    'summary+=("- $platform: \\`$name\\` verifies (file:$name, version:$VERSION)")',
+  ]);
+  assert.ok(latest.indexOf("for platform in $platforms; do") < verify, "per platform");
   // As the app reads it: releases/latest, over HTTPS only, each platform's bytes against the key.
   for (const line of [
     'latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name) || latest=""',
@@ -1082,17 +1129,45 @@ test("release.yml makes a published v* release the latest explicitly, and checks
 test("an unsigned beta goes out only with CLAUSEO_UNSIGNED_BETA 'true' and no Apple secret, signed ad hoc", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
   const lines = text.split("\n").map((line) => stripComment(line).trim());
-  const beta = "UNSIGNED_BETA: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}";
-  const apple =
-    "HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}";
-  // The variable and the Apple secrets are read in publish and assemble only, the same way.
-  assert.equal(lines.filter((line) => line.includes("vars.CLAUSEO_UNSIGNED_BETA")).length, 2);
-  assert.equal(lines.filter((line) => line.startsWith("HAS_APPLE:")).length, 2);
   const at = (commands, line, from = 0) => {
     const index = commands.indexOf(line, from);
     assert.notEqual(index, -1, line);
     return index;
   };
+  // custody decides it once: the variable and the Apple secrets are read there and nowhere else,
+  // as booleans, into its outputs has_apple and unsigned_beta, in every mode.
+  const variable = "BETA_VARIABLE: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}";
+  const appleSecrets =
+    "HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}";
+  assert.deepEqual(lines.filter((line) => line.includes("CLAUSEO_UNSIGNED_BETA") && line.includes("vars.")), [variable]);
+  assert.deepEqual(lines.filter((line) => /secrets\.APPLE_/.test(line)), [appleSecrets]);
+  const custody = jobCommands(text, "custody");
+  const decide = at(custody, "- name: Decide the unsigned beta");
+  assert.deepEqual(custody.slice(decide + 1, decide + 5), ["id: beta", "env:", variable, appleSecrets]);
+  const decideEnd = custody.findIndex((line, i) => i > decide && line.startsWith("- "));
+  const decideStep = custody.slice(decide, decideEnd);
+  assert.ok(!decideStep.some((line) => line.startsWith("if:")), "decided in every mode");
+  for (const line of [
+    "true/false) beta=true ;;",
+    "true/true | false/true | false/false) beta=false ;;",
+    '{ echo "has_apple=$HAS_APPLE"; echo "unsigned_beta=$beta"; } >> "$GITHUB_OUTPUT"',
+  ]) {
+    at(decideStep, line);
+  }
+  const outputs = at(custody, "outputs:");
+  assert.ok(outputs < custody.indexOf("steps:"));
+  assert.deepEqual(custody.slice(outputs + 1, outputs + 3), [
+    "has_apple: ${{ steps.beta.outputs.has_apple }}",
+    "unsigned_beta: ${{ steps.beta.outputs.unsigned_beta }}",
+  ]);
+  // publish and assemble read custody's outputs, which they need.
+  const beta = "UNSIGNED_BETA: ${{ needs.custody.outputs.unsigned_beta }}";
+  const apple = "HAS_APPLE: ${{ needs.custody.outputs.has_apple }}";
+  for (const job of ["publish", "assemble"]) {
+    assert.ok(jobNeeds(text, job).includes("custody"), `${job} needs custody`);
+  }
+  assert.equal(lines.filter((line) => line === beta).length, 2);
+  assert.equal(lines.filter((line) => line === apple).length, 2);
   // publish: without the variable, or with an Apple secret, today's stapler check; else every
   // DMG's .app verifies and is signed ad hoc.
   const publish = jobCommands(text, "publish");
@@ -1225,44 +1300,72 @@ test("the version check passes a first app release or a higher version and refus
   }
 });
 
-// Stage F's workflows that create releases. python-runtime.yml (stage D) still lacks
-// --latest=false, which stage D's own pull request adds; add it here once that is on main.
-const STAGE_F_RELEASE_WORKFLOWS = ["agent-browser-build.yml", "release.yml"];
-
-test("no stage F release takes releases/latest but a published v* app release", () => {
-  // Every installed app reads latest.json through releases/latest, so every other release these
-  // workflows make (agent-browser's, a test run's) says --latest=false, and only release.yml's
-  // publish says --latest.
-  const dir = join(here, "..", "workflows");
-  const creates = [];
-  const latest = [];
-  for (const name of STAGE_F_RELEASE_WORKFLOWS) {
-    const lines = readFileSync(join(dir, name), "utf8")
+/**
+ * Every way a workflow in .github/workflows (each *.yml and *.yaml, found by listing the folder,
+ * so a new workflow is covered) could take releases/latest from a published v* app release: a
+ * `gh release create` or `gh release edit` without --latest=false, but release.yml's publish
+ * (PUBLISH_LINE); --latest anywhere else; a write to the releases API (gh api or curl with a
+ * method or fields) without make_latest=false; or an action that makes releases.
+ */
+function latestProblems(workflows) {
+  const problems = [];
+  for (const [name, text] of workflows) {
+    const lines = text
       .replace(/\\\n\s*/g, " ")
       .split("\n")
       .map((line) => stripComment(line).trim());
     for (const line of lines) {
-      if (/\bgh release create\b/.test(line)) {
-        creates.push([name, line]);
+      const command = line.replace(/^run:\s*/, "");
+      if (name === "release.yml" && command === PUBLISH_LINE) continue;
+      if (/\bgh release (create|edit)\b/.test(command) && !/ --latest=false\b/.test(command)) {
+        problems.push(`${name}: no --latest=false: ${command}`);
       }
-      if (/--latest\b(?!=false)/.test(line)) {
-        latest.push([name, line]);
+      if (/--latest\b(?!=false)/.test(command)) problems.push(`${name}: --latest: ${command}`);
+      const api = /\bgh api\b|\bcurl\b/.test(command) && /\/releases\b/.test(command);
+      const writes = / (-X|--method|--request) *(POST|PATCH|PUT)\b| (-f|-F|--field|--raw-field|--input|-d|--data)\b/.test(command);
+      if (api && writes && !/make_latest=false/.test(command)) {
+        problems.push(`${name}: a releases API write without make_latest=false: ${command}`);
+      }
+      if (/^-? *uses: *[^ ]*(action-gh-release|release-action|create-release)\b/i.test(line)) {
+        problems.push(`${name}: a release action: ${line}`);
       }
     }
   }
-  // Each listed workflow creates a release.
-  assert.deepEqual([...new Set(creates.map(([name]) => name))], STAGE_F_RELEASE_WORKFLOWS, creates.join("\n"));
-  for (const [name, line] of creates) {
-    if (name === "release.yml") {
-      // The draft (release) or the pre-release with --latest=false (test), from kind.
-      assert.match(line, / --verify-tag "\$\{kind\[@\]\}" /, line);
-    } else {
-      assert.match(line, / --latest=false\b/, `${name}: ${line}`);
-    }
-  }
-  assert.deepEqual(latest, [
-    ["release.yml", 'run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest'],
-  ]);
+  return problems;
+}
+
+test("no workflow's release takes releases/latest but a published v* app release", () => {
+  // Every installed app reads latest.json through releases/latest, so every other release any
+  // workflow makes or edits (agent-browser's, python-runtime's, a test run's, release.yml's
+  // draft) says --latest=false, and only release.yml's publish says --latest.
+  const dir = join(here, "..", "workflows");
+  const workflows = readdirSync(dir)
+    .filter((name) => /\.ya?ml$/.test(name))
+    .sort()
+    .map((name) => [name, readFileSync(join(dir, name), "utf8")]);
+  assert.ok(workflows.length > 10, "the workflows folder");
+  assert.deepEqual(latestProblems(workflows), []);
+  // The ones that make a release today, so the rule above is known to have looked at them.
+  const making = workflows.filter(([, text]) => /\bgh release create\b/.test(text)).map(([name]) => name);
+  assert.deepEqual(making, ["agent-browser-build.yml", "python-runtime.yml", "release.yml"]);
+  assert.equal(
+    workflows.flatMap(([, text]) => text.split("\n")).filter((line) => line.trim() === PUBLISH_LINE).length,
+    1,
+  );
+  // Each way it can break is found.
+  const one = (body) => latestProblems([["new.yml", body]]);
+  assert.equal(one('run: gh release create "$TAG" --verify-tag').length, 1);
+  assert.equal(one('run: gh release create "$TAG" \\\n  --prerelease').length, 1);
+  assert.equal(one('gh release edit "$TAG" --draft=false').length, 1);
+  assert.equal(one('gh release edit "$TAG" --draft=false --latest').length, 2);
+  assert.equal(latestProblems([["release.yml", `run: ${PUBLISH_LINE}`]]).length, 0);
+  assert.equal(one('gh api -X POST "repos/$R/releases" -f tag_name=v1').length, 1);
+  assert.equal(one('gh api "repos/$R/releases/1" --method PATCH -F draft=false').length, 1);
+  assert.equal(one('curl -X POST https://api.github.com/repos/o/r/releases -d @body.json').length, 1);
+  assert.equal(one('gh api -X POST "repos/$R/releases" -f make_latest=false').length, 0);
+  assert.equal(one('gh api --paginate "repos/$R/releases"').length, 0);
+  assert.equal(one("- uses: softprops/action-gh-release@0123456789012345678901234567890123456789").length, 1);
+  assert.equal(one('gh release create "$TAG" --latest=false').length, 0);
 });
 
 test("custody checks the release key against tauri.conf.json's pubkey before any leg, the key in one step", () => {
@@ -1279,6 +1382,7 @@ test("custody checks the release key against tauri.conf.json's pubkey before any
   assert.ok(environment !== -1 && environment < custody.indexOf("steps:"), "custody's environment");
   const secrets = custody.filter((line) => /\bsecrets\b/.test(line));
   assert.deepEqual(secrets, [
+    "HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}",
     "TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}",
     "TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}",
   ]);
@@ -1293,11 +1397,13 @@ test("custody checks the release key against tauri.conf.json's pubkey before any
   ]) {
     assert.ok(body.includes(line), line);
   }
-  // Every step but the off-notice only in release mode.
+  // Every step but the beta's decision (in every mode, its own test) and the off-notice only in
+  // release mode.
   const steps = custody.filter((line) => line.startsWith("- "));
   const ifs = custody.filter((line) => line.startsWith("if: needs.check.outputs.mode"));
-  assert.equal(ifs.length, steps.length);
-  assert.equal(ifs.filter((line) => line === "if: needs.check.outputs.mode == 'release'").length, steps.length - 1);
+  assert.equal(steps[0], "- name: Decide the unsigned beta");
+  assert.equal(ifs.length, steps.length - 1);
+  assert.equal(ifs.filter((line) => line === "if: needs.check.outputs.mode == 'release'").length, steps.length - 2);
 });
 
 test("the workflow lint fails each broken rule", () => {

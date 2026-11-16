@@ -11,10 +11,10 @@
 # - release: a pushed tag v<X.Y.Z> on a commit on main. `custody` first checks that the
 #   environment `release`'s updater key signs for tauri.conf.json's pubkey; then it builds under
 #   that environment and leaves a draft GitHub Release; `publish` waits for Rohan's approval (environment
-#   `release-publish`), refuses unless every DMG is notarised and stapled (or, only with the
-#   repository variable CLAUSEO_UNSIGNED_BETA 'true' and no Apple secret, signed ad hoc: the
-#   unsigned beta), then publishes it as the latest release; `latest` checks that GitHub names
-#   it latest and that releases/latest/download/latest.json verifies against the app's key.
+#   `release-publish`), refuses unless every DMG is notarised and stapled (or, only when custody
+#   decided an unsigned beta: the repository variable CLAUSEO_UNSIGNED_BETA 'true' and no Apple
+#   secret, signed ad hoc), then publishes it as the latest release; `latest` checks that GitHub
+#   names it latest and that releases/latest/download/latest.json verifies against the app's key.
 # - test: a pushed tag test-v<X.Y.Z> on a commit of a release-test/* branch. Builds with the
 #   `e2e` feature under `release-test`, signs the updater files with the throwaway test key, and
 #   makes a public pre-release (a draft's assets need a signed-in download) for the updater's
@@ -309,6 +309,12 @@ jobs:
   # it. Taking the `release` environment, it is one more approval of that environment, before
   # the macOS build legs' (see decision 0035). In a test or dry run it takes no environment and
   # one step says there is nothing to check, so every job below runs as before.
+  # It also decides the unsigned beta, once, for assemble (the release notes' first-open block)
+  # and publish (the ad hoc check), which read only its two outputs, never the variable or a
+  # secret: has_apple, any Apple secret it can see (in release mode the `release` environment's
+  # as well as the repository's), and unsigned_beta, CLAUSEO_UNSIGNED_BETA 'true' and no Apple
+  # secret. In a test or dry run it takes no environment, so it sees what assemble read before
+  # (the repository's variable and secrets) and assemble behaves as before.
   custody:
     name: custody
     needs: check
@@ -317,10 +323,32 @@ jobs:
     environment: ${{ needs.check.outputs.mode == 'release' && 'release' || '' }}
     permissions:
       contents: read
+    outputs:
+      has_apple: ${{ steps.beta.outputs.has_apple }}
+      unsigned_beta: ${{ steps.beta.outputs.unsigned_beta }}
     env:
       MODE: ${{ needs.check.outputs.mode }}
       VERSION: ${{ needs.check.outputs.version }}
     steps:
+      # Booleans only: no secret's value reaches the step. Tauri's names (local-mac-dmg.sh unsets
+      # the same): APPLE_CERTIFICATE signs, APPLE_ID or APPLE_API_KEY notarises. The safe rule:
+      # an Apple secret always means notarisation is required, so the variable never weakens a
+      # signed set-up. In every mode.
+      - name: Decide the unsigned beta
+        id: beta
+        env:
+          BETA_VARIABLE: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}
+          HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}
+        run: |
+          set -euo pipefail
+          case "$BETA_VARIABLE/$HAS_APPLE" in
+            true/false) beta=true ;;
+            true/true | false/true | false/false) beta=false ;;
+            *) echo "::error::the beta's inputs are not booleans"; exit 1 ;;
+          esac
+          { echo "has_apple=$HAS_APPLE"; echo "unsigned_beta=$beta"; } >> "$GITHUB_OUTPUT"
+          echo "custody: unsigned beta $beta (Apple secret: $HAS_APPLE)" | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: No release key to check
         if: needs.check.outputs.mode != 'release'
         run: echo "No release key to check in a $MODE run (custody)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -1506,7 +1534,7 @@ jobs:
   # a public pre-release (test). A dry run stops at the artifact dist-assets.
   assemble:
     name: assemble
-    needs: [check, build, sign-windows, arm64-install-smoke]
+    needs: [check, custody, build, sign-windows, arm64-install-smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -1545,13 +1573,12 @@ jobs:
       - name: Install 7-Zip
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends p7zip-full
 
-      # UNSIGNED_BETA and HAS_APPLE: the unsigned beta's two inputs, the same expressions as in
-      # publish (see there), for the release notes' first-open steps. Booleans only: no secret's
-      # value reaches the step.
+      # UNSIGNED_BETA and HAS_APPLE: custody's one decision of the unsigned beta, as publish reads
+      # it, for the release notes' first-open steps.
       - name: Name the assets, write latest.json and SHA256SUMS.txt
         env:
-          UNSIGNED_BETA: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}
-          HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}
+          UNSIGNED_BETA: ${{ needs.custody.outputs.unsigned_beta }}
+          HAS_APPLE: ${{ needs.custody.outputs.has_apple }}
           SIGNPATH_ENABLED: ${{ vars.SIGNPATH_ENABLED == 'true' }}
         run: |
           set -euo pipefail
@@ -1690,8 +1717,8 @@ jobs:
             echo "Clauseo $VERSION, built from $GITHUB_SHA by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
             echo
             echo "Check a download with \`sha256sum -c SHA256SUMS.txt --ignore-missing\`."
-            # The first-open steps, only in an unsigned beta, decided exactly as publish decides
-            # it (UNSIGNED_BETA and HAS_APPLE, below and in publish), so a signed release never
+            # The first-open steps, only in an unsigned beta, custody's one decision, which
+            # publish also reads (UNSIGNED_BETA and HAS_APPLE), so a signed release never
             # carries them; the Windows lines also only while SignPath is off. The words are
             # docs/install/macos.md's and windows.md's, which the links lead to, and each line is
             # a copy review string (UC-751 to UC-755, registry-release-notes.tsx): latest-json's
@@ -1755,35 +1782,38 @@ jobs:
         with:
           subject-path: dist/*
 
-      # A release is a draft, which `publish` makes the latest release explicitly. A test run's
-      # pre-release says --latest=false: GitHub never makes a pre-release the latest, and saying
-      # so here keeps it that way should gh's default ever change, since every installed app
-      # reads latest.json through releases/latest.
+      # A release is a draft, which `publish` makes the latest release explicitly; a test run's is
+      # a pre-release. Both are made with --latest=false: GitHub never makes a draft or a
+      # pre-release the latest, and saying so here keeps it that way should gh's default ever
+      # change, since every installed app reads latest.json through releases/latest.
       - name: Create the GitHub Release
         if: env.MODE != 'dry'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ "$MODE" = release ]; then kind=(--draft); else kind=(--prerelease --latest=false); fi
-          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag "${kind[@]}" \
+          if [ "$MODE" = release ]; then kind=(--draft); else kind=(--prerelease); fi
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag "${kind[@]}" --latest=false \
             --title "Clauseo $VERSION" --notes-file notes.md
 
   # Publishes a v* draft once Rohan approves it (environment release-publish) and makes it the
   # latest release explicitly; `latest` then checks what installed apps will read. Refuses while
   # a DMG is missing or not notarised and stapled (QF.2 (a)), except in an unsigned beta, which
-  # is only ever on purpose: the repository variable CLAUSEO_UNSIGNED_BETA is 'true' and no
-  # Apple secret is set. Then every DMG's Clauseo.app must verify and be signed ad hoc, and the
-  # job summary says the release is an unsigned beta (decision 0035, "The unsigned beta").
+  # is only ever on purpose: custody decided it (the repository variable CLAUSEO_UNSIGNED_BETA is
+  # 'true' and no Apple secret is set). Then every DMG's Clauseo.app must verify and be signed ad
+  # hoc, and the job summary says the release is an unsigned beta (decision 0035, "The unsigned
+  # beta"). Its output public is 'true' once the release is public, which `latest` runs on.
   publish:
     name: publish
-    needs: [check, assemble]
+    needs: [check, custody, assemble]
     if: needs.check.outputs.mode == 'release'
     runs-on: macos-15
     timeout-minutes: 20
     environment: release-publish
     permissions:
       contents: write
+    outputs:
+      public: ${{ steps.public.outputs.public }}
     env:
       VERSION: ${{ needs.check.outputs.version }}
       TAG: ${{ needs.check.outputs.tag }}
@@ -1792,20 +1822,18 @@ jobs:
         with:
           persist-credentials: false
 
-      # The unsigned beta, decided exactly as assemble decides the release notes' block:
-      # UNSIGNED_BETA is the variable (a tag push has no inputs, so a repository variable, never
-      # a default); HAS_APPLE is true when any Apple secret is set, as a boolean only, so no
-      # secret's value reaches the step. Tauri's names (local-mac-dmg.sh unsets the same):
-      # APPLE_CERTIFICATE signs, APPLE_ID or APPLE_API_KEY notarises. The safe rule: an Apple
-      # secret, or a DMG signed with a real identity, always means notarisation is required, so
-      # the variable never weakens a signed set-up. A secret kept only in the `release`
-      # environment is not visible here; the ad hoc check below still refuses that DMG.
-      # Without the variable, or with an Apple secret, the check is today's, word for word.
+      # The unsigned beta, custody's one decision, which assemble's release notes also read:
+      # UNSIGNED_BETA is CLAUSEO_UNSIGNED_BETA 'true' and no Apple secret; HAS_APPLE is any Apple
+      # secret custody saw, the `release` environment's included (see custody). The safe rule:
+      # an Apple secret, or a DMG signed with a real identity, always means notarisation is
+      # required, so the variable never weakens a signed set-up, and the ad hoc check below
+      # refuses a DMG signed with a real identity. Unless custody decided a beta, the check is
+      # today's, word for word. A variable flipped after custody changes nothing in this run.
       - name: Every DMG is notarised and stapled, or this is an unsigned beta on purpose
         env:
           GH_TOKEN: ${{ github.token }}
-          UNSIGNED_BETA: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}
-          HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}
+          UNSIGNED_BETA: ${{ needs.custody.outputs.unsigned_beta }}
+          HAS_APPLE: ${{ needs.custody.outputs.has_apple }}
         run: |
           set -euo pipefail
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.dmg' --dir "$RUNNER_TEMP/dmg"
@@ -1841,15 +1869,20 @@ jobs:
             echo "$name: Clauseo.app verifies and is signed ad hoc"
           done
           echo "::warning::Clauseo $VERSION is an unsigned beta: its DMGs are signed ad hoc and not notarised"
-          echo "**Unsigned beta:** Clauseo $VERSION's DMGs are signed ad hoc and not notarised, published on purpose (repository variable CLAUSEO_UNSIGNED_BETA is true and no Apple secret is set). The release notes carry the first-open steps." |
+          echo "**Unsigned beta:** Clauseo $VERSION's DMGs are signed ad hoc and not notarised, published on purpose (custody: repository variable CLAUSEO_UNSIGNED_BETA is true and no Apple secret is set). The release notes carry the first-open steps." |
             tee -a "$GITHUB_STEP_SUMMARY"
 
       # --latest makes this release the one releases/latest names, which every installed app's
-      # updater reads latest.json through; never left to GitHub's automatic choice.
+      # updater reads latest.json through; never left to GitHub's automatic choice. public=true
+      # right after, so `latest` checks the public release even if a later step fails.
       - name: Publish the draft as the latest release
+        id: public
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          echo "public=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: vars.COUNTS_RELEASES_ENABLED == 'true'
@@ -1874,11 +1907,12 @@ jobs:
   # publish runs on macOS for the stapler; this job needs no environment, no approval and only
   # a read token, and a failed check can be re-run alone without publishing again. Defence in
   # depth: check refuses a release with an empty key, and assemble checked each signature
-  # before the draft existed.
+  # before the draft existed. It runs whenever publish made the release public (its output
+  # public), even if a later step of publish, as recording the release, failed.
   latest:
     name: latest
     needs: [check, publish]
-    if: needs.check.outputs.mode == 'release'
+    if: always() && needs.check.outputs.mode == 'release' && needs.publish.outputs.public == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
