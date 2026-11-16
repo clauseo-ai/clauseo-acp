@@ -220,14 +220,14 @@ fn verbatim_device_long_and_unc_paths_are_refused() {
         format!(r"'\\.\{}\logs\host.docx'", real.display()),
         format!(
             r"'\\?\GLOBALROOT\Device\HarddiskVolume1{}\x.docx'",
-            &real.display().to_string()[2..]
+            real.to_str().unwrap().get(2..).unwrap()
         ),
         format!(r"'\\.\{drive}\x.docx'"),
     ] {
         let got = said("PowerShell", &format!("stetdoc view {word}"));
         assert!(got.contains(PLAIN), "{word}: {got}");
     }
-    let mut long = real.clone();
+    let mut long = real;
     while long.as_os_str().len() < 300 {
         long.push("a-long-folder-name-for-the-path-limit");
     }
