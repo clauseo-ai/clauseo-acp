@@ -357,6 +357,7 @@ fn launch_deny_rules(
         forced_ask: false,
         data: deny,
         case_law: false,
+        versions: crate::versions::VersionsTool::Absent,
         browser: false,
         sandbox,
         matter: None,

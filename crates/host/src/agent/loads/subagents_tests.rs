@@ -46,6 +46,7 @@ fn keys(web_search: Switch, login: Login, browser: bool) -> ClaudeKeys<'static> 
         forced_ask: false,
         data: &NO_DENY,
         case_law: false,
+        versions: crate::versions::VersionsTool::Absent,
         browser,
         sandbox: None,
         matter: None,

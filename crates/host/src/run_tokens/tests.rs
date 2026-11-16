@@ -83,13 +83,13 @@ fn every_deny_list_names_every_token_file_and_no_other() {
         expected(),
         "the fixed targets"
     );
-    for windows in [false, true] {
+    for (windows, sandboxed) in [(false, false), (false, true), (true, false), (true, true)] {
         let deny = LaunchDeny::fixed(vec![PathBuf::from(if windows { r"C:\d" } else { "/d" })]);
-        let rules = claude_deny_rules_on(&deny, windows);
+        let rules = claude_deny_rules_on(&deny, windows, sandboxed);
         assert_eq!(
             token_names(rules.iter().map(String::as_str)),
             expected(),
-            "Claude's rules, windows {windows}"
+            "Claude's rules, windows {windows}, sandboxed {sandboxed}"
         );
     }
     let deny = LaunchDeny::fixed(vec![PathBuf::from(r"C:\d")]);
