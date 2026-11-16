@@ -27,9 +27,19 @@ pub(crate) fn other_matter_on(
     insensitive: bool,
     disk: &Disk<'_>,
 ) -> Option<MatterId> {
+    other_matter_on_in(check, matters, insensitive, disk, forms::data_volume())
+}
+
+/// [`other_matter_on`], macOS's data volume at `volume` (a test's firmlink model).
+pub(crate) fn other_matter_on_in(
+    check: &FenceCheck,
+    matters: &[(MatterId, Vec<PathBuf>)],
+    insensitive: bool,
+    disk: &Disk<'_>,
+    volume: forms::DataVolume<'_>,
+) -> Option<MatterId> {
     // Each fence path by its key, and on macOS by its data-volume twin's (`/System/Volumes/Data`
     // and back: a firmlink, which the request's resolve leaves as written); in no rule.
-    let volume = forms::data_volume();
     let twin = |path: &PathBuf| volume.and_then(|volume| forms::twin_text(path, volume));
     let fenced: Vec<(MatterId, Vec<OsString>)> = matters
         .iter()
