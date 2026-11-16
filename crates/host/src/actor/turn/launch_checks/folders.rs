@@ -181,18 +181,57 @@ pub(super) fn ready_own<'a>(
     notes: &'a Path,
 ) -> Result<(), (&'a Path, std::io::Error)> {
     for folder in [work, notes] {
-        #[cfg(unix)]
-        crate::write::make_private_dir(folder).map_err(|error| (folder, error))?;
-        let claude = folder.join(CLAUDE_DIR);
-        let removed = match std::fs::symlink_metadata(&claude) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-            Ok(meta) if meta.is_dir() => crate::write::remove_tree(&claude),
-            Ok(_) => crate::write::remove_link(&claude),
-        };
-        removed.map_err(|error| (folder, error))?;
+        ready_one(folder).map_err(|error| (folder, error))?;
     }
     Ok(())
+}
+
+/// [`ready_own`] for one folder on Unix, through a handle on it: opened refusing a link (its
+/// parent is the host's alone, so the last part is the one checked), then set to 0700 and its
+/// `.claude` looked up and removed through that handle, never by the folder's path. A link or
+/// file there is unlinked; a folder is first renamed out, beside `folder` where no agent
+/// writes, then removed with all it holds. A link or anything else in `folder`'s place fails.
+#[cfg(unix)]
+fn ready_one(folder: &Path) -> std::io::Result<()> {
+    use rustix::fs::{AtFlags, CWD, FileType, Mode, OFlags};
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let handle = rustix::fs::openat(CWD, folder, flags, Mode::empty())?;
+    rustix::fs::fchmod(&handle, Mode::RWXU)?;
+    let kind = match rustix::fs::statat(&handle, CLAUDE_DIR, AtFlags::SYMLINK_NOFOLLOW) {
+        Err(rustix::io::Errno::NOENT) => return Ok(()),
+        found => FileType::from_raw_mode(found?.st_mode),
+    };
+    if kind != FileType::Directory {
+        return Ok(rustix::fs::unlinkat(&handle, CLAUDE_DIR, AtFlags::empty())?);
+    }
+    let aside = aside_of(folder)?;
+    rustix::fs::renameat(&handle, CLAUDE_DIR, CWD, &aside)?;
+    crate::write::remove_tree(&aside)
+}
+
+/// [`ready_own`] for one folder elsewhere (Windows), by its path.
+#[cfg(not(unix))]
+fn ready_one(folder: &Path) -> std::io::Result<()> {
+    let claude = folder.join(CLAUDE_DIR);
+    match std::fs::symlink_metadata(&claude) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+        Ok(meta) if meta.is_dir() => crate::write::remove_tree(&claude),
+        Ok(_) => crate::write::remove_link(&claude),
+    }
+}
+
+/// A fresh name beside `folder` for its `.claude` on the way out: `.claude-removed-<pid>-<n>`
+/// in its parent, which only the host writes. Should the removal fail, a launch's deny rules
+/// name it with the parent's other entries.
+#[cfg(unix)]
+fn aside_of(folder: &Path) -> std::io::Result<PathBuf> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let parent = folder.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "a folder with no parent")
+    })?;
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Ok(parent.join(format!(".claude-removed-{}-{n}", std::process::id())))
 }
 
 /// Removes `folder` and all it holds, through no link; a failure is a warning.

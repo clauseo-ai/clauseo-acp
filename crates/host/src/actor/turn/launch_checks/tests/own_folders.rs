@@ -105,6 +105,33 @@ fn a_claude_folder_in_the_work_and_notes_folders_is_removed_at_launch() {
     }
 }
 
+/// A notes folder that is a link when the work and notes folders are readied: readying follows
+/// nothing, so the link's target keeps its `.claude` and its mode, and the launch fails.
+#[cfg(unix)]
+#[test]
+fn a_notes_folder_that_is_a_link_is_not_followed() {
+    let data = scratch("notes-link");
+    let target = scratch("notes-link-target");
+    let kept = target.join(".claude").join("x");
+    write::create_dir_all(kept.parent().unwrap()).unwrap();
+    write::write_file(&kept, b"keep").unwrap();
+    write::set_mode(&target, 0o755).unwrap();
+    let state = data.join("agent-state").join("m");
+    let (work, notes) = (state.join("work").join("t"), state.join("notes"));
+    write::create_dir_all(&work).unwrap();
+    write::symlink(&target, &notes).unwrap();
+    let readied = super::super::folders::ready_own(&work, &notes);
+    assert!(kept.exists(), "the link's target lost its .claude");
+    assert_eq!(mode(&target), 0o755, "the link's target was chmodded");
+    let Err((failed, _)) = readied else {
+        panic!("readying a link succeeded");
+    };
+    assert_eq!(failed, notes.as_path());
+    for folder in [&data, &target] {
+        write::remove_dir_all(folder).unwrap();
+    }
+}
+
 /// `path`'s permission bits.
 #[cfg(unix)]
 fn mode(path: &std::path::Path) -> u32 {
