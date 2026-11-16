@@ -3426,7 +3426,8 @@ export type Language =
 export type LastExit = {
 	/**
 	 *  The run before this one ended without its quit: a crash, a forced quit or a power cut.
-	 *  Also true when an action below was left unfinished, however that run ended.
+	 *  The desktop's flag alone: `interrupted` can hold actions after a clean quit too (an idle
+	 *  Quit or a logoff while one ran), and then this is false.
 	 */
 	unclean: boolean,
 	/**

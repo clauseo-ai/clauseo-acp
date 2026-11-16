@@ -41,7 +41,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: one per unfinished undo or tracked-changes decision in a named matter; {action} is UC-331, UC-332, UC-365 or UC-366"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): one per unfinished undo or tracked-changes decision in a named matter; {action} is UC-331, UC-332, UC-365 or UC-366"
   },
   "UC-330": {
     "en": "{action} may not have finished.",
@@ -52,7 +52,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: one per unfinished undo or tracked-changes decision in the Scratch matter (not named)"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): one per unfinished undo or tracked-changes decision in the Scratch matter (not named)"
   },
   "UC-331": {
     "en": "Undo of 1 file",
@@ -63,7 +63,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): {action}"
   },
   "UC-332": {
     "en": "Undo of {count} files",
@@ -74,7 +74,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): {action}"
   },
   "UC-333": {
     "en": "Restore of 1 file",
@@ -85,7 +85,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): {action}"
   },
   "UC-334": {
     "en": "Restore of {count} files",
@@ -96,7 +96,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): {action}"
   },
   "UC-335": {
     "en": "A restore",
@@ -107,7 +107,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: {action}: a whole-matter restore, count unknown"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): {action}: a whole-matter restore, count unknown"
   },
   "UC-365": {
     "en": "Accepting tracked changes",
@@ -118,7 +118,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): {action}"
   },
   "UC-366": {
     "en": "Rejecting tracked changes",
@@ -129,7 +129,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: {action}"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): {action}"
   },
   "UC-367": {
     "en": "Versions has the earlier copies.",
@@ -140,7 +140,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: Last line, when any action is named"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): Last line, when any action is named"
   },
   "UC-372": {
     "en": "{restore} in {matter} may not have finished.",
@@ -151,7 +151,7 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: one per unfinished restore in a named matter; {restore} is UC-333, UC-334 or UC-335; its own key so the Hindi verb agrees with बहाली (feminine)"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): one per unfinished restore in a named matter; {restore} is UC-333, UC-334 or UC-335; its own key so the Hindi verb agrees with बहाली (feminine)"
   },
   "UC-373": {
     "en": "{restore} may not have finished.",
@@ -162,6 +162,6 @@
     "status": "provisional",
     "at": "2026-11-15",
     "by": "crashnote (closed-unexpectedly-notice; waiting for Rohan's review)",
-    "note": "Room notice after Clauseo closed unexpectedly: one per unfinished restore in the Scratch matter (not named); its own key so the Hindi verb agrees"
+    "note": "Room notice after Clauseo closed unexpectedly, or after a clean quit that left a file action unfinished (then with no title): one per unfinished restore in the Scratch matter (not named); its own key so the Hindi verb agrees"
   }
 }
