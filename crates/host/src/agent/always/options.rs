@@ -101,7 +101,7 @@ pub(crate) fn with_always(options: &mut Vec<PermissionOption>) {
 
 /// The option id the agent gets for the lawyer's `chosen` one: a [`SESSION`] option's own id;
 /// none for [`ALWAYS`] (the turn path sends the allow-once option); else `chosen` itself.
-pub(crate) fn agent_choice(chosen: &AgentChoiceId) -> Option<AgentChoiceId> {
+pub(crate) fn agent_choice(chosen: AgentChoiceId) -> Option<AgentChoiceId> {
     let id = chosen.as_str();
     if id == ALWAYS {
         return None;
@@ -109,7 +109,7 @@ pub(crate) fn agent_choice(chosen: &AgentChoiceId) -> Option<AgentChoiceId> {
     match id.strip_prefix(SESSION) {
         Some(own) => AgentChoiceId::new(own).ok(),
         None if id.starts_with(HOST) => None,
-        None => Some(chosen.clone()),
+        None => Some(chosen),
     }
 }
 

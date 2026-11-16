@@ -202,8 +202,9 @@ pub(crate) struct RunFolders {
     /// `<data>/launch-settings/<run id>.json`); gone with the run folder.
     pub(crate) launch_settings: crate::agent::launch_settings::Target,
     /// The matter's kept "Always for this matter" rules, read by the launch prep
-    /// (`folders::make_claude`, `agent/always.rs`), for either agent.
-    pub(crate) always: Vec<String>,
+    /// (`folders::make_claude`, `agent/always.rs`), for either agent; none when there is no
+    /// key in the secret store, so nothing is kept or offered.
+    pub(crate) always: Option<Vec<String>>,
 }
 
 impl RunFolders {
@@ -243,7 +244,7 @@ impl RunFolders {
                 folder: crate::agent::launch_settings::folder(data),
                 run: key.id(),
             },
-            always: Vec::new(),
+            always: None,
         }
     }
 

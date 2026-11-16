@@ -84,11 +84,11 @@ fn a_plan_exit_passes_unchanged_but_for_host_ids() {
 #[test]
 fn a_host_option_maps_back_to_the_agents_own() {
     let id = |text: &str| AgentChoiceId::new(text).unwrap();
-    assert_eq!(agent_choice(&id(ALWAYS)), None);
+    assert_eq!(agent_choice(id(ALWAYS)), None);
     assert_eq!(
-        agent_choice(&id("clauseo.session:allow_session")),
+        agent_choice(id("clauseo.session:allow_session")),
         Some(id("allow_session"))
     );
-    assert_eq!(agent_choice(&id("clauseo.other")), None);
-    assert_eq!(agent_choice(&id("allow_once")), Some(id("allow_once")));
+    assert_eq!(agent_choice(id("clauseo.other")), None);
+    assert_eq!(agent_choice(id("allow_once")), Some(id("allow_once")));
 }

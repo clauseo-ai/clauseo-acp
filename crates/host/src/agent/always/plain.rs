@@ -8,8 +8,9 @@
 //!   outside the matter folder, or one that leaves it with `..`.
 //! - An agent's own shell wrapper is read through once, for Codex only ([`Agent::Codex`]):
 //!   codex-acp 2.2.2 shows Codex's `[zsh, -lc, script]` as
-//!   `stripShellPrefix(shlex_join(argv))`, usually the script alone, and the `bash|sh|zsh -c|-lc
-//!   <script>` form this leaves for any other shell path is read through to its script.
+//!   `stripShellPrefix(shlex_join(argv))`, usually the script alone, and the
+//!   `bash|sh|zsh -c|-lc <script>` form this leaves for any other shell path is read through to
+//!   its script.
 
 /// The longest command kept, in bytes.
 pub(crate) const MAX_COMMAND_BYTES: usize = 8 * 1024;
@@ -66,11 +67,11 @@ pub(crate) fn plain(
         return Err(NotPlain::Size);
     }
     let mut words = split(line, grammar)?;
-    if agent == Agent::Codex {
-        if let Some((script, inner)) = own_wrapper(&words) {
-            words = split(&script, inner)?;
-            return checked(words, inner, place);
-        }
+    if agent == Agent::Codex
+        && let Some((script, inner)) = own_wrapper(&words)
+    {
+        words = split(&script, inner)?;
+        return checked(words, inner, place);
     }
     checked(words, grammar, place)
 }
@@ -80,14 +81,14 @@ fn checked(
     grammar: Grammar,
     place: Place<'_>,
 ) -> Result<Vec<String>, NotPlain> {
-    let program = words.first().ok_or(NotPlain::Unparsed)?;
+    let (program, args) = words.split_first().ok_or(NotPlain::Unparsed)?;
     if !program_name(program, grammar) {
         return Err(NotPlain::Unparsed);
     }
-    if wrapper(program) || refused_args(program, &words[1..]) {
+    if wrapper(program) || refused_args(program, args) {
         return Err(NotPlain::Wrapper);
     }
-    if words[1..].iter().any(|word| outside(word, place)) {
+    if args.iter().any(|word| outside(word, place)) {
         return Err(NotPlain::Outside);
     }
     Ok(words)
@@ -105,7 +106,7 @@ fn own_wrapper(words: &[String]) -> Option<(String, Grammar)> {
         return matches!(flag.as_str(), "-c" | "-lc").then(|| (script.clone(), Grammar::Posix));
     }
     if matches!(program.as_str(), "powershell" | "pwsh") {
-        let (script, rest) = words[1..].split_last()?;
+        let (script, rest) = words.get(1..)?.split_last()?;
         let (command, flags) = rest.split_last()?;
         let command =
             command.eq_ignore_ascii_case("-command") || command.eq_ignore_ascii_case("-c");
@@ -344,8 +345,7 @@ fn absolute(path: &str, windows: bool) -> bool {
         return false;
     }
     let bytes = path.as_bytes();
-    path.starts_with('\\')
-        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+    path.starts_with('\\') || matches!(bytes, [drive, b':', ..] if drive.is_ascii_alphabetic())
 }
 
 fn has_parent(path: &str) -> bool {
@@ -361,7 +361,8 @@ fn inside(path: &str, place: Place<'_>) -> bool {
     ) else {
         return false;
     };
-    path.starts_with(&root) && (path.len() == root.len() || path[root.len()..].starts_with('/'))
+    path.strip_prefix(&root)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
         || root == "/"
 }
 

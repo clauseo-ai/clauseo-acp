@@ -296,6 +296,7 @@ fn run(
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
     let allowed_sites = blocklist::allowed_sites(&config);
+    crate::agent::always::use_secrets(config.wiring.always_secrets.clone());
     let blocklist = blocklist::prepare(&config);
     let ended: Result<_, futures::channel::oneshot::Sender<()>> = pool.run_until(async move {
         let mut actor = match startup::open((config, first), spawner, post, ready.clone()).await {

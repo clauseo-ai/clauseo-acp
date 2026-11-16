@@ -38,6 +38,17 @@ pub(crate) fn with_mcp_secrets(config: HostConfig, store: Option<KeyringStore>) 
     }
 }
 
+/// `config` with the keychain that keeps the "Always for this matter" files' key, under
+/// Clauseo's own service; unchanged with none, so nothing is kept.
+pub(crate) fn with_always_secrets(config: HostConfig, store: Option<KeyringStore>) -> HostConfig {
+    match store {
+        Some(store) => config.with_always_secrets(Arc::new(
+            store.with_service(clauseo_connectors::KEYCHAIN_SERVICE),
+        )),
+        None => config,
+    }
+}
+
 /// `config` with the native confirm on `app` ([`LaunchConfirm`] over [`NativeLaunchDrawer`]).
 pub(crate) fn with_mcp_confirm<R: Runtime>(config: HostConfig, app: AppHandle<R>) -> HostConfig {
     config.with_mcp_confirm(Arc::new(LaunchConfirm::new(NativeLaunchDrawer { app })))

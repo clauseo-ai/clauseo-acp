@@ -14,6 +14,11 @@ expression: "event(\"permission_requested\")"
       }
     ],
     "deliverable": "live",
-    "about": "agent_plan"
+    "about": "agent_plan",
+    "always": {
+      "kind": "command",
+      "shown": "wc -l notes.txt",
+      "cwd": "Drafts"
+    }
   }
 }

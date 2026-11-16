@@ -21,7 +21,7 @@ pub const MAX_KEPT_RULE_BYTES: usize = 2_000;
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub enum KeptKind {
-    /// Running one exact command (`Bash`, `PowerShell`, or ChatGPT's `Run`); the subject is the
+    /// Running one exact command (`Bash`, `PowerShell`, or Codex's `Run`); the subject is the
     /// command.
     Run,
     /// Changing files inside the matter folder (`Edit(*)`, which covers every file-changing
@@ -51,7 +51,7 @@ pub struct KeptPermission {
     /// The MCP server, for `Tool`; left out for every other kind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server: Option<String>,
-    /// For a kept ChatGPT command: the working folder relative to the matter folder, `/`-separated;
+    /// For a kept Codex command: the working folder relative to the matter folder, `/`-separated;
     /// none when it runs in the matter folder itself, and for every other kind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,

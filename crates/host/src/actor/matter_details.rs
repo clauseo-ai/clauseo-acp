@@ -159,6 +159,9 @@ pub(super) fn forget_committed(actor: &mut Actor, matter: MatterId, durable: boo
         actor.folder_supports.remove(&matter);
         super::papers::follow::forgotten(actor, matter);
         turn::stop_agents(actor, matter);
+        // Nothing "Always for this matter" kept outlives the matter (decision record 0063).
+        let kept = crate::agent::always::file_of(actor.effective.data_dir(), matter);
+        crate::agent::always::delete(kept);
         return;
     }
     if let Some(mut entry) = actor.forgotten.remove(&matter) {

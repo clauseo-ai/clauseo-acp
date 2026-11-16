@@ -71,6 +71,16 @@ impl HostConfig {
         self
     }
 
+    /// The secret store that keeps the key of each matter's "Always for this matter" file
+    /// (decision record 0063, account `always-allowed-hmac`): desktop's `KeyringStore`;
+    /// `MemoryStore` in tests. Unset (the default, and on Linux), nothing is kept and no card
+    /// offers "Always for this matter". Process-wide, as Clauseo runs one instance.
+    #[must_use]
+    pub fn with_always_secrets(mut self, secrets: Arc<dyn SecretStore>) -> Self {
+        self.wiring.always_secrets = Some(secrets);
+        self
+    }
+
     /// The confirm a `SaveServer` that adds a server, or changes its command, arguments,
     /// variable or header names, URL, or a loader variable's value (`NODE_OPTIONS`, `PATH`,
     /// `DYLD_*`, …), must pass (`McpLaunchConfirm`): declined, the save answers

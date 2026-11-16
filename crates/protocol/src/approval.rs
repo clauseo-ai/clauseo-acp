@@ -67,7 +67,7 @@ open_unit_enum! {
 open_unit_enum! {
     /// What "Always for this matter" would keep from a permission request (decision 0063).
     pub enum AlwaysKind {
-        /// One exact command (and, for ChatGPT, its working folder).
+        /// One exact command (and, for Codex, its working folder).
         Command,
         /// Changes to any file inside the matter folder.
         FileEdit,

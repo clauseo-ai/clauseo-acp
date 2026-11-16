@@ -4,22 +4,43 @@
 use clauseo_protocol::{AgentKind, AlwaysKind, ToolKind};
 use serde_json::{Value, json};
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use clauseo_connectors::{MemoryStore, SecretStore as _};
+
 use crate::pipeline::tests::support::TempDir;
+
+/// A secret store for the key, process-wide (each test runs in a process of its own).
+fn keyed() -> Arc<MemoryStore> {
+    let store = Arc::new(MemoryStore::new());
+    super::use_secrets(Some(
+        Arc::clone(&store) as Arc<dyn clauseo_connectors::SecretStore>
+    ));
+    store
+}
+
+/// `<dir>/agent-state/<matter>/claude-allow.json`, its folder made.
+fn in_matter(dir: &TempDir, matter: &str) -> PathBuf {
+    let folder = dir.path().join("agent-state").join(matter);
+    crate::write::create_dir_all(&folder).unwrap();
+    folder.join(FILE)
+}
 
 use super::store::{read, remove_now, store_now};
 use super::{
-    EDIT_ALL, FILE, Kept, MAX_RULES, NotKept, Request, file_beside, matter_roots, needs_real, rule,
-    rule_path, run_parts, well_formed, within,
+    EDIT_ALL, FILE, Kept, NotKept, Request, file_beside, matter_roots, needs_real, rule, rule_path,
+    run_parts, well_formed, within,
 };
 
 fn claude(tool: &str, input: Option<&Value>, windows: bool) -> Result<Kept, NotKept> {
-    let matter = if windows { "C:/m" } else { "/m" };
+    let matter = [if windows { "C:/m" } else { "/m" }.to_owned()];
     rule(&Request {
         agent: AgentKind::Claude,
         tool: Some(tool),
         kind: None,
         raw_input: input,
-        matter,
+        matter: &matter,
         windows,
     })
 }
@@ -34,7 +55,7 @@ fn codex(kind: ToolKind, input: &Value) -> Result<Kept, NotKept> {
         tool: None,
         kind: Some(kind),
         raw_input: Some(input),
-        matter: "/m",
+        matter: &["/var/m".to_owned(), "/m".to_owned()],
         windows: false,
     })
 }
@@ -218,6 +239,22 @@ fn a_codex_command_keeps_its_text_and_folder() {
         ("cd a && ls", "/m", NotKept::Refused),
         ("python3 x.py", "/m", NotKept::Refused),
         ("git status", "/m", NotKept::Refused),
+        // The three real Codex cards of the live record (`/tmp/proposals/result.md`, 0063).
+        (
+            r#"cp witness-statement.docx "/Users/Shared/outbox/witness-statement.docx""#,
+            "/m",
+            NotKept::OutsideMatter,
+        ),
+        (
+            r#"python3 -c "from pathlib import Path; Path('/Users/Shared/o/n.txt').write_text('x')""#,
+            "/m",
+            NotKept::Refused,
+        ),
+        (
+            r#"cupsfilter "/m/letter.txt" > "/Users/Shared/outbox/letter.pdf""#,
+            "/m",
+            NotKept::Refused,
+        ),
     ] {
         assert_eq!(run(command, cwd), Err(why), "{command} in {cwd}");
     }
@@ -296,6 +333,7 @@ fn only_rules_this_module_makes_are_well_formed() {
 
 #[test]
 fn the_file_sits_beside_the_notes_and_keeps_each_rule_once() {
+    keyed();
     let dir = TempDir::new("always_file");
     let notes = dir.path().join("agent-state").join("m1").join("notes");
     crate::write::create_dir_all(&notes).unwrap();
@@ -314,27 +352,72 @@ fn the_file_sits_beside_the_notes_and_keeps_each_rule_once() {
     assert_eq!(std::fs::read_dir(&notes).unwrap().count(), 0);
 }
 
+/// A file this host did not write for this matter holds nothing: edited by hand, planted,
+/// version 1, copied from another matter, or signed under another key.
 #[test]
-fn a_hand_edited_file_gives_only_its_well_formed_rules() {
-    let dir = TempDir::new("always_file");
-    let file = dir.path().join(FILE);
-    let many: Vec<String> = (0..MAX_RULES + 5)
-        .map(|n| format!("Bash(echo {n})"))
-        .collect();
-    let mut rules = vec![json!("Bash(*)"), json!(1), json!("Read(//etc/hosts)")];
-    rules.extend(many.iter().map(|rule| json!(rule)));
-    crate::write::write_file(&file, json!({ "allow": rules }).to_string().as_bytes()).unwrap();
-    assert!(
-        read(&file).is_empty(),
-        "a non-string entry fails the whole list"
-    );
-    rules.remove(1);
-    crate::write::write_file(&file, json!({ "allow": rules }).to_string().as_bytes()).unwrap();
-    let got = read(&file);
-    assert_eq!(got.len(), MAX_RULES);
-    assert_eq!(got[0], "Read(//etc/hosts)");
+fn a_file_without_this_hosts_mac_for_this_matter_holds_nothing() {
+    let store = keyed();
+    let dir = TempDir::new("always_planted");
+    let file = in_matter(&dir, "m1");
+    store_now(&file, "Bash(ls)".to_owned(), 1).unwrap();
+    assert_eq!(read(&file), ["Bash(ls)"]);
+    let good = std::fs::read_to_string(&file).unwrap();
+    let mut value: Value = serde_json::from_str(&good).unwrap();
+    assert_eq!(value["version"], json!(2));
+    // A rule added by hand, or one removed by hand: the MAC no longer fits.
+    value["allow"] = json!(["Bash(ls)", "Bash(pwd)"]);
+    crate::write::write_file(&file, value.to_string().as_bytes()).unwrap();
+    assert_eq!(read(&file), Vec::<String>::new());
+    value["allow"] = json!([]);
+    crate::write::write_file(&file, value.to_string().as_bytes()).unwrap();
+    assert_eq!(read(&file), Vec::<String>::new());
+    // Version 1, as #1109 wrote it.
+    let v1 = json!({"version": 1, "allow": ["Bash(ls)"]});
+    crate::write::write_file(&file, v1.to_string().as_bytes()).unwrap();
+    assert_eq!(read(&file), Vec::<String>::new());
+    // The same file copied into another matter: its MAC names the first.
+    crate::write::write_file(&file, good.as_bytes()).unwrap();
+    assert_eq!(read(&file), ["Bash(ls)"]);
+    let other = in_matter(&dir, "m2");
+    crate::write::write_file(&other, good.as_bytes()).unwrap();
+    assert_eq!(read(&other), Vec::<String>::new());
+    // Another key (another machine's Keychain) makes another MAC.
+    store.set(super::store::KEY_ACCOUNT, &[7_u8; 32]).unwrap();
+    super::use_secrets(Some(store));
+    assert_eq!(read(&file), Vec::<String>::new());
+    // Not JSON at all.
     crate::write::write_file(&file, b"not json").unwrap();
     assert_eq!(read(&file), Vec::<String>::new());
+}
+
+/// Without a secret store nothing is read, kept or offered.
+#[test]
+fn no_secret_store_keeps_nothing() {
+    super::use_secrets(None);
+    let dir = TempDir::new("always_no_store");
+    let notes = dir.path().join("agent-state").join("m1").join("notes");
+    crate::write::create_dir_all(&notes).unwrap();
+    assert_eq!(super::read_beside(&notes), None);
+    let file = file_beside(&notes).unwrap();
+    assert!(store_now(&file, "Bash(ls)".to_owned(), 1).is_err());
+    assert!(!file.exists());
+    let store = keyed();
+    assert_eq!(super::read_beside(&notes), Some(Vec::new()));
+    // The key is made once and kept in the store.
+    let key = store.get(super::store::KEY_ACCOUNT).unwrap().unwrap();
+    assert_eq!(key.len(), 32);
+}
+
+/// A forgotten matter's file is deleted; a missing one is fine.
+#[test]
+fn a_forgotten_matters_file_is_deleted() {
+    keyed();
+    let dir = TempDir::new("always_forget");
+    let file = in_matter(&dir, "m1");
+    store_now(&file, "Bash(ls)".to_owned(), 1).unwrap();
+    super::store::delete_now(&file).unwrap();
+    assert!(!file.exists());
+    super::store::delete_now(&file).unwrap();
 }
 
 #[test]
@@ -447,6 +530,7 @@ fn a_link_swapped_into_the_matter_is_outside() {
 /// `.bad-<n>` and starts empty; a removal leaves it alone.
 #[test]
 fn a_bad_file_is_set_aside_not_overwritten() {
+    keyed();
     let dir = TempDir::new("always_bad");
     let file = dir.path().join(FILE);
     crate::write::write_file(&file, b"not json").unwrap();
@@ -466,6 +550,7 @@ fn a_bad_file_is_set_aside_not_overwritten() {
 /// The lawyer's removal takes one rule out and keeps the rest.
 #[test]
 fn a_removed_rule_is_gone_and_the_rest_stay() {
+    keyed();
     let dir = TempDir::new("always_remove");
     let file = dir.path().join(FILE);
     store_now(&file, "Bash(ls)".to_owned(), 8).unwrap();
@@ -479,6 +564,7 @@ fn a_removed_rule_is_gone_and_the_rest_stay() {
 /// and never puts the rule back; an add the lawyer chose after the removal does.
 #[test]
 fn a_pending_add_never_undoes_a_removal() {
+    keyed();
     let dir = TempDir::new("always_pending");
     let file = dir.path().join(FILE);
     store_now(&file, "Bash(pwd)".to_owned(), 1).unwrap();

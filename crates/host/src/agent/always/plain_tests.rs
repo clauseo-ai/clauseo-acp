@@ -1,8 +1,9 @@
 use super::{Agent, Grammar, NotPlain, Place, WRAPPERS, plain};
 
 const MAC: Place<'static> = Place {
+    // unix-paths-ok: a Place is compared as text by `plain` and never reaches a path API
     matter: "/Users/l/Matters/Acme",
-    cwd: "/Users/l/Matters/Acme",
+    cwd: "/Users/l/Matters/Acme", // unix-paths-ok: the same text, compared as text
     windows: false,
 };
 const WIN: Place<'static> = Place {
@@ -187,6 +188,7 @@ fn codex_s_own_wrapper_is_read_through_once() {
     assert_eq!(codex("bash -lc ls extra"), Err(NotPlain::Wrapper));
     assert_eq!(codex("fish -c ls"), Err(NotPlain::Wrapper));
     // Codex's own shell may be in any folder (codex-acp strips only `/bin/`).
+    // unix-paths-ok: command text only; `codex` parses it and no path API opens it
     assert_eq!(codex("/opt/homebrew/bin/bash -lc ls").unwrap(), ["ls"]);
     // Claude's own shell takes the script as given: a `bash -c` in it is the model's.
     assert_eq!(claude("bash -lc 'ls -la'"), Err(NotPlain::Wrapper));

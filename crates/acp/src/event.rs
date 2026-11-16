@@ -49,7 +49,7 @@ pub enum AcpEvent {
         /// and the shell command in it for its data-folder check (`agent/data_fence.rs`).
         raw_input: Option<serde_json::Value>,
         /// `toolCall.kind` as the request sent it (`execute`, `edit`…), when it sent one
-        /// this crate knows: the host reads ChatGPT's command and file-change cards by it
+        /// this crate knows: the host reads Codex's command and file-change cards by it
         /// (`agent/always.rs`).
         tool_kind: Option<clauseo_protocol::ToolKind>,
     },

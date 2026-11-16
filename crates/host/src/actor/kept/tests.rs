@@ -73,7 +73,7 @@ fn each_rule_reads_as_a_kind_and_a_subject() {
     }
 }
 
-/// A kept ChatGPT command run in a folder of the matter lists that folder apart.
+/// A kept Codex command run in a folder of the matter lists that folder apart.
 #[test]
 fn a_codex_command_lists_its_folder() {
     let roots = crate::agent::always::matter_roots(["/work/smith"], false);
@@ -113,6 +113,9 @@ fn text_no_kept_rule_has_reads_as_none() {
 /// numbered above every operation of the first, so the rules file's record never skips it.
 #[test]
 fn a_second_ledger_in_the_process_is_never_skipped() {
+    let store: std::sync::Arc<dyn clauseo_connectors::SecretStore> =
+        std::sync::Arc::new(clauseo_connectors::MemoryStore::new());
+    crate::agent::always::use_secrets(Some(store));
     let dir = crate::pipeline::tests::support::TempDir::new("kept_two_ledgers");
     let file = dir.path().join(crate::agent::always::FILE);
     let matter = clauseo_protocol::MatterId::new(uuid::Uuid::now_v7()).unwrap();

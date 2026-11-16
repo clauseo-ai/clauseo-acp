@@ -30,7 +30,7 @@ pub(crate) mod options;
 pub(crate) mod plain;
 mod store;
 
-pub(crate) use store::{list, next_seq, read_beside, remove_now, store};
+pub(crate) use store::{delete, list, next_seq, read_beside, remove_now, store, use_secrets};
 #[cfg(test)]
 pub(crate) use store::{read, store_now};
 
@@ -62,15 +62,16 @@ pub(crate) enum NotKept {
 pub(crate) struct Request<'a> {
     /// Whose request it is: commands are kept per agent.
     pub(crate) agent: AgentKind,
-    /// Claude Code's tool name (`_meta.claudeCode.toolName`); none for ChatGPT.
+    /// Claude Code's tool name (`_meta.claudeCode.toolName`); none for Codex.
     pub(crate) tool: Option<&'a str>,
-    /// The request's `toolCall.kind`: ChatGPT's command (`execute`) and file-change (`edit`)
+    /// The request's `toolCall.kind`: Codex's command (`execute`) and file-change (`edit`)
     /// cards are read by it.
     pub(crate) kind: Option<ToolKind>,
     /// `toolCall.rawInput`.
     pub(crate) raw_input: Option<&'a Value>,
-    /// The matter folder, as text.
-    pub(crate) matter: &'a str,
+    /// The matter folder's spellings, as text: the folder the agent was given first, then the
+    /// others it is known by (a link resolved, `/var` and `/private/var` on macOS).
+    pub(crate) matter: &'a [String],
     /// Windows paths.
     pub(crate) windows: bool,
 }
@@ -86,6 +87,9 @@ pub(crate) struct Kept {
 /// The one rule that covers every change to a file inside the matter folder.
 pub(crate) const EDIT_ALL: &str = "Edit(*)";
 
+/// Tools that spend the lawyer's money: each call asks (decision record 0063).
+const SPENDS: &[&str] = &["mcp__case-law__recharge"];
+
 /// Claude's web search, kept whole: a search names no site.
 pub(crate) const WEB_SEARCH: &str = "WebSearch";
 
@@ -94,7 +98,7 @@ pub(crate) const WEB_SEARCH: &str = "WebSearch";
 /// - Claude: `Bash(<cmd>)` and `PowerShell(<cmd>)` for one plain command (`plain.rs`) whose
 ///   arguments stay in the matter; `WebFetch(domain:<host>)`; `WebSearch`; an MCP tool's exact
 ///   name; `Read(//<path>)`; `Edit(*)` for `Edit`, `Write`, `MultiEdit` and `NotebookEdit`.
-/// - ChatGPT: `Run(<cmd>)`, or `Run(<cmd>) in <cwd>` when it runs in a folder of the matter, for
+/// - Codex: `Run(<cmd>)`, or `Run(<cmd>) in <cwd>` when it runs in a folder of the matter, for
 ///   an `execute` card (`rawInput` `{command, cwd}`, `command` the text the card shows) that
 ///   asks for no network; `Edit(*)` for an `edit` card.
 ///
@@ -124,15 +128,23 @@ fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
             .ok_or(NotKept::Refused)
     };
     let exact = |made: Option<String>| made.ok_or(NotKept::Refused);
-    let place = plain::Place {
-        matter: request.matter,
-        cwd: request.matter,
-        windows: request.windows,
-    };
     let shell = |tool: &str, grammar: plain::Grammar| -> Result<Kept, NotKept> {
         let line = text("command")?;
         let line = exact(command(line, grammar, plain::Agent::Claude).map(str::to_owned))?;
-        plain::plain(&line, grammar, plain::Agent::Claude, place).map_err(not_kept)?;
+        // Plain in the matter under any of its spellings (Claude's Bash starts in the folder).
+        let mut checked = Err(NotKept::OutsideMatter);
+        for matter in request.matter {
+            let place = plain::Place {
+                matter,
+                cwd: matter,
+                windows: request.windows,
+            };
+            checked = plain::plain(&line, grammar, plain::Agent::Claude, place).map_err(not_kept);
+            if checked.is_ok() {
+                break;
+            }
+        }
+        checked?;
         Ok(Kept {
             rule: format!("{tool}({line})"),
             offer: offer(AlwaysKind::Command, Some(line), None),
@@ -166,6 +178,7 @@ fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
             let rule = format!("Read({})", exact(path(file, request.windows))?);
             kept(rule, AlwaysKind::Read, Some(file.to_owned()))
         }
+        name if SPENDS.contains(&name) => return Err(NotKept::NoRule),
         name if is_mcp_tool(name) => kept(name.to_owned(), AlwaysKind::Tool, Some(name.to_owned())),
         _ => return Err(NotKept::NoRule),
     })
@@ -186,13 +199,20 @@ fn codex_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
             let (line, cwd) = text("command").zip(text("cwd")).ok_or(NotKept::Refused)?;
             let grammar = codex_grammar(request.windows);
             let line = command(line, grammar, plain::Agent::Codex).ok_or(NotKept::Refused)?;
-            let folder =
-                relative(request.matter, cwd, request.windows).ok_or(NotKept::OutsideMatter)?;
+            let (matter, folder) = request
+                .matter
+                .iter()
+                .find_map(|matter| Some((matter, relative(matter, cwd, request.windows)?)))
+                .ok_or(NotKept::OutsideMatter)?;
+            let folder = (!folder.is_empty()).then_some(folder);
             let place = plain::Place {
-                matter: request.matter,
+                matter,
                 cwd,
                 windows: request.windows,
             };
+            // An argument outside the matter refuses (decision record 0063, Deviations): an
+            // exact command replayed unsandboxed is a standing hole, as a name inside the
+            // matter can later be swapped for a link to another matter's file.
             plain::plain(line, grammar, plain::Agent::Codex, place).map_err(not_kept)?;
             let rule = match &folder {
                 Some(folder) => format!("Run({line}) in {folder}"),
@@ -207,7 +227,7 @@ fn codex_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
     }
 }
 
-/// The grammar ChatGPT's shown command is in: PowerShell on Windows, a POSIX shell elsewhere.
+/// The grammar Codex's shown command is in: PowerShell on Windows, a POSIX shell elsewhere.
 fn codex_grammar(windows: bool) -> plain::Grammar {
     if windows {
         plain::Grammar::PowerShell
@@ -219,15 +239,17 @@ fn codex_grammar(windows: bool) -> plain::Grammar {
 fn not_kept(why: plain::NotPlain) -> NotKept {
     match why {
         plain::NotPlain::Outside => NotKept::OutsideMatter,
-        _ => NotKept::Refused,
+        plain::NotPlain::Size | plain::NotPlain::Unparsed | plain::NotPlain::Wrapper => {
+            NotKept::Refused
+        }
     }
 }
 
-/// `cwd` relative to the `matter` folder, `/`-separated: none inside for the folder itself;
-/// none at all for a folder outside it, in its `.clauseo` or a `.claude` folder, or one with a
+/// `cwd` relative to the `matter` folder, `/`-separated, empty for the folder itself; none for
+/// a folder outside it, in its `.clauseo` or a `.claude` folder, or one with a
 /// name a rule can't hold (empty, `.`, `..`, a parenthesis, a control character, a space at
 /// either end). By text: on Windows `\` is `/` and case is folded.
-fn relative(matter: &str, cwd: &str, windows: bool) -> Option<Option<String>> {
+fn relative(matter: &str, cwd: &str, windows: bool) -> Option<String> {
     let norm = |text: &str| {
         let text = if windows {
             text.replace('\\', "/")
@@ -250,7 +272,7 @@ fn relative(matter: &str, cwd: &str, windows: bool) -> Option<Option<String>> {
     let folded = fold(&cwd);
     let rest = folded.strip_prefix(&fold(&matter))?;
     if rest.is_empty() {
-        return Some(None);
+        return Some(String::new());
     }
     rest.strip_prefix('/')?;
     let rest = cwd.get(matter.len() + 1..)?;
@@ -262,7 +284,7 @@ fn relative(matter: &str, cwd: &str, windows: bool) -> Option<Option<String>> {
                 .chars()
                 .any(|c| matches!(c, '(' | ')') || c.is_control())
     });
-    names_ok.then(|| Some(rest.to_owned()))
+    names_ok.then(|| rest.to_owned())
 }
 
 /// The file a path rule names, as an absolute path of this system (`//c/a` is `c:/a` on
@@ -286,7 +308,7 @@ pub(crate) fn needs_real(rule: &str) -> bool {
     rule == EDIT_ALL || rule_path(rule, false).is_some()
 }
 
-/// A ChatGPT `Run` rule's command and working folder.
+/// A Codex `Run` rule's command and working folder.
 pub(crate) fn run_parts(rule: &str) -> Option<(&str, Option<&str>)> {
     let (line, rest) = rule.strip_prefix("Run(")?.split_once(')')?;
     match rest {
@@ -300,13 +322,17 @@ pub(crate) fn well_formed(rule: &str) -> bool {
     if rule.len() > MAX_RULE_LEN {
         return false;
     }
+    if SPENDS.contains(&rule) {
+        return false;
+    }
     if is_mcp_tool(rule) || rule == EDIT_ALL || rule == WEB_SEARCH {
         return true;
     }
     if let Some((line, folder)) = run_parts(rule) {
         let grammar = codex_grammar(cfg!(windows));
         let folder_ok = folder.is_none_or(|folder| {
-            relative("/m", &format!("/m/{folder}"), false) == Some(Some(folder.to_owned()))
+            !folder.is_empty()
+                && relative("/m", &format!("/m/{folder}"), false).as_deref() == Some(folder)
         });
         return folder_ok && command(line, grammar, plain::Agent::Codex).is_some();
     }

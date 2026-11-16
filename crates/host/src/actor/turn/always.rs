@@ -67,7 +67,7 @@ pub(super) struct Answered {
 /// An agent's kept rules for its matter, and its pending requests' [`AlwaysAsk`].
 #[derive(Debug, Default)]
 pub(super) struct Always {
-    /// The matter's rules file; none for an agent other than Claude or ChatGPT.
+    /// The matter's rules file; none for an agent other than Claude or Codex.
     file: Option<PathBuf>,
     /// The agent's kind: commands are kept per agent.
     kind: Option<AgentKind>,
@@ -75,24 +75,30 @@ pub(super) struct Always {
     /// The matter folder's spellings as path rules (`always::matter_roots`): a path rule
     /// outside them is neither kept nor applied (`always::within`).
     roots: Vec<String>,
+    /// The matter folder's spellings as text, the agent's own first, for `always::rule`.
+    spellings: Vec<String>,
     asked: BTreeMap<PermissionRequestId, AlwaysAsk>,
 }
 
 impl Always {
     /// For a launch of an agent of `kind`: the rules its prep read (`RunFolders::always`), for
-    /// Claude or ChatGPT, in forced ask too, without those the lawyer removed since (`kept`, the
+    /// Claude or Codex, in forced ask too, without those the lawyer removed since (`kept`, the
     /// actor's ledger): the prep read the file off the actor, maybe before a removal's write.
     pub(super) fn at_launch(run: &RunFolders, kind: Option<AgentKind>, kept: &Ledger) -> Self {
         if !matches!(kind, Some(AgentKind::Claude | AgentKind::Codex)) {
             return Self::default();
         }
-        let mut rules = run.always.iter().cloned().collect();
+        let Some(read) = run.always.as_ref() else {
+            return Self::default();
+        };
+        let mut rules = read.iter().cloned().collect();
         kept.drop_removed(run.key.matter, &mut rules);
         Self {
             file: always::file_beside(&run.notes),
             kind,
             rules,
             roots: Vec::new(),
+            spellings: Vec::new(),
             asked: BTreeMap::new(),
         }
     }
@@ -101,11 +107,14 @@ impl Always {
     /// not stay within it are dropped (`always::within`), so the data fence's deny rules are
     /// never the only thing between a kept rule and what lies outside the matter.
     pub(super) fn in_matter(mut self, folder: &std::path::Path, spellings: &[String]) -> Self {
-        let folder = folder.to_str();
-        let spellings = folder
-            .into_iter()
-            .chain(spellings.iter().map(String::as_str));
-        self.roots = always::matter_roots(spellings, cfg!(windows));
+        let mut texts: Vec<String> = folder.to_str().map(str::to_owned).into_iter().collect();
+        for spelling in spellings {
+            if !texts.contains(spelling) {
+                texts.push(spelling.clone());
+            }
+        }
+        self.roots = always::matter_roots(texts.iter().map(String::as_str), cfg!(windows));
+        self.spellings = texts;
         let roots = &self.roots;
         self.rules
             .retain(|rule| always::within(rule, roots, cfg!(windows)));
@@ -129,7 +138,7 @@ pub(super) fn ask(
     let agent_ref = agent(actor, thread)?;
     agent_ref.always.file.as_ref()?;
     let kind = agent_ref.always.kind?;
-    let matter = agent_ref.folder.to_str()?.to_owned();
+    let matter = agent_ref.always.spellings.clone();
     let tool = tool_name(actor, thread, session, acp_tool_call_id);
     if options::plan_exit(options) || tool.as_deref() == Some(PLAN_EXIT_TOOL) {
         return None;

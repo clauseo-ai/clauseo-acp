@@ -56,11 +56,14 @@ pub(super) fn answer_permission(
     // A host option goes to the agent as its own (`agent::always::options`): "Always for this
     // matter" as the request's allow once (`always.rs`), a session option as the agent's id.
     // The log keeps the lawyer's choice.
-    let own = crate::agent::always::options::agent_choice(&option_id);
+    let own = crate::agent::always::options::agent_choice(option_id);
     if own.is_none() && !super::always::has_ask(agent, request) {
         return Err(Error::refused(
             ErrorCode::PermissionUnknownOption,
-            format!("option {option_id} is not offered for this request"),
+            format!(
+                "option {} is not offered for this request",
+                option.option_id
+            ),
         ));
     }
     let key = agent.permissions.remove(&request).ok_or_else(not_pending)?;

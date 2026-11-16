@@ -67,6 +67,9 @@ pub(crate) struct LaunchWiring {
     /// `None`: no value can be saved (`mcp.secret_store_failed`) and no server that names one
     /// starts.
     pub(crate) mcp_secrets: Option<Arc<dyn clauseo_connectors::SecretStore>>,
+    /// The secret store the kept "Always for this matter" rules' key lives in
+    /// (`HostConfig::with_always_secrets`); `None`: nothing is kept and no card offers it.
+    pub(crate) always_secrets: Option<Arc<dyn clauseo_connectors::SecretStore>>,
     /// Finds a lawyer's MCP server's program at a save and a launch
     /// (`HostConfig::with_mcp_resolver`); by default the settings crate's resolver.
     pub(crate) mcp_resolve: crate::agent::loads::lawyer::Resolve,
@@ -118,6 +121,7 @@ impl Default for LaunchWiring {
             relays: None,
             connectors: None,
             mcp_secrets: None,
+            always_secrets: None,
             mcp_resolve: Arc::new(crate::agent::loads::lawyer::resolve_here),
             mcp_confirm: None,
             mcp_find: None,
@@ -148,6 +152,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("relays", &self.relays)
             .field("connectors", &self.connectors)
             .field("mcp_secrets", &self.mcp_secrets.is_some())
+            .field("always_secrets", &self.always_secrets.is_some())
             .field("mcp_confirm", &self.mcp_confirm.is_some())
             .field("tree_wait", &self.tree_wait)
             .field("stetdoc", &self.stetdoc)

@@ -22,6 +22,11 @@ expression: "entry(\"permission\")"
       }
     },
     "about": "agent_plan",
+    "always": {
+      "kind": "command",
+      "shown": "wc -l notes.txt",
+      "cwd": "Drafts"
+    },
     "answered_at": 1760000002000
   }
 }
