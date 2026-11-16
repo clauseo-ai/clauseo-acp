@@ -60,7 +60,8 @@ fn own_places(stored: &Path, net: &NetEnv) -> Vec<PathBuf> {
 
 /// [`held`] with every folder resolved again now: `fence`'s other matters (as the launch asked
 /// them) and the own matter folder `stored`. Reads the file system: off the actor, waited on
-/// for `codex::prepare::PREPARE_WAIT` (5 s) before each prompt.
+/// for `codex::prepare::PREPARE_WAIT` (5 s) before each prompt; one that does not answer in
+/// time lets the prompt through (`actor::turn::prompt`).
 ///
 /// What it touches: the mount table once (`NetEnv::current`), then for each other matter
 /// `touchable`'s walk: an `lstat` of each name on the way, and a `readlink` of each link,

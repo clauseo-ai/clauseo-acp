@@ -3,11 +3,10 @@
 
 use std::path::PathBuf;
 
-use clauseo_protocol::{ErrorCode, MatterId};
+use clauseo_protocol::MatterId;
 
-use super::{held, held_as, recheck};
+use super::{held, held_as};
 use crate::agent::matter_fence::{MatterFence, Other};
-use crate::pipeline::tests::support::TempDir;
 use crate::testing::abs;
 
 fn id(n: u128) -> MatterId {
@@ -69,19 +68,22 @@ fn any_spelling_inside_any_own_spelling_is_held() {
 #[cfg(unix)]
 #[test]
 fn the_recheck_follows_a_link_moved_since_the_launch() {
+    use super::recheck;
+    use crate::pipeline::tests::support::TempDir;
+    use clauseo_protocol::ErrorCode;
     let dir = TempDir::new("held-recheck");
     let root = dunce::canonicalize(dir.path()).unwrap();
     for name in ["Acme/W/Sub", "Elsewhere/Sub"] {
         crate::write::create_dir_all(&root.join(name)).unwrap();
     }
     let link = root.join("Link");
-    std::os::unix::fs::symlink(root.join("Elsewhere"), &link).unwrap();
+    crate::write::symlink(&root.join("Elsewhere"), &link).unwrap();
     let asked = Other::new(id(1), "Sub".into(), link.join("Sub"), false);
     let fence = MatterFence::asked(vec![asked]);
     let stored = root.join("Acme");
     assert!(recheck(&fence, &stored).is_ok(), "elsewhere");
-    std::fs::remove_file(&link).unwrap();
-    std::os::unix::fs::symlink(root.join("Acme/W"), &link).unwrap();
+    crate::write::remove_file(&link).unwrap();
+    crate::write::symlink(&root.join("Acme/W"), &link).unwrap();
     let refused = recheck(&fence, &stored).unwrap_err();
     assert_eq!(refused.code(), ErrorCode::MatterHoldsOtherMatter);
     assert_eq!(refused.to_wire().matter(), Some(id(1)));

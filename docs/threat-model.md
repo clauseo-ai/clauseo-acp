@@ -232,9 +232,24 @@ anything the agent starts.
   printed. A lawyer's
   per-conversation read invite is read-only: Claude reads through its Read tool, writes stay
   denied. Gaps: an agent can fake a refused tool call to make the invite's offer appear (the
-  lawyer's click is still required); renaming a folder above a nested matter gets past the path
-  rules (follow-up); what is made in a parent matter after a launch is in no rule until the next
-  one
+  lawyer's click is still required); what is made in a parent matter after a launch is in no rule
+  until the next one
+- `built` (matter inside a matter, RC3): nesting can't be created from inside Clauseo. New
+  matter and import refuse a folder that is, holds or sits inside another matter's
+  (`matter_worker::check_registry` from `actor::matters::begin_create` and the import job,
+  tests `refusals.rs` `a_folder_inside_or_holding_a_matters_folder_is_refused_naming_it` and
+  `folder_query.rs`), Locate refuses the same (`matter_worker::relocate::Registry::check`,
+  test `relocate.rs` `locate_refusals_leave_the_matter_unchanged`), and so does the folder
+  scan (`actor::scan`). It can only arise from a folder moved by hand in Finder or Explorer (a
+  link pointed elsewhere included), or old data. Then no conversation runs in the outer matter,
+  for Claude and Codex on every OS: its launch and resume are refused, and so is the next prompt
+  of a conversation already open, with `matter.holds_other_matter` and a notice naming the inner
+  matter and the way out (move one folder out, or remove one of the two matters from Clauseo);
+  the inner matter's conversations run (`agent::matter_fence::held`). Stage C Mac row 1
+  (b0d68aad7) showed why the shell layer alone was not enough: with `own_shut` set, Claude's
+  `rg NOTE .` in the outer matter printed the nested matter's file. Gap, documented and not
+  built for: a matter that becomes nested during a running turn (an agent's `mv` of a folder
+  above it) is caught at the next prompt, not within that turn
 
 ## Egress proxy
 

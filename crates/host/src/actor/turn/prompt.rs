@@ -149,7 +149,9 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 
 /// The re-check, before a prompt to `thread`'s live agent, for a matter on the list inside its
 /// matter (`agent::matter_fence::held::recheck`): the other matters its launch fenced and the
-/// matter folder as stored, each resolved again off the actor. None to check passes.
+/// matter folder as stored, each resolved again off the actor. None to check passes, and so does
+/// a check that does not answer in time: the launch's check stands, so a slow disk never fails a
+/// turn here.
 fn held_check(
     actor: &Actor,
     thread: ThreadId,
@@ -167,6 +169,17 @@ fn held_check(
         };
         let job = codex::prepare::Job::short("the matter-inside re-check", matter);
         let check = move || crate::agent::matter_fence::held::recheck(&fence, &stored);
-        codex::prepare::off_actor(clock, job, check).await
+        match codex::prepare::off_actor(clock, job, check).await {
+            Err(error) if error.code() != ErrorCode::MatterHoldsOtherMatter => {
+                // The wait's own failure (no answer in 5 s, no thread): the launch's check
+                // stands, and the next prompt checks again.
+                tracing::warn!(
+                    ?matter,
+                    "the matter-inside re-check did not answer; let through"
+                );
+                Ok(())
+            }
+            checked => checked,
+        }
     }
 }

@@ -12,7 +12,9 @@ use clauseo_protocol::{
 };
 
 use super::agents::send_prompt;
-use super::idle::{TWO_ANSWERS, live, rig, until_idle};
+#[cfg(unix)]
+use super::idle::until_idle;
+use super::idle::{TWO_ANSWERS, live, rig};
 use super::matter_fence::other_matter;
 use super::rig::Rig;
 use crate::pipeline::tests::support::TempDir;
@@ -41,16 +43,20 @@ fn turn(rig: &mut Rig, thread: ThreadId, n: u128) {
 /// The codes of `thread`'s failed turns, and the inner matters its notices named, in order.
 fn told(rig: &mut Rig, thread: ThreadId) -> (Vec<ErrorCode>, Vec<(MatterId, String)>) {
     let log = rig.log(thread);
-    let failed = log.iter().filter_map(|event| match event {
-        DomainEvent::TurnFailed(failed) => Some(failed.code),
-        _ => None,
+    let failed = log.iter().filter_map(|event| {
+        let DomainEvent::TurnFailed(failed) = event else {
+            return None;
+        };
+        Some(failed.code)
     });
-    let inside = log.iter().filter_map(|event| match event {
-        DomainEvent::Notice(notice) => match &notice.kind {
-            Some(NoticeKind::MatterInside { matter, name }) => Some((*matter, name.clone())),
-            _ => None,
-        },
-        _ => None,
+    let inside = log.iter().filter_map(|event| {
+        let DomainEvent::Notice(notice) = event else {
+            return None;
+        };
+        let Some(NoticeKind::MatterInside { matter, name }) = &notice.kind else {
+            return None;
+        };
+        Some((*matter, name.clone()))
     });
     (failed.collect(), inside.collect())
 }
@@ -123,7 +129,7 @@ fn an_open_conversation_is_refused_at_its_next_turn_once_a_link_puts_a_matter_in
     let sub = other_matter(&mut rig, &root, "Sub", 5);
     // Sub's folder as stored goes through a link that leads elsewhere at the launch.
     let link = root.join("Link");
-    std::os::unix::fs::symlink(&root, &link).unwrap();
+    crate::write::symlink(&root, &link).unwrap();
     move_to(&mut rig, sub, &link.join("Sub"));
     turn(&mut rig, thread, 10);
     until_idle(&mut rig, thread);
@@ -135,8 +141,8 @@ fn an_open_conversation_is_refused_at_its_next_turn_once_a_link_puts_a_matter_in
     // The link now leads into this matter: the rows and the fence's key are as they were.
     let into = scratch(&rig).join("W");
     crate::write::create_dir_all(&into.join("Sub")).unwrap();
-    std::fs::remove_file(&link).unwrap();
-    std::os::unix::fs::symlink(&into, &link).unwrap();
+    crate::write::remove_file(&link).unwrap();
+    crate::write::symlink(&into, &link).unwrap();
     assert!(live(&rig.actor, thread), "still open");
     turn(&mut rig, thread, 11);
     assert_eq!(

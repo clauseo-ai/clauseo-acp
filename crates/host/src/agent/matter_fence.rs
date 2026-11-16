@@ -19,14 +19,19 @@
 //! On Windows each fence path and spelling is followed by its full 8.3 short form
 //! (`agent::short_forms`), made from the long ones, so a rule also names `CLAUSE~1\…`.
 //!
-//! A matter inside the session's own matter that it is not invited into needs one more thing on
-//! macOS and Linux: Claude's sandbox re-opens the own matter for reading, and its `allowRead`
-//! beats its `denyRead`, so it re-opens none of the own matter then ([`MatterFence::own_shut`]):
-//! Claude's commands can't open the matter, its file tools still can, and the lawyer is told.
-//! A matter only gets inside another by folders moved outside Clauseo (or an older registry):
-//! every way through Clauseo refuses it, and a turn in the outer matter is refused too (`held`):
-//! this is the second layer. Windows has no OS fence: there a command in the own
-//! matter that never names the nested one (`rg x .`) reads it.
+//! A matter on the list inside the session's own matter refuses the launch, and the next prompt
+//! of a live session (`held`, `matter.holds_other_matter`), for every agent and OS: a matter
+//! only gets inside another by folders moved outside Clauseo (or an older registry), since every
+//! way through Clauseo refuses it, so no conversation runs in the outer matter. What follows for
+//! a nested matter is reached only for a forgotten one, or before that refusal existed.
+//!
+//! On macOS and Linux Claude's sandbox re-opens the own matter for reading, and its `allowRead`
+//! beats its `denyRead`, so with a matter it is not invited into inside the own one it re-opens
+//! none of it ([`MatterFence::own_shut`]). That was shown not to keep commands out: stage C Mac
+//! row 1, b0d68aad7, `own_shut` set, Claude's Bash ran `cat` in the matter and `rg NOTE .`
+//! printed the nested matter's file (Claude Code keeps its working folder readable). The code
+//! stays until a follow-up removes it; the launch refusal is what closes that path. Windows has
+//! no OS fence: there a command in the own matter that never names the nested one reads it.
 //!
 //! Who uses which: Claude's `Read` deny rules and Codex's profile name the fence paths of the
 //! matters not invited, Claude's `Edit` deny rules and its Windows shell rules those of every
@@ -103,6 +108,8 @@ pub(crate) struct MatterFence {
     /// Whether another matter the session is not invited into lies inside its own matter: then
     /// Claude's sandbox stays on and re-opens none of the own matter (its `allowRead` would beat
     /// the nested matter's `denyRead`), and the lawyer is told (`NoticeKind::ShellLimited`).
+    /// Shown not to keep commands out (stage C Mac row 1, b0d68aad7: `rg NOTE .` read the nested
+    /// matter); a matter on the list inside refuses the launch first (`held`).
     pub(crate) own_shut: bool,
     /// Every other matter's folder (each spelling, invited or not) inside the own matter:
     /// Claude's sandbox denies writes there; Codex's profile keeps an invited one denied.
