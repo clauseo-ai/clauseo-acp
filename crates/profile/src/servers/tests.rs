@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use clauseo_settings::Locations;
 
-use super::{CASE_LAW, browser_for, browser_mcp_on, case_law, no_browser_on, shell_browser_on};
+use super::{
+    BROWSER_OFF_HERE, CASE_LAW, browser_for, browser_mcp, browser_mcp_on, case_law, no_browser,
+    no_browser_on, shell_browser, shell_browser_on,
+};
 use crate::{BrowserSidecars, ProfilePaths};
 
 fn paths() -> ProfilePaths {
@@ -111,23 +114,38 @@ fn the_case_law_entry_names_the_relay_and_the_token_file_only() {
     );
 }
 
-/// Codex gets the entry on macOS and Linux and no browser at all on Windows. Claude has no
+/// Codex gets the entry on macOS and no browser at all on Windows and Linux. Claude has no
 /// browser on any OS, neither the entry nor its shell command, so the command is copied nowhere.
 /// An agent with no kind (a test's) is left as it was.
 #[test]
-fn codex_has_the_entry_off_windows_and_claude_no_browser_anywhere() {
+fn codex_has_the_entry_on_macos_only_and_claude_no_browser_anywhere() {
     use clauseo_protocol::AgentKind;
-    for windows in [false, true] {
-        assert!(!browser_mcp_on(Some(AgentKind::Claude), windows));
-        assert!(!browser_mcp_on(None, windows));
-        assert!(!no_browser_on(None, windows));
+    for off_os in [false, true] {
+        assert!(!browser_mcp_on(Some(AgentKind::Claude), off_os));
+        assert!(!browser_mcp_on(None, off_os));
+        assert!(!no_browser_on(None, off_os));
     }
-    for windows in [false, true] {
-        assert!(no_browser_on(Some(AgentKind::Claude), windows));
-        assert!(!shell_browser_on(windows));
+    for off_os in [false, true] {
+        assert!(no_browser_on(Some(AgentKind::Claude), off_os));
+        assert!(!shell_browser_on(off_os));
     }
     assert!(browser_mcp_on(Some(AgentKind::Codex), false));
     assert!(!no_browser_on(Some(AgentKind::Codex), false));
     assert!(!browser_mcp_on(Some(AgentKind::Codex), true));
     assert!(no_browser_on(Some(AgentKind::Codex), true));
+}
+
+/// Windows and Linux are the OSes with no browser for launch (Linux until the patched
+/// agent-browser build for Linux, clauseo.2): there neither agent is offered the `browser`
+/// entry or the shell command; on macOS Codex still is.
+#[test]
+fn the_browser_is_off_on_windows_and_linux_and_on_for_codex_on_macos() {
+    use clauseo_protocol::AgentKind;
+    assert_eq!(BROWSER_OFF_HERE, cfg!(any(windows, target_os = "linux")));
+    let codex = browser_mcp(Some(AgentKind::Codex));
+    assert_eq!(codex, cfg!(target_os = "macos"));
+    assert_eq!(no_browser(Some(AgentKind::Codex)), !codex);
+    assert!(!browser_mcp(Some(AgentKind::Claude)));
+    assert!(no_browser(Some(AgentKind::Claude)));
+    assert!(!shell_browser());
 }

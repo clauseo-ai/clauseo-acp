@@ -142,8 +142,10 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
   const w = useSettingsWords();
   const { platform } = useDisplay();
   const { tools } = ctx.settings;
-  // the browser is off on Windows for launch, its row hidden: it counts as off there too
-  const browserOn = tools?.browser === true && platform !== "windows";
+  // the browser is off on Windows and Linux for launch, its row hidden: it counts as off there too
+  // (Linux until the patched agent-browser build for Linux ships)
+  const browserShown = platform !== "windows" && platform !== "linux";
+  const browserOn = tools?.browser === true && browserShown;
   const webOff = tools !== undefined && !tools.web_search && !browserOn;
   return (
     <>
@@ -178,8 +180,8 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
               </InfoTip>
             }
           />
-          {/* the row comes back when the Windows browser ships */}
-          {platform !== "windows" && (
+          {/* the row comes back when the Windows browser, and the patched Linux one, ship */}
+          {browserShown && (
             <ToolRow
               ctx={ctx}
               tools={tools}

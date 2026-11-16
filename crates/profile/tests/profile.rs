@@ -260,9 +260,9 @@ fn kind_specific_parts_go_only_to_their_kind() {
     );
     assert!(profile.codex_keys_without_index(None).is_empty());
     assert!(profile.skill_files(None).is_none());
-    // `browser` goes to Codex alone (`servers::browser_mcp`), and not on Windows: Claude keeps
-    // the shell command.
-    let codex = if cfg!(windows) {
+    // `browser` goes to Codex alone (`servers::browser_mcp`), and on macOS only: neither agent
+    // has it on Windows or Linux (`servers::BROWSER_OFF_HERE`), and Claude has no browser anywhere.
+    let codex = if cfg!(any(windows, target_os = "linux")) {
         vec!["case-law"]
     } else {
         vec!["browser", "case-law"]
@@ -275,7 +275,7 @@ fn kind_specific_parts_go_only_to_their_kind() {
         let names: Vec<String> = profile.servers(kind).into_iter().map(|s| s.name).collect();
         assert_eq!(names, want, "{kind:?}");
     }
-    if !cfg!(windows) {
+    if cfg!(target_os = "macos") {
         assert_eq!(
             profile.servers(Some(AgentKind::Codex))[0],
             clauseo_profile::servers::browser(profile.paths())

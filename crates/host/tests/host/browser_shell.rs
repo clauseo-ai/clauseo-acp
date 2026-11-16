@@ -122,7 +122,7 @@ fn path_parts(seen: &Seen) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Whether this OS gives `launch`'s Codex session no browser at all (Windows,
+/// Whether this OS gives `launch`'s Codex session no browser at all (Windows and Linux,
 /// `clauseo_profile::servers::no_browser`), whatever the hook, the Chrome and the switch; if so,
 /// it checks that the session got none: no shell tool's variables, no tools folder on its
 /// `PATH`, the no-browser sentence (never the shell rules nor the no-Chrome line) and no

@@ -287,14 +287,16 @@ pub(crate) fn entry_part(state: &ToolState, chrome_found: bool) -> BrowserPart {
     }
 }
 
-/// Whether an agent of `kind` gets no browser at all on this OS (`windows`): Codex on Windows,
-/// and Claude on every OS (`clauseo_profile::servers::no_browser_on`, decision record 0030).
+/// Whether an agent of `kind` gets no browser at all on an OS with none for launch (`off_os`,
+/// `clauseo_profile::servers::BROWSER_OFF_HERE`: Windows, and Linux until the patched
+/// agent-browser build for Linux): Codex there, and Claude on every OS
+/// (`clauseo_profile::servers::no_browser_on`, decision record 0030).
 /// Such a session gets no entry, no shell tool (no `agent-browser` on `PATH`, no
 /// `AGENT_BROWSER_*` variables, no browser rules), no browser in its header (the app then offers
 /// no browser action: no install advice, no switch) and the no-browser sentence
 /// (`BrowserPart::Off`).
-pub(crate) fn no_browser(kind: Option<clauseo_protocol::AgentKind>, windows: bool) -> bool {
-    clauseo_profile::servers::no_browser_on(kind, windows)
+pub(crate) fn no_browser(kind: Option<clauseo_protocol::AgentKind>, off_os: bool) -> bool {
+    clauseo_profile::servers::no_browser_on(kind, off_os)
 }
 
 /// The hook's servers for a session, without the `browser` entry when the agent has no browser

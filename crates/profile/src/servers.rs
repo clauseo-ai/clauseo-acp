@@ -27,15 +27,29 @@ pub const BROWSER: &str = "browser";
 /// naming a file, is what holds the browser to its own folder there. Claude has no browser
 /// for launch ([`no_browser`]).
 ///
-/// Not on Windows ([`no_browser`]).
+/// Not on Windows or Linux ([`no_browser`], [`BROWSER_OFF_HERE`]).
 pub fn browser_mcp(kind: Option<AgentKind>) -> bool {
-    browser_mcp_on(kind, cfg!(windows))
+    browser_mcp_on(kind, BROWSER_OFF_HERE)
 }
 
-/// [`browser_mcp`] as it is on Windows when `windows` is true, and elsewhere when it is false.
-pub fn browser_mcp_on(kind: Option<AgentKind>, windows: bool) -> bool {
-    kind == Some(AgentKind::Codex) && !windows
+/// [`browser_mcp`] as it is on an OS with no browser for launch (Windows, Linux) when `off_os`
+/// is true, and on macOS when it is false.
+pub fn browser_mcp_on(kind: Option<AgentKind>, off_os: bool) -> bool {
+    kind == Some(AgentKind::Codex) && !off_os
 }
+
+/// Whether this OS gives no agent a browser for launch: Windows and Linux. Every browser switch
+/// here ([`browser_mcp`], [`no_browser`], [`shell_browser`]) and the host's
+/// (`agent::loads::browser::no_browser`) read it.
+///
+/// - Windows: Codex's shell sandbox leaves loopback open ([`no_browser`]).
+/// - Linux: the agent-browser the Linux release carries (upstream v0.41.1) always starts its
+///   stream server, an unauthenticated loopback listener that can drive the browser, and no
+///   variable turns it off; any program on the computer, a Codex shell command among them, could
+///   drive the guarded browser through it past the guard's filter. Linux gets the browser back
+///   with Clauseo's patched agent-browser build for Linux (clauseo.2), which has no such
+///   listener. The sidecar still ships in the Linux package, unused.
+pub const BROWSER_OFF_HERE: bool = cfg!(any(windows, target_os = "linux"));
 
 /// Whether an agent of `kind` gets no browser at all, neither the entry nor the shell command,
 /// for launch (decision record 0030):
@@ -47,6 +61,8 @@ pub fn browser_mcp_on(kind: Option<AgentKind>, windows: bool) -> bool {
 ///   agent-browser's daemon port and Chrome's debugging port are unauthenticated, so with the
 ///   entry a shell command Codex runs without a prompt could drive the unfenced guard's browser
 ///   past its filter. The way back is the elevated sandbox or an authenticated daemon.
+/// - Codex on Linux, while the Linux release's agent-browser always runs its unauthenticated
+///   stream server ([`BROWSER_OFF_HERE`]). The way back is the patched Linux build (clauseo.2).
 /// - Claude on every OS. On macOS and Linux, whether or not its sandbox ends up on, the shell
 ///   command would
 ///   have to run outside Claude Code's sandbox (`excludedCommands`), and Claude Code's exclusion
@@ -59,16 +75,17 @@ pub fn browser_mcp_on(kind: Option<AgentKind>, windows: bool) -> bool {
 ///   each spell a refused command no rule sees (security review round 4 of #1014).
 ///   The way back is Clauseo's own `agent-browser` shim, after launch.
 ///
-/// So no agent has a browser on Windows, and only Codex, through its guarded entry, on macOS and
-/// Linux.
+/// So no agent has a browser on Windows or Linux, and only Codex, through its guarded entry, on
+/// macOS.
 pub fn no_browser(kind: Option<AgentKind>) -> bool {
-    no_browser_on(kind, cfg!(windows))
+    no_browser_on(kind, BROWSER_OFF_HERE)
 }
 
-/// [`no_browser`] as it is on Windows when `windows` is true, and elsewhere when it is false.
-pub fn no_browser_on(kind: Option<AgentKind>, windows: bool) -> bool {
+/// [`no_browser`] as it is on an OS with no browser for launch (Windows, Linux) when `off_os` is
+/// true, and on macOS when it is false.
+pub fn no_browser_on(kind: Option<AgentKind>, off_os: bool) -> bool {
     match kind {
-        Some(AgentKind::Codex) => windows,
+        Some(AgentKind::Codex) => off_os,
         Some(AgentKind::Claude) => true,
         None => false,
     }
@@ -79,12 +96,13 @@ pub fn no_browser_on(kind: Option<AgentKind>, windows: bool) -> bool {
 /// [`browser_mcp`]). The app copies the command into `<data>/tools`, and renders the browser's
 /// skill, only when it is true, so it copies nothing now.
 pub fn shell_browser() -> bool {
-    shell_browser_on(cfg!(windows))
+    shell_browser_on(BROWSER_OFF_HERE)
 }
 
-/// [`shell_browser`] as it is on Windows when `windows` is true, and elsewhere when it is false.
-pub fn shell_browser_on(windows: bool) -> bool {
-    !no_browser_on(Some(AgentKind::Claude), windows)
+/// [`shell_browser`] as it is on an OS with no browser for launch (Windows, Linux) when `off_os`
+/// is true, and on macOS when it is false.
+pub fn shell_browser_on(off_os: bool) -> bool {
+    !no_browser_on(Some(AgentKind::Claude), off_os)
 }
 
 /// The case-law connector's reserved server name (R24): a `mcp.servers.case-law` entry in the

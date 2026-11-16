@@ -6,7 +6,7 @@
 // when the host sends the tools' switches (SettingsView.tools), each row led by its tool's glyph with the state on it and
 // one helper line at most, each switch showing its value and a flip sent as set_tool_settings with its key; a locked
 // key's switch disabled, showing the host's value, its glyph locked, U11-07's line in its helper's place; the Browser
-// switch's helper the same on or off (no "Not available yet" since #870), and on Windows no Browser row at all, the
+// switch's helper the same on or off (no "Not available yet" since #870), and on Windows and Linux no Browser row at all, the
 // websites' row then following Web search alone; the nav's icon not the web's globe; no
 // Indian Kanoon. The anonymous counts' switch (D-052) only when the host sends SettingsView.privacy, in the first
 // run's words, a flip sent as set_privacy_settings, a firm's lock shown off and disabled, a host change shown live.
@@ -374,7 +374,7 @@ test.each([true, false])(
   },
 );
 
-test.each(["mac", "linux"] as const)(
+test.each(["mac"] as const)(
   "on %s, the Browser switch says ChatGPT uses it, and that the browser runs on this computer",
   async (platform) => {
     const { el } = await mount({ tools: ON, platform });
@@ -384,15 +384,18 @@ test.each(["mac", "linux"] as const)(
   },
 );
 
-test("on Windows, the Browser row is hidden for launch, and Web search keeps its row", async () => {
-  const { el } = await mount({ tools: ON, platform: "windows" });
-  expect(pane(el).textContent).toContain("On the web");
-  expect(switchNamed(el, "Browser")).toBeNull();
-  expect(pane(el).textContent).not.toContain(BROWSER_NOTE);
-  expect(switchNamed(el, "Web search")?.getAttribute("aria-checked")).toBe("true");
-});
+test.each(["windows", "linux"] as const)(
+  "on %s, the Browser row is hidden for launch, and Web search keeps its row",
+  async (platform) => {
+    const { el } = await mount({ tools: ON, platform });
+    expect(pane(el).textContent).toContain("On the web");
+    expect(switchNamed(el, "Browser")).toBeNull();
+    expect(pane(el).textContent).not.toContain(BROWSER_NOTE);
+    expect(switchNamed(el, "Web search")?.getAttribute("aria-checked")).toBe("true");
+  },
+);
 
-test("the websites' row follows Web search alone on Windows, where the browser counts as off", async () => {
+test("the websites' row follows Web search alone on Windows and Linux, where the browser counts as off", async () => {
   const websites = async (tools: ToolsSettingsView, platform: Platform) => {
     const { el } = await mount({ tools, platform });
     const shown = el.querySelector('[data-testid="dest-websites"]') !== null;
@@ -410,7 +413,9 @@ test("the websites' row follows Web search alone on Windows, where the browser c
   // Web search off: no websites' row, though the browser's switch is on in the host's settings
   expect(await websites({ web_search: false, browser: true }, "windows")).toBe(false);
   expect(await websites({ web_search: false, browser: false }, "windows")).toBe(false);
-  // off the Windows, the browser still counts: the row shows with it on alone
+  expect(await websites({ web_search: false, browser: true }, "linux")).toBe(false);
+  expect(await websites({ web_search: true, browser: true }, "linux")).toBe(true);
+  // on macOS, the browser still counts: the row shows with it on alone
   expect(await websites({ web_search: false, browser: true }, "mac")).toBe(true);
 });
 

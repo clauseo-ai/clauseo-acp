@@ -143,24 +143,25 @@ fn codex_s_entry_goes_with_the_session_s_proxy_on_each_os() {
     }
 }
 
-/// Codex on Windows has no browser (`no_browser`): its entry is dropped before the fill, so the
+/// Codex on Windows and Linux has no browser (`no_browser`, `off_os`): its entry is dropped
+/// before the fill, so no `clauseo-mcp browser-guard` and no agent-browser start, and the
 /// session sends none and its header holds no browser state at all, which the app shows as
 /// nothing to act on (no install advice, no switch). Claude has no browser on any OS; Codex
-/// elsewhere is untouched. Runs on every OS: the OS is a parameter.
+/// on macOS is untouched. Runs on every OS: the OS is a parameter.
 #[test]
-fn codex_on_windows_gets_no_entry_and_no_browser_state() {
+fn codex_on_windows_and_linux_gets_no_entry_and_no_browser_state() {
     use clauseo_protocol::AgentKind;
     let dir = PathBuf::from("/data/browser/run/t-1");
     let chrome = PathBuf::from("/chrome");
     let ready = inputs(&dir, Some(&chrome));
-    for windows in [false, true] {
-        assert!(no_browser(Some(AgentKind::Claude), windows));
-        assert!(!no_browser(None, windows));
-        let none_here = no_browser(Some(AgentKind::Codex), windows);
-        assert_eq!(none_here, windows);
+    for off_os in [false, true] {
+        assert!(no_browser(Some(AgentKind::Claude), off_os));
+        assert!(!no_browser(None, off_os));
+        let none_here = no_browser(Some(AgentKind::Codex), off_os);
+        assert_eq!(none_here, off_os);
         let servers = offered(vec![codex_server(false)], none_here);
         let (sent, state) = hook_servers(servers, &ready);
-        if windows {
+        if off_os {
             assert_eq!(sent, Vec::<McpServer>::new());
             assert_eq!(state, None);
         } else {
@@ -172,4 +173,24 @@ fn codex_on_windows_gets_no_entry_and_no_browser_state() {
             );
         }
     }
+}
+
+/// The OS the host runs on picks the switch: Windows and Linux have no browser for launch
+/// (`clauseo_profile::servers::BROWSER_OFF_HERE`), so there a Codex session the hook offers the
+/// entry still sends none and claims no browser; macOS keeps it.
+#[test]
+fn this_os_drops_codex_s_entry_on_windows_and_linux_only() {
+    use clauseo_protocol::AgentKind;
+    let dir = PathBuf::from("/data/browser/run/t-1");
+    let chrome = PathBuf::from("/chrome");
+    let off = clauseo_profile::servers::BROWSER_OFF_HERE;
+    assert_eq!(off, cfg!(any(windows, target_os = "linux")));
+    let none_here = no_browser(Some(AgentKind::Codex), off);
+    assert_eq!(none_here, !cfg!(target_os = "macos"));
+    let (sent, state) = hook_servers(
+        offered(vec![codex_server(false)], none_here),
+        &inputs(&dir, Some(&chrome)),
+    );
+    assert_eq!(sent.is_empty(), none_here);
+    assert_eq!(state.is_none(), none_here);
 }

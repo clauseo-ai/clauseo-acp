@@ -338,10 +338,10 @@ pub(super) fn browser_prep(
         shell: false,
         proxy: false,
     };
-    // Codex on Windows, and Claude on every OS, have no browser at all
-    // (`agent::loads::browser::no_browser`).
+    // Codex on Windows and Linux, and Claude on every OS, have no browser at all
+    // (`agent::loads::browser::no_browser`): no sidecar, no Chrome search, no claim.
     let kind = clauseo_protocol::AgentKind::of(agent);
-    if crate::agent::loads::browser::no_browser(kind, cfg!(windows)) {
+    if crate::agent::loads::browser::no_browser(kind, clauseo_profile::servers::BROWSER_OFF_HERE) {
         return skip;
     }
     let entry = actor
