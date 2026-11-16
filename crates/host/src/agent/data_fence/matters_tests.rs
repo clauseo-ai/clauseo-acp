@@ -11,6 +11,8 @@ use super::{
     LaunchDeny, claude_allow_rules, claude_deny_rules, claude_projects, launch_deny, rule_path,
 };
 use crate::agent::matter_fence::{MatterFence, Other};
+use crate::agent::short_forms::with_short_forms;
+use crate::network_paths::NetEnv;
 use crate::write;
 
 /// Whether one of `rules` denies `tool` on the absolute `path`. A `Tool(//p/**)` rule covers
@@ -172,8 +174,9 @@ fn a_launch_denies_other_matters_and_data_and_leaves_the_sessions_own() {
     }
 }
 
-/// An other matter's folder is named by its canonical path and as stored; one that is the
-/// session's matter folder or `<data>`, or is not absolute, is in no rule.
+/// An other matter's folder is named by its canonical path and as stored, each followed by its
+/// 8.3 short form where the volume makes one (Windows); one that is the session's matter folder
+/// or `<data>`, in any spelling, or is not absolute, is in no rule.
 #[test]
 fn other_matters_are_spelled_both_ways_and_never_cover_the_sessions_own() {
     let dir = layout("matters-spelled");
@@ -183,7 +186,8 @@ fn other_matters_are_spelled_both_ways_and_never_cover_the_sessions_own() {
     let keep = [matter.as_path(), data.as_path()];
     let other = root.join("outside");
     let found = matters(&[(other.clone(), false)], &keep, &[]);
-    assert_eq!(found.others[0].paths, spellings(&other));
+    let want = with_short_forms(spellings(&other), &NetEnv::current());
+    assert_eq!(found.others[0].paths, want);
     for left_out in [
         matter.clone(),
         root.join("data"),
@@ -348,6 +352,59 @@ fn another_matter_in_one_spelling_is_denied_through_every_link() {
             for tool in ["Read", "Edit"] {
                 let refused = claude_denies(&rules, tool, &path);
                 assert!(refused, "{stored:?}: {tool} {path:?}: {rules:#?}");
+            }
+        }
+    }
+}
+
+/// The spelling rule on Windows, by 8.3 short forms (`CLAUSE~1`) where the volume makes them:
+/// the session's matter, given long or short alone, is in no rule by either form, though other
+/// matters are registered at its parent and at itself, each long and short; the sibling matter
+/// is denied Read and Edit by both forms. On a volume that makes no short names it is the long
+/// case again.
+#[cfg(windows)]
+#[test]
+fn the_own_matters_short_form_is_never_fenced_and_another_is_by_both() {
+    use crate::agent::short_forms::{Looked, short_form};
+    let dir = layout("matters-short-rule");
+    let parent = dunce::canonicalize(dir.path())
+        .unwrap()
+        .join("Clients Folder");
+    let (own, other) = (parent.join("Own Matter"), parent.join("Other Matter"));
+    for file in [own.join("a.txt"), other.join("b.txt")] {
+        write::create_dir_all(file.parent().unwrap()).unwrap();
+        write::write_file(&file, b"x").unwrap();
+    }
+    let both = |path: &Path| match short_form(path) {
+        Looked::Form(short) if short != path => vec![path.to_owned(), short],
+        _ => vec![path.to_owned()],
+    };
+    let (owns, others) = (both(&own), both(&other));
+    let registered: Vec<(PathBuf, bool)> = [both(&parent), owns.clone(), others.clone()]
+        .concat()
+        .into_iter()
+        .map(|folder| (folder, false))
+        .collect();
+    for given in &owns {
+        let fence = matters(&registered, &[given.as_path()], &[]);
+        assert!(fence.unfenced.is_empty(), "{given:?}: {fence:?}");
+        let deny = LaunchDeny {
+            matters: fence,
+            ..LaunchDeny::default()
+        };
+        let rules = claude_deny_rules(&deny, false);
+        for tool in ["Read", "Edit"] {
+            for path in owns.iter().flat_map(|own| [own.clone(), own.join("a.txt")]) {
+                assert!(
+                    !denied(&rules, tool, &path),
+                    "{given:?}: {tool} {path:?}: {rules:#?}"
+                );
+            }
+            for path in others.iter().flat_map(|o| [o.clone(), o.join("b.txt")]) {
+                assert!(
+                    denied(&rules, tool, &path),
+                    "{given:?}: {tool} {path:?}: {rules:#?}"
+                );
             }
         }
     }
