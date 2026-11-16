@@ -4,15 +4,27 @@
 // other code on the wire has words.
 import { expect, test } from "vitest";
 import { ERROR_WORDS, type ErrorCode as WordsCode } from "@clauseo/components/lib/words-errors.ts";
-import type { ErrorCode as WireCode } from "../../transport/protocol.ts";
+import type {
+  RefusedBecause as WordsBecause,
+  WriteFailure as WordsFailure,
+} from "@clauseo/components/lib/words-errors-refused.ts";
+import type {
+  ErrorCode as WireCode,
+  RefusedBecause as WireBecause,
+  WriteFailure as WireFailure,
+} from "../../transport/protocol.ts";
 
 /** true only when every A is a B and every B an A. */
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 const wireInWords: Same<WireCode, WordsCode> = true;
 const wordsInWire: Same<WordsCode, WireCode> = true;
+// matter.file_refused's causes, copied as the codes are (words-errors-refused.ts)
+const becauseSame: Same<WireBecause, WordsBecause> = true;
+// matter.file_write_failed's write failure, copied the same way
+const failureSame: Same<WireFailure, WordsFailure> = true;
 
 test("every code on the wire has words, and the words name no code the wire lacks", () => {
-  expect([wireInWords, wordsInWire]).toEqual([true, true]);
+  expect([wireInWords, wordsInWire, becauseSame, failureSame]).toEqual([true, true, true, true]);
   expect(Object.keys(ERROR_WORDS)).toContain("unknown");
 });

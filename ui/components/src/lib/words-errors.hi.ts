@@ -325,6 +325,39 @@ export const HI = {
     null,
   "The AI didn't start, because Clauseo couldn't set up the folder it keeps for the AI on this computer. Your question is kept. If Try again doesn't help, quit Clauseo and open it again. If it keeps happening, show this to whoever looks after this computer.":
     null,
+  // matter.file_refused: the folder refused a change to a file (words-errors-refused.ts), by how much else the act did
+  // and why. Draft English (Rohan to approve); the Hindi is to come (hi: later)
+  "Clauseo couldn't change {name} because the file is set so it can't be changed. It's as it was.":
+    null,
+  "Clauseo couldn't change {name} because the same file also appears somewhere else on this computer. It's as it was.":
+    null,
+  "Clauseo left {name} as it was because it couldn't first check its saved copy of the file. Try again.":
+    null,
+  "Clauseo couldn't change {name} because the file is set so it can't be changed. Everything else was done.":
+    null,
+  "Clauseo couldn't change {name} because the same file also appears somewhere else on this computer. Everything else was done.":
+    null,
+  "Clauseo left {name} as it was because it couldn't first check its saved copy of the file. Everything else was done; try again to change this one too.":
+    null,
+  "Clauseo couldn't change {count} papers, including {name}, which is set so it can't be changed. Everything else was done.":
+    null,
+  "Clauseo couldn't change {count} papers, including {name}, which also appears somewhere else on this computer. Everything else was done.":
+    null,
+  "Clauseo left {count} papers as they were, including {name}, because it couldn't first check its saved copies. Everything else was done; try again to change them too.":
+    null,
+  // matter.file_refused, several files refused for different reasons (REFUSED_MIXED). The app track's English
+  // (provisional); the Hindi is to come (hi: later)
+  "Clauseo couldn't change {count} papers, including {name}, for different reasons. Everything else was done.":
+    null,
+  // matter.file_write_failed: writing a file in place stopped partway (words-errors-written.ts), by whether the file
+  // was put back and whether other papers changed. The app track's English (provisional); the Hindi is to come
+  // (hi: later)
+  "Clauseo couldn't finish changing {name}, so it put the file back as it was. Nothing else was changed.":
+    null,
+  "Clauseo couldn't finish changing {name}, so it put that file back as it was. It may already have changed other papers. To put them back, restore the version from just before this in Versions.":
+    null,
+  "Clauseo couldn't finish changing {name}, and the file may be damaged. To put it right, restore the version from just before this in Versions.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

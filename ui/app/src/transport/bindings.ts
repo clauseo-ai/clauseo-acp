@@ -2095,6 +2095,10 @@ export type ErrorCode =
 "matter.file_folder_clash" | 
 /** Clauseo could not prepare the agent's own folder under its data folder (its home, or a folder of its session), so the agent was not started. Asking again can work. */
 "agent.home_failed" | 
+/** Files the operation would change refused it (their permissions, a second name, or a saved copy that could not be checked); everything else was done. */
+"matter.file_refused" | 
+/** Writing a file in place failed partway, so the operation stopped there; the file was put back as it was, or may be damaged, and the version before the operation holds it. */
+"matter.file_write_failed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -2173,6 +2177,23 @@ export type FileDecision = {
  * It must be a v7 UUID.
  */
 export type FileRefId = string;
+
+/**
+ *  For `matter.file_refused`: why the files were refused, how many were, and how many files the
+ *  action wrote, deleted or meant to, so the UI can tell an action on that file alone (`of` is
+ *  1) from one that did everything else.
+ */
+export type FileRefusal = {
+	/**
+	 *  Why every one of the refused files was refused; missing when they were refused for
+	 *  different reasons.
+	 */
+	because?: RefusedBecause,
+	/**  How many files were refused: [`HostError::files`] names at most [`MAX_ERROR_FILES`]. */
+	refused: number,
+	/**  How many files the action wrote, deleted or meant to, the refused ones included. */
+	of: number,
+};
 
 /**  The files a turn changed. When present it comes before the turn's `TurnEnded`. */
 export type FilesChanged = {
@@ -3022,11 +3043,22 @@ export type HostError = {
 	/**
 	 *  The matter's files the failure is about: for `matter.file_locked`, the files held open,
 	 *  sorted; for `matter.file_folder_clash`, the entry in the way (the file's own path when a
-	 *  folder now has it, else its folder that is now a file), then the file being restored.
-	 *  Missing when it names none. For `matter.file_locked` the files are here, not in
-	 *  `message`.
+	 *  folder now has it, else its folder that is now a file), then the file being restored; for
+	 *  `matter.file_refused`, the refused files, sorted; for `matter.file_write_failed`, the
+	 *  file. At most [`MAX_ERROR_FILES`]. Missing when it names none. For each the files are
+	 *  here, not in `message`.
 	 */
 	files?: MatterPath[],
+	/**
+	 *  For `matter.file_refused`: why the files were refused, how many were, and how many files
+	 *  the action wrote, deleted or meant to. Missing otherwise.
+	 */
+	refusal?: FileRefusal,
+	/**
+	 *  For `matter.file_write_failed`: whether the file was put back as it was, and how many
+	 *  files the action wrote, deleted or meant to. Missing otherwise.
+	 */
+	write_failure?: WriteFailure,
 };
 
 /**  What a subscriber receives. Never logged (the log holds only `DomainEvent`s). */
@@ -5633,6 +5665,20 @@ export type RefreshWhy =
 /**  The lawyer asked again. Reads now, unless a read is in flight. */
 "try_again";
 
+/**  Why the folder refused a change to a file (`matter.file_refused`); the file is as it was. */
+export type RefusedBecause = 
+/**  The file's permissions refuse the change. */
+"permissions" | 
+/**  The file has a second name (a hard link), which changing it in place would change too. */
+"second_name" | 
+/**
+ *  The file could only be changed in place, and Clauseo could not first confirm its saved
+ *  copy of the file, so it left the file alone.
+ */
+"saved_copy_unconfirmed" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
 /**  What kind of build this is: a tagged release, a test build (`test-v*`), or a dry run. */
 export type ReleaseMode = 
 /**  A tagged release. */
@@ -7976,6 +8022,20 @@ export type WordBlackline = {
 	 *  as 0, and 0 is left out.
 	 */
 	changed_tables_total?: number,
+};
+
+/**
+ *  For `matter.file_write_failed`: whether the file was put back as it was, and how many files
+ *  the action wrote, deleted or meant to (1: nothing else changed).
+ */
+export type WriteFailure = {
+	/**
+	 *  The version from before the write was written back whole: the file is as it was.
+	 *  Otherwise it may be damaged.
+	 */
+	put_back: boolean,
+	/**  How many files the action wrote, deleted or meant to, this one included. */
+	of: number,
 };
 
 /* Tauri Specta runtime */

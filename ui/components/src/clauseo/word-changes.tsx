@@ -5,7 +5,8 @@
 // the draft review's cards (draft-pane.tsx's ChangesList, word.css).
 import { useEffect, useId, useRef, type RefObject } from "react";
 import { IconAccept, IconBackToAnswer } from "../icons/icons.tsx";
-import { errorWords } from "../lib/words-errors.ts";
+import { errorWordsOf } from "../lib/words-errors.ts";
+import type { RefusedDetail } from "../lib/words-errors-refused.ts";
 import { mf } from "../lib/words-matter-form.ts";
 import { useReaderWords, type ReaderKey } from "../lib/words-reader.ts";
 import { langOfText } from "../lib/script.ts";
@@ -125,8 +126,9 @@ export function WordChanges({
   sending: boolean;
   /** The latest decision, with its clock time in English ("3:42 pm"), while it can be undone here. */
   decided: { decision: TrackedDecision; time: string } | null;
-  /** What the host refused with, by its code, and whether Try again sends the decision again. */
-  line: { code: string; retry: boolean } | null;
+  /** What the host refused with, by its code (and the files, refusal and write failure matter.file_refused's and
+   * matter.file_write_failed's lines name), and whether Try again sends the decision again. */
+  line: ({ code: string; retry: boolean } & RefusedDetail) | null;
   backRef?: RefObject<HTMLButtonElement | null>;
   onBack: () => void;
   onDecide: (ids: readonly number[], decision: TrackedDecision) => void;
@@ -172,7 +174,7 @@ export function WordChanges({
       {line !== null && (
         <div className="wc-line" role="alert" data-testid="word-changes-line">
           <p>
-            <Say>{errorWords(lang, line.code)}</Say>
+            <Say>{errorWordsOf(lang, line)}</Say>
           </p>
           {line.retry && (
             <Button

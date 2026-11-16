@@ -8,13 +8,14 @@ import { agentText, step, userMessage } from "../testing/stream-script.ts";
 import type { ErrorCode } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost } from "./hosts.ts";
+import { REFUSED_ENTRIES, WRITTEN_ENTRIES } from "./registry-refused.tsx";
 import { RoomOver } from "./states.tsx";
 import { errorWords } from "./words.ts";
 
 /** Whether an error code's sentence needs no "U3-err-<code>" refusal on a send: Versions' own (the Word blackline's,
  * words-errors.ts's MARK_KEYS, UC-114 and UC-115), and agent.offline, agent.service_error, agent.quiet,
  * agent.unreachable, matter.folder_backslash and agent.folder_inaccessible, a turn's failures with their own entries
- * below. Only the false answer narrows: a key it refuses is never one of MARK_KEYS. */
+ * below, and matter.file_refused and matter.file_write_failed, whose sentences are registry-refused.tsx's. Only the false answer narrows: a key it refuses is never one of MARK_KEYS. */
 export const ownEntry = (code: ErrorCode, key: ErrorKey): key is (typeof MARK_KEYS)[number] =>
   code === "agent.offline" ||
   code === "agent.answer_failed" ||
@@ -23,6 +24,8 @@ export const ownEntry = (code: ErrorCode, key: ErrorKey): key is (typeof MARK_KE
   code === "agent.unreachable" ||
   code === "matter.folder_backslash" ||
   code === "agent.folder_inaccessible" ||
+  code === "matter.file_refused" ||
+  code === "matter.file_write_failed" ||
   (MARK_KEYS as readonly string[]).includes(key);
 
 /** agent.offline is never a send's refusal: the stop line under the answer so far, with Try again. */
@@ -185,8 +188,11 @@ const OWN: Partial<Record<ErrorCode, Entry[]>> = {
     "agent.folder_inaccessible",
     "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
   ),
+  "matter.file_refused": REFUSED_ENTRIES,
+  "matter.file_write_failed": WRITTEN_ENTRIES,
 };
 
 /** The entries in place of a refusal for a code `ownEntry` names: agent.offline's, agent.service_error's, agent.quiet's,
- * agent.unreachable's and the two folder codes' own, in their code's place. */
+ * agent.unreachable's, the two folder codes', matter.file_refused's and matter.file_write_failed's own, in their
+ * code's place. */
 export const ownEntries = (code: ErrorCode): Entry[] => OWN[code] ?? [];

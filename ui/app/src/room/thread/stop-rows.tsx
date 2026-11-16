@@ -13,7 +13,7 @@ import { NoticeCard, StopMark } from "@clauseo/components/clauseo/limit-note.tsx
 import { IconChecking } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
-import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { errorWords, errorWordsOf } from "@clauseo/components/lib/words-errors.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
@@ -213,7 +213,18 @@ function Changed({ entry }: { entry: StepEntry }) {
           {...(undoable && !locked ? { onUndo } : {})}
           {...(open === undefined ? {} : { open })}
           undoDisabled={busy || pending}
-          error={shown === null ? null : { words: errorWords(w.lang, shown, plan), code: shown }}
+          error={
+            shown === null
+              ? null
+              : {
+                  // an undo's refusal by the whole error: matter.file_refused and matter.file_write_failed name files
+                  words:
+                    refused !== null && shown === undoRefusal
+                      ? errorWordsOf(w.lang, refused, plan)
+                      : errorWords(w.lang, shown, plan),
+                  code: shown,
+                }
+          }
           errorAction={
             shown === "matter.document_path_too_long" && opener !== undefined
               ? { label: ui(w.lang, revealKey(platform)), onAction: reveal(opener) }

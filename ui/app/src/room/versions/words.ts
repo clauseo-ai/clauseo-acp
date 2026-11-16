@@ -12,7 +12,7 @@ import {
 } from "@clauseo/components/clauseo/versions-model.ts";
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { clock } from "@clauseo/components/lib/words.ts";
-import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { errorWords, errorWordsOf } from "@clauseo/components/lib/words-errors.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { listOf, vt } from "@clauseo/components/lib/words-versions.ts";
 import type {
@@ -538,10 +538,19 @@ export function refusalWords(lang: Lang, code: string, clash: Clash | null): str
       );
 }
 
-/** The line for a failed act, by its code (refusalWords). */
-export const failedLine = (lang: Lang, code: string, clash: Clash | null = null): BandNotice => ({
+/** The line for a failed act, by its code (refusalWords), and matter.file_refused's and matter.file_write_failed's by
+ * the files, refusal and write failure it names (`of`). */
+export const failedLine = (
+  lang: Lang,
+  code: string,
+  clash: Clash | null = null,
+  of?: Snapshot["failedOf"],
+): BandNotice => ({
   tone: "failed",
-  text: refusalWords(lang, code, clash),
+  text:
+    code === "matter.file_folder_clash"
+      ? refusalWords(lang, code, clash)
+      : errorWordsOf(lang, { ...of, code }),
 });
 
 /** The not-saved line: which paper Clauseo changed and when, that the change couldn't be kept as a version, and that

@@ -287,7 +287,7 @@ export function VersionsCentre({
     s.failed !== "matter.turn_running" &&
     s.failed !== "thread.turn_running" &&
     s.ask?.stage !== "word"
-      ? failedLine(lang, s.failed, s.clash)
+      ? failedLine(lang, s.failed, s.clash, s.failedOf)
       : null;
   // a folder gone, or not the matter's: Locate folder beside the words (act-refusals.ts)
   const locateAct =
