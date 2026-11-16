@@ -24,7 +24,7 @@ file is harmless. That is your call, and the next section gives you a way to che
 For the careful. It takes about two minutes.
 
 1. Download Clauseo only from its GitHub release page:
-   <https://github.com/clauseo-ai/clauseo-acp/releases>. Each release is built there by GitHub
+   <https://github.com/clauseo-ai/clauseo-acp/releases/latest>. Each release is built there by GitHub
    from the public source code.
 2. On the same release, open `SHA256SUMS.txt`. Each line is a long code, then a file name. Find
    the line for the file you downloaded.

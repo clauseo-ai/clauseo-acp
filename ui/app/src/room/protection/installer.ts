@@ -11,6 +11,12 @@ import { APP_VERSION } from "../../settings/version.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import { quietly } from "../open.ts";
 
+/** The one place the download address lives: Clauseo's GitHub release page, until Clauseo has a
+ * home page. The install guides link `${RELEASES_PAGE}/latest`, and the repair button links this
+ * version's `${RELEASES_PAGE}/tag/<tag>`. When the home page exists, change it here; the test in
+ * release-page.test.ts names every other line to update. */
+export const RELEASES_PAGE = "https://github.com/clauseo-ai/clauseo-acp/releases";
+
 /** The tag prefix of each release mode's page; a dry run publishes nothing, so it has none. */
 const TAG_PREFIX: Record<ReleaseMode, string | null> = { release: "v", test: "test-v", dry: null };
 
@@ -24,7 +30,7 @@ export function installerPage(
 ): string | null {
   const prefix = TAG_PREFIX[mode];
   return prefix !== null && /^\d+\.\d+\.\d+$/.test(version)
-    ? `https://github.com/clauseo-ai/clauseo-acp/releases/tag/${prefix}${version}`
+    ? `${RELEASES_PAGE}/tag/${prefix}${version}`
     : null;
 }
 

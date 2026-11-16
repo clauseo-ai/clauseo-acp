@@ -28,7 +28,7 @@ is harmless. That is your call, and the next section gives you a way to check.
 For the careful. It takes about two minutes.
 
 1. Download Clauseo only from its GitHub release page:
-   <https://github.com/clauseo-ai/clauseo-acp/releases>. Each release is built there by GitHub
+   <https://github.com/clauseo-ai/clauseo-acp/releases/latest>. Each release is built there by GitHub
    from the public source code. Most Macs need the file ending `_aarch64.dmg`; an older Intel Mac
    needs `_x64.dmg`.
 2. On the same release, open `SHA256SUMS.txt`. Each line is a long code, then a file name. Find
