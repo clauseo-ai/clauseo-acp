@@ -42,6 +42,11 @@ pub(crate) trait Fs {
     /// number), never following a link at it: asked only of a path the walk vouched for. An
     /// error when it can't be read (`NotFound` when there is no such name).
     fn identity(&self, path: &Path) -> io::Result<(u64, u128)>;
+    /// How many names the local file at `path` has (its hard links), never following a link at
+    /// it: asked only of a path the walk vouched for. One where it can't be told.
+    fn links(&self, _path: &Path) -> io::Result<u64> {
+        Ok(1)
+    }
 }
 
 /// The real disk.
@@ -97,6 +102,23 @@ impl Fs for RealFs {
         {
             let _ = path;
             Err(io::ErrorKind::Unsupported.into())
+        }
+    }
+
+    fn links(&self, path: &Path) -> io::Result<u64> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            Ok(std::fs::symlink_metadata(path)?.nlink())
+        }
+        #[cfg(windows)]
+        {
+            super::windows::links(path).map(u64::from)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            Ok(1)
         }
     }
 }

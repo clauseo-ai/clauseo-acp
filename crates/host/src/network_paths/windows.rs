@@ -16,9 +16,9 @@ use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_ID_INFO, FILE_REMOTE_PROTOCOL_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FileAttributeTagInfo, FileIdInfo, FileRemoteProtocolInfo, FindClose, FindFirstFileW,
-    GetFileInformationByHandleEx, GetShortPathNameW, GetVolumeInformationByHandleW, OPEN_EXISTING,
-    QueryDosDeviceW, WIN32_FIND_DATAW,
+    FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdInfo, FileRemoteProtocolInfo, FileStandardInfo,
+    FindClose, FindFirstFileW, GetFileInformationByHandleEx, GetShortPathNameW,
+    GetVolumeInformationByHandleW, OPEN_EXISTING, QueryDosDeviceW, WIN32_FIND_DATAW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -110,6 +110,36 @@ pub(super) fn identity(path: &Path) -> std::io::Result<(u64, u128)> {
     // SAFETY: `handle` was opened above and is closed once.
     let _closed = unsafe { CloseHandle(handle) };
     read
+}
+
+/// How many names (hard links) the local file at `path` has (`FileStandardInfo`), a link at it
+/// opened itself, never followed.
+pub(super) fn links(path: &Path) -> std::io::Result<u32> {
+    let path = wide(path);
+    // SAFETY: `path` is NUL-terminated and outlives the call; no access is asked, every share
+    // mode is allowed, and a link at the path is opened itself, never followed.
+    let handle: HANDLE = unsafe {
+        CreateFileW(
+            PCWSTR(path.as_ptr()),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+    }
+    .map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+    let mut info = FILE_STANDARD_INFO::default();
+    let size = u32::try_from(size_of::<FILE_STANDARD_INFO>()).unwrap_or(0);
+    // SAFETY: `handle` is open; `info` is a FILE_STANDARD_INFO of `size` bytes written in place.
+    let read = unsafe {
+        GetFileInformationByHandleEx(handle, FileStandardInfo, (&raw mut info).cast(), size)
+    };
+    // SAFETY: `handle` was opened above and is closed once.
+    let _closed = unsafe { CloseHandle(handle) };
+    read.map_err(|error| std::io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
+    Ok(info.NumberOfLinks)
 }
 
 /// The identity of the open `file`: its volume's serial number and its 128-bit file ID

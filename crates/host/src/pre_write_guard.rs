@@ -342,17 +342,21 @@ impl Refusal {
     }
 }
 
-/// What the agent is told for a fenced stetdoc read. Another matter's says "was denied" and
-/// names the matter's folder, words #1085's refusal detector (`outside/refused_call.rs`:
-/// `PHRASES`, `names_fenced`) takes for a refusal on that matter, so its offer to invite
-/// the matter can follow. The others are plain refusals.
+/// The one shape a stetdoc command runs in, for a refusal to show.
+const STETDOC_PLAIN: &str = "stetdoc runs only as a plain command: \
+     `stetdoc <subcommand> \"<path>\"`, with no variables, wildcards, wrappers or folder changes \
+     in the same line; a filter such as `| head` may follow it.";
+
+/// What the agent is told for a fenced stetdoc command. Another matter's says "was denied",
+/// words #1085's refusal detector (`outside/refused_call.rs`: `PHRASES`, with the call's own
+/// paths) takes for a refusal on that matter, so its offer to invite the matter can follow; it
+/// names the document only as the agent wrote it, never the matter's registered folder. The
+/// others are plain refusals.
 fn read_reason(fenced: &names::Fenced) -> String {
     match fenced {
-        names::Fenced::Matter(word, folder) => format!(
-            "Reading {word} with stetdoc was denied: it is in another matter's folder ({}), \
-             which this conversation has no access to. Tell the lawyer it is another matter's \
-             folder.",
-            folder.display()
+        names::Fenced::Matter(word) => format!(
+            "Reading {word} with stetdoc was denied: it is in another matter's folder, which this \
+             conversation has no access to. Tell the lawyer it is another matter's folder."
         ),
         names::Fenced::Data(word) => format!(
             "Clauseo doesn't let the agent read {word} with stetdoc: it is in Clauseo's own data \
@@ -364,13 +368,18 @@ fn read_reason(fenced: &names::Fenced) -> String {
         ),
         names::Fenced::Unchecked(word) => format!(
             "Clauseo couldn't tell where {word} leads, so this stetdoc command doesn't run. Give \
-             stetdoc the document's full path, with no variable, ~, wildcard or link it can't \
-             follow, and no folder change in the same command."
+             the document's full path. {STETDOC_PLAIN}"
+        ),
+        names::Fenced::Missing(word) => format!(
+            "{word} doesn't exist, so this stetdoc command doesn't run. Check the document's path."
         ),
         names::Fenced::Overflow(word) => format!(
             "Clauseo couldn't check {word} against this computer's other matters, so stetdoc may \
              read only in this matter's folder and the session's own folders now."
         ),
+        names::Fenced::Shape => {
+            format!("Clauseo doesn't run this stetdoc command. {STETDOC_PLAIN}")
+        }
     }
 }
 

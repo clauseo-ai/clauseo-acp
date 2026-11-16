@@ -210,11 +210,6 @@ fn starts(folders: &Folders, changes: bool, candidate: &Path) -> Vec<PathBuf> {
     paths
 }
 
-/// Whether `word` names a folder change (`cd`, `pushd`, `Set-Location`, …, [`change`]).
-pub(super) fn is_folder_change(word: &str) -> bool {
-    change(word).is_some()
-}
-
 /// What a folder-changing command does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Change {

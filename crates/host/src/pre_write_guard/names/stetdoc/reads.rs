@@ -2,33 +2,38 @@
 //! (`clauseo_profile::claude::stetdoc_allowed`) run `view`, `inspect`, `check` and `lookup` with
 //! no question, and Claude Code checks no path for stetdoc, so its `Read` and shell deny rules
 //! never see the document a command names. stetdoc follows a link given as its input and reads
-//! any Word document or working copy the lawyer can read. So the guard reads the input itself:
-//! its real path (every link followed, each name's long form, so an 8.3 short name too, by the
-//! network-safe walk, [`walk`]), refused when it lies in a fenced place ([`GuardFence`]): the
-//! data folder (but the session's own folders in it), another matter's folder, or a protected
-//! root. Anything else passes as before: a template in the lawyer's Documents is ordinary use,
-//! and stetdoc is Claude's only way to read Word.
+//! any Word document or working copy the lawyer can read. So the guard fences it ([`GuardFence`]):
+//! the data folder (but the session's own folders in it), another matter's folder, a protected
+//! root. A template in the lawyer's Documents is ordinary use and reads as before.
 //!
-//! It fails closed on an input it can't follow: one the walk can't vouch for (a network path, a
-//! link it can't read, a name it may not look at), a word the shell would change first (`~`, a
-//! `$`, a backtick, a brace or an unquoted glob in Bash), a relative one in a command that
-//! changes folder, or a command longer than [`READ_WORDS`] words. Only the form the allow rules
-//! match is read: `stetdoc` first in a simple command (after `NAME=value`, `command` and the
-//! like), at the top level or in a script handed to `sh -c`, `pwsh -Command` or `eval`. A
-//! wrapper (`xargs stetdoc`, `env stetdoc`) matches no rule and goes to a classifier. The
-//! writing subcommands ask, as before.
+//! The fence does not try to read every shell line. It allows one shape and refuses any other
+//! line that mentions stetdoc at all ([`super::shape`]): plain simple commands joined by `;`, `&&`,
+//! `||`, `|` or a new line, every word a plain literal, no wildcard, variable, substitution,
+//! redirection (but `2>&1`), here-document or PowerShell splat. In that line:
 //!
-//! The walk is `network_paths::resolve::walk`, the data fence's. When host's shared resolver
-//! lands, this switches to it.
+//! - a command that runs stetdoc names it first, as `stetdoc`, and is the first of its pipe;
+//! - every other command is a filter from a short list ([`FILTERS`]) with no word mentioning
+//!   stetdoc, so no folder change, alias, function, variable, link, wrapper or other shell;
+//! - each word of a stetdoc command that is not an option name, and each option's `=value`, is
+//!   walked to its real path ([`walk`]: every link followed, each name's long form, so an 8.3
+//!   short name too) and refused in a fenced place, for every subcommand;
+//! - a reading subcommand's document must exist and have one name (no hard link).
+//!
+//! A word the walk can't vouch for (a network path, a link it can't read) is refused. Git Bash's
+//! `/c/…`, `/cygdrive/c/…` and `/proc/cygdrive/c/…` are read as Git Bash hands them on; any
+//! other path from its root (`/tmp`, `/usr`) is refused on Windows.
+//!
+//! Not caught here: a link swapped between this check and stetdoc opening the path (a loop run
+//! in the background by an earlier command), and a hard link inside a working copy that
+//! `check` prints. The walk is `network_paths::resolve::walk`, the data fence's.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use super::super::program_name;
+use super::shape::{Segment, mentions_stetdoc, plain_segments};
 use crate::network_paths::fold_name;
-use crate::network_paths::resolve::{Disk, Walked, comparable, walk};
-use crate::pre_write_guard::shell::{command_words, is_folder_change, script};
-use crate::pre_write_guard::words::{Escape, Segments, shell_segments};
+use crate::network_paths::resolve::{Disk, Entry, Walked, comparable, walk};
+use crate::pre_write_guard::words::Escape;
 use crate::stetdoc_args::args_of;
 
 /// The flags that name a fenced place, each followed by one path.
@@ -43,8 +48,23 @@ const OVERFLOW_FLAG: &str = "--fence-overflow";
 /// program with at most 32 767 characters; past this the list is left out ([`OVERFLOW_FLAG`]).
 const MATTERS_BUDGET: usize = 16 * 1024;
 
-/// The most words of a command read; a longer one with a stetdoc read in it is refused.
-pub(in crate::pre_write_guard) const READ_WORDS: usize = 1024;
+/// The commands a line that runs stetdoc may hold beside it, as their first word: filters of
+/// its output that start no other program, change no folder and make no link. PowerShell's
+/// are matched in any case.
+const FILTERS: [&str; 12] = [
+    "head", "tail", "grep", "wc", "cut", "tr", "uniq", "echo", "printf", "ls", "pwd", "true",
+];
+const PS_FILTERS: [&str; 9] = [
+    "select-object",
+    "select",
+    "select-string",
+    "sls",
+    "out-string",
+    "write-output",
+    "write-host",
+    "measure-object",
+    "measure",
+];
 
 /// stetdoc v0.9.3's reading subcommands that take a document (`cli.rs`: `ViewArgs` :113,
 /// `InspectArgs` :207, `CheckArgs` :376, `LookupArgs` :391), each with its options that take a
@@ -158,24 +178,28 @@ fn pass(args: &mut Vec<String>, flag: &str, path: &Path) -> bool {
     true
 }
 
-/// Why a stetdoc read is refused, with the word that named the document.
+/// Why a stetdoc command is refused, with the word that named the place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::pre_write_guard) enum Fenced {
     /// In the data folder, outside the own folders.
     Data(String),
-    /// In another matter's folder (as the fence spells it).
-    Matter(String, PathBuf),
+    /// In another matter's folder (which the agent is never told).
+    Matter(String),
     /// In a protected root.
     Protected(String),
-    /// Where the word leads could not be found.
+    /// Where the word leads could not be found, or the document has more than one name.
     Unchecked(String),
+    /// The document does not exist.
+    Missing(String),
     /// Outside the matter and the own folders, with the fence cut short.
     Overflow(String),
+    /// The line mentions stetdoc and is not the plain shape ([`super::shape`]).
+    Shape,
 }
 
-/// The first stetdoc read of the shell command `command` (its shell's escape `escape`) that
-/// `fence` refuses, its words taken from `base` (the hook's `cwd`), with `matter` the session's
-/// matter folder, looked at on `disk`. `None` when the fence is empty.
+/// The first reason `fence` refuses the shell command `command` (its shell's escape `escape`),
+/// with `base` the hook's `cwd` and `matter` the session's matter folder, looked at on
+/// `disk`. `None` when the fence is empty or the command never mentions stetdoc.
 pub(in crate::pre_write_guard) fn fenced_read(
     command: &str,
     escape: Escape,
@@ -183,86 +207,105 @@ pub(in crate::pre_write_guard) fn fenced_read(
     fence: &GuardFence,
     disk: &Disk<'_>,
 ) -> Option<Fenced> {
-    if !fence.is_on() {
+    if !fence.is_on() || !mentions_stetdoc(command) {
         return None;
     }
-    let mut top = Segments::new(READ_WORDS);
-    shell_segments(command, escape, &mut top);
-    let inner: Vec<(Segments, Escape)> = top
-        .iter()
-        .filter(|segment| segment.command)
-        .filter_map(|segment| script(&segment.words, escape))
-        .map(|(script, escape)| {
-            let mut inner = Segments::new(READ_WORDS);
-            shell_segments(&script, escape, &mut inner);
-            (inner, escape)
-        })
-        .collect();
-    let all = std::iter::once((&top, escape)).chain(inner.iter().map(|(s, e)| (s, *e)));
-    let parts: Vec<_> = all
-        .flat_map(|(segments, escape)| {
-            let full = segments.full();
-            segments
-                .iter()
-                .filter(|segment| segment.command)
-                .map(move |segment| (segment, escape, full))
-        })
-        .collect();
-    let changes = parts
-        .iter()
-        .any(|(segment, ..)| segment.words.iter().any(|word| is_folder_change(word)));
-    // Walked only when a command reads with stetdoc: most shell commands don't.
-    let mut places = None;
-    for (segment, escape, full) in parts {
-        let words = command_words(&segment.words);
-        let skipped = segment.words.len() - words.len();
-        let Some((program, args)) = words.split_first() else {
-            continue;
-        };
-        if program_name(program) != "stetdoc" {
-            continue;
-        }
-        let args = args_of(args);
-        let Some((input, others)) = read_words(&args) else {
-            continue;
-        };
-        if full {
-            return Some(Fenced::Unchecked("stetdoc".to_owned()));
-        }
-        // Where the input stands among the segment's words, for whether it was quoted.
-        let quoted = segment
-            .words
-            .iter()
-            .skip(skipped + 1)
-            .position(|word| word == input)
-            .and_then(|at| segment.quoted.get(skipped + 1 + at).copied())
-            .unwrap_or(false);
-        let to = Spot {
-            base,
-            escape,
-            changes,
-            disk,
-        };
-        let Some(real) = to.real(input, quoted) else {
-            return Some(Fenced::Unchecked(input.to_owned()));
-        };
-        let places = places.get_or_insert_with(|| Places::new(fence, matter, disk));
-        if let Some(fenced) = places.refuses(&real, input) {
+    let powershell = escape == Escape::Backtick;
+    let Some(segments) = plain_segments(command, powershell) else {
+        return Some(Fenced::Shape);
+    };
+    let to = Spot {
+        base,
+        powershell,
+        disk,
+    };
+    let places = Places::new(fence, matter, disk);
+    for segment in &segments {
+        if let Some(fenced) = segment_refusal(segment, powershell, &to, &places) {
             return Some(fenced);
-        }
-        // Any other word that leads into a fenced place is refused too: a misread option.
-        for word in others {
-            let found = to
-                .real(word, true)
-                .and_then(|real| places.refuses(&real, word));
-            if let Some(fenced @ (Fenced::Data(_) | Fenced::Matter(..) | Fenced::Protected(_))) =
-                found
-            {
-                return Some(fenced);
-            }
         }
     }
     None
+}
+
+/// Why `segment` of a plain line is refused, if it is: a stetdoc command fed by a pipe, a word
+/// of one leading somewhere fenced, its document missing or hard-linked; any other command not a
+/// filter, or with a word that mentions stetdoc.
+fn segment_refusal(
+    segment: &Segment,
+    powershell: bool,
+    to: &Spot<'_, '_>,
+    places: &Places,
+) -> Option<Fenced> {
+    let (program, args) = segment.words.split_first()?;
+    if program != "stetdoc" {
+        let lower = program.to_lowercase();
+        let filter = FILTERS.contains(&program.as_str())
+            || (powershell
+                && (FILTERS.contains(&lower.as_str()) || PS_FILTERS.contains(&lower.as_str())));
+        let mentions = segment.words.iter().any(|word| mentions_stetdoc(word));
+        return (!filter || mentions).then_some(Fenced::Shape);
+    }
+    if segment.piped_in {
+        return Some(Fenced::Shape);
+    }
+    let mut literal = false;
+    for word in args {
+        let value = if literal {
+            word.as_str()
+        } else if word == "--" {
+            literal = true;
+            continue;
+        } else if word.starts_with('-') {
+            match option_value(word) {
+                Some(Some(value)) => value,
+                Some(None) => continue,
+                None => return Some(Fenced::Shape),
+            }
+        } else {
+            word.as_str()
+        };
+        let Some(real) = to.real(value) else {
+            return Some(Fenced::Unchecked(value.to_owned()));
+        };
+        if let Some(fenced) = places.refuses(&real, value) {
+            return Some(fenced);
+        }
+    }
+    let args = args_of(args);
+    if let Some((document, _)) = read_words(&args) {
+        let Some(real) = to.real(document) else {
+            return Some(Fenced::Unchecked(document.to_owned()));
+        };
+        match to.disk.fs.entry(&real) {
+            Ok(Entry::Dir) => {}
+            Ok(Entry::File) if to.disk.fs.links(&real).is_ok_and(|links| links == 1) => {}
+            Ok(Entry::File | Entry::Link) => return Some(Fenced::Unchecked(document.to_owned())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Some(Fenced::Missing(document.to_owned()));
+            }
+            Err(_) => return Some(Fenced::Unchecked(document.to_owned())),
+        }
+    }
+    None
+}
+
+/// An option word's value: `Some(None)` for a bare option name (`-x`, `--name`),
+/// `Some(Some(value))` for `--name=value`, `None` for any other word starting with `-` (a
+/// lone `-`, which reads standard input, or an option with something stuck to it).
+fn option_value(word: &str) -> Option<Option<&str>> {
+    let (name, value) = match word.split_once('=') {
+        Some((name, value)) => (name, Some(value)),
+        None => (word, None),
+    };
+    let bare = name.strip_prefix("--").or_else(|| name.strip_prefix('-'))?;
+    let mut chars = bare.chars();
+    let plain = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if !plain || value.is_some_and(str::is_empty) {
+        return None;
+    }
+    Some(value)
 }
 
 /// A reading subcommand's document word among `args` ([`args_of`]) and its other words that are
@@ -294,41 +337,32 @@ fn read_words<'a>(args: &[&'a str]) -> Option<(&'a str, Vec<&'a str>)> {
 
 /// How a word becomes a path.
 struct Spot<'d, 'a> {
-    /// The hook's `cwd`.
+    /// The hook's `cwd`, for a relative word.
     base: &'a Path,
-    escape: Escape,
-    /// Whether the command changes folder anywhere.
-    changes: bool,
+    /// PowerShell's words, else Bash's.
+    powershell: bool,
     disk: &'a Disk<'d>,
 }
 
 impl Spot<'_, '_> {
-    /// Where `word` (`quoted` in part, so a Bash glob in it is literal) really leads: `None` when
-    /// it can't be told (see the module doc).
-    fn real(&self, word: &str, quoted: bool) -> Option<PathBuf> {
-        let bash = self.escape == Escape::Backslash;
-        let shell_changes = word.is_empty()
-            || word.starts_with('~')
-            || word.contains('$')
-            || (bash && (word.contains(['`', '{']) || (!quoted && word.contains(['*', '?', '[']))));
-        if shell_changes {
+    /// Where the plain word `word` really leads: `None` when it can't be told (an empty word,
+    /// a Git Bash form it doesn't map, a path the walk can't vouch for).
+    fn real(&self, word: &str) -> Option<PathBuf> {
+        if word.is_empty() {
             return None;
         }
         let windows = self.disk.net.windows;
-        let mut text = word.to_owned();
-        if !bash && !windows {
+        let text = if self.powershell && !windows {
             // PowerShell takes `\` as a separator on every OS.
-            text = text.replace('\\', "/");
-        }
-        if bash && windows {
-            // Git Bash hands a native program `/c/x` as `C:\x`.
-            text = msys_drive(&text).unwrap_or(text);
-        }
+            word.replace('\\', "/")
+        } else if !self.powershell && windows {
+            git_bash(word)?
+        } else {
+            word.to_owned()
+        };
         let path = Path::new(&text);
         let path = if path.is_absolute() {
             path.to_path_buf()
-        } else if self.changes {
-            return None;
         } else {
             self.base.join(path)
         };
@@ -340,24 +374,37 @@ impl Spot<'_, '_> {
     }
 }
 
-/// Git Bash's `/c` or `/c/rest` as `C:\` or `C:\rest`.
-fn msys_drive(text: &str) -> Option<String> {
-    let rest = text.strip_prefix('/')?;
-    let mut chars = rest.chars();
-    let drive = chars.next().filter(char::is_ascii_alphabetic)?;
-    let after = chars.as_str();
-    if !(after.is_empty() || after.starts_with('/')) {
-        return None;
-    }
-    let after = after.trim_start_matches('/').replace('/', "\\");
-    Some(format!("{}:\\{after}", drive.to_ascii_uppercase()))
+/// A Bash word as Git Bash hands it to a Windows program: `/c/rest`, `/cygdrive/c/rest` and
+/// `/proc/cygdrive/c/rest` as `C:\rest`; `None` for any other path from its root (`/tmp`,
+/// `/usr`, `//server`, mapped to Git's own folders or a share), and for a word with a `:`
+/// past a drive's or a `;` (a path list, which it maps item by item).
+fn git_bash(word: &str) -> Option<String> {
+    let mapped = match word.strip_prefix('/') {
+        None => word.to_owned(),
+        Some(rest) => {
+            let rest = rest
+                .strip_prefix("proc/cygdrive/")
+                .or_else(|| rest.strip_prefix("cygdrive/"))
+                .unwrap_or(rest);
+            let mut chars = rest.chars();
+            let drive = chars.next().filter(char::is_ascii_alphabetic)?;
+            let after = chars.as_str();
+            if !(after.is_empty() || after.starts_with('/')) {
+                return None;
+            }
+            let after = after.trim_start_matches('/').replace('/', "\\");
+            format!("{}:\\{after}", drive.to_ascii_uppercase())
+        }
+    };
+    let past_drive = mapped.get(2..).unwrap_or_default();
+    (!past_drive.contains(':') && !mapped.contains(';')).then_some(mapped)
 }
 
 /// The fenced places, each as spelled and as walked, in comparable keys.
 struct Places {
     data: Vec<Vec<Key>>,
     own: Vec<Vec<Key>>,
-    matters: Vec<(PathBuf, Vec<Key>)>,
+    matters: Vec<Vec<Key>>,
     protected: Vec<Vec<Key>>,
     matter: Vec<Key>,
     overflow: bool,
@@ -387,11 +434,7 @@ impl Places {
         Self {
             data: all(&fence.data),
             own: all(&fence.own),
-            matters: fence
-                .matters
-                .iter()
-                .map(|path| (path.clone(), keys(path)))
-                .collect(),
+            matters: all(&fence.matters),
             protected: all(&fence.protected),
             matter: keys(matter),
             overflow: fence.overflow,
@@ -408,13 +451,13 @@ impl Places {
             return Some(Fenced::Protected(word.to_owned()));
         }
         let in_matter = within(&self.matter);
-        for (folder, keys) in &self.matters {
+        for keys in &self.matters {
             // A matter that holds this one fences only what lies outside this one.
             let holds_this = keys
                 .iter()
                 .any(|outer| self.matter.iter().any(|this| this.starts_with(outer)));
             if within(keys) && !(holds_this && in_matter) {
-                return Some(Fenced::Matter(word.to_owned(), folder.clone()));
+                return Some(Fenced::Matter(word.to_owned()));
             }
         }
         let own = any(&self.own);

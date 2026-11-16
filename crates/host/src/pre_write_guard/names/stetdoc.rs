@@ -8,6 +8,7 @@ use crate::stetdoc_args::parse;
 use crate::stetdoc_args::{Form, args_of, form};
 
 mod reads;
+mod shape;
 pub(crate) use reads::GuardFence;
 pub(in crate::pre_write_guard) use reads::{Fenced, fenced_read};
 

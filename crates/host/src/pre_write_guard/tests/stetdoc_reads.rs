@@ -1,13 +1,17 @@
 //! The stetdoc read fence end to end: Claude's entry passes the fence, and the guard refuses a
-//! read of another matter's document with words #1085's refusal detector takes for a refusal.
+//! read of another matter's document with words #1085's refusal detector takes for a refusal,
+//! without naming that matter's folder.
 
 use serde_json::json;
 
 use super::{Fixture, guard_with};
 
+/// What the guard says of a line that is not the plain shape, and of a word it can't follow.
+const PLAIN: &str = "stetdoc runs only as a plain command";
+
 /// The fixture's `out` folder as another matter: a document there, read through a link in the
-/// matter, is refused, saying "was denied" and naming that matter's folder; a document beside
-/// it that no fence names (a template in Documents) reads as before.
+/// matter, is refused, saying "was denied" but not where that matter is; a document beside it
+/// that no fence names (a template in Documents) reads as before.
 #[cfg(unix)]
 #[test]
 fn another_matter_is_refused_and_a_template_reads() {
@@ -25,10 +29,52 @@ fn another_matter_is_refused_and_a_template_reads() {
         let hook = fx.hook(tool, &json!({"command": command}));
         let said = guard_with(&args, hook.to_string().as_bytes());
         assert!(said.contains("was denied"), "{tool}: {said}");
-        assert!(said.contains(&format!("({other})")), "{tool}: {said}");
+        assert!(!said.contains(&other), "{tool}: {said}");
     }
     let template = format!("stetdoc view {}", fx.path("docs/template.docx"));
     let hook = fx.hook("Bash", &json!({"command": template}));
+    assert_eq!(guard_with(&args, hook.to_string().as_bytes()), "");
+}
+
+/// A document with a second name (a hard link to another matter's document) is refused; the
+/// matter's own document, with one name, reads.
+#[cfg(unix)]
+#[test]
+fn a_document_with_a_second_name_is_refused() {
+    let fx = Fixture::new("stetdoc-hard-link");
+    std::fs::hard_link(fx.root.join("out/Held.docx"), fx.matter().join("Copy.docx")).unwrap();
+    let (matter, other) = (fx.path("m"), fx.path("out"));
+    let args = ["--matter", &matter, "--fence-matter", &other];
+    let hook = fx.hook("Bash", &json!({"command": "stetdoc view Copy.docx"}));
+    let said = guard_with(&args, hook.to_string().as_bytes());
+    assert!(
+        said.contains("couldn't tell where Copy.docx leads"),
+        "{said}"
+    );
+    let hook = fx.hook(
+        "Bash",
+        &json!({"command": "stetdoc view Contract.docx | head -5"}),
+    );
+    assert_eq!(guard_with(&args, hook.to_string().as_bytes()), "");
+}
+
+/// A stetdoc line that is not the plain shape is refused, the refusal saying what the plain
+/// shape is; a line that never mentions stetdoc is not this fence's.
+#[test]
+fn a_line_not_of_the_plain_shape_is_refused_with_the_plain_form() {
+    let fx = Fixture::new("stetdoc-shape");
+    let (matter, other) = (fx.path("m"), fx.path("out"));
+    let args = ["--matter", &matter, "--fence-matter", &other];
+    for (tool, command) in [
+        ("Bash", "env stetdoc view Contract.docx"),
+        ("Bash", "cd sub; stetdoc view Contract.docx"),
+        ("PowerShell", "stetdoc view (Get-Item Contract.docx)"),
+    ] {
+        let hook = fx.hook(tool, &json!({"command": command}));
+        let said = guard_with(&args, hook.to_string().as_bytes());
+        assert!(said.contains(PLAIN), "{tool} {command}: {said}");
+    }
+    let hook = fx.hook("Bash", &json!({"command": "ls *.docx | head"}));
     assert_eq!(guard_with(&args, hook.to_string().as_bytes()), "");
 }
 
@@ -43,115 +89,6 @@ fn no_fence_no_refusal() {
         guard_with(&["--matter", &matter], hook.to_string().as_bytes()),
         ""
     );
-}
-
-/// The words the guard says for a read of the data folder.
-const DATA_SAID: &str = "it is in Clauseo's own data folder";
-
-/// A real directory junction in the matter into another matter and into the data folder, each
-/// read in both shells: refused, naming the other matter, or as the data folder's.
-#[cfg(windows)]
-#[test]
-fn a_junction_into_another_matter_or_the_data_folder_is_refused() {
-    let fx = Fixture::new("stetdoc-junction");
-    let (other, data) = (fx.path("out"), fx.path("data"));
-    crate::write::create_dir_all(&fx.root.join("data").join("logs")).unwrap();
-    crate::write::write_file(&fx.root.join(r"data\logs\host.docx"), b"x").unwrap();
-    let junction = clauseo_sandbox::windows::test_junction::junction;
-    junction(&fx.matter().join("toB"), &fx.root.join("out")).unwrap();
-    junction(&fx.matter().join("toData"), &fx.root.join("data")).unwrap();
-    let matter = fx.path("m");
-    let args = [
-        "--matter",
-        &matter,
-        "--fence-matter",
-        &other,
-        "--fence-data",
-        &data,
-    ];
-    for (tool, command, said) in [
-        ("Bash", "stetdoc view toB/Held.docx", format!("({other})")),
-        (
-            "PowerShell",
-            r"stetdoc view toB\Held.docx",
-            format!("({other})"),
-        ),
-        (
-            "Bash",
-            "stetdoc view toData/logs/host.docx",
-            DATA_SAID.to_owned(),
-        ),
-        (
-            "PowerShell",
-            r"stetdoc view toData\logs\host.docx",
-            DATA_SAID.to_owned(),
-        ),
-    ] {
-        let hook = fx.hook(tool, &json!({"command": command}));
-        let got = guard_with(&args, hook.to_string().as_bytes());
-        assert!(got.contains(&said), "{tool} {command}: {got}");
-    }
-}
-
-/// The 8.3 short name of another matter's long-named folder is that folder: refused, naming
-/// it. Skipped where the volume makes no short names.
-#[cfg(windows)]
-#[test]
-fn the_short_name_of_another_matters_folder_is_refused() {
-    let fx = Fixture::new("stetdoc-short-name");
-    let long = fx.root.join("Another Matter Folder");
-    crate::write::create_dir_all(&long).unwrap();
-    crate::write::write_file(&long.join("Held.docx"), b"x").unwrap();
-    let Some(short) = crate::network_paths::short_path(&long).filter(|short| *short != long) else {
-        eprintln!("skipped: the volume gave no 8.3 short name for the test folder");
-        return;
-    };
-    let other = long.to_str().unwrap().to_owned();
-    let read = short.join("Held.docx").to_str().unwrap().to_owned();
-    let matter = fx.path("m");
-    let args = ["--matter", &matter, "--fence-matter", &other];
-    for (tool, command) in [
-        (
-            "Bash",
-            format!("stetdoc view '{}'", read.replace('\\', "/")),
-        ),
-        ("PowerShell", format!("stetdoc view '{read}'")),
-    ] {
-        let hook = fx.hook(tool, &json!({"command": command}));
-        let got = guard_with(&args, hook.to_string().as_bytes());
-        assert!(got.contains("was denied"), "{tool} {command}: {got}");
-        assert!(
-            got.contains(&format!("({other})")),
-            "{tool} {command}: {got}"
-        );
-    }
-}
-
-/// The data folder written as its real path and with `\\?\`, in the fence or in the read,
-/// either way round: refused as the data folder's.
-#[cfg(windows)]
-#[test]
-fn the_data_folders_real_and_verbatim_paths_are_refused() {
-    let fx = Fixture::new("stetdoc-data-forms");
-    crate::write::create_dir_all(&fx.root.join("data").join("logs")).unwrap();
-    crate::write::write_file(&fx.root.join(r"data\logs\host.docx"), b"x").unwrap();
-    let real = dunce::canonicalize(fx.root.join("data")).unwrap();
-    let real = real.to_str().unwrap().to_owned();
-    let verbatim = format!(r"\\?\{real}");
-    let matter = fx.path("m");
-    for (fenced, read) in [
-        (fx.path("data"), real.clone()),
-        (fx.path("data"), verbatim.clone()),
-        (verbatim.clone(), real.clone()),
-        (real.clone(), verbatim.clone()),
-    ] {
-        let args = ["--matter", &matter, "--fence-data", &fenced];
-        let read = format!(r"{read}\logs\host.docx");
-        let command = format!("stetdoc view '{read}'");
-        let hook = fx.hook("PowerShell", &json!({"command": command}));
-        let got = guard_with(&args, hook.to_string().as_bytes());
-        assert!(got.contains(DATA_SAID), "{fenced} {command}: {got}");
-    }
 }
 
 /// On the Mac, the data folder written on the data volume (`/System/Volumes/Data/private/…`)
@@ -182,6 +119,9 @@ fn the_data_folders_data_volume_path_is_refused() {
         let command = format!("stetdoc view '{read}/logs/host.docx'");
         let hook = fx.hook("Bash", &json!({"command": command}));
         let got = guard_with(&args, hook.to_string().as_bytes());
-        assert!(got.contains(DATA_SAID), "{fenced} {command}: {got}");
+        assert!(
+            got.contains("it is in Clauseo's own data folder"),
+            "{fenced} {command}: {got}"
+        );
     }
 }

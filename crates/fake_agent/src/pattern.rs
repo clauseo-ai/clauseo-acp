@@ -7,6 +7,8 @@ use serde_json::Value;
 pub(crate) const ANY: &str = "{{any}}";
 /// The last item of an array pattern that matches any further items, none included.
 pub(crate) const REST: &str = "{{rest}}";
+/// The first item of an array pattern whose other items must each match some item, in any order.
+pub(crate) const INCLUDES: &str = "{{includes}}";
 /// The placeholder for the current session's `cwd`.
 pub(crate) const CWD: &str = "{{cwd}}";
 
@@ -51,8 +53,10 @@ pub(crate) fn scalar_eq(left: &Value, right: &Value) -> bool {
 ///
 /// An object pattern matches when every key it names matches; extra keys are fine. Arrays match
 /// element by element with equal length, unless the pattern's last item is `"{{rest}}"`, which
-/// matches any further items, none included. `"{{any}}"` matches any present value. Scalars match
-/// by equality. The error names the first pointer that differs.
+/// matches any further items, none included; or unless its first item is `"{{includes}}"`, when
+/// each other item must match some item, in any order, among any others. `"{{any}}"` matches
+/// any present value. Scalars match by equality. The error names the first pointer that
+/// differs.
 pub(crate) fn matches(
     pattern: &Value,
     actual: Option<&Value>,
@@ -77,6 +81,18 @@ pub(crate) fn matches(
             let Value::Array(actual_items) = actual else {
                 return Err(format!("{at}: expected an array, got {}", short(actual)));
             };
+            if let Some((Value::String(first), wanted)) = items.split_first()
+                && first == INCLUDES
+            {
+                return match wanted.iter().find(|want| {
+                    !actual_items
+                        .iter()
+                        .any(|got| matches(want, Some(got), pointer).is_ok())
+                }) {
+                    Some(missing) => Err(format!("{at}: no item matches {}", short(missing))),
+                    None => Ok(()),
+                };
+            }
             let (items, rest) = match items.split_last() {
                 Some((Value::String(last), head)) if last == REST => (head, true),
                 _ => (items.as_slice(), false),
@@ -197,6 +213,18 @@ mod tests {
                 ""
             ),
             Err("/b/c: expected 3 items, got 2".to_owned())
+        );
+
+        // `{{includes}}` first: each other item matches some item, in any order.
+        let includes = json!({"b": {"c": ["{{includes}}", 2, 1]}});
+        assert_eq!(matches(&includes, Some(&message), ""), Ok(()));
+        assert_eq!(
+            matches(
+                &json!({"b": {"c": ["{{includes}}", 3]}}),
+                Some(&message),
+                ""
+            ),
+            Err("/b/c: no item matches 3".to_owned())
         );
 
         // `{}` matches any object, and only an object.

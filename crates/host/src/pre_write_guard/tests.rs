@@ -526,4 +526,6 @@ mod devanagari;
 mod fixtures;
 mod gaps;
 mod stetdoc_reads;
+#[cfg(windows)]
+mod stetdoc_reads_windows;
 mod timings;
