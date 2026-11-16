@@ -32,6 +32,10 @@ mod codex_status;
 mod status_retry;
 
 #[cfg(test)]
+#[path = "signin/inherited_creds.rs"]
+mod inherited_creds;
+
+#[cfg(test)]
 #[path = "signin/graceful.rs"]
 mod graceful;
 

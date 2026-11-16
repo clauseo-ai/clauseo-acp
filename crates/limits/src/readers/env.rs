@@ -4,10 +4,12 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 
 /// The spec's env map: the `inherited` environment (read at each read) minus every `GIT_*` and
-/// `SSH_*` variable, the names in [`DROPPED_INHERITED`] and every name the agent's settings
-/// variables (`own`) also name, then `own`, all ignoring ASCII case. Every name in `dropped`
-/// (the Codex reader's [`CODEX_DROPPED`]) is left out of both, and so are `NODE_OPTIONS` and
-/// `NODE_PATH` (`clauseo_process::NODE_ENV`).
+/// `SSH_*` variable, the names in [`DROPPED_INHERITED`], every `CLAUDE_*` and `ANTHROPIC_*` name
+/// but a firm's routing and the launch's other drops (`clauseo_process::env_routing`, the agent
+/// launch's rule, decided over `inherited`: so a read never uses an inherited account the agent
+/// would not) and every name the agent's settings variables (`own`) also name, then `own`, all
+/// ignoring ASCII case. Every name in `dropped` (the Codex reader's [`CODEX_DROPPED`]) is left
+/// out of both, and so are `NODE_OPTIONS` and `NODE_PATH` (`clauseo_process::NODE_ENV`).
 ///
 /// The map is the child's whole environment: the host's launcher clears the environment. The
 /// inherited variables are also in the map because `process`'s redactor takes its secrets only from
@@ -29,13 +31,15 @@ pub(crate) fn spec_env(
         clauseo_process::is_node_env(name)
             || dropped.iter().any(|drop| same(OsStr::new(drop), name))
     };
-    let mut env: BTreeMap<OsString, OsString> = inherited
-        .filter(|(name, _)| {
-            !is_dropped_inherited(name)
-                && !drops(name)
-                && !own.keys().any(|own| same(OsStr::new(own), name))
-        })
-        .collect();
+    let mut env: BTreeMap<OsString, OsString> =
+        clauseo_process::env_routing::kept_inherited(inherited)
+            .into_iter()
+            .filter(|(name, _)| {
+                !is_dropped_inherited(name)
+                    && !drops(name)
+                    && !own.keys().any(|own| same(OsStr::new(own), name))
+            })
+            .collect();
     env.extend(
         own.iter()
             .map(|(name, value)| (OsString::from(name), OsString::from(value)))
@@ -272,6 +276,109 @@ mod tests {
                 env.get(OsStr::new(var)) == Some(&OsString::from("stored")),
                 "{var}"
             );
+        }
+    }
+
+    /// Both readers' environments (the Claude reader's, with its forced `CLAUDE_CONFIG_DIR`,
+    /// and the Codex reader's) under the routing rule.
+    fn both_readers(
+        own: &BTreeMap<String, String>,
+        inherited: &[(&str, &str)],
+    ) -> Vec<BTreeMap<OsString, OsString>> {
+        let forced = (OsStr::new("CLAUDE_CONFIG_DIR"), OsStr::new("clauseo-home"));
+        [(Some(forced), &[][..]), (None, &CODEX_DROPPED[..])]
+            .into_iter()
+            .map(|(forced, dropped)| spec_env(own, os(inherited).into_iter(), forced, dropped))
+            .collect()
+    }
+
+    fn get<'a>(env: &'a BTreeMap<OsString, OsString>, name: &str) -> Option<&'a OsString> {
+        env.get(OsStr::new(name))
+    }
+
+    /// A route and its companions reach a reader; the entry's blank key still wins over an
+    /// inherited one.
+    #[test]
+    fn a_route_and_its_companions_reach_a_reader() {
+        let inherited = [
+            ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
+            ("ANTHROPIC_AUTH_TOKEN", "firm-token"),
+            ("ANTHROPIC_API_KEY", "sk-inherited"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", "account"),
+        ];
+        for env in both_readers(&own(&[("ANTHROPIC_API_KEY", "")]), &inherited) {
+            let base = OsString::from("https://gw.firm.example");
+            assert_eq!(get(&env, "ANTHROPIC_BASE_URL"), Some(&base));
+            assert_eq!(
+                get(&env, "ANTHROPIC_AUTH_TOKEN"),
+                Some(&OsString::from("firm-token"))
+            );
+            assert_eq!(get(&env, "ANTHROPIC_API_KEY"), Some(&OsString::new()));
+            assert_eq!(get(&env, "CLAUDE_CODE_OAUTH_TOKEN"), None);
+        }
+    }
+
+    /// With no route every companion drops, in any case; the same name from the entry's
+    /// variables (a firm plan's) still goes in.
+    #[test]
+    fn a_companion_with_no_route_never_reaches_a_reader() {
+        let companions = &clauseo_process::env_routing::ROUTING_KEPT[13..];
+        for &name in companions {
+            for spelling in [name.to_ascii_uppercase(), name.to_ascii_lowercase()] {
+                for env in both_readers(
+                    &own(&[]),
+                    &[(spelling.as_str(), "inherited"), ("PATH", "bin")],
+                ) {
+                    assert!(
+                        env.keys().all(|key| !same(key, OsStr::new(name))),
+                        "{spelling}"
+                    );
+                    assert_eq!(get(&env, "PATH"), Some(&OsString::from("bin")));
+                }
+                for env in both_readers(
+                    &own(&[(name, "entry")]),
+                    &[(spelling.as_str(), "inherited")],
+                ) {
+                    assert_eq!(
+                        get(&env, name),
+                        Some(&OsString::from("entry")),
+                        "{spelling}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every account-only name, in any case, never reaches a reader, route or not.
+    #[test]
+    fn account_only_names_never_reach_a_reader() {
+        for name in clauseo_process::env_routing::CLAUDE_ACCOUNT_ONLY {
+            for spelling in [name.to_ascii_uppercase(), name.to_ascii_lowercase()] {
+                for route in [("PATH", "bin"), ("CLAUDE_CODE_USE_VERTEX", "1")] {
+                    for env in both_readers(&own(&[]), &[(spelling.as_str(), "inherited"), route]) {
+                        assert!(
+                            env.keys().all(|key| !same(key, OsStr::new(name))),
+                            "{spelling}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Host's launch also drops a few names outside the prefixes
+    /// (`clauseo_process::env_routing::ALSO_DROPPED`): so does every reader, from inheritance.
+    #[test]
+    fn the_names_the_launch_also_drops_never_reach_a_reader() {
+        for name in clauseo_process::env_routing::ALSO_DROPPED {
+            for spelling in [name.to_ascii_uppercase(), name.to_ascii_lowercase()] {
+                for env in both_readers(&own(&[]), &[(spelling.as_str(), "1")]) {
+                    assert!(
+                        env.keys().all(|key| !same(key, OsStr::new(name))),
+                        "{spelling}"
+                    );
+                }
+            }
         }
     }
 }

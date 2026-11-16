@@ -8,7 +8,12 @@
 //!
 //! The rules, from the brief (S18, "The environment of every run"):
 //! - "the inherited one minus every `SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE`", and minus
-//!   `NODE_OPTIONS` and `NODE_PATH` (`clauseo_process::NODE_ENV`, which the spawn drops anyway);
+//!   `NODE_OPTIONS` and `NODE_PATH` (`clauseo_process::NODE_ENV`, which the spawn drops anyway),
+//!   and minus every inherited `CLAUDE_*` and `ANTHROPIC_*` name but a firm's routing
+//!   (`clauseo_process::env_routing`, the agent launch's rule: a route, and its companions
+//!   only beside one; and the launch's few other drops, `ALSO_DROPPED`), for both vendors, so
+//!   a status never says signed in on an inherited account (`CLAUDE_CODE_OAUTH_TOKEN`, a lone
+//!   `ANTHROPIC_AUTH_TOKEN`) the agent would not use;
 //! - "plus the agent's home variables";
 //! - "`ANTHROPIC_API_KEY=""` for Claude and `CODEX_API_KEY=""` for Codex, so a stray key cannot
 //!   win and status reports only the plan login";
@@ -30,6 +35,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use crate::platform::Os;
+use clauseo_process::env_routing;
 
 /// Which vendor's CLI a run starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,15 +139,17 @@ const STRIPPED: [&str; 6] = [
 /// so the quotes are part of the argument.
 const CODEX_STORE: [&str; 2] = ["-c", "cli_auth_credentials_store=\"file\""];
 
-/// The child's whole environment for `inputs`: the base minus the stripped names, plus the
-/// run's own variables.
+/// The child's whole environment for `inputs`: the base minus the stripped names and minus the
+/// prefixed names the routing rule drops (decided over that base), plus the run's own variables.
 pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
-    let mut env: BTreeMap<OsString, OsString> = inputs
-        .base
-        .iter()
-        .filter(|(name, _)| !stripped(name))
-        .map(|(name, value)| (name.clone(), value.clone()))
-        .collect();
+    let routed = env_routing::kept_inherited(
+        inputs
+            .base
+            .iter()
+            .filter(|(name, _)| !stripped(name))
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
+    let mut env: BTreeMap<OsString, OsString> = routed.into_iter().collect();
     match inputs.vendor {
         Vendor::Claude => {
             set(&mut env, "ANTHROPIC_API_KEY", OsStr::new(""));
@@ -234,7 +242,7 @@ pub(crate) fn codex_store_args() -> Vec<OsString> {
     CODEX_STORE.iter().map(OsString::from).collect()
 }
 
-/// Whether `name` is dropped from every run.
+/// Whether `name` is dropped from every run, ignoring ASCII case.
 fn stripped(name: &OsStr) -> bool {
     let upper = name.to_string_lossy().to_ascii_uppercase();
     STRIPPED_PREFIXES

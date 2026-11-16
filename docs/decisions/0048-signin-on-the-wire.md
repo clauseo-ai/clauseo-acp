@@ -200,7 +200,11 @@ fresh install, with no key stored yet; it can never replace or clear one.
    `SSH_AUTH_SOCK` and `SSH_ASKPASS` included, on purpose: an agent has no business using the
    lawyer's ssh-agent keys, and they are a way out for data. Checkpoints use gix in-process, so
    agents need no remote git. `limits`' plan readers drop the same (`GIT_*`, `SSH_*`,
-   `NO_BROWSER`, `CLAUDE_CODE_REMOTE` and Codex's `DROPPED_VARS`). Desktop gives the `agents`
+   `NO_BROWSER`, `CLAUDE_CODE_REMOTE` and Codex's `DROPPED_VARS`). Sign-in, status and logout
+   runs and the limits readers ignore inherited account credentials, matching the launch: they
+   keep an inherited `CLAUDE_*` or `ANTHROPIC_*` name only by the launch's routing rule
+   (`crates/process/src/env_routing.rs`), so Plans says signed in only on Clauseo's own sign-in
+   or a firm's route. Desktop gives the `agents`
    worker two launchers: sign-in runs use the `clear_env` one (0046); install runs (npm, Node,
    the system-proxy check) build specs with partial environments and use one that does not
    clear, or Windows children would lose `SystemRoot` and `PATH`.

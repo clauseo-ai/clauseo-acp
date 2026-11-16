@@ -285,3 +285,103 @@ fn every_run_uses_the_system_ca_and_keeps_an_inherited_ssl_cert_file() {
     assert_eq!(get(&env, "SSL_CERT_FILE"), Some("/all-roots.pem"));
     assert_eq!(get(&env, "CODEX_CA_CERTIFICATE"), Some("/firm/ca.pem"));
 }
+
+/// Every run kind of both vendors (sign-in, status and logout all take this env).
+fn every_run(base: &BTreeMap<OsString, OsString>) -> Vec<(Vendor, BTreeMap<OsString, OsString>)> {
+    let home = Path::new("/data/agents/x/home");
+    let mut runs = Vec::new();
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        for kind in [RunKind::Own { home }, RunKind::Reused { home }] {
+            runs.push((vendor, run_env(&inputs(base, vendor, kind))));
+        }
+    }
+    runs
+}
+
+fn with(pairs: &[(&str, &str)]) -> BTreeMap<OsString, OsString> {
+    let mut base = base();
+    for (name, value) in pairs {
+        base.insert(OsString::from(name), OsString::from(value));
+    }
+    base
+}
+
+/// The routing rule (`clauseo_process::env_routing`): a route and its companions are kept, while
+/// `ANTHROPIC_API_KEY` stays blanked for Claude even beside a route.
+#[test]
+fn every_run_keeps_a_route_and_its_companions() {
+    let base = with(&[
+        ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
+        ("anthropic_auth_token", "firm-token"),
+        ("ANTHROPIC_MODEL", "claude-firm"),
+        ("CLAUDE_CODE_OAUTH_TOKEN", "account"),
+    ]);
+    for (vendor, env) in every_run(&base) {
+        assert_eq!(
+            get(&env, "ANTHROPIC_BASE_URL"),
+            Some("https://gw.firm.example")
+        );
+        assert_eq!(get(&env, "anthropic_auth_token"), Some("firm-token"));
+        assert_eq!(get(&env, "ANTHROPIC_MODEL"), Some("claude-firm"));
+        assert_eq!(get(&env, "CLAUDE_CODE_OAUTH_TOKEN"), None, "{vendor:?}");
+        if vendor == Vendor::Claude {
+            assert_eq!(get(&env, "ANTHROPIC_API_KEY"), Some(""));
+        }
+    }
+}
+
+/// With no route, every companion drops: a lone `ANTHROPIC_AUTH_TOKEN` swaps the account.
+#[test]
+fn every_run_drops_a_companion_with_no_route() {
+    for name in
+        &clauseo_process::env_routing::ROUTING_KEPT[clauseo_process::env_routing::ROUTES.len()..]
+    {
+        if *name == "ANTHROPIC_API_KEY" {
+            continue;
+        }
+        for spelling in [name.to_ascii_uppercase(), name.to_ascii_lowercase()] {
+            let base = with(&[(spelling.as_str(), "inherited")]);
+            for (vendor, env) in every_run(&base) {
+                assert_eq!(get(&env, &spelling), None, "{spelling}, {vendor:?}");
+            }
+        }
+    }
+}
+
+/// Every account-only name, in its own case and in lower case, drops from every run, route or
+/// not.
+#[test]
+fn every_run_drops_each_account_only_name_route_or_not() {
+    for name in clauseo_process::env_routing::CLAUDE_ACCOUNT_ONLY {
+        for spelling in [name.to_ascii_uppercase(), name.to_ascii_lowercase()] {
+            for route in [None, Some(("CLAUDE_CODE_USE_BEDROCK", "1"))] {
+                let mut pairs = vec![(spelling.as_str(), "inherited")];
+                pairs.extend(route);
+                for (vendor, env) in every_run(&with(&pairs)) {
+                    let left: Vec<String> = names(&env)
+                        .into_iter()
+                        .filter(|key| key.eq_ignore_ascii_case(name))
+                        .collect();
+                    assert_eq!(
+                        left,
+                        Vec::<String>::new(),
+                        "{spelling}, {vendor:?}, {route:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Host's launch also drops a few names outside the prefixes
+/// (`clauseo_process::env_routing::ALSO_DROPPED`): so does every run.
+#[test]
+fn every_run_drops_the_names_the_launch_also_drops() {
+    for name in clauseo_process::env_routing::ALSO_DROPPED {
+        for spelling in [name.to_ascii_uppercase(), name.to_ascii_lowercase()] {
+            for (vendor, env) in every_run(&with(&[(spelling.as_str(), "1")])) {
+                assert_eq!(get(&env, &spelling), None, "{spelling}, {vendor:?}");
+            }
+        }
+    }
+}

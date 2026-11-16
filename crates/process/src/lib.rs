@@ -22,6 +22,9 @@
 //!   stale owner-file rule: every process from libproc's `proc_listallpids` on macOS, from a
 //!   Toolhelp snapshot on Windows.
 //! - The stderr ring (256 KiB per agent, never uploaded) and its redacted tail of at most 4 KiB.
+//! - [`env_routing`]: which inherited `CLAUDE_*` and `ANTHROPIC_*` names a Claude child keeps, the
+//!   one rule host's launch, sign-in's runs (`agents`) and the plan readers (`limits`) share. The
+//!   spawn itself applies none of it.
 //!
 //! # Interface
 //!
@@ -98,6 +101,7 @@
 #[cfg(any(windows, test))]
 mod browser;
 mod descendants;
+pub mod env_routing;
 mod error;
 mod handle;
 mod launch;

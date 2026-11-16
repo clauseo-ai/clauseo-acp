@@ -79,8 +79,8 @@ fn names_and(launcher: &TestLauncher, var: &str) -> (Vec<OsString>, Option<OsStr
 }
 
 /// The inherited names a reader keeps (no `GIT_*`, `SSH_*`, `NO_BROWSER` or
-/// `CLAUDE_CODE_REMOTE`, nor any name in `dropped`), minus `var` in any case, plus the
-/// `extra` names, sorted.
+/// `CLAUDE_CODE_REMOTE`, nor any name in `dropped`, and only the prefixed names the routing rule
+/// keeps), minus `var` in any case, plus the `extra` names, sorted.
 fn expected_names(var: &str, extra: &[&str], dropped: &[&str]) -> Vec<OsString> {
     let kept = |name: &OsString| {
         let bytes = name.as_encoded_bytes();
@@ -96,11 +96,13 @@ fn expected_names(var: &str, extra: &[&str], dropped: &[&str]) -> Vec<OsString> 
                 .any(|drop| name.eq_ignore_ascii_case(drop))
             && !extra.iter().any(|e| name == e)
     };
-    let mut names: Vec<OsString> = std::env::vars_os()
-        .map(|(name, _)| name)
-        .filter(kept)
-        .chain(extra.iter().map(OsString::from))
-        .collect();
+    let mut names: Vec<OsString> =
+        clauseo_process::env_routing::kept_inherited(std::env::vars_os())
+            .into_iter()
+            .map(|(name, _)| name)
+            .filter(kept)
+            .chain(extra.iter().map(OsString::from))
+            .collect();
     names.sort();
     names.dedup();
     names

@@ -295,10 +295,13 @@ impl Setup {
     }
 
     /// The env a spec should carry, by the case rule: inherited minus the variables no reader
-    /// gets (`GIT_*`, `SSH_*`, `NO_BROWSER`, `CLAUDE_CODE_REMOTE`, `readers/env.rs`) and what
-    /// settings names in any case, then the settings variables.
+    /// gets (`GIT_*`, `SSH_*`, `NO_BROWSER`, `CLAUDE_CODE_REMOTE`, `readers/env.rs`, and the
+    /// prefixed names the routing rule drops) and what settings names in any case, then the
+    /// settings variables.
     pub(crate) fn expected_env() -> BTreeMap<OsString, OsString> {
-        let mut env: BTreeMap<OsString, OsString> = std::env::vars_os()
+        let inherited = clauseo_process::env_routing::kept_inherited(std::env::vars_os());
+        let mut env: BTreeMap<OsString, OsString> = inherited
+            .into_iter()
             .filter(|(name, _)| {
                 let bytes = name.as_encoded_bytes();
                 let prefixed = ["GIT_", "SSH_"].iter().any(|prefix| {

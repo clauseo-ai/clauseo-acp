@@ -20,6 +20,9 @@
 //! - The Claude home is `CLAUDE_SECURESTORAGE_CONFIG_DIR` when set (`""` is `$HOME/.claude`), else
 //!   `CLAUDE_CONFIG_DIR` when set and not empty, else `$HOME/.claude`. Codex's home is `CODEX_HOME`
 //!   when set and not empty, else `$HOME/.codex`.
+//! - Claude's `auth status` with no marker but a non-empty `CLAUDE_CODE_OAUTH_TOKEN` or
+//!   `ANTHROPIC_AUTH_TOKEN` says signed in with `authMethod: "oauth_token"`, as Claude Code does
+//!   (`signin/status.rs`).
 //! - Stdout carries only the lines this module prints, each flushed as it is written.
 //!   Diagnostics go to stderr.
 //! - Claude's `auth status` and Codex's `login status` and `app-server` also write into their
@@ -369,7 +372,7 @@ fn claude(args: &[&str], script: &Script, folder: &Path) -> io::Result<i32> {
         ["auth", "login"] | ["auth", "login", "--claudeai" | "--console"] => {
             claude_login(script, folder)
         }
-        ["auth", "status"] | ["auth", "status", "--json"] => claude_status(folder),
+        ["auth", "status"] | ["auth", "status", "--json"] => status::claude_status(folder),
         ["auth", "logout"] => logout(folder, CLAUDE_LOGOUT_LINE),
         _ => Ok(usage(Mode::Claude)),
     }
@@ -403,22 +406,6 @@ fn open_browser(browser: &OsStr, url: &str) {
             "BROWSER could not start: {error}"
         )));
     }
-}
-
-/// `auth status --json`: the signed-in line when the marker is there, else the signed-out line.
-/// Both are printed exactly as the brief has them, with the keys in that order. The email is the
-/// marker's, `test@example.com` unless a test planted another.
-fn claude_status(folder: &Path) -> io::Result<i32> {
-    let line = match marker(folder) {
-        Some((method, email)) => format!(
-            r#"{{"loggedIn":true,"authMethod":{},"apiProvider":"firstParty","email":{},"subscriptionType":"max"}}"#,
-            json!(method),
-            json!(email)
-        ),
-        None => r#"{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}"#.to_owned(),
-    };
-    say(&line)?;
-    Ok(EXIT_OK)
 }
 
 /// The Codex commands: `login`, `login --device-auth`, `login status`, `logout` and `app-server`,
@@ -596,5 +583,6 @@ mod app_server;
 mod codex_login;
 mod first_meet;
 mod parent;
+mod status;
 #[cfg(test)]
 mod tests;
