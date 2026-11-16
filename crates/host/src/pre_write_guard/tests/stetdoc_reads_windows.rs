@@ -81,7 +81,7 @@ fn both(path: &Path) -> Vec<(&'static str, String)> {
 /// Makes `link` a directory symbolic link to `target`; `false`, said loudly, without the right
 /// to make links (no Developer Mode, no admin).
 fn dir_link(target: &Path, link: &Path) -> bool {
-    match std::os::windows::fs::symlink_dir(target, link) {
+    match crate::write::symlink(target, link) {
         Ok(()) => true,
         Err(error) => {
             eprintln!("SKIPPED a directory link check: {error}");
@@ -195,7 +195,8 @@ fn the_short_names_of_fenced_folders_are_refused() {
 
 /// The data folder's verbatim spelling in the fence still fences its plain path; a verbatim,
 /// device or `GLOBALROOT` path in a stetdoc line is refused; so is a long path past 260
-/// characters into the data folder; and a UNC path, quickly, without waiting on a server.
+/// characters into the data folder; and a UNC path (that no disk is looked at for one is
+/// `reads::tests::unc`).
 #[test]
 fn verbatim_device_long_and_unc_paths_are_refused() {
     let fx = Fixture::new("stetdoc-win-verbatim");
@@ -236,7 +237,6 @@ fn verbatim_device_long_and_unc_paths_are_refused() {
         let got = said(tool, &command);
         assert!(got.contains(DATA_SAID), "{tool} {command}: {got}");
     }
-    let started = std::time::Instant::now();
     for word in [
         r"'\\clauseo-nowhere.invalid\share\x.docx'",
         r"\\clauseo-nowhere.invalid\share\x.docx",
@@ -249,7 +249,6 @@ fn verbatim_device_long_and_unc_paths_are_refused() {
         "stetdoc view //clauseo-nowhere.invalid/share/x.docx",
     );
     assert!(got.contains(PLAIN), "{got}");
-    assert!(started.elapsed() < std::time::Duration::from_secs(5));
 }
 
 /// The fenced folders written in another case, the drive letter too, are refused.

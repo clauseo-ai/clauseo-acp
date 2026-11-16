@@ -42,7 +42,11 @@ fn another_matter_is_refused_and_a_template_reads() {
 #[test]
 fn a_document_with_a_second_name_is_refused() {
     let fx = Fixture::new("stetdoc-hard-link");
-    std::fs::hard_link(fx.root.join("out/Held.docx"), fx.matter().join("Copy.docx")).unwrap();
+    crate::write::hard_link(
+        &fx.root.join("out/Held.docx"),
+        &fx.matter().join("Copy.docx"),
+    )
+    .unwrap();
     let (matter, other) = (fx.path("m"), fx.path("out"));
     let args = ["--matter", &matter, "--fence-matter", &other];
     let hook = fx.hook("Bash", &json!({"command": "stetdoc view Copy.docx"}));
@@ -101,7 +105,7 @@ fn the_data_folders_data_volume_path_is_refused() {
     let fx = Fixture::new("stetdoc-firmlink");
     crate::write::create_dir_all(&fx.root.join("data").join("logs")).unwrap();
     crate::write::write_file(&fx.root.join("data/logs/host.docx"), b"x").unwrap();
-    let real = std::fs::canonicalize(fx.root.join("data")).unwrap();
+    let real = dunce::canonicalize(fx.root.join("data")).unwrap();
     let on_volume =
         std::path::Path::new("/System/Volumes/Data").join(real.strip_prefix("/").unwrap());
     let net = crate::network_paths::NetEnv::current();

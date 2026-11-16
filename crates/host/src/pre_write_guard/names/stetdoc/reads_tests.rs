@@ -78,7 +78,7 @@ mod on_disk {
         }
     }
 
-    fn matter_b(got: Option<Fenced>) -> bool {
+    fn matter_b(got: Option<&Fenced>) -> bool {
         matches!(got, Some(Fenced::Matter(_)))
     }
 
@@ -138,7 +138,7 @@ mod on_disk {
                 "stetdoc view --find=/w/b/secret.docx Contract.docx",
                 "stetdoc view Contract.docx | head -5; stetdoc view link/secret.docx",
             ],
-            |_, got| matter_b(got),
+            |_, got| matter_b(got.as_ref()),
         );
     }
 

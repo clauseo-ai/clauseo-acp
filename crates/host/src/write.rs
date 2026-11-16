@@ -327,6 +327,12 @@ pub(crate) fn open_deny_write(path: &Path) -> io::Result<std::fs::File> {
         .open(path)
 }
 
+/// Makes `link` a second name (a hard link) of the file `target`. For unit tests.
+#[cfg(test)]
+pub(crate) fn hard_link(target: &Path, link: &Path) -> io::Result<()> {
+    std::fs::hard_link(target, link)
+}
+
 /// Makes `link` a symbolic link to `target`. For unit tests: a matter stored as a link.
 #[cfg(all(test, unix))]
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {

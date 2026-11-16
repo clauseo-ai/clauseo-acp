@@ -569,11 +569,11 @@ fn the_own_folders_shell_rules_need_the_sandbox() {
         (list("allow"), list("deny"))
     };
     let globs = crate::agent::data_fence::own_shell_glob_deny_rules(&deny, false);
-    assert!(!globs.is_empty());
+    assert_ne!(globs.len(), 0);
     let glob_denies = |rules: &[String]| globs.iter().all(|glob| rules.contains(glob));
     let any_glob_deny = |rules: &[String]| globs.iter().any(|glob| rules.contains(glob));
     let own_shell = crate::agent::data_fence::own_shell_allow_rules(&deny, false);
-    assert!(!own_shell.is_empty());
+    assert_ne!(own_shell.len(), 0);
     let shell = |rules: &[String]| own_shell.iter().all(|rule| rules.contains(rule));
     let any_shell = |rules: &[String]| own_shell.iter().any(|rule| rules.contains(rule));
     let read = |rules: &[String]| rules.iter().any(|rule| rule.ends_with("/run/s-1/work/**)"));
