@@ -22,6 +22,10 @@
 //!   stale owner-file rule: every process from libproc's `proc_listallpids` on macOS, from a
 //!   Toolhelp snapshot on Windows.
 //! - The stderr ring (256 KiB per agent, never uploaded) and its redacted tail of at most 4 KiB.
+//! - A session's marker and its sweep (`session.rs`): every process of this user whose
+//!   environment holds the session's `CLAUSEO_SESSION` entry is killed (SIGKILL) by pid at the
+//!   session's end, whatever its session, group or parent (`/proc` on Linux, libproc and
+//!   `sysctl(KERN_PROCARGS2)` on macOS; nothing on Windows, whose job takes it all).
 //!
 //! # Interface
 //!
@@ -58,6 +62,10 @@
 //! - [`ExitReport`]: the code or signal, [`ExitReport::stderr_tail`], and
 //!   [`ExitReport::detach_reason`] for `AgentSessionDetached`. [`ShutdownOutcome`] names the
 //!   ladder step that ended the agent, or says it never exited (`Unresponsive`).
+//! - [`SessionMark`]: made by the host from 16 random bytes, put in the launch's environment
+//!   ([`SessionMark::var`], named [`SESSION_VAR`]), read back from a spec's
+//!   ([`SessionMark::of_env`]); [`SessionMark::sweep`] (blocking between its waits) ends what
+//!   carries it and says what it did ([`SessionSwept`]).
 //! - [`Error`], every failed launch, with [`Error::code`] (`agent.launch_failed`).
 //!
 //! # Invariants
@@ -73,6 +81,9 @@
 //! - A process is signalled or ended only after its pid's start time is read again and matches
 //!   the listing's. A failed listing is never read as "no descendants", so it never makes every
 //!   process look new.
+//! - A session's sweep signals only a process run by this user that holds exactly the session's
+//!   entry, never this process, by pid and never by name; each is read again just before its
+//!   kill (on Linux after it is pinned by a pidfd).
 //! - However the agent ends (stdin closed, signal, crash, or the handle dropped), what is left of
 //!   its tree is killed: its group or job, and after a shutdown the listing it was given. An empty
 //!   group is fine.
@@ -86,7 +97,8 @@
 //!
 //! `protocol` (`ErrorCode`, `DetachReason`), `async-process`, `async-io` (the real timer),
 //! `futures`, `memchr` (line ends in the stderr pump), `thiserror`; `nix` on Unix (`signal`),
-//! `libc` on macOS (libproc) and `windows` on Windows. Never `tauri` or `tokio`.
+//! `libc` on Linux (the pidfd calls) and macOS (libproc, `sysctl`) and `windows` on Windows.
+//! Never `tauri` or `tokio`.
 //!
 //! # Start reading
 //!
@@ -105,6 +117,7 @@ mod live;
 #[cfg(all(test, any(target_os = "macos", windows)))]
 mod named_tests;
 mod os;
+mod session;
 mod spec;
 mod stderr;
 mod stdin;
@@ -117,6 +130,7 @@ pub use launch::{
     Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, is_node_env, spawn_in_tree,
 };
 pub use live::{close_spawns, live_handles};
+pub use session::{SESSION_VAR, SessionMark, SessionSwept};
 pub use spec::LaunchSpec;
 pub use stderr::{StderrPump, redact_tokens};
 pub use stdin::AgentStdin;

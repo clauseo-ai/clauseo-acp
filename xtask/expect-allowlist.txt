@@ -304,6 +304,11 @@ crates/process/src/os/windows.rs - unsafe_code
 crates/process/src/os/linux/death.rs - unsafe_code
 # Its macOS descendant listing: libproc's proc_listchildpids, proc_pidinfo and proc_pidpath.
 crates/process/src/os/macos.rs - unsafe_code
+# A session's sweep: on Linux the pidfd_open and pidfd_send_signal system calls (pin a process,
+# then signal only it); on macOS sysctl(KERN_ARGMAX) and sysctl(KERN_PROCARGS2) (a process's
+# environment).
+crates/process/src/os/linux/marked.rs - unsafe_code
+crates/process/src/os/macos/marked.rs - unsafe_code
 crates/process/tests/pipes/shutdown.rs launch_ignoring_sigterm unsafe_code
 crates/process/tests/pipes/write.rs - clippy::disallowed_methods
 crates/process/tests/parent_death.rs - clippy::disallowed_methods

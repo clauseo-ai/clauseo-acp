@@ -1,6 +1,6 @@
 //! The Linux listing of an agent's descendants: `/proc/<pid>/stat` read for every process, the
 //! tree walked by parent pid. Safe std only: file reads and `read_link`. The parent-death
-//! signal is in `linux/death.rs`.
+//! signal is in `linux/death.rs`, a session's sweep in `linux/marked.rs`.
 
 use std::collections::HashMap;
 use std::fs;
@@ -9,8 +9,12 @@ use std::path::PathBuf;
 use crate::descendants::Proc;
 
 mod death;
+mod marked;
 
 pub(super) use death::end_with_parent;
+pub(super) use marked::Procfs;
+#[cfg(test)]
+pub(crate) use marked::uids;
 
 /// What one `/proc/<pid>/stat` line says about its process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

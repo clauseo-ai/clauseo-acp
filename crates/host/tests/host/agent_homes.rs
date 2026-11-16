@@ -19,6 +19,8 @@ use crate::support::{Dir, FAKE, Scenario, matter_with_thread};
 /// The config folder and Codex home the host itself starts with: the lawyer's own.
 const LAWYERS_CLAUDE: &str = "/elsewhere/lawyer/.claude";
 const LAWYERS_CODEX: &str = "/elsewhere/lawyer/.codex";
+/// A session marker the host itself inherited (it was started from another session's shell).
+const INHERITED_MARK: &str = "00000000000000000000000000000000";
 
 /// Runs one turn on a Claude, a Codex and a `fake-agent` thread, with the host's environment
 /// naming the lawyer's own folders; returns what each launch got, in that order.
@@ -28,10 +30,12 @@ fn launches(dir: &Dir) -> Vec<Seen> {
         .filter(|(name, _)| {
             !name.eq_ignore_ascii_case("CLAUDE_CONFIG_DIR")
                 && !name.eq_ignore_ascii_case("CODEX_HOME")
+                && !name.eq_ignore_ascii_case("CLAUSEO_SESSION")
         })
         .collect();
     env.push(("CLAUDE_CONFIG_DIR".into(), LAWYERS_CLAUDE.into()));
     env.push(("CODEX_HOME".into(), LAWYERS_CODEX.into()));
+    env.push(("CLAUSEO_SESSION".into(), INHERITED_MARK.into()));
     let host = dir.start_launching(0, Arc::<Wired>::clone(&wired), |config| {
         config.with_inherited_env(env)
     });
@@ -113,6 +117,33 @@ fn claude_and_codex_launch_with_clauseos_homes_not_the_lawyers() {
         Some(LAWYERS_CLAUDE)
     );
     assert_eq!(var(fake, "CODEX_HOME").as_deref(), Some(LAWYERS_CODEX));
+}
+
+/// Every launch, Claude's, Codex's and one of no kind, carries a session marker of its own
+/// (`CLAUSEO_SESSION`, 32 lowercase hex digits) that its session's end sweeps by; an inherited
+/// one never reaches an agent.
+#[test]
+fn every_launch_carries_a_session_marker_of_its_own() {
+    let dir = three_agents("agent_homes_session_marker");
+    let seen = launches(&dir);
+    assert_eq!(seen.len(), 3);
+    let marks: Vec<String> = seen
+        .iter()
+        .zip(["claude", "codex", "fake"])
+        .map(|(seen, agent)| {
+            let mark = var(seen, "CLAUSEO_SESSION").unwrap_or_else(|| panic!("{agent}: none"));
+            assert_eq!(mark.len(), 32, "{agent}: {mark}");
+            assert!(
+                mark.bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+                "{agent}: {mark}"
+            );
+            assert_ne!(mark, INHERITED_MARK, "{agent}");
+            mark
+        })
+        .collect();
+    let distinct: std::collections::BTreeSet<&String> = marks.iter().collect();
+    assert_eq!(distinct.len(), 3, "{marks:?}");
 }
 
 /// The profile writes Codex's skills into `skills` of the very folder Codex is launched with as

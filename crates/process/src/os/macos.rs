@@ -1,9 +1,10 @@
 //! The macOS listing of an agent's descendants, through libproc: `proc_listchildpids` walks the
 //! tree, `proc_pidinfo(PROC_PIDTBSDINFO)` gives each process's parent, group, start and state,
 //! and `proc_pidpath` its executable. `proc_listallpids` lists every process, for the processes
-//! with a given executable name and their starts (`named`). Each libproc call has one wrapper
-//! here, with its `unsafe` block and the reason it is sound; nothing else in the crate calls
-//! libproc.
+//! with a given executable name and their starts (`named`), and for a session's sweep
+//! (`macos/marked.rs`, which reads environments through `sysctl`). Each libproc call has one
+//! wrapper here, with its `unsafe` block and the reason it is sound; nothing else in the crate
+//! calls libproc.
 #![expect(
     unsafe_code,
     reason = "FFI to libproc (proc_listchildpids, proc_listallpids, proc_pidinfo, proc_pidpath)"
@@ -20,6 +21,10 @@ use nix::unistd::Pid;
 
 use super::name_match::{Read, Reader, Seen, Start, starts_named};
 use crate::descendants::Proc;
+
+mod marked;
+
+pub(super) use marked::Marked;
 
 /// `SZOMB` from `<sys/proc.h>`: `pbi_status` of a process that has exited and waits to be
 /// reaped. The libc crate does not export it.

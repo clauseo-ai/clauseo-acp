@@ -105,6 +105,10 @@ pub(super) fn launch(
     let short = prepared.run.claude_tmp.as_deref();
     let temp = agent::temp::session_env(&prepared.run.root, short, cfg!(windows));
     forced.extend(temp);
+    // Every process of the session carries its own marker, which nothing in the settings or the
+    // hook can override, so the session's end finds and ends what it left (`agent/leftovers.rs`).
+    let (name, value) = agent::leftovers::session_mark()?.var();
+    forced.insert(name, value);
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     let session_folder = agent::session_folder(&folder);
     let matter_spellings = start_failure::spellings_at_launch(actor, &folder, &session_folder);
