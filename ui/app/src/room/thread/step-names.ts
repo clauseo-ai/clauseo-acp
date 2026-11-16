@@ -12,7 +12,7 @@ import type { StreamView } from "../../store/view.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
 import { taskOf } from "./task-words.ts";
-import { toolNameOf, type ToolAs } from "./tool-names.ts";
+import { caseLawOf, toolNameOf, type CaseLaw, type ToolAs } from "./tool-names.ts";
 import { guideOf, skillOf } from "./skill-words.ts";
 
 /** What a step touched. `name`: the paper's file name, a site, or null; `where`: its folder or full place, for the
@@ -207,9 +207,18 @@ const TOOL_LIVE: Record<ToolAs, StepLiveKey> = {
   fetch: "Looking online.",
 };
 
+/** What a step of Clauseo's case-law connector (tool-names.ts, caseLawOf) is doing. */
+const CASE_LAW_LIVE: Record<CaseLaw, StepLiveKey> = {
+  search: "Searching case law.",
+  credits: "Checking your case-law credits.",
+  payment: "Getting a payment link for case-law credits.",
+};
+
 /** The agent's title as a sentence, its paths cut, where nothing else names the step; `plain` with no title. A title
  * that is a tool's name is never shown: a known one says what it does, any other reads as `plain`. */
 export function titled(entry: ToolCallEntry, plain: string, lang: Lang): string {
+  const law = caseLawOf(entry.title);
+  if (law !== null) return stepLive(lang, CASE_LAW_LIVE[law]);
   const tool = toolNameOf(entry.title);
   if (tool !== undefined) return tool.as === null ? plain : stepLive(lang, TOOL_LIVE[tool.as]);
   const title = titleOf(entry.title);
@@ -227,6 +236,9 @@ export function doingOf(lang: Lang, entry: ToolCallEntry): string {
       ? stepLive(lang, "Reading a guide.")
       : stepLive(lang, "Reading {name}.", { name: guide });
   }
+  // a case-law tool says what it does, whatever kind the agent gave it (Claude's other, ChatGPT's execute)
+  const law = caseLawOf(entry.title);
+  if (law !== null) return stepLive(lang, CASE_LAW_LIVE[law]);
   const p = placeOf(entry);
   const name = p.name;
   switch (entry.kind) {

@@ -70,6 +70,32 @@ const KNOWN: Readonly<Record<string, ToolAs>> = {
  * `mcp.<server>.<tool>` ("mcp.browser.agent_browser_open"). */
 const BROWSER = /^(?:mcp__browser__|mcp\.browser\.)/i;
 
+/** What a tool of Clauseo's case-law connector does, as the room tells it: searching case law (a search, a judgment
+ * read, a citation checked), checking the lawyer's case-law credits (it only reads them), or getting a payment link for
+ * more (it never pays: the lawyer pays on the payment page). */
+export type CaseLaw = "search" | "credits" | "payment";
+
+/** The case-law connector's tools, by their exact names (crates/host/src/agent/loads/case_law.rs). A tool of it not
+ * named here reads as any other tool's name does. */
+const CASE_LAW_TOOLS: Readonly<Record<string, CaseLaw>> = {
+  search_law: "search",
+  read_document: "search",
+  citator: "search",
+  check_citations: "search",
+  account: "credits",
+  recharge: "payment",
+};
+
+/** A call of the case-law connector, its server `case-law`, as Claude names it ("mcp__case-law__search_law") or
+ * ChatGPT does ("mcp.case-law.search_law"): its tool's name. */
+const CASE_LAW = /^(?:mcp__case-law__|mcp\.case-law\.)([a-z_]+)$/;
+
+/** What a title naming a case-law tool does; null for any other title. */
+export function caseLawOf(title: string): CaseLaw | null {
+  const tool = CASE_LAW.exec(title.trim().replace(/^`+|`+$/g, ""))?.[1];
+  return tool !== undefined && Object.hasOwn(CASE_LAW_TOOLS, tool) ? CASE_LAW_TOOLS[tool]! : null;
+}
+
 /** A title that is a tool's name: what it does when Clauseo knows it (`as`), null when it doesn't; undefined for a
  * title in words, which is shown. A known name counts in any shape, "Bash" as much as "exec_command". */
 export function toolNameOf(title: string): { as: ToolAs | null } | undefined {

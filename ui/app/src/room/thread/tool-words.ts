@@ -5,7 +5,7 @@ import type { Lang } from "@clauseo/components/lib/display.ts";
 import { steps, type StepKey } from "@clauseo/components/lib/words-steps.ts";
 import type { ToolCallEntry } from "../../transport/protocol.ts";
 import { guideOf, skillOf, skillTitle } from "./skill-words.ts";
-import { toolNameOf, type ToolAs } from "./tool-names.ts";
+import { caseLawOf, toolNameOf, type CaseLaw, type ToolAs } from "./tool-names.ts";
 
 const DONE: Record<ToolAs, StepKey> = {
   network: "Let a task reach the internet.",
@@ -23,6 +23,22 @@ const TRIED: Record<ToolAs, StepKey> = {
   search: "Tried to search the papers.",
   fetch: "Tried to look online.",
 };
+
+/** A case-law tool's words (tool-names.ts, caseLawOf) once its step is over: done, and tried. */
+const CASE_LAW_DONE: Record<CaseLaw, [done: StepKey, tried: StepKey]> = {
+  search: ["Searched case law.", "Tried to search case law."],
+  credits: ["Checked your case-law credits.", "Tried to check your case-law credits."],
+  payment: [
+    "Got a payment link for case-law credits.",
+    "Tried to get a payment link for case-law credits.",
+  ],
+};
+
+/** A step titled with a case-law tool's name, once over: its words, done or tried; null for any other title. */
+export function caseLawDone(lang: Lang, title: string, tried: boolean): string | null {
+  const law = caseLawOf(title);
+  return law === null ? null : steps(lang, CASE_LAW_DONE[law][tried ? 1 : 0]);
+}
 
 /** A known name's words once its step is over: done, or tried (failed or stopped). */
 export const toolDone = (lang: Lang, as: ToolAs, tried: boolean): string =>
@@ -46,6 +62,8 @@ export function skillDone(lang: Lang, entry: ToolCallEntry, tried: boolean): str
 export function overTitle(lang: Lang, title: string, tried: boolean): string {
   const skill = skillTitle(title);
   if (skill !== null) return guideDone(lang, skill, tried);
+  const law = caseLawDone(lang, title, tried);
+  if (law !== null) return law;
   const tool = toolNameOf(title);
   if (tool === undefined) return title;
   if (tool.as !== null) return toolDone(lang, tool.as, tried);

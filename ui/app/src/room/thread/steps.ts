@@ -24,7 +24,7 @@ import {
 } from "./step-names.ts";
 import { taskOf } from "./task-words.ts";
 import { toolNameOf } from "./tool-names.ts";
-import { skillDone, toolDone } from "./tool-words.ts";
+import { caseLawDone, skillDone, toolDone } from "./tool-words.ts";
 import { skillOf } from "./skill-words.ts";
 
 /** One part of an answer: a row on its own, or a group of rows folded into one line. */
@@ -275,6 +275,9 @@ export function doneOf(lang: Lang, entry: ToolCallEntry): string {
   // a skill is a guide read, never its internal name (skill-words.ts)
   const guide = skillDone(lang, entry, tried);
   if (guide !== null) return guide;
+  // a case-law tool says what it did, whatever kind the agent gave it (Claude's other, ChatGPT's execute)
+  const law = caseLawDone(lang, entry.title, tried);
+  if (law !== null) return law;
   const p = placeOf(entry);
   const name = p.name;
   // the agent's own words where nothing else names it: as they are once done, after the attempt once not

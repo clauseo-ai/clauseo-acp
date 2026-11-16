@@ -103,7 +103,16 @@ export const HI = {
   // the live line, after what is being done now
   "1 done so far.": "अब तक 1 पूरा हुआ।",
   "{n} done so far.": "अब तक {n} पूरे हुए।",
+  // a step of Clauseo's case-law connector, done and tried (tool-names.ts, caseLawOf): case law searched (UC-476,
+  // UC-477); the lawyer's credits read (UC-480, UC-481); a payment link got, never a payment (UC-482, UC-483).
+  // Provisional; hi: later
+  "Searched case law.": null,
+  "Tried to search case law.": null,
+  "Checked your case-law credits.": null,
+  "Tried to check your case-law credits.": null,
+  "Got a payment link for case-law credits.": null,
+  "Tried to get a payment link for case-law credits.": null,
 } as const;
 
-/** Every key, for the banned-words screen in the tests. */
-export const stepWords: Readonly<Record<keyof typeof HI, string>> = HI;
+/** Every key, for the banned-words screen in the tests (null: hi: later). */
+export const stepWords: Readonly<Record<keyof typeof HI, string | null>> = HI;
