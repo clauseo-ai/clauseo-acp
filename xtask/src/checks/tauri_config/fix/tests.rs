@@ -41,6 +41,22 @@ fix_texts! {
         Fix::Pubkey => {
             "set plugins.updater.pubkey to the release public key before adding endpoints"
         },
+        Fix::Endpoint => {
+            "set plugins.updater.endpoints to [RELEASE_ENDPOINT] (tauri_config/updater.rs): the \
+             endpoint is decided in decision record 0037 and moves only with that const"
+        },
+        Fix::PubkeyFormat => {
+            "paste the release key's .pub file as written by `tauri signer generate`: base64 of \
+             its two lines, whose comment names the key's own id"
+        },
+        Fix::PubkeyPlaceholder => {
+            "replace it with Rohan's release public key (the .pub text, one line in \
+             tauri.conf.json): nothing can sign for the placeholder, so no update would verify"
+        },
+        Fix::PubkeyTest => {
+            "use the release public key: the throwaway test key signs only test releases, which no \
+             installed copy may trust"
+        },
         Fix::V1Compatible => {
             "the updater is built without its zip feature, so v1Compatible artifacts cannot be \
              installed; use true"

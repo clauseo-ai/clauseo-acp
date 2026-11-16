@@ -26,6 +26,14 @@ pub(crate) enum Fix {
     Platform,
     /// The updater has endpoints but no public key.
     Pubkey,
+    /// The updater's endpoints are not exactly the release endpoint.
+    Endpoint,
+    /// The updater's public key is not a minisign public key.
+    PubkeyFormat,
+    /// The updater's public key is R23 PR 6's placeholder.
+    PubkeyPlaceholder,
+    /// The updater's public key is the throwaway test key.
+    PubkeyTest,
     /// `bundle.createUpdaterArtifacts` is `"v1Compatible"`.
     V1Compatible,
     /// A `dangerous*` key appears at some depth.
@@ -87,6 +95,22 @@ impl fmt::Display for Fix {
             }
             Fix::Pubkey => {
                 "set plugins.updater.pubkey to the release public key before adding endpoints"
+            }
+            Fix::Endpoint => {
+                "set plugins.updater.endpoints to [RELEASE_ENDPOINT] (tauri_config/updater.rs): \
+                 the endpoint is decided in decision record 0037 and moves only with that const"
+            }
+            Fix::PubkeyFormat => {
+                "paste the release key's .pub file as written by `tauri signer generate`: base64 \
+                 of its two lines, whose comment names the key's own id"
+            }
+            Fix::PubkeyPlaceholder => {
+                "replace it with Rohan's release public key (the .pub text, one line in \
+                 tauri.conf.json): nothing can sign for the placeholder, so no update would verify"
+            }
+            Fix::PubkeyTest => {
+                "use the release public key: the throwaway test key signs only test releases, which \
+                 no installed copy may trust"
             }
             Fix::V1Compatible => {
                 "the updater is built without its zip feature, so v1Compatible artifacts cannot be \
