@@ -30,8 +30,6 @@ pub(crate) enum Fix {
     Endpoint,
     /// The updater's public key is not a minisign public key.
     PubkeyFormat,
-    /// The updater's public key is R23 PR 6's placeholder.
-    PubkeyPlaceholder,
     /// The updater's public key is the throwaway test key.
     PubkeyTest,
     /// `bundle.createUpdaterArtifacts` is `"v1Compatible"`.
@@ -103,10 +101,6 @@ impl fmt::Display for Fix {
             Fix::PubkeyFormat => {
                 "paste the release key's .pub file as written by `tauri signer generate`: base64 \
                  of its two lines, whose comment names the key's own id"
-            }
-            Fix::PubkeyPlaceholder => {
-                "replace it with Rohan's release public key (the .pub text, one line in \
-                 tauri.conf.json): nothing can sign for the placeholder, so no update would verify"
             }
             Fix::PubkeyTest => {
                 "use the release public key: the throwaway test key signs only test releases, which \

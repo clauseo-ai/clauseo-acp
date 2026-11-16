@@ -6,7 +6,8 @@
 //! is built from config, the asset protocol is off, and no `dangerous*` key appears at any depth.
 //! The updater (`updater.rs`): its endpoints are none or exactly the release endpoint, with a
 //! public key; that key is a minisign public key, and neither R23 PR 6's placeholder nor the test
-//! key; `bundle.createUpdaterArtifacts` is not `"v1Compatible"`.
+//! key (R23 PR 6's placeholder passes with a note); `bundle.createUpdaterArtifacts` is not
+//! `"v1Compatible"`.
 //! No platform config (`tauri.<platform>.conf.json`, `.json5` or `Tauri.<platform>.toml`) exists:
 //! Tauri merges one over `tauri.conf.json` and could turn a setting back on for one OS.
 //! In `build.rs`, parsed with syn: an `AppManifest` is declared (`app_manifest(` and
@@ -33,7 +34,7 @@ pub(crate) use fix::Fix;
 mod sources;
 
 mod updater;
-use updater::updater_violations;
+use updater::{placeholder_note, updater_violations};
 
 use crate::checks::json_text::key_line;
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
@@ -85,9 +86,15 @@ fn run(ctx: &Context) -> Inspection {
     };
     let mut read = 0;
     let conf = checks::join(desktop, TAURI_CONF);
+    let mut notes = Vec::new();
     let mut found = match checks::read_repo_file(&ctx.root, &conf) {
         Ok(text) => {
             read += usize::from(text.is_some());
+            notes.extend(
+                text.as_deref()
+                    .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                    .and_then(|json| placeholder_note(&json)),
+            );
             conf_violations(&conf, text.as_deref())
         }
         Err(violation) => vec![violation],
@@ -119,7 +126,9 @@ fn run(ctx: &Context) -> Inspection {
         Ok(None) => {}
         Err(violation) => found.push(violation),
     }
-    Inspection::new(read, found)
+    let mut inspection = Inspection::new(read, found);
+    inspection.notes = notes;
+    inspection
 }
 
 /// Every unsafe setting in the Tauri config at `path`. `None` means the file is missing; a missing

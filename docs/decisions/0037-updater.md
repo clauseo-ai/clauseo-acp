@@ -45,13 +45,14 @@ PR 2 (this record's) adds the wire, stubbed, and `update.failed`.
   and `pubkey` to a placeholder: a throwaway minisign key (id `AC986E7C6BA67AB9`) made for PR 6
   alone, whose private half and password were deleted at once, so nothing can sign for it. Its
   public half is committed as `crates/desktop/release/updater-placeholder.pub` and stays there
-  after the swap, as the guards' fixture. While it is the release key, three checks refuse it:
-  xtask's `tauri-config` check (fast lane, "R23 PR 6's placeholder key"), the desktop test
-  `the_release_pubkey_is_not_the_placeholder` ("PR 6 can't merge until Rohan's public key
-  replaces the placeholder"), so PR 6 cannot merge by accident, and `release.yml`'s `check` job
-  in a `release` run, before anything builds. Test and dry runs only warn: a test run's `e2e`
-  build trusts the test key in code and never reads the config's endpoint, and a dry run signs
-  with a key it makes itself. A release build gives the host `PluginUpdater` over the config; a
+  after the swap, as the guards' fixture. While it is the release key, two gates refuse it: the
+  desktop test `the_release_pubkey_is_not_the_placeholder` ("PR 6 can't merge until Rohan's
+  public key replaces the placeholder"), red in CI, so PR 6 cannot merge by accident, and
+  `release.yml`'s `check` job in a `release` run, before anything builds. xtask's
+  `tauri-config` check lets it pass with a note: the static checks run before every push, and a
+  branch that failed them by design could not be pushed. Test and dry runs only warn: a test
+  run's `e2e` build trusts the test key in code and never reads the config's endpoint, and a dry
+  run signs with a key it makes itself. A release build gives the host `PluginUpdater` over the config; a
   debug build without `e2e` still gives none. A dry run's app, if someone installed it, would
   check the real endpoint and refuse every update, since no signature verifies under the
   placeholder.
@@ -62,10 +63,10 @@ PR 2 (this record's) adds the wire, stubbed, and `update.failed`.
   `tauri-config` cases), `cargo test --locked -p clauseo-desktop --lib update::`, and CI's
   `cargo xtask check`.
   Nothing else changes: the placeholder's file and its test stay. The guards stay and keep the
-  placeholder's key id (`PLACEHOLDER_KEY_ID`), so the placeholder can never come back; they also
-  refuse the test key, and a pubkey that is not a minisign public key (xtask names a pasted
-  secret key as such). Keeping them costs nothing, and deleting them would leave only "not
-  empty" to catch a wrong key.
+  placeholder's key id (`PLACEHOLDER_KEY_ID`), so the placeholder can never come back. The
+  desktop test, xtask's `tauri-config` check and `check` also refuse the test key, and a pubkey
+  that is not a minisign public key (xtask names a pasted secret key as such). Keeping them
+  costs nothing, and deleting them would leave only "not empty" to catch a wrong key.
   The guards read the key id from the key's own bytes (line 2 of the `.pub`: 42 bytes, `Ed`,
   the id little-endian) and require the untrusted comment to name the same id, so a rewritten
   comment cannot pass. The desktop test also reads `tauri.{macos,windows,linux}.conf.json` when

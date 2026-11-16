@@ -49,10 +49,6 @@ fix_texts! {
             "paste the release key's .pub file as written by `tauri signer generate`: base64 of \
              its two lines, whose comment names the key's own id"
         },
-        Fix::PubkeyPlaceholder => {
-            "replace it with Rohan's release public key (the .pub text, one line in \
-             tauri.conf.json): nothing can sign for the placeholder, so no update would verify"
-        },
         Fix::PubkeyTest => {
             "use the release public key: the throwaway test key signs only test releases, which no \
              installed copy may trust"
@@ -106,7 +102,6 @@ fn every_fix_prints_its_pinned_text() {
         Fix::Pubkey,
         Fix::Endpoint,
         Fix::PubkeyFormat,
-        Fix::PubkeyPlaceholder,
         Fix::PubkeyTest,
         Fix::V1Compatible,
         Fix::Dangerous,
