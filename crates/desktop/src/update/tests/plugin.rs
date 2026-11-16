@@ -289,10 +289,10 @@ fn each_source_names_the_key_its_updater_trusts() {
     let checked = conf["plugins"]["updater"]["pubkey"].as_str().unwrap();
     assert!(!checked.is_empty());
     assert_eq!(Source::Config.pubkey(&config).as_deref(), Some(checked));
-    config.plugins.0.insert(
-        "updater".to_owned(),
-        serde_json::json!({ "pubkey": " " }),
-    );
+    config
+        .plugins
+        .0
+        .insert("updater".to_owned(), serde_json::json!({ "pubkey": " " }));
     assert_eq!(Source::Config.pubkey(&config), None);
     config.plugins.0.insert(
         "updater".to_owned(),
@@ -311,9 +311,7 @@ fn each_source_names_the_key_its_updater_trusts() {
 #[test]
 fn the_config_source_builds_over_the_release_endpoint() {
     let app = app();
-    assert!(Source::Config
-        .updater(app.handle(), Target::Native)
-        .is_ok());
+    assert!(Source::Config.updater(app.handle(), Target::Native).is_ok());
     let conf: Value =
         serde_json::from_slice(&std::fs::read(crate_dir().join("tauri.conf.json")).unwrap())
             .unwrap();
