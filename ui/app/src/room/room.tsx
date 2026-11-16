@@ -38,11 +38,7 @@ import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import {
-  MarkdownHostContext,
-  PaperLinksContext,
-  type MarkdownHost,
-} from "@clauseo/components/markdown/host.ts";
+import { MarkdownHostContext, PaperLinksContext } from "@clauseo/components/markdown/host.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { frameBatch } from "../store/batch.ts";
 import { blockedSitesOf } from "../store/blocked-sites.ts";
@@ -64,18 +60,18 @@ import { useHostFullScreen } from "./host-full-screen.ts";
 import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
-import type { PapersHost } from "./host-next.ts";
-import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
+import { quietly } from "./open.ts";
+import { useAnswerHost, useTransportStandIns } from "./room-hosts.ts";
 import { usePaperLinks } from "./paper-links.ts";
 import { useMatterMoves, usePapers } from "./use-papers.ts";
-import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
+import { LocateFolderContext } from "./act-refusals.ts";
 import { LocateGate, LocateWarningHost, LocatedFolder } from "./moved.tsx";
 import { usePickWait } from "./picker-wait.ts";
 import { useDraftMenus } from "./config-menus.ts";
 import { FolderChooserHost } from "./folder-chooser-host.tsx";
 import { PickerLine } from "@clauseo/components/clauseo/picker-line.tsx";
 import { unprotectedFolder } from "./folder-support.ts";
-import { coveringWildcard } from "./folder-wildcard.ts";
+import { coveringOf } from "./folder-wildcard.ts";
 import { RoomRail } from "./rail.tsx";
 import { useSettingsKey } from "./settings-key.ts";
 import { focusFind, useFindKey } from "./find-key.ts";
@@ -118,34 +114,6 @@ const SacNote = lazy(() =>
 const loadNewMatter = () => late(import("./new-matter.tsx"));
 const NewMatter = lazy(() => loadNewMatter().then((m) => ({ default: m.NewMatter })));
 const preloadNewMatter = () => void loadNewMatter();
-
-/** The answers' MarkdownHost (open.ts): one object per transport and matter, so a new papers list or a streaming row
- * never makes a new one; the wall's papers reach it as they arrive. */
-function useAnswerHost(
-  transport: HostTransport,
-  matter: MatterId | null,
-  listed: ListedPapers,
-  refusals: ActRefusals,
-  papers: PapersHost | null,
-): MarkdownHost {
-  const host = useMemo(
-    () => new AnswerHost(transport, matter, refusals, papers),
-    [transport, matter, refusals, papers],
-  );
-  useEffect(() => host.show(listed), [host, listed]);
-  return host;
-}
-
-/** What Versions opens and shows files with in the desktop app: the transport's own (H11). */
-function useTransportStandIns(transport: HostTransport): StandIns {
-  return useMemo(
-    () => ({
-      openFile: (file) => transport.openFile(file),
-      reveal: (target) => transport.reveal(target),
-    }),
-    [transport],
-  );
-}
 
 /** Whether a matter the lawyer isn't looking at waits on them, with a question or for permission: Matters' dot. The
  * limit stays muted (QU.6 (ii)): nothing to choose, only a time to wait for. A snoozed or done conversation's wait
@@ -262,15 +230,6 @@ function RoomFrame({
     [talks.drafting, talks.options, talks.agent, conversations],
   );
   const open = view.open;
-  // agent.sandbox_wildcard's folder: another matter's whose * or ? pattern would cover the open one's
-  const covering = useMemo(
-    () =>
-      coveringWildcard(
-        open?.folder_display ?? null,
-        view.matters.filter((m) => m.matter !== open?.matter).map((m) => m.folder_display),
-      ),
-    [open, view.matters],
-  );
   const draftMenus = useDraftMenus(talks, conversations, open, w.lang);
   const setup = hasSetup(transport);
   const welcome =
@@ -583,7 +542,7 @@ function RoomFrame({
                               onThread={matters.onThread}
                               conversations={conversations}
                               folderShut={folderShut}
-                              covering={covering}
+                              covering={coveringOf(open, view.matters)}
                               openRefused={opened?.act === "open" ? opened.code : null}
                             />
                           </ProtectionContext>

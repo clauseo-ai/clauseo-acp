@@ -72,3 +72,13 @@ export function coveringWildcard(
   }
   return null;
 }
+
+/** coveringWildcard for the room's open matter (`open`) among its matters (`matters`, the open one left out). */
+export const coveringOf = (
+  open: { matter: string; folder_display?: string } | null,
+  matters: readonly { matter: string; folder_display?: string }[],
+): string | null =>
+  coveringWildcard(
+    open?.folder_display ?? null,
+    matters.filter((m) => m.matter !== open?.matter).map((m) => m.folder_display),
+  );

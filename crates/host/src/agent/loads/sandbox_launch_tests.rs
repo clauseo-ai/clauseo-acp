@@ -94,9 +94,9 @@ fn every_mac_and_linux_launch_has_a_sandbox_or_a_refusal() {
         ("brackets", with_matter(BRACKETS), &brackets),
         // Another matter's `*` stays a pattern; refused only when it would cover this one.
         ("other matter *", with_other(STAR), &sandboxed),
-        // unix-paths-ok: sandbox paths as text, never opened
         (
             "other matter over this",
+            // unix-paths-ok: sandbox paths as text, never opened
             with_other("/Users/l/Clients/?"),
             &clauseos,
         ),
@@ -151,6 +151,7 @@ fn a_wildcard_neighbour_in_the_parent_refuses_on_linux_and_never_turns_the_sandb
         panic!("macOS refused a neighbour whose pattern covers nothing of this matter's");
     };
     let denied = mac["filesystem"]["denyRead"].as_array().unwrap();
+    // unix-paths-ok: sandbox paths as text, never opened
     assert!(denied.iter().any(|path| path == "/Users/l/Clients/What?"));
 }
 

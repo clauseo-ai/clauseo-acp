@@ -1,6 +1,7 @@
 //! Another matter's registered folder holding `*` or `?` in Claude's sandbox: the pattern it is
 //! on macOS, widened on Linux, and no sandbox when that deny would cover the session's own
 //! folders (`agent/loads/sandbox/glob.rs`).
+// unix-paths-ok: sandbox paths as text, matched and compared, never opened
 
 use std::path::{Path, PathBuf};
 
@@ -50,7 +51,9 @@ fn a_wildcard_neighbour_is_denied_as_its_pattern() {
 
 /// Stage C's names, both listed here: `Test*` and `stagec-proof-claude-[x]`. Both keep the
 /// sandbox on; the `[` is escaped, so each deny covers the folder it names.
+/// Not on Windows, which has no such sandbox: its paths join with `\`.
 #[test]
+#[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
 fn stage_cs_registered_names_keep_the_sandbox_on() {
     let docs = Path::new("/Users/rohan/Documents");
     let star = docs.join("stagec-1097/Test*");

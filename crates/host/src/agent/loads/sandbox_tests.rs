@@ -270,7 +270,10 @@ fn the_data_folder_and_other_matters_are_denied_wherever_they_are() {
 /// Code reads both as a pattern with no escape. The off names the deepest folder holding one,
 /// the matter folder's first (`Off::Wildcard`); the launch is then refused
 /// (`sandbox_launch_tests.rs`). Another matter's folder does not (`sandbox_wild_tests.rs`).
+/// Not on Windows, which has no such sandbox: its paths join with `\`, and the folder named is
+/// found by `/`, the only separator on macOS and Linux.
 #[test]
+#[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
 fn a_wildcard_in_an_own_path_sends_no_sandbox() {
     let wild = |folder: &str, in_matter| {
         let folder = folder.to_owned();
@@ -286,6 +289,7 @@ fn a_wildcard_in_an_own_path_sends_no_sandbox() {
         let settings = settings(&session, None, false, false, &json!({}));
         assert!(settings.get("sandbox").is_none());
         let mut session = Session::new("s-1");
+        // unix-paths-ok: sandbox paths as text, never opened
         session.data = vec![PathBuf::from("/Users/l").join(glob)];
         assert_eq!(mac(&session.paths()), wild(glob, false), "{glob}");
     }
