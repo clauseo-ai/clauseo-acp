@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 // A long paste on the composer: a chip at PASTE_CHIP_MIN characters and over, words in the field under it; the chips'
-// texts first, then the typed words, in what goes, and apart from them in what the room hears (a Draft); removal; and the
-// chips coming back with the composer's words through every way they come back (a draft, setText, fill, clear and its
-// undo), as they were, never split again from one string.
+// texts first, then the typed words, in what goes, and apart from them in what the room hears (a Draft); removal and
+// its undo; undo after a paste, and a paste over selected words; and the chips coming back with the composer's words
+// through every way they come back (a draft, setText, fill, clear and its undo), as they were, never split again from
+// one string.
 import { act, createRef, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";

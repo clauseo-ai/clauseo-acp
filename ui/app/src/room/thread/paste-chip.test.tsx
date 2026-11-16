@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 // The long paste's chips in the room (composer.tsx, paste-chips.tsx): what goes is one string, each chip's text in
-// paste order, as they are drawn, then the typed words; the cap counts the chips, the window's (prompt-cost.ts) and the host's (ChatGPT's, #985) alike, and
-// a refusal keeps them; and the chips come back with the composer's words wherever those come back, as they were: the
-// draft after a visit to another conversation (the typed words and the chips' texts kept apart), and the stopped
-// question's refill.
+// paste order, as they are drawn, then the typed words; the cap counts the chips, the window's (prompt-cost.ts) and
+// the host's (ChatGPT's, #985) alike, and a refusal keeps them; the chips come back with the composer's words wherever
+// those come back, as they were: the draft after a visit to another conversation (the typed words and the chips'
+// texts kept apart, 33 of them too), the stopped question's refill, a steer not sent and a lost edit; and no undo
+// brings a sent question's chips back.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test } from "vitest";

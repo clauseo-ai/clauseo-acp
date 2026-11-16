@@ -62,8 +62,8 @@ export const EMPTY_DRAFT: Draft = { typed: "", pastes: [] };
 export const isBlank = (d: Draft): boolean => d.typed === "" && d.pastes.length === 0;
 
 /** The one string a draft goes as: each chip's text in paste order, as the chips are drawn above the field, then the
- * typed words, a blank line between. With
- * no chips, the typed words alone; with no typed words, the chips alone. Made only to send, or to check what was sent. */
+ * typed words, a blank line between. With no chips, the typed words alone; with no typed words, the chips alone. Made
+ * only to send, or to check what was sent. */
 export function sentOf(d: Draft): string {
   const tail = d.pastes.join(CHIP_GAP);
   if (tail === "") return d.typed;
