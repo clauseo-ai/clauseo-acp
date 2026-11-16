@@ -365,7 +365,7 @@ test("release.yml keeps the workflow rules", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
   assert.deepEqual(lintWorkflow(text), []);
   // The lint read the jobs: each name the release depends on is there.
-  for (const job of ["check", "blocklist", "build", "sign-windows", "assemble", "publish", "measure-builds"]) {
+  for (const job of ["check", "blocklist", "build", "sign-windows", "assemble", "publish", "latest", "measure-builds"]) {
     assert.match(text, new RegExp(`^  ${job}:`, "m"), job);
   }
 });
@@ -1009,9 +1009,10 @@ test("sign-windows runs without the macOS and Linux legs; assemble and publish n
     ),
     sign.join("\n"),
   );
-  // No always(), no !cancelled() and no failure() in assemble or publish: the default success()
-  // keeps a release, or dist-assets, from going out with a leg missing.
-  for (const job of ["assemble", "publish"]) {
+  // No always(), no !cancelled() and no failure() in assemble, publish or latest: the default
+  // success() keeps a release, or dist-assets, from going out with a leg missing, and latest
+  // from checking a release publish did not publish.
+  for (const job of ["assemble", "publish", "latest"]) {
     const ifs = jobCommands(text, job).filter((line) => /^if:/.test(line));
     assert.deepEqual(ifs.filter((line) => /always\(\)|cancelled\(\)|failure\(\)/.test(line)), [], job);
   }
@@ -1028,6 +1029,48 @@ test("a dry run's About shows its version with dev.<short sha>; a tag's shows th
   // The ui job's vite build reads it (ui/app/vite.config.ts, appVersion).
   const ui = jobCommands(text, "ui");
   assert.ok(ui.includes("CLAUSEO_VERSION_SUFFIX: ${{ needs.check.outputs.version_suffix }}"), "the ui build's env");
+});
+
+test("release.yml makes a published v* release the latest explicitly, and checks it as the app reads it", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const lines = text.split("\n").map((line) => stripComment(line).trim());
+  // --latest only where it is meant: publish makes the release the latest, a test pre-release
+  // says it is not; nowhere else.
+  const publish = jobCommands(text, "publish");
+  assert.ok(publish.includes('run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest'), "publish");
+  const assemble = jobCommands(text, "assemble");
+  assert.ok(
+    assemble.includes('if [ "$MODE" = release ]; then kind=(--draft); else kind=(--prerelease --latest=false); fi'),
+    "assemble's create",
+  );
+  assert.equal(lines.filter((line) => /--latest\b/.test(line)).length, 2, "--latest elsewhere");
+  // `latest` runs after publish, in release mode, with a read token, no environment and no secret.
+  const head = jobHead(text, "latest");
+  assert.deepEqual(jobNeeds(text, "latest"), ["check", "publish"]);
+  assert.ok(head.includes("if: needs.check.outputs.mode == 'release'"), head.join("\n"));
+  const latest = jobCommands(text, "latest");
+  const permissions = latest.indexOf("permissions:");
+  assert.deepEqual(latest.slice(permissions + 1, permissions + 3), ["contents: read", "env:"]);
+  assert.ok(!latest.some((line) => /^environment:|\bsecrets\b/.test(line)), "no environment, no secret");
+  // The blocklist job's minisign pin, exactly.
+  const pin = (job) => jobCommands(text, job).filter((line) => /^(tarball|sha)=/.test(line));
+  assert.equal(pin("blocklist").length, 2);
+  assert.deepEqual(pin("latest"), pin("blocklist"));
+  // The tier 1 platforms latest-json.mjs requires, each of which must be in the served latest.json.
+  assert.ok(latest.includes(`TIER1="${tier1Platforms("1.2.3").join(" ")}"`), "TIER1 is tier1Platforms");
+  // As the app reads it: releases/latest, over HTTPS only, each platform's bytes against the key.
+  for (const line of [
+    'latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name) || latest=""',
+    '[ "$latest" = "$TAG" ] || fail "GitHub\'s latest release is ${latest:-none}, not $TAG"',
+    'if get "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json" "$manifest"; then',
+    'key=$(jq -r \'.plugins.updater.pubkey // ""\' crates/desktop/tauri.conf.json)',
+    '[ -n "$key" ] || fail "plugins.updater.pubkey in tauri.conf.json is empty, so latest.json can\'t be checked"',
+    'out=$(minisign -V -p "$work/updater.pub" -m "$work/assets/$name" -x "$work/$platform.minisig") ||',
+  ]) {
+    assert.ok(latest.includes(line), line);
+  }
+  const get = latest.find((line) => line.startsWith("get() {"));
+  assert.match(get ?? "", / --location --proto '=https' --proto-redir '=https' /);
 });
 
 test("the workflow lint fails each broken rule", () => {
