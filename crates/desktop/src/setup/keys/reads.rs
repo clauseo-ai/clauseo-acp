@@ -25,8 +25,10 @@
 //!   a failed read (`failed`) as well: it launches without a key, unless a firm plan, which
 //!   refuses it, as a failed read does, until the read answers.
 //! - Each change of a mark sends a [`KeyNote::Read`].
+//! - A read whose thread panics is a failed read (`READ_PANICKED`): `reading` ends with it.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -41,6 +43,9 @@ use super::marker::{KeyMarker, Marked};
 use super::notes::{KeyNote, NoteSender, send};
 use super::{KeyCache, Keys, error_kind};
 use crate::bridge::lock;
+
+/// The kind a read that panicked is taken in as: a failed read, by the usual rule.
+const READ_PANICKED: &str = "a panic";
 
 /// Which agents' keys are unreadable and which are being read, and each agent's writes.
 #[derive(Debug, Default)]
@@ -78,6 +83,12 @@ impl Marks {
     /// Whether `agent`'s last read failed with no "key stored" mark (see `ReadState::failed`).
     pub(super) fn is_failed(&self, agent: &AgentId) -> bool {
         lock(&self.state).failed.contains(agent)
+    }
+
+    /// Whether a read of `agent` runs: the tests'.
+    #[cfg(test)]
+    pub(super) fn is_reading(&self, agent: &AgentId) -> bool {
+        lock(&self.state).reading.contains(agent)
     }
 
     /// The agents whose key is marked unreadable, for `Debug`.
@@ -339,7 +350,15 @@ fn start_read(cache: &KeyCache, agent: &AgentId) -> oneshot::Receiver<()> {
     let spawned = std::thread::Builder::new()
         .name("clauseo-keychain".to_owned())
         .spawn(move || {
-            let read = keychain.load(&for_thread);
+            // A read that panics is taken in as a failed one, so `reading` ends and Try again
+            // reads again (a build that unwinds; a release build aborts on a panic).
+            let read = catch_unwind(AssertUnwindSafe(|| keychain.load(&for_thread)))
+                .unwrap_or_else(|_panic| {
+                    Err(KeyError::Keychain {
+                        agent: for_thread.clone(),
+                        kind: READ_PANICKED,
+                    })
+                });
             {
                 let _order = lock(&order);
                 marks.finish(&keys, &marker, &for_thread, began, read);

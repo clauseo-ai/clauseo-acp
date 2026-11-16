@@ -502,11 +502,15 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     agent.key_unreadable }`, never "signed in with an API key" and never Sign in, with the
     code's own words ("Clauseo couldn't check for a saved API key in time. If this computer
     asks for permission, allow it, then try again.") and Try again, on the first run's gate,
-    the expired sign-in card and Plans; the log's state word is `key_unreadable`, not
-    `failed`. A sign-in press for it is refused with `agent.key_unreadable` (`SignInBar::
-    KeyUnreadable`, ahead of the firm's and the key's bars) and reads the key again: a stored
-    key bars a plan sign-in whether it reads or not, so an unanswered or denied keychain prompt
-    never sends a lawyer on a firm's key to a personal login. (Amended 2026-11-16, the
+    the expired sign-in card and Plans; the gate and the card also say the way out, "To change
+    it, open Settings, then Plans." (where the key can be removed with no read). The log's
+    state word is `key_unreadable`, not `failed`. A sign-in press for it is refused with
+    `agent.key_unreadable` (`SignInBar::KeyUnreadable`, ahead of the firm's and the key's
+    bars; the key cache is asked as well as the composed facts, so a press before they catch
+    up is refused too) and reads the key again. A plan sign-in already going when the key
+    becomes unreadable is ended, as a key or an endpoint ends one. A stored key bars a plan
+    sign-in whether it reads or not, so an unanswered or denied keychain prompt never sends a
+    lawyer on a firm's key to a personal login. (Amended 2026-11-16, the
     orchestrator's ruling on VM rows D7, A-K6 and K11: the card said "Sign-in didn't finish."
     and its Try again started a plan sign-in.) The launches, the restart after a leave and a
     key's overwrite still count an unreadable key as stored. A thread whose last turn failed
@@ -517,8 +521,9 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     read that key again (`HostConfig::with_key_retry`, called on the actor, never blocking)
     before its 2 s wait, unless a read of it is still running, and so does a sign-in press (the
     card's Try again). A read again that succeeds lifts the refusal, so that launch, or the
-    lawyer's next try, goes on. A read that fails again
-    leaves it. A key the lawyer sets or clears also ends the mark. Desktop keeps one refusal in
+    lawyer's next try, goes on. A read that fails again leaves it, and so does a read whose
+    thread panics (taken in as a failed read, so a retry can read again; a release build aborts
+    on a panic). A key the lawyer sets or clears also ends the mark. Desktop keeps one refusal in
     force per agent (`setup/refusal.rs`): the policy's, else the unreadable key's, else none.
   - *A setup thread that never loads the keys.* The host bounds `agent.keys_loading` itself: from
     12 s after its start (desktop's 10 s and a margin), one still in place counts as

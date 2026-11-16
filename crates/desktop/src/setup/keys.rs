@@ -180,6 +180,12 @@ impl KeyCache {
         in_memory || self.marks.is_unreadable(agent)
     }
 
+    /// Whether a read of `agent`'s key runs: the tests'.
+    #[cfg(test)]
+    pub(crate) fn reading(&self, agent: &AgentId) -> bool {
+        self.marks.is_reading(agent)
+    }
+
     /// Whether memory holds `agent`'s key.
     pub(crate) fn in_memory(&self, agent: &AgentId) -> bool {
         lock(&self.keys).contains_key(agent)

@@ -4,6 +4,7 @@ import { IconOpen } from "../../icons/icons.tsx";
 import { useDisplay } from "../../lib/display.ts";
 import { errorWords } from "../../lib/words-errors.ts";
 import type { FirstLaunchKey } from "../../lib/words-first-launch.ts";
+import { sx } from "../../lib/words-signin-expired.ts";
 import { Button } from "../../ui/button.tsx";
 import { Say } from "../say.tsx";
 import type { GateAct, Plan } from "./gate.tsx";
@@ -113,10 +114,15 @@ export function Failed({
       );
     // a saved API key the keychain didn't give (a macOS prompt unanswered or denied): no sign-in failed, so the key's
     // own words, and Try again, whose press desktop refuses with this code and reads the key again (never a sign-in)
+    // and the way out when Try again can't work (a key that never reads): Plans, where the key
+    // can be removed with no read; the expired card's approved line (UD2), on both surfaces
     case "agent.key_unreadable":
       return (
         <Act act={signIn(w("Try again"))}>
-          <Say>{errorWords(lang, "agent.key_unreadable")}</Say>
+          <Say>{errorWords(lang, "agent.key_unreadable")}</Say>{" "}
+          <span className="fl-gate-why">
+            <Say>{sx(lang, "To change it, open Settings, then Plans.")}</Say>
+          </span>
         </Act>
       );
     case "signin.policy_unreadable":
