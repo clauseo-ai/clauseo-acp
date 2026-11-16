@@ -208,6 +208,7 @@ pub(crate) fn user_policy_touches(
 }
 
 /// The admin tiers' documents on this machine ([`sourced_admin_docs`] without their sources).
+#[cfg(test)]
 pub(crate) fn admin_docs(managed: &Path, os: bool) -> Vec<Doc> {
     sourced_admin_docs(managed, os)
         .into_iter()

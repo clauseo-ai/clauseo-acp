@@ -43,17 +43,14 @@ pub(crate) const DEADLINE: Duration = Duration::from_secs(30);
 /// agents (ps-quote's unchecked refusals use the same; whichever merges second keeps one).
 pub(crate) const UNCHECKED: &str = "Clauseo could not check this step, so it did not run.";
 
-/// The stderr line when the watchdog fires: [`UNCHECKED`], then why.
-pub(crate) const LATE: &str =
-    "Clauseo could not check this step, so it did not run. The check took over 30 seconds.";
+/// Why, after [`UNCHECKED`], when the watchdog fires.
+pub(crate) const LATE: &str = "The check took over 30 seconds.";
 
-/// The stderr line when the guard panics: [`UNCHECKED`], then why.
-pub(crate) const BROKEN: &str =
-    "Clauseo could not check this step, so it did not run. The check failed.";
+/// Why, after [`UNCHECKED`], when the guard panics.
+pub(crate) const BROKEN: &str = "The check failed.";
 
-/// The stderr line when the watchdog's thread cannot start: [`UNCHECKED`], then why.
-pub(crate) const NO_WATCHDOG: &str =
-    "Clauseo could not check this step, so it did not run. The check's time limit did not start.";
+/// Why, after [`UNCHECKED`], when the watchdog's thread cannot start.
+pub(crate) const NO_WATCHDOG: &str = "The check's time limit did not start.";
 
 /// Arms the panic hook and the watchdog (the module doc). Called once, first, by the real entry.
 pub(super) fn arm() {
@@ -115,14 +112,15 @@ fn hang() -> ! {
     }
 }
 
-/// Writes `line` to stderr and ends the process with the refusing code.
-fn refuse_now(line: &str) {
+/// Writes [`UNCHECKED`] and `reason` as one line to stderr and ends the process with the
+/// refusing code.
+fn refuse_now(reason: &str) {
+    let line = format!("{UNCHECKED} {reason}\n");
     let mut errors = std::io::stderr().lock();
     // Nothing more can be done when the agent stopped reading; the exit code still decides.
     drop(
         errors
             .write_all(line.as_bytes())
-            .and_then(|()| errors.write_all(b"\n"))
             .and_then(|()| errors.flush()),
     );
     drop(errors);

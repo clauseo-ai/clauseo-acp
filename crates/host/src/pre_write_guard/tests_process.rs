@@ -104,22 +104,29 @@ fn a_normal_refusal_in_the_guard_process_exits_2_with_a_reason() {
 fn a_panic_in_the_guard_process_exits_2_with_a_reason() {
     let (code, errors) = child(&refused_input(), Some("panic"));
     assert_eq!(code, Some(super::DENY), "{errors}");
-    assert!(errors.contains(BROKEN), "{errors}");
+    assert!(
+        errors.contains(&format!("{UNCHECKED} {BROKEN}")),
+        "{errors}"
+    );
 }
 
 #[test]
 fn the_guard_process_past_its_deadline_exits_2_with_a_reason() {
     let (code, errors) = child(&refused_input(), Some("hang"));
     assert_eq!(code, Some(super::DENY), "{errors}");
-    assert!(errors.contains(LATE), "{errors}");
+    assert!(errors.contains(&format!("{UNCHECKED} {LATE}")), "{errors}");
 }
 
 #[test]
 fn every_refusal_without_an_answer_starts_with_the_shared_sentence() {
-    for line in [LATE, BROKEN, NO_WATCHDOG] {
-        let reason = line
-            .strip_prefix(UNCHECKED)
-            .unwrap_or_else(|| panic!("{line}"));
-        assert!(reason.starts_with(' ') && reason.len() < 80, "{line}");
+    assert_eq!(
+        UNCHECKED,
+        "Clauseo could not check this step, so it did not run."
+    );
+    for reason in [LATE, BROKEN, NO_WATCHDOG] {
+        assert!(
+            reason.ends_with('.') && !reason.contains('\n') && reason.len() < 60,
+            "{reason}"
+        );
     }
 }

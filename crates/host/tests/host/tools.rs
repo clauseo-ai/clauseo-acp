@@ -412,6 +412,14 @@ fn skills_are_written_before_the_launch_and_a_failure_is_no_failed_launch() {
     let matter = host.create_matter("m", &dir.folder("m", &[]));
     turn(&host, host.create_thread(matter, CODEX));
     assert!(skill_md.is_file(), "a Codex launch writes the skills too");
+    host.shutdown();
+    // The Claude launch's run: on Windows it rests on the guard, so it names the stand-in.
+    let host = dir.start_launching(1, Wired::new(&dir), |config| {
+        dir.with_stand_in_guard(config.with_profile_hook(Box::new(Hook {
+            skills: skills.clone(),
+            ..Hook::default()
+        })))
+    });
     // The skills folder made a file: every write fails, and the launch still goes.
     write::remove_dir_all(
         &dir.data()

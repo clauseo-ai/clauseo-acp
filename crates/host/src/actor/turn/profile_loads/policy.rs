@@ -65,14 +65,6 @@ fn managed(actor: &Actor) -> PathBuf {
         .unwrap_or_default()
 }
 
-/// What this machine's admin tiers say for `thread`'s agent, with the server-managed settings
-/// in its Claude home when it has one; the OS tiers are not read in unit tests. For a launch's
-/// checks, and for `asks` (stage D: no read of a network share is approved unasked while an
-/// admin tier is present, `content || remote`).
-pub(crate) fn admin(actor: &Actor, thread: ThreadId) -> AdminPolicy {
-    policies(&managed(actor), claude_home(actor, thread).as_deref()).0
-}
-
 /// What the admin tiers in `managed` (and the OS's, but in unit tests) and the server-managed
 /// settings in `home` say, and every one of their documents with its source.
 fn policies(managed: &Path, home: Option<&Path>) -> (AdminPolicy, Vec<Sourced>) {
@@ -98,6 +90,17 @@ pub(crate) enum AdminTier {
     Absent,
 }
 
+/// Whether a Claude launch carries Claude's sandbox, kept on its agent (`Agent::sandboxed`) for
+/// the policy checks at prompts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Sandboxed {
+    /// No sandbox (Windows), or not known yet.
+    #[default]
+    No,
+    /// Claude's sandbox (macOS, Linux).
+    Yes,
+}
+
 /// Keeps on `thread`'s agent whether its launch found an admin tier (`Agent::admin_tier`), and
 /// whether it carries Claude's sandbox (`Agent::sandboxed`, for the policy checks at prompts).
 pub(super) fn keep_admin_tier(
@@ -108,7 +111,11 @@ pub(super) fn keep_admin_tier(
 ) {
     let agent = super::super::state(actor, thread).and_then(|state| state.agent.as_deref_mut());
     if let Some(agent) = agent {
-        agent.sandboxed = sandboxed;
+        agent.sandboxed = if sandboxed {
+            Sandboxed::Yes
+        } else {
+            Sandboxed::No
+        };
         agent.admin_tier = if admin.content || admin.remote {
             AdminTier::Present
         } else {
@@ -184,7 +191,9 @@ pub(crate) fn user_policy_reader(
         .threads
         .get(&thread)
         .and_then(|entry| entry.turn.agent.as_deref());
-    let launch = agent.map_or((false, false), |agent| (agent.forced_ask, agent.sandboxed));
+    let launch = agent.map_or((false, false), |agent| {
+        (agent.forced_ask, agent.sandboxed == Sandboxed::Yes)
+    });
     let own = own_env(actor, thread);
     move || {
         let (admin, docs) = policies(&managed, home.as_deref());

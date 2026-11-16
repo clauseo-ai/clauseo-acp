@@ -104,12 +104,12 @@ fn a_user_policy_appearing_while_a_prompt_runs_stops_the_turn_at_the_next_poll()
     let lines = [PROMPT.to_owned(), chunk("Working")];
     let (mut rig, thread, tier) = start("claude-policy-mid-turn", &lines);
     let turn = prompting(&mut rig, 10, thread);
-    rig.clock.advance(POLL);
-    rig.run_tasks_until_stalled();
     assert!(
         rig.actor.threads[&thread].turn.current.is_some(),
         "no policy: still running"
     );
+    // Planted before the first poll: each poll reads the policy before it starts its file check
+    // on a thread of its own, so the next poll's timer waits on no thread.
     *tier.lock().unwrap() = Ok(Some(POLICY.to_owned()));
     rig.clock.advance(POLL);
     until_ended(&mut rig, thread);

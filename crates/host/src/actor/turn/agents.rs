@@ -119,7 +119,7 @@ pub(super) struct Agent {
     /// permissions: it runs in forced ask (`agent/forced_ask.rs`).
     pub(super) forced_ask: bool,
     /// A Claude agent's launch carries Claude's sandbox (`profile_loads/policy.rs`).
-    pub(super) sandboxed: bool,
+    pub(super) sandboxed: super::profile_loads::policy::Sandboxed,
     /// The launch's folder check answer, when it ran; read through [`Agent::unprotected`].
     pub(super) folder_check: Option<crate::agent::folder_support::Answer>,
     /// A Claude agent's standing with `auto`, the mode it runs in outside forced ask
@@ -130,7 +130,7 @@ pub(super) struct Agent {
     /// A Claude agent's home, its `CLAUDE_CONFIG_DIR`, whose transcripts confirm a steer
     /// (`queue/confirm.rs`); `None` for any other agent.
     pub(super) claude_home: Option<PathBuf>,
-    /// Whether its launch found a policy tier with content (`policy::admin`); `Present` until then.
+    /// Whether its launch found a policy tier with content (`policy::keep_admin_tier`); `Present` until then.
     pub(super) admin_tier: super::profile_loads::policy::AdminTier,
     /// The MCP servers Clauseo itself sent this session that may run unasked
     /// (`agent/mcp_trust.rs`), filled by `profile_loads::session_loads`: the lawyer's trusted
@@ -303,7 +303,7 @@ pub(super) fn launch_now(
         probe,
         mcp_commands: Vec::new(),
         forced_ask,
-        sandboxed: false,
+        sandboxed: super::profile_loads::policy::Sandboxed::No,
         folder_check: prepared_folder,
         auto: session::Auto::default(),
         modes: super::forced_mode::read_back::Reports::default(),

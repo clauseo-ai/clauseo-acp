@@ -186,7 +186,17 @@ impl Dir {
         let claude_only = agents.is_some_and(|agents| {
             agents.contains_key("claude-acp") && agents.keys().all(|id| id == "claude-acp")
         });
-        if cfg!(windows) && claude_only {
+        if claude_only {
+            self.with_stand_in_guard(config)
+        } else {
+            config
+        }
+    }
+
+    /// [`Dir::stand_in_guard`]'s stand-in on Windows, for a run that launches only Claude in a
+    /// folder that also has a Codex agent; `config` as it is elsewhere.
+    pub(crate) fn with_stand_in_guard(&self, config: HostConfig) -> HostConfig {
+        if cfg!(windows) {
             config.with_pre_write_guard(self.root.join("app").join("clauseo-desktop.exe"))
         } else {
             config

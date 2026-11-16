@@ -153,7 +153,7 @@ impl OwnEnv {
     pub(crate) fn of(env: &BTreeMap<OsString, OsString>) -> Self {
         Self(ENV_OWN.map(|key| {
             env.iter()
-                .find(|(name, _)| same_name(name, key[1]))
+                .find(|(name, _)| key.last().is_some_and(|wanted| same_name(name, wanted)))
                 .map(|(_, value)| value.to_string_lossy().into_owned())
         }))
     }
@@ -231,7 +231,10 @@ pub(crate) fn weakening(
                 .find(|key| at(settings, key).is_some_and(|value| *value != Value::Bool(false)))
         })
         .or_else(|| {
-            let set = |key: &&[&str]| env_values(settings, key[1]).next().is_some();
+            let set = |key: &&[&str]| {
+                key.last()
+                    .is_some_and(|name| env_values(settings, name).next().is_some())
+            };
             ENV_REFUSED.into_iter().find(set)
         })
         .or_else(|| {
