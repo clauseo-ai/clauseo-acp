@@ -36,6 +36,9 @@ export type FootPlan = {
   ready: boolean;
   /** A muted line under its row (Claude's browser sign-in note); null or left out with none. */
   note?: string | null | undefined;
+  /** false when its line offers no sign-in (a saved key the keychain didn't give: its Try again reads the
+   * key), so the lead asking for one stands only for the other plan; left out, its line counts. */
+  signs?: boolean | undefined;
 };
 
 export function Welcome({
@@ -172,7 +175,7 @@ export function Welcome({
             </span>
           ))}
           {/* the lead while a plan still offers its sign-in: either, or both */}
-          {plans.some((plan) => plan.install !== null) && (
+          {plans.some((plan) => plan.install !== null && plan.signs !== false) && (
             <p className="fl-plans-lead">
               <Say>{w("Sign in with the plan you pay for: Claude, ChatGPT or both.")}</Say>
             </p>

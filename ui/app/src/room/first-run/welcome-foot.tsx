@@ -170,10 +170,12 @@ export function welcomeFoot(
     words: string,
     kind: string,
     button: { words: string; press: () => void; testId: string; quiet?: boolean },
+    note?: string,
   ): WorkingState => ({
     kind: "wait",
     words,
     pill: null,
+    ...(note === undefined ? {} : { note }),
     actions: (
       <span className="fl-install" data-testid={IDS.line} data-state={kind}>
         <Button
@@ -205,6 +207,23 @@ export function welcomeFoot(
             ...signIn,
             words: sx(lang, "Sign in again"),
           }),
+          lang,
+          name,
+          null,
+          "none",
+        );
+      // a saved key the keychain didn't give (agent.key_unreadable): the gate's words and Try again
+      // (gate-failed.tsx), never "is ready" with a sign-in (VM row A-K6); desktop refuses the press
+      // and reads the key again. The note says where the key can be changed; no tick, since the
+      // plan can't be used until the key reads
+      if (view.code === "agent.key_unreadable")
+        return named(
+          line(
+            errorWords(lang, "agent.key_unreadable"),
+            "key-unreadable",
+            { ...signIn, words: fl(lang, "Try again") },
+            sx(lang, "To change it, open Settings, then Plans."),
+          ),
           lang,
           name,
           null,

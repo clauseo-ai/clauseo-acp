@@ -51,6 +51,7 @@ use super::confirm::{Ask, SetupConfirm};
 use super::host_calls::SetupHost;
 use super::keys::{KeyCache, KeysLoaded, needs_keys};
 use super::leave::{self, Waiter};
+use super::status_timing::TARGET;
 use super::wiring::Wiring;
 use super::{KeyWrite, SetupBackend, SetupEvents, events};
 use crate::bridge::lock;
@@ -299,7 +300,12 @@ impl AgentsBackend {
             self.compose.sign_in_bar(agent)?
         };
         if bar == SignInBar::KeyUnreadable {
-            tracing::info!(%agent, "sign-in press, stored key unreadable: read again");
+            // On a lifecycle target, so host.log keeps it (`clauseo_host::log_file`).
+            tracing::info!(
+                target: TARGET,
+                %agent,
+                "sign-in press, stored key unreadable: read again"
+            );
             // Its answer comes back as a `KeyNote::Read` when the mark changes.
             drop(self.keys.read_again(agent));
         }

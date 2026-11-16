@@ -20,6 +20,7 @@ import {
   isReady,
   isSignedIn,
   planInPlay,
+  type AgentSetup,
   type SetupState,
   type SetupStore,
 } from "../../store/setup.ts";
@@ -57,6 +58,12 @@ const folderName = (display: string, platform: Platform) =>
     .filter((p) => p !== "")
     .pop() ?? display;
 
+/** Whether the plan's sign-in state is a saved key the keychain didn't give. */
+const keyUnreadable = (setup: AgentSetup | undefined): boolean => {
+  const signIn = setup?.signIn;
+  return typeof signIn === "object" && signIn.failed?.code === "agent.key_unreadable";
+};
+
 /** A row without its note: the first screen says the note under the row instead. */
 function unnoted(row: WorkingState | null): WorkingState | null {
   if (row?.kind !== "wait" || row.note === undefined) return row;
@@ -82,24 +89,27 @@ export function FirstScreen({
   const plans: FootPlan[] = PLANS.map((agent) => {
     const name = NAME[planOf(agent)];
     const setup = state.agents[agent];
-    // the cancelled sign-in's note goes under the row, in Welcome's own slot, not in it
-    const install = unnoted(
-      welcomeFoot(
-        lang,
-        agent,
-        name,
-        setup,
-        state,
-        online,
-        footActs(store, agent, state),
-        IDS.install,
-      ),
+    // the row's note (a cancelled sign-in's, an unreadable key's) goes under the row, in Welcome's
+    // own slot, not in it
+    const row = welcomeFoot(
+      lang,
+      agent,
+      name,
+      setup,
+      state,
+      online,
+      footActs(store, agent, state),
+      IDS.install,
     );
+    const install = unnoted(row);
+    const own = row?.kind === "wait" ? (row.note ?? null) : null;
     return {
       key: agent,
       name,
       install,
-      note: stillNote(lang, name, setup) ?? browserNote(lang, agent, install, setup),
+      note: stillNote(lang, name, setup) ?? browserNote(lang, agent, install, setup) ?? own,
+      // an unreadable key's row offers Try again, which reads the key, never a sign-in
+      signs: !keyUnreadable(setup),
       // ready here, or installed and signed in wherever that happened (D-012: Settings' sign-in left this window
       // with no row for the plan, since its install was never seen turning ready here)
       ready:
