@@ -244,7 +244,8 @@ anything the agent starts.
   Clauseo-only paths, every other session's run folder and every other matter's notes, later ones
   included ([0030](decisions/0030-launch-profile.md)). Gaps: `run.old-*` when the data folder's
   path holds a glob character; none of it on Windows, where Codex's unelevated sandbox
-  can't enforce a read deny (until S15)
+  can't enforce a read deny (until S15). On a Mac, ChatGPT's commands are also denied other
+  matters' folders (the matter fence).
 - `built` (Windows, Codex): Codex runs Clauseo's guard hook as one PowerShell statement
   (`agent/loads/codex.rs`, `ps_command`) naming `clauseo-guard.exe`, a console program installed
   beside `Clauseo.exe` (`codex_guard_program`); the guard's 0 and 2 end the hook, and any other
@@ -280,6 +281,77 @@ anything the agent starts.
   process start) keep the default thread DACL, so such a process can take one over and read the
   key, and the install is per-user, so it could replace the binary anyway
   ([README](../crates/desktop/agent-browser/README.md))
+- `built` (tier C, matter fence, #1085): every other matter the host knows is fenced from a
+  session's agent: Claude's Read and Edit deny rules on every OS, Claude's sandbox read deny and
+  Codex's profile deny on macOS and Linux, and the host's auto-deny of permission requests. On
+  Windows the other matters have no Bash or PowerShell text rules, which keeps a launch's
+  auto-mode context under Claude Code 2.1.293's 1,040,000 B (`data_fence::shell_deny_budget_tests`:
+  under 600,000 B at 8 matters, 700,000 B at 50 and 810,000 B at 200, with one data spelling or
+  two; decision record 0030, "Auto-mode context"); Claude Code checks the file paths of its
+  common file commands (about 40 Bash commands and PowerShell's file cmdlets) against the Read
+  and Edit denies. No folder above another matter is in any rule: an `Edit` deny of a folder
+  covers everything inside it. On macOS, moving such a folder is the sandbox's to refuse while
+  Claude's sandbox is on; when it is off (`NoTemp`, `NotUtf8`, `Wildcard`, `CoversOwn`) each
+  command goes to the lawyer as a card. Scope on Windows in this build: the fence does not cover
+  moving, renaming or deleting a folder above another matter, nor a matter whose folder has
+  moved until the lawyer locates it; the handle pin and the moved-matter refusal are separate
+  PRs. A matter the conversation is not invited into inside the session's own matter stays shut
+  on macOS and Linux even to a command that never names it: Claude's sandbox then re-opens none
+  of the own matter to its commands (its file tools still read and edit it, and the lawyer is
+  told, `ShellLimited`); a deny the sandbox can't spell is widened to a folder above it, never
+  dropped. Windows has no OS fence, so there the fence does not cover a command in the own matter
+  that reaches a matter nested inside it. Codex on Windows has no fence between matters: its
+  instructions tell it a folder holding `.clauseo` is a matter, to open another only if a
+  Clauseo note at the start of the lawyer's message names it as one the lawyer let this
+  conversation read, never because of a chat request, the lawyer's included, or a document
+  (`instructions::other_matters_unfenced`); that is an instruction, not a deny, until its
+  Windows launch has a read deny. On Windows each fenced folder, the data folder and the own
+  matter are also named by their full 8.3 short form (`agent::short_forms`); a path mixing long
+  and short names is outside the rules. The invite's offer names only a matter a refused call's
+  own arguments targeted, never one its output printed. A lawyer's per-conversation read invite
+  is read-only: Claude reads through its Read tool, writes stay denied. Scope: the invite's offer
+  follows a refused call of the agent's, and the lawyer's click is still required; the path rules
+  do not follow a rename of a folder above a nested matter, nor what is made in a parent matter
+  after a launch, until the next launch; a Read already running when a withdrawal's cancel lands
+  finishes, and its output stays in the session the relaunch resumes
+
+### Matters on Windows
+
+What the app will say (UC-820 Windows, UC-821 Mac, PR to come; not shown by this build,
+provisional, Hindi later). On Windows, the launch build's line (UC-820's redraft): "On Windows,
+Clauseo stops Claude's and ChatGPT's file tools from opening or changing another matter's files,
+and refuses their commands that name another matter's folder. It can't catch everything: a
+program they write and run, a file location they piece together, or a shortcut they make first
+can still reach those files." Its second half depends on the launch build's shell scan, which is
+not in #1085. "Move" is not in those words. On a Mac: "On a Mac, the operating system keeps Claude
+inside this matter's folder, so it can't open, change or move another matter's files." That holds
+once #1153 (the sandbox main PR) lands.
+
+Scope for Claude on Windows in this build. Nothing of Clauseo's hooks Claude's Read tool (the
+pre-write guard's matcher never matches Read, and the guard checks no matter fence): file-tool
+reads and edits of another matter are refused by the Read and Edit deny rules.
+
+| Claude tries to | Covered by | Outside the fence in this build (Anthropic's classifier judges it) |
+|---|---|---|
+| Read another matter's file | Claude's file tools (Read deny rules); the common Bash commands and PowerShell file cmdlets (Claude Code's path check against the Read denies) | programs Claude writes and runs, and interpreters it starts in a command; links it makes; paths held in variables; a listing of a folder that holds the own matter beside others (names and sizes) |
+| Change it | the file tools (Edit deny rules); the common write commands (Claude Code's check against the Edit denies) | the same; writes into an invited matter through those (an invite is read-only to the file tools and the common commands) |
+| Move, rename or delete it or a folder above it | nothing in this build; the handle pin and the moved-matter refusal are separate PRs | a folder above another matter (no rule names one); a matter on a share or a removable drive |
+
+The launch build's shell scan (another PR) refuses commands that name another matter's folder,
+including in interpreters' arguments, and commands naming a folder that holds matters. Nothing
+checks the 1,040,000 B auto-mode limit at run time: the budget test pins the estimate, and the
+run-time estimate and its ask mode are #1154's.
+
+A folder that holds both the own matter and another (`C:\Clients\P` holding `A` and `B`, or
+`C:\Clients`) gets no Read or Edit deny, since Claude Code reads a folder rule as covering all
+inside it and would refuse the own matter with it. The data folder keeps its Bash and PowerShell
+text rules (the PowerShell ones until stage D's guard).
+
+The data folder is written as its folder name alone where that name holds Clauseo's: by default
+`ai.clauseo.desktop` (and its 8.3 form `AICLAU~1.DES`). A command naming any file or folder
+whose name starts with it is denied too; no ordinary document is called that. A configured
+folder named, say, `Clauseo Data` also catches a lawyer's own `Clauseo Data Export`, unless the
+own matter's folder holds the name, in which case it keeps its path forms.
 
 ## Egress proxy
 
