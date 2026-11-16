@@ -5,10 +5,11 @@
 //!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
 //!   `WebSearch` (not on a Bedrock login, which has none) and one `WebFetch(domain:…)` per seed
 //!   site, and no bare `WebFetch` (a hook's is dropped, with any `WebFetch` rule holding `*`), so
-//!   a fetch from any other host goes to the permission mode (decision record 0030), and `mcp__case-law__<tool>` per
-//!   search and read tool (`case_law::UNASKED_TOOLS`) only in a session that got the
-//!   `case-law` entry (any hook rule for that server is dropped otherwise), and before it
-//!   `mcp__<name>` for each of the lawyer's servers that runs without asking
+//!   a fetch from any other host goes to the permission mode (decision record 0030), and
+//!   `mcp__case-law__<tool>` per search and read tool (`case_law::UNASKED_TOOLS`) only in a
+//!   session that got the `case-law` entry (any hook rule for that server is dropped
+//!   otherwise), and before it `mcp__<name>` for each of the lawyer's servers that runs
+//!   without asking
 //!   (`agent/mcp_trust.rs`); in forced ask (`agent/forced_ask.rs`) there is no `allowedTools`
 //!   at all, the hook's included. `additionalDirectories` gains the work folder and the matter
 //!   notes folder, after any hook entries. `settings` gains `disableSkillShellExecution: true`

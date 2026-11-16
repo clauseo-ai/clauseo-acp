@@ -16,6 +16,8 @@
 //! checked to resolve with `getent hosts` on 2026-11-03 (decision record 0029, "Seed and deny
 //! lists"); the unit tests never touch the network.
 
+use std::sync::LazyLock;
+
 /// The seeded hosts: the national sites in the order S27 names them, then the 25 High Courts in
 /// the alphabetical order of the courts' names.
 pub const SEED_SITES: &[&str] = &[
@@ -179,30 +181,8 @@ pub const FETCH_ONLY_SITES: &[&str] = &[
 
 /// Every host seeded as a Claude `WebFetch(domain:<host>)` allow rule: [`SEED_SITES`], then
 /// [`FETCH_ONLY_SITES`].
-pub const WEB_FETCH_SITES: [&str; SEED_SITES.len() + FETCH_ONLY_SITES.len()] =
-    concat(SEED_SITES, FETCH_ONLY_SITES);
-
-#[expect(
-    clippy::indexing_slicing,
-    reason = "const fn: no get_mut in const; N is the two lengths' sum, so every index is in bounds and a wrong N fails at compile time"
-)]
-const fn concat<const N: usize>(
-    first: &[&'static str],
-    then: &[&'static str],
-) -> [&'static str; N] {
-    let mut out = [""; N];
-    let mut i = 0;
-    while i < first.len() {
-        out[i] = first[i];
-        i += 1;
-    }
-    let mut j = 0;
-    while j < then.len() {
-        out[first.len() + j] = then[j];
-        j += 1;
-    }
-    out
-}
+pub static WEB_FETCH_SITES: LazyLock<Vec<&'static str>> =
+    LazyLock::new(|| SEED_SITES.iter().chain(FETCH_ONLY_SITES).copied().collect());
 
 #[cfg(test)]
 mod tests {
@@ -249,7 +229,7 @@ mod tests {
     /// as a pattern, so a stray character would widen or break the rule.
     #[test]
     fn each_fetch_host_is_a_plain_domain() {
-        for host in WEB_FETCH_SITES {
+        for host in WEB_FETCH_SITES.iter() {
             assert!(
                 !host.contains(['*', '/', ':', '?', '#', '@', ' ']),
                 "{host} is not a plain domain"
