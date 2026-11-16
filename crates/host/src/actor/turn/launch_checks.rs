@@ -74,6 +74,9 @@ pub(super) struct Preparing {
     id: u64,
     /// The work that waits for the agent's session.
     pub(super) waiting: Vec<Waiting>,
+    /// Closed, or dropped with this, when nothing waits any more (the lawyer's Stop,
+    /// `cancel.rs`): the guard's self-test then gives up and ends its process.
+    pub(super) stop: async_channel::Sender<()>,
 }
 
 /// What a launch's checks found.
@@ -317,12 +320,16 @@ pub(super) fn prepare(
     let Some(state) = state(actor, thread) else {
         return;
     };
-    state.preparing = Some(Box::new(Preparing { id, waiting }));
+    // Nothing is ever sent: the self-test waits for the channel to close (`Preparing::stop`).
+    let (stop, stopped) = async_channel::bounded::<()>(1);
+    state.preparing = Some(Box::new(Preparing { id, waiting, stop }));
     let check = FolderCheck {
         matter: Some(run.key.matter),
         source: actor.folder_check,
     };
     let (clock, check_clock) = (Arc::clone(&actor.clock), Arc::clone(&actor.clock));
+    let selftest = (actor.guard_selftest, actor.pre_write_guard.clone(), stopped);
+    let selftest_clock = Arc::clone(&actor.clock);
     let block_list_wait = claims.egress.block_list_wait(Arc::clone(&actor.clock));
     let matter = run.key.matter;
     let (mcp, settings) = (McpReads::of(actor), Reads::of(actor, claude));
@@ -376,6 +383,8 @@ pub(super) fn prepare(
                 let short = run.claude_tmp.take();
                 run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
+                let selftest = (claude, selftest, &selftest_clock);
+                folders::self_test(&run, &stored, answer, selftest)?;
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
                 run.mcp_secrets = Arc::new(mcp.read());

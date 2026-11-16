@@ -250,6 +250,9 @@ mod launch_folder;
 #[path = "host/launch_refused.rs"]
 mod launch_refused;
 #[cfg(test)]
+#[path = "host/launch_stop.rs"]
+mod launch_stop;
+#[cfg(test)]
 #[path = "host/limits.rs"]
 mod limits;
 #[cfg(test)]
@@ -453,6 +456,9 @@ mod search_review;
 #[cfg(test)]
 #[path = "host/settings.rs"]
 mod settings;
+#[cfg(test)]
+#[path = "host/settings_canary.rs"]
+mod settings_canary;
 #[cfg(test)]
 #[path = "host/settings_entries.rs"]
 mod settings_entries;

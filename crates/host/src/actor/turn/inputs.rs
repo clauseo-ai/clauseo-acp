@@ -59,10 +59,12 @@ pub(crate) enum TurnInput {
 pub(crate) enum AgentReply {
     Initialized(Result<AgentInfo, clauseo_acp::Error>),
     /// `session/load`, `session/resume` or `session/new` returned; `loaded` for the first
-    /// two, which continue the stored session.
+    /// two, which continue the stored session. `canary`: a Claude session's settings canary,
+    /// read back after a good answer (`session/canary.rs`), when the call carried one.
     Session {
         loaded: bool,
         result: Result<SessionStart, clauseo_acp::Error>,
+        canary: Option<super::session::Checked>,
     },
     /// A session's work before its attach (Codex's ask mode and guard's trust, Claude's mode,
     /// the picks) ended; `picked` says what the picks did.

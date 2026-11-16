@@ -36,8 +36,10 @@ use sha2::{Digest, Sha256};
 /// and `Bash`. Names joined by `|` are an exact list in Codex.
 pub(crate) const CODEX_GUARD_MATCHER: &str = "apply_patch|Write|Edit|Bash";
 
-/// The seconds Codex waits for the guard (its default is 600); a timeout lets the tool go on.
-const CODEX_GUARD_TIMEOUT_SECONDS: u64 = 10;
+/// The seconds Codex waits for the guard: its default, 600. The guard's own watchdog refuses
+/// well before (30 s, `pre_write_guard/watchdog.rs`); this only bounds a guard whose watchdog
+/// never fired.
+const CODEX_GUARD_TIMEOUT_SECONDS: u64 = 600;
 
 /// The key of the first handler of the first `PreToolUse` group from session flags.
 #[cfg(not(windows))]
@@ -55,7 +57,7 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 /// {"PreToolUse": [{"matcher": "apply_patch|Write|Edit|Bash", "hooks": [{"type": "command",
 ///   "command": "'<program>' --pre-write-guard --record '<record>' --record-id <hex>",
 ///   "commandWindows": "\"<program>\" --pre-write-guard --record \"<record>\" --record-id <hex>",
-///   "timeout": 10}]}],
+///   "timeout": 600}]}],
 ///  "state": {"/<session-flags>/config.toml:pre_tool_use:0:0": {"trusted_hash": "sha256:…"}}}
 /// ```
 ///
@@ -217,13 +219,14 @@ mod tests {
                     "pre_tool_use",
                     "apply_patch|Write|Edit|Bash",
                     "\"/opt/clauseo/clauseo-desktop\" --pre-write-guard",
-                    10,
+                    600,
                 ),
             )
         } else {
             (
                 "/<session-flags>/config.toml:pre_tool_use:0:0",
-                "sha256:57fd0a13a8285ab7294f320ab698cbfcdfdb55d2cad5482964b9fa10551f7f93"
+                // The reference run's rule (`hook_hashes_match_codexs_types`) with `timeout` 600.
+                "sha256:b541c929f696925ba9955cb09f7fb698059751d3063d6cf1e4d5e8d1cedc2dc4"
                     .to_owned(),
             )
         };
@@ -236,7 +239,7 @@ mod tests {
                         "type": "command",
                         "command": "'/opt/clauseo/clauseo-desktop' --pre-write-guard",
                         "commandWindows": "\"/opt/clauseo/clauseo-desktop\" --pre-write-guard",
-                        "timeout": 10,
+                        "timeout": 600,
                     }],
                 }],
                 "state": {key: {"trusted_hash": hash}},
@@ -282,12 +285,17 @@ mod tests {
         let trusted = &entry["trusted_hash"];
         assert_eq!(
             *trusted,
-            hook_hash("pre_tool_use", "apply_patch|Write|Edit|Bash", effective, 10)
+            hook_hash(
+                "pre_tool_use",
+                "apply_patch|Write|Edit|Bash",
+                effective,
+                600
+            )
         );
         if !cfg!(windows) {
             assert_eq!(
                 *trusted,
-                "sha256:3611c22a15d888b80c600a3c02b6a2cbeb34ed372be387554f335d2dee202548"
+                "sha256:4c0399bcbd6d0c0479dc43555089e31cadfd7147d85255dc1d051e22dcd77e02"
             );
         }
         let odd = Path::new("/data/100%/guard-blocks.jsonl");

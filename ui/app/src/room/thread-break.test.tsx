@@ -86,12 +86,14 @@ test("agent.exited before H10: the stopped line with its time, no Restart, no de
   expect(host.textContent).not.toContain("Details");
 });
 
-test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.settings_changed, agent.mode_not_set and thread.interrupted only, and it calls restart", () => {
+test("with H10 faked: Restart for agent.exited, agent.launch_failed, agent.guard_selftest_failed, agent.settings_changed, agent.mode_not_set, agent.settings_not_loaded and thread.interrupted only, and it calls restart", () => {
   expect([...RESTARTS].sort()).toEqual([
     "agent.exited",
+    "agent.guard_selftest_failed",
     "agent.launch_failed",
     "agent.mode_not_set",
     "agent.settings_changed",
+    "agent.settings_not_loaded",
     "thread.interrupted",
   ]);
   for (const code of RESTARTS) {

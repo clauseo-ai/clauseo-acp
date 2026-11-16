@@ -152,7 +152,7 @@ fn check_step<'a>(
                 ));
             }
         }
-        StepKind::Stderr { .. } | StepKind::Exit { .. } => {}
+        StepKind::Stderr { .. } | StepKind::SessionCanary(_) | StepKind::Exit { .. } => {}
     }
     Ok(())
 }

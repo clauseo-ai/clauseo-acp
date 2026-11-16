@@ -137,6 +137,11 @@ pub(crate) struct Actor {
     pub(crate) folder_check: crate::agent::folder_support::CheckSource,
     /// The program the pre-write guard hook runs, if any (`HostConfig::with_pre_write_guard`).
     pub(crate) pre_write_guard: Option<std::path::PathBuf>,
+    /// Whether a Claude launch runs its guard's self-test (`HostConfig::with_guard_selftest`).
+    pub(crate) guard_selftest: bool,
+    /// Whether a Claude session setup is checked for its settings canary
+    /// (`HostConfig::with_settings_canary`).
+    pub(crate) settings_canary: bool,
     /// The proxy, stetdoc's folder and the browser inputs (`HostConfig::with_egress_proxy`).
     pub(crate) wiring: crate::config::LaunchWiring,
     /// The Chrome for Testing download: its tools, its start-up sweep and the one running.

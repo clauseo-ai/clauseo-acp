@@ -6,7 +6,8 @@
 //! commit, the held replay and the work that waited. When `initialize` gave the agent a title,
 //! its name is logged first (`AgentNamed`, `session/named.rs`), so a failed `session/new`
 //! leaves it in the thread. A Codex agent with a key that answers a session call with
-//! auth-required gets its one `authenticate` first (`key_retry.rs`).
+//! auth-required gets its one `authenticate` first (`key_retry.rs`). A Claude call's settings
+//! canary is read back first (`session/canary.rs`); the host never sends `session/fork`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,10 +29,13 @@ use crate::error::Error;
 use crate::log_file::{Cause, LIFECYCLE};
 use crate::sent::SentView;
 
+mod canary;
 mod claude_mode;
 mod named;
 mod prepare;
 
+use canary::Call;
+pub(super) use canary::{Canary, Checked, Started, arm as arm_canary};
 pub(super) use claude_mode::{AUTO_UNAVAILABLE, Auto, Switched};
 use claude_mode::{Switch, claude_start};
 use prepare::before_attach;
@@ -51,7 +55,11 @@ pub(super) fn on_initialized(actor: &mut Actor, thread: ThreadId, info: AgentInf
     let loads = info.capabilities.load_session && stored.is_some();
     let resumes = !loads && info.capabilities.session.resume && stored.is_some();
     let name = info.title.as_deref().and_then(agent::title::clean_title);
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+    // Not for an agent stopped meanwhile (the lawyer's Stop of its launch, `cancel.rs`).
+    let Some(agent) = state(actor, thread)
+        .and_then(|state| state.agent.as_deref_mut())
+        .filter(|agent| agent.stage == Stage::Initializing)
+    else {
         return;
     };
     agent.info = Some(info);
@@ -80,11 +88,12 @@ pub(super) fn on_initialized(actor: &mut Actor, thread: ThreadId, info: AgentInf
     });
 }
 
-/// The whole log for replay dedupe came back: send `session/load`.
-pub(super) fn on_replay_log(
+/// `session/load`, once the whole log for replay dedupe came back (`log`); without one, the
+/// canary's retry, which keeps the dedupe view read for the first.
+pub(super) fn send_load(
     actor: &mut Actor,
     thread: ThreadId,
-    result: Result<Vec<Envelope>, clauseo_store::Error>,
+    log: Option<Result<Vec<Envelope>, clauseo_store::Error>>,
 ) {
     let session = actor
         .threads
@@ -103,7 +112,7 @@ pub(super) fn on_replay_log(
             return;
         }
     }
-    let clock = Arc::clone(&actor.clock);
+    let (clock, canary) = (Arc::clone(&actor.clock), canary::take(actor, thread));
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
@@ -115,8 +124,9 @@ pub(super) fn on_replay_log(
     else {
         return;
     };
-    match result {
-        Ok(log) => agent.replay = Some(SentView::rebuild(StreamId::Thread(thread), &log)),
+    match log.transpose() {
+        Ok(Some(log)) => agent.replay = Some(SentView::rebuild(StreamId::Thread(thread), &log)),
+        Ok(None) => {}
         Err(error) => tracing::warn!(%thread, error = %Cause(&error), "no log for replay dedupe"),
     }
     agent.mcp_commands = commands(&mcp_servers);
@@ -126,6 +136,7 @@ pub(super) fn on_replay_log(
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let read_clock = Arc::clone(&clock);
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
         let meta = match ready.await {
@@ -143,9 +154,11 @@ pub(super) fn on_replay_log(
             .run(&client, || client.load_session(request.clone()))
             .await;
         fence.await;
+        let canary = canary::after(read_clock, matter, (Call::Load, canary), result.is_ok());
         AgentReply::Session {
             loaded: true,
             result,
+            canary: canary.await,
         }
     });
 }
@@ -163,7 +176,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
         new_session(actor, thread);
         return;
     };
-    let clock = Arc::clone(&actor.clock);
+    let (clock, canary) = (Arc::clone(&actor.clock), canary::take(actor, thread));
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
@@ -177,6 +190,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let read_clock = Arc::clone(&clock);
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
         let meta = match ready.await {
@@ -194,14 +208,21 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
             .run(&client, || client.resume_session(request.clone()))
             .await;
         fence.await;
+        let canary = canary::after(read_clock, matter, (Call::Resume, canary), result.is_ok());
         AgentReply::Session {
             loaded: true,
             result,
+            canary: canary.await,
         }
     });
 }
 
 pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
+    // An agent stopped meanwhile (the lawyer's Stop, `cancel.rs`) gets no session call.
+    let agent = state(actor, thread).and_then(|state| state.agent.as_deref());
+    if agent.is_none_or(|agent| agent.stage != Stage::Loading) {
+        return;
+    }
     let started = folder(actor, thread).and_then(|cwd| Ok((cwd, session_loads(actor, thread)?)));
     let (cwd, (meta, mcp_servers, additional_directories)) = match started {
         Ok(started) => started,
@@ -210,7 +231,7 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
             return;
         }
     };
-    let clock = Arc::clone(&actor.clock);
+    let (clock, canary) = (Arc::clone(&actor.clock), canary::take(actor, thread));
     let matter = matter_of(actor, thread);
     let retry = key_retry::for_call(actor, thread);
     let settings = settings_target(actor, thread);
@@ -224,6 +245,7 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
         matter,
         agent.codex.is_some().then(|| agent.folder.clone()),
     );
+    let read_clock = Arc::clone(&clock);
     let ready = launch_settings::ready(check, clock, matter, settings, meta);
     call(actor, thread, id, async move {
         let meta = match ready.await {
@@ -240,9 +262,11 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
             .run(&client, || client.new_session(request.clone()))
             .await;
         fence.await;
+        let canary = canary::after(read_clock, matter, (Call::New, canary), result.is_ok());
         AgentReply::Session {
             loaded: false,
             result,
+            canary: canary.await,
         }
     });
 }
@@ -289,11 +313,16 @@ pub(super) fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> 
     )))
 }
 
-/// The session is up. A Codex agent's session first runs [`prepare`]'s checks; a Claude
+/// The session is up. A Claude session's settings canary goes first (`canary::passed`: a retry
+/// or a refusal ends here). A Codex agent's session first runs [`prepare`]'s checks; a Claude
 /// agent's session that started in another mode than Clauseo's is first switched to it
 /// ([`claude_start`]); a session with model or effort picks to set takes them there too
 /// (`picks.rs`); any other attaches now.
-pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
+pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStart, at: Started) {
+    let (loaded, canary) = at;
+    if !canary::passed(actor, thread, canary) {
+        return;
+    }
     super::profile_loads::show_tools(actor, thread);
     if !start.config_options.is_empty() {
         super::picks::drop_held(actor, thread, "the session's answer is newer");

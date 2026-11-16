@@ -3,7 +3,10 @@
 //! `session/cancel` and the 5 s fallback, after which the agent is stopped; one whose prompt
 //! already answered, its end waiting for the host's probe, ends at once instead. A turn that ends
 //! cancelled with its agent still attached has what it left running ended (`sweep_leftovers`).
-//! Shutdown cancels every running turn the same way and stops every agent.
+//! Shutdown cancels every running turn the same way and stops every agent. The lawyer's Stop of
+//! a turn still waiting for its agent's launch stops that launch too when nothing else waits for
+//! it ([`abandon_launch`]): the launch prep (and the guard's self-test, whose process ends), or
+//! the agent whose session call, or its settings canary's retry, is in flight.
 
 use clauseo_process::Cutoff;
 use clauseo_protocol::{
@@ -14,7 +17,7 @@ use clauseo_protocol::{
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::{Actor, Tag};
-use super::agents::{self, Stage};
+use super::agents::{self, Stage, Waiting};
 use super::close::TurnClose;
 use super::out::Out;
 use super::{
@@ -52,7 +55,12 @@ pub(super) fn cancel_command(
     // The agent runs an agent-started turn whatever the host's phase: it hears the cancel now.
     super::own_turn::cancel_agent(actor, thread, why::STOP);
     match found {
-        Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, false, turn)) => {
+        Some((TurnPhase::Launching, false, turn)) => {
+            dequeue(actor, Some(ctx), thread, turn)?;
+            abandon_launch(actor, thread, turn);
+            Ok(())
+        }
+        Some((TurnPhase::Accepting | TurnPhase::Queued, false, turn)) => {
             dequeue(actor, Some(ctx), thread, turn)
         }
         Some((TurnPhase::Prompting, false, _)) => {
@@ -70,6 +78,40 @@ pub(super) fn cancel_command(
         Some((_, true, _) | (TurnPhase::FallbackStop | TurnPhase::Ending, false, _)) | None => {
             receipt_only(actor, ctx, thread)
         }
+    }
+}
+
+/// The lawyer's Stop of `turn`, which waited for its agent's launch: it waits no more, and when
+/// nothing else does, the launch stops. A launch prep is dropped: its `stop` closes, so the
+/// guard's self-test gives up and its process ends (`guard_selftest::ask_until`), and its answer,
+/// stale, removes what it made (`launch_checks::on_prepared`). An agent still starting
+/// (`initialize`, its session call, its settings canary's read-back or retry) is stopped: its
+/// process tree ends, and a session answer that comes after goes nowhere (`session/canary.rs`
+/// `passed`). Work an agent being stopped holds for its successor drops the turn too.
+fn abandon_launch(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    let Some(state) = state(actor, thread) else {
+        return;
+    };
+    let other = |item: &Waiting| !matches!(item, Waiting::Turn(waiting) if *waiting == turn);
+    if let Some(preparing) = state.preparing.as_deref_mut() {
+        preparing.waiting.retain(other);
+        if preparing.waiting.is_empty()
+            && let Some(preparing) = state.preparing.take()
+        {
+            let closed = preparing.stop.close();
+            tracing::info!(target: LIFECYCLE, %thread, closed, "a stopped turn's prep drops");
+        }
+        return;
+    }
+    let Some(agent) = state.agent.as_deref_mut() else {
+        return;
+    };
+    agent.after_stop.retain(other);
+    agent.waiting.retain(other);
+    let starting = matches!(agent.stage, Stage::Initializing | Stage::Loading);
+    if starting && agent.waiting.is_empty() {
+        tracing::info!(target: LIFECYCLE, %thread, "a stopped turn's starting agent stops");
+        agents::stop(actor, thread);
     }
 }
 

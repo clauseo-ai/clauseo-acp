@@ -34,6 +34,9 @@ pub(crate) mod sandbox;
 mod sandbox_launch_tests;
 #[cfg(test)]
 mod sandbox_tests;
+pub(crate) mod session_canary;
+#[cfg(test)]
+mod settings_schema_tests;
 pub(crate) mod subagents;
 #[cfg(test)]
 mod subagents_tests;
@@ -313,8 +316,10 @@ pub(crate) struct GuardHook<'a> {
 /// by `|` is an exact list.
 pub(crate) const GUARD_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell";
 
-/// The seconds Claude Code waits for the guard before going on without it (default 600).
-pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
+/// The seconds Claude Code waits for the guard: its default, 600. The guard's own watchdog
+/// refuses well before (30 s, `pre_write_guard/watchdog.rs`); this only bounds a guard whose
+/// watchdog never fired. Codex's hook has the same.
+pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 600;
 
 /// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
 /// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools;

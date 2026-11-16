@@ -294,6 +294,7 @@ test("only the agent.* codes that name Claude have a sentence per plan", () => {
     "agent.settings_changed",
     "agent.mode_not_set",
     "agent.firm_policy_weakens",
+    "agent.settings_not_loaded",
   ];
   const naming = (Object.keys(ERROR_WORDS) as WordedCode[]).filter(
     (c) => ERROR_WORDS[c].includes("Claude") && !claudeOnly.includes(c),
@@ -416,7 +417,8 @@ test.each([
 // Claude refused or stopped over its settings or its mode (provisional; hi: later, so the Hindi display shows the English): the
 // firm's managed settings turn hooks off (U3-err-agent.firm_hooks_off), a managed setting outranks Clauseo's and would weaken the launch, or an
 // administrator's policy file can't be read (U3-err-agent.firm_policy_weakens), a policy any program can write (U3-err-agent.user_policy), the settings file changed
-// while Claude ran (U3-err-agent.settings_changed), Claude did not confirm its mode (U3-err-agent.mode_not_set). Claude-only, so no agent's name changes them.
+// while Claude ran (U3-err-agent.settings_changed), Claude did not confirm its mode (U3-err-agent.mode_not_set), Claude did not load
+// Clauseo's settings (U3-err-agent.settings_not_loaded). Claude-only, so no agent's name changes them.
 // The two policy codes share one line: the setting the step names (StepEntry.failure_setting) in its {setting} slot when it is
 // one of the host's fixed list, else the unnamed line (U3-err-agent.user_policy.unnamed, U3-err-agent.firm_policy_weakens.unnamed).
 const UC474 =
@@ -431,6 +433,8 @@ const POLICY_NO_SETTING =
   "Claude can't start: a setting on this computer turns off a protection Clauseo needs, and only an administrator can change it. Whoever looks after this computer can change or remove it; until then, you can use ChatGPT.";
 const POLICY_NAMED = (setting: string) =>
   POLICY_SLOT.replace("{setting}", `\u2068${setting}\u2069`);
+const SETTINGS_NOT_LOADED =
+  "Claude didn't load Clauseo's safety settings, so Clauseo stopped before Claude did anything and didn't send your message. Quit and reopen Clauseo, then send it again.";
 
 test.each([
   ["agent.firm_hooks_off", UC474],
@@ -438,6 +442,7 @@ test.each([
   ["agent.settings_changed", UC476],
   ["agent.mode_not_set", MODE_NOT_SET],
   ["agent.firm_policy_weakens", POLICY_NO_SETTING],
+  ["agent.settings_not_loaded", SETTINGS_NOT_LOADED],
 ] as const)("%s's line, in English in both languages until its Hindi comes", (code, said) => {
   for (const agent of [CLAUDE, undefined]) {
     expect(errorWords("en", code, agent)).toBe(said);

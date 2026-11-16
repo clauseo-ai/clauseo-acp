@@ -711,3 +711,6 @@ crates/host/src/crash/native/win.rs - unsafe_code
 crates/desktop/src/counts/crashes/win.rs - unsafe_code
 crates/host/src/crash/tests.rs native::native_child unsafe_code
 crates/host/src/crash/tests.rs native::run_child clippy::disallowed_methods
+
+# launch-never-weaker: the pre-write guard refuses from its watchdog thread and panic hook.
+crates/host/src/pre_write_guard/watchdog.rs exit_now clippy::exit

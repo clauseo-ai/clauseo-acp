@@ -1520,6 +1520,63 @@ value, `bypassPermissions` among them, still stops the conversation. Whether a r
 writes anything else at start-up or on a mode switch is a VM check. The global config
 `<CLAUDE_CONFIG_DIR>/.claude.json` (its `env`) is not covered here.
 
+- **2026-11-16 (orchestrator; never silently weaker): every guard hook refuses before Claude's
+  first prompt, at its own deadline, and on every error.** Claude Code 2.1.293 blocks a tool
+  call on a `PreToolUse` command hook's exit 2 (Codex only with stderr) or exit 0 with a JSON
+  deny. So: (1) the guard arms a watchdog and a panic hook first
+  (`pre_write_guard/watchdog.rs`): a panic anywhere, or the guard still running at 30 s, writes
+  one stderr line the agent can act on and exits 2; 30 s is a named constant to be set from the
+  pending Windows timing figures. (2) The agents' hook timeout goes from 10 s to their default
+  600 s (`agent/loads.rs` `GUARD_TIMEOUT_SECONDS`, Codex's `CODEX_GUARD_TIMEOUT_SECONDS` and
+  its trust hash), so the watchdog always answers first. (3) Before each Claude launch, after the
+  launch's deny rules, the host runs the exact entry the session will get (`--ask-all` in
+  forced ask) as Claude Code spawns it (`guard_selftest::Spawn::ClaudeExec`: the program with its
+  `args`, no shell, JSON on stdin, from the session folder) on a made-up `Write` in
+  `bypassPermissions`, which the guard refuses in every matter before looking at any file
+  (`pre_write_guard/selftest.rs`). Unless it exits 2 with a reason within 10 s (`LIMIT`, from
+  the canary's laptop figures below; tried once more when late: the second start is warm), the
+  launch is refused with `agent.guard_selftest_failed` (`guard_selftest.rs`, shared with the
+  file-write guard's branch; whichever merges second drops its copy). Its cost: one start of the
+  Clauseo exe per Claude launch (~16 ms warm, up to ~3 s cold after a reboot on Windows with
+  Defender; `crates/desktop/tests/guard_selftest.rs` prints it in CI). (4) The flag settings
+  Clauseo emits are checked against the pinned SDK's settings schema
+  (`agent/loads/settings_schema_tests.rs`, `tests/fixtures/claude_settings/`).
+  `HostConfig::with_guard_selftest` turns the self-test off for host tests.
+- **2026-11-16 (orchestrator; never silently weaker): every Claude session setup proves its flag
+  settings loaded, with a `SessionStart` canary, before the first prompt.** A `SessionStart`
+  hook in the flag settings (`options.settings`, the `--settings` file) runs and finishes
+  before claude-agent-acp 0.89.1 answers `session/new`, `session/load`, `session/resume` or
+  `new` with `options.resume`, and the answer waits for it (its input's `source` is `startup`
+  for new, `resume` otherwise). So each such call of a Claude
+  agent with the guard program carries one more entry, beside the guard's
+  (`agent/loads/session_canary.rs`, added in `profile_loads::session_loads`): matcher
+  `startup|resume`, the guard program in exec form with `--pre-write-guard --session-canary
+  <run folder>/session-canary.<nonce> <nonce>` (32 random hex digits, fresh per call), timeout
+  10 s (`CANARY_TIMEOUT_SECONDS`; the laptop, 16 Nov, Win 11 26H2, Defender on: 3,106 ms cold
+  after a reboot, 484 ms cold later, ~16 ms warm; about 3x the worst seen).
+  The canary writes the nonce to that new file and exits, reading nothing from stdin
+  (`pre_write_guard/canary.rs`). After the answer, off the actor, the file must hold exactly the
+  nonce (`actor/turn/session/canary.rs`); a canary that is missing, holds anything else, failed
+  or timed out (a timed-out hook never writes late) gets one retry of the same call with a fresh
+  `_meta` (new nonce, file and settings file; load and resume of the same stored session, the
+  first try's held updates dropped; a retried new leaves its first session unused in the agent),
+  then the launch is refused with `agent.settings_not_loaded` (not retryable; the words ask to
+  quit, reopen and send again, so the question goes back into the field). Unchecked, with a warn
+  line: no guard program or a path that is no UTF-8 (as `guard_missing`: the launches that rest
+  on the guard are refused by `check_guard`), and managed settings that turn hooks off (no hook
+  can run there). Clauseo never sends `session/fork`, and a forked session is prompted only
+  after a `session/resume`, which carries the full settings and is checked; a unit test pins new,
+  load and resume as the only setup calls, all sent from `session.rs`.
+  `HostConfig::with_settings_canary` (on; off in tests and `test-support`). Its cost: every
+  Claude `session/new`, `load` and `resume` answer waits for one start of the Clauseo exe: +33 ms
+  warm on `session/new` (229 ms against 196 ms, Linux); unmeasured on Windows, where a
+  cold start under Defender may take far longer and, past the 2 s timeout, refuses the launch
+  after the one retry. The lawyer's Stop during any launch wait (the guard's self-test or its
+  retry, a session call, the canary's read-back or retry) ends the turn at once and stops the
+  launch when nothing else waits for it (`actor/turn/cancel.rs` `abandon_launch`): the prep is
+  dropped and the self-test's process ends (`guard_selftest::ask_until`, `Failed::Stopped`), or
+  the starting agent is stopped and a late session answer attaches nothing.
+
 Limits of this head, stated:
 
 - **`settingSources: ["user"]`; never add `project` or `local`.** Under it, 2.1.293 under
@@ -1533,6 +1590,11 @@ Limits of this head, stated:
   within about 2 s, possibly after Claude Code has applied it. It does not see the matter's
   `.claude/settings*.json` (ignored under `["user"]`, above), nor in-memory grants: a skill's
   `allowed-tools` and approvals given during the session.
+- **The guard proves itself.** The guard's own watchdog and panic hook refuse with exit 2 and
+  a reason (both agents), and each Claude launch runs the guard's self-test first (above).
+- **The flag settings' schema.** The schema test checks the flag settings Clauseo emits against
+  the pinned SDK's schema, and the `SessionStart` canary (above) confirms that each session
+  loaded them.
 
 ## Consequences
 

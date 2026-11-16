@@ -46,7 +46,7 @@ fn through_cmd(command: &str, input: &[u8]) -> Output {
 fn codex_hash(command: &str) -> String {
     let identity = format!(
         "{{\"event_name\":\"pre_tool_use\",\"hooks\":[{{\"async\":false,\"command\":{},\
-         \"timeout\":10,\"type\":\"command\"}}],\"matcher\":\"apply_patch|Write|Edit|Bash\"}}",
+         \"timeout\":600,\"type\":\"command\"}}],\"matcher\":\"apply_patch|Write|Edit|Bash\"}}",
         serde_json::to_string(command).unwrap()
     );
     let digest = Sha256::digest(identity.as_bytes());

@@ -1,12 +1,14 @@
-//! Steps that act outside stdout: files under the cwd, stderr lines, the grandchild, and the
-//! `--pace-ms` pause.
+//! Steps that act outside stdout: files under the cwd, the `SessionStart` canary's nonce file,
+//! stderr lines, the grandchild, and the `--pace-ms` pause.
 
 use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
+use serde_json::Value;
+
 use crate::diagnostic;
-use crate::scenario::FileOp;
+use crate::scenario::{CanaryRun, FileOp};
 
 /// Writes `text` to stderr in one call.
 pub(super) fn write_stderr(text: &str) -> std::io::Result<()> {
@@ -65,6 +67,50 @@ pub(super) fn file_step(cwd: &str, op: &FileOp) -> Result<(), String> {
                 .map_err(|e| format!("move_file {from} to {to}: {e}"))
         }
     }
+}
+
+/// The arguments that start Clauseo's `SessionStart` canary hook: the guard program's flag, then
+/// its canary flag, then the nonce file and the nonce.
+const CANARY_ARGS: [&str; 2] = ["--pre-write-guard", "--session-canary"];
+
+/// Runs a `session_canary` step over `session_start`, the last session call's
+/// `hooks.SessionStart`: finds the command hook whose `args` are [`CANARY_ARGS`], a file and a
+/// nonce, and writes the nonce (`run`) or another value (`wrong`) to that file, as Clauseo's
+/// canary would; the program is never run. No such hook, or a file that is not absolute, fails.
+pub(super) fn session_canary(session_start: Option<&Value>, run: CanaryRun) -> Result<(), String> {
+    let hooks = session_start
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("hooks")?.as_array())
+        .flatten();
+    let found = hooks
+        .filter_map(|hook| hook.get("args")?.as_array())
+        .find_map(|args| {
+            let args: Vec<&str> = args.iter().map(Value::as_str).collect::<Option<_>>()?;
+            match args.as_slice() {
+                [flag, canary, file, nonce] if [*flag, *canary] == CANARY_ARGS => {
+                    Some((*file, *nonce))
+                }
+                _ => None,
+            }
+        });
+    let Some((file, nonce)) = found else {
+        return Err(
+            "session_canary: the last session call's flag settings hold no SessionStart canary"
+                .to_owned(),
+        );
+    };
+    if !Path::new(file).is_absolute() {
+        return Err(format!(
+            "session_canary: the nonce file {file} is not absolute"
+        ));
+    }
+    let content = match run {
+        CanaryRun::Run => nonce.to_owned(),
+        CanaryRun::Wrong => format!("{nonce}0"),
+    };
+    crate::write::write(file, content).map_err(|e| format!("session_canary: write {file}: {e}"))
 }
 
 fn make_parent(path: &Path) -> std::io::Result<()> {

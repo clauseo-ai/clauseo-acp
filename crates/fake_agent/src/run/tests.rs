@@ -31,6 +31,7 @@ fn play_paced(
         cwd: None,
         session: None,
         labels: HashMap::new(),
+        session_start: None,
         pace,
         pause: Box::new(move |duration| recorder.borrow_mut().push(duration)),
     };
@@ -289,4 +290,47 @@ fn pace_counts_updates_across_a_branch() {
     // Before the branch's second update and before the update after the one_of; the branch's
     // first update follows its expect.
     assert_eq!(pauses, [pace, pace]);
+}
+
+/// A `session/new` request line whose flag settings hold `session_start`.
+fn new_with_session_start(session_start: &Value) -> String {
+    let cwd = std::env::temp_dir();
+    let settings = json!({"hooks": {"SessionStart": session_start}});
+    let meta = json!({"claudeCode": {"options": {"settings": settings}}});
+    let params = json!({"cwd": cwd.to_str().unwrap(), "mcpServers": [], "_meta": meta});
+    let line = json!({"jsonrpc": "2.0", "id": 1, "method": "session/new", "params": params});
+    format!("{line}\n")
+}
+
+#[test]
+fn session_canary_writes_what_the_last_session_calls_canary_entry_names() {
+    let file = std::env::temp_dir().join(format!("fake-agent-canary-{}", std::process::id()));
+    let canary = json!([{"matcher": "startup|resume", "hooks": [{"type": "command",
+        "command": "/opt/clauseo/clauseo-desktop", // unix-paths-ok: planted, never run
+        "args": ["--pre-write-guard", "--session-canary", file.to_str().unwrap(), "abc123"],
+        "timeout": 2}]}]);
+    let input = new_with_session_start(&canary);
+    for (run, written) in [("run", "abc123"), ("wrong", "abc1230")] {
+        let scenario = scenario_of(&[
+            r#"{"expect":{"method":"session/new","as":"new"}}"#,
+            &format!(r#"{{"session_canary":"{run}"}}"#),
+        ]);
+        let (stop, _) = play(&scenario, &input);
+        assert_eq!(outcome(stop), None);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), written);
+    }
+    crate::write::remove_file(&file).unwrap();
+    let other = json!([{"hooks": [{"type": "command", "command": "/x", "args": ["--matter"]}]}]);
+    for input in [
+        new_with_session_start(&other),
+        new_with_session_start(&Value::Null),
+    ] {
+        let scenario = scenario_of(&[
+            r#"{"expect":{"method":"session/new","as":"new"}}"#,
+            r#"{"session_canary":"run"}"#,
+        ]);
+        let (stop, _) = play(&scenario, &input);
+        let failed = outcome(stop).unwrap();
+        assert!(failed.ends_with("hold no SessionStart canary"), "{failed}");
+    }
 }

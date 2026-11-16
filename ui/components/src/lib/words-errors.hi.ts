@@ -284,6 +284,20 @@ export const HI = {
     null,
   "Claude can't start: a setting on this computer turns off a protection Clauseo needs, and only an administrator can change it. Whoever looks after this computer can change or remove it; until then, you can use ChatGPT.":
     null,
+  // agent.settings_not_loaded (U3-err-agent.settings_not_loaded): Claude didn't load Clauseo's settings. Provisional English;
+  // hi: later
+  "Claude didn't load Clauseo's safety settings, so Clauseo stopped before Claude did anything and didn't send your message. Quit and reopen Clauseo, then send it again.":
+    null,
+  // Clauseo's file check failed its self-test at a launch, for Claude, ChatGPT, {name} and the AI (provisional,
+  // U3-err-agent.guard_selftest_failed; Hindi later)
+  "Clauseo couldn't start its file check, so Claude didn't start. Quit and reopen Clauseo, then try again.":
+    null,
+  "Clauseo couldn't start its file check, so ChatGPT didn't start. Quit and reopen Clauseo, then try again.":
+    null,
+  "Clauseo couldn't start its file check, so {name} didn't start. Quit and reopen Clauseo, then try again.":
+    null,
+  "Clauseo couldn't start its file check, so the AI didn't start. Quit and reopen Clauseo, then try again.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

@@ -1,0 +1,5 @@
+{"scenario":"claude-canary-stop-new","description":"A claude-acp session/new the agent never answers, with the canary on: the lawyer's Stop ends the turn and stops the starting agent, its child with it; stdin closes and the agent exits","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"settingSources":["user"]}}}}}}
+{"note":"the agent holds the call unanswered; the test reads this pid once it is written, sends Stop, and checks the agent's tree (this child with it) is ended","spawn_child":{"pid_file":"launch-wait.pid"}}

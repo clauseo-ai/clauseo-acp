@@ -1,0 +1,563 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Trimmed from the Settings type of @anthropic-ai/claude-agent-sdk 0.3.293 (claudeCodeVersion 2.1.293, the CLI claude-agent-acp 0.89.1 runs): sdk.d.ts lines 6738-9374, hooks at 7035-7223, permissions 6855-6885, env 6823-6825, sandbox 8691-8928; the hook event names are the CLI's own list (`ah` in the bundled binary), which the d.ts widens to any string. A type with `[k: string]: unknown` is open here (additionalProperties true), one without it is closed. Keys Clauseo never sends are left out of open objects. How to make it again: crates/host/tests/fixtures/claude_settings/README.md. Read by crates/host/src/agent/loads/settings_schema_tests.rs.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "env": {
+      "$ref": "#/definitions/env"
+    },
+    "permissions": {
+      "$ref": "#/definitions/permissions"
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "PreToolUse": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "PostToolUse": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "PostToolUseFailure": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "PostToolBatch": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "Notification": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "UserPromptSubmit": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "UserPromptExpansion": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "SessionStart": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "SessionEnd": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "Stop": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "StopFailure": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "SubagentStart": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "SubagentStop": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "PreCompact": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "PostCompact": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "PreModelSwitch": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "PostModelSwitch": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "PermissionRequest": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "PermissionDenied": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "Setup": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "TeammateIdle": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "TaskCreated": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "TaskCompleted": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "Elicitation": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "ElicitationResult": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "ConfigChange": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "WorktreeCreate": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "WorktreeRemove": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "InstructionsLoaded": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "CwdChanged": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "FileChanged": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "DirectoryAdded": {
+          "$ref": "#/definitions/matcherGroups"
+        },
+        "MessageDisplay": {
+          "$ref": "#/definitions/matcherGroups"
+        }
+      }
+    },
+    "disableAllHooks": {
+      "type": "boolean"
+    },
+    "allowManagedHooksOnly": {
+      "type": "boolean"
+    },
+    "allowManagedPermissionRulesOnly": {
+      "type": "boolean"
+    },
+    "disableSkillShellExecution": {
+      "type": "boolean"
+    },
+    "skipWebFetchPreflight": {
+      "type": "boolean"
+    },
+    "skipDangerousModePermissionPrompt": {
+      "type": "boolean"
+    },
+    "disableAutoMode": {
+      "enum": [
+        "disable"
+      ]
+    },
+    "sandbox": {
+      "$ref": "#/definitions/sandbox"
+    }
+  },
+  "definitions": {
+    "strings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "timeout": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "allow": {
+          "$ref": "#/definitions/strings"
+        },
+        "deny": {
+          "$ref": "#/definitions/strings"
+        },
+        "ask": {
+          "$ref": "#/definitions/strings"
+        },
+        "defaultMode": {
+          "enum": [
+            "acceptEdits",
+            "auto",
+            "bypassPermissions",
+            "default",
+            "dontAsk",
+            "plan"
+          ]
+        },
+        "disableBypassPermissionsMode": {
+          "enum": [
+            "disable"
+          ]
+        },
+        "blockReadsOutsideWorkingDirectories": {
+          "type": "boolean"
+        },
+        "additionalDirectories": {
+          "$ref": "#/definitions/strings"
+        }
+      }
+    },
+    "matcherGroups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/matcherGroup"
+      }
+    },
+    "matcherGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hooks"
+      ],
+      "properties": {
+        "matcher": {
+          "type": "string"
+        },
+        "hooks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/hook"
+          }
+        }
+      }
+    },
+    "hook": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/commandHook"
+        },
+        {
+          "$ref": "#/definitions/promptHook"
+        },
+        {
+          "$ref": "#/definitions/agentHook"
+        },
+        {
+          "$ref": "#/definitions/httpHook"
+        },
+        {
+          "$ref": "#/definitions/mcpToolHook"
+        }
+      ]
+    },
+    "commandHook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "command"
+      ],
+      "properties": {
+        "type": {
+          "const": "command"
+        },
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "$ref": "#/definitions/strings"
+        },
+        "if": {
+          "type": "string"
+        },
+        "shell": {
+          "enum": [
+            "bash",
+            "powershell"
+          ]
+        },
+        "timeout": {
+          "$ref": "#/definitions/timeout"
+        },
+        "statusMessage": {
+          "type": "string"
+        },
+        "once": {
+          "type": "boolean"
+        },
+        "async": {
+          "type": "boolean"
+        },
+        "asyncRewake": {
+          "type": "boolean"
+        }
+      }
+    },
+    "promptHook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "prompt"
+      ],
+      "properties": {
+        "type": {
+          "const": "prompt"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "if": {
+          "type": "string"
+        },
+        "timeout": {
+          "$ref": "#/definitions/timeout"
+        },
+        "model": {
+          "type": "string"
+        },
+        "continueOnBlock": {
+          "type": "boolean"
+        },
+        "statusMessage": {
+          "type": "string"
+        },
+        "once": {
+          "type": "boolean"
+        }
+      }
+    },
+    "agentHook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "prompt"
+      ],
+      "properties": {
+        "type": {
+          "const": "agent"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "if": {
+          "type": "string"
+        },
+        "timeout": {
+          "$ref": "#/definitions/timeout"
+        },
+        "model": {
+          "type": "string"
+        },
+        "statusMessage": {
+          "type": "string"
+        },
+        "once": {
+          "type": "boolean"
+        }
+      }
+    },
+    "httpHook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "url"
+      ],
+      "properties": {
+        "type": {
+          "const": "http"
+        },
+        "url": {
+          "type": "string"
+        },
+        "if": {
+          "type": "string"
+        },
+        "timeout": {
+          "$ref": "#/definitions/timeout"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "allowedEnvVars": {
+          "$ref": "#/definitions/strings"
+        },
+        "statusMessage": {
+          "type": "string"
+        },
+        "once": {
+          "type": "boolean"
+        }
+      }
+    },
+    "mcpToolHook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "server",
+        "tool"
+      ],
+      "properties": {
+        "type": {
+          "const": "mcp_tool"
+        },
+        "server": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "input": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "if": {
+          "type": "string"
+        },
+        "timeout": {
+          "$ref": "#/definitions/timeout"
+        },
+        "statusMessage": {
+          "type": "string"
+        },
+        "once": {
+          "type": "boolean"
+        }
+      }
+    },
+    "sandbox": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "failIfUnavailable": {
+          "type": "boolean"
+        },
+        "autoAllowBashIfSandboxed": {
+          "type": "boolean"
+        },
+        "allowUnsandboxedCommands": {
+          "type": "boolean"
+        },
+        "network": {
+          "$ref": "#/definitions/sandboxNetwork"
+        },
+        "filesystem": {
+          "$ref": "#/definitions/sandboxFilesystem"
+        },
+        "ignoreViolations": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/strings"
+          }
+        },
+        "enableWeakerNestedSandbox": {
+          "type": "boolean"
+        },
+        "enableWeakerNetworkIsolation": {
+          "type": "boolean"
+        },
+        "allowAppleEvents": {
+          "type": "boolean"
+        },
+        "excludedCommands": {
+          "$ref": "#/definitions/strings"
+        },
+        "ripgrep": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command"
+          ],
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "$ref": "#/definitions/strings"
+            }
+          }
+        },
+        "bwrapPath": {
+          "type": "string"
+        },
+        "socatPath": {
+          "type": "string"
+        }
+      }
+    },
+    "sandboxNetwork": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowedDomains": {
+          "$ref": "#/definitions/strings"
+        },
+        "deniedDomains": {
+          "$ref": "#/definitions/strings"
+        },
+        "strictAllowlist": {
+          "type": "boolean"
+        },
+        "allowManagedDomainsOnly": {
+          "type": "boolean"
+        },
+        "allowUnixSockets": {
+          "$ref": "#/definitions/strings"
+        },
+        "allowAllUnixSockets": {
+          "type": "boolean"
+        },
+        "allowLocalBinding": {
+          "type": "boolean"
+        },
+        "allowMachLookup": {
+          "$ref": "#/definitions/strings"
+        },
+        "httpProxyPort": {
+          "type": "number"
+        },
+        "socksProxyPort": {
+          "type": "number"
+        },
+        "tlsTerminate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "caCertPath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "caKeyPath": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "sandboxFilesystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowWrite": {
+          "$ref": "#/definitions/strings"
+        },
+        "denyWrite": {
+          "$ref": "#/definitions/strings"
+        },
+        "denyRead": {
+          "$ref": "#/definitions/strings"
+        },
+        "allowRead": {
+          "$ref": "#/definitions/strings"
+        },
+        "allowManagedReadPathsOnly": {
+          "type": "boolean"
+        },
+        "disabled": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

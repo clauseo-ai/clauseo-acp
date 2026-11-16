@@ -249,6 +249,9 @@ pub(super) fn session_loads(
         claude.as_ref(),
     );
     profile::fill_meta(&mut meta, folders)?;
+    let hooks_off = admin.as_ref().and_then(|admin| admin.hooks_off);
+    let canary = (run.root.as_path(), claude.is_some(), hooks_off);
+    super::session::arm_canary(actor, thread, &mut meta, canary)?;
     super::offline::probe::session_meta(actor, thread, &meta);
     if run.browser_policy_read {
         // What the app heard from a "Try again" follows this newer read.

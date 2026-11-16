@@ -6,7 +6,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
 use super::{
-    Branch, BranchStep, Expect, ExpectResponse, FileOp, OnStdinClose, Reply, StepKind, Wait,
+    Branch, BranchStep, CanaryRun, Expect, ExpectResponse, FileOp, OnStdinClose, Reply, StepKind,
+    Wait,
 };
 use crate::{EXIT_LOAD, EXIT_MISMATCH};
 
@@ -65,6 +66,7 @@ enum StepBody {
     TranscriptUser(String),
     Stderr(StderrBody),
     SpawnChild(SpawnChildBody),
+    SessionCanary(CanaryRun),
     Exit(ExitBody),
     Include(String),
 }
@@ -235,6 +237,7 @@ pub(super) fn step(value: Value) -> Result<Body, String> {
             },
             false,
         ),
+        StepBody::SessionCanary(run) => (StepKind::SessionCanary(run), false),
         StepBody::Exit(b) => (exit(b.code)?, false),
         StepBody::Include(file) => {
             return Ok(Body {

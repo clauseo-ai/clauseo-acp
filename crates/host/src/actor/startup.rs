@@ -93,6 +93,8 @@ pub(super) async fn open(
         codex_hooks: parts.codex_hooks,
         folder_check: parts.folder_check,
         pre_write_guard: parts.pre_write_guard,
+        guard_selftest: parts.guard_selftest,
+        settings_canary: parts.settings_canary,
         // Before `wiring` moves.
         connectors: super::connectors::ConnectorsOnActor::new(parts.wiring.connectors.clone()),
         mcp: super::mcp::McpOnActor::default(),

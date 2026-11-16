@@ -34,6 +34,8 @@ pub(crate) struct ConfigParts {
     pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
     pub(crate) folder_check: crate::agent::folder_support::CheckSource,
     pub(crate) pre_write_guard: Option<PathBuf>,
+    pub(crate) guard_selftest: bool,
+    pub(crate) settings_canary: bool,
     /// The limits reader a caller set; `None` builds the default at start-up.
     pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
     pub(crate) wiring: LaunchWiring,
@@ -116,6 +118,8 @@ impl From<HostConfig> for ConfigParts {
             codex_hooks: config.codex_hooks,
             folder_check: config.folder_check,
             pre_write_guard: config.pre_write_guard,
+            guard_selftest: config.guard_selftest,
+            settings_canary: config.settings_canary,
             limits_reader: config.limits_reader,
             wiring: config.wiring,
             scan_walk: config.scan_walk,
@@ -151,6 +155,37 @@ pub(crate) struct UpdateSeams {
     reason = "config.rs is at its 600-line limit; the last run's flag lives beside its part"
 )]
 impl HostConfig {
+    /// The program Claude Code's `PreToolUse` hook runs, with the one argument
+    /// [`pre_write_guard::FLAG`](crate::pre_write_guard::FLAG), before each file edit and shell
+    /// command (default: none, and no hook goes). The desktop passes its own executable, whose
+    /// `main` runs [`pre_write_guard::run`](crate::pre_write_guard::run) on that argument.
+    /// `agent/loads.rs` builds the hook entry.
+    pub fn with_pre_write_guard(mut self, program: PathBuf) -> Self {
+        self.pre_write_guard = Some(program);
+        self
+    }
+
+    /// Whether each Claude launch first runs the guard's hook command, exactly as its entry
+    /// states it, on a made-up tool call it must refuse, and is refused
+    /// (`agent.guard_selftest_failed`) when it does not refuse in time (`guard_selftest.rs`,
+    /// `pre_write_guard/selftest.rs`). Default: on, but off in tests and in a build with
+    /// `test-support`, whose tests name a guard program that is not there.
+    #[must_use]
+    pub fn with_guard_selftest(mut self, on: bool) -> Self {
+        self.guard_selftest = on;
+        self
+    }
+
+    /// Whether each Claude session setup (`session/new`, `session/load`, `session/resume`) is
+    /// checked for the nonce its `SessionStart` canary writes, proof that Claude Code loaded
+    /// the flag settings, and refused (`agent.settings_not_loaded`) without it. Default: on,
+    /// but off in tests and in a build with `test-support`, whose fake agent runs no hook.
+    #[must_use]
+    pub fn with_settings_canary(mut self, on: bool) -> Self {
+        self.settings_canary = on;
+        self
+    }
+
     /// The run before this one did not quit through its own quit (default: it did): the desktop's
     /// mark in the data folder was still there. `LastExit` says so, for the room's notice, with
     /// the file actions the store says that run left unfinished.

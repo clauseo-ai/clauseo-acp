@@ -1857,6 +1857,8 @@ export type ErrorCode =
 "signin.policy_unreadable" | 
 /** A Claude launch that must ask before every change could not set up the guard that makes it ask, so it was not started. */
 "agent.guard_missing" | 
+/** The check Clauseo runs on its file guard before a launch failed (the guard did not answer as it should), so the agent was not started; quitting and reopening Clauseo may fix it. */
+"agent.guard_selftest_failed" | 
 /** The update's check, download, signature check or install failed; the version running keeps running, and a later check tries again. */
 "update.failed" | 
 /** The change breaks a settings rule, such as an agent entry that is not Clauseo's own install, a secret-shaped variable or an address that is not https; the message names the key, never the value, and nothing was changed. */
@@ -1995,6 +1997,8 @@ export type ErrorCode =
 "agent.mode_not_set" | 
 /** A managed Claude Code setting on this computer (the firm's policy files, macOS managed preferences, the HKLM policy, or the firm's server-managed settings) outranks a value Clauseo sets and would weaken the launch (for example `sandbox.enabled: false`, `sandbox.allowUnsandboxedCommands: true`, `sandbox.excludedCommands`, or a `permissions.defaultMode` weaker than Clauseo's), or an administrator's policy file cannot be read, so Claude was not started, or was stopped. The detail names the setting and where it was found. */
 "agent.firm_policy_weakens" | 
+/** Claude Code did not load the safety settings Clauseo gives each Claude session (its check of them, a hook in those settings, never ran, even after one more try), so Clauseo sent no message and stopped Claude. */
+"agent.settings_not_loaded" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

@@ -1,0 +1,9 @@
+{"scenario":"claude-canary-wrong","description":"A claude-acp session/new whose nonce file holds another value than its nonce, twice: the client refuses the launch with agent.settings_not_loaded and sends no prompt","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new1","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"settingSources":["user"]}}}}}}
+{"note":"a value that is not this call's nonce","session_canary":"wrong"}
+{"respond":{"to":"new1","result":{"sessionId":"sess-1","modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/new","as":"new2","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"settingSources":["user"]}}}}}}
+{"note":"a value that is not this call's nonce","session_canary":"wrong"}
+{"respond":{"to":"new2","result":{"sessionId":"sess-2","modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}

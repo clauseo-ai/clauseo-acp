@@ -1,0 +1,7 @@
+{"scenario":"claude-canary-resume-missing","description":"The start after claude-canary-new, from an adapter that offers session/resume: a resume whose settings were dropped (no nonce), twice: the client refuses the launch with agent.settings_not_loaded and sends no prompt","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"sessionCapabilities":{"resume":{}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/resume","as":"resume1","params":{"sessionId":"sess-1","cwd":"{{any}}","_meta":{"claudeCode":{"options":{"settingSources":["user"]}}}}}}
+{"respond":{"to":"resume1","result":{"modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/resume","as":"resume2","params":{"sessionId":"sess-1","cwd":"{{any}}","_meta":{"claudeCode":{"options":{"settingSources":["user"]}}}}}}
+{"respond":{"to":"resume2","result":{"modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}

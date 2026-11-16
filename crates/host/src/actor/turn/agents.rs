@@ -157,6 +157,8 @@ pub(super) struct Agent {
     pub(super) idle: super::idle::Mark,
     /// What of its guard's record file is read and told (`updates/guard_blocks.rs`).
     pub(super) guard_blocks: super::updates::guard_blocks::Reads,
+    /// A Claude agent's settings canary and its one retry (`session/canary.rs`).
+    pub(super) canary: session::Canary,
 }
 
 impl Agent {
@@ -317,6 +319,7 @@ pub(super) fn launch_now(
         matter_spellings,
         idle: super::idle::Mark::default(),
         guard_blocks: super::updates::guard_blocks::Reads::default(),
+        canary: session::Canary::default(),
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));
@@ -502,11 +505,13 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         | AgentReply::Session {
             result: Err(error),
             loaded: false,
+            ..
         } => launch_failed(actor, thread, &Error::Acp(error)),
         AgentReply::Session {
             result: Ok(start),
             loaded,
-        } => session::on_started(actor, thread, start, loaded),
+            canary,
+        } => session::on_started(actor, thread, start, (loaded, canary)),
         AgentReply::Prepared {
             result: Ok(start),
             loaded,
@@ -521,6 +526,7 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         AgentReply::Session {
             result: Err(error),
             loaded: true,
+            ..
         } => {
             tracing::warn!(
                 %thread,

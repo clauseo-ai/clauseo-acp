@@ -121,9 +121,21 @@ pub(crate) enum StepKind {
         /// session of its own does. No effect on Windows, where the child stays in the job.
         own_group: bool,
     },
+    /// `session_canary`: plays the `SessionStart` settings canary of the last session call.
+    SessionCanary(CanaryRun),
     Exit {
         code: i32,
     },
+}
+
+/// What a `session_canary` step writes to the nonce file the canary entry names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CanaryRun {
+    /// The entry's nonce, as Clauseo's canary writes it: the flag settings loaded.
+    Run,
+    /// Another value than the entry's nonce, as a stale or foreign file would hold.
+    Wrong,
 }
 
 /// A `write_file`, `delete_file` or `move_file` step: paths relative to the session `cwd`.

@@ -162,7 +162,7 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
             "type": "command",
             "command": program.to_str().unwrap(),
             "args": ["--pre-write-guard", "--matter", matter.to_str().unwrap()],
-            "timeout": 10,
+            "timeout": 600,
         }],
     });
     assert_eq!(

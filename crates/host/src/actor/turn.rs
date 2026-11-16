@@ -402,7 +402,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             why,
             result,
         } => match why {
-            LogFor::Replay => session::on_replay_log(actor, thread, result),
+            LogFor::Replay => session::send_load(actor, thread, Some(result)),
             LogFor::Reconcile => reconcile::on_log(actor, thread, result),
             LogFor::Undo(ask) => undo::on_log(actor, thread, *ask, result),
             LogFor::PreviewUndo { turn, reply } => {

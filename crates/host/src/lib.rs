@@ -175,7 +175,8 @@
 //!   ask) it writes Claude Code's `ask` decision on stdout for all but the local reads;
 //!   [`pre_write_guard::FLAG`] (then
 //!   `--matter <folder>`) is what the hook passes. It runs in the hook's own process, with no
-//!   host thread.
+//!   host thread. A panic or its 30 s watchdog exits [`pre_write_guard::DENY`] with a reason
+//!   instead, so every way out of the guard is an answer or a refusal.
 //! - [`log_file::install`] starts the log file as the process's global subscriber and returns
 //!   its [`log_file::LogGuard`]; the app calls it once, first thing.
 //! - [`crash::record_crashes`] has the panic hook record the first panic of a release build into
@@ -254,6 +255,7 @@ pub mod crash;
 mod encode;
 mod error;
 mod file_link;
+mod guard_selftest;
 mod handle;
 mod ids;
 pub mod log_file;

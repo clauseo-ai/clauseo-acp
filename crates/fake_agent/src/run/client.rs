@@ -24,7 +24,7 @@ pub(super) enum Incoming {
 }
 
 /// The session calls whose `_meta.claudeCode.options.settings` [`with_settings_file`] reads.
-const SESSION_CALLS: [&str; 3] = ["session/new", "session/load", "session/resume"];
+pub(super) const SESSION_CALLS: [&str; 3] = ["session/new", "session/load", "session/resume"];
 
 /// `incoming` with a session call's `_meta.claudeCode.options.settings`, when it is a string,
 /// replaced by the JSON of the file it names (a relative path taken from the call's `cwd`), as

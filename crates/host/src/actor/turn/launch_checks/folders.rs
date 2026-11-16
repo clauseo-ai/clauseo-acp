@@ -189,3 +189,34 @@ pub(super) fn remove_folders(run: &RunFolders) {
         }
     }
 }
+
+/// What the guard hook's self-test needs from the launch: whether it is a Claude launch, then
+/// the switch (`HostConfig::with_guard_selftest`), the guard program and the stop channel
+/// (`Preparing::stop`), then the clock.
+pub(super) type SelfTest<'a> = (
+    bool,
+    (bool, Option<PathBuf>, async_channel::Receiver<()>),
+    &'a std::sync::Arc<dyn crate::clock::Clock>,
+);
+
+/// The guard hook's self-test before a Claude launch with the switch on
+/// (`pre_write_guard::selftest::for_launch`), for the matter stored at `stored` and the
+/// launch's folder answer `answer`; the lawyer's Stop (the channel closing) ends it. The run
+/// folder `run` is removed when it fails or is stopped.
+pub(super) fn self_test(
+    run: &RunFolders,
+    stored: &Path,
+    answer: Option<crate::agent::folder_support::Answer>,
+    (claude, (on, guard, stopped), clock): SelfTest<'_>,
+) -> Result<(), Error> {
+    if !(claude && on) {
+        return Ok(());
+    }
+    let stop = Some(async move { stopped.recv().await.unwrap_or_default() });
+    let ran =
+        crate::pre_write_guard::selftest::for_launch(guard.as_deref(), stored, answer, clock, stop);
+    if ran.is_err() {
+        run.remove();
+    }
+    ran
+}

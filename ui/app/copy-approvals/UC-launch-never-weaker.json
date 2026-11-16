@@ -70,5 +70,23 @@
     "at": "2026-11-16",
     "by": "launch-never-weaker (provisional; app words, security review)",
     "note": "agent.user_policy with no setting named: the unnamed line (POLICY_NO_SETTING) beside U3-err-agent.user_policy, for a step whose failure_setting is missing or one this version doesn't know (unknown); the same words for agent.firm_policy_weakens and agent.user_policy; Claude-only; not retryable"
+  },
+  "U3-err-agent.guard_selftest_failed": {
+    "en": "Clauseo couldn't start its file check, so Claude didn't start. Quit and reopen Clauseo, then try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "launch-never-weaker (provisional; Rohan batch review)",
+    "note": "agent.guard_selftest_failed: the check Clauseo runs on its file guard before a launch failed (the guard did not answer as it should), so the agent was not started; retryable. Claude's line; ChatGPT, {name} and the AI variants are in words-errors.ts (PLANNED), Hindi later"
+  },
+  "U3-err-agent.settings_not_loaded": {
+    "en": "Claude didn't load Clauseo's safety settings, so Clauseo stopped before Claude did anything and didn't send your message. Quit and reopen Clauseo, then send it again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "launch-never-weaker (provisional; Rohan batch review)",
+    "note": "agent.settings_not_loaded: Claude Code did not load the flag settings Clauseo gives each Claude session (its SessionStart canary wrote no nonce after session/new, load or resume, even after one more try), so the host sent no message and stopped Claude; Claude-only; not retryable; the words say send it again, so the stopped question goes back into the field (RESTARTS)"
   }
 }

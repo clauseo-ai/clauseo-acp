@@ -171,6 +171,11 @@ any ACP message, including permission requests with misleading text.
   (ignored under `settingSources: ["user"]`, measured, which must never gain `project` or
   `local`), nor in-memory grants from a skill's `allowed-tools` or approvals given during the
   session
+- `built`: The pre-write guard hook fails closed and proves itself: a panic or its 30 s watchdog
+  exits 2 with a reason, and each Claude launch first runs the exact hook command on a call it
+  must refuse, refusing the launch (`agent.guard_selftest_failed`) unless it does within 10 s,
+  tried twice (`pre_write_guard/watchdog.rs`, `guard_selftest.rs`); a session the agent set up
+  without its flag settings is refused (the `SessionStart` canary, `agent.settings_not_loaded`)
 - `built`: Permission answers are checked against the options offered, in the bridge and again in
   the host; `designed`: options are labelled by kind, not by the agent's text (the permission prompt)
 - `designed`: ACP message sizes are capped; Clauseo advertises no file or terminal access to the

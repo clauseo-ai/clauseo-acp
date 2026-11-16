@@ -161,15 +161,25 @@
 //! the agent versions their README names; CI alone does not notice a vendor change, so they are
 //! captured again from the real tool whenever a pinned Claude Code or Codex version moves. In
 //! default and plan mode the permission check (ADR 0021) still stops a write to a held file; in
-//! acceptEdits and bypassPermissions this guard is the only stop. It never panics.
+//! acceptEdits and bypassPermissions this guard is the only stop. It is not meant to panic.
+//!
+//! Every other way out is a refusal (`watchdog.rs`, armed first by [`run`]): a panic anywhere,
+//! or the guard still running at its 30 s deadline, writes one stderr line and exits with
+//! [`DENY`], the code both agents block on; the agents' hook timeout is 600 s
+//! (`agent/loads.rs`), so the watchdog answers first. Each Claude launch first proves the hook
+//! refuses (`selftest.rs`, `crate::guard_selftest`). With `--session-canary` first, the program
+//! is the `SessionStart` canary instead (`canary.rs`).
 
 mod ask;
+mod canary;
 mod codex;
 mod names;
 mod reach;
 pub(crate) mod record;
+pub(crate) mod selftest;
 mod shell;
 mod timings;
+mod watchdog;
 mod words;
 
 use std::ffi::OsString;
@@ -183,6 +193,8 @@ use codex::{has_codex_part, in_codex_folder, patch_targets};
 // The data folder fence reads a command's `sh -c` scripts as this guard does
 // (`agent/data_fence/command.rs`).
 use reach::Reach;
+#[cfg(feature = "test-support")]
+pub use selftest::timed_for_test as selftest_timed_for_test;
 pub(crate) use shell::script as shell_script;
 use shell::{shell_targets, walked_resolutions};
 pub(crate) use words::{
@@ -199,6 +211,10 @@ pub const MATTER_FLAG: &str = "--matter";
 /// The argument that names the file each refusal the lawyer is told about is recorded in
 /// (`record.rs`), followed by the file.
 pub const RECORD_FLAG: &str = record::FLAG;
+
+/// The argument after [`FLAG`] that runs the `SessionStart` settings canary instead of the
+/// guard (`canary.rs`), followed by the nonce file and the nonce.
+pub const CANARY_FLAG: &str = canary::FLAG;
 
 /// The argument after [`RECORD_FLAG`] and its file that gives the file's identity, followed by
 /// it: the guard writes only a file with that identity (`record.rs`).
@@ -232,6 +248,11 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 /// refuse that is not one of `ask::LOCAL_READS` gets Claude Code's `ask` decision on
 /// `output` (`ask.rs`); otherwise `output` stays empty.
 pub fn run(args: &[OsString], input: impl Read, output: impl Write, errors: impl Write) -> i32 {
+    // First, before anything can hang or panic: every way out but an answer is a refusal.
+    watchdog::arm();
+    if let Some(code) = canary::run(args) {
+        return code;
+    }
     let on = timings::wanted(std::env::var_os(timings::ENV).as_deref());
     run_timed(args, input, (output, errors), on)
 }
@@ -385,6 +406,7 @@ impl Refusal {
 /// folder and is held open. [`Ignored`] when the input cannot be read or has a shape the guard
 /// does not know.
 fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignored> {
+    watchdog::planted();
     if bytes.iter().all(u8::is_ascii_whitespace) {
         return Err(Ignored::Empty);
     }
@@ -611,3 +633,5 @@ fn lexical(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_process;

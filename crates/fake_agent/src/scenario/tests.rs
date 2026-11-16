@@ -193,7 +193,7 @@ fn static_checks_name_file_and_line() {
 /// Every step key, in the order `body.rs` declares them.
 const KEYS: &str = "expect, expect_response, all, one_of, respond, update, notify, request, \
                     send_line, write_file, delete_file, move_file, transcript_user, stderr, \
-                    spawn_child, exit, include";
+                    spawn_child, session_canary, exit, include";
 
 #[test]
 fn a_wrong_step_key_lists_every_key() {

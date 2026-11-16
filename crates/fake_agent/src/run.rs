@@ -14,8 +14,8 @@ use serde_json::{Map, Value, json};
 use crate::scenario::{Branch, Expect, Loc, OnStdinClose, Reply, Scenario, StepKind, Wait};
 use crate::{EXIT_MISMATCH, EXIT_OK, diagnostic};
 use client::{
-    Incoming, Miss, NO_CWD, classify, describe_expect, describe_wait, match_expect, match_wait,
-    placed, with_settings_file,
+    Incoming, Miss, NO_CWD, SESSION_CALLS, classify, describe_expect, describe_wait, match_expect,
+    match_wait, placed, with_settings_file,
 };
 
 /// Why the script stopped before reaching its end.
@@ -42,6 +42,9 @@ struct Runner<'s, R, W> {
     cwd: Option<String>,
     session: Option<String>,
     labels: HashMap<String, Label>,
+    /// The `hooks.SessionStart` of the flag settings the last session call an `expect` matched
+    /// carried (`_meta.claudeCode.options.settings`, read from its file), for `session_canary`.
+    session_start: Option<Value>,
     /// The `--pace-ms` pause between consecutive updates; zero for none.
     pace: Duration,
     /// What waits out the pace: a sleep in the real run, a recorder in tests.
@@ -61,6 +64,7 @@ pub(crate) fn run(scenario: &Scenario, pace_ms: u32) -> i32 {
         cwd: None,
         session: None,
         labels: HashMap::new(),
+        session_start: None,
         pace: Duration::from_millis(u64::from(pace_ms)),
         pause: Box::new(effects::pause),
     };
@@ -180,6 +184,10 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                 effects::spawn_child(pid_file, *own_group)
                     .map_err(|m| Stop::Fail(at.clone(), m))?;
             }
+            StepKind::SessionCanary(run) => {
+                effects::session_canary(self.session_start.as_ref(), *run)
+                    .map_err(|m| Stop::Fail(at.clone(), m))?;
+            }
             StepKind::Exit { code } => {
                 self.out
                     .flush()
@@ -284,6 +292,10 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
         let Incoming::Request { id, method, params } = incoming else {
             return;
         };
+        if SESSION_CALLS.contains(&method.as_str()) {
+            let pointer = "/_meta/claudeCode/options/settings/hooks/SessionStart";
+            self.session_start = params.as_ref().and_then(|p| p.pointer(pointer)).cloned();
+        }
         let names = acp::AGENT_METHOD_NAMES;
         if method == names.session_new || method == names.session_load {
             let field = |key: &str| {

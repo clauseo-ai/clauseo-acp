@@ -193,6 +193,14 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentModeNotSet,
             "Claude Code did not confirm the \"auto\" mode Clauseo set; it reported \"plan\"",
         ),
+        failed(
+            ErrorCode::AgentGuardSelftestFailed,
+            "the guard's self-test answered allow for a write it must refuse",
+        ),
+        failed(
+            ErrorCode::AgentSettingsNotLoaded,
+            "Claude Code did not load Clauseo's settings: the canary wrote no nonce, twice",
+        ),
     ]
 }
 

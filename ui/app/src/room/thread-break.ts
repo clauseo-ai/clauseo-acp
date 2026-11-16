@@ -27,6 +27,8 @@ export const RESTARTS = new Set<string>([
   "thread.interrupted",
   "agent.settings_changed",
   "agent.mode_not_set",
+  "agent.guard_selftest_failed",
+  "agent.settings_not_loaded",
 ]);
 
 /** Whether a step's stop takes the mark where it stopped (stopped-mark.tsx) rather than its code's sentence. */

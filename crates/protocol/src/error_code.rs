@@ -195,6 +195,9 @@ error_codes! {
     AgentGuardMissing = "agent.guard_missing", retryable: false, meaning: "A Claude launch that \
         rests on the guard hook (one that must ask before every change, or any on Windows, \
         where Claude has no sandbox) could not set the guard up, so it was not started.";
+    AgentGuardSelftestFailed = "agent.guard_selftest_failed", retryable: true, meaning: "The \
+        check Clauseo runs on its file guard before a launch failed (the guard did not answer as \
+        it should), so the agent was not started; quitting and reopening Clauseo may fix it.";
     UpdateFailed = "update.failed", retryable: true, meaning: "The update's check, download, \
         signature check or install failed; the version running keeps running, and a later check \
         tries again.";
@@ -428,6 +431,10 @@ error_codes! {
         `permissions.defaultMode` weaker than Clauseo's), or an administrator's policy file cannot \
         be read, so Claude was not started, or was stopped. The detail names the setting and where \
         it was found.";
+    AgentSettingsNotLoaded = "agent.settings_not_loaded", retryable: false, meaning: "Claude \
+        Code did not load the safety settings Clauseo gives each Claude session (its check of \
+        them, a hook in those settings, never ran, even after one more try), so Clauseo sent no \
+        message and stopped Claude.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
