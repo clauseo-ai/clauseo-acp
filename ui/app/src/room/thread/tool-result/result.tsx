@@ -215,6 +215,7 @@ function Shown({
           data-testid="tool-result-image"
           src={`data:${picture.mime};base64,${picture.data}`}
           alt=""
+          decoding="async"
         />
       ))}
       {read.pictures > 0 && (
