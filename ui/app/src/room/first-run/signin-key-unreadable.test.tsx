@@ -8,10 +8,12 @@ import {
   AT,
   CLAUDE,
   READY,
+  allById,
   byId,
   info,
   install,
   mountFirstRun,
+  play,
   press,
   settle,
   setups,
@@ -81,4 +83,42 @@ test("key-unreadable: Try again refused in another code says that code's line un
   await settle();
   expect(setups(other)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
   expect(byId("signin-refused")?.textContent).toContain("Clauseo is using your API key.");
+});
+
+// VM rows A-K6 and D7 on 4d2d29744: the start window kept "Claude is ready" with Sign in with
+// Claude after the keychain's bound passed, while Plans and the thread said the key's words.
+// Desktop sends the key's state late (past the 10 s bound, once the window has drawn), through
+// the same setup events the store and the first screen follow.
+test("key-unreadable on the start window, late: the key's words, the Plans line and Try again, never a sign-in", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    first: [info(true)],
+    command: (c) => {
+      if (c.start_sign_in !== undefined) throw refusal("agent.key_unreadable");
+    },
+  });
+  // the keys still load: desktop has sent no plan's state, so no row and no sign-in
+  expect(allById("plan-row")).toEqual([]);
+  // the bound passes: the install and the signed-out plan come first, the start window draws Claude's row
+  await play(t, install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} }));
+  expect(byId("signin-foot-sign-in")?.textContent).toBe("Sign in with Claude");
+  // then the key's late answer: unreadable
+  await play(t, signIn(CLAUDE, UNREADABLE));
+  const row = document.querySelector(`[data-testid="plan-row"][data-agent="${CLAUDE}"]`);
+  expect(byId("signin-foot")?.dataset["state"]).toBe("key-unreadable");
+  expect(row?.textContent).toContain(KEY_WORDS);
+  expect(row?.textContent).toContain("To change it, open Settings, then Plans.");
+  expect(row?.querySelector("[data-lead]")?.getAttribute("data-lead")).toBe("none");
+  expect(text()).not.toContain("is ready");
+  expect(text()).not.toContain("Sign in with Claude");
+  expect(text()).not.toContain("Sign in with the plan you pay for");
+  expect(byId("install-said")?.textContent).toContain(KEY_WORDS);
+  const again = byId("signin-foot-sign-in");
+  expect(again?.textContent).toBe("Try again");
+  // Try again: desktop refuses it with the key's code and reads the key again; the row stays the key's
+  await press(again);
+  await settle();
+  expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
+  expect(byId("signin-foot")?.dataset["state"]).toBe("key-unreadable");
+  expect(text()).not.toContain("Sign in with Claude");
 });
