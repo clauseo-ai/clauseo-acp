@@ -173,6 +173,8 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   and, with `keys` (a Claude agent), in `claudeCode.options.settings.env` (flag settings,
 ///   over a user's or project's). A hook value at `settings` or its `env` that is not an
 ///   object is then replaced.
+/// - On Windows, with `keys`: `CLAUDE_CODE_USE_POWERSHELL_TOOL` `"1"` in both of those `env`
+///   objects, over any hook value, and no `CLAUDE_CODE_GIT_BASH_PATH` (`agent/one_shell.rs`).
 /// - `claudeCode.options.allowDangerouslySkipPermissions`: `false`. claude-agent-acp 0.89.1 then
 ///   offers no bypass mode, nor the plan-exit options that switch to it, and never starts a
 ///   session in it: a settings `defaultMode` of `bypassPermissions` becomes `default`, and a
@@ -212,6 +214,7 @@ pub(crate) fn session_meta(
     let mut env = take_object(&mut options, "env");
     env.insert(CLAUDE_AI_MCP_VAR.to_owned(), Value::from("false"));
     env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
+    super::one_shell::meta_env(&mut env, keys.is_some() && cfg!(windows));
     options.insert("env".to_owned(), Value::Object(env));
     options.insert(ALLOW_BYPASS_OPTION.to_owned(), Value::Bool(false));
     let (strict, sources) = match control {
@@ -253,6 +256,7 @@ pub(crate) fn session_meta(
         let mut settings = take_object(&mut options, "settings");
         let mut settings_env = take_object(&mut settings, "env");
         settings_env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
+        super::one_shell::meta_env(&mut settings_env, cfg!(windows));
         settings.insert("env".to_owned(), Value::Object(settings_env));
         options.insert("settings".to_owned(), Value::Object(settings));
     }

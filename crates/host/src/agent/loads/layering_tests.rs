@@ -259,7 +259,13 @@ fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
 
     let plain = meta_for(false);
     let options = &plain["claudeCode"]["options"];
-    assert_eq!(options["settings"].get("permissions"), None, "{options}");
+    // On Windows the one rule is the whole Bash tool (`agent/one_shell.rs`).
+    let bash_only = json!({"deny": ["Bash"]});
+    assert_eq!(
+        options["settings"].get("permissions"),
+        cfg!(windows).then(|| &bash_only),
+        "{options}"
+    );
     assert_eq!(options["settings"].get("sandbox"), None, "{options}");
     let allowed = options["allowedTools"].as_array().unwrap();
     assert!(allowed.contains(&json!("Bash(git status)")), "{options}");
