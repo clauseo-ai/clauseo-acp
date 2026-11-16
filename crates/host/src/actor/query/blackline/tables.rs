@@ -8,9 +8,10 @@
 //! - what is read (`read.rs`): each version's body, headers, footers, footnotes and endnotes,
 //!   their tables' property elements with the noise left out;
 //! - which parts are compared: the body with the body, the footnotes with the footnotes, the
-//!   endnotes with the endnotes, and a header or footer with the one in the same first place
-//!   (its first section and kind of page). A part in one version only is not compared: it is
-//!   inserted or deleted whole, which stetdoc shows (or, for a header or footer, warns of);
+//!   endnotes with the endnotes, and the headers and footers as stetdoc's compare pairs them
+//!   ([`pair_headers`]: the sections from the last one back, and in each pair of sections the
+//!   part on the same kind of page). A header or footer with tables and no counterpart may
+//!   differ, since what changed in its tables can't be told;
 //! - which tables, rows and cells are paired ([`align`]): within a part (a table's rows, a row's
 //!   cells), by order when both versions have as many; otherwise by their text, the longest
 //!   run of equal texts in order, then the ones between two pairs by order where both sides
@@ -28,6 +29,8 @@
 //! every table in the order it starts, a table inside a cell too.
 
 use clauseo_protocol::{ChangedTable, TableFormat, TablePlace};
+
+use std::collections::BTreeSet;
 
 use read::{Package, Prop, Table, Where, read_package};
 
@@ -60,30 +63,31 @@ pub(crate) fn compare(old: &[u8], new: &[u8]) -> TablesCompared {
     };
     let mut found = TablesCompared::default();
     for (place, new_tables) in &new.parts {
-        let Some(old_tables) = counterpart(&old, place) else {
+        let Some((_, old_tables)) = old.parts.iter().find(|(theirs, _)| theirs == place) else {
             continue;
         };
-        let (pairs, unpaired) = align_by_text(old_tables, new_tables, |table| &table.text);
-        found.may_differ |= unpaired;
-        for (o, n) in pairs {
-            let (Some(old_table), Some(new_table)) = (old_tables.get(o), new_tables.get(n)) else {
-                continue;
-            };
-            let mut formats = Vec::new();
-            found.may_differ |= compare_table(old_table, new_table, &mut formats);
-            if !formats.is_empty() {
-                found.changed.push(ChangedTable {
-                    place: place_of(place),
-                    number: u32::try_from(n + 1).unwrap_or(u32::MAX),
-                    formats: TableFormat::ALL
-                        .into_iter()
-                        .filter(|format| formats.contains(format))
-                        .collect(),
-                });
-            }
+        compare_part(place, old_tables, new_tables, &mut found);
+    }
+    let headers = pair_headers(&old, &new);
+    for (o, n) in &headers.pairs {
+        if let (Some(old_part), Some(new_part)) = (old.headers.get(*o), new.headers.get(*n)) {
+            compare_part(
+                &new_part.place,
+                &old_part.tables,
+                &new_part.tables,
+                &mut found,
+            );
         }
     }
-    found.changed.sort_by_key(|table| table.number);
+    // A header or footer with tables and no counterpart: what changed in them can't be told.
+    let alone = |package: &Package, matched: &BTreeSet<&str>| {
+        package
+            .headers
+            .iter()
+            .any(|(name, part)| !part.tables.is_empty() && !matched.contains(name.as_str()))
+    };
+    found.may_differ |= alone(&old, &headers.old) || alone(&new, &headers.new);
+    // The body, the notes, then the headers and the footers; each part's tables by number.
     found.changed.sort_by_key(|table| place_rank(&table.place));
     if found.changed.len() > TABLES_MAX {
         found.changed.truncate(TABLES_MAX);
@@ -92,18 +96,72 @@ pub(crate) fn compare(old: &[u8], new: &[u8]) -> TablesCompared {
     found
 }
 
-/// The older version's tables of the part in `place` of the newer: the same kind of part, a
-/// header or footer in the same first place.
-fn counterpart<'a>(old: &'a Package, place: &Where) -> Option<&'a Vec<Table>> {
-    old.parts
-        .iter()
-        .find(|(theirs, _)| match (theirs, place) {
-            (Where::Header(_), Where::Header(_)) | (Where::Footer(_), Where::Footer(_)) => {
-                read::first_use(theirs) == read::first_use(place)
+/// Compares the tables of one part, `old_tables` and `new_tables`, into `found`, each changed
+/// table named at `place`.
+fn compare_part(
+    place: &Where,
+    old_tables: &[Table],
+    new_tables: &[Table],
+    found: &mut TablesCompared,
+) {
+    let (pairs, unpaired) = align_by_text(old_tables, new_tables, |table| &table.text);
+    found.may_differ |= unpaired;
+    for (o, n) in pairs {
+        let (Some(old_table), Some(new_table)) = (old_tables.get(o), new_tables.get(n)) else {
+            continue;
+        };
+        let mut formats = Vec::new();
+        found.may_differ |= compare_table(old_table, new_table, &mut formats);
+        if !formats.is_empty() {
+            found.changed.push(ChangedTable {
+                place: place_of(place),
+                number: u32::try_from(n + 1).unwrap_or(u32::MAX),
+                formats: TableFormat::ALL
+                    .into_iter()
+                    .filter(|format| formats.contains(format))
+                    .collect(),
+            });
+        }
+    }
+}
+
+/// The header and footer parts paired across the versions, and the ones matched on each side.
+#[derive(Debug, Default)]
+struct HeaderPairs<'a> {
+    /// The pairs (older part's name, newer part's name), in the order of the newer part's first
+    /// use.
+    pairs: Vec<(&'a str, &'a str)>,
+    old: BTreeSet<&'a str>,
+    new: BTreeSet<&'a str>,
+}
+
+/// Pairs the versions' header and footer parts as stetdoc's compare pairs them: the sections
+/// from the last one back, and in each pair of sections the parts on the same kind of page.
+/// Each part pairs once; a later pairing that names a part already paired is left out.
+fn pair_headers<'a>(old: &'a Package, new: &'a Package) -> HeaderPairs<'a> {
+    let mut found = HeaderPairs::default();
+    for (theirs, ours) in old.sections.iter().rev().zip(new.sections.iter().rev()) {
+        for (footer, slot, name) in ours {
+            let Some((_, _, counterpart)) = theirs
+                .iter()
+                .find(|(other, kind, _)| other == footer && kind == slot)
+            else {
+                continue;
+            };
+            if found.old.contains(counterpart.as_str()) || found.new.contains(name.as_str()) {
+                continue;
             }
-            _ => theirs == place,
-        })
-        .map(|(_, tables)| tables)
+            found.old.insert(counterpart.as_str());
+            found.new.insert(name.as_str());
+            found.pairs.push((counterpart.as_str(), name.as_str()));
+        }
+    }
+    found.pairs.sort_by_key(|(_, name)| {
+        new.headers
+            .get(*name)
+            .map_or((u32::MAX, u8::MAX), |part| read::first_use(&part.place))
+    });
+    found
 }
 
 /// The protocol's place of a part.
@@ -118,6 +176,7 @@ fn place_of(place: &Where) -> TablePlace {
 }
 
 /// The order of the places: the body, the footnotes, the endnotes, the headers, the footers.
+/// The sort is stable, so the headers keep the order of their first use.
 fn place_rank(place: &TablePlace) -> u8 {
     match place {
         TablePlace::Body => 0,
