@@ -1982,6 +1982,8 @@ export type ErrorCode =
 "blackline.too_large" | 
 /** stetdoc's view of the blackline is in a format this Clauseo does not know (a header other than `stet 1`, or none), so nothing is shown rather than a guess. */
 "blackline.format_unknown" | 
+/** A conversation's turn did not run: another matter on Clauseo's list lies inside its matter's folder (folders moved outside Clauseo), at its launch, its resume or before its prompt. The error's `matter` names the inner matter; a `MatterInside` notice before the failure names it to the lawyer. The question is kept. */
+"matter.holds_other_matter" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -4315,7 +4317,7 @@ export type NoticeKind =
 	files: MatterPath[],
 	/**  How many more came back beyond `files`. */
 	more: number,
-} }) & { matters_unfenced?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
+} }) & { matter_inside?: never; matters_unfenced?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
 /**
  *  A skill pack the launch left out: which pack, and why. The app words it by kind; the
  *  notice's `text` is the fallback.
@@ -4325,7 +4327,7 @@ export type NoticeKind =
 	pack: PackId,
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
-} }) & { files_came_back?: never; matters_unfenced?: never; other_matter_refused?: never } | 
+} }) & { files_came_back?: never; matter_inside?: never; matters_unfenced?: never; other_matter_refused?: never } | 
 /**
  *  Claude Code's `auto` permission mode is not available for this session (the account,
  *  the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
@@ -4358,7 +4360,7 @@ export type NoticeKind =
 	matter: MatterId,
 	/**  Its name when the host gave the notice (display only; it may have changed). */
 	name: string,
-} }) & { files_came_back?: never; matters_unfenced?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; matter_inside?: never; matters_unfenced?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Matters Clauseo could not fully fence off from the agent: a folder on the way to
  *  them could not be listed or is on a network share, there were too many paths to name,
@@ -4369,7 +4371,7 @@ export type NoticeKind =
 	matters: MatterId[],
 	/**  How many more beyond `matters`. */
 	more: number,
-} }) & { files_came_back?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; matter_inside?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Claude's sandboxed commands can't reach some folders this session: another matter
  *  this conversation is not invited into lies inside this one, or another matter's
@@ -4377,6 +4379,17 @@ export type NoticeKind =
  *  read and edit the matter. Once a launch.
  */
 "shell_limited" | 
+/**
+ *  Another matter on Clauseo's list lies inside this conversation's matter folder
+ *  (folders moved outside Clauseo), so Clauseo runs no turn here: given with each turn
+ *  that fails `matter.holds_other_matter`, before the failure.
+ */
+({ matter_inside: {
+	/**  The inner matter. */
+	matter: MatterId,
+	/**  Its name when the host gave the notice (display only; it may have changed). */
+	name: string,
+} }) & { files_came_back?: never; matters_unfenced?: never; other_matter_refused?: never; skill_pack_not_loaded?: never } | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 
