@@ -106,3 +106,5 @@ own parse, not the text.
   `disallowedTools` (`crates/host/src/agent/loads/tools.rs`), and compare it with the expected
   list there (`tools_tests.rs` pins it per system): a tool the new pin adds, renames or drops is
   decided there before the bump lands.
+- At the same pin bump, check that a tool left out of `tools` is still refused when a profile's
+  own `allowedTools` names it (`ListAgents`), from the main agent and from a helper.
