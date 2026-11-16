@@ -1,6 +1,6 @@
 //! A blackline side's copy from the folder now (`folder_side`) and the cap on a version's
-//! (`Capped`): a cloud-only placeholder and a file past the size cap are refused as unknown,
-//! with nothing read; a file within the cap is copied whole.
+//! (`Capped`): a cloud-only placeholder is refused as unknown and a file past the size cap as
+//! too large, with nothing read; a file within the cap is copied whole.
 
 use std::fs::Metadata;
 use std::io::Write as _;
@@ -58,7 +58,7 @@ fn a_cloud_only_file_in_the_folder_is_refused_as_unknown_and_not_copied() {
 }
 
 #[test]
-fn a_folder_file_past_the_size_cap_is_refused_as_unknown_and_not_copied() {
+fn a_folder_file_past_the_size_cap_is_too_large_and_not_copied() {
     let dir = folder_with("overcap", b"0123456789");
     let path = MatterPath::new("a.docx").unwrap();
     let refused = folder_side(
@@ -69,7 +69,7 @@ fn a_folder_file_past_the_size_cap_is_refused_as_unknown_and_not_copied() {
         &dir.join("new.docx"),
     )
     .unwrap_err();
-    assert_eq!(code(&refused), ErrorCode::CommandInvalid, "{refused:?}");
+    assert_eq!(code(&refused), ErrorCode::BlacklineTooLarge, "{refused:?}");
     assert!(!dir.join("new.docx").exists());
     write::remove_dir_all(&dir).unwrap();
 }

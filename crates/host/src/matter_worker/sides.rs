@@ -5,8 +5,8 @@
 //! It answers: where the copies go (`<dir>/old.docx` and `<dir>/new.docx`, in the one folder
 //! `dir`, made here and private to the user on Unix); what each side is (`Matter::read_file` for
 //! a version; for the folder now, a copy of the file itself, never through a link, both streamed);
-//! what a missing, over-cap or cloud-only file answers (`Error::UnknownFile`, as `read_file`
-//! answers a missing one); and how the folder
+//! what a missing or cloud-only file answers (`Error::UnknownFile`, as `read_file` answers a
+//! missing one) and an over-cap one (`blackline.too_large`); and how the folder
 //! goes ([`BlacklineDir`], whose drop removes it on every path).
 
 use std::io::{self, Read as _, Write};
@@ -72,10 +72,10 @@ impl Sides {
 
 /// Makes `dir` (its parent too, when missing) and streams `from`'s copy of `path` there as
 /// [`OLD`] and `to`'s as [`NEW`], neither held in memory whole. A file the version or the
-/// folder lacks is `Error::UnknownFile` (`command.invalid`), and so is a side `CompareVersions`
-/// would not see as content: past the size cap (`Limits::effective_cap`), or, in the folder, a
-/// cloud-only placeholder (the settings' probe), whose read would download it. A copy that can't
-/// be written is `blackline.failed`. On any error the folder is gone before this returns.
+/// folder lacks is `Error::UnknownFile` (`command.invalid`), and so is a folder side that is a
+/// cloud-only placeholder (the settings' probe), whose read would download it. A side past the
+/// size cap (`Limits::effective_cap`) is `blackline.too_large`. A copy that can't be written is
+/// `blackline.failed`. On any error the folder is gone before this returns.
 fn write_sides(
     matter: &Matter,
     settings: &Settings,
@@ -116,13 +116,21 @@ fn failed(what: &str, error: &io::Error) -> Error {
     )
 }
 
+/// The refusal of a side past the size cap: too large to mark up.
+fn too_large() -> Error {
+    Error::refused(
+        ErrorCode::BlacklineTooLarge,
+        "the file is over the size cap",
+    )
+}
+
 /// The refusal of `path`, a side `CompareVersions` does not see as content.
 fn unknown(path: &MatterPath) -> Error {
     Error::from(clauseo_matters::Error::UnknownFile { path: path.clone() })
 }
 
 /// Streams `path` as version `checkpoint` holds it into the new file `dest`, at most `cap`
-/// bytes: past it the side is refused as unknown.
+/// bytes: past it the side is too large.
 fn version_side(
     matter: &Matter,
     checkpoint: CheckpointId,
@@ -134,15 +142,15 @@ fn version_side(
     let mut out = Capped::new(file, cap);
     match matter.read_file(checkpoint, path, &mut out) {
         Ok(_) => Ok(()),
-        Err(_) if out.over => Err(unknown(path)),
+        Err(_) if out.over => Err(too_large()),
         Err(error) => Err(error.into()),
     }
 }
 
 /// Streams the file `file` (`path` in the matter's folder now) into the new file `dest`.
 /// Anything but a regular file there (nothing, a folder, a link) is unknown, as are a cloud-only
-/// placeholder by `probe`, checked on the opened file before any read, and a file of more than
-/// `cap` bytes, checked before the copy and again by what it read.
+/// placeholder by `probe`, checked on the opened file before any read; a file of more than
+/// `cap` bytes, checked before the copy and again by what it read, is too large.
 fn folder_side(
     probe: &dyn PlaceholderProbe,
     cap: u64,
@@ -159,14 +167,17 @@ fn folder_side(
     }
     let opened = std::fs::File::open(file).map_err(|error| read_failed(&error))?;
     let meta = opened.metadata().map_err(|error| read_failed(&error))?;
-    if !meta.is_file() || probe.is_cloud_only(file, &meta) || meta.len() > cap {
+    if !meta.is_file() || probe.is_cloud_only(file, &meta) {
         return Err(unknown(path));
+    }
+    if meta.len() > cap {
+        return Err(too_large());
     }
     let mut out = crate::write::create_new_file(dest).map_err(|error| failed("a copy", &error))?;
     let copied = io::copy(&mut opened.take(cap.saturating_add(1)), &mut out)
         .map_err(|error| read_failed(&error))?;
     if copied > cap {
-        return Err(unknown(path));
+        return Err(too_large());
     }
     Ok(())
 }

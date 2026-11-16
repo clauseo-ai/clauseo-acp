@@ -288,6 +288,26 @@ fn a_compare_that_exits_1_fails() {
     host.shutdown();
 }
 
+/// A file in the folder now past the matters' size cap is too large to mark up, and stetdoc
+/// never runs.
+#[test]
+fn a_folder_file_past_the_size_cap_is_too_large() {
+    let dir = Dir::new(
+        "blackline_over_cap",
+        &[(FAKE, Scenario::Bundled("prompt-stream"))],
+    );
+    let stetdoc = fake_stetdoc(&dir);
+    let (host, matter, old, folder) = lease_matter(&dir, Some(&stetdoc));
+    write::sized(&folder.join(DOC), clauseo_matters::FILE_CAP_BYTES + 1);
+    refused(
+        host.query(query(matter, DOC, old, None)),
+        ErrorCode::BlacklineTooLarge,
+    );
+    assert!(!stetdoc.parent().unwrap().join("args-compare.txt").exists());
+    assert_eq!(temp_entries(&dir), Vec::<PathBuf>::new());
+    host.shutdown();
+}
+
 #[test]
 fn a_view_that_takes_too_long_fails() {
     let dir = Dir::new(
