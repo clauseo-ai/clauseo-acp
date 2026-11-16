@@ -10,8 +10,8 @@ libFuzzer needs. Run cargo from this folder so rustup picks that toolchain.
 ## Targets
 
 Each target's `//!` header gives its input format, the crate items it drives and the invariants
-it asserts. All of them go through public APIs only, but `zip_marks`: `build.rs` compiles the
-host's private `revisions/marks.rs` into it (its header says why and what that needs).
+it asserts. All of them go through public APIs only, but `zip_marks`: it compiles the host's
+private `revisions/marks.rs` as a module of its own (its header says why and what that needs).
 
 | target | what it feeds |
 |---|---|

@@ -402,8 +402,9 @@ fuzz/fuzz_targets/matters_objects.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/matters_read.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/protocol_decode.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/zip_marks.rs - clippy::disallowed_methods
-fuzz/fuzz_targets/zip_marks.rs - dead_code
-fuzz/build.rs - clippy::disallowed_methods
+# zip_marks compiles the host's revisions/marks.rs as its module marks: the scan's helpers it
+# never calls (Kept, check) are dead there.
+fuzz/fuzz_targets/zip_marks.rs marks dead_code
 fuzz/fuzz_targets/reducer_snapshot.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/settings_parse.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/store_read.rs - clippy::disallowed_methods

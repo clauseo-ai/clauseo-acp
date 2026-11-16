@@ -167,8 +167,8 @@ fn windows_file(path: &Path, file: std::fs::File) -> Option<std::fs::File> {
 
 /// Whether the zip `file` may hold a tracked change or a comment: `Some(false)` only when it was
 /// read whole as the scan models it and holds none; `None` when a read failed and is worth
-/// trying again.
-fn zip_has_marks(file: impl Read + Seek) -> Option<bool> {
+/// trying again. `pub(super)` for `fuzz/fuzz_targets/zip_marks.rs`, where this file is a module.
+pub(super) fn zip_has_marks(file: impl Read + Seek) -> Option<bool> {
     zip_marks(file, MAX_XML_BYTES, MAX_SCAN_BYTES)
 }
 
@@ -428,12 +428,19 @@ pub(crate) mod hooks {
     }
 }
 
+// Each module names its file: fuzz/fuzz_targets/zip_marks.rs compiles this file as a module of
+// its own (#[path]), where a bare `mod parts;` would be looked for beside it, not in marks/.
 #[cfg(test)]
+#[path = "marks/package_tests.rs"]
 mod package_tests;
+#[path = "marks/parts.rs"]
 mod parts;
 #[cfg(any(windows, test))]
+#[path = "marks/reparse.rs"]
 mod reparse;
 #[cfg(test)]
+#[path = "marks/tests.rs"]
 mod tests;
 #[cfg(test)]
+#[path = "marks/xml_tests.rs"]
 mod xml_tests;
