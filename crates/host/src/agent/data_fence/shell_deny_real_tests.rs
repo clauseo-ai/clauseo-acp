@@ -315,9 +315,10 @@ fn the_worst_realistic_launch_fits_the_settings_file() {
 
 /// The shed decision (`loads::profile::shell_rules_within`), driven off Windows on stage C's
 /// case: 1,000 matters and a configured folder under both `Local` and `Roaming` (two spellings).
-/// At the real budget it sheds exactly when the rules with the variable forms would pass it;
-/// past a budget just under them, the launch logs the shed (fields only) and gets the rules
-/// without them, which still deny Claude's credentials in every spelling.
+/// The bytes already spent are set from the budget, so no change to the other deny rules can move
+/// the case across it: at exactly the budget a launch keeps the variable forms; one byte past it,
+/// the launch logs the shed (fields only) and gets the rules without them, which still deny
+/// Claude's credentials in every spelling.
 #[test]
 fn a_launch_past_its_budget_sheds_the_variable_forms() {
     use crate::agent::loads::profile::{SHED_AT, shell_rules_within};
@@ -333,34 +334,29 @@ fn a_launch_past_its_budget_sheds_the_variable_forms() {
         ..deny
     };
     let size = |rules: &[String]| serde_json::to_string(rules).unwrap().len();
-    let spent = size(&claude_deny_rules_on(&deny, true, false));
     let full = windows_shell_deny_rules(&deny, &long_env);
-    let log = Log::default();
-    let dispatch = log.dispatch();
     let shed = windows_shell_deny_rules_without_variables(&deny, &long_env);
     eprintln!(
-        "two spellings, 1,000 matters: {} B with the variable forms, {} B without (budget \
-         {SHED_AT})",
-        spent + size(&full),
-        spent + size(&shed),
+        "two spellings, 1,000 matters: shell rules {} B with the variable forms, {} B without \
+         (budget {SHED_AT})",
+        size(&full),
+        size(&shed),
     );
-    let real = shell_rules_within(&deny, &long_env, spent, SHED_AT);
-    let over = spent + size(&full) > SHED_AT;
-    assert_eq!(&real, if over { &shed } else { &full });
-    assert!(spent + size(&real) < SHED_AT);
-    let budget = spent + size(&full) - 1;
-    let got = tracing::dispatcher::with_default(&dispatch, || {
-        shell_rules_within(&deny, &long_env, spent, budget)
-    });
+    assert!(size(&shed) < size(&full) && size(&full) < SHED_AT);
+    let fits = SHED_AT - size(&full);
+    let (kept, quiet) = logged(|| shell_rules_within(&deny, &long_env, fits, SHED_AT));
+    assert_eq!(kept, full);
+    assert!(!quiet.contains("shed="), "{quiet}");
+    let (got, text) = logged(|| shell_rules_within(&deny, &long_env, fits + 1, SHED_AT));
     assert_eq!(got, shed);
-    let logged = log.text();
+    assert!(fits + 1 + size(&got) <= SHED_AT);
     assert!(
-        logged.contains("shed=\"vars\"") || logged.contains("shed=vars"),
-        "{logged}"
+        text.contains("shed=\"vars\"") || text.contains("shed=vars"),
+        "{text}"
     );
     assert!(
-        logged.contains("budget=") && !logged.contains("Clauseo Data"),
-        "{logged}"
+        text.contains("budget=") && !text.contains("Clauseo Data"),
+        "{text}"
     );
     let rules = Rules::new(&got);
     for spelling in &spellings {
@@ -375,6 +371,20 @@ fn a_launch_past_its_budget_sheds_the_variable_forms() {
     // Within its budget a launch keeps them.
     let roomy = shell_rules_within(&deny, &long_env, 0, usize::MAX);
     assert_eq!(roomy, full);
+}
+
+/// `run` under a log of its own, and what it logged. The cached interest of every callsite is
+/// rebuilt inside that scope first: with one dispatcher alive, tracing-core takes a callsite's
+/// interest from whatever default is in force where it is first hit (`Rebuilder::JustOne`), so
+/// a first hit with no subscriber, in this test or another in the process, silences it for good.
+fn logged<T>(run: impl FnOnce() -> T) -> (T, String) {
+    let log = Log::default();
+    let dispatch = log.dispatch();
+    let value = tracing::dispatcher::with_default(&dispatch, || {
+        tracing::callsite::rebuild_interest_cache();
+        run()
+    });
+    (value, log.text())
 }
 
 /// A log sink for one test's `tracing` output.
