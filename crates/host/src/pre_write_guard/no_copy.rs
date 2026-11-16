@@ -27,29 +27,50 @@
 //! remove Drafts/Scan.pdf
 //! ```
 //!
-//! **Without the list** the rule still looks at each target itself ([`live`]): a file over
-//! [`FILE_CAP_BYTES`], or one the OS marks cloud-only ([`OsProbe`], a stat, never a download),
-//! is refused too. So a missing or planted list never lets a delete of such a file through that
-//! the guard can see; it only loses the files hydrated earlier in the turn, which the list still
-//! names.
+//! **What is refused** (after the held-open and `.codex` rules). A lawyer can rely on these:
 //!
-//! **What it refuses** (after the held-open and `.codex` rules):
+//! - a **delete** of a listed file, or of a file the guard sees is cloud-only or over
+//!   [`FILE_CAP_BYTES`] now ([`live`]: a stat, never a download), whether or not it is on the
+//!   disk now: Codex's `apply_patch` `Delete File` (and a patch inside a shell command); a
+//!   single, literal `rm`, `unlink`, `Remove-Item`, `del`, `erase`, `ri` or `rd` naming it,
+//!   after any `cd` the shell reader can follow;
+//! - a delete program naming a folder that holds a listed file (`rm -r Exhibits`,
+//!   `rm -r Exhibits/`), or the matter folder itself or one above it while anything is listed
+//!   (`rm -rf .`, `rm -rf ..`);
+//! - an **overwrite, edit or move** of a file that is cloud-only or over the cap *now*
+//!   ([`live`]): Claude Code's `Write`, `Edit`, `MultiEdit`, `NotebookEdit`; a Codex patch's
+//!   `Add`, `Update` and `Move to`; and the shell forms the shared write-form list reads
+//!   (`crate::shell_writes`, the one reader the end of the turn credits by): `>` and `>>`,
+//!   `-o`/`--output`, `tee`, `cp`'s last argument, `mv` and `Move-Item` (both sides), what a
+//!   `stetdoc` command writes. The shell forms grow with that list; nothing here adds its own.
 //!
-//! - a file tool on a listed file: Claude Code's `Write`, `Edit`, `MultiEdit`, `NotebookEdit`;
-//!   any file of a Codex `apply_patch` (`Add`, `Update`, `Delete`, a move's both sides), and a
-//!   patch inside a shell command;
-//! - a shell command (`Bash`, `PowerShell`) that writes, deletes or moves a listed file as the
-//!   turn's own shell writes are read (`crate::shell_writes`, one reader, so the end of the turn
-//!   credits the same forms): `>` and `>>`, `-o`/`--output`, `tee`, `cp`'s last argument, `rm`,
-//!   `unlink`, `mv` (both sides), `Remove-Item`, `del`, `erase`, `ri`, `rd`, `Move-Item`, what a
-//!   `stetdoc` command writes, after any `cd` it can follow;
-//! - a delete program (not a move) naming a folder that holds a listed file (`rm -r Exhibits`,
-//!   `rm -r Exhibits/`), the matter folder itself or one above it (`rm -rf .`, `rm -rf ..`).
+//! **What is not refused**, left to the end of the turn (`actor/turn/end/files.rs`, which names
+//! a deleted no-copy file, and one changed in place, after the turn):
 //!
-//! Not caught, left to the end of the turn: a glob or an expansion (`rm *.pdf`, `rm -rf *`,
-//! `rm "$f"`), `find -delete`, `xargs rm`, `sed -i`, a script file or an
-//! inline script (`python -c`), `rsync --delete`, `unzip -o`, a file that became no-copy during
-//! the turn by a route the live check does not see, and a file made and deleted in one turn.
+//! - an overwrite or edit of a listed file that is on the disk now and within the cap (the
+//!   agent's read of an online-only file downloads it; refusing its edit for the rest of the turn
+//!   would block ordinary work): the end of the turn names it as changed with no earlier copy;
+//! - a shell form the shared write-form list does not read. That list (`crate::shell_writes`)
+//!   is the one place the read forms are kept; this rule refuses those forms and no others, and
+//!   the end of the turn names what went by any other;
+//! - a file that became no-copy during the turn by a route the live check does not see, and a
+//!   file made and deleted in one turn;
+//! - on a matter kept on a network share, nothing is looked at on the disk: a delete of a listed
+//!   file is still refused (the list is looked up by the path's text), but the live check, and so
+//!   every overwrite refusal, does not apply there.
+//!
+//! **Open until the shared write-form list tells a move's source from its destination**: moving
+//! or renaming a listed file that is still cloud-only or over the cap is refused as an overwrite
+//! (a move loses nothing, so it should not be); and the end of the turn's credit of a shell
+//! command's folder targets (`clauseo_matters` `diff.rs` `removed`) takes every write target as a
+//! folder prefix, not only delete and move arguments, so a lawyer's own delete under a folder a
+//! `cp` named can be credited to the agent.
+//!
+//! **Without a list, or with one the guard does not trust**, a delete is judged by the live check
+//! alone: it still refuses a file that is cloud-only or over the cap now, but no longer a listed
+//! file downloaded earlier in the turn, nor a folder holding one (`rm -r Exhibits`, `rm -rf .`).
+//! On Windows the list file has the protection of Clauseo's other data-folder files there (the
+//! command-text rules; there is no fence), so on Windows the live check is the part to rely on.
 //!
 //! A refusal names the file as the list spells it, and it is recorded for the lawyer like the
 //! held-open one (`record.rs` `Reason::NoCopy`).
