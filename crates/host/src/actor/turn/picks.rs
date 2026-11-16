@@ -212,7 +212,7 @@ fn waiting(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) -> Vec
 
 /// The picks made while the session was prepared (after [`wanted`] was taken, so
 /// waiting behind the first prompt): those `options`, the start's now, offer and do not hold,
-/// and that `picked` did not try already. `session::prepare` sets them in another round
+/// and that `picked` did not try already. `session/prepare.rs` sets them in another round
 /// before the attach, so the first prompt runs with them; a pick tried and kept (the
 /// agent failed it otherwise) goes to the agent after the attach, as before.
 pub(super) fn late(
