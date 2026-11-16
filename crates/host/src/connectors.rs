@@ -26,6 +26,7 @@
 //!
 //! [`Secret`]: clauseo_connectors::Secret
 
+mod gate;
 pub(crate) mod hint;
 mod limits;
 pub(crate) use limits::civil_from_days;

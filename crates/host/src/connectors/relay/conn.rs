@@ -11,14 +11,14 @@ use serde_json::Value;
 
 #[cfg(doc)]
 use super::super::limits::MAX_CONNECTIONS_PER_TOKEN;
-use super::super::limits::{MAX_HELLO_BYTES, MAX_IN_FLIGHT, MAX_LINE_BYTES};
+use super::super::limits::{MAX_IN_FLIGHT, MAX_LINE_BYTES};
 use super::super::texts;
-use super::handshake::{self, Line, Refusal, Watchdog};
+use super::handshake::{self, Line, Watchdog};
 use super::{Session, hang_up, lock};
 
 /// Starts connection `id`'s thread. The handshake's deadline is armed before this returns.
 pub(super) fn start(session: &Arc<Session>, id: u64, stream: TcpStream) -> io::Result<()> {
-    let watchdog = Watchdog::arm(session, stream.try_clone()?)?;
+    let watchdog = Watchdog::arm(session.hub.clock.as_ref(), stream.try_clone()?)?;
     let session = Arc::clone(session);
     std::thread::Builder::new()
         .name("clauseo-relay-conn".to_owned())
@@ -38,42 +38,10 @@ fn run(session: &Arc<Session>, id: u64, stream: TcpStream, watchdog: Watchdog) {
         return;
     };
     let mut reader = BufReader::new(read_half);
-    let line = handshake::read_line(&mut reader, MAX_HELLO_BYTES);
-    let met = watchdog.meet();
-    // Its thread ends now, and with the manual clock its timer is disarmed.
-    drop(watchdog);
-    if !met {
-        session.log_refusal("handshake_timeout");
-        return;
-    }
-    let verdict = match line {
-        Line::Text(text) => handshake::check(session, &text),
-        Line::TooLong => Err(Refusal::Silent("hello_too_long")),
-        Line::End => Err(Refusal::Silent("hung_up")),
-    };
     let flight = Arc::new(Flight::default());
-    let verdict = verdict.and_then(|()| session.promote(id, &flight).map_err(Refusal::Answer));
-    let writer = Writer(Mutex::new(stream));
-    // Before the token passed, every refusal answers as a wrong token's does; the log keeps
-    // the reason.
-    let (reason, code) = match verdict {
-        Ok(()) => (None, None),
-        Err(Refusal::Silent(reason)) => (Some(reason), None),
-        Err(Refusal::Unauthenticated(reason)) => (Some(reason), Some(texts::BAD_TOKEN)),
-        Err(Refusal::Answer(code)) => (Some(code), Some(code)),
-    };
-    if let Some(reason) = reason {
-        session.log_refusal(reason);
-        if let Some(code) = code
-            && writer.line(&texts::hello_refused(code)).is_err()
-        {
-            // The peer is gone; it hears nothing either way.
-        }
-        writer.hang_up();
-        return;
-    }
-    if writer.line(&texts::hello_ok()).is_err() {
-        writer.hang_up();
+    let writer = Writer::new(stream);
+    let admit = || session.promote(id, &flight);
+    if !handshake::greet(session.as_ref(), &mut reader, watchdog, &writer, admit) {
         return;
     }
     let conn = Arc::new(Conn {
@@ -108,7 +76,7 @@ impl Conn {
     pub(crate) fn for_test(session: Arc<Session>, stream: TcpStream) -> Conn {
         Conn {
             session,
-            writer: Writer(Mutex::new(stream)),
+            writer: Writer::new(stream),
             upstream: Mutex::new(Upstream::default()),
             flight: Arc::new(Flight::default()),
         }
@@ -119,6 +87,11 @@ impl Conn {
 pub(crate) struct Writer(Mutex<TcpStream>);
 
 impl Writer {
+    /// The write half of `stream`.
+    pub(crate) fn new(stream: TcpStream) -> Writer {
+        Writer(Mutex::new(stream))
+    }
+
     /// Writes `line` and a newline under the lock.
     pub(crate) fn line(&self, line: &[u8]) -> io::Result<()> {
         let mut stream = lock(&self.0);
@@ -151,7 +124,7 @@ struct FlightState {
 
 impl Flight {
     /// Waits until a message may start; `false` once the connection is closing.
-    fn wait_room(&self) -> bool {
+    pub(crate) fn wait_room(&self) -> bool {
         let mut state = lock(&self.state);
         if state.in_flight >= MAX_IN_FLIGHT && !state.closed {
             state.stalls = state.stalls.saturating_add(1);
@@ -177,7 +150,7 @@ impl Flight {
         }
     }
 
-    fn begin(&self) {
+    pub(crate) fn begin(&self) {
         let mut state = lock(&self.state);
         state.in_flight = state.in_flight.saturating_add(1);
         state.lines = state.lines.saturating_add(1);
@@ -274,7 +247,7 @@ fn pump(conn: &Arc<Conn>, reader: &mut BufReader<TcpStream>) {
 /// Discards what the agent has already sent, without waiting for more, so the close after the
 /// line-too-long error is a FIN the agent reads past, not a reset that loses the error. At most
 /// [`MAX_LINE_BYTES`] more are read.
-fn drain(reader: &mut BufReader<TcpStream>) {
+pub(crate) fn drain(reader: &mut BufReader<TcpStream>) {
     use std::io::Read as _;
     if reader.get_ref().set_nonblocking(true).is_err() {
         return;

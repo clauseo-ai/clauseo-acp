@@ -10,10 +10,10 @@
 //! call is counted in memory under it, then waits (lock released) until `day.json` holds that
 //! count or a newer one, before it goes out.
 
-mod accept;
-mod conn;
+pub(super) mod accept;
+pub(super) mod conn;
 mod forward;
-mod handshake;
+pub(super) mod handshake;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -25,10 +25,11 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use clauseo_connectors::{ConnectorHandle, Origin, Secret, new_relay_token};
-use sha2::{Digest as _, Sha256};
 use tracing::Dispatch;
 
 use super::RelayEvents;
+pub(crate) use super::gate::Phase;
+use super::gate::{TokenGate, loopback_only};
 use super::limits::{
     DayCount, DayWriter, LocalDay, MAX_IN_FLIGHT_BYTES_PER_SESSION, MAX_PENDING_HANDSHAKES,
     TurnCaps,
@@ -123,20 +124,12 @@ impl Relays {
         listener: TcpListener,
     ) -> io::Result<(RelaySession, Secret)> {
         let addr = listener.local_addr()?;
-        if !addr.ip().is_loopback() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "the case-law relay listens on loopback only",
-            ));
-        }
+        loopback_only(addr, "the case-law relay listens on loopback only")?;
         let token = new_relay_token();
         let inner = Arc::new(Session {
             hub: Arc::clone(&self.hub),
             key: session,
-            gate: Mutex::new(Gate {
-                phase: Phase::Open,
-                digest: Some(digest(token.expose().as_bytes())),
-            }),
+            gate: TokenGate::new(&token),
             caps: Mutex::new(TurnCaps::default()),
             conns: Mutex::new(Conns::default()),
             bytes: Mutex::new(Bytes::default()),
@@ -163,23 +156,6 @@ impl Relays {
             token,
         ))
     }
-}
-
-/// Where a session is in its life. Only forward.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum Phase {
-    Open,
-    /// The token is revoked: handshakes get `closed`, and nothing more is forwarded.
-    Ending,
-    /// The listener is closing.
-    Stopped,
-}
-
-/// The token's digest and the phase, under one lock: a handshake sees both or neither change.
-struct Gate {
-    phase: Phase,
-    /// `None` once the token is revoked.
-    digest: Option<[u8; 32]>,
 }
 
 /// The connections: those waiting on their handshake, and those past it.
@@ -213,7 +189,8 @@ pub(crate) struct Bytes {
 pub(crate) struct Session {
     pub(crate) hub: Arc<Hub>,
     pub(crate) key: SessionKey,
-    gate: Mutex<Gate>,
+    /// The token's digest and the phase (`gate.rs`).
+    pub(crate) gate: TokenGate,
     pub(crate) caps: Mutex<TurnCaps>,
     conns: Mutex<Conns>,
     /// The raw bytes of the lines in flight on all its connections, and the waits for room.
@@ -228,33 +205,9 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn digest(bytes: &[u8]) -> [u8; 32] {
-    Sha256::digest(bytes).into()
-}
-
-/// Compares two digests in constant time.
-fn same_digest(left: &[u8; 32], right: &[u8; 32]) -> bool {
-    let diff = left
-        .iter()
-        .zip(right)
-        .fold(0u8, |diff, (a, b)| diff | (a ^ b));
-    std::hint::black_box(diff) == 0
-}
-
 impl Session {
     pub(crate) fn phase(&self) -> Phase {
-        lock(&self.gate).phase
-    }
-
-    /// Whether `token` is this listener's live token, in constant time. `Err(())` once the
-    /// token is revoked: the session is ending.
-    pub(crate) fn token_matches(&self, token: &str) -> Result<bool, ()> {
-        let presented = digest(token.as_bytes());
-        let gate = lock(&self.gate);
-        match (gate.phase, gate.digest.as_ref()) {
-            (Phase::Open, Some(ours)) => Ok(same_digest(ours, &presented)),
-            _ => Err(()),
-        }
+        self.gate.phase()
     }
 
     /// Takes `len` bytes of the session's in-flight budget,
@@ -315,11 +268,7 @@ impl Session {
     /// Moves to `to` (never back): revokes the token, then shuts down the connections past
     /// their handshake, and on `Stopped` the pending ones too.
     fn close(&self, to: Phase) {
-        {
-            let mut gate = lock(&self.gate);
-            gate.phase = gate.phase.max(to);
-            gate.digest = None;
-        }
+        self.gate.close(to);
         let conns = lock(&self.conns);
         for live in conns.live.values() {
             if live.flight.is_some() || to == Phase::Stopped {
@@ -361,10 +310,7 @@ impl Session {
     /// Moves connection `id` past its handshake, with its flight; `false` when this token
     /// already has its connections (`busy`) or the session is no longer open.
     pub(crate) fn promote(&self, id: u64, flight: &Arc<Flight>) -> Result<(), &'static str> {
-        let gate = lock(&self.gate);
-        if gate.phase != Phase::Open {
-            return Err(super::texts::CLOSED);
-        }
+        let gate = self.gate.while_open()?;
         let mut conns = lock(&self.conns);
         if conns.open >= super::limits::MAX_CONNECTIONS_PER_TOKEN {
             return Err(super::texts::BUSY);
@@ -408,6 +354,20 @@ impl Session {
             .live
             .values()
             .find_map(|live| live.flight.clone())
+    }
+}
+
+impl handshake::Door for Session {
+    fn gate(&self) -> &TokenGate {
+        &self.gate
+    }
+
+    fn connector(&self) -> &str {
+        self.hub.connector.known().id
+    }
+
+    fn log_refusal(&self, reason: &str) {
+        Session::log_refusal(self, reason);
     }
 }
 

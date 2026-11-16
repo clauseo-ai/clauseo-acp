@@ -12,8 +12,11 @@
 //! session's state (decision record 0050, "The hello"). Past the token, the answer is specific:
 //! `unsupported_version`, `wrong_connector`, or `busy` or `closed` from `Session::promote`.
 //! The hello is never logged, echoed or kept: it holds the token.
+//!
+//! Both listeners of a launch run this one copy ([`greet`]): the case-law relay and the
+//! version-history listener (`connectors/versions_relay.rs`), each through its [`Door`].
 
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, BufReader};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 
@@ -22,9 +25,74 @@ use futures::future::{self, Either};
 use serde::Deserialize;
 use serde_json::Number;
 
-use super::super::limits::HANDSHAKE_TIMEOUT;
+use super::super::gate::TokenGate;
+use super::super::limits::{HANDSHAKE_TIMEOUT, MAX_HELLO_BYTES};
 use super::super::texts;
-use super::{Session, hang_up, lock};
+use super::conn::Writer;
+use super::{hang_up, lock};
+use crate::clock::Clock;
+
+/// What a listener gives the handshake: its gate, its connector's name and its log.
+pub(crate) trait Door {
+    /// The listener's token and phase.
+    fn gate(&self) -> &TokenGate;
+    /// The name a hello must carry (`case-law`, `clauseo-versions`).
+    fn connector(&self) -> &str;
+    /// Logs a refused or dropped connection: the session and the reason, nothing it sent.
+    fn log_refusal(&self, reason: &str);
+}
+
+/// The handshake on a new connection, whose deadline `watchdog` was armed at its accept: the
+/// hello is read from `reader` and checked against `door`, then `admit` lets the connection
+/// in (it answers `busy` or `closed`). `true` once the ok line went out on `writer`.
+/// Otherwise the refusal is logged and the connection hung up, after one answer: `bad_token`
+/// for every refusal before the token passed, the specific code after it, and none for a hello
+/// that timed out, was too long or never came.
+pub(crate) fn greet(
+    door: &impl Door,
+    reader: &mut BufReader<TcpStream>,
+    watchdog: Watchdog,
+    writer: &Writer,
+    admit: impl FnOnce() -> Result<(), &'static str>,
+) -> bool {
+    let line = read_line(reader, MAX_HELLO_BYTES);
+    let met = watchdog.meet();
+    // Its thread ends now, and with the manual clock its timer is disarmed.
+    drop(watchdog);
+    if !met {
+        door.log_refusal("handshake_timeout");
+        return false;
+    }
+    let verdict = match line {
+        Line::Text(text) => check(door.gate(), door.connector(), &text),
+        Line::TooLong => Err(Refusal::Silent("hello_too_long")),
+        Line::End => Err(Refusal::Silent("hung_up")),
+    };
+    let verdict = verdict.and_then(|()| admit().map_err(Refusal::Answer));
+    // Before the token passed, every refusal answers as a wrong token's does; the log keeps
+    // the reason.
+    let (reason, code) = match verdict {
+        Ok(()) => (None, None),
+        Err(Refusal::Silent(reason)) => (Some(reason), None),
+        Err(Refusal::Unauthenticated(reason)) => (Some(reason), Some(texts::BAD_TOKEN)),
+        Err(Refusal::Answer(code)) => (Some(code), Some(code)),
+    };
+    if let Some(reason) = reason {
+        door.log_refusal(reason);
+        if let Some(code) = code
+            && writer.line(&texts::hello_refused(code)).is_err()
+        {
+            // The peer is gone; it hears nothing either way.
+        }
+        writer.hang_up();
+        return false;
+    }
+    if writer.line(&texts::hello_ok()).is_err() {
+        writer.hang_up();
+        return false;
+    }
+    true
+}
 
 /// Why a handshake did not go through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,10 +158,10 @@ pub(crate) struct Watchdog {
 }
 
 impl Watchdog {
-    pub(crate) fn arm(session: &Session, socket: TcpStream) -> io::Result<Watchdog> {
+    pub(crate) fn arm(clock: &dyn Clock, socket: TcpStream) -> io::Result<Watchdog> {
         let state = Arc::new(Mutex::new(Deadline::Waiting));
         let (done, finished) = oneshot::channel::<()>();
-        let timer = session.hub.clock.after(HANDSHAKE_TIMEOUT);
+        let timer = clock.after(HANDSHAKE_TIMEOUT);
         let watched = Arc::clone(&state);
         std::thread::Builder::new()
             .name("clauseo-relay-deadline".to_owned())
@@ -122,13 +190,14 @@ impl Watchdog {
     }
 }
 
-/// Checks a hello line against `session`. The token is compared in constant time with this
-/// listener's own, so a token of another listener is `bad_token`; a revoked session (its token
-/// forgotten, `Session::close`) refuses every token the same way. Only a hello whose token
-/// passes hears what else is wrong with it: another version, then another connector.
-pub(crate) fn check(session: &Session, line: &[u8]) -> Result<(), Refusal> {
+/// Checks a hello line against a listener's `gate` and its `connector` name. The token is
+/// compared in constant time with this listener's own, so a token of another listener is
+/// `bad_token`; a revoked listener (its token forgotten, `TokenGate::close`) refuses every token
+/// the same way. Only a hello whose token passes hears what else is wrong with it: another
+/// version, then another connector.
+pub(crate) fn check(gate: &TokenGate, connector: &str, line: &[u8]) -> Result<(), Refusal> {
     let hello = parse(line).map_err(Refusal::Unauthenticated)?;
-    match session.token_matches(hello.token) {
+    match gate.token_matches(hello.token) {
         Err(()) => return Err(Refusal::Unauthenticated(texts::CLOSED)),
         Ok(false) => return Err(Refusal::Unauthenticated(texts::BAD_TOKEN)),
         Ok(true) => {}
@@ -136,7 +205,7 @@ pub(crate) fn check(session: &Session, line: &[u8]) -> Result<(), Refusal> {
     if hello.version.as_u64() != Some(1) {
         return Err(Refusal::Answer(texts::UNSUPPORTED_VERSION));
     }
-    if hello.connector != session.hub.connector.known().id {
+    if hello.connector != connector {
         return Err(Refusal::Answer(texts::WRONG_CONNECTOR));
     }
     Ok(())
