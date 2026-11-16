@@ -551,8 +551,11 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
     // `<data>/browser/guard/<session>`, which no agent's shell may write, and writes only the
     // file whose identity follows `--record-id` (`guard_record.rs`).
     let command = groups[0]["hooks"][0]["command"].as_str().unwrap();
+    // On Windows the hook names the console program beside the app (`codex_guard_program`).
+    let program = clauseo_host::codex_guard_program(std::path::Path::new(PROGRAM));
+    let shown = program.display();
     let (record, id) = command
-        .strip_prefix(&format!("'{PROGRAM}' --pre-write-guard --record '"))
+        .strip_prefix(&format!("'{shown}' --pre-write-guard --record '"))
         .and_then(|rest| rest.split_once("' --record-id "))
         .unwrap_or_else(|| panic!("{command}"));
     let record = std::path::PathBuf::from(record);
@@ -567,8 +570,7 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
     );
     assert!(!session.is_empty(), "{command}");
     assert_eq!(id.len(), 48, "{command}");
-    let program = std::path::Path::new(PROGRAM);
-    let expected = clauseo_host::codex_hook_config(program, Some((&record, id))).unwrap();
+    let expected = clauseo_host::codex_hook_config(&program, Some((&record, id))).unwrap();
     assert_eq!(config["hooks"], expected);
 }
 

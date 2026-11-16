@@ -186,8 +186,9 @@ fn codex_hooks(
     if let Some(hooks) = &actor.codex_hooks {
         return Some(hooks.clone());
     }
-    let program = actor.pre_write_guard.as_deref()?;
-    let config = agent::loads::codex_hook_config(program, record);
+    // On Windows the console program beside the app, which PowerShell waits for.
+    let program = agent::loads::codex_guard_program(actor.pre_write_guard.as_deref()?);
+    let config = agent::loads::codex_hook_config(&program, record);
     let Some(serde_json::Value::Object(hooks)) = config else {
         tracing::warn!(
             "the pre-write guard's path cannot go in Codex's hook command, so Codex runs without \

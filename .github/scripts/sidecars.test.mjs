@@ -125,15 +125,18 @@ const OWN_MAC = (triple) => ({ ...STETDOC_MAC(triple), ...PDF_MAC(triple) });
 const OWN_RES = (triple) => ({ ...STETDOC_RES(triple), ...PDF_RES(triple) });
 /** A darwin overlay's bundle.macOS with both helpers. */
 const MAC_FILES = (triple) => ({ files: { ...HELPER(triple).files, ...OWN_MAC(triple) } });
+const GUARD_CARGO = (triple) =>
+  ["build", "--release", "--locked", "-p", "clauseo-host", "--bin", "clauseo-guard", "--target", triple];
 const SETUP_CARGO = (triple) =>
   ["build", "--release", "--locked", "-p", "clauseo-sandbox", "--bin", "clauseo-sandbox-setup", "--target", triple];
 
-test("the table ships clauseo-mcp and clauseo-agent-browser on every release target, guard parked", () => {
+test("the table ships clauseo-mcp and clauseo-agent-browser on every release target, clauseo-guard on Windows", () => {
   assert.deepEqual(
     SIDECARS.map((s) => [s.name, s.targets, s.macosHelper === true, s.ownFolder === true]),
     [
       ["clauseo-mcp", RELEASE_TARGETS, false, false],
       ["clauseo-agent-browser", RELEASE_TARGETS, true, false],
+      ["clauseo-guard", WINDOWS, false, false],
       ["clauseo-sandbox-setup", WINDOWS, false, false],
       ["clauseo-stetdoc", RELEASE_TARGETS, false, true],
       ["clauseo-pdftoppm", PDF_TARGETS, false, true],
@@ -195,7 +198,10 @@ test("with the Safe workspace off, the default, no target builds, places or list
       const env = await setup(undefined, { safeWorkspace });
       const mac = isDarwin(triple);
       // On macOS agent-browser goes to Contents/Helpers (bundle.macOS.files), not externalBin.
-      const externalBin = mac ? ["binaries/clauseo-mcp"] : ["binaries/clauseo-mcp", "binaries/clauseo-agent-browser"];
+      // clauseo-guard only on Windows.
+      const externalBin = mac
+        ? ["binaries/clauseo-mcp"]
+        : ["binaries/clauseo-mcp", "binaries/clauseo-agent-browser", ...(isWindows(triple) ? ["binaries/clauseo-guard"] : [])];
       assert.deepEqual(await env.run(triple), externalBin, triple);
       assert.deepEqual(
         await env.overlay(),
@@ -234,7 +240,13 @@ for (const triple of RELEASE_TARGETS) {
   test(`${triple}: with the Safe workspace on, the overlay lists every sidecar for the target, and the copies are named for it`, async () => {
     const env = await setup(undefined, { safeWorkspace: true });
     const pdf = win || mac ? PDF_TOOLS : [];
-    const names = ["clauseo-mcp", "clauseo-agent-browser", ...(win ? ["clauseo-sandbox-setup"] : []), "clauseo-stetdoc", ...pdf];
+    const names = [
+      "clauseo-mcp",
+      "clauseo-agent-browser",
+      ...(win ? ["clauseo-guard", "clauseo-sandbox-setup"] : []),
+      "clauseo-stetdoc",
+      ...pdf,
+    ];
     // On macOS agent-browser goes to Contents/Helpers (bundle.macOS.files), not externalBin;
     // stetdoc and the PDF tools are never in externalBin, but in folders of their own.
     const externalBin = names
@@ -250,7 +262,7 @@ for (const triple of RELEASE_TARGETS) {
     assert.deepEqual(await env.binaries(), names.map((name) => `${name}-${triple}${ext}`).sort());
     assert.deepEqual(env.cargoCalls, [
       ["build", "--release", "--locked", "-p", "clauseo-mcp", "--target", triple],
-      ...(win ? [SETUP_CARGO(triple)] : []),
+      ...(win ? [GUARD_CARGO(triple), SETUP_CARGO(triple)] : []),
       ...pdf.map((name) => ["build", "--release", "--locked", "-p", "clauseo-pdf", "--bin", OWN_FOLDERS[name][1], "--target", triple]),
     ]);
     assert.deepEqual(env.fetchCalls, [ASSET]);
@@ -266,16 +278,19 @@ for (const triple of RELEASE_TARGETS) {
     if (win) {
       const copy = join(bin, `clauseo-sandbox-setup-${triple}.exe`);
       assert.equal(await readFile(copy, "utf8"), "fake clauseo-sandbox-setup\n");
+      const guard = join(bin, `clauseo-guard-${triple}.exe`);
+      assert.equal(await readFile(guard, "utf8"), "fake clauseo-guard\n");
     }
   });
 }
 
 test("a triple the pin marks none leaves agent-browser out of the overlay", async () => {
   const env = await setup({ none: ["aarch64-pc-windows-msvc"] }, { safeWorkspace: true });
-  const externalBin = ["binaries/clauseo-mcp", "binaries/clauseo-sandbox-setup"];
+  const externalBin = ["binaries/clauseo-mcp", "binaries/clauseo-guard", "binaries/clauseo-sandbox-setup"];
   assert.deepEqual(await env.run("aarch64-pc-windows-msvc"), externalBin);
   assert.deepEqual(await env.overlay(), { bundle: { externalBin, resources: OWN_RES("aarch64-pc-windows-msvc") } });
   assert.deepEqual(await env.binaries(), [
+    "clauseo-guard-aarch64-pc-windows-msvc.exe",
     "clauseo-mcp-aarch64-pc-windows-msvc.exe",
     "clauseo-pdfinfo-aarch64-pc-windows-msvc.exe",
     "clauseo-pdftoppm-aarch64-pc-windows-msvc.exe",

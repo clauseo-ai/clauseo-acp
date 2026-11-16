@@ -209,10 +209,14 @@ anything the agent starts.
   path holds a glob character; none of it on Windows, where Codex's unelevated sandbox
   can't enforce a read deny (until S15)
 - `built` (Windows, Codex): Codex runs Clauseo's guard hook as one PowerShell statement
-  (`agent/loads/codex.rs`, `ps_command`); the guard's 0 and 2 end the hook, and any other ending,
-  or input the guard can't read, ends with 2 and "Clauseo could not check this step, so it did
-  not run." Scope: where PowerShell is blocked or absent, Codex can't start the guard; under
-  `cmd`, the session's fallback shell, the line does not run as one command
+  (`agent/loads/codex.rs`, `ps_command`) naming `clauseo-guard.exe`, a console program installed
+  beside `Clauseo.exe` (`codex_guard_program`); the guard's 0 and 2 end the hook, and any other
+  ending, input the guard can't read, or a missing program ends with 2 and "Clauseo could not
+  check this step, so it did not run." Scope: where PowerShell is blocked or absent, Codex can't
+  start the guard; under `cmd`, the session's fallback shell, the line does not run as one
+  command; a firm rule that allows only `Clauseo.exe` by path refuses every Codex step. The
+  program's folder is the app's: no Clauseo fence names it, and Codex's own sandbox, which asks
+  before a write outside the matter, covers both programs alike
 
 ## Egress proxy
 

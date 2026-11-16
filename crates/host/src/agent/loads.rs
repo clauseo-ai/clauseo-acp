@@ -38,7 +38,7 @@ mod subagents_tests;
 mod tests;
 pub(crate) mod tls_roots;
 
-pub use codex::codex_hook_config;
+pub use codex::{GUARD_EXE, codex_guard_program, codex_hook_config};
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

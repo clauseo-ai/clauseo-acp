@@ -118,7 +118,16 @@ windows = { workspace = true, features = [
   "Win32_System_SystemInformation",
 ] }
 
+# The console program Codex's hook runs on Windows (`src/bin/clauseo-guard.rs`): the guard, as the
+# app's `--pre-write-guard` runs it, in a program PowerShell waits for. Shipped beside Clauseo.exe on
+# Windows only (.github/scripts/sidecars.mjs).
+[[bin]]
+name = "clauseo-guard"
+path = "src/bin/clauseo-guard.rs"
+
 [dev-dependencies]
+# Temp folders named as the Windows hook tests need them (`tests/guard_windows.rs`).
+tempfile = "3"
 # The vendored ASCII fold's cross-check against every code point's full case fold
 # (src/network_paths/ascii_fold/tests.rs), as stage C's copy in clauseo-sandbox has it.
 caseless = { workspace = true }
