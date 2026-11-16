@@ -95,11 +95,15 @@ pub(super) fn launch(
         (forced, Some((codex, prepared.login)))
     } else {
         // A Claude agent's home goes in before `plans_folder` reads the merged map below.
-        let forced = prepared
+        let mut forced = prepared
             .claude_home
             .as_deref()
-            .map(agent::home::claude_launch_env);
-        (forced.unwrap_or_default(), None)
+            .map(agent::home::claude_launch_env)
+            .unwrap_or_default();
+        if AgentKind::of(&row.agent) == Some(AgentKind::Claude) {
+            forced.extend(agent::loads::claude_launch_vars());
+        }
+        (forced, None)
     };
     // Every agent's temp folder is its session's own, gone with the run folder.
     let short = prepared.run.claude_tmp.as_deref();
