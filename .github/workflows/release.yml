@@ -8,8 +8,9 @@
 # or published, and assemble checks that neither Windows installer holds one.
 #
 # Three modes, which `check` decides from what started the run:
-# - release: a pushed tag v<X.Y.Z> on a commit on main. Builds under the environment `release`
-#   and leaves a draft GitHub Release; `publish` waits for Rohan's approval (environment
+# - release: a pushed tag v<X.Y.Z> on a commit on main. `custody` first checks that the
+#   environment `release`'s updater key signs for tauri.conf.json's pubkey; then it builds under
+#   that environment and leaves a draft GitHub Release; `publish` waits for Rohan's approval (environment
 #   `release-publish`), refuses unless every DMG is notarised and stapled (or, only with the
 #   repository variable CLAUSEO_UNSIGNED_BETA 'true' and no Apple secret, signed ad hoc: the
 #   unsigned beta), then publishes it as the latest release; `latest` checks that GitHub names
@@ -299,6 +300,75 @@ jobs:
             { echo "::error::machine.conf.json's installMode is not perMachine"; status=1; }
           exit "$status"
 
+  # Custody of the release key, checked first: in release mode, before any build leg starts, the
+  # `release` environment's updater key (TAURI_SIGNING_PRIVATE_KEY and its password) signs a
+  # scratch file with tauri signer, as build and sign-windows sign, and latest-json.mjs --verify
+  # (assemble's check) must hold it under tauri.conf.json's plugins.updater.pubkey, for this
+  # file name and version. A wrong key or password fails here, minutes into the run, not after
+  # every leg has built. assemble still verifies each signed asset. build and sign-windows need
+  # it. Taking the `release` environment, it is one more approval of that environment, before
+  # the macOS build legs' (see decision 0035). In a test or dry run it takes no environment and
+  # one step says there is nothing to check, so every job below runs as before.
+  custody:
+    name: custody
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: ${{ needs.check.outputs.mode == 'release' && 'release' || '' }}
+    permissions:
+      contents: read
+    env:
+      MODE: ${{ needs.check.outputs.mode }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - name: No release key to check
+        if: needs.check.outputs.mode != 'release'
+        run: echo "No release key to check in a $MODE run (custody)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.check.outputs.mode == 'release'
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: needs.check.outputs.mode == 'release'
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: needs.check.outputs.mode == 'release'
+        with:
+          node-version-file: ui/package.json
+          package-manager-cache: false
+
+      # Before the secret: the Tauri CLI from the lock file.
+      - name: Install the ui workspace
+        if: needs.check.outputs.mode == 'release'
+        run: pnpm -C ui install --frozen-lockfile
+
+      # The key only here. tauri signer's output (the signature, public) goes nowhere; nothing
+      # prints the key or its password.
+      - name: The release key signs, and tauri.conf.json's pubkey verifies it
+        if: needs.check.outputs.mode == 'release'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || fail "the release environment has no TAURI_SIGNING_PRIVATE_KEY"
+          dir=$RUNNER_TEMP/custody
+          mkdir -p "$dir"
+          name=custody-$GITHUB_RUN_ID.txt
+          echo "Clauseo $VERSION, custody check of run $GITHUB_RUN_ID" > "$dir/$name"
+          pnpm -s -C ui tauri signer sign --app-version "$VERSION" "$dir/$name" > /dev/null ||
+            fail "tauri signer could not sign with TAURI_SIGNING_PRIVATE_KEY (a wrong password, or not a key)"
+          jq -r '.plugins.updater.pubkey // ""' crates/desktop/tauri.conf.json > "$dir/updater.pub"
+          node .github/scripts/latest-json.mjs --verify "$dir/$name" "$dir/updater.pub" "$name" "$VERSION" ||
+            fail "the release environment's TAURI_SIGNING_PRIVATE_KEY is not the key of tauri.conf.json's plugins.updater.pubkey"
+          rm -rf "$dir"
+          echo "custody: the release key signs, and plugins.updater.pubkey verifies it" | tee -a "$GITHUB_STEP_SUMMARY"
+
   # The block-list snapshot every shipped and measuring build bundles while check's
   # bundle_blocklist is 'true' (a no-op that succeeds while it is 'false', as for launch, so the
   # jobs that need it run as before), in every mode, a dry
@@ -490,7 +560,7 @@ jobs:
   # environment, since only they sign here.
   build:
     name: build (${{ matrix.target }})
-    needs: [check, ui, blocklist]
+    needs: [check, custody, ui, blocklist]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     continue-on-error: ${{ matrix.tier == 2 }}
@@ -953,13 +1023,13 @@ jobs:
   sign-windows:
     name: sign-windows (${{ matrix.target }})
     # It waits for the whole build matrix, but a macOS or Linux leg that failed or never got a
-    # runner doesn't skip it: it runs unless the run was cancelled or check or the block list
-    # failed. Its own Windows leg's exe comes as the windows-exe-<target> artifact, so a failed
+    # runner doesn't skip it: it runs unless the run was cancelled or check, custody or the block
+    # list failed. Its own Windows leg's exe comes as the windows-exe-<target> artifact, so a failed
     # Windows build still fails it, at the download. Its installers upload as release-<target>.
     # assemble and publish keep the default (every job they need succeeded): no release, and no
     # dist-assets, with a leg missing.
-    needs: [check, build, blocklist]
-    if: ${{ !cancelled() && needs.check.result == 'success' && needs.blocklist.result == 'success' }}
+    needs: [check, custody, build, blocklist]
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.custody.result == 'success' && needs.blocklist.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     continue-on-error: ${{ matrix.tier == 2 }}
