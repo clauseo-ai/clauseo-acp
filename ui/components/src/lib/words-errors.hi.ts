@@ -260,6 +260,23 @@ export const HI = {
     "{name} मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
   "The AI couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.":
     "AI मामले का फ़ोल्डर नहीं खोल सका। जाँचें कि वह अब भी वहीं है और उसका नाम नहीं बदला गया है, उसके बाद फिर से प्रयास करें।",
+  // provisional (U3-err-agent.tool_missing, its agents' and .mac lines, the .mac ones also Linux's): Hindi later
+  "Claude can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If Windows Security quarantined it, do this first: open Windows Security, choose Virus & threat protection, then Protection history, and restore or allow the item in Clauseo's folder. If it keeps happening, show this to whoever looks after this computer.":
+    null,
+  "ChatGPT can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If Windows Security quarantined it, do this first: open Windows Security, choose Virus & threat protection, then Protection history, and restore or allow the item in Clauseo's folder. If it keeps happening, show this to whoever looks after this computer.":
+    null,
+  "{name} can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If Windows Security quarantined it, do this first: open Windows Security, choose Virus & threat protection, then Protection history, and restore or allow the item in Clauseo's folder. If it keeps happening, show this to whoever looks after this computer.":
+    null,
+  "The AI can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If Windows Security quarantined it, do this first: open Windows Security, choose Virus & threat protection, then Protection history, and restore or allow the item in Clauseo's folder. If it keeps happening, show this to whoever looks after this computer.":
+    null,
+  "Claude can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If your antivirus quarantined it, restore or allow it there first. If it keeps happening, show this to whoever looks after this computer.":
+    null,
+  "ChatGPT can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If your antivirus quarantined it, restore or allow it there first. If it keeps happening, show this to whoever looks after this computer.":
+    null,
+  "{name} can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If your antivirus quarantined it, restore or allow it there first. If it keeps happening, show this to whoever looks after this computer.":
+    null,
+  "The AI can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If your antivirus quarantined it, restore or allow it there first. If it keeps happening, show this to whoever looks after this computer.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

@@ -1,0 +1,74 @@
+{
+  "U3-err-agent.tool_missing": {
+    "en": "Claude can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If Windows Security quarantined it, do this first: open Windows Security, choose Virus & threat protection, then Protection history, and restore or allow the item in Clauseo's folder. If it keeps happening, show this to whoever looks after this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; Rohan to OK on the screenshots page)",
+    "note": "Refusal of a turn whose agent wasn't started because a file Clauseo keeps for the agent isn't as Clauseo left it (agent.tool_missing); Claude's line, also for an agent not known, on Windows."
+  },
+  "U3-err-agent.tool_missing.mac": {
+    "en": "Claude can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If your antivirus quarantined it, restore or allow it there first. If it keeps happening, show this to whoever looks after this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; Rohan to OK on the screenshots page)",
+    "note": "The same line on the Mac and on Linux (words-errors-tool.ts)."
+  },
+  "U3-err-agent.tool_missing.chatgpt": {
+    "en": "ChatGPT can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If Windows Security quarantined it, do this first: open Windows Security, choose Virus & threat protection, then Protection history, and restore or allow the item in Clauseo's folder. If it keeps happening, show this to whoever looks after this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; Rohan to OK on the screenshots page)",
+    "note": "Refusal of a turn whose agent wasn't started because a file Clauseo keeps for the agent isn't as Clauseo left it (agent.tool_missing); a thread on the ChatGPT plan, on Windows."
+  },
+  "U3-err-agent.tool_missing.chatgpt.mac": {
+    "en": "ChatGPT can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If your antivirus quarantined it, restore or allow it there first. If it keeps happening, show this to whoever looks after this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; Rohan to OK on the screenshots page)",
+    "note": "The same line on the Mac and on Linux (words-errors-tool.ts)."
+  },
+  "U3-err-agent.tool_missing.named": {
+    "en": "{name} can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If Windows Security quarantined it, do this first: open Windows Security, choose Virus & threat protection, then Protection history, and restore or allow the item in Clauseo's folder. If it keeps happening, show this to whoever looks after this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; Rohan to OK on the screenshots page)",
+    "note": "Refusal of a turn whose agent wasn't started because a file Clauseo keeps for the agent isn't as Clauseo left it (agent.tool_missing); an agent of no kind, by its name, on Windows."
+  },
+  "U3-err-agent.tool_missing.named.mac": {
+    "en": "{name} can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If your antivirus quarantined it, restore or allow it there first. If it keeps happening, show this to whoever looks after this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; Rohan to OK on the screenshots page)",
+    "note": "The same line on the Mac and on Linux (words-errors-tool.ts)."
+  },
+  "U3-err-agent.tool_missing.nameless": {
+    "en": "The AI can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If Windows Security quarantined it, do this first: open Windows Security, choose Virus & threat protection, then Protection history, and restore or allow the item in Clauseo's folder. If it keeps happening, show this to whoever looks after this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; Rohan to OK on the screenshots page)",
+    "note": "Refusal of a turn whose agent wasn't started because a file Clauseo keeps for the agent isn't as Clauseo left it (agent.tool_missing); no name at all, on Windows."
+  },
+  "U3-err-agent.tool_missing.nameless.mac": {
+    "en": "The AI can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If your antivirus quarantined it, restore or allow it there first. If it keeps happening, show this to whoever looks after this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "orchestrator (provisional; Rohan to OK on the screenshots page)",
+    "note": "The same line on the Mac and on Linux (words-errors-tool.ts)."
+  }
+}

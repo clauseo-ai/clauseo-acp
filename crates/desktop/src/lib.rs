@@ -126,6 +126,7 @@ mod mcp;
 mod menu;
 mod native_mark;
 mod navigation;
+mod no_git;
 mod open;
 mod picked;
 mod pre_write_guard;
@@ -431,7 +432,7 @@ fn start_host<R: Runtime>(
         let exe = std::env::current_exe().ok();
         let counts = counts::open(&locations, &effective, exe.as_deref());
         let data_dir = effective.data_dir().to_path_buf();
-        let config = host_config(effective)
+        let config = no_git::with_no_git(host_config(effective), &locations)
             .with_documents_later(documents)
             .with_login_check(Arc::new(setup::DesktopLoginCheck::new(
                 SystemDirs.home(),

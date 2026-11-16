@@ -256,6 +256,13 @@ fn launch_spec_leaves_out_dropped_names_from_every_source() {
     assert_eq!(names, ["HOME", "HOOKED", "KEEP"]);
 }
 
+/// A `PATH` of rooted folders on this OS, which the launch keeps as it is.
+const AGENT_PATH: &str = if cfg!(windows) {
+    r"C:\node;C:\Windows"
+} else {
+    "/node:/windows"
+};
+
 /// On Windows env names ignore case: an inherited `Path` must not stand beside (and beat) the
 /// agent's `PATH`, nor an agent's `Mode` beside the hook's `MODE`.
 #[test]
@@ -264,7 +271,7 @@ fn launch_spec_keeps_one_variable_per_name_ignoring_case() {
         command: absolute_program(),
         args: Vec::new(),
         env: BTreeMap::from([
-            ("PATH".to_owned(), r"C:\node;C:\Windows".to_owned()),
+            ("PATH".to_owned(), AGENT_PATH.to_owned()),
             ("Mode".to_owned(), "agent".to_owned()),
         ]),
     };
@@ -292,11 +299,7 @@ fn launch_spec_keeps_one_variable_per_name_ignoring_case() {
         .collect();
     assert_eq!(
         env,
-        [
-            ("HOME", "/home/x"),
-            ("MODE", "hook"),
-            ("PATH", r"C:\node;C:\Windows")
-        ]
+        [("HOME", "/home/x"), ("MODE", "hook"), ("PATH", AGENT_PATH)]
     );
 }
 
@@ -527,6 +530,12 @@ fn session_folder_of_a_local_folder_is_not_verbatim() {
 fn the_path_prepend_goes_first_on_the_merged_path() {
     use std::path::Path;
     let sep = if cfg!(windows) { ";" } else { ":" };
+    // Absolute on this OS, so the launch keeps them.
+    let (usr, opt) = if cfg!(windows) {
+        (r"C:\usr\bin", r"C:\opt\bin")
+    } else {
+        ("/usr/bin", "/opt/bin")
+    };
     let folder = Path::new(if cfg!(windows) {
         r"C:\stetdoc"
     } else {
@@ -570,12 +579,12 @@ fn the_path_prepend_goes_first_on_the_merged_path() {
     };
     let first = folder.to_str().unwrap();
     assert_eq!(
-        run(&agent(&[]), vec![("Path", "/usr/bin")]),
-        [("Path".to_owned(), format!("{first}{sep}/usr/bin"))]
+        run(&agent(&[]), vec![("Path", usr)]),
+        [("Path".to_owned(), format!("{first}{sep}{usr}"))]
     );
     assert_eq!(
-        run(&agent(&[("PATH", "/opt/bin")]), vec![("Path", "/usr/bin")]),
-        [("PATH".to_owned(), format!("{first}{sep}/opt/bin"))]
+        run(&agent(&[("PATH", opt)]), vec![("Path", usr)]),
+        [("PATH".to_owned(), format!("{first}{sep}{opt}"))]
     );
     assert_eq!(
         run(&agent(&[]), vec![]),

@@ -18,6 +18,7 @@ use std::time::Duration;
 use clauseo_protocol::{ErrorCode, MatterId};
 use futures::future::{Either, select};
 
+use crate::agent::no_git;
 use crate::clock::Clock;
 use crate::error::Error;
 
@@ -157,24 +158,34 @@ pub(crate) async fn off_actor_or_undo<T: Send + 'static>(
 
 /// The `.codex` re-check of a Codex agent's matter folder before a prompt or a session call, off
 /// the actor: `stored`, the folder the agent runs in, is resolved through links again each
-/// time, so a link pointed elsewhere since the launch is checked where it now points. `None`
-/// (any other agent) passes at once, with no thread. `matter` is for the log.
+/// time, so a link pointed elsewhere since the launch is checked where it now points. Then, for
+/// an agent with a kind, `no_git`'s check again (`agent::no_git::check_all`): a program gone or
+/// changed since the launch refuses the call with `agent.tool_missing`. Neither (an agent with
+/// no kind) passes at once, with no thread. `matter` is for the log.
 pub(crate) async fn recheck(
     clock: Arc<dyn Clock>,
     matter: Option<MatterId>,
     stored: Option<PathBuf>,
+    no_git: Result<Option<no_git::Check>, no_git::Unusable>,
 ) -> Result<(), Error> {
-    match stored {
-        Some(stored) => {
-            off_actor(
-                clock,
-                Job::short("the .codex re-check", matter),
-                move || super::refuse_codex_folder(&crate::agent::session_folder(&stored)),
-            )
-            .await
-        }
-        None => Ok(()),
+    let no_git = no_git.map_err(no_git::refusal)?;
+    if stored.is_none() && no_git.is_none() {
+        return Ok(());
     }
+    off_actor(
+        clock,
+        Job::short("the call's re-check", matter),
+        move || {
+            if let Some(stored) = &stored {
+                super::refuse_codex_folder(&crate::agent::session_folder(stored))?;
+            }
+            match &no_git {
+                Some(check) => no_git::check_all(check).map(drop).map_err(no_git::refusal),
+                None => Ok(()),
+            }
+        },
+    )
+    .await
 }
 
 /// The failure when the work did not answer in time. Not `matter.folder_missing`: the folder

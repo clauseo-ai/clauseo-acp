@@ -365,3 +365,32 @@ test("matter.folder_backslash with no place known: the Mac's line for the folder
     errorWords("en", "matter.folder_backslash", undefined, { platform: "mac", parent: null }),
   );
 });
+
+// agent.tool_missing: Windows' line (also a caller with no place) says where Windows Security lets the file back;
+// the Mac's and Linux's say it in general. Each names the thread's agent.
+test("agent.tool_missing: Windows' line names Windows Security, the Mac's and Linux's don't; each names the thread's agent", () => {
+  const code = "agent.tool_missing";
+  const win = (a: string) =>
+    `${a} can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If Windows Security quarantined it, do this first: open Windows Security, choose Virus & threat protection, then Protection history, and restore or allow the item in Clauseo's folder. If it keeps happening, show this to whoever looks after this computer.`;
+  const mac = (a: string) =>
+    `${a} can't answer, because a file Clauseo keeps for it isn't as Clauseo left it. Quit Clauseo and open it again, and Clauseo puts it right. If your antivirus quarantined it, restore or allow it there first. If it keeps happening, show this to whoever looks after this computer.`;
+  const on = (platform: "windows" | "mac" | "linux") => ({ platform, parent: null });
+  expect(errorWords("en", code)).toBe(win("Claude"));
+  expect(errorWords("en", code, undefined, on("windows"))).toBe(win("Claude"));
+  for (const p of ["mac", "linux"] as const) {
+    expect(errorWords("en", code, undefined, on(p))).toBe(mac("Claude"));
+    expect(errorWords("en", code, CODEX, on(p))).toBe(mac("ChatGPT"));
+    expect(errorWords("en", code, named("gemini"), on(p))).toBe(mac("gemini"));
+    for (const none of [null, "", "  "])
+      expect(errorWords("en", code, named(none), on(p))).toBe(mac("The AI"));
+  }
+  // No Hindi yet: the English stands.
+  expect(errorWords("hi", code)).toBe(win("Claude"));
+  expect(errorWords("hi", code, undefined, on("mac"))).toBe(mac("Claude"));
+  expect(errorWords("en", code, CODEX)).toBe(win("ChatGPT"));
+  expect(errorWords("en", code, named("gemini"))).toBe(win("gemini"));
+  for (const none of [null, "", "  "])
+    expect(errorWords("en", code, named(none))).toBe(win("The AI"));
+  // no other line names Claude
+  expect(win("ChatGPT")).not.toContain("Claude can");
+});

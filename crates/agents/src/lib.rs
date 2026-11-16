@@ -154,6 +154,7 @@ mod signin;
 mod snapshot;
 mod state;
 mod status;
+mod stray_git;
 mod sysproxy;
 #[cfg_attr(
     not(any(windows, test)),

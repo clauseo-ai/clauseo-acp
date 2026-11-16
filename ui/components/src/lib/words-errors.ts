@@ -6,6 +6,7 @@
 import type { Lang } from "./display.ts";
 import { wordsOf } from "./words-core.ts";
 import { BACKSLASH, backslashKey, byAgent, type BackslashPlace } from "./words-errors-backslash.ts";
+import { TOOL_MAC, TOOL_MISSING } from "./words-errors-tool.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
 import type { VersionKey } from "./words-versions.ts";
@@ -126,6 +127,7 @@ export type ErrorCode =
   | "blackline.not_readable"
   | "blackline.too_large"
   | "blackline.format_unknown"
+  | "agent.tool_missing"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -361,6 +363,9 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // Restart. Draft English (Rohan to approve); Hindi provisional
   "agent.folder_inaccessible":
     "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+  // provisional (U3-err-agent.tool_missing): a file Clauseo keeps for the agent isn't as Clauseo left it, so the host
+  // didn't start Claude; Windows' line, the Mac's and Linux's is words-errors-tool.ts's, the other agents' are in PLANNED
+  "agent.tool_missing": TOOL_MISSING.claude,
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -454,6 +459,12 @@ const PLANNED: Partial<
     nameless:
       "Clauseo couldn't reach the AI. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
   },
+  // provisional (see ERROR_WORDS); the Mac's and Linux's lines are words-errors-tool.ts's
+  "agent.tool_missing": {
+    chatgpt: TOOL_MISSING.chatgpt,
+    named: TOOL_MISSING.named,
+    nameless: TOOL_MISSING.nameless,
+  },
 };
 
 /** The codes PLANNED gives a sentence per agent. */
@@ -499,7 +510,8 @@ export type { BackslashPlace };
 /** A code's sentence in the language; a code this version doesn't know reads as "unknown", which reads as "internal".
  * `agent` is the thread's agent (AgentName), for the codes whose sentence names it (plannedKey); a caller that
  * doesn't know the thread leaves it out. `place` is where matter.folder_backslash's backslash is (BackslashPlace), for
- * a caller that knows the matter; left out, its line names the folder's own name and Finder. */
+ * a caller that knows the matter; left out, its line names the folder's own name and Finder. Its platform also picks
+ * agent.tool_missing's line on the Mac and Linux (words-errors-tool.ts). */
 export function errorWords(
   lang: Lang,
   code: string,
@@ -511,6 +523,14 @@ export function errorWords(
   if (code === "matter.folder_backslash" && place !== undefined) {
     const { key, slots } = backslashKey(agent, place);
     return own(lang, key as keyof typeof HI, slots);
+  }
+  const mac =
+    (place?.platform === "mac" || place?.platform === "linux") && Object.hasOwn(TOOL_MAC, code)
+      ? TOOL_MAC[code]
+      : undefined;
+  if (mac !== undefined) {
+    const { key, name } = byAgent(mac, agent);
+    return own(lang, key as keyof typeof HI, name === undefined ? undefined : { name });
   }
   const known = Object.hasOwn(ERROR_WORDS, code) ? (code as WordedCode) : "unknown";
   const { key, name } = plannedKey(known, agent);

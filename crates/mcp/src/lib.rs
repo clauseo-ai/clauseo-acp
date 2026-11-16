@@ -15,6 +15,8 @@
 //!   host's per-launch relay, and answers "not reachable" itself when there is no relay. It reads
 //!   the relay address from `CLAUSEO_RELAY` and the token from the file `CLAUSEO_RELAY_TOKEN_FILE`
 //!   names; it never puts the token on stdout, stderr or argv.
+//! - The `git` that does nothing ([`no_git`]): run by a file named `git` (`git.exe`), the binary
+//!   exits 1 at once, before any mode, with no output.
 //! - The one place the crate creates folders (`write.rs`; the Unix socket folder under `/tmp`
 //!   is made with mode 0700 and checked in `browser_guard/socket.rs`), and the three places it
 //!   starts a process (`browser_guard/relay/pumps.rs` `spawn_child`, `chrome.rs` `spawn`, both
@@ -54,6 +56,7 @@
 
 pub mod browser_guard;
 pub mod connector;
+pub mod no_git;
 mod write;
 
 /// A mode's failure: the exit code and the message `main` prints on stderr.

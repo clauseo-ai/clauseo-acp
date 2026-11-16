@@ -1364,6 +1364,46 @@ this record and firm-it §8.
   listed in the PR. Clauseo's own macOS jail (parked) would nest Claude's sandbox inside it,
   where it can't start, and with `failIfUnavailable: true` Claude would fail at start-up.
 
+### The agent's `git`
+
+- The agent's PATH holds a git that does nothing; Clauseo's own git use is the host's. At each
+  start the desktop copies the bundled `clauseo-mcp` to `<data>/tools/no-git/git` (`git.exe`
+  on Windows) when the copy is missing or differs (`clauseo_profile::tools::install_no_git`),
+  and run by that name it prints nothing and exits 1 (`clauseo_mcp::no_git`; one whole command
+  line, `check-ignore -- .claude/.cc-writes/sample-file.txt`, exits 0, so Claude Code adds no
+  line to the lawyer's global gitignore). One program on every OS, a real executable.
+- Every Claude and Codex launch checks the copy on the launch-prep thread (a regular file, not a
+  link, with the SHA-256 the desktop copied, alone in its folder but for names starting with
+  `.`) and puts its folder first on the session's PATH, ahead of stetdoc's (`agent/no_git.rs`):
+  the process's PATH, Claude's `CLAUDE_ENV_FILE` line, Codex's macOS shell PATH and a Codex
+  session's `shell_environment_policy.set.PATH`. The same check runs again before every prompt
+  and session call, beside the `.codex` re-check. A copy missing (a virus scanner's
+  quarantine), changed, crowded or never made refuses with `agent.tool_missing`; the next start
+  copies it again and sweeps what lies beside it. A build for the lawyer refuses an agent with a
+  kind when no copy was named to the host at all; only test builds launch without one.
+- Codex looks in its own folders (`vendor/<triple>/bin`, where codex.exe is in the pinned
+  0.162.1, and `codex-path`) before PATH, which Clauseo checks on Windows at each launch and
+  call: the install's Codex packages, their `vendor` folders, every `vendor/<triple>` and every
+  folder in it must be readable and hold no link or junction, and the last two levels no git
+  program (`git.exe`, `.com`, `.bat`, `.cmd`). The agents' start-up removes a git program at
+  those two levels (`clauseo-agents`' `stray_git.rs`), so a restart clears that refusal.
+- Codex puts its own helper folder (`<Codex home>/tmp/arg0/…`, its `apply_patch` and sandbox
+  links) ahead of the copy on its shells' PATH. It holds no git, and it sits in Codex's home,
+  which the Codex fence never lets the shell write.
+- Empty and relative PATH entries (`.`, `bin`, on Windows `\tools` and `C:tools`) are dropped
+  from every agent's PATH. The PATH Claude's login-shell snapshot builds for its Bash commands is
+  not filtered; one more line in `CLAUDE_ENV_FILE` could do it cheaply, and is left for later.
+- The sign-in, sign-in status and logout runs and the plan-usage readers are built apart from
+  the launch and get no copy on their PATH; each starts in Clauseo's own folders, never a matter
+  folder, and starts no session or turn.
+- Both agents also get `GIT_ATTR_SOURCE` set to the empty tree, and Codex
+  `GIT_CEILING_DIRECTORIES` set to the matter folder's parent.
+- `<data>/tools` is read-only to agents (the data folder fence's `READ_ONLY`; Codex's sandbox
+  reads it). The host's process never gets the folder on its PATH, and the host starts no git
+  program.
+- On Windows Claude Code looks for Git Bash two folders above the `git.exe` it finds,
+  `<data>/tools/bin/bash.exe`, which never exists.
+
 ## Consequences
 
 - R22 adds its text with `Instructions::with_part` and its skills with `SkillSource::builtin`

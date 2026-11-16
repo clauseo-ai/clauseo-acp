@@ -77,12 +77,13 @@ pub(crate) enum AgentReply {
         turn: TurnId,
         result: Result<PromptEnd, clauseo_acp::Error>,
     },
-    /// A Codex prompt's `.codex` re-check (or its wait) refused it before it was sent.
+    /// A prompt's re-check (a Codex agent's `.codex`, any agent's `git` that does nothing) or its
+    /// wait refused it before it was sent.
     PromptRefused {
         turn: TurnId,
         error: crate::error::Error,
     },
-    /// A Codex session call's `.codex` re-check refused it before it was sent.
+    /// A session call's re-check (as for `PromptRefused`) refused it before it was sent.
     Refused(crate::error::Error),
     /// A `SetConfigOption` of `pick` answered.
     Config {

@@ -91,9 +91,12 @@ impl Os {
 /// A session's `PATH` folders and what its shells get, found on the launch-prep thread.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SessionPath {
-    /// The folders first on the session's `PATH`, in order: stetdoc's, the shell browser's
-    /// tools, then the profile hook's (`actor/turn/agents/path.rs`).
+    /// The folders first on the session's `PATH`, in order: the `git` that does nothing's
+    /// (`agent/no_git.rs`), stetdoc's, the shell browser's tools, then the profile hook's
+    /// (`actor/turn/agents/path.rs`).
     pub(crate) dirs: Vec<PathBuf>,
+    /// Whether the first of `dirs` is the `git` that does nothing's folder.
+    pub(crate) no_git: bool,
     /// Whether any of the hook's folders went on, which drops `agent::PYTHON_VARS`.
     pub(crate) hook_path: bool,
     /// Whether the agent is Codex.

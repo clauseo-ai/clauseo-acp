@@ -1554,7 +1554,8 @@ expression: counts_schema()
         "blackline.not_readable",
         "blackline.too_large",
         "blackline.format_unknown",
-        "agent.unreachable"
+        "agent.unreachable",
+        "agent.tool_missing"
       ],
       "type": "string"
     },

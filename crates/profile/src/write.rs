@@ -85,6 +85,30 @@ pub(crate) fn remove_file(path: &Path) -> Result<(), ProfileError> {
     }
 }
 
+/// Removes the file or link `path`, as [`remove_file`] does, first clearing a read-only file's
+/// read-only attribute on Windows, which refuses to remove one (Unix needs only the folder
+/// writable); a missing file is no error.
+pub(crate) fn remove_file_forced(path: &Path) -> Result<(), ProfileError> {
+    if cfg!(windows)
+        && let Ok(meta) = std::fs::symlink_metadata(path)
+        && meta.is_file()
+        && meta.permissions().readonly()
+    {
+        writable(path, meta.permissions());
+    }
+    remove_file(path)
+}
+
+/// Makes the file `path` writable, given its `permissions`; a failure is left to the removal.
+#[expect(
+    clippy::permissions_set_readonly_false,
+    reason = "only to remove the file: Windows refuses to remove a read-only one"
+)]
+fn writable(path: &Path, mut permissions: std::fs::Permissions) {
+    permissions.set_readonly(false);
+    drop(std::fs::set_permissions(path, permissions));
+}
+
 /// `fs::remove_dir` of a folder only when it is empty; a missing or non-empty folder is left
 /// as it is, with no error.
 pub(crate) fn remove_empty_dir(path: &Path) {

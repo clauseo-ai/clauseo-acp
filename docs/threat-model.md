@@ -157,6 +157,13 @@ any ACP message, including permission requests with misleading text.
   `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` and denies the whole `Bash` tool (decision record 0030,
   2026-11-16); every Windows acceptance row runs on a Git-free machine with 5.1 only and with
   `pwsh` 7 installed
+- `built`: The agent's PATH holds a git that does nothing (Clauseo's own binary, copied to
+  `<data>/tools/no-git`, read-only to agents), first on every Claude and Codex launch and in their
+  shells. Clauseo's own git use is the host's: its history uses git in-process and never reads
+  the agent's PATH. Covered: the copy is checked (present, unchanged, alone in its folder) at each
+  launch, prompt and session call, and a failed check refuses with `agent.tool_missing`; on
+  Windows, Codex looks in its own folders before PATH, and Clauseo checks those at each launch
+  and call too.
 - `designed`: The launch self-test (#1167) refuses a launch whose pre-write guard cannot start
 
 ## Sandbox

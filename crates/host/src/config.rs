@@ -24,7 +24,6 @@ use crate::ids::{IdSource, RandomV7};
 use crate::search::SearchSeams;
 use crate::update::{NoUpdater, Updater};
 use crate::window::PATCH_WINDOW_BYTES;
-
 mod idle;
 pub(crate) use idle::IdleStop;
 pub use idle::{CAP_MIN_IDLE, IDLE_LIMIT, LIVE_AGENTS};
@@ -43,6 +42,7 @@ pub use egress::{DEFAULT_TREE_WAIT, EgressProxy};
 mod session;
 pub use session::SessionKey;
 mod wiring;
+pub use wiring::NoGit;
 pub(crate) use wiring::{LaunchWiring, PackReadHook, Stetdoc};
 pub(crate) mod mcp;
 
