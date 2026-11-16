@@ -14,6 +14,12 @@ pub(crate) const MATTERS: usize = 60;
 /// The session's own run folder's name: `<uuid>-<n>`, as `SessionKey::id` makes it.
 pub(crate) const OWN_RUN: &str = "01a1d5be-5efa-73f6-a24b-dc90c01883d9-10";
 
+/// The session's thread, [`OWN_RUN`]'s: its work folder is `agent-state/<matter 0>/work/<this>`.
+pub(crate) const OWN_THREAD: &str = "01a1d5be-5efa-73f6-a24b-dc90c01883d9";
+
+/// Another conversation of matter 0: its work folder is not the session's.
+pub(crate) const OTHER_THREAD: &str = "01a1d5c4-90d5-7548-96d0-4a1610744929";
+
 /// Another run of the same thread, whose name is a text prefix of [`OWN_RUN`].
 pub(crate) const PREFIX_RUN: &str = "01a1d5be-5efa-73f6-a24b-dc90c01883d9-1";
 
@@ -35,6 +41,8 @@ pub(crate) struct Big {
     pub(crate) deny: LaunchDeny,
     /// `data/run/<OWN_RUN>`.
     pub(crate) run: PathBuf,
+    /// `data/agent-state/<matter 0>/work/<OWN_THREAD>`.
+    pub(crate) work: PathBuf,
     /// `data/agent-state/<matter 0>/notes`.
     pub(crate) notes: PathBuf,
 }
@@ -89,16 +97,15 @@ const COMMON: [&str; 23] = [
     "launch-settings/other-run.json",
 ];
 
-/// The rest of [`big_with`]: the own run, the matters and projects, written and enumerated.
+/// The rest of [`big_with`]: the own run and work folder, another conversation's work folder,
+/// the matters and projects, written and enumerated.
 fn big_rest(data: PathBuf, mut files: Vec<String>, matters: usize, project_count: usize) -> Big {
-    for own in [
-        "work/reply.md",
-        "relay-token",
-        "skill-packs/p/x",
-        "clauseo-env.sh",
-    ] {
+    for own in ["relay-token", "skill-packs/p/x", "clauseo-env.sh"] {
         files.push(format!("run/{OWN_RUN}/{own}"));
     }
+    let state = format!("agent-state/{}", matter_id(0));
+    files.push(format!("{state}/work/{OWN_THREAD}/reply.md"));
+    files.push(format!("{state}/work/{OTHER_THREAD}/draft.md"));
     let home = data.join("agents/claude-acp/home");
     let projects = |n: usize| {
         let key = super::claude_project_key(&matter_folder(n));
@@ -118,8 +125,9 @@ fn big_rest(data: PathBuf, mut files: Vec<String>, matters: usize, project_count
         write::write_file(&path, b"x").unwrap();
     }
     let run = data.join("run").join(OWN_RUN);
-    let notes = data.join("agent-state").join(matter_id(0)).join("notes");
-    let own = [run.clone(), notes.clone(), home.join("plans")];
+    let notes = data.join(&state).join("notes");
+    let work = data.join(&state).join("work").join(OWN_THREAD);
+    let own = [run.clone(), work.clone(), notes.clone(), home.join("plans")];
     // The project of matter 0's folder, as `claude_projects` finds it for a Windows path.
     let project = vec![data.join(projects(0))];
     assert_eq!(
@@ -131,6 +139,7 @@ fn big_rest(data: PathBuf, mut files: Vec<String>, matters: usize, project_count
         data,
         deny,
         run,
+        work,
         notes,
     }
 }
@@ -139,6 +148,11 @@ fn big_rest(data: PathBuf, mut files: Vec<String>, matters: usize, project_count
 /// folder `<v7>-<n>`, its Claude project for `C:\Users\<user>\Documents\Launch Matter`.
 pub(crate) const LAPTOP_MATTER: &str = "01a1d670-e53d-7665-ad1a-d33922e44a6f";
 pub(crate) const LAPTOP_RUN: &str = "01a1d673-4d5a-776d-9061-201035c7d75e-1";
+/// Another conversation of the laptop's matter: its work folder is not the session's.
+pub(crate) const LAPTOP_OTHER_THREAD: &str = "01a1d672-1c0e-7d3b-8e11-5a2b9c0d4e6f";
+/// The laptop's thread, [`LAPTOP_RUN`]'s: its work folder is
+/// `agent-state/<LAPTOP_MATTER>/work/<this>`.
+pub(crate) const LAPTOP_THREAD: &str = "01a1d673-4d5a-776d-9061-201035c7d75e";
 
 /// A data folder like the laptop's, under `root`, for the user `user`: the own matter, run and
 /// project (`LAPTOP_*`), `matters` seeded matters with random v4 ids (`[guid]::NewGuid()`,
@@ -159,7 +173,10 @@ pub(crate) fn laptop(
     ] {
         files.push(format!("run/{run}/work/x.md"));
     }
-    files.push(format!("run/{LAPTOP_RUN}/work/memo.md"));
+    let laptop_work = format!("agent-state/{LAPTOP_MATTER}/work");
+    files.push(format!("{laptop_work}/{LAPTOP_THREAD}/memo.md"));
+    // Another conversation's work folder in the same matter.
+    files.push(format!("{laptop_work}/{LAPTOP_OTHER_THREAD}/x.md"));
     files.push(format!("agent-state/{LAPTOP_MATTER}/notes/Notes.md"));
     let mut state = seed;
     let mut guid = || {
@@ -206,14 +223,15 @@ pub(crate) fn laptop(
         write::create_dir_all(path.parent().unwrap()).unwrap();
         write::write_file(&path, b"x").unwrap();
     }
+    let matter = data.join("agent-state").join(LAPTOP_MATTER);
     let own = [
         data.join("run").join(LAPTOP_RUN),
-        data.join("agent-state").join(LAPTOP_MATTER).join("notes"),
+        matter.join("work").join(LAPTOP_THREAD),
+        matter.join("notes"),
         home.join("plans"),
     ];
     let project = vec![home.join("projects").join(&own_key)];
     let mut deny = launch_deny(vec![data.clone()], &data, &own, &project);
-    let work = data.join("run").join(LAPTOP_RUN).join("work");
-    deny.own_reads = super::own_reads(&data, &[&work, &own[1]]);
+    deny.own_reads = super::own_reads(&data, &[&own[1], &own[2]]);
     (deny, own_key, ids)
 }

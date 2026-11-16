@@ -258,7 +258,7 @@ fn removing_a_run_folder_never_follows_a_link_inside_it() {
     write::write_file(&outside.join("brief.md"), b"keep").unwrap();
     let launch = folders(&data, 1);
     launch.make(&data, &RunSweep::default()).unwrap();
-    write::symlink(&outside, &launch.work.join("linked")).unwrap();
+    write::symlink(&outside, &launch.root.join("linked")).unwrap();
     write::create_dir_all(&launch.browser).unwrap();
     write::symlink(&outside.join("brief.md"), &launch.browser.join("file-link")).unwrap();
     launch.remove();
@@ -419,12 +419,11 @@ fn a_late_prep_frees_its_claims() {
     write::remove_dir_all(&data).unwrap();
 }
 
-/// The shell browser's environment for a session, built from its run folders as the launch
-/// builds them, against that session's Codex fence as the launch lists it: `AGENT_BROWSER_CONFIG`,
-/// `_DOWNLOAD_PATH` and `_PROFILE` and this matter's brief all writable, to an ordinary command
-/// and to an escalated one (agent-browser's always is), the `agent-browser` copy in
-/// `<data>/tools` readable and not writable to an ordinary command; another matter's session's
-/// three and its brief denied to both, and so is `<data>/browser`.
+/// The shell browser's environment for a session, built from its folders as the launch builds
+/// them, against its Codex fence as listed: `AGENT_BROWSER_CONFIG`, `_DOWNLOAD_PATH`, `_PROFILE`,
+/// the work folder and this matter's brief writable, ordinary and escalated (agent-browser's
+/// always is), the `agent-browser` copy in `<data>/tools` readable and not writable; another
+/// matter's session's denied to both, and so is `<data>/browser`.
 #[test]
 fn the_shell_browser_env_is_reachable_under_its_own_codex_fence_only() {
     use std::collections::BTreeMap;
@@ -452,17 +451,17 @@ fn the_shell_browser_env_is_reachable_under_its_own_codex_fence_only() {
         write::create_dir_all(&folders.browser_profile).unwrap();
         write::create_dir_all(&folders.downloads).unwrap();
     }
-    let listed = list(&data, &run.root, &run.notes);
-    let codex_home = locations.agent_home("codex-acp");
+    let listed = list(&data, &run.root, &[&run.work, &run.notes]);
     let session = Session {
         run_root: &run.root,
+        work: &run.work,
         notes: &run.notes,
-        codex_home: &codex_home,
+        codex_home: &locations.agent_home("codex-acp"),
         listed: &listed,
         socket_dir: None,
     };
     let fence = keys(&locations, session, false);
-    let own = [run.root.clone(), run.notes.clone()];
+    let own = [run.root.clone(), run.work.clone(), run.notes.clone()];
     let env_of = |run: &RunFolders| -> BTreeMap<OsString, OsString> {
         let id = run.key.id();
         shell_env(&ShellInputs {
@@ -485,6 +484,7 @@ fn the_shell_browser_env_is_reachable_under_its_own_codex_fence_only() {
             .map(|name| PathBuf::from(&env[&OsString::from(name)]))
             .collect();
         paths.push(run.browser_profile.join("Default").join("Cookies"));
+        paths.push(run.work.join("draft.md"));
         paths.push(run.notes.join("matter-brief.md"));
         paths
     };

@@ -174,11 +174,11 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
 }
 
 /// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), for
-/// the thread's agent: its own folders are its run folder, this matter's notes, a Claude agent's
-/// plans folder in Clauseo's Claude home, and its working folder. None when the request names no
-/// path and no command, or the thread has no agent. Its command's search folders are read as
-/// `shell`, the shell of the request's tool, would read them.
-fn fence_check(
+/// the thread's agent: its own folders are its run folder, its work folder, this matter's notes,
+/// a Claude agent's plans folder in Clauseo's Claude home, and its working folder. None when the
+/// request names no path and no command, or the thread has no agent. Its command's search folders
+/// are read as `shell`, the shell of the request's tool, would read them.
+pub(super) fn fence_check(
     actor: &Actor,
     thread: ThreadId,
     paths: &[PathBuf],
@@ -197,7 +197,7 @@ fn fence_check(
     let mut allowed: Vec<PathBuf> = turn
         .run
         .iter()
-        .flat_map(|run| [run.root.clone(), run.notes.clone()])
+        .flat_map(|run| [run.root.clone(), run.work.clone(), run.notes.clone()])
         .collect();
     // Claude Code writes its plan note there (`agent/plan_note.rs`); a plans folder elsewhere
     // in the data folder is not the session's.

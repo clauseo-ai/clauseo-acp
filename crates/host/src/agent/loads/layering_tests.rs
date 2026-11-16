@@ -385,20 +385,22 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
             rules.contains(&"Edit(//data/skill-packs/**)"),
             "{hook}: {rules:?}"
         );
-        assert!(
-            rules.contains(&"Read(//data/agents/codex-acp/**)"),
-            "{hook}: {rules:?}"
-        );
-        assert!(
-            rules.contains(&"Read(//data/settings.json)"),
-            "{hook}: {rules:?}"
-        );
+        // Codex's install and settings.json are denied; so is a run folder's work folder.
+        for rule in [
+            "Read(//data/agents/codex-acp/**)",
+            "Read(//data/settings.json)",
+            "Read(//data/run/*/work/**)",
+            "Edit(//data/run/*/work/**)",
+        ] {
+            assert!(rules.contains(&rule), "{hook}: {rules:?}");
+        }
         assert!(
             !rules.iter().any(|rule| {
                 (rule.contains("/run/")
                     && !rule.ends_with("/run/*/relay-token)")
                     && !rule.ends_with("/run/*/proxy-secret)")
-                    && !rule.ends_with("/run/*/agent-browser/config.json)"))
+                    && !rule.ends_with("/run/*/agent-browser/config.json)")
+                    && !rule.ends_with("/run/*/work/**)"))
                     || rule.contains("/agent-state")
             }),
             "{rules:?}"

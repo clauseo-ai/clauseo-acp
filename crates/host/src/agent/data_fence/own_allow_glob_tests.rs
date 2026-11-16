@@ -11,7 +11,7 @@ use super::super::super::cross_tests::Rules;
 use super::super::super::tests::denied_by;
 use super::super::own_shell_glob_deny_rules;
 use super::{
-    DATA, LAPTOP_MATTER, LAPTOP_RUN, Launch, MATTER, Verdict, launch, leads, own_reads_commands,
+    DATA, LAPTOP_MATTER, LAPTOP_THREAD, Launch, MATTER, Verdict, launch, leads, own_reads_commands,
     parse, under, verdict,
 };
 use crate::agent::data_fence::{LaunchDeny, claude_allow_rules_on, claude_deny_rules_on};
@@ -150,7 +150,11 @@ fn an_own_folder_glob_is_denied_in_every_spelling() {
         for spelling in &spellings {
             for (lead, sep, powershell) in leads(spelling) {
                 let notes = under(&lead, sep, &["agent-state", LAPTOP_MATTER, "notes"]);
-                let work = under(&lead, sep, &["run", LAPTOP_RUN, "work"]);
+                let work = under(
+                    &lead,
+                    sep,
+                    &["agent-state", LAPTOP_MATTER, "work", LAPTOP_THREAD],
+                );
                 let mut commands = vec![
                     ("Bash", format!(r#"cat "{notes}"/*/x"#)),
                     ("Bash", format!("cat {notes}{sep}j?{sep}x")),
@@ -221,7 +225,10 @@ fn a_plain_own_read_and_other_globs_are_not_denied() {
             allowed.extend(own_reads_commands(spelling));
         }
         let notes = format!(r"{}\agent-state\{LAPTOP_MATTER}\notes", spellings[0]);
-        let work = format!(r"{}\run\{LAPTOP_RUN}\work", spellings[0]);
+        let work = format!(
+            r"{}\agent-state\{LAPTOP_MATTER}\work\{LAPTOP_THREAD}",
+            spellings[0]
+        );
         allowed.extend([
             (
                 "Bash",
@@ -281,7 +288,7 @@ const PIN_1098: &str = concat!(
 fn the_1098_pinned_read_is_not_denied() {
     let (_, glob, _, _) = rules(&[DATA]);
     let notes = format!(r"{DATA}\agent-state\{LAPTOP_MATTER}\notes");
-    let work = format!(r"{DATA}\run\{LAPTOP_RUN}\work");
+    let work = format!(r"{DATA}\agent-state\{LAPTOP_MATTER}\work\{LAPTOP_THREAD}");
     let m = r"Microsoft.PowerShell.Management";
     for read in [
         format!(r"{m}\Get-Content -LiteralPath '{notes}\memo.md'"),

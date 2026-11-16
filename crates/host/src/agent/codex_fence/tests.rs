@@ -34,6 +34,10 @@ pub(crate) fn run_root() -> PathBuf {
     data().join("run").join("s1")
 }
 
+pub(crate) fn work() -> PathBuf {
+    notes().with_file_name("work").join("t1")
+}
+
 pub(crate) fn notes() -> PathBuf {
     data().join("agent-state").join("m1").join("notes")
 }
@@ -57,10 +61,11 @@ pub(crate) fn fence() -> Map<String, Value> {
 
 /// The fence with `listed` as the launch found the data folder.
 pub(crate) fn fence_with(listed: &Listed) -> Map<String, Value> {
-    let (run_root, notes, codex_home, socket_dir) =
-        (run_root(), notes(), codex_home(), socket_dir());
+    let (run_root, work, notes, codex_home, socket_dir) =
+        (run_root(), work(), notes(), codex_home(), socket_dir());
     let session = Session {
         run_root: &run_root,
+        work: &work,
         notes: &notes,
         codex_home: &codex_home,
         listed,
@@ -91,6 +96,7 @@ pub(crate) fn listed() -> Listed {
         ]),
         agent_state: Some(vec![
             data.join("agent-state").join("m1").join("scratch"),
+            data.join("agent-state").join("m1").join("work").join("t2"),
             data.join("agent-state").join("m2"),
         ]),
         set_aside: vec![data.join("run.old-0")],
@@ -200,7 +206,7 @@ pub(crate) enum Turn {
 /// (`:workspace`), with the rules `turn` keeps; the deepest matching rule wins, and `deny` wins
 /// a tie. A deny glob that matches denies.
 pub(crate) fn access_in(keys: &Map<String, Value>, turn: Turn, path: &Path) -> String {
-    access_with(keys, turn, path, &[run_root(), notes()])
+    access_with(keys, turn, path, &[run_root(), work(), notes()])
 }
 
 /// [`access_in`] for a session whose `additionalDirectories` are `own`.
@@ -295,7 +301,8 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
         assert_eq!(scoped.get(subpath), Some(&json!("deny")), "{subpath}");
     }
     for (subpath, value) in scoped {
-        let own = ["run/s1", "agent-state/m1/notes"].contains(&subpath.as_str());
+        let own = ["run/s1", "agent-state/m1/work/t1", "agent-state/m1/notes"];
+        let own = own.contains(&subpath.as_str());
         assert_eq!(
             value,
             &json!(if own { "write" } else { "deny" }),
@@ -305,17 +312,15 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
 }
 
 /// Under the profile Codex reads no `writable_roots` from `CODEX_CONFIG` (stage B, live): the
-/// profile itself names the session's run folder and notes `write`, exactly.
+/// profile itself names the session's run folder, work folder and notes `write`, exactly.
 #[test]
 fn the_profile_names_the_own_run_folder_and_notes_write() {
     let keys = fence();
     let scoped = &keys["permissions"][PROFILE]["filesystem"][data().to_str().unwrap()];
     assert_eq!(scoped["run/s1"], json!("write"));
+    assert_eq!(scoped["agent-state/m1/work/t1"], json!("write"));
     assert_eq!(scoped["agent-state/m1/notes"], json!("write"));
-    for path in [
-        run_root().join("work").join("a.md"),
-        notes().join("brief.md"),
-    ] {
+    for path in [work().join("a.md"), notes().join("brief.md")] {
         assert_eq!(
             access_in(&keys, Turn::Profile, &path),
             "write",
@@ -354,11 +359,12 @@ fn sessions_and_matters_made_after_the_launch_are_denied() {
             .join("brief.md"),
         data.join("agent-state").join("m-later"),
         data.join("agent-state").join("m1").join("other"),
+        data.join("agent-state/m1/work/t-later/a.md"),
     ] {
         assert_eq!(access(&keys, &path), "deny", "{}", path.display());
     }
     for path in [
-        run_root().join("work").join("a.md"),
+        work().join("a.md"),
         run_root().join("skill-packs").join("x").join("SKILL.md"),
         notes().join("matter-brief.md"),
     ] {
@@ -405,7 +411,7 @@ fn search_the_store_and_other_matters_and_sessions_are_denied() {
 fn the_own_folders_codex_home_and_the_built_in_skills_stay_readable() {
     let keys = fence();
     for path in [
-        run_root().join("work").join("notes.md"),
+        work().join("notes.md"),
         run_root().join("skill-packs").join("x").join("SKILL.md"),
         notes().join("matter-brief.md"),
         codex_home()
@@ -508,9 +514,10 @@ fn the_guard_record_file_is_denied_to_the_shell_and_patches() {
 
 #[test]
 fn windows_gets_no_fence() {
-    let (run_root, notes, codex_home) = (run_root(), notes(), codex_home());
+    let (run_root, work, notes, codex_home) = (run_root(), work(), notes(), codex_home());
     let session = Session {
         run_root: &run_root,
+        work: &work,
         notes: &notes,
         codex_home: &codex_home,
         listed: &listed(),
@@ -523,13 +530,15 @@ fn windows_gets_no_fence() {
 fn a_data_folder_with_a_glob_character_is_named_literally_without_the_set_aside_glob() {
     let locations = Locations::under_root(Path::new("/srv/Clauseo[1]"));
     let data = locations.data_dir().to_path_buf();
-    let (run_root, notes, codex_home) = (
+    let (run_root, work, notes, codex_home) = (
         data.join("run").join("s1"),
+        data.join("agent-state").join("m1").join("work").join("t1"),
         data.join("agent-state").join("m1").join("notes"),
         locations.agent_home("codex-acp"),
     );
     let session = Session {
         run_root: &run_root,
+        work: &work,
         notes: &notes,
         codex_home: &codex_home,
         listed: &Listed::default(),
@@ -556,7 +565,7 @@ fn the_fence_reaches_codex_config_whole_and_the_hook_cannot_set_it() {
     }) else {
         panic!("the hook is an object")
     };
-    let work = run_root().join("work");
+    let work = work();
     let notes = notes();
     let folders = Folders::of(&work, &notes).unwrap();
     let switch = Switch {

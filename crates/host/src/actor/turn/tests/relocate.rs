@@ -54,6 +54,7 @@ fn a_turn_sent_during_a_relocate_waits_and_runs_in_the_new_folder() {
     // A first turn: the agent is attached, started in the old folder.
     let first = send_prompt(&mut rig, 10, thread);
     until_idle(&mut rig, thread);
+    let work = super::work_folder::wrote(&rig.actor, thread);
     assert!(rig.log(thread).iter().any(|event| matches!(event,
         DomainEvent::TurnEnded(ended) if ended.turn == first)));
 
@@ -169,6 +170,8 @@ fn a_turn_sent_during_a_relocate_waits_and_runs_in_the_new_folder() {
         None
     });
     assert_eq!(ended, Some(StopReason::EndTurn), "{kinds:?}");
+    // Started again in the new folder, with the same work folder (`work_folder.rs`).
+    super::work_folder::same_work(&rig.actor, thread, &work);
     assert!(
         rig.matter_log()
             .iter()

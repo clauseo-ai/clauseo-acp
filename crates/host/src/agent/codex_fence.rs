@@ -2,9 +2,9 @@
 //! and, listed at the launch ([`list`]), on every other session's run folder, every other
 //! matter's state, `run.old-*`, and what of `<data>/agents` the shell needs not ([`rules`]), as a
 //! Codex permission profile in each Codex session's `CODEX_CONFIG`. The session's own run folder
-//! (with the shell browser's `agent-browser` folder in it) and the matter's notes are in no deny,
-//! and are `write` entries in the profile and ACP `additionalDirectories`
-//! (`actor::turn::profile_loads::codex_directories`).
+//! (with the shell browser's `agent-browser` folder in it), the conversation's work folder and the
+//! matter's notes are in no deny, and are `write` entries in the profile and ACP
+//! `additionalDirectories` (`actor::turn::profile_loads::codex_directories`).
 //!
 //! At codex tag `rust-v0.162.1`:
 //! - Per-path rules exist only in a named profile: `default_permissions = "<name>"` selects
@@ -39,7 +39,8 @@
 //!   reopens it for an ordinary command, never for an escalated one (stage C: every escalated
 //!   `agent-browser` failed under `<data>/run` whole and `<data>/browser`). The fence names the
 //!   siblings of what it leaves open instead, listed at the launch: other sessions' run folders,
-//!   other matters' state folders and the own matter's beside its notes, `run.old-*`, the
+//!   other matters' state folders, the own matter's beside its notes and work, other
+//!   conversations' work folders, `run.old-*`, the
 //!   entries of `agents` but Codex's own folder and the runtime folder, and those of the runtime
 //!   folder but Clauseo's Python builds. A listing that fails denies its folder whole, as before.
 //!   An escalated command may write in what no deny names (the Python runtime included): that is
@@ -161,8 +162,8 @@ const AGENTS_KEPT: [&str; 2] = ["codex-acp", "runtime"];
 pub(crate) struct Listed {
     /// Every entry of `<data>/run` but the session's own run folder.
     pub(crate) run: Option<Vec<PathBuf>>,
-    /// Every entry of `<data>/agent-state` but this matter's folder, and every entry of that
-    /// folder but its notes.
+    /// Every entry of `<data>/agent-state` but this matter's folder, every entry of that folder
+    /// but its notes and `work`, and every entry of `work` but the conversation's own.
     pub(crate) agent_state: Option<Vec<PathBuf>>,
     /// The `run.old-*` entries of `<data>` (beside [`SET_ASIDE_GLOB`]).
     pub(crate) set_aside: Vec<PathBuf>,
@@ -174,12 +175,12 @@ pub(crate) struct Listed {
     pub(crate) runtime: Option<Vec<PathBuf>>,
 }
 
-/// Lists, for [`Listed`], `<data>/run` down to `run_root`, `<data>/agent-state` down to
-/// `notes`, the `run.old-*` entries of `data`, `<data>/agents` and `<data>/agents/runtime`.
-/// A folder on the way that is not a real folder (a link), a list that fails or a name that is
-/// not UTF-8 (no rule could name it) leaves that part `None`. File system calls: off the actor
-/// (the launch prep, once the run folder and notes are made).
-pub(crate) fn list(data: &Path, run_root: &Path, notes: &Path) -> Listed {
+/// Lists, for [`Listed`], `<data>/run` down to `run_root`, `<data>/agent-state` down to each
+/// of `state` (the work folder and the notes), the `run.old-*` entries of `data`, `<data>/agents`
+/// and `<data>/agents/runtime`. A folder on the way that is not a real folder (a link), a list
+/// that fails or a name that is not UTF-8 (no rule could name it) leaves that part `None`. File
+/// system calls: off the actor (the launch prep, once the run, work and notes folders are made).
+pub(crate) fn list(data: &Path, run_root: &Path, state: &[&Path]) -> Listed {
     let run = data.join("run");
     let agent_state = data.join("agent-state");
     let agents = data.join("agents");
@@ -188,7 +189,7 @@ pub(crate) fn list(data: &Path, run_root: &Path, notes: &Path) -> Listed {
         |entry: &Entry| entry.folder && crate::agent::data_fence::is_python_runtime(&entry.name);
     Listed {
         run: down_to(&run, run_root),
-        agent_state: down_to(&agent_state, notes),
+        agent_state: down_to_each(&agent_state, state),
         set_aside: entries(data)
             .map(|all| {
                 all.into_iter()
@@ -280,11 +281,26 @@ fn down_to(parent: &Path, own: &Path) -> Option<Vec<PathBuf>> {
     Some(out)
 }
 
+/// [`down_to`] for each of `owns`, together: an entry one listing names that is, or holds,
+/// another of `owns` is on that one's way and is left out; `None` when any listing is.
+fn down_to_each(parent: &Path, owns: &[&Path]) -> Option<Vec<PathBuf>> {
+    let mut out = Vec::new();
+    for own in owns {
+        out.extend(down_to(parent, own)?);
+    }
+    out.retain(|entry| !owns.iter().any(|own| own.starts_with(entry)));
+    out.sort();
+    out.dedup();
+    Some(out)
+}
+
 /// The session's folders the fence needs.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Session<'a> {
     /// `<data>/run/<session id>`, a `write` entry.
     pub(crate) run_root: &'a Path,
+    /// `<data>/agent-state/<matter>/work/<thread>`, a `write` entry.
+    pub(crate) work: &'a Path,
     /// `<data>/agent-state/<matter>/notes`, a `write` entry.
     pub(crate) notes: &'a Path,
     /// Codex's home, never denied whole.
@@ -306,12 +322,12 @@ pub(crate) struct Session<'a> {
 /// guard's `--cwd`, is in it), Claude's whole folder, [`AGENTS_DENIED`], Codex's sign-in
 /// markers and [`CODEX_HOME_DENIED`] and [`CODEX_DATABASES`] in its home, then what the launch
 /// listed ([`Listed`], each path only under the folder it was listed from). A path that is or
-/// holds the session's run folder, its notes or Codex's home is left out, with a warning. Last,
+/// holds the session's run, work or notes folder or Codex's home is left out, with a warning. Last,
 /// each of [`SESSION_PARENTS`] and the runtime folder that the launch could not list, whole, and
 /// the session's browser socket folder ([`Session::socket_dir`]) and the own run folder's
-/// proxy password file ([`PROXY_SECRET_FILE`]): then the session's two folders
-/// are reopened by [`keys`]' `write` entries and the session's `additionalDirectories` for an
-/// ordinary command only, never an escalated one.
+/// proxy password file ([`PROXY_SECRET_FILE`]): then the session's folders are reopened by
+/// [`keys`]' `write` entries and the session's `additionalDirectories` for an ordinary command
+/// only, never an escalated one.
 pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf> {
     let data = locations.data_dir();
     let agents = data.join("agents");
@@ -383,7 +399,12 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
         );
     }
     denied.retain(|path| {
-        let own = [session.run_root, session.notes, session.codex_home];
+        let own = [
+            session.run_root,
+            session.work,
+            session.notes,
+            session.codex_home,
+        ];
         let keep = !own.iter().any(|folder| folder.starts_with(path));
         if !keep {
             tracing::warn!("a data-folder deny holds a session folder and is left out");
@@ -401,12 +422,12 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
 
 /// The `CODEX_CONFIG` keys of the fence: `default_permissions` naming [`PROFILE`], and
 /// `permissions.<PROFILE>` extending [`EXTENDS`] with each of [`rules`] as `deny` and the
-/// session's run folder and notes as `write`, scoped under `<data>`, plus [`SET_ASIDE_GLOB`]
-/// and [`SECRET_GLOB`] when the data folder's path holds no glob character (a scoped glob reads
-/// its base as glob text; decision record 0030 names the gap). A rule outside `<data>` is keyed
-/// by its own path. Empty on Windows (`windows`). A path that is not UTF-8 is
-/// left out with a warning; the launch already fails on a run folder or notes that are not
-/// (`Folders::of`), and those sit in the data folder.
+/// session's run, work and notes folders as `write`, scoped under `<data>`, plus
+/// [`SET_ASIDE_GLOB`] and [`SECRET_GLOB`] when the data folder's path holds no glob character
+/// (a scoped glob reads its base as glob text; decision record 0030 names the gap). A rule
+/// outside `<data>` is keyed by its own path. Empty on Windows (`windows`). A path that is not
+/// UTF-8 is left out with a warning; the launch already fails on a run folder or notes that are
+/// not (`Folders::of`), and those sit in the data folder.
 pub(crate) fn keys(
     locations: &Locations,
     session: Session<'_>,
@@ -426,7 +447,8 @@ pub(crate) fn keys(
     let denies = rules(locations, session)
         .into_iter()
         .map(|path| (path, "deny"));
-    let own = [session.run_root, session.notes].map(|path| (path.to_path_buf(), "write"));
+    let own =
+        [session.run_root, session.work, session.notes].map(|path| (path.to_path_buf(), "write"));
     for (path, mode) in denies.chain(own) {
         match path.strip_prefix(data).ok().and_then(Path::to_str) {
             Some(relative) if !relative.is_empty() => {

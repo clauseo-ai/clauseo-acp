@@ -10,13 +10,13 @@
 //! fails the waiting work.
 //!
 //! After both refusals, the same thread makes the session's folders ([`RunFolders`]: its
-//! stand-in `run/<session id>` folder with `work` and `browser` under it, and the matter's
-//! notes folder) and, for an agent with a kind, writes the profile's skills
+//! stand-in `run/<session id>` folder, the conversation's work folder and the matter's notes
+//! folder) and, for an agent with a kind, writes the profile's skills
 //! (`ProfileHook::launch_writes`, `clauseo_profile::write_skills`), after their wait when one is
 //! in flight ([`skill_wait`]). A skill write that fails is a warning, never a failed launch.
 //! The first write's token goes in [`Prepared`], so only that launch's Codex keys carry the
 //! skills index; a failed write leaves none. Then the launch's skill packs go into its own
-//! plugin under the run folder ([`packs`]). The notes folder stays; the run folder is the
+//! plugin under the run folder ([`packs`]). Notes and work stay; the run folder is the
 //! launch's own (its id is in the name) and is removed off the actor on every way out: by the
 //! prep thread when nobody waits for its answer any more
 //! ([`codex::prepare::off_actor_or_undo`]), and otherwise from the actor ([`discard`]) when
@@ -56,7 +56,7 @@ use super::agents::{self, Waiting};
 use super::offline::probe::settings::{Reads, SettingsRead};
 use super::{TurnInput, host_stopping, state};
 
-use crate::agent::codex_fence::Listed;
+use crate::agent::codex_fence::{self, Listed};
 use crate::agent::data_fence::LaunchDeny;
 use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::agent::loads::lawyer::Reads as McpReads;
@@ -111,7 +111,8 @@ pub(crate) struct RunFolders {
     /// `<data>/run/<session id>`: the stand-in for stage C's per-agent state folder, made at
     /// the launch and removed when the agent ends.
     pub(crate) root: PathBuf,
-    /// `{work_folder}`, `<root>/work`.
+    /// `{work_folder}`, `<data>/agent-state/<matter id>/work/<thread>` ([`folders::work_dir`]):
+    /// the conversation's, the same at every launch, kept when a session ends.
     pub(crate) work: PathBuf,
     /// `{browser_dir}`, the guard's `--cwd`: `<data>/browser/run/<session id>`, outside the
     /// run folder, since Codex's shell may write the run folder and the guard, unfenced, writes
@@ -218,7 +219,7 @@ impl RunFolders {
         let agent_browser = root.join(crate::browser::SESSION_DIR);
         Self {
             key,
-            work: root.join("work"),
+            work: folders::work_dir(data, key.matter, key.thread),
             browser: browser_run_dir(data).join(key.id()),
             guard: None,
             browser_config: agent_browser.join(crate::browser::SESSION_CONFIG),
@@ -261,8 +262,8 @@ impl RunFolders {
     }
 
     /// Removes this launch's run folder, its browser folder and Claude's short temp folder,
-    /// through no link ([`folders::remove_folders`]); the notes folder stays. File system
-    /// calls: off the actor.
+    /// through no link ([`folders::remove_folders`]); the notes and work folders stay. File
+    /// system calls: off the actor.
     pub(crate) fn remove(&self) {
         folders::remove_folders(self);
     }
@@ -379,7 +380,7 @@ pub(super) fn prepare(
                 let short = run.claude_tmp.take();
                 run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
-                run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
+                run.codex_listed = codex_fence::list(&data, &run.root, &[&run.work, &run.notes]);
                 claim(&mut run, &data, claims, slot);
                 run.mcp_secrets = Arc::new(mcp.read());
                 let skills_written = skill_wait::write_skills(&skills.writes);

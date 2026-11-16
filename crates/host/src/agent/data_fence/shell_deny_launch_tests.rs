@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 use super::tests::denied_by;
 use super::windows_shell_deny_rules;
-use crate::agent::data_fence::big_folder::{self, OWN_RUN, PREFIX_RUN, matter_id};
+use crate::agent::data_fence::big_folder::{
+    self, OTHER_THREAD, OWN_RUN, OWN_THREAD, PREFIX_RUN, matter_id,
+};
 use crate::agent::data_fence::{LaunchDeny, claude_deny_rules_on, claude_projects, launch_deny};
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
@@ -66,6 +68,8 @@ fn vm_launch(root: &Path, own: &str) -> LaunchDeny {
         folders.push(format!("{VM_FOLDER} {n}"));
     }
     files.push(format!("agent-state/{VM_MATTER}/notes/Notes.md"));
+    let thread = own.rsplit_once('-').unwrap().0;
+    files.push(format!("agent-state/{VM_MATTER}/work/{thread}/reply.md"));
     for folder in &folders {
         let key = super::super::claude_project_key(folder);
         files.push(format!("agents/claude-acp/home/projects/{key}/s.jsonl"));
@@ -77,6 +81,10 @@ fn vm_launch(root: &Path, own: &str) -> LaunchDeny {
     }
     let own_folders = [
         data.join("run").join(own),
+        data.join("agent-state")
+            .join(VM_MATTER)
+            .join("work")
+            .join(thread),
         data.join("agent-state").join(VM_MATTER).join("notes"),
         home.join("plans"),
     ];
@@ -95,7 +103,9 @@ fn vm_commands() -> Vec<(&'static str, &'static str, String)> {
     );
     let notes_back = notes_fwd.replace('/', "\\");
     let work = |run: &str| {
-        format!("C:/Users/clauseo-lawyer/AppData/Local/ai.clauseo.desktop/run/{run}/work")
+        let thread = run.rsplit_once('-').unwrap().0;
+        let data = "C:/Users/clauseo-lawyer/AppData/Local/ai.clauseo.desktop";
+        format!("{data}/agent-state/{VM_MATTER}/work/{thread}")
     };
     let work_back = work(VM_RUN_A).replace('/', "\\");
     vec![
@@ -205,6 +215,8 @@ fn in_a_sixty_matter_folder_only_the_own_folders_pass() {
         format!("run/{PREFIX_RUN}/work/draft.md"),
         format!("run/{PREFIX_RUN}"),
         format!("run/{OWN_RUN}/relay-token"),
+        format!("run/{OWN_RUN}/work/reply.md"),
+        format!("agent-state/{}/work/{OTHER_THREAD}/draft.md", matter_id(0)),
         "launch-settings/other-run.json".to_owned(),
         "launch-settings".to_owned(),
         "run".to_owned(),
@@ -220,8 +232,8 @@ fn in_a_sixty_matter_folder_only_the_own_folders_pass() {
         String::new(),
     ];
     let own_places = [
-        format!("run/{OWN_RUN}/work/reply.md"),
-        format!("run/{OWN_RUN}/work"),
+        format!("agent-state/{}/work/{OWN_THREAD}/reply.md", matter_id(0)),
+        format!("agent-state/{}/work/{OWN_THREAD}", matter_id(0)),
         format!("agent-state/{}/notes", matter_id(0)),
         format!("agent-state/{}/notes/notes.md", matter_id(0)),
         "agents/claude-acp/home/plans/plan.md".to_owned(),
@@ -356,15 +368,15 @@ fn a_dot_dot_after_the_data_folder_is_denied() {
             ),
             format!(
                 "cat {}/../../settings.json",
-                at(&format!("run/{OWN_RUN}/work"))
+                at(&format!("agent-state/{own}/work/{OWN_THREAD}"))
             ),
             format!(
                 r"cat {}\..\..\settings.json",
-                at(&format!("run/{OWN_RUN}/work"))
+                at(&format!("agent-state/{own}/work/{OWN_THREAD}"))
             ),
             format!(
                 r"cat {}\\..\\..\\settings.json",
-                at(&format!("run/{OWN_RUN}/work"))
+                at(&format!("agent-state/{own}/work/{OWN_THREAD}"))
             ),
             format!("ls {}/..", at(&format!("run/{OWN_RUN}"))),
             // Mixed: `/..` after a path written with `\`, and the other way round.
@@ -382,7 +394,7 @@ fn a_dot_dot_after_the_data_folder_is_denied() {
                 assert!(denied_by(&rules, tool, &command), "{tool}: {command}");
             }
         }
-        let work = at(&format!("run/{OWN_RUN}/work"));
+        let work = at(&format!("agent-state/{own}/work/{OWN_THREAD}"));
         let matter = r"C:\Users\clauseo-lawyer\CloudProxy\Matter 00";
         for command in [
             format!(r#"pandoc "{work}{sep}reply.md" -o "{matter}\x.docx""#),

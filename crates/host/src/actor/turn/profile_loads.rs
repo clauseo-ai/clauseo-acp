@@ -84,6 +84,7 @@ pub(super) fn launch_keys(
         // The data-folder fence (`agent::codex_fence`), in every Codex session.
         let session = crate::agent::codex_fence::Session {
             run_root: &prepared.run.root,
+            work: &prepared.run.work,
             notes: &prepared.run.notes,
             codex_home: &codex.home,
             listed: &prepared.run.codex_listed,
@@ -584,14 +585,13 @@ fn recheck_managed(actor: &Actor, run: &mut RunFolders) {
     }
 }
 
-/// Codex's ACP `additionalDirectories`: the session's run folder (its work folder and its pack
-/// plugin) and the matter's notes. codex-acp makes each turn's `workspaceWrite` roots from them,
-/// beside the matter folder and tmp (codex-acp 2.2.2 `dist/index.js:35598-35612, 35878-35885`).
-/// With the data-folder fence's profile selected, Codex reads no `writable_roots` from
-/// `CODEX_CONFIG`, so these and the profile's own `write` entries (`agent::codex_fence`) are what
-/// reopen both folders under its deny of `<data>/run` and `<data>/agent-state`.
+/// Codex's ACP `additionalDirectories`: the run folder (its pack plugin), the work folder and the
+/// notes; codex-acp makes each turn's `workspaceWrite` roots from them, the matter folder and tmp
+/// (codex-acp 2.2.2 `dist/index.js:35598-35612, 35878-35885`). Under the fence's profile Codex
+/// reads no `CODEX_CONFIG` `writable_roots`; these and its `write` entries (`agent::codex_fence`)
+/// reopen them under its deny of `<data>/run` and `<data>/agent-state`.
 pub(super) fn codex_directories(run: &RunFolders) -> Vec<PathBuf> {
-    vec![run.root.clone(), run.notes.clone()]
+    vec![run.root.clone(), run.work.clone(), run.notes.clone()]
 }
 
 /// The session call answered: the tool state [`session_loads`] held shows in the header.

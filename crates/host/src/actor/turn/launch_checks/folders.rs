@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::{ErrorCode, MatterId};
+use clauseo_protocol::{ErrorCode, MatterId, ThreadId};
 
 use super::{RunFolders, RunSweep};
 use crate::agent::data_fence;
@@ -100,13 +100,14 @@ pub(super) fn launch_deny(
     deny
 }
 
-/// The session's own folders, which Claude's deny rules leave out: its run folder, this
-/// matter's notes, the matter folder (`agent::session_folder` of `stored`) and, for Claude,
-/// the plans folder in its home.
+/// The session's own folders, which Claude's deny rules leave out: its run folder, its work
+/// folder, this matter's notes, the matter folder (`agent::session_folder` of `stored`) and,
+/// for Claude, the plans folder in its home.
 fn own_folders(run: &RunFolders, stored: &Path, claude_home: Option<&Path>) -> Vec<PathBuf> {
     let plans = claude_home.map(|home| home.join("plans"));
     [
         run.root.clone(),
+        run.work.clone(),
         run.notes.clone(),
         crate::agent::session_folder(stored),
     ]
@@ -146,6 +147,15 @@ fn make_fallback_folder(data: &Path, notes: &Path) {
             "the browser's fallback downloads folder was not made"
         );
     }
+}
+
+/// `<data>/agent-state/<matter>/work/<thread>`: the conversation's work folder, the same at
+/// every launch of its agent, so a resumed session finds the paths it wrote before.
+pub(crate) fn work_dir(data: &Path, matter: MatterId, thread: ThreadId) -> PathBuf {
+    data.join("agent-state")
+        .join(matter.to_string())
+        .join("work")
+        .join(thread.to_string())
 }
 
 /// Removes `folder` and all it holds, through no link; a failure is a warning.
