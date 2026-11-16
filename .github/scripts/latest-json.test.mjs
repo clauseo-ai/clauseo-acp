@@ -977,7 +977,7 @@ test("release.yml bundles the block-list snapshot only behind its one switch, of
     "sign-windows: BLOCKLIST_OVERLAY is not set from the switch",
   ]);
   // Needing blocklist.
-  assert.deepEqual(broken("needs: [check, build, blocklist]", "needs: [check, build]"), ["sign-windows: no blocklist in needs"]);
+  assert.deepEqual(broken("needs: [check, custody, build, blocklist]", "needs: [check, custody, build]"), ["sign-windows: no blocklist in needs"]);
   // The download: behind the switch, before the first build or bundle.
   assert.deepEqual(broken(/( {6}# The same verified snapshot[^]*?)\n {8}if: [^\n]*/, "$1"), [
     "sign-windows: the blocklist-snapshot download is not behind the switch",
@@ -1002,10 +1002,10 @@ test("sign-windows runs without the macOS and Linux legs; assemble and publish n
     return lines.slice(0, lines.findIndex((line) => line.startsWith("runs-on:")));
   };
   const sign = head("sign-windows");
-  assert.ok(sign.includes("needs: [check, build, blocklist]"), sign.join("\n"));
+  assert.ok(sign.includes("needs: [check, custody, build, blocklist]"), sign.join("\n"));
   assert.ok(
     sign.includes(
-      "if: ${{ !cancelled() && needs.check.result == 'success' && needs.blocklist.result == 'success' }}",
+      "if: ${{ !cancelled() && needs.check.result == 'success' && needs.custody.result == 'success' && needs.blocklist.result == 'success' }}",
     ),
     sign.join("\n"),
   );
@@ -1255,6 +1255,41 @@ test("no workflow's release takes releases/latest but a published v* app release
   assert.deepEqual(latest, [
     ["release.yml", 'run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest'],
   ]);
+});
+
+test("custody checks the release key against tauri.conf.json's pubkey before any leg, the key in one step", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const head = jobHead(text, "custody");
+  assert.deepEqual(jobNeeds(text, "custody"), ["check"]);
+  assert.ok(!head.some((line) => line.startsWith("if:")), "no job-level if: build and sign-windows need it to succeed");
+  // Every leg that builds, and sign-windows, waits for it.
+  assert.ok(jobNeeds(text, "build").includes("custody"), "build needs custody");
+  assert.ok(jobNeeds(text, "sign-windows").includes("custody"), "sign-windows needs custody");
+  const custody = jobCommands(text, "custody");
+  // The release environment in release mode only, before `steps:`.
+  const environment = custody.indexOf("environment: ${{ needs.check.outputs.mode == 'release' && 'release' || '' }}");
+  assert.ok(environment !== -1 && environment < custody.indexOf("steps:"), "custody's environment");
+  const secrets = custody.filter((line) => /\bsecrets\b/.test(line));
+  assert.deepEqual(secrets, [
+    "TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}",
+    "TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}",
+  ]);
+  const step = custody.indexOf("- name: The release key signs, and tauri.conf.json's pubkey verifies it");
+  assert.ok(step > custody.indexOf("run: pnpm -C ui install --frozen-lockfile"), "install before the key");
+  const body = custody.slice(step, custody.findIndex((line, i) => i > step && line.startsWith("- ")) >>> 0);
+  assert.equal(body[1], "if: needs.check.outputs.mode == 'release'");
+  for (const line of [
+    'pnpm -s -C ui tauri signer sign --app-version "$VERSION" "$dir/$name" > /dev/null ||',
+    "jq -r '.plugins.updater.pubkey // \"\"' crates/desktop/tauri.conf.json > \"$dir/updater.pub\"",
+    'node .github/scripts/latest-json.mjs --verify "$dir/$name" "$dir/updater.pub" "$name" "$VERSION" ||',
+  ]) {
+    assert.ok(body.includes(line), line);
+  }
+  // Every step but the off-notice only in release mode.
+  const steps = custody.filter((line) => line.startsWith("- "));
+  const ifs = custody.filter((line) => line.startsWith("if: needs.check.outputs.mode"));
+  assert.equal(ifs.length, steps.length);
+  assert.equal(ifs.filter((line) => line === "if: needs.check.outputs.mode == 'release'").length, steps.length - 1);
 });
 
 test("the workflow lint fails each broken rule", () => {

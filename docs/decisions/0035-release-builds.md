@@ -36,8 +36,8 @@ Developer ID.
     the run's artifact `dist-assets`. Since a dry run holds nothing secret, it may start from any
     branch, so a fix can be dry-run before it merges (`gh workflow run release.yml --ref <branch>`).
 - **Jobs:** `check` (mode, tag against version and branch, the release overlays, no test feature in a
-  `v*` build, a `v*` release's endpoint and version);
-  `ui` (the ui built once for every leg, with hidden source maps moved out of
+  `v*` build, a `v*` release's endpoint and version); `custody` (the release key against the pubkey,
+  below); `ui` (the ui built once for every leg, with hidden source maps moved out of
   its `dist` folder before any leg embeds it); `build` (the matrix below); `build`'s macOS legs rename the bundler's `Clauseo.app.tar.gz` to `Clauseo_<v>_<arch>.app.tar.gz`, drop its `.sig` and sign the renamed file; `sign-windows` (SignPath's slot, then both NSIS
   installers from the one exe with `tauri bundle --no-binary-patching`, then the updater signature,
   last); `assemble` (refuses a bundler-named `Clauseo.app.tar.gz`, checks each Mac archive's signature, writes `latest.json` and
@@ -269,6 +269,21 @@ For the same reason `check`'s version bar is the highest published `v<X.Y.Z>` re
 list, never whatever releases/latest names. Until the first `v*` release is published with
 `--latest`, releases/latest stays python-runtime's; no installed copy has the endpoint before R23's
 PR 6, so nothing breaks today.
+
+## Custody of the release key (2026-11-16)
+
+In release mode the job `custody` (environment `release`, read token, after `check`) installs the
+ui workspace (the Tauri CLI from the lock file), then, in its one step with
+`TAURI_SIGNING_PRIVATE_KEY` and its password, signs a scratch file with `tauri signer sign` and
+fails unless `latest-json.mjs --verify` holds the signature under `plugins.updater.pubkey` for that
+file name and version. A wrong key or password fails minutes into the run instead of after every
+leg has built; `assemble` still verifies each signed asset. `build` and `sign-windows` need it.
+In a test or dry run it takes no environment and only says there is nothing to check.
+
+Its approval is one more wave of the `release` environment, since no job in that environment ran
+before the build legs. With ro-hansolo as required reviewer on `release`, a release run needs four
+approvals: `release` three times (`custody`; then the two signing macOS build legs, which start
+together; then the two `sign-windows` legs, after the build matrix) and `release-publish` once.
 
 ## The unsigned beta (2026-11-16)
 
