@@ -232,7 +232,8 @@ pub(crate) fn writable(
 ///    once (one sync per folder, not per file).
 ///
 /// A crash in step 1 or 2 leaves the folder's files as they were, with `.clauseo-<n>.tmp` files
-/// beside them at worst (excluded from every checkpoint); a crash in step 3 or 4 leaves the
+/// beside them at worst (excluded from every checkpoint, and removed by the next write in that
+/// folder, [`write::sweep_temps`]); a crash in step 3 or 4 leaves the
 /// folder partly written, each file old or new and never torn (each was synced before its
 /// rename; a rename whose folder was not synced yet may be lost, leaving the old file),
 /// recorded by nothing until the next checkpoint. `apply` returns only after every folder is
@@ -413,9 +414,16 @@ fn stage_all<'a>(
     made: &mut Vec<PathBuf>,
 ) -> Result<Vec<(&'a MatterPath, write::Staged)>, Error> {
     let mut staged = Vec::new();
+    let mut swept = std::collections::BTreeSet::new();
     for &op in ops {
         if let Op::Write(path, blob) = op {
             let abs = make_parents(folder, path, made)?;
+            // A crash's temp files go before this write's first temp file in their folder.
+            if let Some(dir) = abs.parent()
+                && swept.insert(dir.to_owned())
+            {
+                write::sweep_temps(dir);
+            }
             let file = write::stage(&abs, &mut |file| {
                 core.history.read_blob(*blob, path.as_str(), file).map(drop)
             })?;

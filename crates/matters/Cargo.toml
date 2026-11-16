@@ -49,8 +49,13 @@ clauseo-process = { path = "../process" }
 # `GetDriveTypeW` for a network drive (place/windows.rs); the workspace's one `windows` line.
 # `Win32_UI_Shell` and `Win32_System_Com`: the Recycle Bin through `IFileOperation`
 # (trash/windows.rs), whose progress sink `windows-core`'s `implement` builds.
+# `Win32_Security` and `Win32_Security_Authorization`: a temp file's ACL set to one that lets it
+# be removed (write/windows.rs).
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
   "Win32_System_Com",
   "Win32_UI_Shell",

@@ -261,6 +261,9 @@ pub(crate) struct Staged {
     keep: bool,
     /// The things of the target's metadata the temp file could not take ([`keep::copy`]).
     lost: Lost,
+    /// Unix: what is copied once the temp file is the target (macOS: the ACL).
+    #[cfg(unix)]
+    after: Option<keep::After>,
 }
 
 /// How many things of a replaced file's metadata (its permissions, an extended attribute, its
@@ -327,16 +330,31 @@ fn stage_as(
         .parent()
         .ok_or_else(|| Error::io("replace", target, io::ErrorKind::InvalidInput.into()))?;
     let (temp, mut file) = new_temp(dir)?;
-    let mut staged = Staged {
+    let staged = Staged {
         temp: Some(temp),
         target: target.to_owned(),
         keep,
         lost: Lost::default(),
+        #[cfg(unix)]
+        after: None,
     };
     fill(&mut file)?;
     // Before the sync, which then covers the metadata too.
-    staged.lost = kept_metadata(keep, target, &file);
+    #[cfg(unix)]
+    let staged = {
+        let mut staged = staged;
+        if keep {
+            let (lost, after) = keep::copy(target, &file);
+            staged.lost = lost;
+            staged.after = Some(after);
+        }
+        staged
+    };
+    #[cfg(test)]
+    injected("keep").map_err(|err| Error::io("write", target, err))?;
     fsync::sync_file(&file).map_err(|err| Error::io("sync", target, err))?;
+    #[cfg(test)]
+    injected("sync").map_err(|err| Error::io("sync", target, err))?;
     Ok(staged)
 }
 
@@ -369,6 +387,14 @@ impl Staged {
                 lost: self.lost,
             });
         };
+        #[cfg(test)]
+        if let Err(err) = injected("rename") {
+            self.temp = Some(temp);
+            return Err(RenameFailed {
+                error: Error::io("rename", &self.target, err),
+                changed: false,
+            });
+        }
         #[cfg(any(windows, test))]
         let renamed = match replace {
             Some(replace) if self.keep => {
@@ -385,6 +411,10 @@ impl Staged {
         match renamed {
             Ok(lost) => {
                 self.lost.add(lost);
+                #[cfg(unix)]
+                if let Some(after) = self.after.take() {
+                    self.lost.add(after.apply());
+                }
                 Ok(Renamed {
                     dir,
                     lost: self.lost,
@@ -438,26 +468,93 @@ fn plain_rename(temp: &Path, target: &Path) -> Result<Lost, Failed> {
         .map_err(failed)
 }
 
-/// Unix: when `keep`, the target's metadata copied to the temp file ([`keep::copy`]).
-#[cfg(unix)]
-fn kept_metadata(keep: bool, target: &Path, file: &File) -> Lost {
-    if keep {
-        keep::copy(target, file)
-    } else {
-        Lost::default()
+#[cfg(test)]
+thread_local! {
+    /// Tests: the step of a write that fails, once armed by [`fail_at`] on this thread.
+    static FAIL_AT: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
+/// Tests: makes the step `step` ("keep", "sync" or "rename") of this thread's writes fail.
+#[cfg(test)]
+pub(crate) fn fail_at(step: Option<&'static str>) {
+    FAIL_AT.with(|at| at.set(step));
+}
+
+/// Tests: the failure [`fail_at`] armed for `step`, if any.
+#[cfg(test)]
+fn injected(step: &'static str) -> io::Result<()> {
+    if FAIL_AT.with(std::cell::Cell::get) == Some(step) {
+        return Err(io::Error::other(step));
+    }
+    Ok(())
+}
+
+/// Removes the temp file `temp`. When its own ACL refuses that (macOS: a deny-delete entry it
+/// inherited, or the folder's `delete_child` denied; Windows: the same, or the read-only
+/// attribute), it is first given one that allows it, and removed again.
+pub(crate) fn remove_temp(temp: &Path) -> io::Result<()> {
+    match remove_file(temp) {
+        Err(err) if err.kind() == io::ErrorKind::PermissionDenied && unlock(temp) => {
+            remove_file(temp)
+        }
+        removed => removed,
     }
 }
 
-/// Elsewhere nothing: `ReplaceFileW` keeps the metadata at the rename.
-#[cfg(not(unix))]
-fn kept_metadata(_keep: bool, _target: &Path, _file: &File) -> Lost {
-    Lost::default()
+/// Lets the file `temp` be removed; whether that went.
+fn unlock(temp: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::allow_delete(temp).is_ok()
+    }
+    #[cfg(windows)]
+    {
+        windows::allow_delete(temp).is_ok()
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        // A Linux ACL or mode never refuses a removal: that is the folder's permission.
+        let _ = temp;
+        false
+    }
+}
+
+/// Removes the temp files a crash left in `dir` (every `.clauseo-<digits>.tmp`, at any number:
+/// a write whose first renames went leaves the later ones), before a write there: the matter's
+/// one writer has none in flight then. One listing of `dir`; links and anything not a regular
+/// file are skipped. A file that does not go is logged once.
+pub(crate) fn sweep_temps(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut left = 0_u32;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !is_temp_name(&name) || !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            continue;
+        }
+        match remove_temp(&entry.path()) {
+            Err(err) if err.kind() != io::ErrorKind::NotFound => left += 1,
+            _ => {}
+        }
+    }
+    if left > 0 {
+        tracing::warn!(left, "a crashed write's temp files left behind");
+    }
+}
+
+/// Whether `name` is exactly `.clauseo-<one or more ASCII digits>.tmp`, [`new_temp`]'s names.
+fn is_temp_name(name: &std::ffi::OsStr) -> bool {
+    name.to_str()
+        .and_then(|name| name.strip_prefix(".clauseo-"))
+        .and_then(|rest| rest.strip_suffix(".tmp"))
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 impl Drop for Staged {
     fn drop(&mut self) {
         if let Some(temp) = self.temp.take()
-            && let Err(err) = remove_file(&temp)
+            && let Err(err) = remove_temp(&temp)
         {
             tracing::warn!(error = %err, "temp file left behind");
         }
@@ -483,5 +580,7 @@ fn new_temp(dir: &Path) -> Result<(PathBuf, File), Error> {
 
 #[cfg(test)]
 mod keep_tests;
+#[cfg(test)]
+mod leftover_tests;
 #[cfg(test)]
 mod tests;

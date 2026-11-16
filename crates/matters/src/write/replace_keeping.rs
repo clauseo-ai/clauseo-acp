@@ -30,7 +30,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::{Lost, TEMP_TRIES, remove_file, rename};
+use super::{Lost, TEMP_TRIES, rename};
 use crate::matter::backups::backup_name;
 
 /// What [`next_step`] chose after the call.
@@ -104,7 +104,7 @@ pub(super) fn replace_keeping(
     let backup_there = there(&backup);
     match next_step(result.is_err(), target_there, backup_there) {
         Step::Done => {
-            if backup_there && let Err(err) = remove_file(&backup) {
+            if backup_there && let Err(err) = super::remove_temp(&backup) {
                 tracing::warn!(error = %err, "backup of a replaced file left behind");
             }
             Ok(Lost::default())
