@@ -26,6 +26,18 @@ check() {
   fi
 }
 
+# check_worker_lock <expected worker_lock> <path>...
+check_worker_lock() {
+  local want=$1
+  shift
+  local got
+  got=$(printf '%s\0' "$@" | bash "$script" 2> /dev/null | sed -n 's/^worker_lock=//p')
+  if [ "$got" != "$want" ]; then
+    echo "FAIL: $* -> worker_lock = $got, want $want"
+    fail=1
+  fi
+}
+
 T="true"
 F="false"
 
@@ -56,6 +68,7 @@ check "$T $T $T $T" ui/app/src/review/registry-panels.tsx
 check "$T $T $T $T" ui/app/src/room/room-commands.ts
 check "$T $T $T $T" ui/e2e/app-windows/smoke.spec.ts
 check "$T $T $T $T" ui/e2e/app-windows/scenarios/word-one-docx.jsonl
+check "$T $T $T $T" ui/app/copy-approvals/UC-agents-subagents-scale.json
 check "$T $F $F $F" docs/decisions/0006-store-format.md
 check "$T $F $F $F" docs/ui-states.md docs/other.md
 
@@ -104,6 +117,29 @@ check "$T $T $T $T" $'README.md\n'
 check "$T $T $T $T" $'README.md\nui/app/src/App.tsx'
 check "$T $T $T $T" $'docs/a.md\ncrates/desktop/src/lib.rs'
 
+# The counts Worker's lock file: what it resolves (its folder, crates/counts, any Cargo.toml in
+# crates/ or at the root, the root Cargo.lock), and every path when everything runs.
+check_worker_lock "$T" crates/counts/src/lib.rs
+check_worker_lock "$T" crates/counts/README.md
+check_worker_lock "$T" crates/counts/assets/x.json
+check_worker_lock "$T" Cargo.lock
+check_worker_lock "$T" Cargo.toml
+check_worker_lock "$T" crates/host/Cargo.toml
+check_worker_lock "$T" services/counts-worker/src/lib.rs
+check_worker_lock "$T" services/counts-worker/Cargo.lock
+check_worker_lock "$T" README.md services/counts-worker/pnpm-lock.yaml
+check_worker_lock "$F" crates/host/src/session.rs
+check_worker_lock "$F" ui/app/src/App.tsx
+check_worker_lock "$F" ui/pnpm-lock.yaml ui/e2e/scoreboard/cli.ts
+check_worker_lock "$F" README.md
+check_worker_lock "$F" docs/architecture/overview.md docs/img/flow.svg
+check_worker_lock "$F" xtask/Cargo.toml
+check_worker_lock "$F" fuzz/Cargo.toml fuzz/Cargo.lock
+check_worker_lock "$T" .github/workflows/ci.yml
+check_worker_lock "$T" some-new-dir/thing.rs
+check_worker_lock "$T" $'README.md\n'
+check_worker_lock "$T"
+
 # APP_CRATES is clauseo-desktop's path-dependency closure. Each crate's Cargo.toml names a
 # workspace crate as `path = "../<dir>"`; `path = "."` and `path = "src/..."` are its own targets.
 deps() {
@@ -149,8 +185,26 @@ normalize() { # a/b/../c -> a/c
   done
   printf '%s\n' "${out[*]}"
 }
+# A literal that names a folder (subagents.rs's "../../ui/app") stands for the files the same .rs
+# file joins onto it (.join("copy-approvals/...")) that exist; with none, for the folder itself.
 reads=$(
-  grep -rhoE --include='*.rs' '"(\.\./)+(ui|docs)/[^"]+"' crates | tr -d '"' | sed -E 's#^(\.\./)+##'
+  grep -rlE --include='*.rs' '"(\.\./)+(ui|docs)/[^"]+"' crates | while IFS= read -r file; do
+    grep -oE '"(\.\./)+(ui|docs)/[^"]+"' "$file" | tr -d '"' | sed -E 's#^(\.\./)+##' | sort -u \
+      | while IFS= read -r lit; do
+        if [ ! -d "$lit" ]; then
+          echo "$lit"
+          continue
+        fi
+        found=""
+        while IFS= read -r rel; do
+          if [ -n "$rel" ] && [ -f "$lit/$rel" ]; then
+            echo "$lit/$rel"
+            found=1
+          fi
+        done < <(grep -oE '\.join\("[^".][^"]*"\)' "$file" | sed -E 's/^\.join\("//; s/"\)$//')
+        if [ -z "$found" ]; then echo "$lit"; fi
+      done
+  done
   grep -rnoE --include='*.rs' 'include_str!\("[^"]+\.md"\)' crates | while IFS= read -r hit; do
     file=${hit%%:*}
     lit=${hit#*include_str!(\"}

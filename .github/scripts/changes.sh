@@ -15,6 +15,12 @@
 # - product: product code changed (crates/, ui/, Cargo.toml, Cargo.lock), the paths of
 #            comment.ts's isProductPath, or what builds or budgets it (rust-toolchain.toml,
 #            .cargo/, budgets.toml): the scoreboards run. Everything on when all() is.
+# - worker_lock: what the counts Worker (services/counts-worker/, a workspace with its own
+#            Cargo.lock) resolves could have changed: its folder, crates/counts/, a Cargo.toml in
+#            crates/ or at the root (crates/counts inherits the root's workspace dependencies),
+#            or the root Cargo.lock. ci.yml's counts-worker-lock job checks that its lock file
+#            still resolves with --locked (2026-11-16: #1173 gave crates/counts a libc dependency,
+#            updated only the root Cargo.lock, and counts-deploy.yml failed on main).
 #
 # Fail safe: a path no rule knows turns every output on, and so does an empty diff (a diff that
 # lists nothing is more likely a broken fetch than a no-op pull request). Each rule is a `case`
@@ -29,12 +35,12 @@ set -euo pipefail
 APP_CRATES="desktop host search protocol settings process fake_agent reducer store matters acp limits codex_appserver connectors profile agents counts sandbox blocklist"
 
 nl=$'\n'
-rust=false app=false ui=false product=false product_also=false unknown=""
+rust=false app=false ui=false product=false product_also=false worker_lock=false unknown=""
 count=0
 paths=()
 
 # Fail safe means everything: the scoreboards and the comment too.
-all() { rust=true app=true ui=true product_also=true; }
+all() { rust=true app=true ui=true product_also=true worker_lock=true; }
 
 is_app_crate() {
   local c
@@ -62,6 +68,13 @@ classify() {
       return
       ;;
   esac
+  # The counts Worker's lock file, on top of whatever the rule below decides for the path. A case
+  # glob's * matches a /, so crates/*/Cargo.toml is a Cargo.toml at any depth under crates/.
+  case "$p" in
+    Cargo.toml | Cargo.lock | crates/*/Cargo.toml | crates/counts/* | services/counts-worker/*)
+      worker_lock=true
+      ;;
+  esac
   case "$p" in
     # Review routing and the pull request template: read by people, not jobs.
     .github/CODEOWNERS | .github/pull_request_template.md) ;;
@@ -85,6 +98,8 @@ classify() {
     ui/app/src/review/registry-*.tsx | ui/app/src/room/room-commands.ts) ui=true app=true rust=true ;;
     docs/firm-it.md) rust=true ;;
     ui/app/doc-approvals.json) ui=true app=true rust=true ;;
+    # The copy approvals: profile's legal tests (crates/profile/tests/legal/) check its lines against them.
+    ui/app/copy-approvals/*) ui=true app=true rust=true ;;
     # The window's specs and scenarios: the host's e2e_scenarios test launches each one they play.
     ui/e2e/app-windows | ui/e2e/app-windows/*) ui=true app=true rust=true ;;
     # A crate's assets are built into it (include_str!), Markdown too, so they are not prose.
@@ -96,7 +111,8 @@ classify() {
     .gitignore | .gitattributes | */.gitignore | */.gitattributes) ;;
     # Nightly fuzzing only (fuzz.yml); no pull request job builds fuzz/.
     fuzz/*) ;;
-    # The counts Worker: its own workspace, built and tested by counts-worker.yml alone.
+    # The counts Worker: its own workspace, built and tested by counts-worker.yml; ci.yml checks
+    # only its lock file (worker_lock, above).
     services/counts-worker/*) ;;
     # What every Rust build reads.
     Cargo.toml | Cargo.lock | clippy.toml) rust=true app=true ;;
@@ -140,3 +156,4 @@ echo "rust=$rust"
 echo "app=$app"
 echo "ui=$ui"
 echo "product=$product"
+echo "worker_lock=$worker_lock"
