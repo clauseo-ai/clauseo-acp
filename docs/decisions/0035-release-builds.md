@@ -416,25 +416,48 @@ or `DEVELOPER_ID`, never in a `run:` script, never printed; `release-apple.test.
 - `assemble` and `publish` are unchanged: `has_apple` true means no first-open block in the notes
   and `publish`'s `stapler validate` on every DMG. Delete `CLAUSEO_UNSIGNED_BETA` once it ships.
 
-**Entitlements**: `crates/desktop/macos/app.entitlements.plist`, named by
-`bundle.macOS.entitlements`, is an empty dict on purpose. Tauri passes it to every codesign it runs
-(the .app, the main binary, the externalBin sidecars); the helpers get none. Kept: nothing, since
-nothing Clauseo runs needs a hardened-runtime exception. Left out, and refused by the check:
-`get-task-allow` (lets any process of the user attach a debugger; notarisation refuses it; never on
-a release); `cs.allow-jit` and `cs.allow-unsigned-executable-memory` (WKWebView's JavaScript JIT
-runs in WebKit's own WebContent process, not in the app; the Rust host, clauseo-mcp,
-agent-browser (a native Rust binary), stetdoc and poppler generate no code); and
-`cs.disable-library-validation` (the app loads no dylib that isn't Apple's or its own: no plugin,
-and `dlopen2` and `libloading` are on Linux only), as well as
-`cs.allow-dyld-environment-variables`, `cs.disable-executable-page-protection` and `cs.debugger`.
-Chrome, which agent-browser drives, the agents and any node or python they start are processes of
-their own, assessed under their own signatures: the parent's hardened runtime doesn't pass to them.
-The app is not sandboxed (Developer ID, outside the Mac App Store), so no App Sandbox, network or
-file entitlement applies, and it uses no privacy-protected device (camera, microphone, Apple
-Events). The ad hoc builds (test, dry, the beta) already sign the .app, the main binary and
-the sidecars with the hardened runtime (`hardenedRuntime: true`) and the helpers with
-`--options runtime`; with the file they also carry the empty entitlements, which changes nothing
-they may do.
+**Entitlements, per binary** (never one blanket set). Every Mach-O in the .app gets the hardened
+runtime (`--options runtime`) in every mode, ad hoc and Developer ID alike, and only what it needs.
+`release.yml`'s "Every Mach-O has the hardened runtime and its own entitlements" step checks it on
+every macOS leg: `file` finds the Mach-O files, which must be exactly these, and each must show a
+`runtime` flag and hold exactly the keys below. The bundle holds no dylib or framework
+(`bundle.macOS.frameworks` is unset; the same scan would name one).
+
+| Mach-O | Entitlements | Why (evidence) |
+|---|---|---|
+| `Contents/MacOS/Clauseo` and the .app | `macos/app.entitlements.plist`, an empty dict | The Rust host and the WKWebView UI. WebKit's JavaScript JIT runs in WebKit's own WebContent process, not in the app, so no `allow-jit`. It links only Apple's frameworks, and `dlopen2`/`libloading` are Linux-only (Cargo.lock: tao, libappindicator), so library validation stays on. Not sandboxed (Developer ID), so no App Sandbox keys. No camera, microphone or Apple Events. |
+| `Contents/MacOS/clauseo-mcp` (externalBin) | the same file, so empty | Rust, built here; starts agent-browser and Chrome as processes of their own. No JIT, no foreign library. Tauri 2.10.2 signs every externalBin with the app's file and has no per-sidecar setting, and the file is empty, so the result is the same as "none". |
+| `Contents/Helpers/clauseo-agent-browser` | none | agent-browser 0.41.1, a native Rust binary (19.4 MB budget, `native/daemon.rs`), speaking CDP to a Chrome it doesn't load in-process. No JIT, no foreign library. |
+| `Contents/Helpers/stetdoc/stetdoc` | none | clauseo-ai/stetdoc's single native program. No JIT, no plugin. |
+| `Contents/Helpers/pdf/pdftoppm`, `pdf/pdfinfo`, `pdf/pdftotext` | none | poppler, built here (crates/pdf), the only files in `pdf/`, so no dylib beside them. No JIT. |
+
+Left out everywhere, and refused by the Developer ID check:
+- `get-task-allow`: lets any process of the user attach a debugger; notarisation refuses it; never
+  on a release.
+- `cs.allow-jit`, `cs.allow-unsigned-executable-memory`: no binary generates code.
+- `cs.disable-library-validation`: none loads a library signed by someone else.
+- `cs.allow-dyld-environment-variables`, `cs.disable-executable-page-protection`, `cs.debugger`.
+
+A binary that one day needs an entitlement gets a file of its own: a helper's `codesign` line in
+the bundle step names it, and the check step's table gives that path its keys.
+
+**What Clauseo runs from outside the bundle**, as child processes. A hardened parent's entitlements
+and runtime don't pass to a child: each process runs under its own executable's signature. What
+matters for these is their own signature. On Apple silicon the kernel runs no arm64 code without at
+least an ad hoc one. Files Clauseo downloads itself carry no quarantine mark, so Gatekeeper doesn't
+assess them.
+- **Node** for the agents' ACP adapters: nodejs.org's 24.22.0 archive, checked by SHA-256, or the
+  user's own Node. Signed by its publisher, with its own JIT entitlements.
+- **The agents' CLIs** (claude-agent-acp, codex-acp and the binaries their npm packages carry):
+  their vendors' signatures.
+- **The Python runtime and tesseract** (stage D's python-runtime release, downloaded at run time):
+  python-build-standalone's interpreter as published. Tesseract is "signed ad hoc on macOS"
+  (xtask/src/python_runtime/build.rs).
+- **Chrome**: the lawyer's installed Google Chrome, which clauseo-mcp starts (decision 0029):
+  Google's signature.
+
+None needs anything from Clauseo's entitlements. Changing them would change nothing for these
+processes.
 
 **Proven before the account exists**: the workflow's logic (`release-apple.test.mjs`, a dry run);
 the entitlements and the hardened runtime (an ad hoc build on the VM, which now carries the file);

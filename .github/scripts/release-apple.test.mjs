@@ -835,3 +835,69 @@ test("the bundler's codesign gets --timestamp, and a signature without one fails
   assert.notEqual(late, text);
   assert.notDeepEqual(wrapperPlacementProblems(late), []);
 });
+
+// ---- Every mode: the hardened runtime and per-binary entitlements on every Mach-O ----
+
+const RUNTIME_STEP = "Every Mach-O has the hardened runtime and its own entitlements";
+
+/** What the every-mode runtime check lacks, or where it is skipped. */
+function runtimeStepProblems(text) {
+  const steps = stepsOf(text, "build");
+  const at = (name) => steps.findIndex((step) => step.name === name);
+  const step = steps[at(RUNTIME_STEP)];
+  if (step === undefined) {
+    return ["build has no every-mode hardened runtime check"];
+  }
+  const problems = [];
+  if (step.if !== "runner.os == 'macOS'") {
+    problems.push(`the hardened runtime check runs under ${step.if}, not on every macOS leg`);
+  }
+  if (!(at(BUNDLE_STEP) < at(RUNTIME_STEP) && at(RUNTIME_STEP) < at("Collect this leg's assets"))) {
+    problems.push("the hardened runtime check is not after the bundle and before the assets are collected");
+  }
+  const wanted = [
+    "grep -Eq ' flags=0x[0-9a-f]+\\(([a-z-]+,)*runtime(,[a-z-]+)*\\) ' <<< \"$info\" ||",
+    '[ "$have" = "$want" ] ||',
+    "Contents/MacOS/*) expected=$app_keys ;;",
+    "Contents/Helpers/*) expected='[]' ;;",
+    'held=$(codesign -d --entitlements - --xml "$file" 2> /dev/null | keys) ||',
+    '[ "$held" = "$expected" ] ||',
+    "printf '.\\t%s\\n' \"$app_keys\" >> \"$RUNNER_TEMP/entitlements.tsv\"",
+  ];
+  for (const words of wanted) {
+    if (!step.run.includes(words)) {
+      problems.push(`the hardened runtime check has no ${words}`);
+    }
+  }
+  // The ad hoc helpers get the runtime too; the bundler's own signatures get it from hardenedRuntime.
+  const bundle = stepNamed(text, "build", BUNDLE_STEP)?.run ?? "";
+  if (!bundle.includes('codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime "$helper"')) {
+    problems.push("the ad hoc helpers are not signed with --options runtime");
+  }
+  return problems;
+}
+
+test("every mode's .app has the hardened runtime and per-binary entitlements on every Mach-O", () => {
+  const text = workflow();
+  assert.deepEqual(runtimeStepProblems(text), []);
+  const head = `      - name: ${RUNTIME_STEP}\n        if: runner.os == 'macOS'\n`;
+  const breaks = [
+    // Developer ID only: the ad hoc build the VM tests would go unchecked.
+    text.replace(head, `      - name: ${RUNTIME_STEP}\n        if: env.DEVELOPER_ID == 'true'\n`),
+    // A Mach-O without the runtime let through.
+    text.replace("grep -Eq ' flags=0x[0-9a-f]+\\(([a-z-]+,)*runtime(,[a-z-]+)*\\) ' <<< \"$info\" ||", "true ||"),
+    // One blanket set: helpers given the app's entitlements.
+    text.replace("Contents/Helpers/*) expected='[]' ;;", "Contents/Helpers/*) expected=$app_keys ;;"),
+    // The .app itself skipped.
+    text.replace("          printf '.\\t%s\\n' \"$app_keys\" >> \"$RUNNER_TEMP/entitlements.tsv\"\n", ""),
+    // Ad hoc helpers without the runtime.
+    text.replace(
+      'codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime "$helper"',
+      'codesign --force -s "$APPLE_SIGNING_IDENTITY" "$helper"',
+    ),
+  ];
+  for (const [i, broken] of breaks.entries()) {
+    assert.notEqual(broken, text, `break ${i} applies`);
+    assert.notDeepEqual(runtimeStepProblems(broken), [], `break ${i} is caught`);
+  }
+});

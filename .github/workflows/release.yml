@@ -990,7 +990,8 @@ jobs:
       # lives only as long as its process; the bundler then finds APPLE_SIGNING_IDENTITY in the
       # search list and signs the externalBin sidecars, the main binary and the .app with it
       # (--options runtime, macos/app.entitlements.plist, and --timestamp through the codesign
-      # wrapper below, which fails a signature without one before anything is notarised), notarises the .app with the API key (APPLE_API_KEY, APPLE_API_ISSUER and
+      # wrapper below, which fails a signature without one before anything is notarised),
+      # notarises the .app with the API key (APPLE_API_KEY, APPLE_API_ISSUER and
       # APPLE_API_KEY_PATH, the .p8 written here), prints the notary log if it is refused, and
       # staples it; the DMG and the updater archive hold the stapled .app. The bundler never
       # notarises the DMG, so this step does, staples and validates it, and prints the notary log
@@ -1156,6 +1157,58 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app" ||
             { echo "::error::codesign --verify --deep --strict fails on $app"; exit 1; }
           echo "- $TARGET Clauseo.app: Contents/MacOS holds $have; Contents/Helpers holds $helpers(stetdoc/stetdoc, pdf/pdftoppm, pdf/pdfinfo, pdf/pdftotext; signed); the .app verifies --deep --strict" |
+            tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Every mode, ad hoc included (the VM tests a test build for this): every Mach-O file in the
+      # .app (`file` finds them) is exactly the main binary, the externalBin sidecars and the five
+      # helpers, and each, and the .app, is signed with the hardened runtime (a `runtime` flag in
+      # codesign -dvvv's flags=) and holds exactly its own entitlements, decided per binary in
+      # decision 0035 ("Entitlements, per binary"): Contents/MacOS's files and the .app the
+      # bundler's bundle.macOS.entitlements file (it signs them all with it), Contents/Helpers's
+      # none (this workflow signs them with none). Compared as keys, through plutil, so codesign's XML
+      # layout doesn't matter.
+      - name: Every Mach-O has the hardened runtime and its own entitlements
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          app=$RELEASE_DIR/bundle/macos/Clauseo.app
+          app_file=crates/desktop/$(jq -er '.bundle.macOS.entitlements' crates/desktop/tauri.conf.json)
+          [ -f "$app_file" ] || fail "tauri.conf.json's bundle.macOS.entitlements names no file ($app_file)"
+          # A plist on stdin (empty: none), as its sorted keys.
+          keys() {
+            local xml
+            xml=$(cat)
+            if [ -z "$xml" ]; then echo '[]'; else plutil -convert json -o - - <<< "$xml" | jq -cS 'keys'; fi
+          }
+          app_keys=$(keys < "$app_file")
+          want=$({ echo Contents/MacOS/Clauseo
+            jq -r '.bundle.externalBin[] | "Contents/MacOS/" + ltrimstr("binaries/")' crates/desktop/release/sidecars.generated.json
+            printf '%s\n' Contents/Helpers/clauseo-agent-browser Contents/Helpers/stetdoc/stetdoc \
+              Contents/Helpers/pdf/pdftoppm Contents/Helpers/pdf/pdfinfo Contents/Helpers/pdf/pdftotext; } | LC_ALL=C sort)
+          have=$(cd "$app" && find . -type f -print0 | xargs -0 file -N -F '|' | sed -n '/ (for architecture /d; s/^\.\/\(.*\)| Mach-O.*/\1/p' | LC_ALL=C sort)
+          [ "$have" = "$want" ] ||
+            fail "the Mach-O files in $app are $(echo $have); they must be exactly $(echo $want)"
+          while IFS= read -r macho; do
+            case "$macho" in
+              Contents/MacOS/*) expected=$app_keys ;;
+              Contents/Helpers/*) expected='[]' ;;
+              *) fail "no entitlements decided for $macho" ;;
+            esac
+            printf '%s\t%s\n' "$macho" "$expected"
+          done <<< "$have" > "$RUNNER_TEMP/entitlements.tsv"
+          printf '.\t%s\n' "$app_keys" >> "$RUNNER_TEMP/entitlements.tsv"
+          while IFS=$'\t' read -r macho expected; do
+            file=$app/$macho
+            [ "$macho" = . ] && file=$app
+            info=$(codesign -dvvv "$file" 2>&1) || fail "codesign -dvvv fails on $file"
+            grep -Eq ' flags=0x[0-9a-f]+\(([a-z-]+,)*runtime(,[a-z-]+)*\) ' <<< "$info" ||
+              fail "$file is not signed with the hardened runtime ($(grep -o 'flags=[^ ]*' <<< "$info"))"
+            held=$(codesign -d --entitlements - --xml "$file" 2> /dev/null | keys) ||
+              fail "codesign cannot read $file's entitlements"
+            [ "$held" = "$expected" ] || fail "$file holds the entitlements $held; decision 0035 gives it $expected"
+          done < "$RUNNER_TEMP/entitlements.tsv"
+          echo "- $TARGET: $(grep -c . <<< "$have") Mach-O files and the .app signed with the hardened runtime; entitlements: Contents/MacOS and the .app $app_keys, Contents/Helpers none" |
             tee -a "$GITHUB_STEP_SUMMARY"
 
       # The Developer ID's leg, after the layout check above, before anything uploads it. Every
