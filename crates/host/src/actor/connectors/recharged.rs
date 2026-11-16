@@ -90,11 +90,12 @@ pub(super) fn recharged(
 ///   begun before this result (from before its charge) is not applied. One no lower (an older
 ///   result, or a free or refused call that changed nothing) leaves a read in flight alone:
 ///   whatever that read finds is at least as new as the balance shown, and nothing would start
-///   it again (the relay dropped the connectors crate's copy, so the read asks the connector). Between recharges a
-///   balance only falls, so a higher one reported later is from a call the connector booked
-///   earlier, and showing it would undo a newer charge. A rise (a recharge) comes only from a
-///   recharge's answer or an account read, which apply as before; the paced read after each paid
-///   result (`PaidResult`, kept as is) corrects anything this rule got wrong;
+///   it again (the relay dropped the connectors crate's copy, so the read asks the connector).
+///   Between recharges a balance only falls, so a higher one reported later is from a call the
+///   connector booked earlier, and showing it would undo a newer charge. A rise (a recharge)
+///   comes only from a recharge's answer or an account read, which apply as before; the paced
+///   read after each paid result (`PaidResult`, kept as is) corrects anything this rule got
+///   wrong;
 /// - with no account held there is nothing to show it on (`set_balance`).
 ///
 /// Shown, it drives `low` and, above nothing, ends the out-of-credit state; an out-of-credits
