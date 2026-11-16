@@ -260,16 +260,71 @@ fn the_launch_does_not_add_repository_status_to_the_conversation() {
     }
     assert_eq!(GIT_STATUS_SETTING, "includeGitInstructions");
     assert_eq!(
-        claude_launch_vars(),
-        BTreeMap::from([
-            (
-                OsString::from("CLAUDE_CODE_DISABLE_CRON"),
-                OsString::from("1")
-            ),
-            (
-                OsString::from("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"),
-                OsString::from("1")
-            ),
-        ])
+        claude_launch_vars().get(&OsString::from("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS")),
+        Some(&OsString::from("1"))
     );
+}
+
+/// Every Claude launch turns Claude Code's messaging between sessions off, adds no marketplace
+/// by itself, refuses other sessions' messages and has Remote Control off: the variables in the
+/// adapter's environment, in the env it spawns Claude Code with and in the flag settings' `env`,
+/// and the two settings, over a hook's own values.
+#[test]
+fn every_claude_launch_keeps_messaging_between_sessions_and_remote_control_off() {
+    let vars = [
+        ("CLAUDE_CODE_HARBOR_KITE", "0"),
+        ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
+    ];
+    for hook in [
+        json!({}),
+        json!({"claudeCode": {"options": {
+            "env": {"CLAUDE_CODE_HARBOR_KITE": "1"},
+            "settings": {
+                "env": {"CLAUDE_CODE_HARBOR_KITE": "1"},
+                "crossSessionInbound": "accept",
+                "disableRemoteControl": false,
+            },
+        }}}),
+    ] {
+        for control in [McpControl::Clauseo, McpControl::Managed] {
+            let meta = Value::Object(session_meta(
+                hook.as_object().cloned(),
+                control,
+                None,
+                Some(&keys(OFF)),
+            ));
+            let options = &meta["claudeCode"]["options"];
+            for (name, value) in vars {
+                assert_eq!(options["env"][name], value, "{hook} {name}");
+                assert_eq!(options["settings"]["env"][name], value, "{hook} {name}");
+            }
+            assert_eq!(
+                options["settings"]["crossSessionInbound"], "refuse",
+                "{hook}"
+            );
+            assert_eq!(options["settings"]["disableRemoteControl"], true, "{hook}");
+        }
+    }
+    let launch = claude_launch_vars();
+    for (name, value) in vars {
+        assert_eq!(
+            launch.get(&OsString::from(name)),
+            Some(&OsString::from(value))
+        );
+    }
+    assert_eq!(launch.len(), 4);
+}
+
+/// `SendMessage` stays offered (it continues a helper); `ListAgents` is neither offered nor
+/// allowed.
+#[test]
+fn send_message_stays_and_list_agents_is_left_out() {
+    let options = options(json!({"allowedTools": ["ListAgents", "ListPeers"]}), ON);
+    let offered = strings(&options["tools"]);
+    assert!(offered.contains(&"SendMessage") && offered.contains(&"Agent"));
+    for name in ["ListAgents", "ListPeers"] {
+        assert!(!offered.contains(&name));
+        assert!(strings(&options["disallowedTools"]).contains(&name));
+        assert!(!strings(&options["allowedTools"]).contains(&name), "{name}");
+    }
 }
