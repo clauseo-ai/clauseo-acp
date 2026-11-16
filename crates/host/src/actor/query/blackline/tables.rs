@@ -19,6 +19,10 @@
 //!   whole, which the blackline shows;
 //! - what changed: a paired table's own properties, its grid, and each paired row's and cell's,
 //!   compared element by element, each difference named by its group ([`group_of`]);
+//! - which headers and footers were not compared at all: the texts of the parts one version has
+//!   and the other does not ([`TablesCompared::lone_header_texts`]); stetdoc's compare does not
+//!   compare a header of a section it pairs with none, and does not warn of it, so `run.rs`
+//!   says so when no part the blackline shows has that text;
 //! - what is never silent: where both sides have tables, rows or cells left between two pairs
 //!   and not as many of them, what changed there can't be put on a table, so the part may differ
 //!   ([`TablesCompared::may_differ`]); and so may the whole document when a version can't be
@@ -51,14 +55,17 @@ pub(crate) struct TablesCompared {
     pub(crate) changed: Vec<ChangedTable>,
     /// Whether the blackline may differ (the module doc).
     pub(crate) may_differ: bool,
+    /// The texts of the headers and footers some section uses that only one version has, each
+    /// with its white space taken out ([`squeezed`]), once, sorted; an empty text left out.
+    pub(crate) lone_header_texts: Vec<String>,
 }
 
 /// The tables' formatting of `old` and `new`, two .docx files' bytes, compared.
 pub(crate) fn compare(old: &[u8], new: &[u8]) -> TablesCompared {
     let (Some(old), Some(new)) = (read_package(old), read_package(new)) else {
         return TablesCompared {
-            changed: Vec::new(),
             may_differ: true,
+            ..TablesCompared::default()
         };
     };
     let mut found = TablesCompared::default();
@@ -87,6 +94,19 @@ pub(crate) fn compare(old: &[u8], new: &[u8]) -> TablesCompared {
             .any(|(name, part)| !part.tables.is_empty() && !matched.contains(name.as_str()))
     };
     found.may_differ |= alone(&old, &headers.old) || alone(&new, &headers.new);
+    let texts = |package: &Package| -> BTreeSet<String> {
+        package
+            .headers
+            .values()
+            .map(|part| squeezed(&part.text))
+            .filter(|text| !text.is_empty())
+            .collect()
+    };
+    let (old_texts, new_texts) = (texts(&old), texts(&new));
+    found.lone_header_texts = old_texts
+        .symmetric_difference(&new_texts)
+        .cloned()
+        .collect();
     // The body, the notes, then the headers and the footers; each part's tables by number.
     found.changed.sort_by_key(|table| place_rank(&table.place));
     if found.changed.len() > TABLES_MAX {
@@ -232,6 +252,12 @@ fn forms<'a>(props: &'a [Prop], name: &str) -> Vec<&'a str> {
         .collect();
     forms.sort_unstable();
     forms
+}
+
+/// `text` with its white space taken out, so a header's text read from its part and the one a
+/// story view shows (with a tab, a line break) compare equal.
+pub(crate) fn squeezed(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
 /// Adds `format` to `formats` once.

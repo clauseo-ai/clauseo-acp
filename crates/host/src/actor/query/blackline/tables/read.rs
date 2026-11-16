@@ -97,11 +97,12 @@ pub(crate) struct Package {
     pub(crate) sections: Vec<SectionParts>,
 }
 
-/// A header or footer part: where it is, and its tables.
+/// A header or footer part: where it is, its tables, and its whole text (every `w:t`).
 #[derive(Debug)]
 pub(crate) struct HeaderPart {
     pub(crate) place: Where,
     pub(crate) tables: Vec<Table>,
+    pub(crate) text: String,
 }
 
 /// One section's header and footer parts, a kind of page it has none for taking the one before
@@ -157,10 +158,14 @@ pub(crate) fn read_package(bytes: &[u8]) -> Option<Package> {
             _ => continue,
         };
         let xml = read_part(&mut zip, &rel.target, &mut left)?;
-        let (tables, _, _) = tables_of(&xml, false)?;
+        let (tables, _, text) = tables_of(&xml, false)?;
         match place {
             Where::Header(_) | Where::Footer(_) => {
-                let part = HeaderPart { place, tables };
+                let part = HeaderPart {
+                    place,
+                    tables,
+                    text,
+                };
                 package.headers.insert(rel.target.clone(), part);
             }
             notes @ (Where::Body | Where::Footnotes | Where::Endnotes) => {

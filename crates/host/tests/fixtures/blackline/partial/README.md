@@ -82,6 +82,13 @@ The notes, headers and footers, what compare says beside the redline, and table 
   of its exclusions), and the section's break shows no mark.
 - `cellfmt-body-old.docx`, `cellfmt-body-new.docx`: the shading of `cellfmt-*.docx` beside a body
   change; compare marks the body's change only.
+- `cover-old.docx`, `cover-new.docx`: a cover section inserted first with a header of its own,
+  while the shading of the table in the old header (now on section 2) changes, beside a body
+  change. compare warns `compare_not_restored` for the inserted paragraph that ends the cover
+  section; its headers' view shows both headers unchanged.
+- `added-old.docx`, `added-new.docx`: an existing paragraph ends a new first section with a header
+  of its own, beside a body change. compare warns nothing, marks neither the header nor the
+  section break, and its headers' view shows the new header unchanged.
 - Each of these four pairs has `view-<pair>.json`, `check-<pair>.json` and
   `final-<pair>-old.json`, `final-<pair>-new.json` as above.
 

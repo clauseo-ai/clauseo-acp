@@ -145,6 +145,7 @@ fn each_group_of_formatting_is_named() {
             TablesCompared {
                 changed: vec![body(1, &[format])],
                 may_differ: false,
+                ..TablesCompared::default()
             },
             "{format:?}"
         );
@@ -183,6 +184,7 @@ fn a_table_inserted_beside_a_change_pairs_by_text() {
         TablesCompared {
             changed: vec![body(3, &[Shading])],
             may_differ: false,
+            ..TablesCompared::default()
         }
     );
 }
@@ -198,6 +200,7 @@ fn tables_that_can_not_be_paired_may_differ() {
         TablesCompared {
             changed: Vec::new(),
             may_differ: true,
+            ..TablesCompared::default()
         }
     );
     // A row of the table split in two with new text: the rows can't be paired either.
@@ -255,6 +258,7 @@ fn a_tables_change_in_a_header_names_the_header() {
                 formats: vec![Alignment],
             }],
             may_differ: false,
+            ..TablesCompared::default()
         }
     );
 }
@@ -321,8 +325,31 @@ fn a_header_whose_section_moved_pairs_from_the_last_section_back() {
                 number: 1,
                 formats: vec![Shading],
             }],
-            ..TablesCompared::default()
+            may_differ: false,
+            lone_header_texts: vec!["Coverheader.".to_owned()],
         }
+    );
+}
+
+/// A header's text one version only has is listed, white space taken out; a header edited in
+/// place lists its text on both sides, and the same header lists nothing.
+#[test]
+fn a_header_text_one_version_only_has_is_listed() {
+    let old = sectioned(&[hdr(&p("Main header."))], "One year.");
+    let added = sectioned(
+        &[hdr(&p("Schedule header.")), hdr(&p("Main header."))],
+        "Two years.",
+    );
+    assert_eq!(compare(&old, &added).lone_header_texts, ["Scheduleheader."]);
+    let edited = sectioned(&[hdr(&p("Main header, revised."))], "One year.");
+    assert_eq!(
+        compare(&old, &edited).lone_header_texts,
+        ["Mainheader,revised.", "Mainheader."]
+    );
+    let blank = sectioned(&[hdr(&p("Main header.")), hdr("")], "Two years.");
+    assert_eq!(
+        compare(&old, &blank).lone_header_texts,
+        Vec::<String>::new()
     );
 }
 
