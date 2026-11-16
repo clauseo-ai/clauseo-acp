@@ -160,10 +160,10 @@ pub(crate) fn is_python_runtime(name: &str) -> bool {
 /// `Read` and `Edit` for each of `deny.targets`, then `Edit` alone for each of [`READ_ONLY`]
 /// and all under it; then, of the other matters' fence (`agent::matter_fence`), `Read` of the
 /// fence paths of each matter the session is not invited into and `Edit` of every matter's, each
-/// path and all under it, and `Edit` of the folders above them that hold no own place
-/// ([`ancestors::ancestor_edit_rules`]); then, unless the launch has Claude's shell sandbox
-/// (`sandboxed`: macOS or Linux with `agent::loads::sandbox` on; never Windows, nor a launch
-/// whose sandbox is `Off`), the own folders' glob denies ([`own_shell_glob_deny_rules`]), which
+/// path and all under it (no folder above one: its `Edit` deny would cover all inside it, an
+/// ordinary save in Documents or every shell command under `/tmp`); then, unless the launch has
+/// Claude's shell sandbox (`sandboxed`: macOS or Linux with `agent::loads::sandbox` on; never
+/// Windows, nor a launch whose sandbox is `Off`), the own folders' glob denies ([`own_shell_glob_deny_rules`]), which
 /// refuse an allowed listing or read of an own folder that holds a glob. Under the sandbox they
 /// would buy nothing (Seatbelt checks the real path a glob reaches) and cost a pipe holding a glob
 /// after an own read (`cat <notes>/a.md | grep 'a.*b'`), which they refuse outright, the deny
@@ -205,9 +205,6 @@ pub(crate) fn claude_deny_rules_on(
             push(format!("{tool}({base})"));
             push(format!("{tool}({base}/**)"));
         }
-    }
-    for rule in ancestors::ancestor_edit_rules(deny, windows) {
-        push(rule);
     }
     if !sandboxed {
         for rule in own_shell_glob_deny_rules(deny, windows) {
@@ -543,7 +540,6 @@ fn key(path: &Path, insensitive: bool) -> Vec<OsString> {
 
 #[cfg(test)]
 mod ancestor_tests;
-mod ancestors;
 #[cfg(test)]
 pub(crate) mod big_folder;
 #[cfg(test)]
