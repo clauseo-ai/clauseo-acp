@@ -262,10 +262,10 @@ fn the_budget_fences_the_smallest_matters_first() {
 #[test]
 fn a_short_path_into_the_own_matter_names_no_parent() {
     let at = |path: &str| PathBuf::from(crate::testing::abs(path));
-    let (long, short) = (
-        "/Users/clauseo-lawyer/Matters/Acme",
-        "/Users/CLAUSE~1/Matters/Acme",
-    );
+    // unix-paths-ok: `at` passes every path built from it through crate::testing::abs
+    let long = "/Users/clauseo-lawyer/Matters/Acme";
+    // unix-paths-ok: `at` passes every path built from it through crate::testing::abs
+    let short = "/Users/CLAUSE~1/Matters/Acme";
     let mut acme = Other::new(id(1), "Acme".to_owned(), at(long), false);
     acme.spellings = vec![at(long), at(short)];
     let mut fence = MatterFence::asked(vec![acme]);
