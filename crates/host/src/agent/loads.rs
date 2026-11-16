@@ -128,32 +128,19 @@ pub(crate) const CLAUDE_AI_MCP_VAR: &str = "ENABLE_CLAUDEAI_MCP_SERVERS";
 /// where the next writes. Unset, the folder a call's `cd` reaches would carry to the next.
 pub(crate) const CLAUDE_SHELL_FOLDER_VAR: &str = "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR";
 
-/// The Claude Code variable that, set to `1`, keeps its scheduler off: no `CronCreate`,
-/// `CronDelete` or `CronList` tool, and no scheduled task is started (Claude Code 2.1.293 reads
-/// it from the process env). Clauseo has no scheduling, so every Claude launch sets it, in the
-/// adapter's environment, in `claudeCode.options.env` and in the flag settings' `env`
-/// ([`session_meta`], [`claude_launch_vars`]). `ScheduleWakeup` stays offered with it set, so
-/// it is denied by name too (`tools::NOT_OFFERED`).
+/// A launch variable Clauseo sets on every Claude launch ([`CLAUDE_LAUNCH_VARS`]).
 pub(crate) const CLAUDE_CRON_OFF_VAR: &str = "CLAUDE_CODE_DISABLE_CRON";
 
-/// The Claude Code variable that, set to `1`, keeps the repository status (branch, user and
-/// recent commits of the folder's or a parent's git repository) out of the conversation's
-/// first message (Claude Code 2.1.293 reads it before the setting [`GIT_STATUS_SETTING`]).
-/// Clauseo works in matter folders, not repositories, so every Claude launch sets both.
+/// A launch variable Clauseo sets on every Claude launch ([`CLAUDE_LAUNCH_VARS`]).
 pub(crate) const CLAUDE_GIT_STATUS_OFF_VAR: &str = "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS";
 
-/// The flag setting that does what [`CLAUDE_GIT_STATUS_OFF_VAR`] does, `false` in every Claude
-/// launch's flag settings ([`session_meta`]).
+/// A flag setting Clauseo sets on every Claude launch ([`claude_flag_settings`]).
 pub(crate) const GIT_STATUS_SETTING: &str = "includeGitInstructions";
 
-/// The Claude Code variable that, set to `0`, turns off its messaging between sessions (and its
-/// `ListAgents` tool). Claude Code 2.1.293 reads it in `vi()`, the gate of that messaging,
-/// before any feature flag; Claude Code's own helpers are still continued by `SendMessage`.
-/// Every Claude launch sets it; [`CROSS_SESSION_SETTING`] goes with it.
+/// A launch variable Clauseo sets on every Claude launch ([`CLAUDE_LAUNCH_VARS`]).
 pub(crate) const CLAUDE_MESSAGING_OFF_VAR: &str = "CLAUDE_CODE_HARBOR_KITE";
 
-/// The Claude Code variable that, set to `1`, keeps it from adding its official plugin
-/// marketplace by itself. Clauseo gives Claude no plugins, so every launch sets it.
+/// A launch variable Clauseo sets on every Claude launch ([`CLAUDE_LAUNCH_VARS`]).
 pub(crate) const CLAUDE_MARKETPLACE_OFF_VAR: &str =
     "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL";
 
@@ -170,12 +157,10 @@ pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 4] = [
     (CLAUDE_MARKETPLACE_OFF_VAR, "1"),
 ];
 
-/// Claude Code's setting for messages between sessions, `"refuse"` in every launch's flag
-/// settings, beside [`CLAUDE_MESSAGING_OFF_VAR`].
+/// A flag setting Clauseo sets on every Claude launch ([`claude_flag_settings`]).
 pub(crate) const CROSS_SESSION_SETTING: &str = "crossSessionInbound";
 
-/// The flag setting that turns Claude Code's Remote Control off; 2.1.293 reads it from the
-/// merged settings, the flag settings among them (`fj()`).
+/// A flag setting Clauseo sets on every Claude launch ([`claude_flag_settings`]).
 pub(crate) const REMOTE_CONTROL_OFF_SETTING: &str = "disableRemoteControl";
 
 /// The keys every Claude launch sets in its flag settings ([`session_meta`]), over a hook's.
@@ -253,8 +238,8 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   `session-mode.js:22-35`, `permissions/modes.js` `resolvePermissionMode`). Whatever mode it
 ///   then starts in (`default`, `auto`, `plan`, or `acceptEdits` in forced ask) is switched to
 ///   [`claude_mode`] after the start, since `_meta` cannot set it.
-/// - `claudeCode.options.extraArgs`: `setting-sources` and [`MODE_FLAGS`] taken out, in both
-///   forms the SDK turns into a flag (`{"setting-sources": "…"}` and
+/// - `claudeCode.options.extraArgs`: `setting-sources`, [`MODE_FLAGS`] and [`TOOL_FLAGS`] taken
+///   out, in both forms the SDK turns into a flag (`{"setting-sources": "…"}` and
 ///   `{"setting-sources=…": null}`), since an extra flag goes after the SDK's own and would win.
 /// - Under [`McpControl::Clauseo`]: `strictMcpConfig: true` and `settingSources`
 ///   [`CLAUDE_SETTING_SOURCES`].
@@ -297,6 +282,7 @@ pub(crate) fn session_meta(
         extra.retain(|flag, _| {
             let taken_out = is_flag(flag, SETTING_SOURCES_FLAG)
                 || MODE_FLAGS.iter().any(|name| is_flag(flag, name))
+                || TOOL_FLAGS.iter().any(|name| is_flag(flag, name))
                 || (control == McpControl::Managed
                     && MANAGED_MCP_FLAGS.iter().any(|name| is_flag(flag, name)));
             !taken_out
@@ -354,6 +340,17 @@ pub(crate) const ALLOW_BYPASS_OPTION: &str = "allowDangerouslySkipPermissions";
 
 /// The Claude Code flag `settingSources` becomes.
 const SETTING_SOURCES_FLAG: &str = "setting-sources";
+
+/// The `extraArgs` flags that would set the tools or the flag settings beside
+/// `claudeCode.options`' own keys (an extra flag goes after the SDK's own and would win).
+const TOOL_FLAGS: [&str; 6] = [
+    "tools",
+    "allowedTools",
+    "allowed-tools",
+    "disallowedTools",
+    "disallowed-tools",
+    "settings",
+];
 
 /// The Claude Code flags that set the permission mode or allow bypass. An extra flag goes after
 /// the SDK's own `--permission-mode`, so it would win over [`CLAUDE_MODE`] and over

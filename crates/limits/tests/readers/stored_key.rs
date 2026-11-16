@@ -15,7 +15,8 @@ use futures::future::join;
 use zeroize::Zeroizing;
 
 use crate::harness::{
-    CODEX_JS, FAKE_KEY, FAKE_OPENAI_KEY, Play, Setup, SharedTimer, TestLauncher, under,
+    CLAUDE_FORCED, CODEX_JS, FAKE_KEY, FAKE_OPENAI_KEY, Play, Setup, SharedTimer, TestLauncher,
+    under,
 };
 
 /// A setup whose settings hold Claude's and Codex's entries as an install writes them: the key
@@ -106,6 +107,14 @@ fn expected_names(var: &str, extra: &[&str], dropped: &[&str]) -> Vec<OsString> 
     names
 }
 
+/// `expected_names` for a Claude read: `ANTHROPIC_API_KEY` in any case replaced by `extra`, and
+/// the variables every Claude read sets (`CLAUDE_FORCED`).
+fn claude_names(extra: &[&str]) -> Vec<OsString> {
+    let forced = CLAUDE_FORCED.map(|(name, _)| name);
+    let extra: Vec<&str> = extra.iter().copied().chain(forced).collect();
+    expected_names("ANTHROPIC_API_KEY", &extra, &forced)
+}
+
 /// The Codex reader's own drops (`readers/env.rs`'s `CODEX_DROPPED`).
 const CODEX_DROPPED: [&str; 4] = [
     "CODEX_PATH",
@@ -125,10 +134,7 @@ fn a_stored_claude_key_replaces_the_empty_placeholder_and_reads_pay_as_you_go() 
     };
     assert!(matches!(limits.billing, Billing::PayAsYouGo { .. }));
     let (names, value) = names_and(&launcher, "ANTHROPIC_API_KEY");
-    assert_eq!(
-        names,
-        expected_names("ANTHROPIC_API_KEY", &["ANTHROPIC_API_KEY"], &[])
-    );
+    assert_eq!(names, claude_names(&["ANTHROPIC_API_KEY"]));
     assert!(
         value == Some(OsString::from(FAKE_KEY)),
         "not the stored key"
@@ -192,10 +198,7 @@ fn no_variable_given_leaves_the_settings_variables() {
         };
         block_on(reader.read(AgentKind::Claude));
         let (names, value) = names_and(&launcher, "anthropic_api_key");
-        assert_eq!(
-            names,
-            expected_names("ANTHROPIC_API_KEY", &["anthropic_api_key"], &[])
-        );
+        assert_eq!(names, claude_names(&["anthropic_api_key"]));
         assert_eq!(value, Some(OsString::new()));
         launcher.wait_stdout_closed();
     }
