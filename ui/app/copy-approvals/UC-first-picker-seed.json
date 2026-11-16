@@ -1,0 +1,11 @@
+{
+  "UC-874": {
+    "en": "{agent}'s default",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (provisional; orchestrator to approve)",
+    "note": "a new conversation's model and effort menus on the composer's status line, before the plan's agent has reported its options (the host's seed): the closed picker and its one menu row read \"Claude's default\" or \"ChatGPT's default\"; never in a conversation's own menus"
+  }
+}
