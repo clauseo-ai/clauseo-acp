@@ -140,6 +140,11 @@ test("low already when the turn starts: no line", async () => {
   await status({ signed_in: { low: true, balance: { credits: 6 } } });
   await end(9, T3);
   expect(h!.all("low-credit")).toHaveLength(0);
+  // the control: credit back, then low again while a turn runs, and the line does show
+  await start(10, 4, uuid(4, 4), "And Delhi?", "One from Delhi.");
+  await status(OK);
+  await status(LOW);
+  expect(linesUnder()).toHaveLength(1);
 });
 
 test("low, then not low, then low again in a later turn: the line shows again, under that turn", async () => {
