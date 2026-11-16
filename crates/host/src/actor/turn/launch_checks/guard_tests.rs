@@ -1,11 +1,12 @@
-//! The guard's folder at the launch (`folders.rs` `make_guard`): the record made for any agent
-//! but Claude, and the no-copy list (its header alone) for every agent, in a folder of the
-//! session's own, `pre_write_guard::record::folder`, with each file's identity kept, and removed
-//! with the run folder; a Claude session makes the folder and the list alone; anything
-//! already at the session's guard folder (a folder holding a file of the record's name, a file,
-//! a symlink, a dangling one or a junction) refuses the launch, is left as it was, and the run
-//! folder is taken back. A link at the guard folders' parent, `<data>/browser/guard`, is removed,
-//! never followed, and a real folder made in its place: the launch goes on, a Claude session's too.
+//! The guard's folder at the launch (`folders.rs` `make_guard`): the record made for any agent but
+//! Claude, and the no-copy list (its header alone) for every agent, in a folder of the session's
+//! own, `pre_write_guard::record::folder`, with each file's identity kept, and removed with the run
+//! folder; a Claude session makes the folder and the list alone; anything already at the session's
+//! guard folder is left as it was: a symlink, a dangling one or a junction refuses the launch of
+//! any agent, the run folder taken back; a folder holding a file of the record's name, or a file,
+//! refuses any agent's but Claude's, which goes on without a list (the guard's live check still
+//! applies). A link at the guard folders' parent, `<data>/browser/guard`, is removed, never
+//! followed, and a real folder made in its place: the launch goes on, a Claude session's too.
 
 use std::path::{Path, PathBuf};
 
@@ -112,7 +113,12 @@ fn a_claude_session_makes_the_guard_folder_with_the_list_alone() {
 /// Refuses the launch for what is at the session's guard folder: `agent.launch_failed`, no
 /// record and no list, the run folder taken back; for a Claude session too.
 fn refused(data: &Data, run: &RunFolders) {
-    for claude in [false, true] {
+    refused_for(data, run, &[false, true]);
+}
+
+/// [`refused`] for the agents `claudes` says (`true`: Claude).
+fn refused_for(data: &Data, run: &RunFolders, claudes: &[bool]) {
+    for &claude in claudes {
         let mut run = run.clone();
         // Not `run.make` again: a new sweep would set the planted folder aside.
         write::create_dir_all(&run.root).unwrap();
@@ -124,9 +130,21 @@ fn refused(data: &Data, run: &RunFolders) {
     }
 }
 
+/// A Claude launch whose guard folder cannot be made for an I/O reason (no link at its place)
+/// goes on without a list, nothing made or removed there, and the run folder kept: Claude's hook
+/// needs no record, and the guard's live check still applies.
+fn claude_launches_without_a_list(data: &Data, run: &RunFolders) {
+    let mut run = run.clone();
+    write::create_dir_all(&run.root).unwrap();
+    make_guard(&mut run, &data.0, true).unwrap();
+    assert_eq!((run.guard, run.no_copy), (None, None));
+    assert!(run.root.exists(), "the run folder is kept");
+}
+
 /// A folder already at the session's guard folder, holding a file of the record's name: the
 /// create-new call refuses it, so the host's `O_EXCL` never meets the file, which keeps its text;
-/// and `O_EXCL` alone refuses that file too.
+/// and `O_EXCL` alone refuses that file too. Codex's launch is refused; Claude's goes on without a
+/// list (a stale folder or file is an I/O reason, not a link).
 #[test]
 fn a_folder_or_a_file_at_the_guard_folders_place_refuses_the_launch() {
     let data = Data::new("folder");
@@ -135,7 +153,8 @@ fn a_folder_or_a_file_at_the_guard_folders_place_refuses_the_launch() {
     write::create_dir_all(&folder).unwrap();
     let file = record::file(&folder);
     write::write_file(&file, b"planted\n").unwrap();
-    refused(&data, &run);
+    refused_for(&data, &run, &[false]);
+    claude_launches_without_a_list(&data, &run);
     assert_eq!(std::fs::read(&file).unwrap(), b"planted\n");
     let error = write::create_record(&file).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
@@ -146,7 +165,8 @@ fn a_folder_or_a_file_at_the_guard_folders_place_refuses_the_launch() {
     let folder = guard_folder(&data.0, &run);
     write::create_dir_all(folder.parent().unwrap()).unwrap();
     write::write_file(&folder, b"a file\n").unwrap();
-    refused(&data, &run);
+    refused_for(&data, &run, &[false]);
+    claude_launches_without_a_list(&data, &run);
     assert_eq!(std::fs::read(&folder).unwrap(), b"a file\n");
 }
 

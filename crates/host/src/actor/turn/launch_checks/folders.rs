@@ -49,9 +49,11 @@ pub(super) fn make(run: &RunFolders, data: &Path, sweep: &RunSweep) -> Result<()
 /// ([`no_copy::make`](crate::pre_write_guard::no_copy::make)), kept in [`RunFolders::no_copy`].
 /// It sits in `<data>/browser`, which no agent's shell or patch tool may write (Codex's fence
 /// denies it, `agent/codex_fence.rs` `DATA_DENIED`; Claude's deny rules, `Read` and `Edit` of
-/// `browser/**`), so only the host makes it. Anything
-/// already at the session's guard folder (a folder, a file, a symlink or a junction) refuses the
-/// launch, the run folder taken back, as [`make`] does. File system calls: off the actor.
+/// `browser/**`), so only the host makes it. A link at the session's guard folder (a symlink or
+/// a junction) refuses the launch, the run folder taken back, as [`make`] does; anything else
+/// that stops the folder or the list being made refuses any agent's launch but Claude's, which
+/// goes on without a list, with a warning (its hook needs no record, and the guard's live check
+/// still applies). File system calls: off the actor.
 pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Result<(), Error> {
     use crate::pre_write_guard::{no_copy, record};
     let session = run.key.id();
@@ -75,6 +77,20 @@ pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Res
             run.no_copy = Some(list);
             Ok(())
         }
+        // Claude's hook needs no record, only the list, and the guard's live check still
+        // applies without it: a folder or list it could not make for an I/O reason (a disk
+        // error, a stale folder or file at its place) launches Claude without a list. A link
+        // or junction at the session's guard folder still refuses it, as it refuses any agent.
+        Err(error) if claude && !is_link(&record::folder(data, &session)) => {
+            tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "the guard's no-copy list was not made; Claude launches without it, and the \
+                 guard looks at each file itself"
+            );
+            run.guard = None;
+            run.no_copy = None;
+            Ok(())
+        }
         Err(error) => {
             run.remove();
             Err(Error::refused(
@@ -83,6 +99,12 @@ pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Res
             ))
         }
     }
+}
+
+/// Whether a link is at `path`: a symlink, dangling or not, or on Windows a junction or another
+/// reparse point; neither a real folder nor a regular file.
+fn is_link(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| !meta.is_dir() && !meta.is_file())
 }
 
 /// The data folder canonicalised, then as configured when that differs; as configured alone
