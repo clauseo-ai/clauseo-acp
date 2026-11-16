@@ -22,8 +22,9 @@ Developer ID.
   and by `workflow_dispatch`. Its `check` job sets the mode:
   - `release`: tag `vX.Y.Z` on a commit on `main`. The jobs that sign use the environment `release`;
     `assemble` leaves a draft GitHub Release; `publish` (environment `release-publish`, Rohan as
-    required reviewer) refuses unless every DMG passes `xcrun stapler validate`, then publishes it
-    with `gh release edit --draft=false --latest`, so it is the latest release explicitly. `latest` then checks it as installed apps read it (below).
+    required reviewer) refuses unless every DMG passes `xcrun stapler validate` (or the release is
+    an unsigned beta, below), then publishes it with `gh release edit --draft=false --latest`, so
+    it is the latest release explicitly. `latest` then checks it as installed apps read it (below).
   - `test`: tag `test-vX.Y.Z` on a commit of a `release-test/*` branch (a branch from `main` with only
     the version bumped, deleted after the run). Built with the `e2e` feature under the environment
     `release-test`, its updater files signed with the throwaway test key, published as a pre-release,
@@ -250,6 +251,42 @@ minisign (the `blocklist` job's tarball and SHA-256, which `latest-json.test.mjs
 a Linux build and `publish` runs on macOS for the stapler, and this way the check needs no
 environment, no approval and only a read token, and can be re-run alone. A failure there means the
 release is already public: it is the signal to fix or pull it, not a gate before it.
+
+## The unsigned beta (2026-11-16)
+
+Rohan decided the launch is an unsigned beta: the Mac build signed ad hoc and not notarised,
+Windows unsigned (as above). `publish` lets an unnotarised DMG out only on purpose, never by a
+silent fall-through:
+
+- The switch is the repository variable `CLAUSEO_UNSIGNED_BETA`, exactly `'true'` (a tag push has
+  no inputs). The release is an unsigned beta when it is `'true'` and no Apple secret is set
+  (`APPLE_CERTIFICATE`, `APPLE_ID` or `APPLE_API_KEY`, Tauri's names, read only as a boolean on
+  the step's env). `assemble` (the release notes) and `publish` decide it with the same two
+  expressions; `latest-json.test.mjs` keeps them equal.
+- Unset, or with any Apple secret: `publish` refuses exactly as before unless every DMG passes
+  `xcrun stapler validate`. The variable never weakens a signed set-up.
+- An unsigned beta: `publish` mounts each DMG and requires its `Clauseo.app` to pass
+  `codesign --verify --deep --strict` and be signed ad hoc (`Signature=adhoc`): Apple silicon runs
+  no unsigned arm64 code, and a real identity's signature means a signed set-up, which must be
+  notarised, so it is refused (this also covers Apple secrets kept only in the `release`
+  environment, which `publish` cannot see). The job summary and a warning say the release is an
+  unsigned beta.
+- The updater archive's minisign signature is the same in both: `build` signs it with the mode's
+  updater key whatever the Apple signature, `assemble` and `latest` verify it.
+- Windows: nothing refuses an unsigned installer; the SignPath steps run only with
+  `vars.SIGNPATH_ENABLED` `'true'` on a `v*` tag.
+- The release notes carry the first-open steps (macOS: System Settings, Privacy & Security, Open
+  Anyway, since macOS 15 dropped the right-click Open bypass, and the "damaged" fix
+  `xattr -dr com.apple.quarantine /Applications/Clauseo.app`; Windows: More info, Run anyway, while
+  SignPath is off) only in an unsigned beta, in the words of `docs/install/macos.md` and
+  `windows.md`, which they link. Release notes are not registered strings, so they take no copy
+  approval id (`copy:check` fails on an approved id the registry lacks); Rohan reads them on the
+  draft before he approves `publish`.
+- A job sees only the secrets its environment gives it: `assemble` (no environment) the
+  repository's, `publish` those and `release-publish`'s. Apple secrets kept only in the `release`
+  environment, where `build` would sign, are invisible to both: `publish`'s ad hoc check still
+  refuses the signed DMG, but the draft's notes would carry the first-open steps. So S20a deletes
+  the variable when the Developer ID arrives.
 
 ## Linux and sizes (S20 follow-up, 2026-11-03)
 
