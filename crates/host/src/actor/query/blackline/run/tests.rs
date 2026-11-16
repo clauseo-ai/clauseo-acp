@@ -10,8 +10,8 @@ use std::path::Path;
 use clauseo_protocol::ErrorCode;
 
 use clauseo_protocol::{
-    BlacklineNotice, BlacklineParagraph, BlacklinePart, BlacklinePartKind, ChangedTable,
-    ParagraphChange, TableFormat, TablePlace, WordBlackline,
+    BlacklineNotice, BlacklineParagraph, BlacklinePart, BlacklinePartKind, BlacklineRun,
+    ChangedTable, ParagraphChange, RunKind, TableFormat, TablePlace, WordBlackline,
 };
 
 use super::cross::{LINKS_MAX, note_what_compare_missed};
@@ -207,6 +207,61 @@ fn shaded_table() -> ChangedTable {
     }
 }
 
+/// A header's text one version only has says the header was not compared, unless a part the
+/// blackline shows holds it (in its older or its newer text), the notice is there already, or
+/// the headers' view did not read.
+#[test]
+fn a_header_text_one_version_only_has_is_said_unless_shown() {
+    let lone = |texts: &[&str]| TablesCompared {
+        lone_header_texts: texts.iter().map(|text| (*text).to_owned()).collect(),
+        ..TablesCompared::default()
+    };
+    let empty = WordBlackline {
+        paragraphs: Vec::new(),
+        truncated: false,
+        notices: Vec::new(),
+        changed_links: Vec::new(),
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
+    };
+    let mut unshown = empty.clone();
+    note_tables(&mut unshown, lone(&["Scheduleheader."]), true);
+    assert_eq!(
+        unshown.notices,
+        [BlacklineNotice::HeaderOrFooterNotCompared]
+    );
+    // When the headers' view did not read, stetdoc's list of changes says what is not shown.
+    let mut unread = empty.clone();
+    note_tables(&mut unread, lone(&["Scheduleheader."]), false);
+    assert_eq!(unread.notices, []);
+    let mut shown = empty.clone();
+    let run = |kind, text: &str| BlacklineRun {
+        kind,
+        text: text.to_owned(),
+        object: None,
+    };
+    shown.parts.push(BlacklinePart {
+        kind: BlacklinePartKind::Header { uses: Vec::new() },
+        paragraphs: vec![BlacklineParagraph {
+            change: ParagraphChange::Changed,
+            runs: vec![
+                run(RunKind::Same, "Header "),
+                run(RunKind::Del, "one"),
+                run(RunKind::Ins, "two"),
+                run(RunKind::Same, ".\t"),
+            ],
+            hidden: false,
+        }],
+    });
+    note_tables(&mut shown, lone(&["Headerone.", "Headertwo."]), true);
+    assert_eq!(shown.notices, []);
+    let mut said = empty;
+    said.notices
+        .push(BlacklineNotice::HeaderOrFooterNotCompared);
+    note_tables(&mut said, lone(&["Scheduleheader."]), true);
+    assert_eq!(said.notices, [BlacklineNotice::HeaderOrFooterNotCompared]);
+}
+
 /// What the comparison of the table formatting found goes on the blackline: the tables with the
 /// table notice, and may differ where it could not tell, in order; nothing found adds nothing.
 #[test]
@@ -225,7 +280,9 @@ fn what_the_table_comparison_found_is_said() {
         TablesCompared {
             changed: vec![shaded_table()],
             may_differ: true,
+            ..TablesCompared::default()
         },
+        true,
     );
     assert_eq!(found.changed_tables, [shaded_table()]);
     assert_eq!(
@@ -237,7 +294,7 @@ fn what_the_table_comparison_found_is_said() {
         ]
     );
     let mut none = empty.clone();
-    note_tables(&mut none, TablesCompared::default());
+    note_tables(&mut none, TablesCompared::default(), true);
     assert_eq!(none, empty);
 }
 

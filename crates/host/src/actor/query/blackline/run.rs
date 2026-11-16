@@ -27,14 +27,16 @@ use std::pin::pin;
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, Timer};
-use clauseo_protocol::{BlacklineNotice, ErrorCode, ParagraphChange, WordBlackline};
+use clauseo_protocol::{
+    BlacklineNotice, BlacklinePartKind, ErrorCode, ParagraphChange, RunKind, WordBlackline,
+};
 use futures::AsyncReadExt as _;
 use futures::future::{Either, join, select};
 
 use super::parse::receipt::read_compare;
 use super::parse::story::add_parts;
 use super::parse::{Read, ViewFailure, order, read_view};
-use super::tables::{self, TablesCompared};
+use super::tables::{self, TablesCompared, squeezed};
 use crate::config::Stetdoc;
 use crate::matter_worker::{NEW, OLD};
 
@@ -122,7 +124,7 @@ pub(crate) async fn blackline<T: Timer>(
     order(&mut read.blackline.notices);
     // The story views and the check run at once: the check's list is applied once the parts'
     // ids are counted.
-    let (stories, listed) = join(
+    let ((stories, headers_read), listed) = join(
         stories::view_stories(launcher, timer, stetdoc, dir),
         cross::list_changes(launcher, timer, stetdoc, dir),
     )
@@ -139,28 +141,71 @@ pub(crate) async fn blackline<T: Timer>(
         let compared = match &sides {
             Some((old, new)) => tables::compare(old, new),
             None => TablesCompared {
-                changed: Vec::new(),
                 may_differ: true,
+                ..TablesCompared::default()
             },
         };
-        note_tables(&mut read.blackline, compared);
+        note_tables(&mut read.blackline, compared, headers_read);
     }
     note_a_silent_difference(&mut read.blackline, differ);
     Ok(read)
 }
 
-/// Says in `blackline` what the comparison of the versions' table formatting found: the tables
-/// that changed, with [`BlacklineNotice::CellFormatChanged`], and that it may differ where it
-/// could not tell.
-pub(crate) fn note_tables(blackline: &mut WordBlackline, compared: TablesCompared) {
+/// Says in `blackline` what the comparison of the versions' files found: the tables that
+/// changed, with [`BlacklineNotice::CellFormatChanged`]; that it may differ where it could not
+/// tell; and, when the headers' view read (`headers_read`; when it did not, stetdoc's list of
+/// changes says what it holds is not shown), [`BlacklineNotice::HeaderOrFooterNotCompared`] for
+/// a header's or footer's text one version only has that no part the blackline shows holds, in
+/// its older or newer text.
+pub(crate) fn note_tables(
+    blackline: &mut WordBlackline,
+    compared: TablesCompared,
+    headers_read: bool,
+) {
     if !compared.changed.is_empty() {
         blackline.notices.push(BlacklineNotice::CellFormatChanged);
     }
     if compared.may_differ {
         blackline.notices.push(BlacklineNotice::MayDiffer);
     }
+    let shown = shown_header_texts(blackline);
+    if headers_read
+        && compared
+            .lone_header_texts
+            .iter()
+            .any(|text| !shown.contains(text))
+    {
+        blackline
+            .notices
+            .push(BlacklineNotice::HeaderOrFooterNotCompared);
+    }
     blackline.changed_tables = compared.changed;
     order(&mut blackline.notices);
+}
+
+/// The older and the newer text of each header and footer the blackline shows, white space
+/// taken out.
+fn shown_header_texts(blackline: &WordBlackline) -> Vec<String> {
+    let mut texts = Vec::new();
+    for part in &blackline.parts {
+        if !matches!(
+            part.kind,
+            BlacklinePartKind::Header { .. } | BlacklinePartKind::Footer { .. }
+        ) {
+            continue;
+        }
+        for side in [RunKind::Del, RunKind::Ins] {
+            let text: String = part
+                .paragraphs
+                .iter()
+                .flat_map(|paragraph| &paragraph.runs)
+                .filter(|run| run.kind == RunKind::Same || run.kind == side)
+                .map(|run| run.text.as_str())
+                .collect();
+            texts.push(squeezed(&text));
+        }
+    }
+    texts
 }
 
 /// Adds [`BlacklineNotice::MayDiffer`] when the two files differ (`differ`) but the blackline

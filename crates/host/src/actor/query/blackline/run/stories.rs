@@ -18,18 +18,19 @@ use crate::actor::query::blackline::parse::story::{Story, StoryRead, read_story}
 use crate::config::Stetdoc;
 
 /// The redline's notes and headers in `dir`, read (both story views, run at once), for
-/// `add_parts`; a story whose view fails is left out.
+/// `add_parts`, and whether the headers' view read; a story whose view fails is left out.
 pub(crate) async fn view_stories<T: Timer>(
     launcher: &dyn Launcher,
     timer: &T,
     stetdoc: &Stetdoc,
     dir: &Path,
-) -> Vec<StoryRead> {
+) -> (Vec<StoryRead>, bool) {
     let (notes, headers) = join(
         view_story(launcher, timer, stetdoc, dir, Story::Notes),
         view_story(launcher, timer, stetdoc, dir, Story::Headers),
     )
     .await;
+    let headers_read = headers.is_ok();
     let mut stories = Vec::new();
     for (story, viewed) in [(Story::Notes, notes), (Story::Headers, headers)] {
         match viewed {
@@ -39,7 +40,7 @@ pub(crate) async fn view_stories<T: Timer>(
             }
         }
     }
-    stories
+    (stories, headers_read)
 }
 
 /// The redline's view of `story`, read.

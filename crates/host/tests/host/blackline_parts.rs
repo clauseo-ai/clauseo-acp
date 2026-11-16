@@ -95,7 +95,8 @@ fn what_compare_could_not_mark_up_may_differ() {
         None,
         &[("compare.json", b"{}")],
     );
-    assert_eq!(unread.notices, [MayDiffer]);
+    // The header the newer version adds is still caught, by its text, with no warning to read.
+    assert_eq!(unread.notices, [HeaderOrFooterNotCompared, MayDiffer]);
 }
 
 /// A cell's shading changed beside a body change: compare marks only the body's; the table is
@@ -154,8 +155,13 @@ fn the_real_stetdoc_shows_the_parts_and_names_what_compare_misses() {
     // A cover section inserted first, with its own header: the old header, whose table's
     // shading changed, is on section 2 now and pairs with itself. compare can't mark up the
     // inserted paragraph that ends the cover section, which may differ.
+    // Its header is in the newer version only and stetdoc's compare pairs it with nothing, nor
+    // warns of it: the blackline says it was not compared.
     let cover = through_real(&stetdoc, "cover");
-    assert_eq!(cover.notices, [CellFormatChanged, MayDiffer]);
+    assert_eq!(
+        cover.notices,
+        [HeaderOrFooterNotCompared, CellFormatChanged, MayDiffer]
+    );
     let on_section_2 = ChangedTable {
         place: TablePlace::Header {
             uses: vec![HeaderUse {
@@ -166,4 +172,13 @@ fn the_real_stetdoc_shows_the_parts_and_names_what_compare_misses() {
         ..shaded()
     };
     assert_eq!(cover.changed_tables, [on_section_2]);
+    // A section added in the newer version (an existing paragraph now ends it) with a header of
+    // its own, beside a body change: stetdoc's compare neither compares that header nor warns,
+    // and its view shows the header unchanged.
+    let added = through_real(&stetdoc, "added");
+    assert!(body_changed(&added));
+    assert_eq!(
+        (added.parts, added.notices),
+        (vec![], vec![HeaderOrFooterNotCompared])
+    );
 }
