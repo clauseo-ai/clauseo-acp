@@ -548,18 +548,19 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
     let groups = config["hooks"]["PreToolUse"].as_array().unwrap();
     assert_eq!(groups.len(), 1, "{groups:?}");
     assert_eq!(groups[0]["matcher"], "apply_patch|Write|Edit|Bash");
-    // The guard records its refusals in a folder of the session's own,
-    // `<data>/browser/guard/<session>`, which no agent's shell may write, and writes only the
-    // file whose identity follows `--record-id` (`guard_record.rs`).
+    // The guard's record and no-copy list sit in the session's own `<data>/browser/guard/<id>`,
+    // which no agent's shell may write; it opens only the file whose identity follows each.
     let command = groups[0]["hooks"][0]["command"].as_str().unwrap();
     // On Windows the hook names the console program beside the app (`codex_guard_program`).
     let program = clauseo_host::codex_guard_program(std::path::Path::new(PROGRAM));
     let shown = program.display();
-    let (record, id) = command
+    let (record, id, (list, list_id)) = command
         .strip_prefix(&format!("'{shown}' --pre-write-guard --record '"))
         .and_then(|rest| rest.split_once("' --record-id "))
+        .and_then(|(record, rest)| Some((record, rest.split_once(" --no-copy-list '")?)))
+        .and_then(|(file, (id, rest))| Some((file, id, rest.split_once("' --no-copy-list-id ")?)))
         .unwrap_or_else(|| panic!("{command}"));
-    let record = std::path::PathBuf::from(record);
+    let [record, list] = [record, list].map(std::path::PathBuf::from);
     let below = crate::guard_record::below_data(&dir, &record);
     let [browser, guard, session, file] = below.as_slice() else {
         panic!("{below:?}");
@@ -570,8 +571,10 @@ fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
         "{command}"
     );
     assert!(!session.is_empty(), "{command}");
-    assert_eq!(id.len(), 48, "{command}");
-    let expected = clauseo_host::codex_hook_config(&program, Some((&record, id))).unwrap();
+    assert_eq!(list, record.with_file_name("no-copy.txt"), "{command}");
+    assert_eq!((id.len(), list_id.len()), (48, 48), "{command}");
+    let (record, list) = (Some((&*record, id)), Some((&*list, list_id)));
+    let expected = clauseo_host::codex_hook_config(&program, record, list).unwrap();
     assert_eq!(config["hooks"], expected);
 }
 

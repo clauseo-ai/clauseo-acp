@@ -4325,7 +4325,7 @@ export type NoticeKind =
 	files: MatterPath[],
 	/**  How many more came back beyond `files`. */
 	more: number,
-} }) & { files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; no_copy_blocked?: never; skill_pack_not_loaded?: never } | 
 /**
  *  A skill pack the launch left out: which pack, and why. The app words it by kind; the
  *  notice's `text` is the fallback.
@@ -4335,7 +4335,7 @@ export type NoticeKind =
 	pack: PackId,
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
-} }) & { files_came_back?: never; files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never } | 
+} }) & { files_came_back?: never; files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; no_copy_blocked?: never } | 
 /**
  *  Claude Code's `auto` permission mode is not available for this session (the account,
  *  the model or the agent ruled it out), so Claude runs in `acceptEdits` and asks before
@@ -4367,7 +4367,7 @@ export type NoticeKind =
 	 *  line can show. A newer host sends no folder, an older one the whole path.
 	 */
 	file: MatterPath,
-} }) & { files_came_back?: never; files_gone_no_copy?: never; guard_steps_more?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; files_gone_no_copy?: never; guard_steps_more?: never; no_copy_blocked?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Clauseo's pre-write guard refused a step of the agent's that would change the
  *  matter's `.codex` folder, the agent's own settings there.
@@ -4385,7 +4385,7 @@ export type NoticeKind =
 ({ guard_steps_more: {
 	/**  How many. */
 	more: number,
-} }) & { files_came_back?: never; files_gone_no_copy?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; files_gone_no_copy?: never; held_open_blocked?: never; no_copy_blocked?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Files that were in the matter's folder when a step began but that Clauseo kept no copy
  *  of (cloud-only, over the size cap) were deleted during it: no undo brings them back.
@@ -4399,7 +4399,19 @@ export type NoticeKind =
 	files: SkippedFile[],
 	/**  How many more were deleted beyond `files`. */
 	more: number,
-} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
+} }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; no_copy_blocked?: never; skill_pack_not_loaded?: never } | 
+/**
+ *  Clauseo's pre-write guard refused a step of the agent's that would delete, move or
+ *  overwrite a file Clauseo keeps no copy of (cloud-only, over the size cap), which no
+ *  undo could bring back. Codex sends no event of its own for it.
+ */
+({ no_copy_blocked: {
+	/**
+	 *  The file's name, the last part of its path in the matter, cut to a length the
+	 *  line can show.
+	 */
+	file: MatterPath,
+} }) & { files_came_back?: never; files_gone_no_copy?: never; guard_steps_more?: never; held_open_blocked?: never; skill_pack_not_loaded?: never } | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

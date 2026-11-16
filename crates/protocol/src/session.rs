@@ -350,6 +350,14 @@ open_data_enum! {
             /// How many more were deleted beyond `files`.
             more: u32,
         },
+        /// Clauseo's pre-write guard refused a step of the agent's that would delete, move or
+        /// overwrite a file Clauseo keeps no copy of (cloud-only, over the size cap), which no
+        /// undo could bring back. Codex sends no event of its own for it.
+        NoCopyBlocked = "no_copy_blocked" {
+            /// The file's name, the last part of its path in the matter, cut to a length the
+            /// line can show.
+            file: MatterPath,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -380,6 +388,9 @@ open_data_enum! {
                 reason: crate::SkippedFileReason::CloudOnly,
             }],
             more: 1,
+        },
+        NoticeKind::NoCopyBlocked {
+            file: MatterPath::new("Scan.pdf").unwrap(),
         },
     ];
 }

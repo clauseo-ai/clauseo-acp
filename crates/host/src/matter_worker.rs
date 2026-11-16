@@ -149,8 +149,11 @@ pub(crate) enum MatterJob {
         current: PathBuf,
         registry: Registry,
     },
-    /// The before-turn checkpoint.
-    BeforeTurn(TurnMeta),
+    /// The before-turn checkpoint, then its no-copy files onto the session's list, if it has one.
+    BeforeTurn(
+        TurnMeta,
+        Option<crate::pre_write_guard::no_copy::NoCopyList>,
+    ),
     /// The after-turn checkpoint with the places the turn's tool calls named ([`tool_paths`]
     /// resolves those they wrote), and the turn's before-turn checkpoint when the host knows it
     /// (for a reused id's changes).
@@ -439,9 +442,10 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             current,
             registry,
         } => MatterReply::Located(locate(settings, slot, id, &folder, current, &registry)),
-        MatterJob::BeforeTurn(meta) => {
+        MatterJob::BeforeTurn(meta, list) => {
             MatterReply::BeforeTurn(open(settings, slot).and_then(|matter| {
                 let checkpoint = matter.before_turn(&meta)?;
+                no_copy_list::update(list.as_ref(), &checkpoint.no_copy);
                 turn_checkpoint(matter, checkpoint, None)
             }))
         }
@@ -576,6 +580,7 @@ mod claims;
 mod crash;
 mod import;
 mod jobs;
+mod no_copy_list;
 mod relocate;
 mod sides;
 mod too_deep;

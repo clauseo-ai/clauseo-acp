@@ -310,9 +310,13 @@ pub(super) fn before_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             thread,
             kind: JobKind::Before(turn),
         };
+        // The session's no-copy list, which the checkpoint's thread brings up to date.
+        let list = state(actor, thread)
+            .and_then(|state| state.run.as_ref())
+            .and_then(|run| run.no_copy.clone());
         actor
             .matter_worker(matter)?
-            .send(MatterJob::BeforeTurn(meta), MatterTag::Turn(job))?;
+            .send(MatterJob::BeforeTurn(meta, list), MatterTag::Turn(job))?;
         actor.work.matter_jobs += 1;
         Ok(())
     })();

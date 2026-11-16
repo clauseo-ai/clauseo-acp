@@ -340,38 +340,50 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 more: 0,
             }),
         },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "Clauseo stopped a step: the AI tried to delete or replace Scan.pdf. Clauseo \
+                   has no copy of it, so that couldn't be undone."
+                .to_owned(),
+            kind: Some(NoticeKind::NoCopyBlocked {
+                file: MatterPath::new("Scan.pdf").unwrap(),
+            }),
+        },
     ];
-    notices.extend(
-        [
-            (
-                PackSkipReason::NotTurnedOn,
-                "This matter is set to use it, but it isn't turned on.",
-            ),
-            (
-                PackSkipReason::NotAdmitted,
-                "The skill pack settings on this computer don't allow it.",
-            ),
-            (
-                PackSkipReason::Changed,
-                "Its files changed after it was turned on. Turn it on again.",
-            ),
-            (
-                PackSkipReason::Missing,
-                "Clauseo couldn't find it on this computer.",
-            ),
-            (
-                PackSkipReason::Invalid,
-                "Its files aren't a valid skill pack.",
-            ),
-            (
-                PackSkipReason::TooMany,
-                "Clauseo loads at most 8 skill packs at a time.",
-            ),
-        ]
-        .into_iter()
-        .map(|(reason, words)| skill_pack_notice(reason, words)),
-    );
+    notices.extend(skill_pack_notices());
     notices.into_iter().map(DomainEvent::from).collect()
+}
+
+/// A skill pack notice for each `PackSkipReason`, in the corpus's order.
+fn skill_pack_notices() -> impl Iterator<Item = Notice> {
+    [
+        (
+            PackSkipReason::NotTurnedOn,
+            "This matter is set to use it, but it isn't turned on.",
+        ),
+        (
+            PackSkipReason::NotAdmitted,
+            "The skill pack settings on this computer don't allow it.",
+        ),
+        (
+            PackSkipReason::Changed,
+            "Its files changed after it was turned on. Turn it on again.",
+        ),
+        (
+            PackSkipReason::Missing,
+            "Clauseo couldn't find it on this computer.",
+        ),
+        (
+            PackSkipReason::Invalid,
+            "Its files aren't a valid skill pack.",
+        ),
+        (
+            PackSkipReason::TooMany,
+            "Clauseo loads at most 8 skill packs at a time.",
+        ),
+    ]
+    .into_iter()
+    .map(|(reason, words)| skill_pack_notice(reason, words))
 }
 
 /// A host notice of kind `SkillPackNotLoaded` for the pack `nda-kit`, left out for `reason`.

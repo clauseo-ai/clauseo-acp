@@ -1,4 +1,5 @@
-// UC's entries for files deleted during a step that Clauseo kept no copy of (UC-720 to UC-725): the host's
+// UC's entries for files deleted during a step that Clauseo kept no copy of (UC-720 to UC-725), and for a step the
+// pre-write guard stopped because it would delete or replace one (UC-726, UC-727): the host's
 // files_gone_no_copy notice in the room's thread (room/thread/notice-words.ts, from words-thread.ts goneLines), whose lines the band
 // in Versions repeats for that change, and the timeline's short note on it. A file only online says its cloud
 // service's recycle bin may still have it; a file too large says so.
@@ -23,6 +24,35 @@ const PLAIN: ThreadKey =
   "{file} was deleted during this step. Clauseo had no copy of it to bring back.";
 const MORE: ThreadKey = "{n} more files that Clauseo had no copy of were deleted during this step.";
 const NOTE: VersionKey = "{file} was deleted, with no copy to bring back";
+const STOPPED: ThreadKey =
+  "Clauseo stopped a step: {name} tried to delete or replace {file}. Clauseo has no copy of it, so that couldn't be undone.";
+const STOPPED_ALONE: ThreadKey =
+  "Clauseo stopped a step: the AI tried to delete or replace {file}. Clauseo has no copy of it, so that couldn't be undone.";
+
+/** The guard's notice of a step it stopped on a file with no copy, in a thread of codex-acp (ChatGPT): Codex shows
+ * no step of its own for a call its hook blocked, and Claude, its own failed step, gets no notice. */
+const stopped = (): ReactNode => (
+  <RoomOver
+    host={() =>
+      threadHost({
+        agent: "codex-acp",
+        entries: [
+          userMessage(5, 1, "Tidy up the scans folder."),
+          {
+            notice: {
+              order: 6,
+              event: uuid(1, 10),
+              level: "warning",
+              text: "Clauseo stopped a step: the AI tried to delete or replace Site photos.zip. Clauseo has no copy of it, so that couldn't be undone.",
+              ts: 6000,
+              kind: { no_copy_blocked: { file: "Site photos.zip" } },
+            },
+          },
+        ],
+      })
+    }
+  />
+);
 
 /** The host's notice of the gone files, its English fallback as the host writes it. */
 const notice = (files: SkippedFile[], more: number, text: string): ViewEntry => {
@@ -109,5 +139,17 @@ export const UC_NO_COPY: Entry[] = [
     words: versionWords(NOTE),
     screen: "room/versions",
     render: alone((lang) => vt(lang, NOTE, { file: "Site photos.zip" })),
+  },
+  {
+    id: "UC-726",
+    words: threadWords(STOPPED),
+    screen: "room/thread",
+    render: stopped,
+  },
+  {
+    id: "UC-727",
+    words: threadWords(STOPPED_ALONE),
+    screen: "room/thread",
+    render: alone((lang) => th(lang, STOPPED_ALONE, { file: "Site photos.zip" })),
   },
 ];

@@ -28,16 +28,28 @@ const VALUED: [&str; 7] = [
     "--suffix",
 ];
 
-/// The indexes in `args` of the paths `program` (as written: a folder, any case, `.exe` or not)
-/// deletes or moves; empty for any other program.
-pub(crate) fn removed<W: AsRef<str>>(program: &str, args: &[W]) -> Vec<usize> {
+/// Whether `program` (as written: a folder, any case, `.exe` or not) is a deleting one, not a
+/// move.
+pub(crate) fn deletes(program: &str) -> bool {
+    DELETERS.contains(&name_of(program).as_str())
+}
+
+/// `program`'s last part, lower case, without `.exe`.
+fn name_of(program: &str) -> String {
     let name = program
         .rsplit(['/', '\\'])
         .next()
         .unwrap_or(program)
         .to_ascii_lowercase();
-    let name = name.strip_suffix(".exe").unwrap_or(&name);
-    if !DELETERS.contains(&name) && !MOVERS.contains(&name) {
+    name.strip_suffix(".exe")
+        .map_or_else(|| name.clone(), str::to_owned)
+}
+
+/// The indexes in `args` of the paths `program` (as written: a folder, any case, `.exe` or not)
+/// deletes or moves; empty for any other program.
+pub(crate) fn removed<W: AsRef<str>>(program: &str, args: &[W]) -> Vec<usize> {
+    let name = name_of(program);
+    if !DELETERS.contains(&name.as_str()) && !MOVERS.contains(&name.as_str()) {
         return Vec::new();
     }
     let mut out = Vec::new();

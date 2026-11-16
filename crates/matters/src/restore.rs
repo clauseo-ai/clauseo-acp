@@ -448,6 +448,7 @@ pub(crate) fn restore(
                 changes: Vec::new(),
                 skipped: Vec::new(),
                 gone: Vec::new(),
+                no_copy: Vec::new(),
             },
             written: restored,
             removed: Vec::new(),

@@ -18,11 +18,12 @@
 //! complete lines only, [`MAX_READ`] bytes a time, never through a link, from a pipe or a file
 //! with two links, a line that does not parse skipped (the next one still read), a file cut short
 //! read from its start.
-//! A paper is named only when the matter holds it, by its name alone (the last part of its
-//! path, [`shown_name`], through #1122's `shown.rs`); any other refusal of a held paper, and a
-//! name with an invisible character, is `GuardStepBlocked`, unnamed. A
-//! turn names at most [`MAX_TOLD`] papers, reasons and unnamed steps, each once; every other step
-//! it stopped (a repeat of one told, named or not, or one past the cap) is counted and told in one
+//! A refusal is of a paper held open, a file Clauseo holds no copy of (`NoCopyBlocked`), or the
+//! `.codex` folder. A paper is named only when the matter holds it, by its name alone (the last
+//! part of its path, [`shown_name`], through #1122's `shown.rs`); any other refusal of a held
+//! paper, and a name with an invisible character, is `GuardStepBlocked`, unnamed. A turn names at
+//! most [`MAX_TOLD`] papers, reasons and unnamed steps, each once; every other step it stopped (a
+//! repeat of one told, named or not, or one past the cap) is counted and told in one
 //! `GuardStepsMore` line by the read the turn's end asks for.
 
 use std::io::{Read, Seek, SeekFrom};
@@ -199,6 +200,11 @@ fn notice(kind: NoticeKind) -> Notice {
             "Clauseo stopped a step: the AI tried to change {file}, which is open in Word. Close \
              it in Word, then ask again."
         )
+    } else if let NoticeKind::NoCopyBlocked { file } = &kind {
+        format!(
+            "Clauseo stopped a step: the AI tried to delete or replace {file}. Clauseo has no copy \
+             of it, so that couldn't be undone."
+        )
     } else if kind == NoticeKind::CodexFolderBlocked {
         "Clauseo stopped a step: the AI tried to change its own settings in this matter's folder."
             .to_owned()
@@ -224,12 +230,13 @@ fn notice(kind: NoticeKind) -> Notice {
 fn kind_of(record: &Record, matter: &Path) -> NoticeKind {
     let path = match (record.reason, &record.path) {
         (Reason::CodexFolder, _) => return NoticeKind::CodexFolderBlocked,
-        (Reason::HeldOpen, Some(path)) => path,
-        (Reason::HeldOpen, None) => return NoticeKind::GuardStepBlocked,
+        (Reason::HeldOpen | Reason::NoCopy, Some(path)) => path,
+        (Reason::HeldOpen | Reason::NoCopy, None) => return NoticeKind::GuardStepBlocked,
     };
     let held = std::fs::symlink_metadata(matter.join(path.as_str())).is_ok();
     let name = path.as_str().rsplit('/').next().unwrap_or_default();
     match MatterPath::new(&shown_name(name)) {
+        Ok(file) if held && record.reason == Reason::NoCopy => NoticeKind::NoCopyBlocked { file },
         Ok(file) if held => NoticeKind::HeldOpenBlocked { file },
         _ => NoticeKind::GuardStepBlocked,
     }

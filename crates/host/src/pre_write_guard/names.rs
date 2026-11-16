@@ -21,7 +21,7 @@ use super::{MAX_WORDS, Refusal, timings};
 
 pub(super) use allow::{read_only, textutil_writes};
 use spelling::as_listed;
-pub(super) use spelling::listed_spelling;
+pub(super) use spelling::{disk_key, listed_spelling};
 pub(super) use stetdoc::{Stetdoc, stetdoc};
 
 /// The most folder entries [`held_files`] reads; a larger matter is read in part, shallow folders

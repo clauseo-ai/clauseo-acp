@@ -41,29 +41,45 @@ pub(super) fn make(run: &RunFolders, data: &Path, sweep: &RunSweep) -> Result<()
     Ok(())
 }
 
-/// Makes the pre-write guard's record of its refusals for `run`, for any agent but Claude
-/// (`claude`), whose hook passes none (`updates/guard_blocks.rs`): the session's guard folder,
-/// create-new, then the file in it with `O_EXCL`
-/// ([`record::make`](crate::pre_write_guard::record::make)), and keeps the file and the identity
-/// it read from it in [`RunFolders::guard`]. It sits in `<data>/browser`, which no agent's shell
-/// or patch tool may write (Codex's fence denies it, `agent/codex_fence.rs` `DATA_DENIED`;
-/// Claude's deny rules, `Read` and `Edit` of `browser/**`), so only the host makes it. Anything
+/// Makes the session's guard folder for `run`, create-new
+/// ([`record::make_folder`](crate::pre_write_guard::record::make_folder)), and in it, each with
+/// `O_EXCL`, the pre-write guard's record of its refusals, for any agent but Claude (`claude`),
+/// whose hook passes none (`updates/guard_blocks.rs`), kept with the identity read from it in
+/// [`RunFolders::guard`], and its no-copy list, for every agent
+/// ([`no_copy::make`](crate::pre_write_guard::no_copy::make)), kept in [`RunFolders::no_copy`].
+/// It sits in `<data>/browser`, which no agent's shell or patch tool may write (Codex's fence
+/// denies it, `agent/codex_fence.rs` `DATA_DENIED`; Claude's deny rules, `Read` and `Edit` of
+/// `browser/**`), so only the host makes it. Anything
 /// already at the session's guard folder (a folder, a file, a symlink or a junction) refuses the
 /// launch, the run folder taken back, as [`make`] does. File system calls: off the actor.
 pub(super) fn make_guard(run: &mut RunFolders, data: &Path, claude: bool) -> Result<(), Error> {
-    if claude {
-        return Ok(());
-    }
-    match crate::pre_write_guard::record::make(data, &run.key.id()) {
-        Ok(made) => {
-            run.guard = Some(made);
+    use crate::pre_write_guard::{no_copy, record};
+    let session = run.key.id();
+    let made = if claude {
+        record::make_folder(data, &session).map(|folder| (folder, None))
+    } else {
+        record::make(data, &session)
+            .map(|(file, id)| (record::folder(data, &session), Some((file, id))))
+    };
+    // A list not made takes back the folder just made for it, as a record not made does.
+    let made = made.and_then(|(folder, guard)| match no_copy::make(&folder) {
+        Ok(list) => Ok((list, guard)),
+        Err(error) => {
+            drop(crate::write::remove_tree(&folder));
+            Err(error)
+        }
+    });
+    match made {
+        Ok((list, guard)) => {
+            run.guard = guard;
+            run.no_copy = Some(list);
             Ok(())
         }
         Err(error) => {
             run.remove();
             Err(Error::refused(
                 ErrorCode::AgentLaunchFailed,
-                format!("cannot make the guard's record file: {error}"),
+                format!("cannot make the guard's record file or no-copy list: {error}"),
             ))
         }
     }
@@ -161,7 +177,9 @@ pub(super) fn remove_folders(run: &RunFolders) {
             this.and_then(Path::file_name) == Some(std::ffi::OsStr::new(name))
         })
     };
-    let guard = run.guard.as_ref().and_then(|(file, _)| file.parent());
+    let guard = (run.guard.as_ref().map(|(file, _)| file))
+        .or(run.no_copy.as_ref().map(|list| &list.file))
+        .and_then(|file| file.parent());
     let guard_parents = [
         crate::pre_write_guard::record::FOLDER,
         crate::browser::CONFIG_DIR,

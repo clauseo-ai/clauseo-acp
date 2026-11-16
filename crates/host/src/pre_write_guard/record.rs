@@ -1,7 +1,8 @@
 //! The guard's record of the refusals the lawyer is told about. Codex sends no event for a call
 //! its hook blocked (codex-acp 2.2.2 ignores `hook/completed`), so with [`FLAG`] and a file
 //! (Codex's hook passes `<data>/browser/guard/<session>/guard-blocks.jsonl`, [`file`],
-//! `agent/loads/codex.rs`) and [`ID_FLAG`] with its identity, a refusal for a held-open file or
+//! `agent/loads/codex.rs`) and [`ID_FLAG`] with its identity, a refusal for a held-open file, a
+//! file with no copy (`no_copy.rs`) or
 //! the `.codex` folder is appended to that file as one JSON line, a [`Record`], and the host
 //! reads it back during the turn to show "Clauseo stopped a step"
 //! (`actor/turn/updates/guard_blocks.rs`). Claude Code's entry passes no file: Claude shows the
@@ -64,19 +65,11 @@ pub(crate) fn file(folder: &Path) -> PathBuf {
 }
 
 /// Makes the record file of the session `session` under the data folder `data`, empty: the
-/// parent of the guard folders through no link below `data` (one that is a link or no folder
-/// is first removed, never followed, [`unlink_parent`]), then the session's guard folder
-/// ([`folder`]) with a create-new call, then the file in it with `O_EXCL`. Anything already at
-/// the session's folder (a folder, a file, a symlink, a junction or another reparse point) fails
-/// with `AlreadyExists`, never followed and left as it is. The file and its identity, read from
-/// the file made. A file not made takes the folder made for it back. File system calls: the
-/// launch prep's, off the actor (`launch_checks/folders.rs` `make_guard`).
+/// session's guard folder ([`make_folder`]), then the file in it with `O_EXCL`. The file and
+/// its identity, read from the file made. A file not made takes the folder made for it back.
+/// File system calls: the launch prep's, off the actor (`launch_checks/folders.rs` `make_guard`).
 pub(crate) fn make(data: &Path, session: &str) -> std::io::Result<(PathBuf, RecordId)> {
-    let folder = folder(data, session);
-    let parent = folder.parent().unwrap_or(data);
-    unlink_parent(parent);
-    crate::write::create_private_dirs_under(data, parent)?;
-    crate::write::create_private_dir(&folder)?;
+    let folder = make_folder(data, session)?;
     let file = file(&folder);
     match crate::write::create_record(&file) {
         Ok(id) => Ok((file, id)),
@@ -87,11 +80,28 @@ pub(crate) fn make(data: &Path, session: &str) -> std::io::Result<(PathBuf, Reco
     }
 }
 
+/// Makes the guard folder of the session `session` under the data folder `data` ([`folder`]):
+/// the parent of the guard folders through no link below `data` (one that is a link or no
+/// folder is first removed, never followed, [`unlink_parent`]), then the session's folder with a
+/// create-new call. Anything already at the session's folder (a folder, a file, a symlink, a
+/// junction or another reparse point) fails with `AlreadyExists`, never followed and left as it
+/// is. Its path. The launch prep's, which makes the record ([`make`]) and the no-copy list
+/// (`no_copy::make`) in it, for a Claude session the list alone, off the actor.
+pub(crate) fn make_folder(data: &Path, session: &str) -> std::io::Result<PathBuf> {
+    let folder = folder(data, session);
+    let parent = folder.parent().unwrap_or(data);
+    unlink_parent(parent);
+    crate::write::create_private_dirs_under(data, parent)?;
+    crate::write::create_private_dir(&folder)?;
+    Ok(folder)
+}
+
 /// Removes `parent` (`<data>/browser/guard`) when it is there but is no real folder: a symlink,
 /// a junction, another reparse point or a file. The link itself goes ([`remove_link`]), never
-/// what it points to, with a warning, so [`make`] makes a real folder in its place and the
+/// what it points to, with a warning, so [`make_folder`] makes a real folder in its place and the
 /// launch goes on, as the browser install replaces a link at its version folder
-/// (`browser/install.rs`). Left as it was, every launch but Claude's would fail. A link it cannot
+/// (`browser/install.rs`). Left as it was, every launch would fail, Claude's too, since its
+/// session's folder holds the no-copy list (`no_copy.rs`). A link it cannot
 /// remove is left, and the launch is refused below.
 ///
 /// [`remove_link`]: crate::write::remove_link
@@ -121,6 +131,8 @@ pub(crate) enum Reason {
     HeldOpen,
     /// The call writes in, or under Codex's hook names, the matter's `.codex` folder.
     CodexFolder,
+    /// The call deletes or overwrites a file Clauseo holds no copy of (`no_copy.rs`).
+    NoCopy,
 }
 
 /// Whose hook refused the call.
@@ -144,7 +156,8 @@ pub(crate) struct Record {
     pub(crate) tool: String,
     /// Why it was refused.
     pub(crate) reason: Reason,
-    /// The held file as the matter lists it; none for the `.codex` folder.
+    /// The held file, or the one with no copy, as the matter lists it; none for the `.codex`
+    /// folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) path: Option<MatterPath>,
 }
@@ -169,6 +182,7 @@ pub(super) fn record_of(refusal: &Refusal, bytes: &[u8], claude: bool) -> Option
     let (reason, path) = match refusal {
         Refusal::HeldOpen(path) => (Reason::HeldOpen, Some(path.clone())),
         Refusal::CodexFolder => (Reason::CodexFolder, None),
+        Refusal::NoCopy(path, _) => (Reason::NoCopy, Some(path.clone())),
         Refusal::StetdocServe => return None,
     };
     let tool = serde_json::from_slice::<Value>(bytes)

@@ -1,7 +1,8 @@
 //! `PermissionResolved.held_open` (decision record 0021): a matter path when the host refused
 //! the request because a program holds that file open, left out otherwise, and an entry
 //! written before the field existed decodes with `None`. And the notice kinds of a step
-//! Clauseo's pre-write guard stopped: a paper held open, or the matter's `.codex` folder.
+//! Clauseo's pre-write guard stopped: a paper held open, the matter's `.codex` folder, or a file
+//! Clauseo keeps no copy of.
 
 use clauseo_protocol::{
     DomainEvent, MatterPath, NoticeKind, PermissionChoice, PermissionKind, PermissionResolved,
@@ -77,4 +78,9 @@ fn the_guards_notice_kinds_decode_and_round_trip() {
     let more = NoticeKind::GuardStepsMore { more: 3 };
     decodes_in_both(r#"{"guard_steps_more":{"more":3}}"#, &more);
     round_trips(&more);
+    let no_copy = NoticeKind::NoCopyBlocked {
+        file: MatterPath::new("Scan.pdf").unwrap(),
+    };
+    decodes_in_both(r#"{"no_copy_blocked":{"file":"Scan.pdf"}}"#, &no_copy);
+    round_trips(&no_copy);
 }

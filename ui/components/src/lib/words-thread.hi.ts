@@ -212,6 +212,12 @@ export const HI = {
   "Clauseo stopped a step.": "Clauseo ने एक काम रोक दिया।",
   "Clauseo stopped one more step.": "Clauseo ने एक और काम रोका।",
   "Clauseo stopped {n} more steps.": "Clauseo ने {n} और काम रोके।",
+  // the guard stopped a step that would delete or replace a file Clauseo keeps no copy of (only online, or over
+  // the size cap), named as Versions names it ({file}); {name} as above (provisional, UC-726, UC-727)
+  "Clauseo stopped a step: {name} tried to delete or replace {file}. Clauseo has no copy of it, so that couldn't be undone.":
+    "Clauseo ने एक काम रोक दिया: {name} ने {file} को हटाने या बदलने की कोशिश की। Clauseo के पास इसकी कोई प्रति नहीं है, इसलिए इसे पूर्ववत नहीं किया जा सकता था।",
+  "Clauseo stopped a step: the AI tried to delete or replace {file}. Clauseo has no copy of it, so that couldn't be undone.":
+    "Clauseo ने एक काम रोक दिया: AI ने {file} को हटाने या बदलने की कोशिश की। Clauseo के पास इसकी कोई प्रति नहीं है, इसलिए इसे पूर्ववत नहीं किया जा सकता था।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

@@ -142,8 +142,26 @@ test("a step the guard stopped with no paper named, and the turn's count of more
   expect(noticeLine({ guard_steps_more: { more: 0 } }, en)).toBeNull();
 });
 
+test("a step the guard stopped on a file Clauseo keeps no copy of names the agent and the file, in English and Hindi", () => {
+  const kind: NoticeKind = { no_copy_blocked: { file: "Scan.pdf" } };
+  const codex = { kind: "codex", name: "codex-acp" } as const;
+  expect(noticeLine(kind, en, codex)).toBe(
+    `Clauseo stopped a step: ChatGPT tried to delete or replace ${iso("Scan.pdf")}. Clauseo has no copy of it, so that couldn't be undone.`,
+  );
+  expect(noticeLine(kind, words("hi"), codex)).toBe(
+    `Clauseo ने एक काम रोक दिया: ChatGPT ने ${iso("Scan.pdf")} को हटाने या बदलने की कोशिश की। Clauseo के पास इसकी कोई प्रति नहीं है, इसलिए इसे पूर्ववत नहीं किया जा सकता था।`,
+  );
+  expect(noticeLine(kind, en)).toBe(
+    `Clauseo stopped a step: the AI tried to delete or replace ${iso("Scan.pdf")}. Clauseo has no copy of it, so that couldn't be undone.`,
+  );
+  expect(noticeLine(kind, words("hi"))).toBe(
+    `Clauseo ने एक काम रोक दिया: AI ने ${iso("Scan.pdf")} को हटाने या बदलने की कोशिश की। Clauseo के पास इसकी कोई प्रति नहीं है, इसलिए इसे पूर्ववत नहीं किया जा सकता था।`,
+  );
+});
+
 test("a guard notice with no paper gives null, so the row shows its text", () => {
   expect(noticeLine({ held_open_blocked: {} } as unknown as NoticeKind, en)).toBeNull();
+  expect(noticeLine({ no_copy_blocked: {} } as unknown as NoticeKind, en)).toBeNull();
 });
 
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
