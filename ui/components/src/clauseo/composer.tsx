@@ -454,10 +454,18 @@ export function Composer<V extends string = string>({
                 <PasteChips
                   chips={chips.list}
                   onRemove={(id) => {
-                    chips.remove(id);
+                    chips.remove(id, area.current?.value ?? "");
                     changed();
                   }}
                   onEmptied={() => area.current?.focus()}
+                  onKeyDown={(e) => {
+                    // Cmd/Ctrl+Z on a chip's button, as after a remove whose focus went to the next chip: the
+                    // chip comes back
+                    if (chips.undo(e, platform === "mac", area.current?.value ?? "", false)) {
+                      e.preventDefault();
+                      changed();
+                    }
+                  }}
                 />
               )}
               <label className="sr-only" htmlFor={fieldId}>
@@ -514,8 +522,8 @@ export function Composer<V extends string = string>({
               settle(true);
             }}
             onKeyDown={(e) => {
-              // Cmd/Ctrl+Z taking back a clear, fill or set takes its chips back too
-              if (chips.undo(e, platform === "mac")) {
+              // Cmd/Ctrl+Z taking back a clear, fill or set takes its chips back too, and a chip removed comes back
+              if (chips.undo(e, platform === "mac", e.currentTarget.value, true)) {
                 e.preventDefault();
                 changed();
                 return;

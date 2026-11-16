@@ -1,7 +1,7 @@
 // The long pastes on the composer's well (paste-chips-logic.ts): a chip each, in paste order, beside the papers'
 // pills, saying "Pasted text" and its size in words, with a remove button. A chip can't be edited: the lawyer removes
 // it and pastes again. The composer holds them through usePasteChips (paste-chips-state.ts).
-import { useRef } from "react";
+import { useRef, type KeyboardEvent } from "react";
 import { IconNewMatter } from "../icons/icons.tsx";
 import { count } from "../lib/money.ts";
 import { useThreadWords } from "../lib/words-thread.ts";
@@ -9,15 +9,17 @@ import type { PasteChip } from "./paste-chips-logic.ts";
 
 /** Each chip: "Pasted text", its words under it, and Remove pasted text, which the size describes. Tab reaches each
  * remove button; a removed chip's focus goes to the next chip's button, else the one before, else the field
- * (`onEmptied`). */
+ * (`onEmptied`). Keys pressed on a remove button reach `onKeyDown`, for Cmd/Ctrl+Z to bring a removed chip back. */
 export function PasteChips({
   chips,
   onRemove,
   onEmptied,
+  onKeyDown,
 }: {
   chips: readonly PasteChip[];
   onRemove: (id: number) => void;
   onEmptied: () => void;
+  onKeyDown?: (e: KeyboardEvent<HTMLButtonElement>) => void;
 }) {
   const w = useThreadWords();
   const list = useRef<HTMLUListElement>(null);
@@ -47,6 +49,7 @@ export function PasteChips({
             aria-label={w.th("Remove pasted text")}
             aria-describedby={`paste-chip-${c.id}`}
             onClick={() => remove(c.id, at)}
+            onKeyDown={onKeyDown}
           >
             <IconNewMatter size={14} className="rotate-45" />
           </button>
