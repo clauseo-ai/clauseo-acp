@@ -1987,12 +1987,14 @@ export type ErrorCode =
 "agent.sandbox_unavailable" | 
 /** The firm's managed settings for Claude Code on this computer turn hooks off (`disableAllHooks` or `allowManagedHooksOnly`), and this launch rests on Clauseo's guard hook (forced ask, or Windows), so Claude was not started. */
 "agent.firm_hooks_off" | 
-/** A Claude Code policy that any program run by the user can write (the Windows registry key HKCU\SOFTWARE\Policies\ClaudeCode) sets permissions, sandbox or hooks, and no administrator's policy outranks it, so Claude was not started, or was stopped. */
+/** A Claude Code policy in the Windows registry key HKCU\SOFTWARE\Policies\ClaudeCode, which only IT or a program running as administrator can write, applies (no administrator's policy outranks it) and holds a setting that would weaken the launch, or cannot be read, so Claude was not started, or was stopped. The detail names the setting. */
 "agent.user_policy" | 
 /** The Claude settings file Clauseo writes at each launch changed while Claude ran, so Clauseo stopped Claude; the next message starts it again with Clauseo's settings. */
 "agent.settings_changed" | 
 /** Claude Code did not confirm the mode Clauseo set it to (`auto`; `default` in forced ask; `acceptEdits` when auto is not available), as the session started or after a mode change during the conversation, so Clauseo sent no message in another mode and stopped the conversation. */
 "agent.mode_not_set" | 
+/** A managed Claude Code setting on this computer (the firm's policy files, macOS managed preferences, the HKLM policy, or the firm's server-managed settings) outranks a value Clauseo sets and would weaken the launch (for example `sandbox.enabled: false`, `sandbox.allowUnsandboxedCommands: true`, `sandbox.excludedCommands`, or a `permissions.defaultMode` weaker than Clauseo's), or an administrator's policy file cannot be read, so Claude was not started, or was stopped. The detail names the setting and where it was found. */
+"agent.firm_policy_weakens" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -2877,6 +2879,12 @@ export type HostError = {
 	 *  `message`.
 	 */
 	files?: MatterPath[],
+	/**
+	 *  The policy setting that refused a Claude launch, for `agent.user_policy` and
+	 *  `agent.firm_policy_weakens` when the host knows it; missing otherwise. The turn's
+	 *  `TurnFailed` carries it on.
+	 */
+	setting?: PolicySetting,
 };
 
 /**  What a subscriber receives. Never logged (the log holds only `DomainEvent`s). */
@@ -4943,6 +4951,60 @@ export type Platform =
 "linux";
 
 /**
+ *  A Claude Code setting a policy may hold that weakens a Claude launch: one of the fixed
+ *  keys the host's policy check knows (`policy_keys/weakens.rs`), written as its dotted key.
+ *  Never text from a policy file, a path or a value. A key this version does not know reads
+ *  as `Unknown`, which the app shows as no setting named.
+ */
+export type PolicySetting = 
+/**  Turns every hook off. */
+"disableAllHooks" | 
+/**  Drops every hook but the policy's own. */
+"allowManagedHooksOnly" | 
+/**  Drops every permission rule but the policy's own. */
+"allowManagedPermissionRulesOnly" | 
+/**  Skips the prompt before the mode that asks nothing. */
+"skipDangerousModePermissionPrompt" | 
+/**  Whether Claude Code's bundled skills load. */
+"disableBundledSkills" | 
+/**  The permission mode a session starts in. */
+"permissions.defaultMode" | 
+/**  Whether the mode that bypasses permissions can be chosen. */
+"permissions.disableBypassPermissionsMode" | 
+/**  Whether Claude's sandbox is on. */
+"sandbox.enabled" | 
+/**  Whether a sandboxed command runs without asking. */
+"sandbox.autoAllowBashIfSandboxed" | 
+/**  Whether a command may run outside the sandbox. */
+"sandbox.allowUnsandboxedCommands" | 
+/**  Whether Claude Code stops when its sandbox cannot start. */
+"sandbox.failIfUnavailable" | 
+/**  Whether a sandboxed command may send Apple events. */
+"sandbox.allowAppleEvents" | 
+/**  Whether a weaker sandbox runs inside another one. */
+"sandbox.enableWeakerNestedSandbox" | 
+/**  Whether the sandbox's network isolation is weakened. */
+"sandbox.enableWeakerNetworkIsolation" | 
+/**  Whether a sandboxed command may bind a local port. */
+"sandbox.network.allowLocalBinding" | 
+/**  Whether a sandboxed command may use every Unix socket. */
+"sandbox.network.allowAllUnixSockets" | 
+/**  The commands that run outside the sandbox. */
+"sandbox.excludedCommands" | 
+/**  Whether the repository status goes in a conversation's first message. */
+"includeGitInstructions" | 
+/**  Whether other Claude Code sessions can send this one messages. */
+"crossSessionInbound" | 
+/**  Whether Claude Code's Remote Control is off. */
+"disableRemoteControl" | 
+/**  The tools Claude Code offers. */
+"tools" | 
+/**  The `PATH` a policy's `env` gives Claude Code. */
+"env.PATH" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**
  *  Who made a call or an answer. Only the local desktop exists now; scopes come with the
  *  phone, whose principal may carry data, so a kind from a newer Clauseo decodes to
  *  `Unknown`.
@@ -6251,6 +6313,8 @@ export type StepEntry = {
 	stop: StopReason,
 	/**  The code of the `TurnFailed` before it, when it failed. */
 	failure?: ErrorCode,
+	/**  The policy setting of that `TurnFailed` (`TurnFailed::setting`), which the app names. */
+	failure_setting?: PolicySetting,
 	/**  The files it changed (from its `FilesChanged`; empty when none changed). */
 	files: FileChange[],
 	/**  The files it changed but did not version. */
@@ -7041,6 +7105,12 @@ export type TurnFailed = {
 	 *  may carry an unknown code in front, so it can be longer.
 	 */
 	detail?: string,
+	/**
+	 *  The policy setting that refused a Claude launch (`agent.user_policy`,
+	 *  `agent.firm_policy_weakens`), which the app names; missing when none is known. Only ever
+	 *  one of the host's fixed keys: never a policy's text, a path or a value.
+	 */
+	setting?: PolicySetting,
 };
 
 /**

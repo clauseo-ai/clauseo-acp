@@ -145,7 +145,7 @@ fn codex_reads_none_of_the_scrubbed_names() {
     ]);
     for name in names {
         assert!(
-            !crate::agent::spec::is_dropped_inherited(std::ffi::OsStr::new(name)),
+            !crate::agent::spec::is_dropped_inherited(std::ffi::OsStr::new(name), false),
             "{name}"
         );
     }
@@ -153,25 +153,87 @@ fn codex_reads_none_of_the_scrubbed_names() {
         crate::agent::spec::SCRUBBED_PREFIXES,
         ["CLAUDE_", "ANTHROPIC_"]
     );
-    assert_eq!(crate::agent::spec::SCRUBBED, ["IS_SANDBOX"]);
+    assert_eq!(crate::agent::spec::SCRUBBED.len(), 8);
 }
 
-/// Every inherited `CLAUDE_*` and `ANTHROPIC_*` name outside `ROUTING_KEPT` drops, in any case;
-/// each name on the list passes, in any case.
+/// The names outside both prefixes on the scrub's list (`SCRUBBED`) drop, inherited, in any case,
+/// route or not; the firm's proxy and CA stay.
+#[test]
+fn the_loosening_names_outside_the_prefixes_drop_and_the_firms_proxy_and_ca_stay() {
+    use std::ffi::OsStr;
+
+    use crate::agent::spec::is_dropped_inherited;
+    for name in [
+        "IS_SANDBOX",
+        "NODE_TLS_REJECT_UNAUTHORIZED",
+        "node_tls_reject_unauthorized",
+        "SESSION_INGRESS_URL",
+        "AGENT_PROXY_URL",
+        "AGENT_PROXY_AUTH_TOKEN",
+        "SELF_HOSTED_RUNNER_TRUST_WORKSPACE",
+        "SELF_HOSTED_RUNNER_HOOKS_DIR",
+        "SELF_HOSTED_RUNNER_CONFINE_REPO_SETTINGS",
+    ] {
+        for route in [true, false] {
+            assert!(
+                is_dropped_inherited(OsStr::new(name), route),
+                "{name} drops"
+            );
+        }
+    }
+    for name in [
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_FILE",
+    ] {
+        assert!(
+            !is_dropped_inherited(OsStr::new(name), false),
+            "{name} stays"
+        );
+    }
+}
+
+/// A route (`ROUTES`) passes on its own, in any case; every other name on `ROUTING_KEPT` passes
+/// only beside a route; every other inherited `CLAUDE_*` and `ANTHROPIC_*` name drops, in any
+/// case, route or not.
 #[test]
 fn only_the_listed_routing_names_pass_and_every_other_prefixed_name_drops() {
     use std::ffi::OsStr;
 
-    use crate::agent::spec::{ROUTING_KEPT, is_dropped_inherited};
+    use crate::agent::spec::{ROUTES, ROUTING_KEPT, is_dropped_inherited};
     for name in ROUTING_KEPT {
-        assert!(!is_dropped_inherited(OsStr::new(name)), "{name} passes");
         let lower = name.to_ascii_lowercase();
-        assert!(!is_dropped_inherited(OsStr::new(&lower)), "{lower} passes");
+        for name in [name, lower.as_str()] {
+            let route = ROUTES
+                .iter()
+                .any(|listed| listed.eq_ignore_ascii_case(name));
+            assert!(
+                !is_dropped_inherited(OsStr::new(name), true),
+                "{name} passes"
+            );
+            assert_eq!(
+                is_dropped_inherited(OsStr::new(name), false),
+                !route,
+                "{name}"
+            );
+        }
     }
     // Names Claude Code 2.1.293 reads that are not routing, names left out on purpose
     // (`agent/spec/routing.rs`), and near-misses of listed names: none passes on a pattern.
     for name in [
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
         "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+        "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+        "ANTHROPIC_UNIX_SOCKET",
+        "CLAUDE_CODE_API_BASE_URL",
+        "ANTHROPIC_IDENTITY_TOKEN",
+        "ANTHROPIC_FEDERATION_RULE_ID",
+        "ANTHROPIC_PROFILE",
+        "ANTHROPIC_CONFIG_DIR",
         "CLAUDE_CODE_HOST_CREDS_FILE",
         "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
         "CLAUDE_CODE_CUSTOM_OAUTH_URL",
@@ -183,81 +245,180 @@ fn only_the_listed_routing_names_pass_and_every_other_prefixed_name_drops() {
         "CLAUDE_CODE_HTTPS_PROXY",
         "CLAUDE_CODE_SANDBOXED",
         "CLAUDE_CODE_BUBBLEWRAP",
+        "CLAUDE_CODE_3P_SEEDED_OPUS_DEFAULT",
         "CLAUDE_CONFIG_DIR",
         "ANTHROPIC_BETAS",
-        "ANTHROPIC_BEDROCK_SERVICE_TIER",
         "ANTHROPIC_BASE_URL_EXTRA",
         "ANTHROPIC_DEFAULT_NEXT_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL_EXTRA",
         "CLAUDE_CODE_SKIP_ANY_AUTH",
         "CLAUDE_CODE_USE_SOMETHING_NEW",
         "ANTHROPIC_",
         "CLAUDE_",
         "IS_SANDBOX",
     ] {
-        assert!(is_dropped_inherited(OsStr::new(name)), "{name} drops");
+        assert!(is_dropped_inherited(OsStr::new(name), true), "{name} drops");
         assert!(!ROUTING_KEPT.contains(&name), "{name} is not on the list");
     }
 }
 
-/// The table in #1167's description: where a launch's routing points, for an inherited endpoint
-/// with a token, one without, a firm plan's endpoint, none, and an inherited account token. Each
-/// row is what main sends: main drops no `ANTHROPIC_*` or `CLAUDE_*` name (it drops
-/// `GIT_`/`SSH_`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE` only), and the hook's names win over
-/// inherited ones.
+/// `CLAUDE_PROJECT_UUID` names a claude.ai Project (2.1.293's project context block);
+/// `CLAUDE_CODE_BRIEF` and `CLAUDE_CODE_PEWTER_OWL_TOOL` each offer its `SendUserMessage` tool.
+/// Clauseo never sets them, and an inherited one drops, with a route or without:
+/// none is routing, so the `CLAUDE_` prefix scrub takes it (a policy's `env` setting one
+/// refuses the launch, `weakens.rs`).
+#[test]
+fn an_inherited_project_id_or_brief_switch_never_reaches_the_agent() {
+    use std::ffi::OsStr;
+
+    use crate::agent::spec::{ROUTING_KEPT, is_dropped_inherited};
+
+    for name in [
+        "CLAUDE_PROJECT_UUID",
+        "CLAUDE_CODE_BRIEF",
+        "CLAUDE_CODE_PEWTER_OWL_TOOL",
+    ] {
+        assert!(!ROUTING_KEPT.contains(&name), "{name}");
+        for route in [false, true] {
+            let dropped = is_dropped_inherited(OsStr::new(name), route);
+            assert!(dropped, "{name}, route {route}");
+        }
+    }
+}
+
+/// One row of #1167's table: what it shows, the inherited names, the hook's (a firm plan's), and
+/// every `CLAUDE_*` and `ANTHROPIC_*` name the launch holds but its home.
+type Row = (
+    &'static str,
+    &'static [(&'static str, &'static str)],
+    &'static [(&'static str, &'static str)],
+    &'static [(&'static str, &'static str)],
+);
+
+/// The rows. `ANTHROPIC_API_KEY` is the settings entry's `""` unless the hook sets the stored key:
+/// an inherited key never wins over it.
+const ROWS: [Row; 9] = [
+    (
+        "an inherited endpoint with its token",
+        &[
+            ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
+            ("ANTHROPIC_AUTH_TOKEN", "firm-token"),
+        ],
+        &[],
+        &[
+            ("ANTHROPIC_API_KEY", ""),
+            ("ANTHROPIC_AUTH_TOKEN", "firm-token"),
+            ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
+        ],
+    ),
+    (
+        "an inherited endpoint with no token (#1152 refuses it while no key is held)",
+        &[("ANTHROPIC_BASE_URL", "https://gw.firm.example")],
+        &[],
+        &[
+            ("ANTHROPIC_API_KEY", ""),
+            ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
+        ],
+    ),
+    (
+        "a firm plan's endpoint and the stored key, over an inherited one",
+        &[("ANTHROPIC_BASE_URL", "https://elsewhere.example")],
+        &[
+            ("ANTHROPIC_BASE_URL", "https://plan.firm.example"),
+            ("ANTHROPIC_API_KEY", "sk-stored"),
+        ],
+        &[
+            ("ANTHROPIC_API_KEY", "sk-stored"),
+            ("ANTHROPIC_BASE_URL", "https://plan.firm.example"),
+        ],
+    ),
+    ("none", &[], &[], &[("ANTHROPIC_API_KEY", "")]),
+    (
+        "an inherited account token: dropped, so Clauseo's own sign-in is used",
+        &[
+            ("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-firm"),
+            ("CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "rt-firm"),
+        ],
+        &[],
+        &[("ANTHROPIC_API_KEY", "")],
+    ),
+    (
+        "a lone token with no endpoint: an account swap, dropped",
+        &[("ANTHROPIC_AUTH_TOKEN", "someone-elses-token")],
+        &[],
+        &[("ANTHROPIC_API_KEY", "")],
+    ),
+    (
+        "an inherited key beside its endpoint: the entry's empty key still wins",
+        &[
+            ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
+            ("ANTHROPIC_API_KEY", "sk-inherited"),
+        ],
+        &[],
+        &[
+            ("ANTHROPIC_API_KEY", ""),
+            ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
+        ],
+    ),
+    (
+        "a provider switch with its companions: all passed",
+        &[
+            ("claude_code_use_bedrock", " True "),
+            ("ANTHROPIC_BEDROCK_REGION_PREFIX", "eu"),
+            ("CLAUDE_CODE_SKIP_BEDROCK_AUTH", "1"),
+            ("ANTHROPIC_CUSTOM_HEADERS", "X-Firm: 1"),
+            (
+                "ANTHROPIC_MODEL",
+                "arn:aws:bedrock:eu-west-1:1:inference-profile/firm",
+            ),
+        ],
+        &[],
+        &[
+            ("ANTHROPIC_API_KEY", ""),
+            ("ANTHROPIC_BEDROCK_REGION_PREFIX", "eu"),
+            ("ANTHROPIC_CUSTOM_HEADERS", "X-Firm: 1"),
+            (
+                "ANTHROPIC_MODEL",
+                "arn:aws:bedrock:eu-west-1:1:inference-profile/firm",
+            ),
+            ("CLAUDE_CODE_SKIP_BEDROCK_AUTH", "1"),
+            ("claude_code_use_bedrock", " True "),
+        ],
+    ),
+    (
+        "companions with no route (a switch that is off, an empty endpoint): dropped",
+        &[
+            ("CLAUDE_CODE_USE_VERTEX", "0"),
+            ("ANTHROPIC_BASE_URL", ""),
+            ("CLAUDE_CODE_USE_GATEWAY", "1"),
+            ("ANTHROPIC_AUTH_TOKEN", "someone-elses-token"),
+            ("ANTHROPIC_CUSTOM_HEADERS", "X-Other: 1"),
+            ("ANTHROPIC_VERTEX_PROJECT_ID", "other-project"),
+            ("ANTHROPIC_MODEL", "claude-other"),
+            ("CLAUDE_CODE_CLIENT_CERT", "/tmp/other.pem"),
+        ],
+        &[],
+        &[
+            ("ANTHROPIC_API_KEY", ""),
+            ("ANTHROPIC_BASE_URL", ""),
+            ("CLAUDE_CODE_USE_VERTEX", "0"),
+        ],
+    ),
+];
+
+/// The table in #1167's description (`ROWS`): every `CLAUDE_*` and `ANTHROPIC_*` name a launch
+/// holds. The routing rows are what main sends (main drops no `ANTHROPIC_*` or `CLAUDE_*` name),
+/// and the hook's names win over inherited ones. A name that only swaps the account (an OAuth
+/// token, a lone bearer token) never reaches the agent, which signs in with Clauseo's own login
+/// in its home (`CLAUDE_CONFIG_DIR`, forced in every row); nor does a companion with no route.
 #[test]
 fn routing_points_where_it_did_before_the_scrub() {
-    use crate::agent::spec::ROUTING_KEPT;
-    type Pairs<'a> = &'a [(&'a str, &'a str)];
-    let rows: [(&str, Pairs<'_>, Pairs<'_>, Pairs<'_>); 5] = [
-        (
-            "an inherited endpoint with its token",
-            &[
-                ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
-                ("ANTHROPIC_AUTH_TOKEN", "firm-token"),
-            ],
-            &[],
-            &[
-                ("ANTHROPIC_AUTH_TOKEN", "firm-token"),
-                ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
-            ],
-        ),
-        (
-            "an inherited endpoint with no token (#1152 refuses it while no key is held)",
-            &[("ANTHROPIC_BASE_URL", "https://gw.firm.example")],
-            &[],
-            &[("ANTHROPIC_BASE_URL", "https://gw.firm.example")],
-        ),
-        (
-            "a firm plan's endpoint and the stored key, over an inherited one",
-            &[("ANTHROPIC_BASE_URL", "https://elsewhere.example")],
-            &[
-                ("ANTHROPIC_BASE_URL", "https://plan.firm.example"),
-                ("ANTHROPIC_API_KEY", "sk-stored"),
-            ],
-            &[
-                ("ANTHROPIC_API_KEY", "sk-stored"),
-                ("ANTHROPIC_BASE_URL", "https://plan.firm.example"),
-            ],
-        ),
-        ("none", &[], &[], &[]),
-        (
-            "an inherited account token: the same account as main",
-            &[
-                ("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-firm"),
-                ("CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "rt-firm"),
-            ],
-            &[],
-            &[
-                ("CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "rt-firm"),
-                ("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-firm"),
-            ],
-        ),
-    ];
-    for (row, inherited, hook, expected) in rows {
+    let home = std::path::Path::new("/data/agents/claude-acp/home");
+    for (row, inherited, hook, expected) in ROWS {
         let agent = AgentLaunch {
             command: absolute_program(),
             args: Vec::new(),
-            env: BTreeMap::new(),
+            env: BTreeMap::from([("ANTHROPIC_API_KEY".to_owned(), String::new())]),
         };
         let hook = crate::agent::loads::launch_env(
             hook.iter()
@@ -271,20 +432,22 @@ fn routing_points_where_it_did_before_the_scrub() {
         let spec = launch_spec(
             &agent,
             hook,
-            BTreeMap::new(),
+            crate::agent::home::claude_launch_env(home),
             &[],
-            inherited,
+            inherited.into_iter(),
             std::env::temp_dir(),
             &[],
         )
         .unwrap();
+        let config = spec.env().get(&OsString::from("CLAUDE_CONFIG_DIR"));
+        assert_eq!(config, Some(&home.as_os_str().to_owned()), "{row}");
         let routing: BTreeMap<String, String> = spec
             .env()
             .iter()
             .filter_map(|(name, value)| {
                 Some((name.to_str()?.to_owned(), value.to_str()?.to_owned()))
             })
-            .filter(|(name, _)| ROUTING_KEPT.contains(&name.as_str()))
+            .filter(|(name, _)| scrubbed(name) && name != "CLAUDE_CONFIG_DIR")
             .collect();
         let expected: BTreeMap<String, String> = expected
             .iter()

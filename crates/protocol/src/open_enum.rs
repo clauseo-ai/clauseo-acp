@@ -60,6 +60,10 @@ pub(crate) use count_idents;
 /// string only; a kind this version does not know, as a plain string or as the key of a one-key
 /// map `{"kind": payload}` (payload skipped, any shape), becoming `Unknown`.
 ///
+/// A variant row may end in `= "wire"` to write that value instead of its snake case name, for
+/// an enum whose values are not Rust names (`PolicySetting`'s dotted keys); the value is a serde
+/// `rename`, so it never changes once logged.
+///
 /// After the enum, a line `test mod name;` names the test module the macro writes beside it: it
 /// round-trips every value of `ALL` in JSON and `MessagePack` and reads an unknown kind, as a
 /// string and as a key, to `Unknown` (`check::unit_enum`, in tests). The line is required.
@@ -67,7 +71,7 @@ macro_rules! open_unit_enum {
     (
         $(#[doc = $doc:expr])*
         $vis:vis enum $name:ident {
-            $($(#[doc = $variant_doc:expr])* $variant:ident,)+
+            $($(#[doc = $variant_doc:expr])* $variant:ident $(= $wire:literal)?,)+
         }
         test mod $test:ident;
     ) => {
@@ -76,7 +80,7 @@ macro_rules! open_unit_enum {
         #[cfg_attr(feature = "specta", derive(specta::Type))]
         #[serde(rename_all = "snake_case")]
         $vis enum $name {
-            $($(#[doc = $variant_doc])* $variant,)+
+            $($(#[doc = $variant_doc])* $(#[serde(rename = $wire)])? $variant,)+
             /// A value from a newer Clauseo that this version does not know.
             #[serde(other)]
             Unknown,
@@ -89,7 +93,7 @@ macro_rules! open_unit_enum {
                 #[derive(serde::Deserialize)]
                 #[serde(rename_all = "snake_case")]
                 enum $name {
-                    $($(#[doc = $variant_doc])* $variant,)+
+                    $($(#[doc = $variant_doc])* $(#[serde(rename = $wire)])? $variant,)+
                     #[serde(other)]
                     Unknown,
                 }

@@ -9,10 +9,10 @@ use crate::{
     ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
     ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, ImportSummary,
     LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeKind, NoticeLevel, PageVia,
-    PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PlanEntry, Principal,
-    RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind, TextOrBlob, ThreadId,
-    Timestamp, ToolCallContent, ToolCallId, ToolCallStatus, ToolKind, ToolLocation, TurnId,
-    TurnUsage, WebResult,
+    PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PlanEntry,
+    PolicySetting, Principal, RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind,
+    TextOrBlob, ThreadId, Timestamp, ToolCallContent, ToolCallId, ToolCallStatus, ToolKind,
+    ToolLocation, TurnId, TurnUsage, WebResult,
 };
 
 /// A thread's header. Entry id `header:<thread>`.
@@ -389,6 +389,9 @@ pub struct StepEntry {
     /// The code of the `TurnFailed` before it, when it failed.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub failure: Option<ErrorCode>,
+    /// The policy setting of that `TurnFailed` (`TurnFailed::setting`), which the app names.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub failure_setting: Option<PolicySetting>,
     /// The files it changed (from its `FilesChanged`; empty when none changed).
     pub files: Vec<FileChange>,
     /// The files it changed but did not version.

@@ -67,7 +67,7 @@ use crate::coalesce::ThreadText;
 use crate::error::Error;
 use crate::matter_worker::MatterReply;
 use crate::pipeline::Failure;
-use state::BeforePrompt;
+use state::{BeforePrompt, End};
 
 pub(crate) use asks::asks_pending;
 pub(crate) use came_back::{
@@ -278,16 +278,6 @@ struct LimitMark {
     window: Option<String>,
     resets_at: Option<Timestamp>,
     reason: LimitStopReason,
-}
-
-/// How a turn ends.
-#[derive(Debug, Clone)]
-struct End {
-    stop: clauseo_protocol::StopReason,
-    failure: Option<(ErrorCode, Option<String>)>,
-    expiry: clauseo_protocol::ExpiryReason,
-    /// Logged after `TurnEnded`: the agent exited during the turn.
-    detach: Option<clauseo_protocol::DetachReason>,
 }
 
 /// What a turn commit continues with once its result is back.

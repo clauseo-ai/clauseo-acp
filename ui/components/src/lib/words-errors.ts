@@ -6,6 +6,7 @@
 import type { Lang } from "./display.ts";
 import { isolate, wordsOf } from "./words-core.ts";
 import { BACKSLASH, backslashKey, byAgent, type BackslashPlace } from "./words-errors-backslash.ts";
+import { POLICY_NO_SETTING, POLICY_SETTING, policySetting } from "./words-errors-policy.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
 import type { VersionKey } from "./words-versions.ts";
@@ -133,6 +134,7 @@ export type ErrorCode =
   | "agent.user_policy"
   | "agent.settings_changed"
   | "agent.mode_not_set"
+  | "agent.firm_policy_weakens"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -396,10 +398,10 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // start Claude. Claude-only: no other plan's line. Hindi later
   "agent.firm_hooks_off":
     "Claude can't start here: your firm's Claude settings on this computer switch off a safety check Clauseo needs (disableAllHooks or allowManagedHooksOnly). Start this conversation with ChatGPT instead.",
-  // provisional (U3-err-agent.user_policy): a Claude Code policy any program can write (Windows, HKCU) sets permissions, sandbox or
-  // hooks, so the host didn't start Claude, or stopped it. Claude-only. Hindi later
-  "agent.user_policy":
-    "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is undone. Remove the program that made it, then try again, or use ChatGPT for now.",
+  // provisional (U3-err-agent.user_policy): a Claude Code policy only IT or an elevated program can write (Windows, HKCU)
+  // weakens the launch, so the host didn't start Claude, or stopped it. Claude-only; its line is POLICY_SETTING's, or POLICY_NO_SETTING's
+  // (U3-err-agent.user_policy.unnamed) when the step names no setting. Hindi later
+  "agent.user_policy": POLICY_NO_SETTING,
   // provisional (U3-err-agent.settings_changed): the settings file Clauseo writes at each launch changed while Claude ran, so Clauseo stopped
   // it; the next message starts it again (retryable). Claude-only. Hindi later
   "agent.settings_changed":
@@ -409,6 +411,11 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // conversation. Claude-only, so no other plan's line; not retryable. Hindi later
   "agent.mode_not_set":
     "Clauseo couldn't put Claude in its safe working mode, so it didn't send your message. Quit and reopen Clauseo, then send it again.",
+  // provisional (U3-err-agent.firm_policy_weakens): a managed Claude Code setting on this computer (the firm's policy files, macOS managed
+  // preferences, the HKLM policy, or the firm's server-managed settings) outranks a value Clauseo sets and would weaken the launch, or an
+  // administrator's policy file can't be read, so the host didn't start Claude, or stopped it. Claude-only; the same two lines as
+  // agent.user_policy (the unnamed one U3-err-agent.firm_policy_weakens.unnamed). Hindi later
+  "agent.firm_policy_weakens": POLICY_NO_SETTING,
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -554,18 +561,27 @@ export type FolderPlace = BackslashPlace & { wildcard?: string | null | undefine
  * doesn't know the thread leaves it out. `place` is where matter.folder_backslash's backslash is (BackslashPlace), for
  * a caller that knows the matter; left out, its line names the folder's own name and Finder. Its `wildcard` names the
  * folder in matter.folder_wildcard's line (in its `{name}` slot, never the agent's name); left out or null, that code
- * reads as agent.sandbox_unavailable's line. */
+ * reads as agent.sandbox_unavailable's line. `setting` is the step's StepEntry.failure_setting, for agent.user_policy and
+ * agent.firm_policy_weakens: one of POLICY_SETTINGS (words-errors-policy.ts) fills POLICY_SETTING's slot; none, or any
+ * other ("unknown" among them), gives POLICY_NO_SETTING's line. */
 export function errorWords(
   lang: Lang,
   code: string,
   agent?: AgentName,
   place?: FolderPlace,
+  setting?: string | null,
 ): string {
   if (Object.hasOwn(APP_ERROR_WORDS, code))
     return own(lang, APP_ERROR_WORDS[code as keyof typeof APP_ERROR_WORDS]);
   if (code === "matter.folder_backslash" && place !== undefined) {
     const { key, slots } = backslashKey(agent, place);
     return own(lang, key as keyof typeof HI, slots);
+  }
+  if (code === "agent.user_policy" || code === "agent.firm_policy_weakens") {
+    const named = policySetting(setting);
+    return named === null
+      ? own(lang, POLICY_NO_SETTING)
+      : own(lang, POLICY_SETTING, { setting: isolate(named) });
   }
   if (code === "matter.folder_wildcard") {
     const name = place?.wildcard ?? null;

@@ -1,5 +1,5 @@
 //! The single-value security keys every Claude launch sets in its flag settings, whatever the
-//! OS, mode or hook ([`pin_security_keys`]).
+//! OS, mode or hook, and the bundled skills it denies ([`pin_security_keys`]).
 //!
 //! Claude Code 2.1.293 still reads the user settings file under `--setting-sources=user`
 //! (`<CLAUDE_CONFIG_DIR>/settings.json`, Clauseo's own Claude home, `agent::home`), and policy
@@ -34,6 +34,14 @@
 //!   remote-tools check names each as weakening the sandbox's isolation ("the sandbox on this
 //!   device is configured with a setting that weakens its isolation …").
 //!
+//! - `disableBundledSkills: true` (schema: a boolean, "Disable the skills and workflows that
+//!   ship with Claude Code"; 2.1.293 @205219337): Claude Code's bundled skills
+//!   (`update-config`, `fewer-permission-prompts`, …; `security-review` is a built-in prompt
+//!   command) do not load. Only commands whose source is `builtin` go (`QG`/`dgr` @207669048):
+//!   plugins (Clauseo's skills, a firm pack's), `.claude/skills/` and `.claude/commands/` are
+//!   unaffected, as the schema's description says too. Belt and braces, [`SKILL_DENIES`] go on
+//!   `permissions.deny`, which every source joins, so no file can take them out.
+//!
 //! Left out: `disableAutoMode` (Clauseo runs auto), `blockReadsOutsideWorkingDirectories` (only
 //! tightens, "true in any settings source wins", and would break reading the skills),
 //! `allowManagedHooksOnly`, `allowManagedPermissionRulesOnly` and
@@ -48,12 +56,21 @@ use super::take_object;
 /// A pinned key: its path in the settings and its value.
 pub(crate) type Pin = (&'static [&'static str], Value);
 
+/// Three of the bundled skills, also denied by name (a `Skill` rule's content is the skill's
+/// name, 2.1.293).
+pub(crate) const SKILL_DENIES: [&str; 3] = [
+    "Skill(update-config)",
+    "Skill(fewer-permission-prompts)",
+    "Skill(security-review)",
+];
+
 /// Every key [`pin_security_keys`] sets for a launch with Claude's sandbox (`sandboxed`) or
 /// without, in forced ask or not.
 pub(crate) fn security_pins(sandboxed: bool, forced_ask: bool) -> Vec<Pin> {
     let mode = super::claude_mode(forced_ask);
     vec![
         (&["disableAllHooks"], Value::Bool(false)),
+        (&["disableBundledSkills"], Value::Bool(true)),
         (&["permissions", "defaultMode"], Value::from(mode)),
         (
             &["permissions", "disableBypassPermissionsMode"],
@@ -87,7 +104,9 @@ pub(crate) fn security_pins(sandboxed: bool, forced_ask: bool) -> Vec<Pin> {
 }
 
 /// Sets each of [`security_pins`] in `settings` (the flag settings), over whatever the hook or
-/// the host's other keys put there; an object on a key's path that is not one is replaced.
+/// the host's other keys put there, and adds [`SKILL_DENIES`] to `permissions.deny` after any
+/// rules already there; an object on a key's path that is not one is replaced, and so is a
+/// `deny` that is not an array.
 pub(crate) fn pin_security_keys(
     settings: &mut Map<String, Value>,
     sandboxed: bool,
@@ -96,6 +115,18 @@ pub(crate) fn pin_security_keys(
     for (path, value) in security_pins(sandboxed, forced_ask) {
         set_path(settings, path, value);
     }
+    let mut permissions = take_object(settings, "permissions");
+    let mut deny = match permissions.remove("deny") {
+        Some(Value::Array(rules)) => rules,
+        _ => Vec::new(),
+    };
+    for rule in SKILL_DENIES {
+        if !deny.iter().any(|held| held.as_str() == Some(rule)) {
+            deny.push(Value::from(rule));
+        }
+    }
+    permissions.insert("deny".to_owned(), Value::Array(deny));
+    settings.insert("permissions".to_owned(), Value::Object(permissions));
 }
 
 /// Sets `value` at `path` in `map`, making each object on the way.

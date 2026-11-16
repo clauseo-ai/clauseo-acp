@@ -124,7 +124,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `auto_mode_unavailable`, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`), `outside_matter_blocked`, `shell_network_blocked`, `shell_network_blocked_no_web_search`, `held_open_blocked` with file, `codex_folder_blocked`, `guard_step_blocked`, `guard_steps_more` with more, `model_switch_refused` with picked and kept (model display names); host notices only; `text` is the fallback) | acp, host | yes | T |
 | `compaction_changed` | status, summary? | acp | yes | T |
 | `files_changed` | turn, files, skipped | matters, through the host | yes | T |
-| `turn_failed` | turn, code, detail? (never shown) | host, acp | yes | T |
+| `turn_failed` | turn, code, detail? (never shown), setting? (`PolicySetting`) | host, acp | yes | T |
 | `turn_stopped_at_limit` | turn, window?, resets_at?, reason | limits, through the host | yes | T |
 | `turn_ended` | turn, stop, usage?, checkpoint_after? | host | yes | T |
 | `step_undone` | turn, checkpoint, restored, kept, unversioned? | host, matters | yes | T |
@@ -323,6 +323,16 @@ Tool calls carry their web (0041; no event changes, the fold does). `ToolCallEnt
 is ignored, and the reducer keeps at most 50 pages per call. The new view types are additive, and
 `REDUCER_SCHEMA_VERSION` goes from 7 to 8, after the triage's 6 to 7: old snapshots are passed over
 and each thread's log is folded once at its next reopen, as for the bumps above.
+
+A policy's refusal of a Claude launch names its setting (added 2026-11-16). `turn_failed.setting`
+(a `PolicySetting`, left out when none) is the Claude Code key the host's policy check found
+(`agent.user_policy`, `agent.firm_policy_weakens`), written as its dotted key
+(`sandbox.enabled`): only one of the check's fixed keys, never a policy's text, a path or a
+value; a key a newer Clauseo adds reads as `Unknown`, which the app shows as no setting named.
+The fold keeps it beside the turn's failure code and gives it to the step as
+`StepEntry.failure_setting` (left out when none). Both fields are additive, and
+`REDUCER_SCHEMA_VERSION` goes from 13 to 14: old snapshots are passed over and each thread's log
+is folded once at its next reopen, as for the bumps above.
 
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same
@@ -578,7 +588,7 @@ as the room left by the blocks before it allows, so a block past the limit comes
 | `ErrorCode` | open, `Unknown` | unit | |
 | `ContentBlock` | open, `Unsupported { kind, raw_from, raw }` | data | |
 | `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope`, `NoticeKind` | open, `Unknown { kind }` | data | |
-| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout` | open, `Unknown` | unit | |
+| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout`, `PolicySetting` | open, `Unknown` | unit | |
 | `TextOrBlob` | closed | data | Inline text or a blob reference is how Clauseo stores a payload; a third form is a new storage format. |
 | `RawPayload` | closed | data | It is the data model of JSON and MessagePack themselves. |
 | `StreamId` | closed | data (one string) | A thread's or a matter's stream is the log's own keying; a new stream kind changes the store. |

@@ -350,6 +350,7 @@ pub(super) fn prepare(
                 let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
                 let codex = match codex_home {
                     Some(home) => {
+                        settings.codex_refusal()?;
                         let (folder, support) =
                             codex::prepare_launch(&check, &stored, &data, &home)?;
                         answer = Some(support);

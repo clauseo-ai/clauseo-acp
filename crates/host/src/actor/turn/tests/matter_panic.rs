@@ -27,6 +27,7 @@ fn done() -> End {
         failure: None,
         expiry: ExpiryReason::TurnEnded,
         detach: None,
+        setting: None,
     }
 }
 

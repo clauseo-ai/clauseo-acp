@@ -25,6 +25,7 @@ fn step(rig: &mut Rig) -> (ThreadId, TurnId) {
         failure: None,
         expiry: ExpiryReason::TurnEnded,
         detach: None,
+        setting: None,
     };
     end::end_turn(&mut rig.actor, thread, done);
     until_ended(rig, thread);

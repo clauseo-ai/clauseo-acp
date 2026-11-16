@@ -15,14 +15,15 @@ use super::super::super::input::Input;
 use super::super::key_retry::{KeyRetry, own_login};
 use super::super::launch_checks::Prepared;
 use super::super::offline::probe::Target;
+use super::super::offline::probe::settings::policy_keys::weakens::OwnEnv;
 use super::{CodexAgent, path, start_failure};
 use crate::agent::{self, AgentLink};
 use crate::error::Error;
 
 /// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, a
 /// Claude launch's plans folder, the matter folder's spellings for its stderr summary, a Claude
-/// launch's home, the launch variables the data fence expands (`data_fence::launch_vars`), and
-/// what the offline probe asks (`offline/probe/service.rs`).
+/// launch's home, the launch variables later checks read ([`LaunchVars`]), and what the offline
+/// probe asks (`offline/probe/service.rs`).
 pub(super) type Launched = (
     AgentLink,
     PathBuf,
@@ -30,9 +31,18 @@ pub(super) type Launched = (
     Option<PathBuf>,
     Vec<String>,
     Option<PathBuf>,
-    Vec<(String, String)>,
+    LaunchVars,
     Option<Target>,
 );
+
+/// The launch's variables that checks read again later, kept on the agent (`Agent::vars`).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LaunchVars {
+    /// Those holding a path, for the data fence's `$env:NAME` (`data_fence::launch_vars`).
+    pub(crate) fence: Vec<(String, String)>,
+    /// The launch's own values a policy's `env` must leave as they are (`weakens::OwnEnv`).
+    pub(crate) own: OwnEnv,
+}
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
 /// variables, then the profile hook's with the host's switches over them, then what the host
@@ -135,7 +145,10 @@ pub(super) fn launch(
     let plan_notes = claude
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
         .flatten();
-    let fence_vars = agent::data_fence::launch_vars(spec.env());
+    let vars = LaunchVars {
+        fence: agent::data_fence::launch_vars(spec.env()),
+        own: OwnEnv::of(spec.env()),
+    };
     // The service and route the offline probe asks, from the env the agent gets, unless the
     // agent's own settings files move them (read by the prep).
     let kind = AgentKind::of(&row.agent);
@@ -164,7 +177,7 @@ pub(super) fn launch(
         plan_notes,
         matter_spellings,
         claude_home,
-        fence_vars,
+        vars,
         probe,
     ))
 }

@@ -26,6 +26,7 @@ fn rewritten(rig: &mut Rig) -> (ThreadId, HostCommand) {
         failure: None,
         expiry: ExpiryReason::TurnEnded,
         detach: None,
+        setting: None,
     };
     end::end_turn(&mut rig.actor, thread, done);
     until_ended(rig, thread);

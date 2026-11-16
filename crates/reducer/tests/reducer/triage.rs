@@ -110,6 +110,7 @@ fn triggers(log: &mut Log, turn: TurnId) -> Vec<(&'static str, DomainEvent)> {
                 turn,
                 code: ErrorCode::ALL[0],
                 detail: None,
+                setting: None,
             }
             .into(),
         ),

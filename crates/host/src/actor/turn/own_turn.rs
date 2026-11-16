@@ -383,6 +383,7 @@ fn end_now(actor: &mut Actor, thread: ThreadId) {
         failure: None,
         expiry: ExpiryReason::TurnEnded,
         detach: None,
+        setting: None,
     };
     end::end_turn(actor, thread, end);
 }

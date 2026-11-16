@@ -2,12 +2,13 @@
 //! `later_variants` in the parent module chains on before them, R24's case-law records, and the
 //! host notices with a kind, which it chains on next, the skill pack notices among them, and the
 //! later stop reasons (`NotAllowed`'s moved here from it), which it chains on next, and the later
-//! steer outcomes, which it chains on last.
+//! steer outcomes, which it chains on next, and a policy refusal naming each `PolicySetting`,
+//! which it chains on last.
 
 use clauseo_protocol::{
     AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PackId,
-    PackSkipReason, PageVia, PageVisited, SearchSource, SteerOutcome, SteerResolved, StopReason,
-    TurnEnded, TurnFailed, WebResult, WebSearchRecorded,
+    PackSkipReason, PageVia, PageVisited, PolicySetting, SearchSource, SteerOutcome, SteerResolved,
+    StopReason, TurnEnded, TurnFailed, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{checkpoint_id, message_id, tool_call_id, turn_id};
@@ -176,6 +177,11 @@ fn agent_failures() -> Vec<DomainEvent> {
             "the firm's managed Claude settings set disableAllHooks, so the guard hook can't run",
         ),
         failed(
+            ErrorCode::AgentFirmPolicyWeakens,
+            "the firm's Claude Code policy (managed-settings.json) sets `sandbox.enabled`, \
+             which weakens this launch",
+        ),
+        failed(
             ErrorCode::AgentUserPolicy,
             "HKCU\\SOFTWARE\\Policies\\ClaudeCode sets permissions, outranked by no admin policy",
         ),
@@ -280,6 +286,7 @@ fn failed(code: ErrorCode, detail: &str) -> DomainEvent {
         turn: turn_id(3),
         code,
         detail: Some(detail.to_owned()),
+        setting: None,
     }
     .into()
 }
@@ -484,4 +491,40 @@ pub(super) fn steers() -> Vec<DomainEvent> {
         }
         .into(),
     ]
+}
+
+/// A policy refusal of turn 3 naming each `PolicySetting`: the hooks keys from the user tier
+/// (`agent.user_policy`, the one tier where they refuse), the rest from the firm's policy.
+pub(super) fn policy_settings() -> Vec<DomainEvent> {
+    let known = PolicySetting::ALL
+        .into_iter()
+        .filter(|s| *s != PolicySetting::Unknown);
+    known
+        .map(|setting| {
+            let key = serde_json::to_value(setting).unwrap();
+            let key = key.as_str().unwrap();
+            let hooks = matches!(
+                setting,
+                PolicySetting::DisableAllHooks | PolicySetting::AllowManagedHooksOnly
+            );
+            let (code, source) = if hooks {
+                (
+                    ErrorCode::AgentUserPolicy,
+                    "HKCU\\SOFTWARE\\Policies\\ClaudeCode",
+                )
+            } else {
+                (ErrorCode::AgentFirmPolicyWeakens, "managed-settings.json")
+            };
+            TurnFailed {
+                turn: turn_id(3),
+                code,
+                detail: Some(format!(
+                    "the Claude Code policy at {source} sets `{key}`, which weakens Clauseo's \
+                     protections; only an administrator can change it, so Claude is not run"
+                )),
+                setting: Some(setting),
+            }
+            .into()
+        })
+        .collect()
 }

@@ -31,6 +31,7 @@ fn a_failed_undo_commit_keeps_the_writer_and_is_retried() {
         failure: None,
         expiry: ExpiryReason::TurnEnded,
         detach: None,
+        setting: None,
     };
     end::end_turn(&mut rig.actor, thread, done);
     until_ended(&mut rig, thread);

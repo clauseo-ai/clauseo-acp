@@ -1561,7 +1561,8 @@ expression: counts_schema()
         "agent.firm_hooks_off",
         "agent.user_policy",
         "agent.settings_changed",
-        "agent.mode_not_set"
+        "agent.mode_not_set",
+        "agent.firm_policy_weakens"
       ],
       "type": "string"
     },

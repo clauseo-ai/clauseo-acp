@@ -9,11 +9,12 @@
 //!
 //! - **Before each prompt** ([`check`], off the actor, beside the Codex `.codex` re-check): the
 //!   file must still say what the launch wrote, give or take the few keys Claude Code writes
-//!   there itself with safe values (`agent::home::claude_settings_intact`), and the
-//!   user-writable Windows policy must not apply (`profile_loads::policy::user_policy_refusal`,
-//!   on the actor, [`policy_refusal`]). Either failing stops the conversation: the turn fails
-//!   (`agent.settings_changed` or `agent.user_policy`, the detail naming no path) and the agent
-//!   is stopped, so the next message launches it again, and that launch rewrites the file.
+//!   there itself with safe values (`agent::home::claude_settings_intact`), and no policy may
+//!   weaken the launch (the per-user Windows one, the firm's, its server's:
+//!   `profile_loads::policy::user_policy_refusal`, on the actor, [`policy_refusal`]). Either
+//!   failing stops the conversation: the turn fails (`agent.settings_changed`, or
+//!   `agent.user_policy` or `agent.firm_policy_weakens`, the detail naming the setting) and the
+//!   agent is stopped, so the next message launches it again, and that launch rewrites the file.
 //! - **While the prompt runs** ([`watched`]): both checks again every [`POLL`], raced against
 //!   the prompt call, so a change made mid-turn (by a tool the agent ran, or anything else)
 //!   stops the turn within about two seconds, the same way. Claude Code may already have applied
@@ -49,8 +50,9 @@ pub(super) fn changed() -> Error {
     )
 }
 
-/// Before a prompt of a Claude agent (`claude`): the user-writable policy's refusal, if it
-/// applies (`profile_loads::policy`). On the actor; a warn line when it refuses.
+/// Before a prompt of a Claude agent (`claude`): the refusal of a policy that weakens the launch
+/// (the per-user one, the firm's or its server's), if any (`profile_loads::policy`). On the
+/// actor; a warn line when it refuses.
 pub(super) fn policy_refusal(actor: &Actor, thread: ThreadId, claude: bool) -> Option<Error> {
     if !claude {
         return None;
@@ -58,8 +60,7 @@ pub(super) fn policy_refusal(actor: &Actor, thread: ThreadId, claude: bool) -> O
     let error = super::super::profile_loads::policy::user_policy_refusal(actor, thread)?;
     tracing::warn!(
         %thread,
-        "a user-writable Claude Code policy sets permissions, sandbox or hooks: the conversation \
-         is stopped before its prompt"
+        "a Claude Code policy weakens the launch: the conversation is stopped before its prompt"
     );
     Some(error)
 }

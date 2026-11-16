@@ -85,6 +85,7 @@ expression: fold(&prompt_stream().unwrap())
     "after_turn": null,
     "files": {},
     "failures": {},
+    "failure_settings": {},
     "before_checkpoints": {}
   }
 }

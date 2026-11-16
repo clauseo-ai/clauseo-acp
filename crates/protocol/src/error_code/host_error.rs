@@ -4,7 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::ErrorCode;
 use crate::serde_util::BorrowedStr;
-use crate::{Error, MatterId, MatterPath};
+use crate::{Error, MatterId, MatterPath, PolicySetting};
 
 /// What every host call returns on failure.
 ///
@@ -37,6 +37,11 @@ pub struct HostError {
     /// `message`.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     files: Vec<MatterPath>,
+    /// The policy setting that refused a Claude launch, for `agent.user_policy` and
+    /// `agent.firm_policy_weakens` when the host knows it; missing otherwise. The turn's
+    /// `TurnFailed` carries it on.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    setting: Option<PolicySetting>,
 }
 
 impl HostError {
@@ -48,6 +53,7 @@ impl HostError {
             message: message.into(),
             matter: None,
             files: Vec::new(),
+            setting: None,
         }
     }
 
@@ -75,6 +81,19 @@ impl HostError {
     /// Empty when it names none.
     pub fn files(&self) -> &[MatterPath] {
         &self.files
+    }
+
+    /// The same failure, naming the policy `setting` that refused the launch (see
+    /// [`HostError::setting`]).
+    #[must_use]
+    pub const fn with_setting(mut self, setting: PolicySetting) -> Self {
+        self.setting = Some(setting);
+        self
+    }
+
+    /// The policy setting that refused a Claude launch, when the failure names one.
+    pub const fn setting(&self) -> Option<PolicySetting> {
+        self.setting
     }
 
     /// Why the call failed.
@@ -136,6 +155,8 @@ struct HostErrorWire<'a> {
     matter: Option<MatterId>,
     #[serde(default)]
     files: Vec<MatterPath>,
+    #[serde(default)]
+    setting: Option<PolicySetting>,
 }
 
 impl<'de> Deserialize<'de> for HostError {
@@ -155,6 +176,7 @@ impl<'de> Deserialize<'de> for HostError {
                 },
                 matter: wire.matter,
                 files: wire.files,
+                setting: wire.setting,
             },
             None => Self {
                 code: ErrorCode::Unknown,
@@ -162,6 +184,7 @@ impl<'de> Deserialize<'de> for HostError {
                 retryable: wire.retryable,
                 matter: wire.matter,
                 files: wire.files,
+                setting: wire.setting,
             },
         })
     }

@@ -1,6 +1,6 @@
 //! The host's one error type: every failure of a host call, with the code a client sees.
 
-use clauseo_protocol::{ErrorCode, HostError};
+use clauseo_protocol::{ErrorCode, HostError, PolicySetting};
 
 /// Why a host call failed. [`Error::code`] gives the client's code; `From<Error> for HostError`
 /// gives the wire form.
@@ -122,6 +122,16 @@ impl Error {
     /// A state check's refusal with `code` and a detail for logs.
     pub(crate) fn refused(code: ErrorCode, message: impl Into<String>) -> Self {
         Self::Refused(HostError::new(code, message))
+    }
+
+    /// The policy setting a refusal names (`HostError::setting`), which the turn's `TurnFailed`
+    /// carries on; `None` for any other failure.
+    pub(crate) const fn setting(&self) -> Option<PolicySetting> {
+        if let Self::Refused(error) = self {
+            error.setting()
+        } else {
+            None
+        }
     }
 }
 

@@ -12,8 +12,9 @@
 
 use clauseo_protocol::{
     AgentSessionDetached, CheckpointId, DetachReason, ElicitationExpired, ElicitationId, ErrorCode,
-    ExpiryReason, FilesChanged, MatterId, PermissionExpired, PermissionRequestId, StopReason,
-    StreamId, ThreadId, ToolCallStatus, TurnEnded, TurnFailed, TurnId, TurnStoppedAtLimit,
+    ExpiryReason, FilesChanged, MatterId, PermissionExpired, PermissionRequestId, PolicySetting,
+    StopReason, StreamId, ThreadId, ToolCallStatus, TurnEnded, TurnFailed, TurnId,
+    TurnStoppedAtLimit,
 };
 
 use super::super::Actor;
@@ -93,6 +94,8 @@ pub(super) struct TurnClose {
     pub(super) stop: StopReason,
     /// The turn's first failure: logged as `TurnFailed`.
     pub(super) failure: Option<(ErrorCode, Option<String>)>,
+    /// The policy setting that failure names (`TurnFailed::setting`); `None` without one.
+    pub(super) setting: Option<PolicySetting>,
     pub(super) expiries: Expiries,
     /// `Cancelled` for each tool call of the turn not finished, as sent.
     pub(super) cancel_tools: bool,
@@ -119,6 +122,7 @@ impl TurnClose {
             turn,
             stop,
             failure: None,
+            setting: None,
             expiries: Expiries::None,
             cancel_tools: false,
             complete_tools: Skipped::None,
@@ -164,6 +168,7 @@ impl TurnClose {
                     turn,
                     code: *code,
                     detail,
+                    setting: self.setting,
                 },
             )?;
         }

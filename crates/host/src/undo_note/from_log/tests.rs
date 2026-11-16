@@ -82,6 +82,7 @@ fn step(n: u64, turn: TurnId, stop: StopReason, after: Option<CheckpointId>) -> 
         turn,
         stop,
         failure: None,
+        failure_setting: None,
         files: Vec::new(),
         skipped: Vec::new(),
         checkpoint_before: Some(checkpoint(40 + u8::try_from(n).unwrap())),

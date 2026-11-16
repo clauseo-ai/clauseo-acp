@@ -9,8 +9,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use clauseo_protocol::{
     CheckpointId, ElicitationId, ElicitationState, ErrorCode, FileChange, HeaderEntry,
-    MatterHeaderEntry, MatterId, MessageId, PermissionRequestId, PermissionState, Seq, SkippedFile,
-    StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, UserMessageStatus, ViewEntry, utf16_len,
+    MatterHeaderEntry, MatterId, MessageId, PermissionRequestId, PermissionState, PolicySetting,
+    Seq, SkippedFile, StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, UserMessageStatus,
+    ViewEntry, utf16_len,
 };
 use serde::{Deserialize, Serialize};
 
@@ -117,6 +118,8 @@ pub struct ThreadState {
     pub(crate) files: BTreeMap<TurnId, TurnFiles>,
     /// `TurnFailed` codes of turns that have not ended.
     pub(crate) failures: BTreeMap<TurnId, ErrorCode>,
+    /// The policy settings those `TurnFailed` name (`TurnFailed::setting`), for their steps.
+    pub(crate) failure_settings: BTreeMap<TurnId, PolicySetting>,
     /// The before-turn checkpoints of started turns that have not ended, for their steps.
     pub(crate) before_checkpoints: BTreeMap<TurnId, CheckpointId>,
     pub(crate) index: Index,
@@ -135,6 +138,7 @@ impl ThreadState {
             after_turn: None,
             files: BTreeMap::new(),
             failures: BTreeMap::new(),
+            failure_settings: BTreeMap::new(),
             before_checkpoints: BTreeMap::new(),
             index: Index::default(),
         }

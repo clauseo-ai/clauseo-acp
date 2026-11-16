@@ -188,6 +188,7 @@ fn turn_entries() -> Vec<ViewEntry> {
             turn: turn_id(3),
             stop: StopReason::EndTurn,
             failure: None,
+            failure_setting: None,
             files: file_changes(),
             skipped: vec![],
             checkpoint_before: Some(checkpoint_id(13)),

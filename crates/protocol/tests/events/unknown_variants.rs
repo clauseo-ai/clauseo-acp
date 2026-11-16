@@ -578,12 +578,14 @@ fn turn_failed_keeps_a_newer_code_in_detail() {
             turn: turn_id(3),
             code,
             detail: detail.map(str::to_owned),
+            setting: None,
         };
         // The wire form: a known code, then its text replaced by the code under test.
         let written = TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::Internal,
             detail: wire_detail.map(str::to_owned),
+            setting: None,
         };
         let mut json: serde_json::Value = serde_json::to_value(&written).unwrap();
         json["code"] = wire_code.into();

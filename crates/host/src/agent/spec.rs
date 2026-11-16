@@ -26,8 +26,9 @@ pub(crate) fn launch_spec(
 
 /// The whole environment of `agent`'s launch. It holds the `inherited` environment (the host's
 /// own, read at launch) minus every `GIT_*` and `SSH_*` variable, the names in
-/// [`DROPPED_INHERITED`], every `CLAUDE_*` and `ANTHROPIC_*` and `IS_SANDBOX`
-/// ([`SCRUBBED_PREFIXES`], [`SCRUBBED`]), and every name an agent, hook or forced variable
+/// [`DROPPED_INHERITED`], every `CLAUDE_*` and `ANTHROPIC_*` but the firm's routing and
+/// [`SCRUBBED`] (`IS_SANDBOX`, …; [`SCRUBBED_PREFIXES`]; whether the inherited environment holds
+/// a route is worked out once, for all its names), and every name an agent, hook or forced variable
 /// also names; then the agent's variables minus those the hook or `forced` names, then the
 /// hook's minus those `forced` names, then `forced`: what the host sets for the agent's kind
 /// (a Codex agent's mode, home and config, `agent/codex.rs`; a Claude agent's home,
@@ -83,9 +84,16 @@ pub(crate) fn launch_env(
         .filter(|(name, _)| !names(&hook_env, name) && !names(&forced, name) && !drops(name))
         .filter(|(name, _)| !is_agent_browser(name))
         .collect();
+    let inherited: Vec<(OsString, OsString)> = inherited.collect();
+    let route = routing::holds_route(
+        inherited
+            .iter()
+            .map(|(name, value)| (name.as_os_str(), value.as_os_str())),
+    );
     let mut env: BTreeMap<OsString, OsString> = inherited
+        .into_iter()
         .filter(|(name, _)| {
-            !is_dropped_inherited(name)
+            !is_dropped_inherited(name, route)
                 && !is_agent_browser(name)
                 && !drops(name)
                 && !names(&hook_env, name)
@@ -204,7 +212,8 @@ pub(crate) const DROPPED_INHERITED: [&str; 2] = ["NO_BROWSER", "CLAUDE_CODE_REMO
 /// `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` loads more `CLAUDE.md`, `CLAUDE_CONFIG_DIR`
 /// picks the user settings, `CLAUDE_CODE_USE_COWORK_PLUGINS` the other user file, and
 /// `ANTHROPIC_*` the service and key. What a launch needs of them Clauseo sets itself, and so
-/// they never come from here, but for the firm's routing ([`ROUTING_KEPT`]): the forced ones
+/// they never come from here, but for the firm's inherited routing
+/// ([`ROUTING_KEPT`](routing::ROUTING_KEPT), a route and its companions): the forced ones
 /// (`CLAUDE_CONFIG_DIR`, `agent::home`;
 /// `CLAUDE_CODE_TMPDIR`, `agent::temp`; `CLAUDE_CODE_SHELL`, `agent::shell_path`), the
 /// sign-in's in the agent's settings entry (`ANTHROPIC_API_KEY` empty, `CLAUDE_CONFIG_DIR`,
@@ -218,19 +227,39 @@ pub(crate) const DROPPED_INHERITED: [&str; 2] = ["NO_BROWSER", "CLAUDE_CODE_REMO
 pub(crate) const SCRUBBED_PREFIXES: [&str; 2] = ["CLAUDE_", "ANTHROPIC_"];
 
 mod routing;
-pub(crate) use routing::ROUTING_KEPT;
+#[cfg(test)]
+pub(crate) use routing::{ROUTES, ROUTING_KEPT};
 
-/// The inherited variables outside [`SCRUBBED_PREFIXES`] that loosen Claude Code: `IS_SANDBOX=1`
-/// lets it run as root in bypass and cancels a policy's `disableNoSandbox` (2.1.293).
-pub(crate) const SCRUBBED: [&str; 1] = ["IS_SANDBOX"];
+/// The inherited variables outside [`SCRUBBED_PREFIXES`] that the scrub drops, each a name Claude
+/// Code 2.1.293 reads (decimal byte offsets in its binary, `grep -aob`): `IS_SANDBOX`,
+/// `NODE_TLS_REJECT_UNAUTHORIZED` (on Claude Code's own list of sensitive names, `Sl`,
+/// @205331198), `SESSION_INGRESS_URL` (@93264844), `AGENT_PROXY_URL` and
+/// `AGENT_PROXY_AUTH_TOKEN` (@94103596, @94103620), and the self-hosted runner's
+/// `SELF_HOSTED_RUNNER_TRUST_WORKSPACE` (@102682348), `SELF_HOSTED_RUNNER_HOOKS_DIR` (@93241659)
+/// and `SELF_HOSTED_RUNNER_CONFINE_REPO_SETTINGS` (@102681396). The firm's proxy and CA
+/// (`HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`,
+/// `SSL_CERT_FILE`) stay.
+pub(crate) const SCRUBBED: [&str; 8] = [
+    "IS_SANDBOX",
+    "NODE_TLS_REJECT_UNAUTHORIZED",
+    "SESSION_INGRESS_URL",
+    "AGENT_PROXY_URL",
+    "AGENT_PROXY_AUTH_TOKEN",
+    "SELF_HOSTED_RUNNER_TRUST_WORKSPACE",
+    "SELF_HOSTED_RUNNER_HOOKS_DIR",
+    "SELF_HOSTED_RUNNER_CONFINE_REPO_SETTINGS",
+];
 
 /// Whether an inherited `name` stays out of every agent's environment: it has a prefix in
-/// [`DROPPED_INHERITED_PREFIXES`], or one in [`SCRUBBED_PREFIXES`] and is not in
-/// [`ROUTING_KEPT`], or is in [`DROPPED_INHERITED`] or [`SCRUBBED`], ignoring ASCII case
-/// (Windows does; on Unix a lowercase one dropped costs nothing).
-pub(crate) fn is_dropped_inherited(name: &OsStr) -> bool {
+/// [`DROPPED_INHERITED_PREFIXES`], or one in [`SCRUBBED_PREFIXES`] and is not kept as routing
+/// (a name in [`ROUTES`](routing::ROUTES), or another in
+/// [`ROUTING_KEPT`](routing::ROUTING_KEPT) while `route` says the inherited environment
+/// holds a route, `routing::holds_route`), or is in [`DROPPED_INHERITED`] or
+/// [`SCRUBBED`], ignoring ASCII case (Windows does; on Unix a lowercase one dropped costs
+/// nothing).
+pub(crate) fn is_dropped_inherited(name: &OsStr, route: bool) -> bool {
     let bytes = name.as_encoded_bytes();
-    let routing = ROUTING_KEPT.iter().any(|kept| same(OsStr::new(kept), name));
+    let routing = routing::kept(name, route);
     let scrubbed = SCRUBBED_PREFIXES.iter().filter(|_| !routing);
     let prefixes = DROPPED_INHERITED_PREFIXES.iter().chain(scrubbed);
     prefixes.into_iter().any(|prefix| {

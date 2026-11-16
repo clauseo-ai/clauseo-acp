@@ -6,16 +6,28 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use clauseo_protocol::{
-    ContentBlock, DetachReason, ErrorCode, ExpiryReason, MatterId, MessageId, StopReason, TextKind,
-    ThreadId, TurnId, ViewEntry,
+    ContentBlock, DetachReason, ErrorCode, ExpiryReason, MatterId, MessageId, PolicySetting,
+    StopReason, TextKind, ThreadId, TurnId, ViewEntry,
 };
 use clauseo_reducer::ThreadState;
 
 use super::super::{Actor, HostPhase};
-use super::{Current, End, TurnPhase, host_stopping, key_retry};
+use super::{Current, TurnPhase, host_stopping, key_retry};
 
 /// The detail of a `TurnFailed` logged because a commit of the turn failed.
 pub(super) const STORE_DETAIL: &str = "a commit of the turn failed";
+
+/// How a turn ends (split from `turn.rs` for its size).
+#[derive(Debug, Clone)]
+pub(super) struct End {
+    pub(super) stop: StopReason,
+    pub(super) failure: Option<(ErrorCode, Option<String>)>,
+    /// The policy setting that failure names (`TurnFailed::setting`); `None` without one.
+    pub(super) setting: Option<PolicySetting>,
+    pub(super) expiry: ExpiryReason,
+    /// Logged after `TurnEnded`: the agent exited during the turn.
+    pub(super) detach: Option<DetachReason>,
+}
 
 impl End {
     /// A turn the lawyer (or shutdown) cancelled.
@@ -23,6 +35,7 @@ impl End {
         Self {
             stop: StopReason::Cancelled,
             failure: None,
+            setting: None,
             expiry: ExpiryReason::TurnEnded,
             detach,
         }
@@ -42,6 +55,7 @@ impl End {
         Self {
             stop: StopReason::Failed,
             failure: Some((code, detail)),
+            setting: None,
             expiry,
             detach,
         }

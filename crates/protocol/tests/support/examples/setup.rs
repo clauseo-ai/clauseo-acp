@@ -31,6 +31,7 @@ pub(super) fn turns() -> [DomainEvent; 12] {
             turn: turn_id(3),
             code,
             detail: Some("an install or sign-in stopped".to_owned()),
+            setting: None,
         }
         .into()
     })

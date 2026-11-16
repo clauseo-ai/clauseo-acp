@@ -2,11 +2,14 @@
 //! user-writable policy appearing between two prompts fails the second before it is sent
 //! (`agent.user_policy`); the policy appearing, or Claude's user settings file changing, while a
 //! prompt runs ends that turn at the next poll (`agent.user_policy`, `agent.settings_changed`).
-//! The user tier is played through `user_policy_for_tests`; the clock is the rig's.
+//! A policy's refusal names its setting in the turn's `TurnFailed`. The user tier is played
+//! through `user_policy_for_tests`; the clock is the rig's.
 
 use std::sync::{Arc, Mutex};
 
-use clauseo_protocol::{AgentKind, DomainEvent, ErrorCode, StopReason, ThreadId, TurnId};
+use clauseo_protocol::{
+    AgentKind, DomainEvent, ErrorCode, PolicySetting, StopReason, ThreadId, TurnId,
+};
 
 use super::agents::send_prompt;
 use super::failures::until_ended;
@@ -16,8 +19,9 @@ use crate::actor::turn::TurnPhase;
 use crate::actor::turn::prompt::claude_settings::POLL;
 use crate::actor::turn::wide::UserTierRead;
 
-/// An HKCU policy that applies and turns the sandbox off.
-const POLICY: &str = r#"{"sandbox":{"enabled":false}}"#;
+/// An HKCU policy that applies and turns every hook off, the guard's among them: a weakening
+/// value with or without the sandbox.
+const POLICY: &str = r#"{"disableAllHooks":true}"#;
 
 /// A Claude rig whose agent runs `lines`, with the user tier played by `tier` (none yet).
 fn start(test: &str, lines: &[String]) -> (Rig, ThreadId, Arc<Mutex<UserTierRead>>) {
@@ -45,6 +49,16 @@ fn end(rig: &mut Rig, thread: ThreadId, turn: TurnId) -> (Option<StopReason>, Op
         (failed.turn == turn).then_some(failed.code)
     });
     (stop, code)
+}
+
+/// The policy setting `turn`'s `TurnFailed` names in `thread`'s log.
+fn setting(rig: &mut Rig, thread: ThreadId, turn: TurnId) -> Option<PolicySetting> {
+    rig.log(thread).iter().find_map(|event| {
+        let DomainEvent::TurnFailed(failed) = event else {
+            return None;
+        };
+        (failed.turn == turn).then_some(failed.setting).flatten()
+    })
 }
 
 /// Sends prompt `n` and runs until it is out to the agent.
@@ -80,6 +94,8 @@ fn a_user_policy_appearing_between_two_prompts_stops_the_second() {
     let (stop, code) = end(&mut rig, thread, second);
     assert_eq!(stop, Some(StopReason::Failed));
     assert_eq!(code, Some(ErrorCode::AgentUserPolicy));
+    let named = setting(&mut rig, thread, second);
+    assert_eq!(named, Some(PolicySetting::DisableAllHooks));
     rig.finish();
 }
 
@@ -100,6 +116,8 @@ fn a_user_policy_appearing_while_a_prompt_runs_stops_the_turn_at_the_next_poll()
     let (stop, code) = end(&mut rig, thread, turn);
     assert_eq!(stop, Some(StopReason::Failed));
     assert_eq!(code, Some(ErrorCode::AgentUserPolicy));
+    let named = setting(&mut rig, thread, turn);
+    assert_eq!(named, Some(PolicySetting::DisableAllHooks));
     rig.finish();
 }
 
@@ -126,5 +144,34 @@ fn claudes_settings_file_changing_while_a_prompt_runs_stops_the_turn_at_the_next
     let (stop, code) = end(&mut rig, thread, turn);
     assert_eq!(stop, Some(StopReason::Failed));
     assert_eq!(code, Some(ErrorCode::AgentSettingsChanged));
+    assert_eq!(setting(&mut rig, thread, turn), None);
+    rig.finish();
+}
+
+/// The watch firing once the turn is past prompting (here, a cancel's fallback stop under way)
+/// still stops the agent: nothing else would until the next prompt's check.
+#[test]
+fn a_check_refusing_during_a_cancel_stops_the_agent() {
+    let lines = [PROMPT.to_owned(), chunk("Working")];
+    let (mut rig, thread, _) = start("claude-policy-during-cancel", &lines);
+    let turn = prompting(&mut rig, 10, thread);
+    let current = rig.actor.threads.get_mut(&thread).unwrap();
+    let current = current.turn.current.as_mut().unwrap();
+    current.cancelled = true;
+    current.phase = TurnPhase::FallbackStop;
+    let error = crate::error::Error::refused(ErrorCode::AgentSettingsChanged, "changed");
+    crate::actor::turn::end::on_prompt_refused(&mut rig.actor, thread, turn, &error);
+    let stage = rig.actor.threads[&thread]
+        .turn
+        .agent
+        .as_deref()
+        .map(|agent| agent.stage);
+    assert!(
+        matches!(
+            stage,
+            None | Some(crate::actor::turn::agents::Stage::Stopping)
+        ),
+        "{stage:?}"
+    );
     rig.finish();
 }

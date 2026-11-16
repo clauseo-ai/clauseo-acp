@@ -304,10 +304,14 @@ export function StepRow({
         <p className={QUIET} data-code={line.code}>
           <Say>
             {line.kind === "error"
-              ? errorWords(w.lang, line.code, plan, {
-                  ...backslashPlace(folder, platform),
-                  wildcard: wildcardName(folder),
-                })
+              ? errorWords(
+                  w.lang,
+                  line.code,
+                  plan,
+                  { ...backslashPlace(folder, platform), wildcard: wildcardName(folder) },
+                  // the policy codes' line names the setting the step carries, from the host's fixed list
+                  entry.failure_setting,
+                )
               : th(w.lang, line.key, line.slots)}
           </Say>
         </p>

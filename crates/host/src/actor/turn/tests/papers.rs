@@ -94,6 +94,7 @@ fn with_no_watch_each_turn_end_lists_the_matters_papers_again() {
         failure: None,
         expiry: ExpiryReason::TurnEnded,
         detach: None,
+        setting: None,
     };
     let (told, matter) = papers_changed_by("papers-end-done", false, true, false, done);
     assert_eq!(told, [matter]);

@@ -49,9 +49,13 @@ use crate::error::Error;
 use crate::log_file::Cause;
 
 /// The host English of the notice a thread gets when Claude's `auto` mode is not available
-/// (`NoticeKind::AutoModeUnavailable`), for a view that does not know the kind.
-pub(crate) const AUTO_UNAVAILABLE: &str = "Claude's automatic mode isn't available for this \
-     account, so Claude asks before running commands.";
+/// (`NoticeKind::AutoModeUnavailable`), for a view that does not know the kind. Provisional: the
+/// session runs in `acceptEdits`, where file changes go unasked and, with the sandbox, so do
+/// sandboxed commands (`pinned.rs`, `autoAllowBashIfSandboxed`), so it never says Claude asks
+/// before running commands; and the cause may be the model, not the account.
+/// The app's own line (`notice-words.ts`, TN.json) awaits the app's words.
+pub(crate) const AUTO_UNAVAILABLE: &str = "Claude's automatic mode isn't available here, so \
+     Claude makes file changes without asking and asks before steps outside its protection.";
 
 /// Where a Claude agent stands with `auto`.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

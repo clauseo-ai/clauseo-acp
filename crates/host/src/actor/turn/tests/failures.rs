@@ -147,6 +147,7 @@ pub(super) fn end_failing(rig: &mut Rig, thread: ThreadId, times: usize) {
         failure: None,
         expiry: clauseo_protocol::ExpiryReason::TurnEnded,
         detach: None,
+        setting: None,
     };
     end::end_turn(&mut rig.actor, thread, end);
     until_ended(rig, thread);
@@ -278,6 +279,7 @@ fn an_at_limit_turn_whose_checkpoint_fails_stays_at_limit() {
         failure: None,
         expiry: clauseo_protocol::ExpiryReason::TurnEnded,
         detach: None,
+        setting: None,
     });
     let failed = Err(crate::error::Error::Internal("the disk is full".to_owned()));
     end::on_after_turn(&mut rig.actor, thread, turn, failed);

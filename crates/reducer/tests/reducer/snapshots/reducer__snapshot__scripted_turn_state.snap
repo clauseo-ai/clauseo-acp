@@ -1078,6 +1078,7 @@ expression: fold(&scripted_turn().unwrap())
     "after_turn": null,
     "files": {},
     "failures": {},
+    "failure_settings": {},
     "before_checkpoints": {}
   }
 }

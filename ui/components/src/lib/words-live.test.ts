@@ -13,6 +13,7 @@ import {
   type WordedCode,
 } from "./words-errors.ts";
 import { errorHindi } from "./words-errors.hi.ts";
+import { POLICY_SETTINGS } from "./words-errors-policy.ts";
 import { fr, type FolderKey } from "./words-folder.ts";
 import { frc, type FolderCardKey } from "./words-folder-card.ts";
 import { frame } from "./words-frame.ts";
@@ -284,7 +285,7 @@ test("an agent's name fills no other code", () => {
 
 test("only the agent.* codes that name Claude have a sentence per plan", () => {
   // Claude-only refusals: the host sends them for a Claude launch alone (its sandbox, macOS and Linux; its settings
-  // and hooks), so no other plan's thread ever shows their line (UC-472, U3-err-agent.firm_hooks_off, user_policy and settings_changed)
+  // and hooks), so no other plan's thread ever shows their line (UC-472, U3-err-agent.firm_hooks_off, firm_policy_weakens, user_policy and settings_changed)
   const claudeOnly: readonly WordedCode[] = [
     "agent.sandbox_unavailable",
     "matter.folder_wildcard",
@@ -292,6 +293,7 @@ test("only the agent.* codes that name Claude have a sentence per plan", () => {
     "agent.user_policy",
     "agent.settings_changed",
     "agent.mode_not_set",
+    "agent.firm_policy_weakens",
   ];
   const naming = (Object.keys(ERROR_WORDS) as WordedCode[]).filter(
     (c) => ERROR_WORDS[c].includes("Claude") && !claudeOnly.includes(c),
@@ -412,26 +414,71 @@ test.each([
 });
 
 // Claude refused or stopped over its settings or its mode (provisional; hi: later, so the Hindi display shows the English): the
-// firm's managed settings turn hooks off (U3-err-agent.firm_hooks_off), a policy any program can write (U3-err-agent.user_policy), the settings file changed
-// while Claude ran (U3-err-agent.settings_changed), Claude did not confirm its mode (U3-err-agent.mode_not_set). Claude-only, so no agent's name changes them
+// firm's managed settings turn hooks off (U3-err-agent.firm_hooks_off), a managed setting outranks Clauseo's and would weaken the launch, or an
+// administrator's policy file can't be read (U3-err-agent.firm_policy_weakens), a policy any program can write (U3-err-agent.user_policy), the settings file changed
+// while Claude ran (U3-err-agent.settings_changed), Claude did not confirm its mode (U3-err-agent.mode_not_set). Claude-only, so no agent's name changes them.
+// The two policy codes share one line: the setting the step names (StepEntry.failure_setting) in its {setting} slot when it is
+// one of the host's fixed list, else the unnamed line (U3-err-agent.user_policy.unnamed, U3-err-agent.firm_policy_weakens.unnamed).
 const UC474 =
   "Claude can't start here: your firm's Claude settings on this computer switch off a safety check Clauseo needs (disableAllHooks or allowManagedHooksOnly). Start this conversation with ChatGPT instead.";
-const UC475 =
-  "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is undone. Remove the program that made it, then try again, or use ChatGPT for now.";
 const UC476 =
   "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.";
 const MODE_NOT_SET =
   "Clauseo couldn't put Claude in its safe working mode, so it didn't send your message. Quit and reopen Clauseo, then send it again.";
+const POLICY_SLOT =
+  "Claude can't start: a setting on this computer ({setting}) turns off a protection Clauseo needs, and only an administrator can change it. Whoever looks after this computer can change or remove it; until then, you can use ChatGPT.";
+const POLICY_NO_SETTING =
+  "Claude can't start: a setting on this computer turns off a protection Clauseo needs, and only an administrator can change it. Whoever looks after this computer can change or remove it; until then, you can use ChatGPT.";
+const POLICY_NAMED = (setting: string) =>
+  POLICY_SLOT.replace("{setting}", `\u2068${setting}\u2069`);
 
 test.each([
   ["agent.firm_hooks_off", UC474],
-  ["agent.user_policy", UC475],
+  ["agent.user_policy", POLICY_NO_SETTING],
   ["agent.settings_changed", UC476],
   ["agent.mode_not_set", MODE_NOT_SET],
+  ["agent.firm_policy_weakens", POLICY_NO_SETTING],
 ] as const)("%s's line, in English in both languages until its Hindi comes", (code, said) => {
   for (const agent of [CLAUDE, undefined]) {
     expect(errorWords("en", code, agent)).toBe(said);
     expect(errorWords("hi", code, agent)).toBe(said);
   }
   expect(said).not.toMatch(BANNED_EN);
+});
+
+test.each(
+  POLICY_SETTINGS.flatMap((setting) =>
+    (["agent.firm_policy_weakens", "agent.user_policy"] as const).map(
+      (code) => [code, setting] as const,
+    ),
+  ),
+)("%s's line names the step's setting %s", (code, setting) => {
+  for (const lang of ["en", "hi"] as const) {
+    expect(errorWords(lang, code, CLAUDE, undefined, setting)).toBe(POLICY_NAMED(setting));
+  }
+  expect(POLICY_NAMED(setting)).not.toMatch(BANNED_EN);
+});
+
+test("the policy line is the unnamed one for no setting, an unknown one, or anything off the fixed list", () => {
+  for (const setting of [
+    undefined,
+    null,
+    "",
+    "unknown",
+    "sandbox.network.httpProxyPort",
+    "somethingElse",
+    "`sandbox.enabled`",
+    " sandbox.enabled",
+    "the Claude Code policy at managed-settings.json sets `sandbox.enabled`, which weakens Clauseo's protections",
+  ]) {
+    for (const code of ["agent.user_policy", "agent.firm_policy_weakens"]) {
+      expect(errorWords("en", code, CLAUDE, undefined, setting)).toBe(POLICY_NO_SETTING);
+      expect(errorWords("hi", code, CLAUDE, undefined, setting)).toBe(POLICY_NO_SETTING);
+    }
+  }
+  // the slot's own text never reaches a line unfilled, and another code's line never takes a setting
+  expect(errorWords("en", "agent.firm_policy_weakens", CLAUDE, undefined, "x")).not.toContain("{");
+  expect(errorWords("en", "agent.firm_hooks_off", CLAUDE, undefined, "sandbox.enabled")).toBe(
+    UC474,
+  );
 });

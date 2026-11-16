@@ -163,6 +163,7 @@ mod number;
 mod open_enum;
 mod patch;
 mod picks;
+mod policy_setting;
 mod protection;
 mod query;
 mod raw;
@@ -262,6 +263,7 @@ wire_types! {
     },
     number::{Count, Cursor, Finite, Seq, Timestamp},
     picks::{AgentPrefs, ConfigPicks},
+    policy_setting::{PolicySetting},
     patch::{
         Ack, AppendTarget, HostEvent, PatchBatch, StreamHeader, Subscribe, SubscribeEvents,
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,

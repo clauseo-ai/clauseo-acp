@@ -234,15 +234,21 @@ pub(super) fn files_changed(state: &mut ThreadState, event: &FilesChanged, out: 
     state.files.insert(event.turn, files);
 }
 
-/// Keeps the failure's code for the turn's step, or updates the step when the turn has ended.
+/// Keeps the failure's code and setting for the turn's step, or updates the step when the turn
+/// has ended.
 pub(super) fn turn_failed(state: &mut ThreadState, event: &TurnFailed, out: &mut Applied) {
     if let Some(order) = state.index.steps.get(&event.turn).copied() {
         update_step(state, order, out, |step| {
-            set(&mut step.failure, Some(event.code))
+            set(&mut step.failure, Some(event.code)) | set(&mut step.failure_setting, event.setting)
         });
         return;
     }
     state.failures.insert(event.turn, event.code);
+    if let Some(setting) = event.setting {
+        state.failure_settings.insert(event.turn, setting);
+    } else {
+        state.failure_settings.remove(&event.turn);
+    }
 }
 
 /// The at-limit card, and `PausedAtLimit` when the turn is the thread's last one, even after
@@ -305,6 +311,7 @@ pub(super) fn turn_ended(
     if !running && event.stop != StopReason::Failed {
         state.files.remove(&event.turn);
         state.failures.remove(&event.turn);
+        state.failure_settings.remove(&event.turn);
         state.before_checkpoints.remove(&event.turn);
         settle_prompt(state, event.turn, UserMessageStatus::Removed, out);
         if state.running.is_none()
@@ -332,6 +339,7 @@ pub(super) fn turn_ended(
         turn: event.turn,
         stop: event.stop,
         failure: state.failures.remove(&event.turn),
+        failure_setting: state.failure_settings.remove(&event.turn),
         checkpoint_before: state.before_checkpoints.remove(&event.turn),
         files,
         skipped,

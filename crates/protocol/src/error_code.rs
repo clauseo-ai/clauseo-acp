@@ -409,9 +409,10 @@ error_codes! {
         `allowManagedHooksOnly`), and this launch rests on Clauseo's guard hook (forced ask, \
         or Windows), so Claude was not started.";
     AgentUserPolicy = "agent.user_policy", retryable: false, meaning: "A Claude Code policy \
-        that any program run by the user can write (the Windows registry key \
-        HKCU\\SOFTWARE\\Policies\\ClaudeCode) sets permissions, sandbox or hooks, and no \
-        administrator's policy outranks it, so Claude was not started, or was stopped.";
+        in the Windows registry key HKCU\\SOFTWARE\\Policies\\ClaudeCode, which only IT or a \
+        program running as administrator can write, applies (no administrator's policy outranks \
+        it) and holds a setting that would weaken the launch, or cannot be read, so Claude was \
+        not started, or was stopped. The detail names the setting.";
     AgentSettingsChanged = "agent.settings_changed", retryable: true, meaning: "The Claude \
         settings file Clauseo writes at each launch changed while Claude ran, so Clauseo \
         stopped Claude; the next message starts it again with Clauseo's settings.";
@@ -419,6 +420,14 @@ error_codes! {
         confirm the mode Clauseo set it to (`auto`; `default` in forced ask; `acceptEdits` when \
         auto is not available), as the session started or after a mode change during the \
         conversation, so Clauseo sent no message in another mode and stopped the conversation.";
+    AgentFirmPolicyWeakens = "agent.firm_policy_weakens", retryable: false, meaning: "A managed \
+        Claude Code setting on this computer (the firm's policy files, macOS managed preferences, \
+        the HKLM policy, or the firm's server-managed settings) outranks a value Clauseo sets and \
+        would weaken the launch (for example `sandbox.enabled: false`, \
+        `sandbox.allowUnsandboxedCommands: true`, `sandbox.excludedCommands`, or a \
+        `permissions.defaultMode` weaker than Clauseo's), or an administrator's policy file cannot \
+        be read, so Claude was not started, or was stopped. The detail names the setting and where \
+        it was found.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

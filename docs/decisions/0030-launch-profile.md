@@ -845,12 +845,53 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
   Claude home, count for the same check; being in a folder the user can write, they never
   switch the user tier's check off. Each launch keeps `Agent::admin_tier` (an admin tier or
   server-managed settings with content) for later checks. The user tier
-  (`HKCU\SOFTWARE\Policies\ClaudeCode`, which any program the user runs can write and which
-  Claude Code takes as its policy when no admin tier has content) that sets anything under
+  (`HKCU\SOFTWARE\Policies\ClaudeCode`, which Claude Code takes as its policy when no admin
+  tier has content) that sets anything under
   `permissions`, `sandbox`, `hooks`, `disableAllHooks`, `allowManagedHooksOnly` or
   `allowManagedPermissionRulesOnly` refuses the launch, and stops a live conversation at its
   next prompt, with `agent.user_policy` (`UC-TBD-hkcu-policy`). Claude Code polls that key
-  every 30 minutes. (`actor/turn/profile_loads/policy.rs`,
+  every 30 minutes.
+- **2026-11-16 (orchestrator; supersedes the user tier's rule above).** Only IT or a program
+  running as administrator can write the user tier: the lawyer's account can only read
+  `HKCU\Software\Policies` (laptop check, Windows 11, 16 Nov).
+  Every policy document (the admin files and drop-ins, the macOS managed preferences, HKLM,
+  HKCU, `remote-settings.json`) is checked for a setting that outranks a value Clauseo pins
+  and would weaken the launch: every pinned key but `disableAllHooks` (a value neither the pin
+  nor its tighter side; for `permissions.defaultMode`, a mode other than the pin, `default` or
+  `plan`), a non-empty `sandbox.excludedCommands`, `skipDangerousModePermissionPrompt` and
+  `allowManagedPermissionRulesOnly` set to anything but `false`; the sandbox's keys only for a
+  launch with the sandbox or under a document that turns it on (`policy_keys/weakens.rs`). One
+  found refuses the launch, and stops a live conversation at its next prompt or poll, naming
+  the setting and where it was found (in the detail and a warn line; the key alone, from a
+  fixed list, also travels as `TurnFailed.setting` to the view's `failure_setting`, which fills
+  the app's `{setting}` slot; anything else shows the unnamed line): `agent.user_policy` for HKCU, `agent.firm_policy_weakens` for the rest. A value
+  that only tightens passes, so a firm's per-user policy no longer refuses for touching a key.
+  A policy document that cannot be read, or is over the size cap, refuses the same way. The
+  hooks keys keep their rule above (a refusal when the launch rests on the guard), but in HKCU,
+  which has always refused them. Claude Code applies a policy's `env` last, over the flag
+  settings' and the process's, so these refuse the same way: an `env` setting
+  `CLAUDE_CODE_USE_POWERSHELL_TOOL`, `CLAUDE_CODE_GIT_BASH_PATH`, `CLAUDE_PROJECT_UUID` (a
+  claude.ai Project's id), `CLAUDE_CODE_BRIEF` or `CLAUDE_CODE_PEWTER_OWL_TOOL` (each offers
+  the `SendUserMessage` tool) to anything; one setting a launch variable of Clauseo's to
+  another value or emptying it (the scheduler, repository-status,
+  messaging and marketplace switches, and the launch's own `PATH` and `GIT_ATTR_SOURCE`, read
+  from the environment the agent got and kept for the checks before each prompt); and a flag
+  setting Clauseo sets (`includeGitInstructions`, `crossSessionInbound`,
+  `disableRemoteControl`) given another value, or `tools` set at all. `PATH` and those flag
+  settings are named in the app's slot (`env.PATH`, …); the other variables show the unnamed
+  line. A firm whose policy sets `PATH` is refused on every launch: IT removes it from the
+  Claude policy for Clauseo's machines. `disallowedTools` is left: a policy's entries only add
+  denies. Until launch-tool-list and launch-no-git merge, `weakens.rs` carries their names
+  and values as constants that must match theirs. A Codex launch is refused the same way
+  (`agent.firm_policy_weakens`, the unnamed line) when one of Codex 0.162.1's managed config
+  layers sets `shell_environment_policy` (at its top or in a profile) or cannot be read: the
+  system `config.toml`, the legacy `/etc/codex/managed_config.toml` and the macOS managed
+  preferences' `config_toml_base64` (`policy_keys/codex_env.rs`); Clauseo sets the environment
+  of the model's commands itself. Not read: the config of Codex's cloud bundle, which
+  Codex fetches itself. Knowingly left: the
+  arrays a firm adds (allow rules, write roots, domains, sockets), its own `hooks` and the rest of its `env`,
+  and the single values Clauseo does not pin; none outranks a pin, and each is set where only
+  IT can write. (`actor/turn/profile_loads/policy.rs`,
   `actor/turn/offline/probe/settings/policy_keys.rs`.) **Rejected:** a shell deny rule for
   writing that key: text rules match a command's words, and `reg.exe`, PowerShell's
   `New-ItemProperty`, `HKEY_CURRENT_USER` spellings or a script reach it alike, so the rule
@@ -1428,22 +1469,36 @@ parts close this:
    name is replaced, not followed. `cowork_settings.json` (what Claude Code reads instead when
    `CLAUDE_CODE_USE_COWORK_PLUGINS` is set) is removed. A failed write refuses the launch
    (`agent.launch_failed`); it was a warn line before.
-2. **Every single-value security key is pinned** in the flag settings
-   (`agent/loads/pinned.rs`, called last in `session_meta`): `disableAllHooks: false`, the
+2. **The single-value security keys are pinned** in the flag settings
+   (`agent/loads/pinned.rs`, called last in `session_meta`): `disableAllHooks: false`,
+   `disableBundledSkills: true` (with `Skill(update-config)`, `Skill(fewer-permission-prompts)`
+   and `Skill(security-review)` on `permissions.deny`; plugin skills stay), the
    session's `permissions.defaultMode`, `permissions.disableBypassPermissionsMode: "disable"`,
    `sandbox.enabled` (true with the sandbox, false on Windows), `autoAllowBashIfSandboxed`,
    `allowUnsandboxedCommands: false`, `failIfUnavailable: true`, and `allowAppleEvents`,
    `enableWeakerNestedSandbox`, `enableWeakerNetworkIsolation`, `network.allowLocalBinding`
    and `network.allowAllUnixSockets` all false. The module doc lists the keys left out and why
    (`disableAutoMode`, `blockReadsOutsideWorkingDirectories`, the policy-only
-   `allowManaged*` keys, the arrays).
-3. **No inherited `CLAUDE_*`, `ANTHROPIC_*` or `IS_SANDBOX` reaches any agent**
-   (`agent/spec.rs` `SCRUBBED_PREFIXES`, `SCRUBBED`). Several loosen a session
-   (`CLAUDE_CODE_BUBBLEWRAP`, `CLAUDE_CODE_SANDBOXED`, `CLAUDE_BG_SESSION_PERMISSION_RULES`,
-   `IS_SANDBOX`, …). What a launch needs Clauseo sets itself (forced, the agent's settings
-   entry, the profile hook, `_meta`), so only inherited values go. `Login::of` ignores an
-   inherited cloud variable for the same reason. The plan readers
-   (`crates/limits/src/readers/env.rs`) do not scrub these yet.
+   `allowManaged*` keys, the arrays). Not every single value is pinned: 2.1.293 also has
+   `sandbox.network.httpProxyPort`, `sandbox.network.socksProxyPort`,
+   `sandbox.network.strictAllowlist`, `apiKeyHelper`, `statusLine`, `otelHeadersHelper` and
+   `awsAuthRefresh`; for these the user file is rewritten at each launch (part 1), and a
+   change to it between checks is caught by parts 4 and 5.
+3. **No inherited `CLAUDE_*`, `ANTHROPIC_*` or `IS_SANDBOX` reaches any agent, but a firm's
+   route** (`agent/spec.rs` `SCRUBBED_PREFIXES`, `SCRUBBED`; `agent/spec/routing.rs`
+   `ROUTING_KEPT`). Several loosen a session (`CLAUDE_CODE_BUBBLEWRAP`, `CLAUDE_CODE_SANDBOXED`,
+   `CLAUDE_BG_SESSION_PERMISSION_RULES`, `IS_SANDBOX`, …). Clauseo sets what its own launch
+   needs (forced, the agent's settings entry, the profile hook, `_meta`). A firm that routes
+   Claude through the computer's environment keeps that route: an inherited endpoint or provider
+   switch passes, and the names it needs (credentials, headers, regions, resources, model ids,
+   mutual TLS, skipped cloud auth) pass only beside one. A name that only swaps the account (the
+   OAuth tokens, a lone `ANTHROPIC_AUTH_TOKEN`) or points Claude at something a local program can
+   serve (`ANTHROPIC_UNIX_SOCKET`) drops. Exact names read in 2.1.293, never a pattern.
+   Stated limit: workload identity federation is an account, not a route, so a firm that signs
+   Claude in that way isn't supported until Plans supports firm accounts. `Login::of` ignores an
+   inherited cloud variable for the same reason. The sign-in and status child and the plan
+   readers (`crates/limits/src/readers/env.rs`) do not scrub these yet: stage D's PR gives them
+   the same list and rule.
 4. **Each Claude prompt checks first** (`actor/turn/prompt/claude_settings.rs`): the user file
    must still be the launch's (`claude_settings_intact`: a plain file, its JSON equal to what
    was written apart from Claude Code's own keys (below), compared as JSON because Claude Code's own writer may reformat it, and no
@@ -1464,6 +1519,20 @@ string model, bools, and a `permissions` object holding only `defaultMode` set t
 value, `bypassPermissions` among them, still stops the conversation. Whether a real session
 writes anything else at start-up or on a mode switch is a VM check. The global config
 `<CLAUDE_CONFIG_DIR>/.claude.json` (its `env`) is not covered here.
+
+Limits of this head, stated:
+
+- **`settingSources: ["user"]`; never add `project` or `local`.** Under it, 2.1.293 under
+  claude-agent-acp 0.89.1, with Clauseo's launch inputs, loads nothing from the matter's or a
+  parent folder's `.claude/skills`, `.claude/commands`, `.claude/agents`,
+  `.claude/settings.json` or `settings.local.json`: no skill or agent reaches the model, and
+  `get_settings` lists only the flag settings. Pinned by
+  `agent::loads::layering_tests::a_hook_meta_setting_a_switch_or_the_guards_key_loses_both`
+  (a hook asking for all three still sends `["user"]`) and the `claude-mode-*` scenarios.
+- **The settings watch** (parts 4 and 5) catches an edit to Clauseo's own user `settings.json`
+  within about 2 s, possibly after Claude Code has applied it. It does not see the matter's
+  `.claude/settings*.json` (ignored under `["user"]`, above), nor in-memory grants: a skill's
+  `allowed-tools` and approvals given during the session.
 
 ## Consequences
 

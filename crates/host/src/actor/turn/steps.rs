@@ -255,6 +255,7 @@ pub(super) fn on_launch_failed(actor: &mut Actor, thread: ThreadId, turn: TurnId
                 error.rpc_data(),
             ),
             detail: Some(super::close::detail_of(actor, error.detail())),
+            setting: error.setting(),
         };
         end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
         return;
@@ -273,7 +274,10 @@ pub(super) fn end_unstarted(
     checkpoint: Option<(MatterId, TurnCheckpoint)>,
 ) {
     let mut close = TurnClose::new(turn, stop);
-    close.failure = failed.map(|failed| (failed.code, failed.detail));
+    if let Some(failed) = failed {
+        close.failure = Some((failed.code, failed.detail));
+        close.setting = failed.setting;
+    }
     close.detach = current(actor, thread).and_then(|current| current.detach.take());
     let sent = (|| -> Result<(), Error> {
         if let Some((matter, checkpoint)) = checkpoint {
@@ -351,6 +355,7 @@ pub(super) fn on_before_turn(
                 turn,
                 code: error.code(),
                 detail: Some(error.detail()),
+                setting: None,
             };
             end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
             return;
@@ -361,6 +366,7 @@ pub(super) fn on_before_turn(
             turn,
             code,
             detail: Some(STORE_DETAIL.to_owned()),
+            setting: None,
         };
         let checkpoint = Some((matter, checkpoint));
         end_unstarted(
@@ -409,6 +415,7 @@ pub(super) fn on_before_turn(
                 turn,
                 code: error.code(),
                 detail: Some(error.detail()),
+                setting: None,
             };
             end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
         }

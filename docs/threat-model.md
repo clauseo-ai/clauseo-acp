@@ -150,6 +150,27 @@ any ACP message, including permission requests with misleading text.
   `CLAUDE.md`) from the matter or any folder above it, because every Claude session call (new,
   load, resume) sends user-only setting sources (`settingSources: ["user"]`, `agent/loads.rs`
   `CLAUDE_SETTING_SOURCES`); the `claude-mode-*` scenarios pin it (`tests/host/claude_mode.rs`)
+- `built`: No inherited `CLAUDE_*`, `ANTHROPIC_*` or `IS_SANDBOX` reaches an agent but a firm's
+  route (an endpoint or provider switch, with the names it needs only beside one), so the
+  environment a program sets for the lawyer doesn't change a Claude session's settings or account
+  (`agent/spec.rs`, `agent/spec/routing.rs`). Scope: an inherited route passes as it is set
+  (#1152 refuses an endpoint while no key is held). Limit: a firm that signs Claude in by
+  workload identity federation isn't supported until Plans supports firm accounts
+- `built`: A Claude launch is never silently weaker than Clauseo set it
+  ([0030](decisions/0030-launch-profile.md), "Launch never weaker"): the user settings file is
+  rewritten at each launch, the single-value security keys are pinned in the flag settings,
+  Claude Code's bundled skills are off and three of them are denied by name, and a policy
+  (the firm's files, managed preferences, HKLM, HKCU, server-managed settings) that would weaken
+  the launch, or can't be read, refuses it, naming the setting; so does a policy `env` that
+  changes one of Clauseo's launch variables (the launch's `PATH` included) or sets the shell
+  switches, a claude.ai Project id or the `SendUserMessage` tool's switches, and a policy that
+  overrides Clauseo's flag settings or sets `tools`, at the launch and before each prompt; a
+  Codex managed config that sets `shell_environment_policy` refuses a Codex launch. The
+  settings watch catches an edit to Clauseo's user `settings.json` within about 2 s, possibly
+  after Claude Code has applied it; it doesn't see the matter's `.claude/settings*.json`
+  (ignored under `settingSources: ["user"]`, measured, which must never gain `project` or
+  `local`), nor in-memory grants from a skill's `allowed-tools` or approvals given during the
+  session
 - `built`: Permission answers are checked against the options offered, in the bridge and again in
   the host; `designed`: options are labelled by kind, not by the agent's text (the permission prompt)
 - `designed`: ACP message sizes are capped; Clauseo advertises no file or terminal access to the

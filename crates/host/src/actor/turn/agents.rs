@@ -118,6 +118,8 @@ pub(super) struct Agent {
     /// A Claude agent whose launch's folder check found a network drive or a drive without
     /// permissions: it runs in forced ask (`agent/forced_ask.rs`).
     pub(super) forced_ask: bool,
+    /// A Claude agent's launch carries Claude's sandbox (`profile_loads/policy.rs`).
+    pub(super) sandboxed: bool,
     /// The launch's folder check answer, when it ran; read through [`Agent::unprotected`].
     pub(super) folder_check: Option<crate::agent::folder_support::Answer>,
     /// A Claude agent's standing with `auto`, the mode it runs in outside forced ask
@@ -141,9 +143,9 @@ pub(super) struct Agent {
     /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
     /// (`agent/plan_note.rs`); `None` for any other agent.
     pub(super) plan_notes: Option<PathBuf>,
-    /// Its launch variables that hold a path, for the data fence's `$env:NAME`
-    /// (`data_fence::launch_vars`).
-    pub(super) fence_vars: Vec<(String, String)>,
+    /// Its launch variables that later checks read (`launch::LaunchVars`): those holding a path,
+    /// for the data fence, and its own values a policy's `env` must leave as they are.
+    pub(super) vars: launch::LaunchVars,
     /// Its permission requests the host rejected for touching Clauseo's data folder
     /// (`agent/data_fence.rs`), logged as a count on its `agent ended` line.
     pub(super) denied_data_folder: u32,
@@ -251,7 +253,7 @@ pub(super) fn launch_now(
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
     let mut tree = None;
-    let (link, folder, codex, plan_notes, matter_spellings, claude_home, fence_vars, probe) =
+    let (link, folder, codex, plan_notes, matter_spellings, claude_home, vars, probe) =
         match launch(actor, thread, prepared, &mut tree) {
             Ok(launched) => launched,
             Err(error) => {
@@ -301,6 +303,7 @@ pub(super) fn launch_now(
         probe,
         mcp_commands: Vec::new(),
         forced_ask,
+        sandboxed: false,
         folder_check: prepared_folder,
         auto: session::Auto::default(),
         modes: super::forced_mode::read_back::Reports::default(),
@@ -308,7 +311,7 @@ pub(super) fn launch_now(
         admin_tier: super::profile_loads::policy::AdminTier::Present,
         mcp_sent: (!unprotected).then(Vec::new),
         plan_notes,
-        fence_vars,
+        vars,
         denied_data_folder: 0,
         start_failure: None,
         matter_spellings,

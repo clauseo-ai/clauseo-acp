@@ -104,6 +104,8 @@ test("registry ids are unique and typeable", () => {
   ).toEqual(["U3-err-", "U3-err-Store.full", "U3-err-a..b"]);
 });
 
+const FIRM = "U3-err-agent.firm_policy_weakens";
+
 test("U3's ids are written as they are: one per error code but U3-07's and Versions' own, and the limit row's own Reset not given.", () => {
   const ids = REGISTRY.map((e) => e.id).filter((id) => id.startsWith("U3-"));
   const codes = (Object.entries(ERROR_WORDS) as [string, string][])
@@ -123,7 +125,16 @@ test("U3's ids are written as they are: one per error code but U3-07's and Versi
           "agent.sandbox_unavailable",
         ].includes(code),
     )
-    .map(([code]) => `U3-err-${code}`);
+    .map(([code]) => `U3-err-${code}`)
+    // the two policy codes' named and unnamed lines stand together, in agent.user_policy's place
+    // (registry-claude-settings.tsx)
+    .flatMap((id) =>
+      id === "U3-err-agent.user_policy"
+        ? [id, `${id}.unnamed`, FIRM, `${FIRM}.unnamed`]
+        : id === FIRM
+          ? []
+          : [id],
+    );
   expect(ids.filter((id) => id.startsWith("U3-err-"))).toEqual(codes);
   expect(ids.filter((id) => !id.startsWith("U3-err-"))).toEqual([
     ...Array.from({ length: 15 }, (_, i) => `U3-${String(i + 1).padStart(2, "0")}`),

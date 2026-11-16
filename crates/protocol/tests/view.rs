@@ -455,6 +455,7 @@ fn step_undo_possible_is_a_checkpoint_not_undone() {
         turn: turn_id(3),
         stop: StopReason::EndTurn,
         failure: None,
+        failure_setting: None,
         files: vec![],
         skipped: vec![],
         checkpoint_before: None,

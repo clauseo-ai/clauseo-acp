@@ -190,6 +190,30 @@ fn the_pins_are_clauseos_values() {
     assert_eq!(windows["sandbox"].get("filesystem"), None);
 }
 
+/// Every launch shape's flag settings turn the bundled skills off and deny three of them by name,
+/// beside the hook's own deny rules; a user file saying `disableBundledSkills: false`
+/// or holding no deny rules changes neither (a single value loses, arrays join).
+#[test]
+fn the_bundled_skills_are_off_and_the_loosening_ones_denied() {
+    for (sandboxed, forced_ask) in [(true, false), (true, true), (false, false), (false, true)] {
+        let flag = flag_settings(sandboxed, forced_ask);
+        assert_eq!(flag["disableBundledSkills"], json!(true));
+        let user = json!({"disableBundledSkills": false, "permissions": {"deny": []}});
+        let merged = effective(&user, &flag);
+        assert_eq!(merged["disableBundledSkills"], json!(true));
+        let deny = merged["permissions"]["deny"].as_array().unwrap();
+        for rule in super::SKILL_DENIES {
+            assert_eq!(
+                deny.iter()
+                    .filter(|held| held.as_str() == Some(rule))
+                    .count(),
+                1,
+                "{rule} once, {sandboxed} {forced_ask}"
+            );
+        }
+    }
+}
+
 /// The merging keys and the `env` block, planted in the user file, are gone once the launch
 /// rewrites it: the effective settings hold none of them.
 #[test]

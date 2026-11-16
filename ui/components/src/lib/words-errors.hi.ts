@@ -269,15 +269,20 @@ export const HI = {
     null,
   "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again. If this keeps happening, ask your firm's IT.":
     null,
-  // agent.firm_hooks_off (U3-err-agent.firm_hooks_off), agent.user_policy (U3-err-agent.user_policy), agent.settings_changed (U3-err-agent.settings_changed), agent.mode_not_set
+  // agent.firm_hooks_off (U3-err-agent.firm_hooks_off), agent.user_policy (see below), agent.settings_changed (U3-err-agent.settings_changed), agent.mode_not_set
   // (U3-err-agent.mode_not_set): Claude refused or stopped over its settings or its mode. Provisional English; hi: later
   "Claude can't start here: your firm's Claude settings on this computer switch off a safety check Clauseo needs (disableAllHooks or allowManagedHooksOnly). Start this conversation with ChatGPT instead.":
-    null,
-  "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is undone. Remove the program that made it, then try again, or use ChatGPT for now.":
     null,
   "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.":
     null,
   "Clauseo couldn't put Claude in its safe working mode, so it didn't send your message. Quit and reopen Clauseo, then send it again.":
+    null,
+  // agent.user_policy (U3-err-agent.user_policy) and agent.firm_policy_weakens (U3-err-agent.firm_policy_weakens), the same two lines: a
+  // setting the step names ({setting}, POLICY_SETTING), or none (POLICY_NO_SETTING, U3-err-agent.user_policy.unnamed and
+  // U3-err-agent.firm_policy_weakens.unnamed). Provisional English; hi: later
+  "Claude can't start: a setting on this computer ({setting}) turns off a protection Clauseo needs, and only an administrator can change it. Whoever looks after this computer can change or remove it; until then, you can use ChatGPT.":
+    null,
+  "Claude can't start: a setting on this computer turns off a protection Clauseo needs, and only an administrator can change it. Whoever looks after this computer can change or remove it; until then, you can use ChatGPT.":
     null,
 } as const;
 

@@ -7,8 +7,8 @@ use clauseo_protocol::{
     AgentId, AgentSessionDetached, CompactionChanged, CompactionStatus, ContentAppended,
     ContentBlock, DetachReason, ElicitationOutcome, ElicitationRequest, ElicitationRequested,
     ElicitationResolved, Envelope, ErrorCode, LimitStopReason, Notice, NoticeKind, NoticeLevel,
-    PageVia, PageVisited, Principal, StepUndone, TextKind, TextOrBlob, ToolCallStatus, TurnFailed,
-    TurnStoppedAtLimit, ViewEntry, WebResult, WebSearchRecorded,
+    PageVia, PageVisited, PolicySetting, Principal, StepUndone, TextKind, TextOrBlob,
+    ToolCallStatus, TurnFailed, TurnStoppedAtLimit, ViewEntry, WebResult, WebSearchRecorded,
 };
 use clauseo_reducer::{
     Error, REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef, StreamState, apply, view_snapshot,
@@ -163,6 +163,8 @@ fn mid_turn() -> (Log, StreamState) {
         turn,
         code: ErrorCode::ALL[0],
         detail: None,
+        // a setting, so the snapshot pins the state's failure_settings too
+        setting: Some(PolicySetting::ALL[0]),
     };
     log.push(failed).unwrap();
     let reason = DetachReason::Closed;

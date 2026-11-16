@@ -123,12 +123,14 @@ pub fn later_variants() -> Vec<DomainEvent> {
             turn: turn_id(3),
             code: ErrorCode::SettingsLocked,
             detail: Some("ui.theme is set by policy".to_owned()),
+            setting: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterCodexFolder,
             detail: Some("the matter folder holds a .codex folder".to_owned()),
+            setting: None,
         }
         .into(),
         PageVisited::new(
@@ -151,54 +153,63 @@ pub fn later_variants() -> Vec<DomainEvent> {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderIsDrive,
             detail: Some("/ is a drive root".to_owned()),
+            setting: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderIsHome,
             detail: Some("the home folder".to_owned()),
+            setting: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderIsSystem,
             detail: Some("/usr is a system folder".to_owned()),
+            setting: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderUnreadable,
             detail: Some("permission denied".to_owned()),
+            setting: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderIsMatter,
             detail: Some("already a matter".to_owned()),
+            setting: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderInMattersRoot,
             detail: Some("inside the data folder".to_owned()),
+            setting: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderNetwork,
             detail: Some("on a network drive".to_owned()),
+            setting: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::MatterFolderNoPermissions,
             detail: Some("no file permissions".to_owned()),
+            setting: None,
         }
         .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::AgentGuardMissing,
             detail: Some("the guard hook has no program".to_owned()),
+            setting: None,
         }
         .into(),
         CheckpointRecorded::new(checkpoint_id(18), CheckpointKind::Revisions, None, None)
@@ -209,6 +220,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
             turn: turn_id(3),
             code: ErrorCode::UpdateFailed,
             detail: Some("the signature did not verify".to_owned()),
+            setting: None,
         }
         .into(),
     ]
@@ -218,6 +230,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .chain(later::notices())
     .chain(later::stops())
     .chain(later::steers())
+    .chain(later::policy_settings())
     .collect()
 }
 
@@ -421,6 +434,7 @@ fn turn_end_events() -> Vec<DomainEvent> {
             turn,
             code: ErrorCode::AgentExited,
             detail: None,
+            setting: None,
         }
         .into(),
         TurnStoppedAtLimit {

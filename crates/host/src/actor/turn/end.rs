@@ -122,6 +122,7 @@ pub(super) fn on_prompt_done(
                 failure: None,
                 expiry: ExpiryReason::TurnEnded,
                 detach: None,
+                setting: None,
             }
         }
         Err(_) if too_long => End {
@@ -129,6 +130,7 @@ pub(super) fn on_prompt_done(
             failure: None,
             expiry: ExpiryReason::TurnEnded,
             detach: None,
+            setting: None,
         },
         Err(error) => {
             if fallback {
@@ -160,14 +162,28 @@ fn too_long_stops(actor: &Actor, thread: ThreadId, kind: clauseo_acp::TooLong) -
     stops
 }
 
-/// A Codex prompt's `.codex` re-check refused it, so nothing reached the agent: the agent is
-/// stopped (its app-server would load the folder's settings on any restart) and the turn ends
-/// failed with the refusal's code.
+/// A Codex prompt's `.codex` re-check refused it, or a Claude check (its settings file, a policy
+/// that weakens the launch) refused it or fired while it ran: the agent is stopped (its
+/// app-server would load the folder's settings on any restart; Claude would run on under the
+/// change) and the turn ends failed with the refusal's code. A refusal that arrives once the
+/// turn is past prompting (a cancel's fallback stop under way, or the turn ending) still stops
+/// the agent, as the check refused it; one for an earlier turn while another prompts is left to
+/// that turn's own checks.
 pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnId, error: &Error) {
-    let prompting = current(actor, thread)
-        .is_some_and(|current| current.turn == turn && current.phase == TurnPhase::Prompting);
-    if !prompting {
-        return;
+    let state = current(actor, thread).map(|current| (current.turn == turn, current.phase));
+    match state {
+        Some((true, TurnPhase::Prompting)) => {}
+        Some((false, _)) => return,
+        Some((true, _)) | None => {
+            tracing::warn!(
+                %thread,
+                error = %Cause(error),
+                "a host check refused after the prompt (a cancel, or the turn ending): the agent \
+                 is stopped"
+            );
+            agents::stop(actor, thread);
+            return;
+        }
     }
     tracing::warn!(
         %thread,
@@ -181,7 +197,10 @@ pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnI
     let end = if cancelled {
         End::cancelled(None)
     } else {
-        End::failed(error.code(), Some(error.to_string()), None)
+        End {
+            setting: error.setting(),
+            ..End::failed(error.code(), Some(error.to_string()), None)
+        }
     };
     end_turn(actor, thread, end);
     agents::stop(actor, thread);
@@ -334,6 +353,7 @@ pub(super) fn on_after_turn(
         if let Some(hit) = limits::at_limit(actor, AgentKind::Codex) {
             end.stop = StopReason::EndTurn;
             end.failure = None;
+            end.setting = None;
             limit = Some(LimitMark {
                 window: hit.window,
                 resets_at: hit.resets_at,
@@ -350,6 +370,7 @@ pub(super) fn on_after_turn(
     // Expiries step 6 could not log (its commit failed, the stream rolled back).
     close.expiries = Expiries::Pending(end.expiry);
     close.failure = end.failure;
+    close.setting = end.setting;
     close.limit = limit;
     close.detach = end.detach;
     close.complete_tools = super::skipped::to_complete(actor, thread, &close);

@@ -5,8 +5,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::serde_util::BorrowedStr;
 use crate::{
     CheckpointId, CompactString, ContentBlock, Delivery, Error, ErrorCode, FileChange,
-    LimitStopReason, MatterPath, MessageId, SkippedFile, SteerOutcome, StopReason, TextKind,
-    ThreadId, Timestamp, ToolCallId, TurnId, TurnUsage,
+    LimitStopReason, MatterPath, MessageId, PolicySetting, SkippedFile, SteerOutcome, StopReason,
+    TextKind, ThreadId, Timestamp, ToolCallId, TurnId, TurnUsage,
 };
 
 /// The lawyer's message, logged before its turn is queued or started. `session/load` replays
@@ -216,6 +216,11 @@ pub struct TurnFailed {
     /// may carry an unknown code in front, so it can be longer.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub detail: Option<String>,
+    /// The policy setting that refused a Claude launch (`agent.user_policy`,
+    /// `agent.firm_policy_weakens`), which the app names; missing when none is known. Only ever
+    /// one of the host's fixed keys: never a policy's text, a path or a value.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub setting: Option<PolicySetting>,
 }
 
 /// `TurnFailed` as read, before its code is looked up.
@@ -226,6 +231,8 @@ struct TurnFailedWire<'a> {
     code: BorrowedStr<'a>,
     #[serde(default)]
     detail: Option<String>,
+    #[serde(default)]
+    setting: Option<PolicySetting>,
 }
 
 impl<'de> Deserialize<'de> for TurnFailed {
@@ -245,6 +252,7 @@ impl<'de> Deserialize<'de> for TurnFailed {
             turn: wire.turn,
             code,
             detail,
+            setting: wire.setting,
         })
     }
 }

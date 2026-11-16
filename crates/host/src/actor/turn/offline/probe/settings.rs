@@ -104,6 +104,12 @@ impl Reads {
         }
     }
 
+    /// The refusal when one of Codex's managed config layers sets `shell_environment_policy`
+    /// ([`policy_keys::codex_env`]); on the prep's thread, for a Codex launch.
+    pub(crate) fn codex_refusal(&self) -> Result<(), crate::error::Error> {
+        policy_keys::codex_env::codex_refusal(&self.codex)
+    }
+
     /// What the launch's agent's settings files say ([`SettingsRead`]); on the prep's thread.
     pub(crate) fn read(
         &self,

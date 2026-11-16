@@ -230,11 +230,12 @@ pub(super) fn session_loads(
             matter,
             ask_all: forced_ask,
         });
+    let sandboxed = sandbox.is_some();
     let admin = match claude {
         Some(_) => Some(policy::check_guard(
             actor,
             thread,
-            (forced_ask, sandbox.is_some()),
+            (forced_ask, sandboxed),
             guard,
         )?),
         None => None,
@@ -256,7 +257,7 @@ pub(super) fn session_loads(
     let mut servers = lawyer_sent;
     super::super::mcp::left_out(actor, left_out);
     if let Some(admin) = admin {
-        policy::keep_admin_tier(actor, thread, admin);
+        policy::keep_admin_tier(actor, thread, admin, sandboxed);
     }
     note_mcp_sent(actor, thread, &trusted, case_law_entry.is_some());
     servers.extend(hook_servers);
