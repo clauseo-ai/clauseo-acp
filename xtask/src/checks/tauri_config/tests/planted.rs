@@ -138,9 +138,12 @@ crate::checks::planted::cases! {
          [\"https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json\"]",
         Fix::Endpoint,
     )], inspects 2 => super::repos::second_endpoint,
-    /// R23 PR 6's placeholder key (the committed `updater-placeholder.pub`) passes, with a note:
-    /// the desktop guard test and release.yml's `check` are its gates.
-    placeholder_pubkey_passes: Passes, inspects 2 => super::repos::placeholder_pubkey,
+    /// R23 PR 6's placeholder key (the committed `updater-placeholder.pub`) fails at `pubkey`.
+    placeholder_pubkey: Fails[fails(
+        "crates/desktop/tauri.conf.json:20",
+        "plugins.updater.pubkey is R23 PR 6's placeholder key (AC986E7C6BA67AB9)",
+        Fix::PubkeyPlaceholder,
+    )], inspects 2 => super::repos::placeholder_pubkey,
     /// The throwaway test key (the committed `updater-test.pub`) fails at `pubkey`.
     test_pubkey: Fails[fails(
         "crates/desktop/tauri.conf.json:20",

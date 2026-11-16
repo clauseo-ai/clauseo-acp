@@ -53,6 +53,11 @@ fix_texts! {
             "use the release public key: the throwaway test key signs only test releases, which no \
              installed copy may trust"
         },
+        Fix::PubkeyPlaceholder => {
+            "use the release public key, the one crates/desktop/release/updater-release.keyid \
+             names: nothing can sign for the placeholder, so no installed copy would take an \
+             update"
+        },
         Fix::V1Compatible => {
             "the updater is built without its zip feature, so v1Compatible artifacts cannot be \
              installed; use true"
@@ -103,6 +108,7 @@ fn every_fix_prints_its_pinned_text() {
         Fix::Endpoint,
         Fix::PubkeyFormat,
         Fix::PubkeyTest,
+        Fix::PubkeyPlaceholder,
         Fix::V1Compatible,
         Fix::Dangerous,
         Fix::AppManifest,

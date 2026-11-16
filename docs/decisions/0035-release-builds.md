@@ -51,17 +51,21 @@ Developer ID.
   third-party build scripts run. Only the macOS legs of `build` take an environment, since only they
   sign there. `.github/scripts/latest-json.test.mjs` fails on a pull request trigger, an unpinned
   action, a job without `permissions:` or a secret outside a step, and runs in CI's fast lane.
-- **The release key, checked before a release builds.** In a `release` run the `check` job reads
-  `plugins.updater.pubkey` from `tauri.conf.json` by its own bytes: line 2 of the decoded `.pub`
-  must decode to 42 bytes starting `Ed`, the key id is bytes 2 to 10 read little-endian
-  (`%016X`), and the untrusted comment must name that id. It refuses, each with its own
-  `::error::`, an empty key, one that does not decode so, R23 PR 6's placeholder
-  (`AC986E7C6BA67AB9`) and the test key (its id read from `updater-test.pub`). Every mode decodes
-  both keys the same way, so each dry run exercises the decoder; dry and test runs only warn on
-  the placeholder: a dry run makes its own key and a test run signs with the test key. Unlike the
-  desktop test that refuses the same keys, this check is the one a merge cannot skip. Checked
-  locally (2026-11-06): the placeholder, the test key and a doctored comment are refused; a fresh
-  throwaway key passes.
+- **The release key, checked before a release builds.** The `check` job's step "The updater's keys
+  and endpoint are the release's" reads `plugins.updater.pubkey` from `tauri.conf.json` by its own
+  bytes: line 2 of the decoded `.pub` must decode to 42 bytes starting `Ed`, the key id is bytes 2
+  to 10 read little-endian (`%016X`), and the untrusted comment must name that id. In every mode it
+  needs `updater-test.pub` (missing, empty or not a key fails) and `updater-release.keyid` (one
+  upper-case key id), and decodes both keys, so each dry run exercises the decoder. In a `release`
+  run it refuses, each with its own `::error::`, an empty key, one that does not decode so, R23 PR
+  6's placeholder (`AC986E7C6BA67AB9`), the test key, and any key whose id is not the one
+  `updater-release.keyid` names (Rohan's, `F6A25D1511B92EBE`); and an endpoint list other than
+  exactly releases/latest. Dry and test runs only warn on the placeholder: a dry run makes its own
+  key and a test run signs with the test key. It reads `tauri.conf.json` alone; no overlay a release
+  build passes may set `plugins.updater`. `latest-json.test.mjs` runs the step's own script against
+  the committed files and broken copies (each refusal above, and a rotated key with its keyid,
+  which passes), and fails an overlay that sets `plugins.updater`. Unlike the desktop test that
+  requires the same id, this check is the one a merge cannot skip.
 - **No test key in a shipped binary.** In every `build` leg of a run that is not `test` (so
   release and dry runs), the step right after `tauri build`, before any signing or upload (on
   Linux, `tauri build --bundles deb,rpm` has already made the packages), scans the app binary as

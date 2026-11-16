@@ -32,6 +32,8 @@ pub(crate) enum Fix {
     PubkeyFormat,
     /// The updater's public key is the throwaway test key.
     PubkeyTest,
+    /// The updater's public key is R23 PR 6's placeholder, whose private half was deleted.
+    PubkeyPlaceholder,
     /// `bundle.createUpdaterArtifacts` is `"v1Compatible"`.
     V1Compatible,
     /// A `dangerous*` key appears at some depth.
@@ -105,6 +107,11 @@ impl fmt::Display for Fix {
             Fix::PubkeyTest => {
                 "use the release public key: the throwaway test key signs only test releases, which \
                  no installed copy may trust"
+            }
+            Fix::PubkeyPlaceholder => {
+                "use the release public key, the one crates/desktop/release/updater-release.keyid \
+                 names: nothing can sign for the placeholder, so no installed copy would take an \
+                 update"
             }
             Fix::V1Compatible => {
                 "the updater is built without its zip feature, so v1Compatible artifacts cannot be \

@@ -34,7 +34,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -1297,6 +1297,104 @@ test("the version check passes a first app release or a higher version and refus
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const DESKTOP = join(here, "..", "..", "crates", "desktop");
+const KEYS_STEP = "The updater's keys and endpoint are the release's";
+
+/** Tauri's form of a minisign public key with key id `id` (16 hex digits) and a comment naming `named`. */
+function madePub(id, named = id) {
+  const key = Buffer.concat([Buffer.from("Ed"), Buffer.from(id, "hex").reverse(), Buffer.alloc(32, 0x11)]);
+  return b64(`untrusted comment: minisign public key: ${named}\n${key.toString("base64")}\n`);
+}
+
+test("check's key step requires the release key's id, refuses the placeholder and the test key, and needs updater-test.pub", { skip: process.platform === "win32" }, () => {
+  const script = stepScript(readFileSync(RELEASE_YML, "utf8"), KEYS_STEP);
+  const real = {
+    conf: readFileSync(join(DESKTOP, "tauri.conf.json"), "utf8"),
+    testPub: readFileSync(join(DESKTOP, "release", "updater-test.pub"), "utf8"),
+    keyid: readFileSync(join(DESKTOP, "release", "updater-release.keyid"), "utf8"),
+  };
+  const placeholder = readFileSync(join(DESKTOP, "release", "updater-placeholder.pub"), "utf8").trim();
+  const withPub = (pubkey) => {
+    const conf = JSON.parse(real.conf);
+    conf.plugins.updater.pubkey = pubkey;
+    return JSON.stringify(conf);
+  };
+  const dir = mkdtempSync(join(tmpdir(), "keys-step-"));
+  // One run of the step's own script in a copy of the files it reads; null leaves a file out.
+  const run = (mode, files = {}) => {
+    rmSync(join(dir, "crates"), { recursive: true, force: true });
+    mkdirSync(join(dir, "crates", "desktop", "release"), { recursive: true });
+    const { conf, testPub, keyid } = { ...real, ...files };
+    for (const [path, text] of [["tauri.conf.json", conf], ["release/updater-test.pub", testPub], ["release/updater-release.keyid", keyid]]) {
+      if (text !== null) writeFileSync(join(dir, "crates", "desktop", path), text);
+    }
+    const result = spawnSync("bash", ["-c", script], { cwd: dir, encoding: "utf8", env: { ...process.env, MODE: mode } });
+    return { status: result.status, out: result.stdout + result.stderr };
+  };
+  const passes = (mode, files, why) => {
+    const result = run(mode, files);
+    assert.equal(result.status, 0, `${why} in ${mode}: ${result.out}`);
+    return result.out;
+  };
+  const fails = (mode, files, error, why) => {
+    const result = run(mode, files);
+    assert.equal(result.status, 1, `${why} in ${mode}: ${result.out}`);
+    assert.ok(result.out.includes(`::error::${error}`), `${why} in ${mode}: ${result.out}`);
+  };
+  try {
+    // The committed files pass in every mode, the release key being the one updater-release.keyid names.
+    assert.equal(real.keyid, "F6A25D1511B92EBE\n");
+    for (const mode of ["release", "test", "dry"]) {
+      assert.ok(passes(mode, {}, "the committed files").includes("plugins.updater.pubkey is key F6A25D1511B92EBE; the test key is B142942ACEC5F521"));
+    }
+    // updater-test.pub: missing, empty or no key fails in every mode, before anything is decoded.
+    for (const mode of ["release", "test", "dry"]) {
+      for (const [testPub, error] of [
+        [null, "crates/desktop/release/updater-test.pub (the test key's public key) is missing"],
+        ["", "crates/desktop/release/updater-test.pub (the test key's public key) is missing"],
+        ["bm90IGEga2V5Cg==\n", "crates/desktop/release/updater-test.pub is not a minisign public key:"],
+      ]) {
+        fails(mode, { testPub }, error, `updater-test.pub ${JSON.stringify(testPub)}`);
+      }
+    }
+    // updater-release.keyid: missing or not one upper-case key id fails in every mode.
+    for (const keyid of [null, "", "f6a25d1511b92ebe\n", "F6A25D1511B92EB\n"]) {
+      fails("dry", { keyid }, "crates/desktop/release/updater-release.keyid does not hold a key id", `keyid ${JSON.stringify(keyid)}`);
+    }
+    // A release refuses the placeholder, the test key and any key but the one the keyid names.
+    fails("release", { conf: withPub(placeholder) }, "plugins.updater.pubkey is the placeholder (AC986E7C6BA67AB9)", "the placeholder");
+    fails("release", { conf: withPub(real.testPub.trim()) }, "plugins.updater.pubkey is the test key (B142942ACEC5F521)", "the test key");
+    const other = withPub(madePub("0123456789ABCDEF"));
+    fails("release", { conf: other }, "plugins.updater.pubkey is key 0123456789ABCDEF, not the release key F6A25D1511B92EBE", "another key");
+    fails("release", { conf: withPub(madePub("0123456789ABCDEF", "F6A25D1511B92EBE")) }, "plugins.updater.pubkey in tauri.conf.json is not a minisign public key: its comment does not name its own key id 0123456789ABCDEF", "a renamed comment");
+    fails("release", { conf: withPub("") }, "plugins.updater.pubkey in tauri.conf.json is empty", "no key");
+    // Rotating the key: a new pubkey passes once the keyid names it.
+    passes("release", { conf: other, keyid: "0123456789ABCDEF\n" }, "a rotated key and keyid");
+    // A dry or test run only warns on the placeholder and takes any well-formed key.
+    for (const mode of ["test", "dry"]) {
+      assert.ok(passes(mode, { conf: withPub(placeholder) }, "the placeholder").includes("::warning::plugins.updater.pubkey is still the placeholder"));
+      passes(mode, { conf: other }, "another key");
+    }
+    // The endpoint: exactly releases/latest in a release.
+    const conf = JSON.parse(real.conf);
+    conf.plugins.updater.endpoints = ["https://example.com/latest.json"];
+    fails("release", { conf: JSON.stringify(conf) }, "plugins.updater.endpoints in tauri.conf.json is", "another endpoint");
+    passes("dry", { conf: JSON.stringify(conf) }, "another endpoint");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("no overlay a release build passes sets plugins.updater, so check's read of tauri.conf.json is the app's", () => {
+  const committed = readdirSync(join(DESKTOP, "release")).filter((name) => name.endsWith(".json") && name !== "sidecars.generated.json");
+  assert.ok(committed.includes("release.conf.json") && committed.includes("machine.conf.json"), committed.join(" "));
+  const inline = [...readFileSync(RELEASE_YML, "utf8").matchAll(/--config '(\{[^']*\})'/g)].map((match) => match[1]);
+  assert.ok(inline.length > 0);
+  for (const [name, json] of [...committed.map((name) => [name, readFileSync(join(DESKTOP, "release", name), "utf8")]), ...inline.map((json) => [json, json])]) {
+    assert.equal(JSON.parse(json).plugins?.updater, undefined, `${name} sets plugins.updater`);
   }
 });
 
