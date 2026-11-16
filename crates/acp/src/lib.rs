@@ -79,6 +79,7 @@ mod diagnose;
 mod driver;
 mod error;
 mod event;
+#[cfg(feature = "fuzzing")]
 #[doc(hidden)]
 pub mod fuzzing;
 mod inbound;

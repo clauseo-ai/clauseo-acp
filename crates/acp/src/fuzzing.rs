@@ -1,5 +1,6 @@
-//! Internals the fuzz targets in `fuzz/` call directly, hidden from the docs. Not part of the
-//! crate's interface: nothing but the fuzz crate may use it, and it changes with the internals.
+//! Internals the fuzz targets in `fuzz/` call directly, built only with the `fuzzing` feature,
+//! which only the fuzz crate turns on, and hidden from the docs. Not part of the crate's
+//! interface: it changes with the internals.
 
 /// What the start of a `session/update` line over the line cap says, as the line reader reads it
 /// (`line/oversize.rs`), for the fuzz target `acp_skipped_update`.

@@ -38,9 +38,11 @@ mod oversize;
 mod tests;
 
 use envelope::Envelope;
-pub(crate) use oversize::{
-    MAX_ID_BYTES, SKIPPED_UPDATE_METHOD, SkippedUpdate, TOOL_CALL_UPDATE, skipped_update,
-};
+#[cfg(any(test, feature = "fuzzing"))]
+pub(crate) use oversize::MAX_ID_BYTES;
+#[cfg(feature = "fuzzing")]
+pub(crate) use oversize::skipped_update;
+pub(crate) use oversize::{SKIPPED_UPDATE_METHOD, SkippedUpdate, TOOL_CALL_UPDATE};
 
 /// The longest JSON-RPC line the agent may send: 8 MiB, newline excluded.
 pub(crate) const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
