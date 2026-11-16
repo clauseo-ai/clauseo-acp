@@ -75,7 +75,7 @@ fn a_path_swapped_for_a_link_after_the_keep_is_caught() {
             place.display()
         );
     }
-    // A file not made yet is judged by its folder (`cp a b`, `mkdir x`).
+    // A file not there yet is judged by its folder (a read of it finds nothing).
     let new = Reach {
         places: vec![matter.join("new.txt")],
         ..Reach::default()
@@ -163,4 +163,23 @@ fn a_file_named_like_the_program_beside_codex_is_caught() {
     crate::write::remove_file(&matter.join("ls")).unwrap();
     crate::write::write_file(&matter.join("ls"), b"rm -rf ~\n").unwrap();
     assert_eq!(reach.check(&matter, false), Some(false));
+}
+
+/// A bundled program is found only in stetdoc's folder, first on the session's `PATH`: never in
+/// the shell browser's tools or the profile hook's folders, nor anywhere without stetdoc.
+#[test]
+fn a_bundled_program_is_found_only_in_stetdocs_folder() {
+    use std::path::{Path, PathBuf};
+    let stetdoc = Path::new("bin-stetdoc");
+    let browser = PathBuf::from("bin-browser");
+    let hook = PathBuf::from("bin-hook");
+    let dirs = [stetdoc.to_path_buf(), browser.clone(), hook];
+    assert_eq!(
+        super::bundled(Some(stetdoc), &dirs),
+        [stetdoc.to_path_buf()]
+    );
+    let none: [PathBuf; 0] = [];
+    assert_eq!(super::bundled(None, &dirs), none);
+    assert_eq!(super::bundled(Some(stetdoc), &dirs[1..]), none);
+    assert_eq!(super::bundled(Some(&browser), &dirs), none);
 }

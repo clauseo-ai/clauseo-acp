@@ -31,6 +31,10 @@ mod agent_name;
 #[cfg(test)]
 #[path = "host/always.rs"]
 mod always;
+// Unix only: its tests' matters and links use unix paths.
+#[cfg(all(test, unix))]
+#[path = "host/always_fixes.rs"]
+mod always_fixes;
 #[cfg(test)]
 #[path = "host/always_kept.rs"]
 mod always_kept;

@@ -152,14 +152,16 @@ const POSIX_SHELLS: [&str; 3] = ["/bin/zsh", "/bin/bash", "/bin/sh"];
 /// Windows PowerShell at its system path, `/`-separated.
 const WINDOWS_POWERSHELL: &str = "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
 
-/// `line`'s words under `grammar`, or [`NotPlain::Unparsed`].
+/// `line`'s words under `grammar`, or [`NotPlain::Unparsed`]. Each word is judged whole once
+/// it ends ([`word_ok`]), knowing whether any of it was quoted.
 fn split(line: &str, grammar: Grammar) -> Result<Vec<String>, NotPlain> {
     let mut words = Vec::new();
     let mut word: Option<String> = None;
+    let mut quoted = false;
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
         if c == ' ' || c == '\t' {
-            words.extend(word.take());
+            end(&mut words, &mut word, &mut quoted, grammar)?;
             continue;
         }
         // PowerShell reads `''` inside quotes as one quote, and joins quoted and bare text by
@@ -168,6 +170,7 @@ fn split(line: &str, grammar: Grammar) -> Result<Vec<String>, NotPlain> {
         let current = word.get_or_insert_with(String::new);
         match c {
             '\'' if whole => {
+                quoted = true;
                 loop {
                     match chars.next() {
                         Some('\'') => break,
@@ -181,6 +184,7 @@ fn split(line: &str, grammar: Grammar) -> Result<Vec<String>, NotPlain> {
                 }
             }
             '"' if grammar == Grammar::Posix => loop {
+                quoted = true;
                 match chars.next() {
                     Some('"') => break,
                     Some(inner) if quoted_ok(inner, grammar) => current.push(inner),
@@ -191,22 +195,60 @@ fn split(line: &str, grammar: Grammar) -> Result<Vec<String>, NotPlain> {
             _ => return Err(NotPlain::Unparsed),
         }
     }
-    words.extend(word);
+    end(&mut words, &mut word, &mut quoted, grammar)?;
     if words.is_empty() {
         return Err(NotPlain::Unparsed);
     }
     Ok(words)
 }
 
-/// A character taken outside quotes: ASCII letters and digits, a few marks, and any other
-/// letter or digit. The shell reads none of these as more than itself. PowerShell takes fewer:
-/// no `,` (an array), `@` (splatting), `%` or `=`.
+/// Ends the word being read, if any: judged whole ([`word_ok`]), then added to `words`.
+fn end(
+    words: &mut Vec<String>,
+    word: &mut Option<String>,
+    quoted: &mut bool,
+    grammar: Grammar,
+) -> Result<(), NotPlain> {
+    if let Some(done) = word.take() {
+        if !word_ok(&done, *quoted, grammar) {
+            return Err(NotPlain::Unparsed);
+        }
+        words.push(done);
+    }
+    *quoted = false;
+    Ok(())
+}
+
+/// Whether a whole word, quoted in part or not, reads as the text it holds. PowerShell reads two
+/// forms otherwise: a quoted word starting with `-` is a file name to it, never a switch, and a
+/// bare word that looks like a number is one (`1kb` is 1024, `0x10` is 16, `007` is 7), so
+/// such a word is taken only as a plain number with no leading zero, short enough to stay one.
+fn word_ok(word: &str, quoted: bool, grammar: Grammar) -> bool {
+    if grammar != Grammar::PowerShell {
+        return true;
+    }
+    if quoted {
+        return !word.starts_with('-');
+    }
+    let bytes = word.as_bytes();
+    let numeric = matches!(bytes, [b'0'..=b'9' | b'+', ..] | [b'.', b'0'..=b'9', ..]);
+    !numeric || word == "0" || plain_number(word)
+}
+
+/// `1` to `999999999`: ASCII digits, no leading zero, at most nine.
+fn plain_number(word: &str) -> bool {
+    word.len() <= 9 && !word.starts_with('0') && word.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// A character taken outside quotes: ASCII letters and digits and a few marks; no other letter
+/// or digit, so no look-alike name reaches a card. The shell reads none of these as more than
+/// itself. PowerShell takes fewer: no `,` (an array), `@` (splatting), `%` or `=`.
 fn bare_ok(c: char, grammar: Grammar) -> bool {
     let marks: &[char] = match grammar {
         Grammar::Posix => &['_', '-', '.', '/', ':', ',', '+', '=', '@', '%'],
         Grammar::PowerShell => &['_', '-', '.', '/', ':', '+'],
     };
-    c.is_ascii_alphanumeric() || marks.contains(&c) || (!c.is_ascii() && c.is_alphanumeric())
+    c.is_ascii_alphanumeric() || marks.contains(&c)
 }
 
 /// A character taken inside quotes: what [`bare_ok`] takes, and the space. Never a quote of

@@ -8,8 +8,9 @@
 //!   another matter's file after the rule was kept is caught here.
 //! - Its program must be found on the agent's search path at the place its allowlist entry names
 //!   (`table::At`), by real path: never a file in the matter, never a relative entry.
-//! - For Codex, no entry of the working folder may bear the program's name: codex-acp 2.2.2's
-//!   `stripShellPrefix` shows a run of `bash <name>` (a script in that folder) as `<name>`.
+//! - No entry of the working folder may bear the program's name, for either agent: codex-acp
+//!   2.2.2's `stripShellPrefix` shows a run of `bash <name>` (a script in that folder) as
+//!   `<name>`, and a `.` entry a user's shell files add to the search path would run it.
 //!
 //! What is checked is the state at that moment; a change between the check and the run is not
 //! seen, as for every check of the host's on the matter thread.
@@ -32,8 +33,8 @@ pub(crate) struct Reach {
     pub(crate) places: Vec<PathBuf>,
     /// A command's program.
     pub(crate) program: Option<Program>,
-    /// A path that must not exist, not even as a link: Codex's working folder joined with its
-    /// program's name.
+    /// A path that must not exist, not even as a link: a command's working folder joined with
+    /// its program's name.
     pub(crate) absent: Option<PathBuf>,
 }
 
@@ -47,7 +48,8 @@ pub(crate) struct Program {
     /// The agent's search path, `PATH` as its launch set it; none when not known, and then the
     /// program is never found.
     pub(crate) search: Option<OsString>,
-    /// Clauseo's own folders first on that path, for [`At::Bundled`].
+    /// Stetdoc's folder, when it is first on that path, for [`At::Bundled`]: no other folder
+    /// Clauseo puts there (the browser's tools, the profile hook's).
     pub(crate) bundled: Vec<PathBuf>,
 }
 
@@ -123,6 +125,17 @@ impl Program {
         });
         named && in_allowed && !real_inside(&real, folder, windows) && real.is_file()
     }
+}
+
+/// Where a bundled program (`At::Bundled`) may be: stetdoc's folder `stetdoc`, when it is the
+/// first of the session's `PATH` folders `dirs`; never the shell browser's tools or the profile
+/// hook's folders after it.
+pub(crate) fn bundled(stetdoc: Option<&Path>, dirs: &[PathBuf]) -> Vec<PathBuf> {
+    stetdoc
+        .filter(|folder| dirs.first().is_some_and(|first| first == folder))
+        .map(Path::to_path_buf)
+        .into_iter()
+        .collect()
 }
 
 /// The first file named `name` (on Windows with an extension a shell would add) in the

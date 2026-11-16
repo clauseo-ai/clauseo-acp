@@ -269,7 +269,7 @@ fn a_codex_command_keeps_its_text_and_folder() {
         (
             r#"cp witness-statement.docx "/Users/Shared/outbox/witness-statement.docx""#,
             "/m",
-            NotKept::OutsideMatter,
+            NotKept::Refused,
         ),
         (
             r#"python3 -c "from pathlib import Path; Path('/Users/Shared/o/n.txt').write_text('x')""#,
@@ -400,15 +400,14 @@ fn a_codex_command_with_more_permissions_keeps_nothing() {
 fn a_command_rule_carries_what_it_reaches() {
     let kept = claude(
         "Bash",
-        Some(&json!({"command": "cp a.txt Drafts/b.txt"})),
+        Some(&json!({"command": "cat a.txt Drafts/b.txt"})),
         false,
     )
     .unwrap();
     let command = kept.command.unwrap();
-    assert_eq!(command.program.name, "cp");
+    assert_eq!(command.program.name, "cat");
     assert_eq!(command.cwd, "/m");
     assert_eq!(command.paths, ["a.txt", "Drafts/b.txt"]);
-    assert!(!command.codex);
     assert!(needs_real(&kept.rule));
     let run = codex(
         ToolKind::Execute,
@@ -419,7 +418,6 @@ fn a_command_rule_carries_what_it_reaches() {
     assert_eq!(command.program.name, "grep");
     assert_eq!(command.cwd, "/m/Drafts");
     assert_eq!(command.paths, ["a.txt"], "the pattern is not a path");
-    assert!(command.codex);
     for rule in ["Bash(ls)", "PowerShell(Get-ChildItem)", "Run(ls) in a"] {
         assert!(needs_real(rule), "{rule}");
     }
@@ -555,4 +553,20 @@ fn a_link_swapped_into_the_matter_is_outside() {
     crate::write::symlink(&other, &matter.join("x")).unwrap();
     assert!(!real_within(&matter.join("x/new.plist"), &matter, false));
     assert!(super::needs_real(super::EDIT_ALL));
+}
+
+/// A Claude shell call that asks to run outside its sandbox keeps nothing: a kept rule covers
+/// the plain run only.
+#[test]
+fn an_unsandboxed_claude_command_keeps_nothing() {
+    for flag in [json!(true), json!("true"), json!(1)] {
+        let input = json!({"command": "wc -l a.txt", "dangerouslyDisableSandbox": flag});
+        assert_eq!(
+            claude("Bash", Some(&input), false),
+            Err(NotKept::NoRule),
+            "{flag}"
+        );
+    }
+    let input = json!({"command": "wc -l a.txt", "dangerouslyDisableSandbox": false});
+    assert!(claude("Bash", Some(&input), false).is_ok());
 }

@@ -38,10 +38,9 @@ fn a_plain_command_is_its_words() {
     );
     assert_eq!(claude("ls   -1\tDrafts").unwrap(), ["ls", "-1", "Drafts"]);
     assert_eq!(
-        claude("cp a.txt b'c'd.txt").unwrap(),
-        ["cp", "a.txt", "bcd.txt"]
+        claude("cat a.txt b'c'd.txt").unwrap(),
+        ["cat", "a.txt", "bcd.txt"]
     );
-    assert_eq!(claude("ls Écrits").unwrap(), ["ls", "Écrits"]);
     let got = plain("grep -n term a.txt", Grammar::Posix, Agent::Claude, MAC).unwrap();
     assert_eq!(got.program.name, "grep");
     assert_eq!(got.paths, ["a.txt"]);
@@ -225,8 +224,8 @@ fn an_argument_outside_the_matter_is_refused() {
     for line in [
         "cat /etc/passwd",
         "ls /Users/l/Matters/Acme2",
-        "mv /Users/l/Q /Users/l/Q2",
-        "grep -r term /etc",
+        "cat /Users/l/Q /Users/l/Q2",
+        "grep term /etc",
     ] {
         assert_eq!(claude(line), Err(NotPlain::Outside), "{line:?}");
     }
@@ -345,4 +344,74 @@ fn an_empty_or_long_command_is_refused() {
     assert_eq!(claude("   "), Err(NotPlain::Unparsed));
     let long = format!("ls {}", "a".repeat(super::MAX_COMMAND_BYTES));
     assert_eq!(claude(&long), Err(NotPlain::Size));
+}
+
+/// A command that writes is never kept, by either agent, in either shell: no program on the list
+/// writes (`cp`, `mv`, `mkdir`, `Copy-Item`, `Move-Item`).
+#[test]
+fn no_command_that_writes_is_kept() {
+    for line in [
+        "cp memo.txt Drafts",
+        "cp -r Exhibits Bundle",
+        "cp -R Template/ .",
+        "mv Pack Drafts",
+        "mkdir Drafts",
+    ] {
+        assert_eq!(claude(line), Err(NotPlain::NotListed), "{line:?}");
+        assert_eq!(codex(line), Err(NotPlain::NotListed), "{line:?}");
+    }
+    for line in ["Copy-Item a.txt Drafts", "Move-Item Pack Drafts"] {
+        assert_eq!(ps(line), Err(NotPlain::NotListed), "{line:?}");
+    }
+    assert!(claude("cat memo.txt").is_ok(), "a read is still kept");
+    assert!(ps("Get-Content memo.txt").is_ok(), "a read is still kept");
+}
+
+/// A POSIX option after the first file name is a file to BSD `cat`, `cp` and the rest: refused.
+#[test]
+fn an_option_after_a_file_name_is_refused() {
+    for line in [
+        "cat a -n",
+        "cp a b -R",
+        "head notes.txt -n 5",
+        "ls Drafts -la",
+    ] {
+        assert_eq!(claude(line), Err(NotPlain::NotListed), "{line:?}");
+    }
+}
+
+/// PowerShell reads a bare word that looks like a number as one (`1kb` is 1024), and a quoted
+/// word starting with `-` as a file, never a switch: both refused. A plain number still fits.
+#[test]
+fn powershell_numbers_and_quoted_dashes_are_refused() {
+    for line in [
+        "Get-Content 1kb",
+        "Get-Content 0x10",
+        "Get-Content 1e3",
+        "Get-Content 10l",
+        "Get-Content 007",
+        "Get-Content +5",
+        "Get-Content .5",
+        "Get-Content 1234567890",
+        "Get-Content '-Raw'",
+        "Get-Content -Path '-x'",
+        "Select-String '-SimpleMatch' a.txt",
+    ] {
+        assert_eq!(ps(line), Err(NotPlain::Unparsed), "{line:?}");
+    }
+    assert!(ps("Get-Content -TotalCount 10 a.txt").is_ok());
+    assert!(ps("Get-Content '1kb'").is_ok(), "a quoted name is text");
+    assert!(ps("Get-Content ./1kb").is_ok());
+    assert!(
+        claude("head -n 007 a.txt").is_ok(),
+        "POSIX reads digits as they are"
+    );
+}
+
+/// No letter outside ASCII, so no look-alike name reaches a card.
+#[test]
+fn a_letter_outside_ascii_is_refused() {
+    for line in ["ls Écrits", "cat 'Écrits/a.txt'", "cat а.txt"] {
+        assert_eq!(claude(line), Err(NotPlain::Unparsed), "{line:?}");
+    }
 }

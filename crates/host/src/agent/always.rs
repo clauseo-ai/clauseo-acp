@@ -36,10 +36,12 @@ mod real;
 mod site;
 mod store;
 pub(crate) mod table;
+mod tool;
 
-pub(crate) use reach::{Program, Reach};
+pub(crate) use reach::{Program, Reach, bundled};
 use real::{name_as_opened, own_folder};
 pub(crate) use real::{real_inside, real_within};
+use tool::{is_mcp_tool, mcp_parts, tool_offer};
 
 pub(crate) use store::{delete, list, next_seq, read_beside, remove_now, store, use_secrets};
 #[cfg(test)]
@@ -108,9 +110,6 @@ pub(crate) struct Command {
     pub(crate) cwd: String,
     /// Its path words as typed, absolute or relative to `cwd`.
     pub(crate) paths: Vec<String>,
-    /// Whether it is Codex's: codex-acp shows `bash <name>` as `<name>`, so no entry of the
-    /// working folder may bear the program's name.
-    pub(crate) codex: bool,
 }
 
 /// The one rule that covers every change to a file inside the matter folder.
@@ -161,16 +160,6 @@ fn offer(kind: AlwaysKind, shown: Option<String>, cwd: Option<String>) -> Always
     }
 }
 
-/// A tool's offer: its server and its name there, never the whole `mcp__<server>__<tool>`, so
-/// the card can say "{tool} from {server}". Web search has no server.
-fn tool_offer(server: Option<&str>, tool: &str) -> AlwaysOffer {
-    AlwaysOffer {
-        server: server.map(str::to_owned),
-        tool: Some(tool.to_owned()),
-        ..offer(AlwaysKind::Tool, None, None)
-    }
-}
-
 fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
     let raw_input = request.raw_input;
     let text = |key: &str| {
@@ -180,6 +169,14 @@ fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
     };
     let exact = |made: Option<String>| made.ok_or(NotKept::Refused);
     let shell = |tool: &str, grammar: plain::Grammar| -> Result<Kept, NotKept> {
+        // A call that asks to run outside Claude's sandbox is asked each time: a kept rule
+        // covers the plain run only.
+        let unsandboxed = raw_input
+            .and_then(|input| input.get("dangerouslyDisableSandbox"))
+            .is_some_and(|value| value != &Value::Bool(false));
+        if unsandboxed {
+            return Err(NotKept::NoRule);
+        }
         let line = text("command")?;
         let line = exact(command(line, grammar, plain::Agent::Claude).map(str::to_owned))?;
         // Plain in the matter under any of its spellings (Claude's Bash starts in the folder).
@@ -201,7 +198,6 @@ fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
             program: plain.program,
             cwd: matter.clone(),
             paths: plain.paths,
-            codex: false,
         };
         Ok(Kept {
             rule: format!("{tool}({line})"),
@@ -318,7 +314,6 @@ fn codex_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
                 program: plain.program,
                 cwd: cwd.to_owned(),
                 paths: plain.paths,
-                codex: true,
             };
             Ok(Kept {
                 rule,
@@ -490,23 +485,6 @@ fn one_plain_command(command: &str, grammar: plain::Grammar, agent: plain::Agent
         Ok(_) | Err(plain::NotPlain::Outside) => true,
         Err(_) => false,
     }
-}
-
-/// An MCP tool's server and its name there: `mcp__<server>__<tool>` split at the first `__`
-/// after the server's name (Claude Code's own form).
-fn mcp_parts(name: &str) -> Option<(&str, &str)> {
-    name.strip_prefix("mcp__")?.split_once("__")
-}
-
-/// An MCP tool's exact name, `mcp__<server>__<tool>`: letters, digits, `_` and `-` only.
-fn is_mcp_tool(name: &str) -> bool {
-    name.strip_prefix("mcp__").is_some_and(|rest| {
-        rest.split_once("__")
-            .is_some_and(|(server, tool)| !server.is_empty() && !tool.is_empty())
-            && rest
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
-    })
 }
 
 /// An absolute file path as a path rule's content in Claude Code's syntax, `//<path>` (a path

@@ -88,7 +88,8 @@ pub(super) struct Always {
     /// The agent's search path, `PATH` as its launch set it, where a kept command's program
     /// must be found (`always::Program`).
     search: Option<OsString>,
-    /// Clauseo's own folders first on it (`shell_path::SessionPath::dirs`).
+    /// Stetdoc's folder when it is first on it (`HostConfig::with_agent_path_prepend`), the
+    /// only place a bundled program may be: not the browser's tools or the profile hook's.
     bundled: Vec<PathBuf>,
     asked: BTreeMap<PermissionRequestId, AlwaysAsk>,
 }
@@ -97,7 +98,13 @@ impl Always {
     /// For a launch of an agent of `kind`: the rules its prep read (`RunFolders::always`), for
     /// Claude or Codex, in forced ask too, without those the lawyer removed since (`kept`, the
     /// actor's ledger): the prep read the file off the actor, maybe before a removal's write.
-    pub(super) fn at_launch(run: &RunFolders, kind: Option<AgentKind>, kept: &Ledger) -> Self {
+    /// `stetdoc` is stetdoc's folder (`Wiring::path_prepend`).
+    pub(super) fn at_launch(
+        run: &RunFolders,
+        kind: Option<AgentKind>,
+        kept: &Ledger,
+        stetdoc: Option<&Path>,
+    ) -> Self {
         if !matches!(kind, Some(AgentKind::Claude | AgentKind::Codex)) {
             return Self::default();
         }
@@ -122,7 +129,7 @@ impl Always {
             roots: Vec::new(),
             spellings: Vec::new(),
             search: None,
-            bundled: run.path.dirs.clone(),
+            bundled: always::bundled(stetdoc, &run.path.dirs),
             asked: BTreeMap::new(),
         }
     }
@@ -170,6 +177,9 @@ pub(super) fn ask(
     agent_ref.always.file.as_ref()?;
     let kind = agent_ref.always.kind?;
     let matter = agent_ref.always.spellings.clone();
+    // Claude's shell starts in the matter folder only while its policy lets Clauseo keep it
+    // there; when the start is unknown, a kept command could run from another folder.
+    let start_known = agent_ref.shell_start == crate::sent::ShellStart::Matter;
     let tool = tool_name(actor, thread, session, acp_tool_call_id);
     if options::plan_exit(options) || tool.as_deref() == Some(PLAN_EXIT_TOOL) {
         return None;
@@ -186,7 +196,14 @@ pub(super) fn ask(
         matter: &matter,
         windows: cfg!(windows),
     };
-    let kept = always::rule(&request);
+    let kept = always::rule(&request).and_then(|kept| {
+        let unanchored = kind == AgentKind::Claude && kept.command.is_some() && !start_known;
+        if unanchored {
+            Err(NotKept::Refused)
+        } else {
+            Ok(kept)
+        }
+    });
     Some(AlwaysAsk {
         kept,
         once,
@@ -228,7 +245,9 @@ pub(super) fn reach(
         return Reach {
             places,
             program: Some(program),
-            absent: command.codex.then(|| cwd.join(command.program.name)),
+            // For either agent: codex-acp shows `bash <name>` as `<name>`, and a `.` entry
+            // on a shell's search path would run a file of the program's name there.
+            absent: Some(cwd.join(command.program.name)),
             ..Reach::default()
         };
     }
@@ -275,23 +294,40 @@ fn tool_name(
     })
 }
 
-/// Whether the request is for a tool that spends the lawyer's money (`always::spends`): Claude's
-/// by the logged call's tool name, Codex's by the MCP call codex-acp announced for it or, for
-/// a standalone request, the server and tool it names. Read before any check takes the call.
-pub(super) fn spends(
+/// Whether the request is for a tool that spends the lawyer's money (`always::spends`), or
+/// offers "For this conversation" for a tool it cannot be tied to: then its card offers only
+/// this call. The tool is Claude's by the logged call's tool name, Codex's by the MCP call
+/// codex-acp announced for it or, for a standalone request, the server and tool it names. Read
+/// before any check takes the call.
+pub(super) fn once_only(
     actor: &mut Actor,
     thread: ThreadId,
     session: &AgentSessionId,
     acp_tool_call_id: &str,
     raw_input: Option<&Value>,
+    options: &[PermissionOption],
 ) -> bool {
-    let named = tool_name(actor, thread, session, acp_tool_call_id).is_some_and(|name| {
-        name.strip_prefix("mcp__")
-            .and_then(|rest| rest.split_once("__"))
-            .is_some_and(|(server, tool)| always::spends(server, tool))
+    match mcp_tool(actor, thread, session, acp_tool_call_id, raw_input) {
+        Some((server, tool)) => always::spends(&server, &tool),
+        None => options::session_only(options),
+    }
+}
+
+/// The MCP server and tool the request is for, when the host can tell.
+fn mcp_tool(
+    actor: &mut Actor,
+    thread: ThreadId,
+    session: &AgentSessionId,
+    acp_tool_call_id: &str,
+    raw_input: Option<&Value>,
+) -> Option<(String, String)> {
+    let parts = |server: &str, tool: &str| (server.to_owned(), tool.to_owned());
+    let named = tool_name(actor, thread, session, acp_tool_call_id).and_then(|name| {
+        let (server, tool) = name.strip_prefix("mcp__")?.split_once("__")?;
+        Some(parts(server, tool))
     });
-    if named {
-        return true;
+    if named.is_some() {
+        return named;
     }
     let standalone = crate::agent::mcp_trust::codex_standalone_server(
         session.as_str(),
@@ -300,16 +336,14 @@ pub(super) fn spends(
     )
     .and_then(|server| {
         let tool = crate::agent::mcp_trust::codex_standalone_tool(server, raw_input)?;
-        Some(always::spends(server, tool))
+        Some(parts(server, tool))
     });
-    if standalone == Some(true) {
-        return true;
+    if standalone.is_some() {
+        return standalone;
     }
-    super::state(actor, thread).is_some_and(|state| {
-        state
-            .sources
-            .codex_mcp_call(acp_tool_call_id)
-            .is_some_and(|(server, tool)| always::spends(server, tool))
+    super::state(actor, thread).and_then(|state| {
+        let (server, tool) = state.sources.codex_mcp_call(acp_tool_call_id)?;
+        Some(parts(server, tool))
     })
 }
 

@@ -25,10 +25,12 @@ const HOST: &str = "clauseo.";
 const PLAN_EXIT_OPTION: &str = "exit-plan-";
 
 /// Agent options that would keep something beyond this one call, whatever their kind:
-/// codex-acp 2.2.2's command amendment and session approval, claude-agent-acp 0.89.1's
+/// codex-acp 2.2.2's command amendment, session approval and turn grant (`allow_permissions_turn`,
+/// kind `allow_once`: more permissions for the rest of the turn), claude-agent-acp 0.89.1's
 /// rule-writing and skill options. Network amendments match by prefix ([`NETWORK_AMENDMENT`]).
 const DROPPED: &[&str] = &[
     "accept_execpolicy_amendment",
+    "allow_permissions_turn",
     "allow_for_session",
     "allow_always",
     "allow-always",
@@ -83,6 +85,13 @@ pub(crate) fn agent_options(options: &mut Vec<PermissionOption>) {
         let dropped = DROPPED.contains(&id) || id.starts_with(NETWORK_AMENDMENT);
         !dropped && option.kind != PermissionKind::AllowAlways
     });
+}
+
+/// Whether `options` hold an agent's session-only option ([`SESSION_ONLY`]), as it sent it.
+pub(crate) fn session_only(options: &[PermissionOption]) -> bool {
+    options
+        .iter()
+        .any(|option| SESSION_ONLY.contains(&option.option_id.as_str()))
 }
 
 /// `options` without any that would allow more than this one call: for a tool that spends the

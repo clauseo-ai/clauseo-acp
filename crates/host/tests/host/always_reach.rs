@@ -5,7 +5,7 @@
 
 use clauseo_protocol::{PermissionKind, StopReason, StreamId};
 
-use crate::always::{ALWAYS, keep, offers, resolutions};
+use crate::always::{ALWAYS, keep, offers, resolutions, resolved_always};
 #[cfg(unix)]
 use crate::always::{CLAUDE, ask, bash_options, claude_scenario};
 use crate::permissions::answer_from;
@@ -81,5 +81,17 @@ fn a_helpers_identical_command_is_answered_and_nothing_more() {
         assert!(!card.contains(&ALWAYS.to_owned()), "{}", events.dump());
     }
     assert_eq!(offers(&events), [None, None, None, None]);
+    // The host's answer names the command it allowed, though the helper's call was never
+    // logged: its transcript row can show it.
+    let named: Vec<Option<String>> = resolved_always(&events)
+        .into_iter()
+        .map(|always| always.and_then(|offer| offer.shown))
+        .collect();
+    assert_eq!(
+        named,
+        [Some("wc -l notes.txt".to_owned()), None, None, None],
+        "{}",
+        events.dump()
+    );
     host.shutdown();
 }

@@ -95,13 +95,15 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     // No agent may name a host option (`clauseo.*`), whatever filter runs next.
     crate::agent::always::options::drop_host_ids(&mut options);
     // A paid call (case law's `recharge`) asks every time: no option on its card covers more
-    // than this call, for either agent.
-    if super::always::spends(
+    // than this call, for either agent. Nor does one offering "For this conversation" for a
+    // tool the host cannot name, which could be the paid one.
+    if super::always::once_only(
         actor,
         thread,
         &session,
         &acp_tool_call_id,
         raw_input.as_ref(),
+        &options,
     ) {
         crate::agent::always::options::once_only(&mut options);
     }

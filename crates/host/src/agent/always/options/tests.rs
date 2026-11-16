@@ -25,6 +25,7 @@ fn no_agent_option_that_keeps_anything_reaches_the_lawyer() {
         option("allow_for_session", AllowAlways),
         option("accept_execpolicy_amendment", AllowAlways),
         option("apply_network_policy_amendment:0", AllowAlways),
+        option("allow_permissions_turn", AllowOnce),
         option("decline", RejectOnce),
         option("cancel", RejectOnce),
     ];

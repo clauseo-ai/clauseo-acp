@@ -6,12 +6,15 @@
 //!
 //! Each entry says where the program may be (`At`), which options it takes and what their
 //! values are, and what its other words are (`Word`). A `Word::Path` word is a file the
-//! command reads or writes: the host checks, at keep time and again at every use, that it lies
+//! command reads: the host checks, at keep time and again at every use, that it lies
 //! inside the matter by its real path (`reach.rs`). A `Word::Text` word is data the program
 //! never opens as a file; a `Word::Number` word is digits.
 //!
 //! The list comes from the commands that raised cards in recorded runs (2026-11-16 census) and
-//! the plain commands beside them that read or move a matter's own files. Commands that run
+//! the plain commands beside them that read a matter's own files. Every program here only reads:
+//! no program that writes (`cp`, `mv`, `mkdir`, `Copy-Item`, `Move-Item`) is listed, as a
+//! write lands through a link placed after the check (inside a destination folder, or in a race),
+//! and a recursive copy or move could plant an agent's own files at any depth. Commands that run
 //! code (`python3`, `swift`, `osascript`), reach the network (`curl`) or drive a browser
 //! (`agent-browser eval`) are not here, and never will be.
 
@@ -104,7 +107,8 @@ pub(crate) const PROGRAMS: &[Spec] = &[
         grammar: Grammar::Posix,
         at: SYSTEM,
         options: &[],
-        flags: "1aAdFhlrRSt",
+        // No `-R`: a listing never walks into the matter's `.clauseo` or a `.claude` folder.
+        flags: "1aAdFhlrSt",
         subcommands: &[],
         lead: None,
         operands: Word::Path,
@@ -175,7 +179,8 @@ pub(crate) const PROGRAMS: &[Spec] = &[
             opt("-B", NUMBER),
             opt("-C", NUMBER),
         ],
-        flags: "cEFhHilnoqrsvwx",
+        // No `-r`: a search never walks into the matter's `.clauseo` or a `.claude` folder.
+        flags: "cEFhHilnoqsvwx",
         subcommands: &[],
         lead: Some(Word::Text),
         operands: Word::Path,
@@ -188,40 +193,6 @@ pub(crate) const PROGRAMS: &[Spec] = &[
         at: MAC_ONLY,
         options: &[opt("-name", TEXT), opt("-raw", None)],
         flags: "",
-        subcommands: &[],
-        lead: None,
-        operands: Word::Path,
-        count: (1, MANY),
-    },
-    // Copy, move, make a folder: every operand inside the matter.
-    Spec {
-        name: "cp",
-        grammar: Grammar::Posix,
-        at: SYSTEM,
-        options: &[],
-        flags: "fnpRrv",
-        subcommands: &[],
-        lead: None,
-        operands: Word::Path,
-        count: (2, MANY),
-    },
-    Spec {
-        name: "mv",
-        grammar: Grammar::Posix,
-        at: SYSTEM,
-        options: &[],
-        flags: "fnv",
-        subcommands: &[],
-        lead: None,
-        operands: Word::Path,
-        count: (2, MANY),
-    },
-    Spec {
-        name: "mkdir",
-        grammar: Grammar::Posix,
-        at: SYSTEM,
-        options: &[],
-        flags: "pv",
         subcommands: &[],
         lead: None,
         operands: Word::Path,
@@ -318,38 +289,6 @@ pub(crate) const PROGRAMS: &[Spec] = &[
         operands: Word::Path,
         count: (0, 2),
     },
-    Spec {
-        name: "Copy-Item",
-        grammar: Grammar::PowerShell,
-        at: At::Cmdlet,
-        options: &[
-            opt("-Path", PATH),
-            opt("-LiteralPath", PATH),
-            opt("-Destination", PATH),
-            opt("-Force", None),
-        ],
-        flags: "",
-        subcommands: &[],
-        lead: None,
-        operands: Word::Path,
-        count: (0, 2),
-    },
-    Spec {
-        name: "Move-Item",
-        grammar: Grammar::PowerShell,
-        at: At::Cmdlet,
-        options: &[
-            opt("-Path", PATH),
-            opt("-LiteralPath", PATH),
-            opt("-Destination", PATH),
-            opt("-Force", None),
-        ],
-        flags: "",
-        subcommands: &[],
-        lead: None,
-        operands: Word::Path,
-        count: (0, 2),
-    },
 ];
 
 /// The entry for `program` as typed in `grammar`: exact for a POSIX program, in any case for
@@ -387,6 +326,9 @@ pub(crate) enum Unfit {
 pub(crate) fn read(spec: &Spec, args: &[String]) -> Result<Read, Unfit> {
     let mut paths = Vec::new();
     let mut operands: Vec<&String> = Vec::new();
+    // The lead operand given by name instead (Select-String's `-Pattern`): every operand is then
+    // of the operands' kind.
+    let mut lead_given = false;
     let mut at = 0;
     while let Some(arg) = args.get(at) {
         at += 1;
@@ -394,11 +336,19 @@ pub(crate) fn read(spec: &Spec, args: &[String]) -> Result<Read, Unfit> {
             operands.push(arg);
             continue;
         }
+        // BSD `cat`, `head`, `ls` and `wc` stop reading options at the first operand, so a
+        // word starting with `-` after it is a file the checks would not see as one. A
+        // subcommand (`stetdoc view`) is not an operand.
+        let subcommand = usize::from(!spec.subcommands.is_empty());
+        if spec.grammar == Grammar::Posix && operands.len() > subcommand {
+            return Err(Unfit::Option);
+        }
         let same = |name: &str| match spec.grammar {
             Grammar::Posix => name == arg,
             Grammar::PowerShell => name.eq_ignore_ascii_case(arg),
         };
         if let Some(option) = spec.options.iter().find(|option| same(option.name)) {
+            lead_given |= spec.lead.is_some() && option.value == spec.lead;
             if let Some(kind) = option.value {
                 let value = args.get(at).ok_or(Unfit::Option)?;
                 at += 1;
@@ -447,7 +397,7 @@ pub(crate) fn read(spec: &Spec, args: &[String]) -> Result<Read, Unfit> {
     }
     for (index, operand) in operands.into_iter().enumerate() {
         let kind = match spec.lead {
-            Some(lead) if index == 0 => lead,
+            Some(lead) if index == 0 && !lead_given => lead,
             _ => spec.operands,
         };
         take(kind, operand, &mut paths)?;

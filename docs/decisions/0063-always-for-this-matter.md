@@ -65,20 +65,32 @@ byte: `rawInput.command` as the agent sent it (Claude's `Bash`/`PowerShell` inpu
 `stripShellPrefix(shlex_join(argv))`). Eligibility is an **allowlist**
 (`always/table.rs`, read by `always/plain.rs`). A command is kept only when all of these hold:
 
-- It parses as **one plain command**: words of letters, digits and `_ - . / : , + = @ %`
-  (PowerShell: `_ - . / : +` only), or `'…'` and `"…"` holding those and spaces. Anything else
+- It parses as **one plain command**: words of ASCII letters, digits and `_ - . / : , + = @ %`
+  (PowerShell: `_ - . / : +` only), or `'…'` and `"…"` holding those and spaces; no other
+  letter (no look-alike names). In PowerShell a quoted word never starts with `-` (PowerShell
+  reads it as a file, never a switch), and a bare word that starts with a digit, `+` or `.` and
+  a digit must be a plain number of at most nine digits with no leading zero (PowerShell reads
+  `1kb` as 1024, `0x10` as 16, `007` as 7). Anything else
   fails closed: `; & | < > ( ) $ ` \ ! ^ * ? [ ] { } ~ #`, any quote mark inside a quote (PowerShell
   ends a string at a typographic quote too), a line break, a control or invisible character.
 - The program is a **bare name on the list**, never a path (a program in the matter is a file the
   agent can write). The list, from the 2026-11-16 card census and the plain commands beside it:
-  `ls cat head tail wc file grep mdls cp mv mkdir`, `stetdoc view|inspect|check`, and the cmdlets
-  `Get-Content Get-ChildItem Get-Item Test-Path Select-String Copy-Item Move-Item`. Nothing that
-  runs code, reaches the network, deletes, links or runs another program is on it, so no
-  runner, interpreter, preprocessor flag or file-reading config can come in by not being named.
+  `ls cat head tail wc file grep mdls`, `stetdoc view|inspect|check`, and the cmdlets
+  `Get-Content Get-ChildItem Get-Item Test-Path Select-String`. **Every program on it only
+  reads.** Nothing that writes (`cp`, `mv`, `mkdir`, `Copy-Item`, `Move-Item`), runs code,
+  reaches the network, deletes, links or runs another program is on it, so no runner,
+  interpreter, preprocessor flag or file-reading config can come in by not being named. A write
+  lands through a link the agent places after the check (in a destination folder, or in the race
+  below), and a recursive copy or move could put `AGENTS.md`, `.codex` or `.agents` at any
+  depth; a read that loses the race reads, and the data fence still holds.
 - Every option is one the program's entry lists, with a value of the kind it says (a number, a
   text the program never opens, or a path). One-letter flags may be joined (`-la`) only when none
   takes a value; `--name=value` only for a listed long option; PowerShell takes no
-  `-Param:value` form and no joined flags.
+  `-Param:value` form and no joined flags. In a POSIX command no option comes after the first
+  operand: BSD `cat`, `head`, `ls` and `wc` stop reading options there, so `cat notes.txt -n`
+  reads a file named `-n`. No recursive search or listing (`grep -r`, `ls -R`), so no kept
+  command reads `.clauseo` or a `.claude` folder. With `-Pattern` given by name,
+  Select-String's operands are all paths.
 - Every path word is a plain path: no leading `-` or `=` (zsh's `=prog`), no `=` or `~`, no
   `\`, no `:` but a drive letter's (`HKCU:`, `Env:`, `FileSystem::` refuse), no `..` name.
   None names an absolute place outside the matter.
@@ -101,22 +113,29 @@ the card is about to offer "Always" and again before every answer the host gives
   a link to another matter after the rule was kept is caught at the next use.
 - The program is the first file of its name on the agent's own `PATH` (as its launch set it), and
   by real path in a folder its entry names: `/bin` or `/usr/bin` (`mdls` `/usr/bin` only; Git
-  for Windows' `usr/bin` for Claude's Bash on Windows), or for `stetdoc` one of the folders
-  Clauseo puts first on that `PATH`. Never in the matter; a relative `PATH` entry before it
-  fails. A cmdlet is part of PowerShell and is matched by name.
-- For Codex, no entry of the working folder bears the program's name: codex-acp shows a run of
-  `bash <name>` as `<name>`.
+  for Windows' `usr/bin` for Claude's Bash on Windows), or for `stetdoc` stetdoc's own folder
+  when Clauseo puts it first on that `PATH` (never the browser's tools or the profile hook's
+  folders). Never in the matter; a relative `PATH` entry before it fails. A cmdlet is part of
+  PowerShell and is matched by name.
+- For either agent, no entry of the working folder bears the program's name: codex-acp shows a
+  run of `bash <name>` as `<name>`, and a `.` a user's shell files put on the search path would
+  run that file.
 
 Claude's working folder is always the matter folder: Clauseo sets
 `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` (`agent/loads.rs`), and Claude Code then starts
 every Bash call there (its binary resets the shell's cwd after each call). So a Claude rule needs
-no folder, and its card's `{folder}` is "this matter's folder".
+no folder, and its card's `{folder}` is "this matter's folder". A firm's Claude Code policy can
+turn that variable off; the start is then unknown (`sent::ShellStart`), and no Claude command is
+offered "Always" or answered from a kept rule. A Claude shell call that asks to run outside its
+sandbox (`dangerouslyDisableSandbox`) keeps nothing either: a kept rule covers the plain run.
 
 **A helper's requests.** A Codex `multi_agent` helper asks on the parent's session with a tool
 call the host never saw announced. A kept rule answers the helper's identical command (same
 text, same folder, same reach checks) as it answers the parent's. Its card never offers "Always":
 the card shows a generic line, not the command, and the lawyer would keep a rule they never saw.
-The same holds for any request whose tool call the host did not log.
+The same holds for any request whose tool call the host did not log. The host's answer names the
+kept rule in `PermissionResolved.always` (its exact command and folder), so the thread shows what
+was allowed though the helper's call was never logged.
 
 **File edits.** One `Edit(*)` per matter covers every file whose real path is inside the
 matter folder. The matter thread resolves the path the same way the held-open check does:
@@ -146,7 +165,8 @@ reads another matter's files under an invite still uses only its own matter's en
 claims a scope it doesn't have:
 
 - Codex: `accept_execpolicy_amendment`, `apply_network_policy_amendment:*`, `allow_for_session`,
-  and MCP `allow_always`.
+  `allow_permissions_turn` (kind `allow_once`, but it grants more permissions for the rest of
+  the turn), and MCP `allow_always`.
 - Claude: `allow-with-updates`, `allow-skill-exact`, `allow-skill-prefix`.
 - Any other option of kind `allow_always` (an agent's "always" we don't know yet keeps
   something somewhere).
@@ -253,11 +273,12 @@ stops with a sentence and never goes on in the wider mode.
 | Case | Example | Census |
 |---|---|---|
 | A program off the list | `swift read.swift Brief.pdf`, `python3 x.py`, `curl -sI https://…`, `agent-browser eval …`, `bash -c "…"`, `npx …`, `find`, `rm` | S5:22, S5:32; census 2026-11-16: 26 of 28 shell cards |
-| An option off a program's list | `grep -e x a`, `head -n5 a`, `cp -t /tmp a` | |
+| A command that writes | `cp memo.txt Drafts`, `mv Pack Drafts`, `mkdir x`, `Copy-Item a b` | |
+| An option off a program's list, or after a file name | `grep -e x a`, `head -n5 a`, `grep -r x .`, `cat notes.txt -n` | |
 | A command whose file is now a link out of the matter, or whose program is not where its entry says | `cat notes.txt` after `notes.txt` became a link | |
 | A request whose card cannot show the command | a Codex helper's request | |
 | A chain, pipe, redirection or substitution | `cd sub && ls`, `ls > list.txt`, `cat $(ls)` | |
-| A command with an argument outside the matter, both agents | `mv ../Q ../Q2`; Codex's `cp witness-statement.docx "/Users/Shared/…/witness-statement.docx"` | S249:25 |
+| A command with an argument outside the matter, both agents | `cat ../Q/a.txt`; Codex's `cp witness-statement.docx "/Users/Shared/…/witness-statement.docx"` | S249:25 |
 | A command with a web address (Codex) | `curl -L -o judgment.pdf https://…` (refused unasked, `shell_network.rs`) | S3:48, S22:63 |
 | Network approvals for Codex | any host (Codex sites: `docs/notes/codex-network-sites.md`) | |
 | A command with a backslash | `Get-Content .\a.txt`, `type C:\m\a.txt` (PowerShell paths must use `/`) | |
@@ -266,7 +287,8 @@ stops with a sentence and never goes on in the wider mode.
 | A file outside the matter | an edit of `../B/notes.txt` | row 10 |
 | A Codex write outside the matter (its only cards in the live record) | until the folder grant (`folder_save`, below) lands | |
 | A Codex MCP tool of a lawyer's server not trusted | asked once per conversation ("For this conversation") | |
-| `recharge` | case law's credit purchase | |
+| `recharge`, and a Codex MCP card the host cannot tie to a tool (it could be `recharge`): only this call | case law's credit purchase | |
+| A Claude command when its policy keeps the shell's folder between calls | `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=0` in managed settings | |
 | No secret store | Linux, or a refused Keychain prompt | row 21 |
 | A command longer than 8 KiB, cut, or holding `[withheld]` | | |
 
@@ -313,13 +335,23 @@ Claude in `auto` raised no card in any task of the record.
   `.home.arpa`, and loopback, private, link-local and shared IPv4 addresses are never kept.
 - **A malformed key** (not 32 bytes) in the secret store is an error: it is never replaced, and
   nothing is kept or offered.
+- **No program that writes is kept** (second security review, N1): `cp`, `mv`, `mkdir`,
+  `Copy-Item` and `Move-Item` left the list; rules kept for them are dropped on read.
 - **UC-813 is gone**: a rule the host could not write lasts only in the answering agent's memory
   until it stops; other live threads of the matter ask until they relaunch.
 
 ### Residuals
 
 - A check of what a command reaches is the state when it runs on the matter thread; a link made
-  between the check and the run is not seen.
+  between the check and the run is not seen. An agent with a background loop in its sandbox
+  (Codex's unified exec, Claude's background Bash on Windows) can flip a link in that window
+  and retry. Since only reading programs are kept, a lost race is a read: it reaches no further
+  than the data fence lets the agent read anyway, and writes nothing.
+- On Windows the HMAC key sits in Credential Manager, which has no per-program access control,
+  and Claude there has no sandbox: a process running as the lawyer, the agent's own shell
+  included, can read the key and sign a rules file. The HMAC holds against a file copied,
+  planted or edited without the key; on Windows it does not hold against the agent. Only
+  reading programs can be kept, so a forged command rule still only reads.
 - A cmdlet is matched by name: a PowerShell profile that defines an alias or function of the
   same name would run instead (Claude's PowerShell and Codex's `powershell.exe` load profiles
   unless `-NoProfile`).

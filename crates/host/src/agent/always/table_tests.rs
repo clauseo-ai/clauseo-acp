@@ -64,7 +64,7 @@ fn every_entry_is_well_made() {
 }
 
 /// What is never on the list: programs that run code, reach the network or drive a browser,
-/// and ones that delete, link or run another program.
+/// ones that delete, link or run another program, and any that writes.
 #[test]
 fn programs_that_run_code_or_reach_out_are_not_listed() {
     for name in [
@@ -94,6 +94,11 @@ fn programs_that_run_code_or_reach_out_are_not_listed() {
         "cupsfilter",
         "pandoc",
         "soffice",
+        "cp",
+        "mv",
+        "mkdir",
+        "touch",
+        "tee",
     ] {
         assert!(find(name, Grammar::Posix).is_none(), "{name}");
     }
@@ -103,6 +108,9 @@ fn programs_that_run_code_or_reach_out_are_not_listed() {
         "Remove-Item",
         "New-Item",
         "Set-Content",
+        "Copy-Item",
+        "Move-Item",
+        "Out-File",
     ] {
         assert!(find(name, Grammar::PowerShell).is_none(), "{name}");
     }
@@ -128,10 +136,6 @@ fn a_command_s_words_are_read_against_its_entry() {
         posix("mdls", "-name kMDItemNumberOfPages a.pdf").unwrap(),
         ["a.pdf"]
     );
-    assert_eq!(
-        posix("cp", "a.docx Drafts/b.docx").unwrap(),
-        ["a.docx", "Drafts/b.docx"]
-    );
     assert_eq!(posix("stetdoc", "view a.docx").unwrap(), ["a.docx"]);
     assert_eq!(
         posix("stetdoc", "view --revisions a.docx").unwrap(),
@@ -149,9 +153,9 @@ fn a_command_s_words_are_read_against_its_entry() {
     );
     assert_eq!(ps("Get-Content", "-path a.txt").unwrap(), ["a.txt"]);
     assert_eq!(
-        ps("Copy-Item", "a.txt -Destination b.txt").unwrap(),
-        ["b.txt", "a.txt"],
-        "option values first, then operands"
+        ps("Select-String", "term a.txt").unwrap(),
+        ["a.txt"],
+        "the pattern first, then the file"
     );
     assert_eq!(
         ps("Select-String", "-Pattern term -Path a.txt").unwrap(),
@@ -178,8 +182,6 @@ fn words_that_do_not_fit_are_refused() {
         ("cat", "--a=b=/abs", Unfit::Option),
         ("cat", "a/../../b", Unfit::Word),
         ("ls", "-o../x", Unfit::Option),
-        ("cp", "a.txt", Unfit::Count),
-        ("cp", "-t /tmp a.txt", Unfit::Option),
         ("stetdoc", "edit a.docx", Unfit::Count),
         ("stetdoc", "", Unfit::Count),
         ("stetdoc", "--revisions", Unfit::Count),
@@ -188,14 +190,11 @@ fn words_that_do_not_fit_are_refused() {
         assert_eq!(posix(program, line), Err(why), "{program} {line}");
     }
     let ps = |program, line| paths(program, Grammar::PowerShell, line);
-    assert_eq!(
-        ps("Copy-Item", "a.txt -Destination:C:/x"),
-        Err(Unfit::Option)
-    );
+    assert_eq!(ps("Get-Content", "-Path:C:/x"), Err(Unfit::Option));
     assert_eq!(ps("Get-Content", "FileSystem::C:/x"), Err(Unfit::Word));
     assert_eq!(ps("Get-Content", "HKCU:/Software"), Err(Unfit::Word));
     assert_eq!(ps("Get-Content", "a.txt b.txt"), Err(Unfit::Count));
-    assert_eq!(ps("Copy-Item", "-Recurse a b"), Err(Unfit::Option));
+    assert_eq!(ps("Get-ChildItem", "-Recurse a"), Err(Unfit::Option));
     assert_eq!(
         ps("Get-ChildItem", "-rf"),
         Err(Unfit::Option),
@@ -233,5 +232,50 @@ fn a_path_word_is_a_plain_path() {
         "C:/../x",
     ] {
         assert!(!path_word(word), "{word}");
+    }
+}
+
+/// BSD `cat`, `head`, `ls` and `wc` stop reading options at the first operand: a word starting
+/// with `-` after it is a file, so it is refused rather than read as an option.
+#[test]
+fn an_option_after_the_first_operand_is_refused() {
+    for (program, line) in [
+        ("cat", "a -n"),
+        ("cat", "notes.txt -n"),
+        ("head", "notes.txt -n 5"),
+        ("ls", "Drafts -la"),
+        ("wc", "a.txt -l"),
+        ("grep", "term a.txt -n"),
+    ] {
+        assert_eq!(posix(program, line), Err(Unfit::Option), "{program} {line}");
+    }
+    assert_eq!(posix("cat", "-n a").unwrap(), ["a"]);
+    assert_eq!(
+        posix("stetdoc", "view a.docx --revisions"),
+        Err(Unfit::Option)
+    );
+}
+
+/// With `-Pattern` given by name, Select-String's operands are all paths (PowerShell binds the
+/// first to `-Path`).
+#[test]
+fn select_string_with_a_named_pattern_reads_its_operands_as_paths() {
+    let ps = |line| paths("Select-String", Grammar::PowerShell, line);
+    assert_eq!(ps("-Pattern x a.txt").unwrap(), ["a.txt"]);
+    assert_eq!(ps("a.txt -Pattern x").unwrap(), ["a.txt"]);
+    assert_eq!(ps("x a.txt").unwrap(), ["a.txt"]);
+}
+
+/// No recursive search or listing: `grep -r` and `ls -R` would read the matter's `.clauseo` and
+/// `.claude` folders.
+#[test]
+fn no_search_or_listing_walks_the_matter() {
+    for (program, line) in [
+        ("grep", "-r term ."),
+        ("grep", "-rn term Drafts"),
+        ("ls", "-R"),
+        ("ls", "-laR ."),
+    ] {
+        assert_eq!(posix(program, line), Err(Unfit::Option), "{program} {line}");
     }
 }
