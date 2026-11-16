@@ -341,6 +341,30 @@ fn with_no_relay_each_request_gets_not_reachable_and_notifications_nothing() {
     assert_no_token(&capture);
 }
 
+/// The errors the mode answers itself name the connector it runs as, not always case law.
+#[test]
+fn the_version_history_connector_names_itself_in_its_own_errors() {
+    let scratch = Scratch::new("no-relay-versions");
+    let file = token_file(&scratch, TOKEN);
+    let mut input = b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/list\"}\n".to_vec();
+    input.extend(std::iter::repeat_n(b'x', MAX_LINE_BYTES + 1));
+    input.push(b'\n');
+    let env = good_env(closed_port(), &file);
+    let (result, capture) = run_mode(&env, &["clauseo-versions"], &input);
+    assert_eq!(result.unwrap(), 0);
+    let replies = capture.replies();
+    assert_eq!(replies.len(), 2, "{replies:?}");
+    assert_eq!(
+        replies[0]["error"]["message"],
+        "The version history is not available in this conversation: Clauseo's relay is not reachable. Tell the lawyer to start a new conversation."
+    );
+    assert_eq!(
+        replies[1]["error"]["message"],
+        "Line too long for Clauseo's version-history relay."
+    );
+    assert_no_token(&capture);
+}
+
 #[test]
 fn a_refused_handshake_gives_the_hosts_code_as_the_reason() {
     // A plain code is passed on; anything else, or no answer at all, is `connect_failed`.

@@ -7,7 +7,7 @@ use std::sync::{Arc, mpsc};
 use serde_json::{Value, json};
 
 use super::super::tests::Capture;
-use super::{Pending, Writer, send_request};
+use super::{Pending, Request, Subject, Writer, send_request};
 
 /// The relay thread has answered what was pending and closed the set, but the socket still takes
 /// writes, as a socket whose peer has closed does until the peer's reset arrives (and as macOS
@@ -32,9 +32,11 @@ fn a_request_after_the_link_ended_is_answered_at_once_and_not_forwarded() {
         &mut writer,
         &out,
         &pending,
-        super::CONNECT_FAILED,
-        &id,
-        br#"{"jsonrpc":"2.0","id":6,"method":"tools/call"}"#,
+        (super::CONNECT_FAILED, Subject::of("case-law")),
+        Request {
+            id: &id,
+            line: br#"{"jsonrpc":"2.0","id":6,"method":"tools/call"}"#,
+        },
     )
     .unwrap();
     assert!(writer.is_none(), "the link is dropped");
@@ -71,9 +73,11 @@ fn a_forwarded_request_nudges_the_reader() {
         &mut writer,
         &out,
         &pending,
-        super::CONNECT_FAILED,
-        &json!(7),
-        line,
+        (super::CONNECT_FAILED, Subject::of("case-law")),
+        Request {
+            id: &json!(7),
+            line,
+        },
     )
     .unwrap();
     assert_eq!(

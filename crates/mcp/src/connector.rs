@@ -100,9 +100,10 @@ pub(crate) fn run_with_shut(
         Ok(link) => (Some(link), String::from(handshake::CONNECT_FAILED)),
         Err(reason) => (None, reason),
     };
+    let subject = answer::Subject::of(&settings.name);
     // The token is no longer needed; the handshake has been sent.
     drop(settings);
-    pump::serve(stdin, out, link, refusal, shut).map_err(|error| Failure {
+    pump::serve(stdin, out, link, refusal, shut, subject).map_err(|error| Failure {
         code: EXIT_FAILED,
         message: format!("clauseo-mcp connector: stdio failed: {error}"),
     })?;

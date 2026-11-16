@@ -22,7 +22,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::MAX_LINE_BYTES;
-use super::answer;
+use super::answer::{self, Subject};
 use super::handshake::{CONNECT_FAILED, Link};
 use super::head::{self, Head};
 use super::line::{self, Line, Out};
@@ -52,7 +52,8 @@ impl Writer {
 
 /// Pumps stdin to the relay and the relay to `out` until stdin closes. `refusal` is the reason
 /// the agent gets with its errors when `link` is `None`; `shut` is the `shutdown` used (tests
-/// give one that does nothing). An `Err` means stdout (or stdin) failed.
+/// give one that does nothing); `subject` names the connector in those errors. An `Err` means
+/// stdout (or stdin) failed.
 ///
 /// When it returns, the link has been ended: the relay thread's read has failed or will at its
 /// next try. On `Ok` the thread has also been waited for, within a bound: it has ended and the
@@ -64,11 +65,12 @@ pub(crate) fn serve(
     link: Option<Link>,
     mut refusal: String,
     shut: Shut,
+    subject: Subject,
 ) -> io::Result<()> {
     let pending = Arc::new(Pending::default());
     let (mut writer, relay_done) = match link {
         Some(link) => {
-            let (writer, done) = start_relay(link, out, &pending, shut);
+            let (writer, done) = start_relay(link, out, &pending, shut, subject);
             (Some(writer), Some(done))
         }
         None => (None, None),
@@ -80,18 +82,22 @@ pub(crate) fn serve(
                 // The host would close on such a line too; the link ends here. Its pending
                 // requests are answered by the relay thread, and the agent's later requests get
                 // the not-reachable errors.
-                line::write_line(out, answer::line_too_long().as_bytes())?;
+                line::write_line(out, answer::line_too_long(subject).as_bytes())?;
                 writer = None;
                 refusal = String::from(CONNECT_FAILED);
             }
             Line::Text(text) if line::is_blank(&text) => {}
             Line::Text(text) => match (writer.is_some(), request_id(&text)) {
                 (true, Some(id)) => {
-                    send_request(&mut writer, out, &pending, &refusal, &id, &text)?;
+                    let request = Request {
+                        id: &id,
+                        line: &text,
+                    };
+                    send_request(&mut writer, out, &pending, (&refusal, subject), request)?;
                 }
                 _ => {
                     if !forward(&mut writer, &text) {
-                        for reply in answer::not_reachable(&text, &refusal) {
+                        for reply in answer::not_reachable(subject, &text, &refusal) {
                             line::write_line(out, reply.as_bytes())?;
                         }
                     }
@@ -116,7 +122,10 @@ pub(crate) fn serve(
     // A relay that did not close within the grace leaves requests unanswered: answer them now.
     // Closing the set is atomic, so the relay thread, if it ends later, answers none of them again.
     for id in pending.close() {
-        line::write_line(out, answer::unreachable_for(&id, CONNECT_FAILED).as_bytes())?;
+        line::write_line(
+            out,
+            answer::unreachable_for(subject, &id, CONNECT_FAILED).as_bytes(),
+        )?;
     }
     Ok(())
 }
@@ -135,17 +144,19 @@ fn send_request(
     writer: &mut Option<Writer>,
     out: &Out,
     pending: &Pending,
-    refusal: &str,
-    id: &Value,
-    line: &[u8],
+    (refusal, subject): (&str, Subject),
+    Request { id, line }: Request<'_>,
 ) -> io::Result<()> {
     match pending.add(id) {
         Added::Pending => {}
-        Added::Full => return line::write_line(out, answer::busy_for(id).as_bytes()),
+        Added::Full => return line::write_line(out, answer::busy_for(subject, id).as_bytes()),
         Added::Closed => {
             // The link is over; later lines take the no-link path.
             *writer = None;
-            return line::write_line(out, answer::unreachable_for(id, refusal).as_bytes());
+            return line::write_line(
+                out,
+                answer::unreachable_for(subject, id, refusal).as_bytes(),
+            );
         }
     }
     if forward(writer, line) {
@@ -155,9 +166,18 @@ fn send_request(
         return Ok(());
     }
     if pending.release(id) {
-        line::write_line(out, answer::unreachable_for(id, refusal).as_bytes())?;
+        line::write_line(
+            out,
+            answer::unreachable_for(subject, id, refusal).as_bytes(),
+        )?;
     }
     Ok(())
+}
+
+/// One request line and its `id`.
+struct Request<'a> {
+    id: &'a Value,
+    line: &'a [u8],
 }
 
 /// Writes one line to the relay. `false` when there is no link or the write fails; a failed link
@@ -186,6 +206,7 @@ fn start_relay(
     out: &Out,
     pending: &Arc<Pending>,
     shut: Shut,
+    subject: Subject,
 ) -> (Writer, Receiver<()>) {
     let Link { mut reader, socket } = link;
     let (stop, stopped) = mpsc::channel::<()>();
@@ -193,7 +214,7 @@ fn start_relay(
     let (done_tx, done_rx) = mpsc::channel::<()>();
     let (out, pending) = (Arc::clone(out), Arc::clone(pending));
     thread::spawn(move || {
-        relay_to_agent(reader, &out, &pending, shut);
+        relay_to_agent(reader, &out, &pending, (shut, subject));
         // The sender's drop is the signal: the receiver sees the disconnect.
         drop(done_tx);
     });
@@ -205,7 +226,12 @@ fn start_relay(
 /// a write fails. A reply releases its pending request. Then the link is shut down and this
 /// thread's handle on the socket dropped, and each request still pending is answered with the
 /// not-reachable error; the set is closed, so the stdin side answers any later one.
-fn relay_to_agent(mut reader: BufReader<Polled>, out: &Out, pending: &Pending, shut: Shut) {
+fn relay_to_agent(
+    mut reader: BufReader<Polled>,
+    out: &Out,
+    pending: &Pending,
+    (shut, subject): (Shut, Subject),
+) {
     // The end, a read error, or a line over the cap: the link is gone either way.
     while let Ok(Line::Text(text)) = line::read(&mut reader, MAX_LINE_BYTES) {
         if line::is_blank(&text) {
@@ -229,7 +255,12 @@ fn relay_to_agent(mut reader: BufReader<Polled>, out: &Out, pending: &Pending, s
     }
     drop(reader);
     for id in pending.close() {
-        if line::write_line(out, answer::unreachable_for(&id, CONNECT_FAILED).as_bytes()).is_err() {
+        if line::write_line(
+            out,
+            answer::unreachable_for(subject, &id, CONNECT_FAILED).as_bytes(),
+        )
+        .is_err()
+        {
             break;
         }
     }
