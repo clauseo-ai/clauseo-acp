@@ -112,6 +112,76 @@ export const BLOB_SHOT: BlobRef = {
   preview: BLOB_SHOT_TEXT.slice(0, 512),
 };
 
+/** Base64 that reads as a PNG's (its signature), padded to `n` characters: not a real picture. */
+const pngOf = (n: number) => PNG.slice(0, 12) + "A".repeat(n - 12);
+const blobFor = (hash: string, text: string): BlobRef => ({
+  hash,
+  size_bytes: text.length,
+  preview: text.slice(0, 512),
+});
+/** The saved path agent-browser 0.41.1's screenshot puts in its text block (mcp.rs response_text: data.path). */
+export const SHOT_PATH =
+  "/Users/asha/Library/Application Support/in.clauseo.app/browser/0190aa00-0000-7000-8000-000000000001/screenshots/screenshot-1763270000000.png";
+/** agent-browser 0.41.1's screenshot result as it writes it: serde_json without preserve_order sorts the keys, so the
+ * image block's `data` comes before its `type`; codex-acp wraps it in {result, error}. */
+export const BLOB_SHOT_SORTED_TEXT = JSON.stringify({
+  result: {
+    content: [
+      { text: SHOT_PATH, type: "text" },
+      { data: pngOf(200_000), mimeType: "image/png", type: "image" },
+    ],
+    isError: false,
+    structuredContent: { exitCode: 0, stderr: "", stdout: "" },
+  },
+  error: null,
+});
+export const BLOB_SHOT_SORTED = blobFor("b6".repeat(32), BLOB_SHOT_SORTED_TEXT);
+/** The same with 2 KB of warning and stderr in its text (mcp.rs tool_text), so the preview shows no picture. */
+export const BLOB_SHOT_LONG_TEXT = JSON.stringify({
+  result: {
+    content: [
+      {
+        text: `${SHOT_PATH}\n\nwarning: ${"w".repeat(1_000)}\n\nstderr:\n${"e".repeat(1_000)}`,
+        type: "text",
+      },
+      { data: pngOf(200_000), mimeType: "image/png", type: "image" },
+    ],
+    isError: false,
+  },
+  error: null,
+});
+export const BLOB_SHOT_LONG = blobFor("b7".repeat(32), BLOB_SHOT_LONG_TEXT);
+/** codex-acp's rawInput for agent-browser's screenshot: {server, tool, arguments}. */
+export const SHOT_INPUT: TextOrBlob = inline(
+  '{"server":"browser","tool":"agent_browser_screenshot","arguments":{"fullPage":true}}',
+);
+/** Claude's screenshot: claude-agent-acp 0.89.1 sends the MCP result's blocks as content (tool-calls/content.js
+ * toAcpContentBlock: text, then {type: "image", data, mimeType}) and its rawOutput in Anthropic's shape; the host keeps
+ * the text inline and the image's 1.5 MB of base64 in a blob of its own. */
+export const CLAUDE_SHOT_DATA = pngOf(1_500_000);
+export const CLAUDE_SHOT_BLOB = blobFor("b8".repeat(32), CLAUDE_SHOT_DATA);
+const claudeRaw = JSON.stringify([
+  { type: "text", text: SHOT_PATH },
+  { type: "image", source: { type: "base64", media_type: "image/png", data: CLAUDE_SHOT_DATA } },
+]);
+export const CLAUDE_SHOT: Partial<ToolCallEntry> = {
+  title: "mcp__browser__agent_browser_screenshot",
+  content: [
+    { text: { text: inline(SHOT_PATH) } },
+    {
+      content: { content: { image: { data: { blob: CLAUDE_SHOT_BLOB }, mime_type: "image/png" } } },
+    },
+  ],
+};
+export const CLAUDE_SHOT_RAW = blobFor("b9".repeat(32), claudeRaw);
+/** A small one, its image inline. */
+export const CLAUDE_SHOT_SMALL: Partial<ToolCallEntry> = {
+  content: [
+    { text: { text: inline("Took a screenshot.") } },
+    { content: { content: { image: { data: inline(PNG), mime_type: "image/png" } } } },
+  ],
+};
+
 /** Hostile outputs: markup, a script link, a bare URL, RTL marks and one 10,000-character line. */
 export const HOSTILE: Record<string, TextOrBlob> = {
   img: opaque({ content: [text("<img src=x onerror=alert(1)>")] }),

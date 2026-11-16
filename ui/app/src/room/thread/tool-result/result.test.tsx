@@ -377,6 +377,76 @@ test("a screenshot is drawn as a picture scaled to the column, inline or from a 
   expect(result.violations.map((v) => v.id)).toEqual([]);
 });
 
+test("codex's real screenshot shapes are drawn: keys sorted (data before type), and text past the preview on a screenshot call", async () => {
+  const m = await mount(
+    [
+      F.called({ blob: F.BLOB_SHOT_SORTED }),
+      F.called({ blob: F.BLOB_SHOT_LONG }, { raw_input: F.SHOT_INPUT }),
+      // the same blob on a call that isn't a screenshot: its preview shows no picture, so it is never read
+      F.called(
+        { blob: F.BLOB_SHOT_LONG },
+        { raw_input: { inline: '{"server":"x","tool":"read"}' } },
+      ),
+    ],
+    {
+      [F.BLOB_SHOT_SORTED.hash]: F.BLOB_SHOT_SORTED_TEXT,
+      [F.BLOB_SHOT_LONG.hash]: F.BLOB_SHOT_LONG_TEXT,
+    },
+  );
+  expect(F.BLOB_SHOT_SORTED.preview).not.toContain('"type":"image"');
+  expect(F.BLOB_SHOT_LONG.preview).not.toMatch(/image|"data"/);
+  await settle();
+  await m.click(m.press(0));
+  expect(m.text(0)).toBe(F.SHOT_PATH);
+  expect(m.block(0)!.querySelectorAll('[data-testid="tool-result-image"]')).toHaveLength(1);
+  expect(m.block(0)!.textContent).toBe(F.SHOT_PATH);
+  await m.click(m.press(1));
+  expect(m.block(1)!.querySelectorAll('[data-testid="tool-result-image"]')).toHaveLength(1);
+  expect(m.text(1)).toContain("warning: www");
+  await m.click(m.press(2));
+  expect(m.block(2)!.textContent).toBe("This result is too large to show here.");
+  // one read each for the two drawn (both under 1 MB), none for the third
+  expect(m.reads().map((r) => (r.query as { read_blob: { hash: string } }).read_blob.hash)).toEqual(
+    [F.BLOB_SHOT_SORTED.hash, F.BLOB_SHOT_LONG.hash],
+  );
+});
+
+test("Claude's screenshot, sent as content blocks (text, then the image in a blob of its own), offers the press and is drawn", async () => {
+  const m = await mount(
+    [
+      F.called({ blob: F.CLAUDE_SHOT_RAW }, F.CLAUDE_SHOT),
+      F.called(undefined, F.CLAUDE_SHOT_SMALL),
+      // content without a picture still offers no press, as before
+      F.called({ inline: "[]" }, { content: [{ text: { text: { inline: "Read 42 lines." } } }] }),
+    ],
+    { [F.CLAUDE_SHOT_BLOB.hash]: F.CLAUDE_SHOT_DATA },
+  );
+  await settle();
+  expect(m.press(0).textContent).toBe("Show the result");
+  expect(m.press(1).textContent).toBe("Show the result");
+  expect(m.rows()[2]!.querySelector(".step-row-press")).toBeNull();
+  expect(m.reads()).toEqual([]);
+  await m.click(m.press(0));
+  const len = 1_048_576;
+  // the image's own blob, whole, in 1 MB reads; never the Anthropic-shaped rawOutput
+  expect(m.reads()).toEqual([
+    { call: "query", query: { read_blob: { hash: F.CLAUDE_SHOT_BLOB.hash, offset: 0, len } } },
+    { call: "query", query: { read_blob: { hash: F.CLAUDE_SHOT_BLOB.hash, offset: len, len } } },
+  ]);
+  expect(m.text(0)).toBe(F.SHOT_PATH);
+  const img = m.block(0)!.querySelectorAll('[data-testid="tool-result-image"]');
+  expect(img).toHaveLength(1);
+  expect(img[0]!.getAttribute("src")).toBe(`data:image/png;base64,${F.CLAUDE_SHOT_DATA}`);
+  expect(img[0]!.className).toBe("step-row-result-image");
+  expect(m.block(0)!.textContent).toBe(F.SHOT_PATH);
+  await m.click(m.press(1));
+  expect(m.block(1)!.querySelector("img")!.getAttribute("src")).toBe(
+    `data:image/png;base64,${F.PNG}`,
+  );
+  expect(m.block(1)!.textContent).toBe("Took a screenshot.");
+  expect(m.reads()).toHaveLength(2);
+});
+
 test("the reading words show only once a blob's read has taken 400 ms, the press held while they do", async () => {
   // the block's chunk is in from the tests above; only the clock is faked
   let answer: (r: QueryResult) => void = () => {};

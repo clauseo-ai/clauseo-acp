@@ -1,5 +1,5 @@
 // One tool call's row in an open step group, live or from an older page. A finished call with no content but a raw
-// output offers "Show the result" (U17): the press opens what came back under the row, its block loaded on the first
+// output, or with a picture in its content, offers "Show the result" (U17, tool-result/eligible.ts): the press opens what came back under the row, its block loaded on the first
 // press (tool-result/result-load.ts); an error read there turns the row's mark to Failed and its icon to the break.
 // A task leads with plain words and folds its command under "Show the command", its paths cut to the matter; a step
 // that failed says why in one line under its words (D-017, task-words.ts); one Claude's own checks refused says so
@@ -13,7 +13,7 @@ import { tr } from "@clauseo/components/lib/words-tool-result.ts";
 import type { EntryId, ToolCallEntry } from "../../transport/protocol.ts";
 import { isoOf, stamp } from "./clock.ts";
 import { doneOf, hoverOf, markOf, timeOf } from "./steps.ts";
-import { eligible } from "./tool-result/eligible.ts";
+import { resultOf } from "./tool-result/eligible.ts";
 import { ResultBlock } from "./tool-result/result-load.ts";
 import { useMatterFolder } from "../folder-support.ts";
 import { CommandFold } from "./command-fold.tsx";
@@ -38,7 +38,7 @@ export const CallRow = memo(function CallRow({
   const [reading, setReading] = useState(false);
   const block = useId();
   const at = timeOf(call);
-  const output = eligible(call) ? call.raw_output : undefined;
+  const output = resultOf(call);
   const folder = useMatterFolder();
   const command = call.kind === "execute" ? taskOf(call, folder).command : null;
   return (
@@ -84,7 +84,7 @@ export const CallRow = memo(function CallRow({
                   <Suspense fallback={null}>
                     <ResultBlock
                       id={block}
-                      output={output}
+                      result={output}
                       lang={lang}
                       onFailed={setFailed}
                       onReading={setReading}
