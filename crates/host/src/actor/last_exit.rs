@@ -46,8 +46,10 @@ pub(crate) struct Recorded {
 }
 
 /// Start-up, before the loop: the actions the last run left unfinished, then deleted, so the next
-/// start does not name them again. `unclean` is the desktop's word on the last run; an unfinished
-/// action makes it unclean too. A store that does not answer leaves the list empty.
+/// start does not name them again. `unclean` is the desktop's word on the last run alone: an
+/// action still running at a clean quit that never stopped the host (an idle Quit, a logoff) leaves
+/// a row too, and the room names it without saying Clauseo closed unexpectedly. A store that does
+/// not answer leaves the list empty.
 pub(super) async fn at_start(store: &Store, unclean: bool, now: Timestamp) -> LastExitHost {
     let left = store.pending_actions().await.unwrap_or_else(|error| {
         tracing::warn!(error = %Cause(&error), "the unfinished file actions were not read");
@@ -77,7 +79,7 @@ pub(super) async fn at_start(store: &Store, unclean: bool, now: Timestamp) -> La
         .collect();
     LastExitHost {
         view: LastExit {
-            unclean: unclean || !interrupted.is_empty(),
+            unclean,
             run_started: now,
             interrupted,
         },

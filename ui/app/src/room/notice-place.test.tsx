@@ -100,6 +100,18 @@ test("over the welcome, below 1200 px, the notice heads the work, not the wall t
   expect(notice()?.querySelector('[data-testid="crash-got-it"]')).not.toBeNull();
 });
 
+test("Got it over the welcome leaves focus in the work: the welcome's first button, not the page", async () => {
+  await mount(1100, []);
+  const gotIt = notice()?.querySelector<HTMLButtonElement>('[data-testid="crash-got-it"]');
+  expect(gotIt).not.toBeNull();
+  await act(async () => gotIt?.click());
+  expect(notice()).toBeNull();
+  const focused = document.activeElement as HTMLElement | null;
+  expect(focused).not.toBe(document.body);
+  expect(focused?.closest(".room-centre")).not.toBeNull();
+  expect(focused?.matches("button, a[href], input")).toBe(true);
+});
+
 test("over the welcome from 1200 px it stands at the rail's foot", async () => {
   await mount(1400, []);
   expect(notice()?.closest(".room-rail-foot")).not.toBeNull();

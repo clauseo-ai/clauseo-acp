@@ -1,7 +1,8 @@
 //! The file actions a run leaves unfinished (`last_exit.rs`): an undo's record is durable before
 //! R8 touches a file, a crash keeps it and the next start names it in `LastExit` (and clears
 //! it, so a start after one with no host stop names nothing), a finished undo leaves none, and an
-//! unclean exit with nothing recorded says only that.
+//! unclean exit with nothing recorded says only that. `unclean` is the desktop's flag alone: rows
+//! after a clean quit are named with it false.
 
 use clauseo_protocol::{
     CommandEnvelope, ExpiryReason, FileChoice, FileDecision, HostCommand, InterruptedAction,
@@ -92,12 +93,14 @@ fn an_undo_is_recorded_before_r8_runs_and_named_after_a_crash() {
     if let Some(entry) = rig.actor.matters.get_mut(&matter) {
         entry.turns.holder = None;
     }
-    let mut rig = rig.restart(1);
+    let mut rig = Rig::open_with(rig.close(), 1, None, |config| {
+        config
+            .with_idle_limit(std::time::Duration::MAX)
+            .with_live_agents(usize::MAX)
+            .with_last_run_unclean(true)
+    });
     let view = last_exit(&mut rig);
-    assert!(
-        view.unclean,
-        "an unfinished action makes the last run unclean"
-    );
+    assert!(view.unclean, "the desktop said the last run did not quit");
     assert_eq!(
         view.interrupted,
         vec![InterruptedAction {
@@ -117,7 +120,30 @@ fn an_undo_is_recorded_before_r8_runs_and_named_after_a_crash() {
 }
 
 #[test]
-fn a_start_after_a_run_whose_host_never_stopped_names_nothing() {
+fn a_clean_quit_with_a_row_names_it_and_is_not_unclean() {
+    let mut rig = Rig::start("interrupted-clean-with-row", "");
+    let matter: MatterId = rig.matter();
+    let at = rig.actor.now().wall;
+    let row = crate::actor::last_exit::action(matter, InterruptedKind::Restore, None, None, at);
+    let store = rig.actor.store.clone();
+    rig.run(async move { store.put_pending_action(row).await })
+        .unwrap();
+    // A restore still running at an idle Quit: the desktop's flag says clean, the row stays.
+    let mut rig = rig.restart(1);
+    let view = last_exit(&mut rig);
+    assert!(
+        !view.unclean,
+        "the lawyer quit: not \"closed unexpectedly\""
+    );
+    assert_eq!(view.interrupted.len(), 1);
+    assert_eq!(view.interrupted[0].kind, InterruptedKind::Restore);
+    rig.finish();
+}
+
+/// A regression test of start-up's delete: a run whose host never stopped (`restart_unstopped`)
+/// leaves nothing for the start after, since the start before it already cleared the rows.
+#[test]
+fn start_up_clears_the_rows_so_a_run_that_never_stopped_leaves_none() {
     let mut rig = Rig::start("interrupted-unstopped", "");
     let matter: MatterId = rig.matter();
     let at = rig.actor.now().wall;
