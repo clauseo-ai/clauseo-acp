@@ -181,6 +181,14 @@ fn verdict(option: &AgentChoiceId, picked: Option<bool>, value: &ConfigValue) ->
 /// its option waiting for the session instead, the last one waiting. A pick of the seed's value
 /// (a draft's config sent from the seed) is left out: the agent keeps its own default.
 pub(super) fn wanted(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) -> Vec<Pick> {
+    candidates(actor, thread, options)
+        .into_iter()
+        .filter(|pick| offer(options, pick) != Offer::Held)
+        .collect()
+}
+
+/// [`wanted`]'s picks before it leaves out those `options` hold already.
+fn candidates(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) -> Vec<Pick> {
     let mut picks: Vec<Pick> = match logged(actor, thread) {
         Some(own) => own.iter().filter_map(current_pick).collect(),
         None => remembered(actor, thread)
@@ -196,10 +204,8 @@ pub(super) fn wanted(actor: &mut Actor, thread: ThreadId, options: &[ConfigOptio
         picks.retain(|(id, _)| *id != pick.0);
         picks.push(pick);
     }
+    picks.retain(|pick| pick.1.as_str() != AGENT_DEFAULT);
     picks
-        .into_iter()
-        .filter(|pick| pick.1.as_str() != AGENT_DEFAULT && offer(options, pick) != Offer::Held)
-        .collect()
 }
 
 /// The picks of the `SetConfigOption`s of a select value waiting for `thread`'s session, of the
@@ -343,7 +349,8 @@ pub(super) async fn apply(
                 ..
             }) => picked.stale.push(pick),
             Err(clauseo_acp::Error::Rpc { code, .. }) => {
-                tracing::warn!(option = %pick.0, value = %pick.1, code, "a config pick failed; kept");
+                let value = pick_value(&start.config_options, &pick);
+                tracing::warn!(option = %pick.0, value, code, "a config pick failed; kept");
             }
             Err(error) => {
                 tracing::warn!(option = %pick.0, error = %Cause(&error), "a config pick was not set");
@@ -357,24 +364,44 @@ pub(super) async fn apply(
 /// The longest value a host.log line about picks writes as itself.
 const LOGGED_VALUE_MAX: usize = 40;
 
-/// The model and the effort among `picks`, by their options' categories in `options`; `-` for
-/// none. All a host.log line about picks carries besides the agent id: no other option. A value
-/// shows only when it is one its option in `options` lists and a short plain id ([`loggable`]);
+/// The model and the effort among `picks`, by their options' categories in `options`; else
+/// `held` for one among `held`, a pick left out because its option held the value already;
+/// `-` for none. All a host.log line about picks carries besides the agent id: no other
+/// option. A value shows only when it is one its option in `options` lists and a short plain id ([`loggable`]);
 /// otherwise `-`: record 0047 keeps settings values out of the log, and a firm's model id on
 /// a cloud provider can carry its account number (a Bedrock ARN).
-fn model_and_effort<'a>(options: &[ConfigOption], picks: &'a [Pick]) -> (&'a str, &'a str) {
+fn model_and_effort<'a>(
+    options: &[ConfigOption],
+    picks: &'a [Pick],
+    held: &[Pick],
+) -> (&'a str, &'a str) {
+    let of_category = |id: &AgentChoiceId, category: ConfigCategory| {
+        (options.iter()).find(|option| option.id == id.as_str() && option.category == category)
+    };
     let of = |category: ConfigCategory| {
-        picks
-            .iter()
-            .find_map(|(id, value)| {
-                let option = options
-                    .iter()
-                    .find(|option| option.id == id.as_str() && option.category == category)?;
-                Some(loggable(option, value.as_str()))
-            })
-            .unwrap_or("-")
+        let sent = (picks.iter()).find_map(|(id, value)| {
+            of_category(id, category).map(|option| loggable(option, value.as_str()))
+        });
+        let was_held = || {
+            held.iter()
+                .any(|(id, _)| of_category(id, category).is_some())
+        };
+        match sent {
+            Some(value) => value,
+            None if was_held() => "held",
+            None => "-",
+        }
     };
     (of(ConfigCategory::Model), of(ConfigCategory::ThoughtLevel))
+}
+
+/// A pick's value as a host.log line writes it: [`loggable`] against its option in `options`,
+/// `-` when `options` hold no option of its id.
+fn pick_value<'a>(options: &[ConfigOption], (id, value): &'a Pick) -> &'a str {
+    options
+        .iter()
+        .find(|option| option.id == id.as_str())
+        .map_or("-", |option| loggable(option, value.as_str()))
 }
 
 /// `value` when `option` lists it among its choices and it is at most [`LOGGED_VALUE_MAX`]
@@ -403,7 +430,11 @@ pub(super) fn after(
         .get(&thread)
         .map_or_else(String::new, |entry| entry.row.agent.as_str().to_owned());
     if !picked.set.is_empty() {
-        let (model, effort) = model_and_effort(options, &picked.set);
+        let held: Vec<Pick> = candidates(actor, thread, options)
+            .into_iter()
+            .filter(|pick| offer(options, pick) == Offer::Held && !picked.set.contains(pick))
+            .collect();
+        let (model, effort) = model_and_effort(options, &picked.set, &held);
         tracing::info!(target: LIFECYCLE, %agent, %model, %effort, "picks sent before first prompt");
     }
     if picked.sent {
@@ -413,7 +444,7 @@ pub(super) fn after(
     if picked.stale.is_empty() {
         return;
     }
-    let (model, effort) = model_and_effort(options, &picked.stale);
+    let (model, effort) = model_and_effort(options, &picked.stale, &[]);
     tracing::info!(target: LIFECYCLE, %agent, %model, %effort, "the agent does not take a config pick; dropped");
     let drop_stale = |picks: &mut ConfigPicks| {
         let mut changed = false;
