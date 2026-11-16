@@ -294,6 +294,23 @@ fn commands_are_kept_per_agent() {
     assert_ne!(claude, codex);
 }
 
+/// A `Read` card shows the file relative to the matter folder, `/`-separated, nested or not, on
+/// either system; the rule keeps the whole path.
+#[test]
+fn a_read_shows_the_file_relative_to_the_matter() {
+    let cases = [
+        ("/m/Drafts/2026/brief.docx", false, "Drafts/2026/brief.docx"),
+        ("/m/notes.txt", false, "notes.txt"),
+        (r"C:\m\Drafts\Brief.docx", true, "Drafts/Brief.docx"),
+    ];
+    for (file, windows, shown) in cases {
+        let kept = claude("Read", Some(&json!({ "file_path": file })), windows).unwrap();
+        assert_eq!(kept.offer.kind, AlwaysKind::Read);
+        assert_eq!(kept.offer.shown.as_deref(), Some(shown), "{file}");
+        assert!(kept.rule.starts_with("Read(//"), "{}", kept.rule);
+    }
+}
+
 #[test]
 fn windows_paths_become_posix_ones() {
     let input = |path: &str| json!({ "file_path": path });

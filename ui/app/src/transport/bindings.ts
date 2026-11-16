@@ -439,8 +439,9 @@ export type AlwaysOffer = {
 	/**  What kind of thing is kept. */
 	kind: AlwaysKind,
 	/**
-	 *  What it covers, as the card shows it: the exact command text, the site's host name or the
-	 *  tool's name; none for a file edit (it covers the whole matter). At most 8 KiB.
+	 *  What it covers, as the card shows it: the exact command text, the site's host name, the
+	 *  tool's name, or a read file's path relative to the matter folder (`/`-separated); none
+	 *  for a file edit (it covers the whole matter). At most 8 KiB.
 	 */
 	shown?: string,
 	/**

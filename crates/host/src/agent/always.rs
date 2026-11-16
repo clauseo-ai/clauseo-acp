@@ -230,7 +230,16 @@ fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
         "Read" => {
             let file = text("file_path")?;
             let rule = format!("Read({})", exact(path(file, request.windows))?);
-            kept(rule, AlwaysKind::Read, Some(file.to_owned()))
+            // The card shows the file relative to the matter folder, `/`-separated. One whose
+            // path is outside it keeps its whole path here, but is never offered: a `Read` rule
+            // needs the file's real path inside the matter (`needs_real`).
+            let shown = request
+                .matter
+                .iter()
+                .find_map(|matter| relative(matter, file, request.windows))
+                .filter(|shown| !shown.is_empty())
+                .unwrap_or_else(|| file.to_owned());
+            kept(rule, AlwaysKind::Read, Some(shown))
         }
         name if SPENDS.contains(&name) => return Err(NotKept::NoRule),
         name if is_mcp_tool(name) => kept(name.to_owned(), AlwaysKind::Tool, Some(name.to_owned())),
