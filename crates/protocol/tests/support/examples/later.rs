@@ -320,6 +320,45 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::ShellNetworkBlockedNoWebSearch),
         },
+    ];
+    notices.extend(guard_notices());
+    notices.extend(
+        [
+            (
+                PackSkipReason::NotTurnedOn,
+                "This matter is set to use it, but it isn't turned on.",
+            ),
+            (
+                PackSkipReason::NotAdmitted,
+                "The skill pack settings on this computer don't allow it.",
+            ),
+            (
+                PackSkipReason::Changed,
+                "Its files changed after it was turned on. Turn it on again.",
+            ),
+            (
+                PackSkipReason::Missing,
+                "Clauseo couldn't find it on this computer.",
+            ),
+            (
+                PackSkipReason::Invalid,
+                "Its files aren't a valid skill pack.",
+            ),
+            (
+                PackSkipReason::TooMany,
+                "Clauseo loads at most 8 skill packs at a time.",
+            ),
+        ]
+        .into_iter()
+        .map(|(reason, words)| skill_pack_notice(reason, words)),
+    );
+    notices.into_iter().map(DomainEvent::from).collect()
+}
+
+/// The notices from `HeldOpenBlocked` on, in the same order (split from [`notices`] to stay within
+/// clippy's 120 lines once main's kinds are in; the corpus order is unchanged).
+fn guard_notices() -> Vec<Notice> {
+    vec![
         Notice {
             level: NoticeLevel::Warning,
             text: "Clauseo stopped a step: the AI tried to change Drafts/Lease.docx, which is \
@@ -362,38 +401,7 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 name: "Smith".to_owned(),
             }),
         },
-    ];
-    notices.extend(
-        [
-            (
-                PackSkipReason::NotTurnedOn,
-                "This matter is set to use it, but it isn't turned on.",
-            ),
-            (
-                PackSkipReason::NotAdmitted,
-                "The skill pack settings on this computer don't allow it.",
-            ),
-            (
-                PackSkipReason::Changed,
-                "Its files changed after it was turned on. Turn it on again.",
-            ),
-            (
-                PackSkipReason::Missing,
-                "Clauseo couldn't find it on this computer.",
-            ),
-            (
-                PackSkipReason::Invalid,
-                "Its files aren't a valid skill pack.",
-            ),
-            (
-                PackSkipReason::TooMany,
-                "Clauseo loads at most 8 skill packs at a time.",
-            ),
-        ]
-        .into_iter()
-        .map(|(reason, words)| skill_pack_notice(reason, words)),
-    );
-    notices.into_iter().map(DomainEvent::from).collect()
+    ]
 }
 
 /// A host notice of kind `SkillPackNotLoaded` for the pack `nda-kit`, left out for `reason`.
