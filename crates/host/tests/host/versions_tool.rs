@@ -162,20 +162,34 @@ impl Client {
 const OK: &str = r#"{"clauseo_relay":1,"ok":true}"#;
 const REFUSED: &str = r#"{"clauseo_relay":1,"ok":false,"error":"bad_token"}"#;
 
-/// The version ids and every file path `list_versions` lists.
-fn listed(result: &Value) -> (Vec<String>, Vec<String>) {
+/// A tool's answer: its one text block (no `structuredContent`).
+fn answer_text(result: &Value) -> &str {
     assert_ne!(result["isError"], true, "{result}");
-    let versions = result["structuredContent"]["versions"].as_array().unwrap();
-    let ids = versions
-        .iter()
-        .map(|version| version["id"].as_str().unwrap().to_owned())
+    assert!(result.get("structuredContent").is_none(), "{result}");
+    result["content"][0]["text"].as_str().unwrap()
+}
+
+/// The version ids and every file path `list_versions` lists: its `id:` lines and its file
+/// lines (`  <change>: <path>`).
+fn listed(result: &Value) -> (Vec<String>, Vec<String>) {
+    let text = answer_text(result);
+    let ids = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("id: "))
+        .map(str::to_owned)
         .collect();
-    let paths = versions
-        .iter()
-        .flat_map(|version| version["files"].as_array().unwrap())
-        .map(|file| file["path"].as_str().unwrap().to_owned())
+    let paths = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("  ")?.split_once(": "))
+        .filter(|(change, _)| !change.starts_with(' '))
+        .map(|(_, path)| path.to_owned())
         .collect();
     (ids, paths)
+}
+
+/// The page `read_version` gives: what follows its header line and the blank line.
+fn page(result: &Value) -> &str {
+    answer_text(result).split_once("\n\n").unwrap().1
 }
 
 /// What the run-removal hook saw: whether the token file was still there, and the answer a
@@ -268,7 +282,7 @@ fn each_agent_reads_only_its_own_matters_history_through_its_own_listener() {
         assert!(!paths.iter().any(|path| path == other), "{paths:?}");
         let oldest = versions.last().unwrap().clone();
         let read = client.call(4, "read_version", &json!({"version": oldest, "path": own}));
-        assert_eq!(read["structuredContent"]["text"], content, "{read}");
+        assert_eq!(page(&read), content, "{read}");
         tokens.push(token);
         ids.push(oldest);
     }

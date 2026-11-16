@@ -3,22 +3,24 @@
 
 /// `list_versions`' description.
 pub(super) const LIST_DESCRIPTION: &str = "Read-only. Lists the versions Clauseo kept of this \
-matter's folder, newest first: each version's id, when it was taken, what took it (import, \
-before_turn, after_turn, outside_edits, undo, restore, revisions), who (agent, lawyer, \
-outside_clauseo), whether this conversation took it, the version it restored from for a \
-restore, and the files it changed (at most 25 names, with files_total). Covers only this matter. \
-Files that were deleted are listed with the version that deleted them. 20 versions by default, \
-50 at most; pass next_before as before for older ones. Changes nothing.";
+matter's folder, newest first, as text: a line with how many, a next_before line, then one block \
+per version with its id, at (when it was taken), kind (import, before_turn, after_turn, \
+outside_edits, undo, restore, revisions), by (agent, lawyer, outside_clauseo), \
+this_conversation (yes or no), restored_from for a restore, files_total, and at most 25 of the \
+files it changed, one per line as change: path (a rename adds a from: line). Covers only this \
+matter. Files that were deleted are listed with the version that deleted them. 20 versions by \
+default, 50 at most; pass next_before as before for older ones. Changes nothing.";
 
 /// `read_version`'s description.
 pub(super) const READ_DESCRIPTION: &str = "Read-only. Returns one file as an earlier version of \
-this matter held it, as text: 64 KiB a page from offset, with next_offset while more is left \
-and total_bytes. Text files saved as UTF-8 (up to 16 MiB) come back as they are; Word (.docx) \
-files as the text Clauseo's Word tool shows. PDFs and other files are not read. Covers only \
-this matter. Earlier versions of a file the matter has held ever since can be read, including \
-text the lawyer later removed from it. A file that was deleted is listed by list_versions, but \
-its earlier versions cannot be read, even when a file with its name is there again, unless the \
-lawyer brought it back with Undo or from Versions. Changes nothing.";
+this matter held it, as text: a header line (version, at, format, offset, next_offset or end, \
+total_bytes, path), a blank line, then the file's text, 64 KiB a page from offset; pass \
+next_offset as offset for the next page. Text files saved as UTF-8 (up to 16 MiB) come back as \
+they are; Word (.docx) files as the text Clauseo's Word tool shows. PDFs and other files are not \
+read. Covers only this matter. Earlier versions of a file the matter has held ever since can be \
+read, including text the lawyer later removed from it. A file that was deleted is listed by \
+list_versions, but its earlier versions cannot be read, even when a file with its name is there \
+again, unless the lawyer brought it back with Undo or from Versions. Changes nothing.";
 
 /// Why a call was refused; [`Refusal::text`] is what the agent reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

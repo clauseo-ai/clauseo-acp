@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use clauseo_matters::{Matter, VersionFile, holds_now, version_file};
 use clauseo_protocol::{CheckpointId, MatterPath};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use super::caps::Reserved;
 use super::continuity::{Step, Walk};
@@ -177,19 +177,21 @@ pub(super) fn run(backend: &Backend, args: &Map<String, Value>) -> Outcome {
     drop(plan);
     let config = &backend.config;
     let logged = config.source.logged(config.session.matter, &[version]);
-    let mut answer = json!({
-        "version": version.to_string(),
-        "path": file.path.as_str(),
-        "at": logged.at.get(&version).map(|at| utc_time(*at)),
-        "format": format,
-        "text": page.text,
-        "offset": page.offset,
-        "total_bytes": total,
-    });
-    if let (Some(next), Some(object)) = (page.next_offset, answer.as_object_mut()) {
-        object.insert("next_offset".to_owned(), json!(next));
-    }
-    Ok(answer)
+    let at = logged
+        .at
+        .get(&version)
+        .map_or_else(|| "unknown".to_owned(), |at| utc_time(*at));
+    let next = page
+        .next_offset
+        .map_or_else(|| "end".to_owned(), |next| next.to_string());
+    // The path last: it may hold `; ` but never a line break (`MatterPath`).
+    Ok(format!(
+        "version: {version}; at: {at}; format: {format}; offset: {}; next_offset: {next}; \
+         total_bytes: {total}; path: {}\n\n{}",
+        page.offset,
+        file.path.as_str(),
+        page.text
+    ))
 }
 
 /// What the read of `file` will do, by its name and size, and for a Word file whether its text

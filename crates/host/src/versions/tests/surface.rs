@@ -91,7 +91,7 @@ fn the_limits_the_texts_name_are_the_ones_in_force() {
             .text()
             .contains(&format!("1 to {MAX_LIMIT}"))
     );
-    assert!(LIST_DESCRIPTION.contains(&format!("at most {MAX_FILES_PER_VERSION} names")));
+    assert!(LIST_DESCRIPTION.contains(&format!("at most {MAX_FILES_PER_VERSION} of the files")));
     assert!(LIST_DESCRIPTION.contains(&format!("{DEFAULT_LIMIT} versions by default")));
     assert!(LIST_DESCRIPTION.contains(&format!("{MAX_LIMIT} at most")));
     assert!(READ_DESCRIPTION.contains(&format!("{} KiB a page", PAGE_BYTES / 1024)));
@@ -145,27 +145,42 @@ fn notifications_get_nothing_and_bad_messages_get_json_rpc_errors() {
 }
 
 #[test]
-fn a_page_reaches_the_model_once_in_structured_content() {
+fn an_answer_is_text_in_content_once_with_no_structured_content() {
     let mut fixture = Fixture::new("versions-surface-shape");
     let text = "Clause 7: the rent is reviewed each year. ".repeat(100);
     fixture.put("lease.txt", text.as_bytes());
     let v2 = fixture.checkpoint(2);
     let result = super::read(&fixture.backend(), v2, "lease.txt");
     assert_eq!(result["isError"], false);
-    assert_eq!(result["structuredContent"]["text"], text.as_str());
+    assert!(result.get("structuredContent").is_none(), "{result}");
     let content = result["content"].as_array().unwrap();
     assert_eq!(content.len(), 1);
-    let line = content[0]["text"].as_str().unwrap();
-    assert!(!line.contains("Clause 7"), "{line}");
-    assert!(
-        line.contains("lease.txt") && line.contains("structuredContent.text"),
-        "{line}"
+    let whole = content[0]["text"].as_str().unwrap();
+    assert_eq!(whole.matches("Clause 7").count(), 100, "the page once");
+    assert_eq!(
+        whole,
+        format!(
+            "version: {v2}; at: unknown; format: text; offset: 0; next_offset: end; \
+             total_bytes: {}; path: lease.txt\n\n{text}",
+            text.len()
+        )
     );
     let page = super::call(&fixture.backend(), "list_versions", json!({}));
-    let line = page["content"][0]["text"].as_str().unwrap();
-    assert_eq!(
-        line,
-        "2 versions of this matter, newest first, are in structuredContent.versions."
+    assert!(page.get("structuredContent").is_none(), "{page}");
+    let listed = page["content"][0]["text"].as_str().unwrap();
+    assert!(
+        listed.starts_with(
+            "versions: 2, newest first\nnext_before: none (no older versions)\n\nid: "
+        ),
+        "{listed}"
     );
-    assert!(!line.contains("lease.txt"), "{line}");
+    assert!(listed.contains("\nfiles:\n  added: lease.txt"), "{listed}");
+    // Neither tool offers an output schema.
+    let tools = Fixture::new("versions-surface-schema")
+        .backend()
+        .answer(&ask("tools/list", json!({})))
+        .unwrap();
+    for tool in tools["result"]["tools"].as_array().unwrap() {
+        assert!(tool.get("outputSchema").is_none(), "{tool}");
+    }
 }

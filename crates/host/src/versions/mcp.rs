@@ -1,7 +1,8 @@
 //! One JSON-RPC message from the agent and its answer. `initialize` names the server and offers
 //! tools only; `ping` is answered empty; `tools/list` gives the two tools; `tools/call` runs one
 //! after the per-turn cap; any other method is `Method not found`. A notification, or a message
-//! with no method (the agent's own response), gets nothing back. A tool's refusal is a result
+//! with no method (the agent's own response), gets nothing back. A tool's answer is text in
+//! `content`, once, with no `structuredContent` and no `outputSchema`; its refusal is a result
 //! with `isError` and one sentence, so the agent reads it; an unknown tool is the JSON-RPC
 //! error MCP gives it.
 
@@ -17,8 +18,8 @@ const PROTOCOL_VERSIONS: [&str; 3] = [LATEST, "2025-03-26", "2024-11-05"];
 /// The newest protocol version it speaks.
 const LATEST: &str = "2025-06-18";
 
-/// What one tool call gives: the result, or a refusal sentence.
-pub(super) type Outcome = Result<Value, Refusal>;
+/// What one tool call gives: its answer as text, or a refusal sentence.
+pub(super) type Outcome = Result<String, Refusal>;
 
 /// The answer to `message`, or `None` when none is due.
 pub(super) fn answer(backend: &Backend, message: &Value) -> Option<Value> {
@@ -145,14 +146,13 @@ fn call(backend: &Backend, id: &Value, params: Option<&Map<String, Value>>) -> V
         Err(Refusal::TooManyCalls)
     };
     let result = match outcome {
-        Ok(structured) => {
-            let text = summary(&structured);
-            json!({
-                "content": [{ "type": "text", "text": text }],
-                "structuredContent": structured,
-                "isError": false,
-            })
-        }
+        // Text in `content` only, never `structuredContent`: Codex's model reads only `content`
+        // (stage B's run of Codex 2.2.2), and Claude Code shows its model only
+        // `structuredContent` when a result has one, so the answer goes once, where both read it.
+        Ok(text) => json!({
+            "content": [{ "type": "text", "text": text }],
+            "isError": false,
+        }),
         Err(refusal) => {
             tracing::info!(
                 matter = %session.matter,
@@ -168,41 +168,6 @@ fn call(backend: &Backend, id: &Value, params: Option<&Map<String, Value>>) -> V
         }
     };
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
-}
-
-/// The one line `content` carries beside `structuredContent`, which holds the answer itself:
-/// Claude Code shows its model only `structuredContent` when a result has one (as the case-law
-/// relay found, `connectors/relay/forward/reply.rs`), so the page goes there once and the line
-/// only says where it is.
-fn summary(structured: &Value) -> String {
-    if let Some(versions) = structured.get("versions").and_then(Value::as_array) {
-        let more = if structured.get("next_before").is_some() {
-            "; older ones page with next_before"
-        } else {
-            ""
-        };
-        return format!(
-            "{} versions of this matter, newest first, are in structuredContent.versions{more}.",
-            versions.len()
-        );
-    }
-    let field = |name: &str| {
-        structured
-            .get(name)
-            .map(ToString::to_string)
-            .unwrap_or_default()
-    };
-    let read = structured
-        .get("text")
-        .and_then(Value::as_str)
-        .map_or(0, str::len);
-    format!(
-        "{} at version {}: {read} bytes from offset {} of {}, in structuredContent.text.",
-        field("path"),
-        field("version"),
-        field("offset"),
-        field("total_bytes"),
-    )
 }
 
 /// A JSON-RPC error answer.

@@ -291,16 +291,93 @@ pub(super) fn call(backend: &VersionsBackend, tool: &str, args: Value) -> Value 
     answer["result"].clone()
 }
 
-/// The structured answer of a call that must succeed: `content` is one short line beside it,
-/// so a page reaches the model once.
-pub(super) fn ok(result: &Value) -> &Value {
+/// The answer of a call that must succeed, read back from its text into the fields it names
+/// (as JSON, so tests compare them): the result holds one text block and no
+/// `structuredContent`, so the answer reaches the model once.
+pub(super) fn ok(result: &Value) -> Value {
     assert_eq!(result["isError"], false, "{result}");
+    assert!(result.get("structuredContent").is_none(), "{result}");
     let content = result["content"].as_array().unwrap();
     assert_eq!(content.len(), 1, "{result}");
-    let line = content[0]["text"].as_str().unwrap();
-    assert!(!line.contains('\n'), "{line}");
-    assert!(line.len() < 300, "{line}");
-    &result["structuredContent"]
+    assert_eq!(content[0]["type"], "text", "{result}");
+    let text = content[0]["text"].as_str().unwrap();
+    if text.starts_with("versions: ") {
+        parse_list(text)
+    } else {
+        parse_read(text)
+    }
+}
+
+/// `read_version`'s answer: the header line's fields, and the page: all that follows the blank
+/// line after it (the shape test checks the whole text).
+fn parse_read(text: &str) -> Value {
+    let (header, page) = text.split_once("\n\n").unwrap();
+    assert!(!header.contains('\n'), "{header}");
+    let (fields, path) = header.split_once("; path: ").unwrap();
+    let mut answer = serde_json::Map::new();
+    for field in fields.split("; ") {
+        let (key, value) = field.split_once(": ").unwrap();
+        let value = match (key, value) {
+            ("next_offset", "end") => continue,
+            ("at", "unknown") => Value::Null,
+            ("offset" | "next_offset" | "total_bytes", number) => {
+                json!(number.parse::<u64>().unwrap())
+            }
+            (_, other) => json!(other),
+        };
+        answer.insert(key.to_owned(), value);
+    }
+    answer.insert("path".to_owned(), json!(path));
+    answer.insert("text".to_owned(), json!(page));
+    Value::Object(answer)
+}
+
+/// `list_versions`' answer: the count and `next_before` lines, then one block per version.
+fn parse_list(text: &str) -> Value {
+    let mut blocks = text.split("\n\n");
+    let mut head = blocks.next().unwrap().lines();
+    let count: usize = head
+        .next()
+        .unwrap()
+        .strip_prefix("versions: ")
+        .unwrap()
+        .strip_suffix(", newest first")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let next = head.next().unwrap().strip_prefix("next_before: ").unwrap();
+    assert_eq!(head.next(), None);
+    let versions: Vec<Value> = blocks.map(parse_version).collect();
+    assert_eq!(versions.len(), count, "{text}");
+    let mut page = json!({ "versions": versions });
+    if !next.starts_with("none") {
+        page["next_before"] = json!(next);
+    }
+    page
+}
+
+fn parse_version(block: &str) -> Value {
+    let mut version = serde_json::Map::new();
+    let mut files: Vec<Value> = Vec::new();
+    for line in block.lines() {
+        if let Some(from) = line.strip_prefix("    from: ") {
+            files.last_mut().unwrap()["from"] = json!(from);
+        } else if let Some(file) = line.strip_prefix("  ") {
+            let (change, path) = file.split_once(": ").unwrap();
+            files.push(json!({ "path": path, "change": change }));
+        } else if line != "files:" {
+            let (key, value) = line.split_once(": ").unwrap();
+            let value = match (key, value) {
+                ("at", "unknown") => Value::Null,
+                ("this_conversation", yes) => json!(yes == "yes"),
+                ("files_total", number) => json!(number.parse::<u64>().unwrap()),
+                (_, other) => json!(other),
+            };
+            version.insert(key.to_owned(), value);
+        }
+    }
+    version.insert("files".to_owned(), Value::Array(files));
+    Value::Object(version)
 }
 
 /// The refusal sentence of a call that must be refused.

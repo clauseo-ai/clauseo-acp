@@ -34,7 +34,7 @@ fn it_lists_only_this_matters_versions_newest_first() {
     let backend = fixture.backend();
     let page = call(&backend, "list_versions", json!({}));
     let page = ok(&page);
-    assert_eq!(ids(page), vec![id(4), id(3), id(2), id(1)]);
+    assert_eq!(ids(&page), vec![id(4), id(3), id(2), id(1)]);
     assert!(page.get("next_before").is_none(), "{page}");
     assert!(!page.to_string().contains("secret.txt"), "{page}");
 }
@@ -49,7 +49,7 @@ fn it_honours_the_limit_and_pages_with_next_before() {
     let backend = fixture.backend();
     let first = call(&backend, "list_versions", json!({ "limit": 2 }));
     let first = ok(&first);
-    assert_eq!(ids(first), vec![id(6), id(5)]);
+    assert_eq!(ids(&first), vec![id(6), id(5)]);
     assert_eq!(first["next_before"], id(5));
     let second = call(
         &backend,
@@ -57,14 +57,14 @@ fn it_honours_the_limit_and_pages_with_next_before() {
         json!({ "limit": 2, "before": first["next_before"] }),
     );
     let second = ok(&second);
-    assert_eq!(ids(second), vec![id(4), id(3)]);
+    assert_eq!(ids(&second), vec![id(4), id(3)]);
     let last = call(
         &backend,
         "list_versions",
         json!({ "limit": 2, "before": second["next_before"] }),
     );
     let last = ok(&last);
-    assert_eq!(ids(last), vec![id(2), id(1)]);
+    assert_eq!(ids(&last), vec![id(2), id(1)]);
     assert!(last.get("next_before").is_none(), "{last}");
 }
 
@@ -77,11 +77,11 @@ fn it_gives_twenty_by_default_and_fifty_at_most() {
     }
     let backend = fixture.backend();
     let plain = call(&backend, "list_versions", json!({}));
-    assert_eq!(ids(ok(&plain)).len(), 20);
+    assert_eq!(ids(&ok(&plain)).len(), 20);
     let most = call(&backend, "list_versions", json!({ "limit": MAX_LIMIT }));
     let most = ok(&most);
-    assert_eq!(ids(most).len(), 50);
-    assert_eq!(ids(most).first().unwrap(), &id(61));
+    assert_eq!(ids(&most).len(), 50);
+    assert_eq!(ids(&most).first().unwrap(), &id(61));
     assert_eq!(most["next_before"], id(12));
     // Every version of a page past one job's diffs has its own files.
     assert!(

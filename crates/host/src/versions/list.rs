@@ -11,7 +11,7 @@
 
 use clauseo_matters::{Matter, TimelineEntry};
 use clauseo_protocol::{ChangeKind, CheckpointId, CheckpointKind, MatterPath};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use super::mcp::Outcome;
 use super::texts::Refusal;
@@ -72,33 +72,41 @@ pub(super) fn run(backend: &Backend, args: &Map<String, Value>) -> Outcome {
     let ids: Vec<CheckpointId> = rows.iter().map(|row| row.entry.id).collect();
     let session = backend.config.session;
     let logged = backend.config.source.logged(session.matter, &ids);
-    let versions: Vec<Value> = rows
-        .iter()
-        .zip(files)
-        .map(|(row, files)| {
-            let entry = &row.entry;
-            let mut version = json!({
-                "id": entry.id.to_string(),
-                "at": logged.at.get(&entry.id).map(|at| utc_time(*at)),
-                "kind": kind_name(entry.kind),
-                "by": by(entry.kind),
-                "this_conversation": entry.thread == Some(session.thread),
-                "files": files.listed.iter().map(file_json).collect::<Vec<_>>(),
-                "files_total": files.total,
-            });
-            if let (Some(from), Some(object)) =
-                (logged.restored_from.get(&entry.id), version.as_object_mut())
-            {
-                object.insert("restored_from".to_owned(), json!(from.to_string()));
-            }
-            version
-        })
-        .collect();
-    let mut page = json!({ "versions": versions });
-    if let (Some(next), Some(object)) = (next_before, page.as_object_mut()) {
-        object.insert("next_before".to_owned(), json!(next.to_string()));
+    let next = next_before.map_or_else(
+        || "none (no older versions)".to_owned(),
+        |id| id.to_string(),
+    );
+    let mut lines = vec![
+        format!("versions: {}, newest first", rows.len()),
+        format!("next_before: {next}"),
+    ];
+    for (row, files) in rows.iter().zip(files) {
+        let entry = &row.entry;
+        let at = logged
+            .at
+            .get(&entry.id)
+            .map_or_else(|| "unknown".to_owned(), |at| utc_time(*at));
+        let this = if entry.thread == Some(session.thread) {
+            "yes"
+        } else {
+            "no"
+        };
+        lines.push(String::new());
+        lines.push(format!("id: {}", entry.id));
+        lines.push(format!("at: {at}"));
+        lines.push(format!("kind: {}", kind_name(entry.kind)));
+        lines.push(format!("by: {}", by(entry.kind)));
+        lines.push(format!("this_conversation: {this}"));
+        if let Some(from) = logged.restored_from.get(&entry.id) {
+            lines.push(format!("restored_from: {from}"));
+        }
+        lines.push(format!("files_total: {}", files.total));
+        lines.push("files:".to_owned());
+        for file in &files.listed {
+            file_lines(&mut lines, file);
+        }
     }
-    Ok(page)
+    Ok(lines.join("\n"))
 }
 
 /// `limit`: [`DEFAULT_LIMIT`] when missing or null, else a whole number from 1 to
@@ -203,7 +211,9 @@ fn files_of(
         .collect()
 }
 
-fn file_json((path, change): &(MatterPath, ChangeKind)) -> Value {
+/// One file's lines: `  <change>: <path>`, and for a rename `    from: <old path>` after it. A
+/// path holds no line break (`MatterPath` refuses control characters), so each is one line.
+fn file_lines(lines: &mut Vec<String>, (path, change): &(MatterPath, ChangeKind)) {
     let name = match change {
         ChangeKind::Added => "added",
         ChangeKind::Modified => "modified",
@@ -211,11 +221,10 @@ fn file_json((path, change): &(MatterPath, ChangeKind)) -> Value {
         ChangeKind::Renamed { .. } => "renamed",
         ChangeKind::Unknown { .. } => "unknown",
     };
-    let mut file = json!({ "path": path.as_str(), "change": name });
-    if let (ChangeKind::Renamed { from }, Some(object)) = (change, file.as_object_mut()) {
-        object.insert("from".to_owned(), json!(from.as_str()));
+    lines.push(format!("  {name}: {}", path.as_str()));
+    if let ChangeKind::Renamed { from } = change {
+        lines.push(format!("    from: {}", from.as_str()));
     }
-    file
 }
 
 /// The kind's name in the tool's answer.
