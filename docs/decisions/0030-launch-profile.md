@@ -1372,8 +1372,9 @@ this record and firm-it §8.
     it when that resolves; a test keeps every entry a plain domain (no `*`, no path, no port).
   - **The seeded sites.** `SEED_SITES` (the browser's list: the proxy and the connectors hint
     read it, unchanged) and `FETCH_ONLY_SITES` (Claude's fetch rules only): the `www.` forms,
-    `api.sci.gov.in` (the Supreme Court's judgment PDFs), eCourts, Indian Kanoon, India Code,
-    the Legislative Department, Parliament, PRS and the Law Commission, the e-Gazette, the
+    `api.sci.gov.in` (the Supreme Court's judgment PDFs), eCourts, Indian Kanoon and Supreme
+    Court Observer (non-official research sites, on the PRS precedent), India Code, the
+    Legislative Department and its statute dashboard, Parliament, PRS and the Law Commission, the e-Gazette, the
     regulators the legal instructions name (TRAI added, and RBI's document host), and the
     tribunals (NCLT, NCLAT, ITAT, NGT, CESTAT, DRT, SAT, APTEL, TDSAT, CAT, NCDRC). The legal
     instructions name no foreign source, so none is seeded. A seeded host's own operator sees

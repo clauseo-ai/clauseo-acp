@@ -82,9 +82,10 @@ pub const SEED_SITES: &[&str] = &[
 /// The hosts Claude may also fetch unasked, beyond [`SEED_SITES`]: the `www.` form of seeded
 /// hosts, and the sites of a lawyer's ordinary research day that the browser's list leaves out.
 /// Only Claude's `WebFetch` rules read it; the browser's proxy and the connectors hint keep
-/// [`SEED_SITES`]. Each host resolved with `getent hosts` on 2026-11-16 (`main.sci.gov.in`,
-/// `www.indiankanoon.org`, `www.gujarathighcourt.nic.in` and `www.hcraj.nic.in` did not, so they
-/// are left out).
+/// [`SEED_SITES`]. Each host resolved with `getent hosts`, and through 1.1.1.1 and 8.8.8.8, on
+/// 2026-11-16. Left out because they did not: `www.indiankanoon.org`,
+/// `www.gujarathighcourt.nic.in`, `www.hcraj.nic.in`, and `main.sci.gov.in`, which `sci.gov.in`'s
+/// own name servers (`ns1.nic.in` and the rest) answer NXDOMAIN.
 pub const FETCH_ONLY_SITES: &[&str] = &[
     // The Supreme Court: its site as it serves it, and the host of its judgment PDFs.
     "www.sci.gov.in",
@@ -122,10 +123,15 @@ pub const FETCH_ONLY_SITES: &[&str] = &[
     "njdg.ecourts.gov.in",
     // Indian Kanoon, the public judgment search most research starts from.
     "indiankanoon.org",
+    // Supreme Court Observer, a non-official case tracker (on the Indian Kanoon and PRS precedent
+    // for non-official research sites).
+    "scobserver.in",
+    "www.scobserver.in",
     // Legislation: India Code, the Legislative Department, Parliament, PRS, the Law Commission.
     "www.indiacode.nic.in",
     "legislative.gov.in",
     "www.legislative.gov.in",
+    "lddashboard.legislative.gov.in",
     "sansad.in",
     "www.sansad.in",
     "eparlib.sansad.in",

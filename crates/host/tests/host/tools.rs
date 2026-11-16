@@ -59,7 +59,7 @@ const SEEDED: [&str; 33] = [
 ];
 
 /// The hosts Claude also fetches unasked (`FETCH_ONLY_SITES`), written out for the same reason.
-const FETCH_ONLY: [&str; 74] = [
+const FETCH_ONLY: [&str; 77] = [
     "www.sci.gov.in",
     "api.sci.gov.in",
     "www.allahabadhighcourt.in",
@@ -92,9 +92,12 @@ const FETCH_ONLY: [&str; 74] = [
     "judgments.ecourts.gov.in",
     "njdg.ecourts.gov.in",
     "indiankanoon.org",
+    "scobserver.in",
+    "www.scobserver.in",
     "www.indiacode.nic.in",
     "legislative.gov.in",
     "www.legislative.gov.in",
+    "lddashboard.legislative.gov.in",
     "sansad.in",
     "www.sansad.in",
     "eparlib.sansad.in",
