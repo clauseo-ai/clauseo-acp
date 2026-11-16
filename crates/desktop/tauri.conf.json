@@ -58,7 +58,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFDOTg2RTdDNkJBNjdBQjkKUldTNWVxWnJmRzZZckM2eGhMWTFHbWg1bSsvMFYzb2VmRWZYWkVFeFVQTHhncEVvSkVmb1hUR1EK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2QTI1RDE1MTFCOTJFQkUKUldTK0xya1JGVjJpOXNLZ1hxNFo3aGdnYjBXMkU3ZjlQdHU3M2JqVi9sRnYwY0wrdnlmUmcwRTUK",
       "endpoints": ["https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json"],
       "requireSignedVersion": true,
       "allowDowngrades": false,
