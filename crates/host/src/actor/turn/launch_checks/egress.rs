@@ -20,7 +20,8 @@
 //! the browser entry reaches the proxy, through `{proxy_port}` and the browser listener's
 //! password ([`EgressGuard::secret`]), which the guard gives Chrome over CDP. The password goes
 //! to the guard in a file, `<run>/proxy-secret` ([`write_secret`]), which the entry names
-//! (`{proxy_secret_file}`) and the guard deletes once read: never in the entry, whose variables
+//! (`{proxy_secret_file}`) and the guard deletes once read ([`end`] removes it when the session
+//! ends, if no guard did): never in the entry, whose variables
 //! the Claude Agent SDK puts on a command line and Codex receives in `session/new`.
 //! Without the password the proxy answers 407, so a process that reaches loopback (Codex's
 //! sandboxed shell on Windows) cannot use it. The proxy is advisory for the agent itself:
@@ -157,9 +158,18 @@ pub(in crate::actor::turn) fn unread_secret(run: &RunFolders, state: Option<&Too
         let file = file.to_path_buf();
         // Never joined: a remove that fails leaves the file to the run folder's removal.
         drop(std::thread::spawn(move || {
-            drop(crate::write::remove_old_file(&file));
+            drop(crate::write::remove_file_no_follow(&file));
         }));
     }
+}
+
+/// `run`'s session ended: its password file goes, whether or not a guard ever read it, before
+/// the run folder's removal waits for the session's processes (`removal::discard`, off the
+/// actor), so a run held past that wait keeps no password on disk. Removed by name without
+/// following a link (`write::remove_file_no_follow`); a remove that fails leaves the file to
+/// the run folder's removal.
+pub(super) fn end(run: &RunFolders) {
+    drop(crate::write::remove_file_no_follow(&run.proxy_secret));
 }
 
 impl Drop for EgressGuard {

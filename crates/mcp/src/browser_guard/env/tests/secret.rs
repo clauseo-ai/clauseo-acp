@@ -9,15 +9,18 @@ use crate::browser_guard::proxy_auth::Password;
 use crate::write;
 
 /// The variable.
-const VAR: &str = "CLAUSEO_PROXY_SECRET_FILE";
+pub(super) const VAR: &str = "CLAUSEO_PROXY_SECRET_FILE";
+/// The refusal of a file the one open could not open.
+pub(super) const UNREADABLE: &str =
+    "CLAUSEO_PROXY_SECRET_FILE names a file the guard cannot open to read and empty";
 /// An obviously fake password: 64 of `0-9 a-f`.
-const SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+pub(super) const SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 /// A folder of the test's own under the temp folder, removed when dropped.
-struct Scratch(PathBuf);
+pub(super) struct Scratch(pub(super) PathBuf);
 
 impl Scratch {
-    fn new(test: &str) -> Self {
+    pub(super) fn new(test: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
             "clauseo-mcp-proxy-secret-{test}-{}",
             std::process::id()
@@ -28,7 +31,7 @@ impl Scratch {
     }
 
     /// A file `name` in it holding `content`; its path.
-    fn file(&self, name: &str, content: &[u8]) -> String {
+    pub(super) fn file(&self, name: &str, content: &[u8]) -> String {
         let path = self.0.join(name);
         write::write(&path, content).unwrap();
         path.to_str().unwrap().to_owned()
@@ -42,7 +45,7 @@ impl Drop for Scratch {
 }
 
 /// The error for the file at `file`, as text, with the proxy set.
-fn refusal(os: Os, file: &str) -> String {
+pub(super) fn refusal(os: Os, file: &str) -> String {
     proxy_secret(&source_for(os, &[(VAR, file)], ""), os)
         .unwrap_err()
         .to_string()
@@ -155,10 +158,7 @@ fn an_unreadable_file_is_refused() {
         return;
     }
     let error = refusal(Os::Unix, &file);
-    assert_eq!(
-        error,
-        "CLAUSEO_PROXY_SECRET_FILE names a file the guard cannot read"
-    );
+    assert_eq!(error, UNREADABLE);
 }
 
 /// The file without the proxy is refused, and left alone: the guard deletes nothing it has not
@@ -215,38 +215,30 @@ fn a_file_that_cannot_be_deleted_is_emptied() {
     }
 }
 
-/// A file the guard can neither delete nor empty is refused, without its content (unless the
-/// tests run as root, who can do both).
+/// A file the guard may read but not write is refused before anything reads it, and left as it
+/// was: the one open asks for both (unless the tests run as root, who may do both).
 #[cfg(unix)]
 #[test]
-fn a_file_that_can_be_neither_deleted_nor_emptied_is_refused() {
+fn a_file_the_guard_may_not_write_is_refused_and_left() {
     let scratch = Scratch::new("stuck");
     let folder = scratch.0.join("locked");
     write::create_dir(&folder).unwrap();
     let file = folder.join("proxy-secret");
     write::write(&file, SECRET).unwrap();
-    let probe = folder.join("probe");
-    write::write(&probe, "").unwrap();
     write::set_mode(&file, 0o400).unwrap();
-    write::set_mode(&folder, 0o500).unwrap();
-    let root = write::remove_file(&probe).is_ok();
+    let root = nix::unistd::geteuid().is_root();
     let read = proxy_secret(
         &source_for(Os::Unix, &[(VAR, file.to_str().unwrap())], ""),
         Os::Unix,
     );
     let left = std::fs::read(&file);
-    write::set_mode(&folder, 0o700).unwrap();
     if root {
         return;
     }
-    let error = read.unwrap_err().to_string();
+    assert_eq!(read.unwrap_err().to_string(), UNREADABLE);
     assert_eq!(
-        error,
-        "CLAUSEO_PROXY_SECRET_FILE names a file the guard could neither delete nor empty"
-    );
-    assert_eq!(
-        left.unwrap().len(),
-        SECRET.len(),
+        left.unwrap(),
+        SECRET.as_bytes(),
         "the file is left as it was"
     );
 }

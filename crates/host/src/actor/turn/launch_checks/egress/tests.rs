@@ -11,7 +11,7 @@ use clauseo_sandbox::{
 };
 
 use super::super::{RunFolders, RunSweep};
-use super::{CountDenials, EgressGuard, proxy_config, write_secret};
+use super::{CountDenials, EgressGuard, end, proxy_config, write_secret};
 use crate::actor::input::Input;
 use crate::config::SessionKey;
 
@@ -262,4 +262,45 @@ fn a_password_file_not_written_closes_the_proxy() {
     write_secret(&mut none);
     assert!(none.egress.is_none());
     assert!(!none.proxy_secret.exists());
+}
+
+/// The session's end removes the password file (`end`, in the run folder's removal) whether or
+/// not a guard read it; a missing file is fine, and a folder at the name stays.
+#[test]
+fn the_session_end_removes_the_password_file() {
+    let scratch = clauseo_connectors::fake::ScratchDir::new("proxy-secret-end").unwrap();
+    let data = scratch.path().join("data");
+    crate::write::create_dir_all(&data).unwrap();
+    let mut run = RunFolders::new(&data, key());
+    run.make(&data, &RunSweep::default()).unwrap();
+    with_proxy(&mut run);
+    write_secret(&mut run);
+    assert!(run.proxy_secret.is_file());
+    end(&run);
+    assert!(run.proxy_secret.symlink_metadata().is_err(), "not removed");
+    end(&run);
+    crate::write::create_dir_all(&run.proxy_secret).unwrap();
+    end(&run);
+    assert!(run.proxy_secret.is_dir(), "a folder at the name is left");
+}
+
+/// A link planted at the password file's name goes itself at the session's end; the file it
+/// points at is never followed, so it keeps its bytes.
+#[cfg(unix)]
+#[test]
+fn the_session_end_removes_a_link_at_the_name_never_its_target() {
+    let scratch = clauseo_connectors::fake::ScratchDir::new("proxy-secret-link").unwrap();
+    let data = scratch.path().join("data");
+    crate::write::create_dir_all(&data).unwrap();
+    let run = RunFolders::new(&data, key());
+    run.make(&data, &RunSweep::default()).unwrap();
+    let target = scratch.path().join("target");
+    crate::write::write_file(&target, b"keep me").unwrap();
+    crate::write::symlink(&target, &run.proxy_secret).unwrap();
+    end(&run);
+    assert!(
+        run.proxy_secret.symlink_metadata().is_err(),
+        "the link stayed"
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"keep me");
 }

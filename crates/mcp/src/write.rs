@@ -102,15 +102,9 @@ pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     std::fs::remove_file(path)
 }
 
-/// Empties `file` in place, never creating it: opened for writing (`OpenOptions`, without
-/// `create`), then `File::set_len(0)`. The proxy's secret file when it cannot be deleted
-/// (`browser_guard/env.rs`).
-pub(crate) fn empty_file(file: &Path) -> io::Result<()> {
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(file)?
-        .set_len(0)
-}
+/// The proxy's secret file (`browser_guard/env.rs`), read, emptied and deleted through one
+/// handle opened without following a link (`write/secret.rs`).
+pub(crate) mod secret;
 
 /// `fs::remove_dir`: a link to a folder (a Windows junction) where Chrome's profile needs a real
 /// folder (`browser_guard/chrome/profile.rs`); it removes the link, never what it points at.
@@ -336,6 +330,19 @@ pub(crate) fn open_unshared(file: &Path) -> io::Result<std::fs::File> {
 #[cfg(all(test, unix))]
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
+}
+
+/// `fs::hard_link`, for the unit tests' fixtures.
+#[cfg(test)]
+pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
+    std::fs::hard_link(original, link)
+}
+
+/// `os::windows::fs::symlink_file`, for the unit tests' fixtures (it needs Developer Mode or
+/// the right to make links).
+#[cfg(all(test, windows))]
+pub(crate) fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_file(target, link)
 }
 
 /// `fs::set_permissions` with a Unix mode, for the unit tests' fixtures.
