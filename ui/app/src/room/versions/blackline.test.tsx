@@ -333,7 +333,7 @@ test("the table notice names each table and what changed in it; past four, the f
     },
   }));
   expect(lines()).toEqual([
-    "Formatting changed in table 2 (borders, shading), table 1 in the header (first page) (merged cells), table 1 in the footnotes (row height) and table 2 in the endnotes (other formatting).",
+    "Formatting changed in table 2: borders, shading; table 1 in the header (first page): merged cells; table 1 in the footnotes: row height; table 2 in the endnotes: other formatting.",
   ]);
   await h.unmount();
   h = await comparing(() => ({
@@ -348,7 +348,7 @@ test("the table notice names each table and what changed in it; past four, the f
     },
   }));
   expect(lines()).toEqual([
-    "Formatting changed in table 2 (borders, shading), table 1 in the header (first page) (merged cells), table 1 in the footnotes (row height) and 3 more.",
+    "Formatting changed in table 2: borders, shading; table 1 in the header (first page): merged cells; table 1 in the footnotes: row height; and 3 more.",
   ]);
 });
 
@@ -366,7 +366,7 @@ test("past the host's cap the table line counts every changed table: 60 changed,
     },
   }));
   expect(lines()).toEqual([
-    "Formatting changed in table 1 (borders), table 2 (borders), table 3 (borders) and 57 more.",
+    "Formatting changed in table 1: borders; table 2: borders; table 3: borders; and 57 more.",
     MAY_DIFFER,
   ]);
 });

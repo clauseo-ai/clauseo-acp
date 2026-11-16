@@ -145,7 +145,7 @@ const HEADINGS: [string, VersionKey, BlacklinePart[]][] = [
 /** The table line's words, with their ids and the tables that show them. */
 const TABLES: [string, VersionKey, ChangedTable[]][] = [
   ["UC-452", "Formatting changed in {tables}.", FOUR_TABLES],
-  ["UC-453", "Formatting changed in {tables} and {n} more.", SIX_TABLES],
+  ["UC-453", "Formatting changed in {tables}; and {n} more.", SIX_TABLES],
   ["UC-454", "table {n}", ONE_TABLE],
   ["UC-455", "table {n} in the {part}", FOUR_TABLES],
   ["UC-456", "table {n} in the footnotes", FOUR_TABLES],
