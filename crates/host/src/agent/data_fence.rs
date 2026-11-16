@@ -135,7 +135,7 @@ pub(crate) const SHARED: [(&str, &str); 1] = [(
 
 /// The prefix of the folder name of each build of Clauseo's Python runtime under
 /// `<data>/agents/runtime` (`clauseo_agents`' `python.rs`, `FOLDER_PREFIX`):
-/// `clauseo-python-3.13.18-c2-macos-arm64`, one per pinned build.
+/// `clauseo-python-3.13.18-c4-macos-arm64`, one per pinned build.
 pub(crate) const PYTHON_RUNTIME_PREFIX: &str = "clauseo-python-";
 
 /// What of `<data>` every session may read and run, never write, as rule patterns of folders
