@@ -50,7 +50,7 @@ pub(super) fn plain_segments(text: &str, powershell: bool) -> Option<Vec<Segment
             '|' if chars.next_if_eq(&'|').is_some() => line.end_segment(false)?,
             '|' if chars.peek() != Some(&'&') => line.end_segment(true)?,
             '\'' | '"' => {
-                if line.started {
+                if line.state != Word::None {
                     // A quote inside a word joins two forms in one word: not plain.
                     return None;
                 }
@@ -73,10 +73,11 @@ pub(super) fn plain_segments(text: &str, powershell: bool) -> Option<Vec<Segment
                     return None;
                 }
                 line.word.push_str(&quoted);
-                line.started = true;
-                line.quoted = true;
+                line.state = Word::Quoted;
             }
-            '2' if !line.started && chars.clone().take(3).eq(ERR_TO_OUT.chars().skip(1)) => {
+            '2' if line.state == Word::None
+                && chars.clone().take(3).eq(ERR_TO_OUT.chars().skip(1)) =>
+            {
                 let after = chars.clone().nth(3);
                 if line.words.is_empty()
                     || after.is_some_and(|next| !matches!(next, ' ' | '\t' | ';' | '\n' | '|'))
@@ -97,19 +98,16 @@ pub(super) fn plain_segments(text: &str, powershell: bool) -> Option<Vec<Segment
                     // `~` starts a home folder at a word's start, or after `=` or `:` in Bash.
                     return None;
                 }
-                if line.quoted {
+                if line.state == Word::Quoted {
                     return None;
                 }
                 line.word.push(c);
-                line.started = true;
+                line.state = Word::Bare;
             }
             _ => return None,
         }
     }
     line.end_segment(false)?;
-    if line.pipe_pending {
-        return None;
-    }
     Some(line.segments)
 }
 
@@ -134,20 +132,26 @@ fn plain_in_double(c: char, powershell: bool) -> bool {
     !matches!(c, '$' | '`') && (powershell || !matches!(c, '\\' | '!'))
 }
 
+/// Where the current word stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Word {
+    /// Not begun.
+    #[default]
+    None,
+    /// Begun with plain characters.
+    Bare,
+    /// A quoted string (an empty one counts): nothing may follow in the same word.
+    Quoted,
+}
+
 /// The line read so far.
 #[derive(Default)]
 struct Line {
     segments: Vec<Segment>,
     words: Vec<String>,
     word: String,
-    /// Whether the current word has begun (an empty quoted word counts).
-    started: bool,
-    /// Whether the current word was quoted: nothing may follow in the same word.
-    quoted: bool,
-    /// Whether the segment being read is fed by a pipe.
-    piped_in: bool,
-    /// Whether the last separator was a pipe, so a segment must follow.
-    pipe_pending: bool,
+    state: Word,
+    /// Whether the segment being read is fed by a pipe, so it must have words.
     /// Whether `2>&1` stood in the segment being read.
     skipped_redirect: bool,
     count: usize,
@@ -156,7 +160,7 @@ struct Line {
 impl Line {
     /// The current word, ended; `None` past [`MAX_WORDS`] or for a wildcard in it.
     fn end_word(&mut self) -> Option<()> {
-        if !self.started {
+        if self.state == Word::None {
             return Some(());
         }
         let word = std::mem::take(&mut self.word);
@@ -168,8 +172,7 @@ impl Line {
             return None;
         }
         self.words.push(word);
-        self.started = false;
-        self.quoted = false;
+        self.state = Word::None;
         Some(())
     }
 
@@ -178,7 +181,7 @@ impl Line {
         self.end_word()?;
         if self.words.is_empty() {
             // `;;`, a leading `;` or an empty line ends nothing; a pipe at either end is no shape.
-            if pipe || self.pipe_pending || self.skipped_redirect {
+            if pipe || self.piped_in || self.skipped_redirect {
                 return None;
             }
             return Some(());
@@ -191,7 +194,6 @@ impl Line {
             return None;
         }
         self.piped_in = pipe;
-        self.pipe_pending = pipe;
         self.skipped_redirect = false;
         Some(())
     }

@@ -257,10 +257,10 @@ fn segment_refusal(
             literal = true;
             continue;
         } else if word.starts_with('-') {
-            match option_value(word) {
-                Some(Some(value)) => value,
-                Some(None) => continue,
-                None => return Some(Fenced::Shape),
+            match option_word(word) {
+                OptionWord::Value(value) => value,
+                OptionWord::Name => continue,
+                OptionWord::Odd => return Some(Fenced::Shape),
             }
         } else {
             word.as_str()
@@ -280,32 +280,46 @@ fn segment_refusal(
         match to.disk.fs.entry(&real) {
             Ok(Entry::Dir) => {}
             Ok(Entry::File) if to.disk.fs.links(&real).is_ok_and(|links| links == 1) => {}
-            Ok(Entry::File | Entry::Link) => return Some(Fenced::Unchecked(document.to_owned())),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Some(Fenced::Missing(document.to_owned()));
             }
-            Err(_) => return Some(Fenced::Unchecked(document.to_owned())),
+            Ok(Entry::File | Entry::Link) | Err(_) => {
+                return Some(Fenced::Unchecked(document.to_owned()));
+            }
         }
     }
     None
 }
 
-/// An option word's value: `Some(None)` for a bare option name (`-x`, `--name`),
-/// `Some(Some(value))` for `--name=value`, `None` for any other word starting with `-` (a
-/// lone `-`, which reads standard input, or an option with something stuck to it).
-fn option_value(word: &str) -> Option<Option<&str>> {
+/// What a word starting with `-` is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OptionWord<'a> {
+    /// A bare option name (`-x`, `--name`).
+    Name,
+    /// `--name=value`: the value.
+    Value(&'a str),
+    /// Anything else: a lone `-` (standard input), or an option with something stuck to it.
+    Odd,
+}
+
+/// What the word `word`, starting with `-`, is ([`OptionWord`]).
+fn option_word(word: &str) -> OptionWord<'_> {
     let (name, value) = match word.split_once('=') {
         Some((name, value)) => (name, Some(value)),
         None => (word, None),
     };
-    let bare = name.strip_prefix("--").or_else(|| name.strip_prefix('-'))?;
+    let Some(bare) = name.strip_prefix("--").or_else(|| name.strip_prefix('-')) else {
+        return OptionWord::Odd;
+    };
     let mut chars = bare.chars();
     let plain = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '-');
-    if !plain || value.is_some_and(str::is_empty) {
-        return None;
+    match value {
+        _ if !plain => OptionWord::Odd,
+        None => OptionWord::Name,
+        Some("") => OptionWord::Odd,
+        Some(value) => OptionWord::Value(value),
     }
-    Some(value)
 }
 
 /// A reading subcommand's document word among `args` ([`args_of`]) and its other words that are
