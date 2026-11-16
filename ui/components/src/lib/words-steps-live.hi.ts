@@ -34,7 +34,12 @@ export const HI = {
   "Clauseo's research guide": "Clauseo की शोध मार्गदर्शिका",
   "Clauseo's matter brief guide": "Clauseo की मामला सारांश मार्गदर्शिका",
   "Clauseo's browser guide": "Clauseo की ब्राउज़र मार्गदर्शिका",
+  // a step of Clauseo's case-law connector (tool-names.ts, caseLawOf): a search, a judgment read or a citation checked
+  // (UC-475); the lawyer's credits read (UC-478); a payment link got, never a payment (UC-479). Provisional; hi: later
+  "Searching case law.": null,
+  "Checking your case-law credits.": null,
+  "Getting a payment link for case-law credits.": null,
 } as const;
 
-/** Every key, for the banned-words screen in the tests. */
-export const stepLiveWords: Readonly<Record<keyof typeof HI, string>> = HI;
+/** Every key, for the banned-words screen in the tests (null: hi: later). */
+export const stepLiveWords: Readonly<Record<keyof typeof HI, string | null>> = HI;

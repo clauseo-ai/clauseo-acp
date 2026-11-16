@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
-// A tool Clauseo ships, as each agent names its MCP call on the way to the room. Claude (claude-agent-acp) sends the
-// tool's name as the title, `mcp__<server>__<tool>`, with the kind `other` and the tool's own input; ChatGPT (codex-acp
-// 2.2.2, `McpToolReporter`) sends `mcp.<server>.<tool>`, with the kind `execute` and the input `{server, tool,
-// arguments}`. Either way the row says what the tool does in the room's words, running, done and failed, and never
-// falls back to "Ran a task." nor shows the name. Each goes through the real room over FakeTransport.
+// A tool Clauseo ships (the browser guard, the case-law connector), as each agent names its MCP call on the way to
+// the room. Claude (claude-agent-acp) sends the tool's name as the title, `mcp__<server>__<tool>`, with the kind `other`
+// and the tool's own input; ChatGPT (codex-acp 2.2.2, `McpToolReporter`) sends `mcp.<server>.<tool>`, with the kind
+// `execute` and the input `{server, tool, arguments}`. Either way the row says what the tool does in the room's words,
+// running, done and failed, never falls back to "Ran a task." or "Did one other thing.", and never shows the name.
+// Each goes through the real room over FakeTransport.
 import { act } from "react";
 import { stepLive, type StepLiveKey } from "@clauseo/components/lib/words-steps-live.ts";
 import { steps, type StepKey } from "@clauseo/components/lib/words-steps.ts";
@@ -11,7 +12,7 @@ import { afterEach, expect, test } from "vitest";
 import { agentText, header, reset, toolCall, userMessage } from "../../testing/stream-script.ts";
 import type { ToolCallStatus, ToolKind, ViewEntry } from "../../transport/protocol.ts";
 import { mountRoom, type Harness } from "./harness.ts";
-import { toolNameOf } from "./tool-names.ts";
+import { caseLawOf, toolNameOf, type CaseLaw } from "./tool-names.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -46,9 +47,11 @@ const call = ({ title, kind, input }: Call, status: ToolCallStatus): ViewEntry =
   },
 });
 
-/** Each family's tool, its arguments, and its words: running, done, tried. */
+/** Each family's tool, what it reads as (tool-names.ts: toolNameOf's online, or caseLawOf's), its arguments, and its
+ * words: running, done, tried. */
 const FAMILIES: [
   family: string,
+  as: "online" | CaseLaw,
   server: string,
   tool: string,
   args: object,
@@ -58,6 +61,7 @@ const FAMILIES: [
 ][] = [
   [
     "browser guard",
+    "online",
     "browser",
     "agent_browser_open",
     { url: "https://example.com" },
@@ -67,6 +71,7 @@ const FAMILIES: [
   ],
   [
     "browser guard",
+    "online",
     "browser",
     "agent_browser_click",
     { selector: "@e3" },
@@ -74,23 +79,86 @@ const FAMILIES: [
     "Looked online.",
     "Tried to look online.",
   ],
+  [
+    "case law",
+    "search",
+    "case-law",
+    "search_law",
+    { query: "Section 138 NI Act" },
+    "Searching case law.",
+    "Searched case law.",
+    "Tried to search case law.",
+  ],
+  [
+    "case law",
+    "search",
+    "case-law",
+    "read_document",
+    { docid: 1 },
+    "Searching case law.",
+    "Searched case law.",
+    "Tried to search case law.",
+  ],
+  [
+    "case law",
+    "search",
+    "case-law",
+    "citator",
+    { docid: 1 },
+    "Searching case law.",
+    "Searched case law.",
+    "Tried to search case law.",
+  ],
+  [
+    "case law",
+    "search",
+    "case-law",
+    "check_citations",
+    { text: "AIR 1973 SC 1461" },
+    "Searching case law.",
+    "Searched case law.",
+    "Tried to search case law.",
+  ],
+  [
+    "case law",
+    "credits",
+    "case-law",
+    "account",
+    {},
+    "Checking your case-law credits.",
+    "Checked your case-law credits.",
+    "Tried to check your case-law credits.",
+  ],
+  [
+    "case law",
+    "payment",
+    "case-law",
+    "recharge",
+    { credits: 100 },
+    "Getting a payment link for case-law credits.",
+    "Got a payment link for case-law credits.",
+    "Tried to get a payment link for case-law credits.",
+  ],
 ];
 
-const CASES = FAMILIES.flatMap(([family, server, tool, args, running, done, tried]) =>
+const CASES = FAMILIES.flatMap(([family, as, server, tool, args, running, done, tried]) =>
   (
     [
       ["Claude", claude(server, tool, args)],
       ["ChatGPT", codex(server, tool, args)],
     ] as const
-  ).map(([agent, c]) => ({ family, agent, c, running, done, tried })),
+  ).map(([agent, c]) => ({ family, as, agent, c, running, done, tried })),
 );
 
 const shown = () => document.body.textContent ?? "";
 
 test.each(CASES)(
   "$family under $agent ($c.title): the name maps to what the tool does",
-  ({ c, running }) => {
-    expect(toolNameOf(c.title)).toEqual({ as: running === "Looking online." ? "fetch" : null });
+  ({ c, as }) => {
+    if (as === "online") {
+      expect(toolNameOf(c.title)).toEqual({ as: "fetch" });
+      expect(caseLawOf(c.title)).toBeNull();
+    } else expect(caseLawOf(c.title)).toBe(as);
   },
 );
 
@@ -101,7 +169,8 @@ test.each(CASES)(
     h.deliver([reset([ASKED, call(c, "in_progress")], header("running"))]);
     await h.settle();
     expect(h.one("working")!.textContent).toContain(stepLive("en", running));
-    expect(shown()).not.toContain("Running a task.");
+    expect(shown()).not.toContain(stepLive("en", "Running a task."));
+    expect(shown()).not.toContain(stepLive("en", "Working on it."));
     expect(shown()).not.toContain(c.title);
   },
 );
@@ -124,6 +193,8 @@ test.each(
     expect(group).toContain(steps("en", words));
     expect(group).not.toContain(steps("en", "Ran a task."));
     expect(group).not.toContain(steps("en", "Tried to run a task."));
+    expect(group).not.toContain(steps("en", "Did one other thing."));
+    expect(group).not.toContain(steps("en", "Tried one other thing."));
     expect(shown()).not.toContain(c.title);
   },
 );

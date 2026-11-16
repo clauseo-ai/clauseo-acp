@@ -1,6 +1,7 @@
 // UC's entries for two activity rows in plain words (UC-240 to UC-249): a skill read as a guide, never by its internal
 // name ("clauseo:legal-drafting"; room/thread/skill-words.ts), and a task named by its own title where it gave no other
-// words, in place of "Ran a task.". The real room over FakeTransport.
+// words, in place of "Ran a task."; and a step of Clauseo's case-law connector in its own words (UC-475 to UC-483).
+// The real room over FakeTransport.
 import type { ToolCallEntry, ToolCallStatus, ToolKind, ViewEntry } from "../transport/protocol.ts";
 import { step, toolCall, userMessage } from "../testing/stream-script.ts";
 import type { Entry } from "./entry.ts";
@@ -23,6 +24,13 @@ function call(title: string, kind: ToolKind, status: ToolCallStatus, raw?: objec
 const skill = (name: string, status: ToolCallStatus) =>
   call(`Load skill: ${name}`, "other", status, { skill: name });
 const task = (status: ToolCallStatus) => call("Run the checks", "execute", status);
+/** A call of the case-law connector's `tool`: as ChatGPT names it (codex-acp: `mcp.case-law.<tool>`, execute), or as
+ * Claude does (`mcp__case-law__<tool>`, other). */
+const law = (agent: "chatgpt" | "claude", tool: string, status: ToolCallStatus, args: object) =>
+  agent === "chatgpt"
+    ? call(`mcp.case-law.${tool}`, "execute", status, { server: "case-law", tool, arguments: args })
+    : call(`mcp__case-law__${tool}`, "other", status, args);
+const SOUGHT = { query: "Section 138 NI Act dishonour of cheque" };
 
 const host = (state: ThreadState) => () => threadHost(state);
 const opened = (c: ViewEntry) => () => (
@@ -95,5 +103,60 @@ export const UC_TOOL_ROWS: Entry[] = [
     words: stepWords("Tried to read a guide."),
     screen: "room/thread",
     render: opened(skill("firm:house-style", "failed")),
+  },
+  // a step of Clauseo's case-law connector (room/thread/tool-names.ts, caseLawOf), under either agent
+  {
+    id: "UC-475",
+    words: stepLiveWords("Searching case law."),
+    screen: "room/thread",
+    render: running(law("chatgpt", "search_law", "in_progress", SOUGHT)),
+  },
+  {
+    id: "UC-476",
+    words: stepWords("Searched case law."),
+    screen: "room/thread",
+    render: opened(law("claude", "search_law", "completed", SOUGHT)),
+  },
+  {
+    id: "UC-477",
+    words: stepWords("Tried to search case law."),
+    screen: "room/thread",
+    render: opened(law("chatgpt", "citator", "failed", { docid: 1 })),
+  },
+  {
+    id: "UC-478",
+    words: stepLiveWords("Checking your case-law credits."),
+    screen: "room/thread",
+    render: running(law("claude", "account", "in_progress", {})),
+  },
+  {
+    id: "UC-479",
+    words: stepLiveWords("Getting a payment link for case-law credits."),
+    screen: "room/thread",
+    render: running(law("chatgpt", "recharge", "in_progress", {})),
+  },
+  {
+    id: "UC-480",
+    words: stepWords("Checked your case-law credits."),
+    screen: "room/thread",
+    render: opened(law("chatgpt", "account", "completed", {})),
+  },
+  {
+    id: "UC-481",
+    words: stepWords("Tried to check your case-law credits."),
+    screen: "room/thread",
+    render: opened(law("claude", "account", "failed", {})),
+  },
+  {
+    id: "UC-482",
+    words: stepWords("Got a payment link for case-law credits."),
+    screen: "room/thread",
+    render: opened(law("claude", "recharge", "completed", {})),
+  },
+  {
+    id: "UC-483",
+    words: stepWords("Tried to get a payment link for case-law credits."),
+    screen: "room/thread",
+    render: opened(law("chatgpt", "recharge", "failed", {})),
   },
 ];
