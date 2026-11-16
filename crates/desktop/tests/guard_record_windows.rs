@@ -35,7 +35,12 @@ fn shells() -> Vec<String> {
     let pwsh = std::env::var_os("ProgramFiles")
         .map(|folder| Path::new(&folder).join(r"PowerShell\7\pwsh.exe"))
         .filter(|pwsh| pwsh.is_file());
-    // Without PowerShell 7 the runs are Windows PowerShell's alone (win-02 has both).
+    // Without PowerShell 7 a local run is Windows PowerShell's alone; on CI it must be there.
+    let on_ci = std::env::var_os("CI").is_some_and(|value| !value.is_empty());
+    assert!(
+        pwsh.is_some() || !on_ci,
+        "PowerShell 7 is not at %ProgramFiles%\\PowerShell\\7\\pwsh.exe on this CI runner"
+    );
     shells.extend(pwsh.map(|pwsh| pwsh.to_string_lossy().into_owned()));
     shells
 }
