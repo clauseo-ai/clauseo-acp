@@ -9,7 +9,7 @@ use crate::observe::{Events, started};
 use crate::permissions::{KINDS_ANSWERS, PERM, answer_from, until_first_request};
 use crate::support::{Dir, FAKE, Running, Scenario};
 
-/// Thread A (`permission-kinds`) holds the writer at `perm-1`; thread B (`prompt-stream`) in
+/// Thread A (`permission-kinds-once`) holds the writer at `perm-1`; thread B (`prompt-stream`) in
 /// the same matter has sent a prompt whose turn waits behind A.
 struct TwoThreads {
     matter: MatterId,
@@ -25,7 +25,7 @@ fn dir(test: &str) -> Dir {
     Dir::new(
         test,
         &[
-            (PERM, Scenario::Bundled("permission-kinds")),
+            (PERM, Scenario::Local("permission-kinds-once")),
             (FAKE, Scenario::Bundled("prompt-stream")),
         ],
     )

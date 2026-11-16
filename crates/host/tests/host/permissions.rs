@@ -10,16 +10,17 @@ use crate::support::{Dir, Running, Scenario, matter_with_thread};
 use crate::turn::change_label;
 use crate::write;
 
-/// The agent id mapped to `permission-kinds`.
+/// The agent id mapped to `permission-kinds-once`.
 pub(crate) const PERM: &str = "perm-agent";
 
-/// The answers `permission-kinds` expects, in order.
+/// The answers `permission-kinds-once` expects, in order: the host drops the agent's
+/// `allow-always` from every card, so the second is `allow-once` too.
 pub(crate) const KINDS_ANSWERS: [&str; 4] =
-    ["allow-once", "allow-always", "reject-once", "reject-always"];
+    ["allow-once", "allow-once", "reject-once", "reject-always"];
 
-/// A dir whose `perm-agent` plays `permission-kinds`.
+/// A dir whose `perm-agent` plays `permission-kinds-once`.
 fn kinds_dir(test: &str) -> Dir {
-    Dir::new(test, &[(PERM, Scenario::Bundled("permission-kinds"))])
+    Dir::new(test, &[(PERM, Scenario::Local("permission-kinds-once"))])
 }
 
 /// Answers the requests of `thread` from the `first`-th on (0-based) with `options`, waiting

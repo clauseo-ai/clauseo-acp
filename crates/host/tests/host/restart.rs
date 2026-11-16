@@ -23,7 +23,7 @@ fn log(events: &Events) -> Vec<(u64, String)> {
 fn reconcile_ends_interrupted_turn_once() {
     let dir = Dir::new(
         "reconcile_ends_interrupted_turn_once",
-        &[(PERM, Scenario::Bundled("permission-kinds"))],
+        &[(PERM, Scenario::Local("permission-kinds-once"))],
     );
     let host = dir.start(0);
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], PERM);

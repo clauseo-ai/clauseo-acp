@@ -237,7 +237,7 @@ fn locate_refusals_leave_the_matter_unchanged() {
 fn relocate_while_a_turn_runs_is_refused() {
     let dir = Dir::new(
         "relocate_while_a_turn_runs",
-        &[(PERM, Scenario::Bundled("permission-kinds"))],
+        &[(PERM, Scenario::Local("permission-kinds-once"))],
     );
     let host = dir.start(0);
     let folder = dir.folder("m", &[("brief.txt", "Clause 4 draft\n")]);

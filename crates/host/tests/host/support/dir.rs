@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use clauseo_connectors::{MemoryStore, SecretStore as _};
 use clauseo_host::{Host, HostConfig, ManualClock, SequentialIds, WithMatterTrash as _};
 use clauseo_process::{Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{ErrorCode, Timestamp};
@@ -24,7 +25,17 @@ pub(crate) struct Dir {
     root: PathBuf,
     data: PathBuf,
     work: PathBuf,
+    /// The secret store "Always for this matter" keeps its key in, holding [`ALWAYS_KEY`];
+    /// none: the host keeps nothing ([`Dir::without_always_secrets`]).
+    always_secrets: Option<Arc<MemoryStore>>,
 }
+
+/// The account the host keeps the kept-rules key under (decision record 0063).
+const ALWAYS_KEY_ACCOUNT: &str = "always-allowed-hmac";
+
+/// The kept-rules key every test host finds in its secret store, so a test can write a rules
+/// file the host takes ([`crate::always::keep`]).
+pub(crate) const ALWAYS_KEY: [u8; 32] = [0x5a; 32];
 
 impl Dir {
     /// A fresh folder for `test`, with `agents` written into `settings.json`.
@@ -40,9 +51,24 @@ impl Dir {
         write::create_dir_all(&root.join("data"));
         write::create_dir_all(&work);
         let data = root.join("data");
-        let dir = Self { root, data, work };
+        let always_secrets = Arc::new(MemoryStore::new());
+        always_secrets
+            .set(ALWAYS_KEY_ACCOUNT, &ALWAYS_KEY)
+            .expect("a memory store keeps the key");
+        let dir = Self {
+            root,
+            data,
+            work,
+            always_secrets: Some(always_secrets),
+        };
         dir.set_agents(agents);
         dir
+    }
+
+    /// This dir's hosts with no secret store for "Always for this matter": they keep nothing.
+    pub(crate) fn without_always_secrets(mut self) -> Self {
+        self.always_secrets = None;
+        self
     }
 
     /// Writes `settings.json` mapping each id to `fake_agent --scenario <scenario>`. Read at
@@ -154,7 +180,12 @@ impl Dir {
     ) -> HostConfig {
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(locations, &SystemFiles, &[&policy]);
-        crate::idle_stop::off(HostConfig::new(effective, launcher))
+        let config = crate::idle_stop::off(HostConfig::new(effective, launcher));
+        let config = match &self.always_secrets {
+            Some(secrets) => config.with_always_secrets(Arc::<MemoryStore>::clone(secrets)),
+            None => config,
+        };
+        config
             // A silent turn is never probed: no host test touches the network (D-050).
             .with_quiet_watch(false)
             .with_limits_reader(Arc::new(NoReader))

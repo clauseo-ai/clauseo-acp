@@ -87,7 +87,7 @@ fn notices(
 fn a_blocked_site_is_noticed_once_per_turn_with_a_count() {
     let dir = Dir::new(
         "site_blocked_per_turn",
-        &[(PERM, Scenario::Bundled("permission-kinds"))],
+        &[(PERM, Scenario::Local("permission-kinds-once"))],
     );
     let host = dir.start(0);
     let mut sub = subscribe(&host);

@@ -90,7 +90,7 @@ fn working_then_stopped_then_idle_once_seen() {
 fn a_permission_then_an_answer_ready_which_survives_a_restart() {
     let dir = Dir::new(
         "status_permission_ready",
-        &[(PERM, Scenario::Bundled("permission-kinds"))],
+        &[(PERM, Scenario::Local("permission-kinds-once"))],
     );
     let host = dir.start(0);
     let (matter, thread, _) =
@@ -167,7 +167,7 @@ fn a_permission_in_one_thread_outranks_an_answer_ready_in_another() {
         "status_precedence",
         &[
             (FAKE, Scenario::Bundled("prompt-stream")),
-            (PERM, Scenario::Bundled("permission-kinds")),
+            (PERM, Scenario::Local("permission-kinds-once")),
         ],
     );
     let host = dir.start(0);

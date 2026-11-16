@@ -50,7 +50,7 @@ struct Rig {
 
 impl Rig {
     fn new(test: &str, stetdoc: bool) -> Self {
-        let dir = Dir::new(test, &[(PERM, Scenario::Bundled("permission-kinds"))]);
+        let dir = Dir::new(test, &[(PERM, Scenario::Local("permission-kinds-once"))]);
         let bin = dir.home().join("stetdoc");
         let program = fake_into(&bin);
         write::write(&bin.join("check.json"), CHECK.as_bytes());
@@ -325,7 +325,7 @@ fn a_list_past_one_mib_reads_cut_to_its_caps() {
 fn copies_a_crash_left_are_swept_at_start() {
     let dir = Dir::new(
         "revisions-sweep",
-        &[(PERM, Scenario::Bundled("permission-kinds"))],
+        &[(PERM, Scenario::Local("permission-kinds-once"))],
     );
     let left = dir
         .data()

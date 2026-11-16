@@ -147,7 +147,6 @@ fn a_normal_forced_ask_task_raises_one_card() {
 /// forced ask keeps it: the one card of the normal task offers "Always allow changes to files in
 /// this matter", and answering it reaches the agent as its `allow-once`.
 #[test]
-#[ignore = "needs the option rewrite that adds clauseo.always (always-for-this-matter core)"]
 fn the_one_card_offers_always_for_this_matter_in_forced_ask() {
     let connector = Connector::new(true);
     let (_dir, host, thread) = with_case_law(

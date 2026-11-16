@@ -1,8 +1,8 @@
 //! The lawyer's side of "Always for this matter" (`actor/kept.rs`): `KeptPermissions` lists a
 //! matter's kept rules in plain kinds, `RemoveKeptPermission` takes one out of the file and out
 //! of the running agent (even when the file never held it, and from a launch that read the file
-//! before the removal), and an "Always" that kept nothing logs a notice saying it was allowed
-//! this once only.
+//! before the removal), and an "Always" that kept nothing (the matter filled up while its card
+//! waited) logs a notice saying it was allowed this once only.
 
 use std::path::Path;
 
@@ -16,16 +16,7 @@ use crate::support::{Dir, Running, Scenario, matter_with_thread};
 
 const CLAUDE: &str = "claude-acp";
 
-/// Writes `rules` as `matter`'s kept rules, as the host stores them.
-fn keep(dir: &Dir, matter: MatterId, rules: &[&str]) {
-    let file = dir
-        .data()
-        .join("agent-state")
-        .join(matter.to_string())
-        .join("claude-allow.json");
-    let text = serde_json::json!({"version": 1, "allow": rules}).to_string();
-    crate::write::write(&file, text.as_bytes());
-}
+use crate::always::{ALWAYS, keep};
 
 /// The rule form of `path`, an absolute path: `//x/y` for `/x/y`, `//c/x/y` for `C:\x\y`.
 fn rule_form(path: &Path) -> String {
@@ -58,16 +49,16 @@ fn notices(events: &crate::observe::Events) -> Vec<Notice> {
 fn the_kept_rules_are_listed_in_plain_kinds() {
     let dir = Dir::new("kept_list", &[(CLAUDE, Scenario::Local("claude-always"))]);
     let host = dir.start(0);
-    let (matter, _thread, folder) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
+    let (matter, _thread, _folder) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
     assert_eq!(kept(&host, matter), Vec::new(), "none kept yet");
-    let edit = format!("Edit({}/work/out.txt)", rule_form(&folder));
     let outside = std::env::temp_dir().join("elsewhere.txt");
     let read = format!("Read({})", rule_form(&outside));
     let rules = [
         "Bash(wc -l notes.txt)",
         "WebFetch(domain:example.com)",
         "mcp__court__find_case",
-        edit.as_str(),
+        "Edit(*)",
+        "Run(wc -l notes.txt) in drafts",
         read.as_str(),
     ];
     keep(&dir, matter, &rules);
@@ -84,7 +75,7 @@ fn the_kept_rules_are_listed_in_plain_kinds() {
         })
         .collect();
     assert_eq!(
-        shown[..4],
+        shown[..5],
         [
             (
                 "Bash(wc -l notes.txt)",
@@ -104,11 +95,17 @@ fn the_kept_rules_are_listed_in_plain_kinds() {
                 "find_case",
                 Some("court")
             ),
-            (edit.as_str(), KeptKind::Edit, "work/out.txt", None),
+            ("Edit(*)", KeptKind::Edit, "", None),
+            (
+                "Run(wc -l notes.txt) in drafts",
+                KeptKind::Run,
+                "wc -l notes.txt",
+                None
+            ),
         ]
     );
     // A file outside the matter is shown whole.
-    let last = &listed[4];
+    let last = &listed[5];
     assert_eq!(
         (last.rule.as_str(), last.kind),
         (read.as_str(), KeptKind::Read)
@@ -199,7 +196,7 @@ fn a_removed_rule_the_file_lost_leaves_the_running_agent() {
     let (matter, thread, _folder) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Run the tests.");
-    answer_from(&host, &mut events, thread, 0, &["allow-with-updates"]);
+    answer_from(&host, &mut events, thread, 0, &[ALWAYS]);
     events.until_turn_ended(turn);
     // Once its write is done, the file loses the rule, as if the write had failed.
     let file = dir
@@ -227,6 +224,10 @@ fn a_removed_rule_the_file_lost_leaves_the_running_agent() {
     host.shutdown();
 }
 
+/// "Always" on a card whose rule finds the matter full when it is answered keeps nothing: two
+/// cards wait at once in a matter keeping 499 rules (the most is 500), both offer "Always", and
+/// the lawyer picks it on both. The second logs a notice that it was allowed this once only. A
+/// wildcard command offers no "Always" at all.
 #[test]
 fn an_always_that_keeps_nothing_says_it_was_allowed_once_only() {
     let dir = Dir::new(
@@ -235,15 +236,16 @@ fn an_always_that_keeps_nothing_says_it_was_allowed_once_only() {
     );
     let host = dir.start(0);
     let (matter, thread, _folder) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
+    let many: Vec<String> = (0..499).map(|n| format!("Bash(wc -l f{n}.txt)")).collect();
+    let many: Vec<&str> = many.iter().map(String::as_str).collect();
+    keep(&dir, matter, &many);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "List the Word files.");
-    answer_from(
-        &host,
-        &mut events,
-        thread,
-        0,
-        &["allow-with-updates", "allow-with-updates"],
-    );
+    answer_from(&host, &mut events, thread, 0, &["allow-once"]);
+    events.until("permission request 3", |e| {
+        e.permission_requests().len() >= 3
+    });
+    answer_from(&host, &mut events, thread, 1, &[ALWAYS, ALWAYS]);
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
@@ -257,18 +259,16 @@ fn an_always_that_keeps_nothing_says_it_was_allowed_once_only() {
             (notice.level, notice.kind)
         })
         .collect();
-    let once = |reason| {
-        (
-            NoticeLevel::Info,
-            Some(NoticeKind::AlwaysNotKept { reason }),
-        )
-    };
-    assert_eq!(
-        said,
-        [once(NotKeptReason::NoRule), once(NotKeptReason::Refused)],
-        "{}",
-        events.dump()
+    let full = (
+        NoticeLevel::Info,
+        Some(NoticeKind::AlwaysNotKept {
+            reason: NotKeptReason::Full,
+        }),
     );
-    assert_eq!(kept(&host, matter), Vec::new(), "nothing was kept");
+    assert_eq!(said, [full], "{}", events.dump());
+    crate::always::until_kept(&dir, matter, 500);
+    let rules: Vec<String> = kept(&host, matter).into_iter().map(|k| k.rule).collect();
+    assert!(rules.contains(&"Bash(wc -l a.txt)".to_owned()));
+    assert!(!rules.contains(&"Bash(wc -l b.txt)".to_owned()));
     host.shutdown();
 }

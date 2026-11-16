@@ -117,7 +117,7 @@ impl Scenario {
 /// The test's folder, [`Dir`], and the host configs it starts.
 #[path = "support/dir.rs"]
 mod dir;
-pub(crate) use dir::Dir;
+pub(crate) use dir::{ALWAYS_KEY, Dir};
 
 /// The harness's limits reader: every read fails at once, and nothing is launched.
 pub(crate) struct NoReader;

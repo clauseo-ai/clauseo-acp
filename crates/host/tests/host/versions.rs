@@ -211,7 +211,7 @@ fn restore_of_the_current_version_writes_nothing() {
 fn restore_refused_while_turn_runs() {
     let dir = Dir::new(
         "restore_refused_while_turn_runs",
-        &[(PERM, Scenario::Bundled("permission-kinds"))],
+        &[(PERM, Scenario::Local("permission-kinds-once"))],
     );
     let host = dir.start(0);
     let (matter, thread, folder) =

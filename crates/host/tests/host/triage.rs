@@ -136,7 +136,7 @@ fn the_morning_sweep_marks_exactly_the_quiet_threads_once() {
         "triage_sweep",
         &[
             (FAKE, Scenario::Bundled("prompt-stream")),
-            (PERM, Scenario::Bundled("permission-kinds")),
+            (PERM, Scenario::Local("permission-kinds-once")),
             (SLOW, Scenario::Bundled("cancel-unanswered")),
             (SEND, Scenario::Bundled("send-now")),
         ],
