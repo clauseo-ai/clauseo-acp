@@ -3,8 +3,8 @@
 //! resolver, as this crate's own tests have through `start_with`. A test that makes up its sites
 //! (the host's block list tests, whose upstream is a local stand-in) then resolves them with no
 //! DNS, so it passes on an offline runner (CI's network namespace with loopback only), where a
-//! real lookup fails and open mode skips the address check (a name through an upstream goes on
-//! by name alone, `name_only`; a direct route gets 502). Only the resolver is
+//! real lookup fails (a name through an upstream then goes on by name alone in open mode, since
+//! the probe of `name_only` fails too; a direct route gets 502). Only the resolver is
 //! replaced: connects are real sockets, and every check, the machine's own networks
 //! (`local_net`, read from the OS) and `is_public` included, is the production one.
 

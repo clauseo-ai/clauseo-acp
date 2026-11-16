@@ -1,13 +1,17 @@
 //! The Windows lookup: `WinHttpGetIEProxyConfigForCurrentUser`; when auto-detect is on or an
 //! auto-config URL is set, `WinHttpGetProxyForUrl` (WPAD by DHCP and DNS, then the URL); else
 //! the static proxy string with its bypass list. Every string `WinHTTP` returns is freed with
-//! `GlobalFree`, and the session handle is closed, when its owner drops.
+//! `GlobalFree`, and the session handle is closed, when its owner drops. For the firm's own
+//! names (`firm.rs`): the bypass list, and the registry's DNS suffixes and NRPT rules.
 #![expect(
     unsafe_code,
-    reason = "FFI to WinHTTP's proxy configuration and PAC calls"
+    reason = "FFI to WinHTTP's proxy configuration and PAC calls, and the registry's DNS keys"
 )]
 
-use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
+use windows::Win32::Foundation::{
+    ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, GlobalFree,
+    HGLOBAL,
+};
 use windows::Win32::Networking::WinHttp::{
     WINHTTP_ACCESS_TYPE_NAMED_PROXY, WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_AUTO_DETECT_TYPE_DHCP,
     WINHTTP_AUTO_DETECT_TYPE_DNS_A, WINHTTP_AUTOPROXY_AUTO_DETECT, WINHTTP_AUTOPROXY_CONFIG_URL,
@@ -15,7 +19,13 @@ use windows::Win32::Networking::WinHttp::{
     WINHTTP_CURRENT_USER_IE_PROXY_CONFIG, WINHTTP_PROXY_INFO, WinHttpCloseHandle,
     WinHttpGetIEProxyConfigForCurrentUser, WinHttpGetProxyForUrl, WinHttpOpen, WinHttpSetTimeouts,
 };
+use windows::Win32::System::Registry::{
+    HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY, RRF_RT_REG_MULTI_SZ, RRF_RT_REG_SZ,
+    RegCloseKey, RegEnumKeyExW, RegOpenKeyExW,
+};
 use windows::core::{BOOL, HRESULT, HSTRING, PCWSTR, PWSTR, w};
+
+use crate::windows::{RecordError, read_registry_units};
 
 use super::os::OsError;
 use super::{Configured, PacSetting, Route};
@@ -119,29 +129,121 @@ pub(super) fn bypass_list() -> Option<String> {
 }
 
 /// The machine's DNS suffixes the registry names, for the firm's own names (`firm.rs`): the
-/// primary suffix (`Domain`) and the search list of `Tcpip\Parameters`, and the search list
-/// Group Policy sets. A value that is missing adds nothing; one that cannot be read is logged by
-/// source only.
-pub(super) fn dns_search_list() -> Vec<String> {
+/// primary suffix (`Domain`) and the search list of `Tcpip\Parameters`, and the search list and
+/// primary suffix Group Policy sets. A value that is missing adds nothing; `None` when one
+/// cannot be read.
+pub(super) fn dns_search_list() -> Option<Vec<String>> {
     let parameters = w!("SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters");
     let policy = w!("SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient");
+    let primary = w!("SOFTWARE\\Policies\\Microsoft\\System\\DNSClient");
     let mut found = Vec::new();
     for (key, value) in [
         (parameters, w!("Domain")),
         (parameters, w!("SearchList")),
         (policy, w!("SearchList")),
+        (primary, w!("NV PrimaryDnsSuffix")),
     ] {
-        match crate::windows::read_registry_string(key, value) {
-            Ok(Some(text)) => found.extend(
-                text.split([',', ';', ' '])
-                    .filter(|entry| !entry.is_empty())
-                    .map(str::to_owned),
-            ),
-            Ok(None) => {}
-            Err(_unreadable) => super::firm::unread("tcpip_registry"),
+        let text = crate::windows::read_registry_string(key, value).ok()?;
+        found.extend(
+            text.unwrap_or_default()
+                .split([',', ';', ' '])
+                .filter(|entry| !entry.is_empty())
+                .map(str::to_owned),
+        );
+    }
+    Some(found)
+}
+
+/// The Name Resolution Policy Table's rules, Group Policy's and the local ones (which
+/// `Add-DnsClientNrptRule` and VPN profiles write), under `HKLM`: each rule a subkey whose
+/// `Name` lists its namespaces (`.firm.example` for a suffix).
+const NRPT_TABLES: [&str; 2] = [
+    "SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient\\DnsPolicyConfig",
+    "SYSTEM\\CurrentControlSet\\Services\\Dnscache\\Parameters\\DnsPolicyConfig",
+];
+
+/// Every namespace of [`NRPT_TABLES`]' rules, raw, for the firm's own names (`firm.rs`). A table
+/// or a rule's `Name` that is missing adds nothing; `None` when one cannot be read.
+pub(super) fn nrpt_namespaces() -> Option<Vec<String>> {
+    let mut found = Vec::new();
+    for table in NRPT_TABLES {
+        for rule in subkeys(table)? {
+            let wide: Vec<u16> = format!("{table}\\{rule}")
+                .encode_utf16()
+                .chain([0])
+                .collect();
+            let path = PCWSTR(wide.as_ptr());
+            let name = w!("Name");
+            let units = match read_registry_units(path, name, RRF_RT_REG_MULTI_SZ) {
+                Err(RecordError::WrongType) => read_registry_units(path, name, RRF_RT_REG_SZ),
+                read => read,
+            };
+            found.extend(super::firm::multi_sz(&units.ok()?.unwrap_or_default())?);
         }
     }
-    found
+    Some(found)
+}
+
+/// The names of `HKLM\<path>`'s subkeys (64-bit view); none when it does not exist, `None`
+/// when it or a name cannot be read.
+fn subkeys(path: &str) -> Option<Vec<String>> {
+    let path = HSTRING::from(path);
+    let mut opened = HKEY::default();
+    // SAFETY: the path is NUL-terminated and lives for the call; `opened` is a live
+    // out-pointer, closed by `OpenKey`.
+    let open = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &path,
+            None,
+            KEY_READ | KEY_WOW64_64KEY,
+            &raw mut opened,
+        )
+    };
+    match open {
+        ERROR_SUCCESS => {}
+        ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => return Some(Vec::new()),
+        _unreadable => return None,
+    }
+    let key = OpenKey(opened);
+    let mut names = Vec::new();
+    for index in 0u32.. {
+        // A key name is at most 255 characters.
+        let mut name = [0u16; 256];
+        let mut len = 256u32;
+        // SAFETY: `name` is live and `len` units long for the call, and `len` is a live
+        // out-pointer; the class and the last-write time are not asked for.
+        let status = unsafe {
+            RegEnumKeyExW(
+                key.0,
+                index,
+                Some(PWSTR(name.as_mut_ptr())),
+                &raw mut len,
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        match status {
+            ERROR_SUCCESS => {}
+            ERROR_NO_MORE_ITEMS => break,
+            _unreadable => return None,
+        }
+        let units = name.get(..usize::try_from(len).ok()?)?;
+        names.push(String::from_utf16(units).ok()?);
+    }
+    Some(names)
+}
+
+/// An open registry key, closed on drop.
+struct OpenKey(HKEY);
+
+impl Drop for OpenKey {
+    fn drop(&mut self) {
+        // SAFETY: opened by `RegOpenKeyExW` and closed once, here.
+        let _closed = unsafe { RegCloseKey(self.0) };
+    }
 }
 
 /// A string `WinHTTP` allocated, freed with `GlobalFree` on drop.

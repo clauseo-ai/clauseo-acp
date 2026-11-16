@@ -137,6 +137,8 @@ pub use marker::setup_state;
 #[cfg(windows)]
 pub(crate) use record::read_string as read_registry_string;
 #[cfg(windows)]
+pub(crate) use record::read_units as read_registry_units;
+#[cfg(windows)]
 pub use record::{
     RecordError, sandbox_data_dir, sandbox_group_sid, sandbox_owner_sid, sandbox_pool_sids,
 };

@@ -11,8 +11,8 @@
 //! (listener, host, port, verdict, why, bytes each way) to `--log`, or to stderr without it,
 //! and every denial as a JSON line on stderr. Neither token is ever logged. The proxy's own
 //! `tracing` lines at info and above, from Clauseo's crates, go to stderr too, each as
-//! `{"log":{"level":..,"target":..,"message":..,<fields>}}` (the learned firm names' counts
-//! among them, in open mode). `--open` admits
+//! `{"log":{"level":..,"target":..,"message":..,<fields>}}` (in open mode, the name-only path's
+//! probe turning it on or off, and the learned firm names' counts). `--open` admits
 //! any public host (`ProxyMode::Open`) in place of the allowlist. `--block` (may repeat) loads
 //! a block list naming those hosts as phishing; without it no list is loaded, the proxy logs
 //! once that nothing is blocked, and `--open` does not start (open mode needs a list). Runs

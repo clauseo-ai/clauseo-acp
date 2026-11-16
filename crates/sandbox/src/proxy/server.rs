@@ -25,7 +25,7 @@ use crate::proxy::allowlist::Name;
 use crate::proxy::head::{self, Head, HeadError, ParseError, Request, within};
 use crate::proxy::load::{Load, PendingSlot, SocketSlot};
 use crate::proxy::local_net::LocalNets;
-use crate::proxy::name_only::{FirmNames, Streak};
+use crate::proxy::name_only::{FirmRead, Gate, PROBE_WAIT};
 use crate::proxy::net::Network;
 use crate::proxy::relay::{Idle, Stream, linger};
 use crate::proxy::target::{Kind, Target, classify};
@@ -34,7 +34,7 @@ use crate::proxy::{
     Allowlist, Exchange, Limits, Listener, Record, Shared, SharedClock, Unopened, Verdict, connect,
     http,
 };
-use crate::{CappedSink, Denial, DenialSink, HostRefusal, Reachability};
+use crate::{CappedSink, Clock as _, Denial, DenialSink, HostRefusal, Reachability};
 
 mod blocked;
 
@@ -60,9 +60,10 @@ pub(crate) struct Parts {
     pub(crate) record: Option<Record>,
     pub(crate) limits: Limits,
     pub(crate) local: LocalNets,
-    /// The firm's own suffixes, for open mode's name-only path (empty in other proxies).
-    pub(crate) firm: FirmNames,
-    /// The clock of the name-only path's [`Streak`].
+    /// The read of the firm's own suffixes: open mode's browser listener alone has one, and with
+    /// it the name-only path and its probe.
+    pub(crate) firm: Option<Arc<FirmRead>>,
+    /// The clock of the name-only path's probe ([`Gate`]).
     pub(crate) dns_clock: SharedClock,
 }
 
@@ -84,10 +85,8 @@ pub(crate) struct Ctx {
     remembered: route::Remembered,
     /// The machine's own networks, read at start, which no connection may reach.
     local: LocalNets,
-    /// The firm's own suffixes, which the name-only path refuses.
-    firm: FirmNames,
-    /// Failed local lookups in a row on the name-only path, on `dns_clock`.
-    streak: RefCell<Streak>,
+    /// The name-only path's probe state, on `dns_clock`; none where the path is not.
+    gate: Option<RefCell<Gate>>,
     dns_clock: SharedClock,
 }
 
@@ -106,6 +105,10 @@ pub(crate) fn run(
     browser: Option<&Async<TcpListener>>,
     stopped: oneshot::Receiver<()>,
 ) {
+    let gate = parts.firm.map(|read| {
+        let wait = parts.limits.connect.min(PROBE_WAIT);
+        RefCell::new(Gate::new(Arc::clone(&parts.net), read, wait))
+    });
     let ctx = Rc::new(Ctx {
         shared: parts.shared,
         silent: parts.silent,
@@ -121,11 +124,15 @@ pub(crate) fn run(
         load: Rc::new(Load::default()),
         remembered: route::Remembered::default(),
         local: parts.local,
-        firm: parts.firm,
-        streak: RefCell::new(Streak::default()),
+        gate,
         dns_clock: parts.dns_clock,
     });
     let executor = LocalExecutor::new();
+    // The first probe, at start, so the first failed lookup seldom waits for it.
+    if let Some(gate) = &ctx.gate {
+        let first = gate.borrow_mut().start(ctx.dns_clock.now());
+        executor.spawn(first).detach();
+    }
     async_io::block_on(executor.run(async {
         let work = join3(
             accept(&executor, &ctx, agent, Listener::Agent),
@@ -359,7 +366,10 @@ impl Ctx {
                 }
             },
             Route::Http { host, port } => {
-                if screen::screen(self, &target, exchange).await.is_err() {
+                if screen::screen(self, &target, &host, exchange)
+                    .await
+                    .is_err()
+                {
                     return self
                         .answer(client, exchange, 403, Verdict::Refused, "")
                         .await;

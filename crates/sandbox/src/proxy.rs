@@ -31,12 +31,13 @@
 //! resolved locally too and refused if any local answer is not. When local DNS fails, times out
 //! or finds nothing, a name the allowlist passed goes upstream unchecked (a desktop that
 //! resolves only through its proxy): a known gap, limited to listed names. A name let in without
-//! the list (open mode's browser listener) takes the name-only path then (`name_only`): local
-//! DNS is waited for 2 s at most, and the name goes upstream unresolved only as a CONNECT to a
-//! name with a dot under no internal suffix and none of the firm's own, else is refused
-//! (`DnsUnavailable`). Either way the upstream resolves the name again itself, so a DNS answer
-//! that changes between the proxy's lookup and the upstream's (rebinding) can still reach an
-//! address the proxy did not check; the firm's proxy decides what it reaches.
+//! the list (open mode's browser listener) is refused then (`DnsUnavailable`), unless a probe of
+//! fixed public names finds that local DNS answers none (`name_only`): only then does it go
+//! upstream unresolved, as a CONNECT to a name with a dot under no internal suffix, no
+//! name-to-address service and none of the firm's own, never the proxy's own host. Either way
+//! the upstream resolves the name again itself, so a DNS answer that changes between the proxy's
+//! lookup and the upstream's (rebinding) can still reach an address the proxy did not check; the
+//! firm's proxy decides what it reaches.
 //!
 //! A sink or record callback runs on the proxy thread and must not block: one that blocks stalls
 //! every connection of the launch, and `ProxyHandle`'s drop, which joins the thread.
@@ -87,7 +88,7 @@ pub use upstream::{
 use crate::{Clock, DenialSink, Error, HostRefusal, SystemClock};
 use allowlist::Name;
 use local_net::LocalNets;
-use name_only::FirmNames;
+use name_only::FirmRead;
 use net::{Network, SystemNetwork};
 pub(crate) use shared::{Shared, Unopened};
 use token::Token;
@@ -293,8 +294,8 @@ pub(crate) struct Options {
     pub(crate) reach: Option<Box<Reach>>,
     /// The machine's own networks in place of the OS's list (the test seam).
     pub(crate) local: Option<LocalNets>,
-    /// The firm's own suffixes in place of those learned from the OS (the test seam).
-    pub(crate) firm: Option<FirmNames>,
+    /// The read of the firm's own suffixes in place of the OS's (the test seam).
+    pub(crate) firm: Option<Arc<FirmRead>>,
 }
 
 impl Default for Options {
@@ -383,15 +384,12 @@ pub(crate) fn start_with(
         Some(local) => local,
         None => local_nets(open_browser)?,
     };
-    // Only open mode's browser listener has the name-only path.
-    let firm = match options.firm {
-        Some(firm) => firm,
-        None if open_browser => {
-            let no_proxy = Env::from_process().no_proxy;
-            FirmNames::new(upstream::firm_suffixes(no_proxy.as_deref()))
-        }
-        None => FirmNames::default(),
-    };
+    // Only open mode's browser listener has the name-only path, read when it comes on.
+    let firm = open_browser.then(|| {
+        options.firm.unwrap_or_else(|| {
+            Arc::new(|| upstream::firm_suffixes(Env::from_process().no_proxy.as_deref()))
+        })
+    });
     if config.block.first_unloaded_notice() {
         tracing::warn!("egress: the block list is not loaded; no site is blocked");
     }
