@@ -35,6 +35,9 @@ mod always;
 #[path = "host/always_kept.rs"]
 mod always_kept;
 #[cfg(test)]
+#[path = "host/always_sites.rs"]
+mod always_sites;
+#[cfg(test)]
 #[path = "host/ask_user_question.rs"]
 mod ask_user_question;
 #[cfg(test)]

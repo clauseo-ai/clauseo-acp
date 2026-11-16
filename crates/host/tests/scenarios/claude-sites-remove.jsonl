@@ -1,0 +1,19 @@
+{"scenario":"claude-sites-remove","description":"A matter keeps WebFetch(domain:sci.gov.in): the first SandboxNetworkAccess card for sci.gov.in is answered allow-once by the host; once the lawyer removes the rule, the same session asks again and the lawyer's reject reaches the agent","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"sci.gov.in","name":"SandboxNetworkAccess","kind":"fetch","status":"pending","rawInput":{"host":"sci.gov.in"}}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-1","title":"sci.gov.in","rawInput":{"host":"sci.gov.in"}},"options":[{"optionId":"allow-once","name":"Yes","kind":"allow_once"},{"optionId":"allow-with-updates","name":"Yes, and don't ask again for sci.gov.in","kind":"allow_always"},{"optionId":"reject","name":"No","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-p1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-2","title":"sci.gov.in","name":"SandboxNetworkAccess","kind":"fetch","status":"pending","rawInput":{"host":"sci.gov.in"}}}}
+{"request":{"id":"perm-2","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-2","title":"sci.gov.in","rawInput":{"host":"sci.gov.in"}},"options":[{"optionId":"allow-once","name":"Yes","kind":"allow_once"},{"optionId":"allow-with-updates","name":"Yes, and don't ask again for sci.gov.in","kind":"allow_always"},{"optionId":"reject","name":"No","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-2","result":{"outcome":{"outcome":"selected","optionId":"reject"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-2","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-p2","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}
