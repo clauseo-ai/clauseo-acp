@@ -3,8 +3,8 @@
 //! passed as one argument, the environment cleared and set again, the hook input on stdin, from
 //! the turn's folder (codex-rs at rust-v0.162.1 `core/src/session/mod.rs:5141-5149`,
 //! `hooks/src/engine/command_runner.rs:384-433`), under Windows PowerShell 5.1 and, when
-//! installed, PowerShell 7. A data folder under `…\O'Brien Zoë Q\data` (an apostrophe, a space,
-//! non-ASCII names); the record made as the host's launch makes it
+//! installed, PowerShell 7. A data folder under `…\O'Brien & Sons Zoë Q\…\data` (an apostrophe,
+//! an ampersand, spaces, non-ASCII names, a record path over 200 characters); the record made as the host's launch makes it
 //! (`clauseo_host::pre_write_guard::make_record`); the hook built as the host builds it
 //! (`clauseo_host::codex_hook_config`), with the built app as the guard. The guard refuses a
 //! `.codex` write with its code 2 and its reason, and appends one line to the record; a file held
@@ -114,15 +114,19 @@ fn the_real_hook_command_refuses_and_records_under_powershell_from_an_apostrophe
         .prefix("guard-ps-")
         .tempdir()
         .unwrap();
-    let user = folder(root.path(), "O'Brien Zoë Q");
-    let data = folder(user.path(), "data");
+    // A Windows user named as lawyers are, under a folder long enough that the record's path is
+    // over 200 characters.
+    let user = folder(root.path(), "O'Brien & Sons Zoë Q");
+    let long = folder(user.path(), &"Sharma v State 2024 papers ".repeat(5));
+    let data = folder(long.path(), "data");
     let data = data.path();
     assert!(
-        data.to_str().unwrap().contains(r"O'Brien Zoë Q\data"),
+        data.to_str().unwrap().contains(r"O'Brien & Sons Zoë Q\"),
         "{data:?}"
     );
     let (record, id) = clauseo_host::pre_write_guard::make_record(data, "s1").unwrap();
     assert_eq!(record, data.join(r"browser\guard\s1\guard-blocks.jsonl"));
+    assert!(record.as_os_str().len() > 200, "{record:?}");
 
     let config = clauseo_host::codex_hook_config(Path::new(APP), Some((&record, &id))).unwrap();
     let hook = &config["PreToolUse"][0]["hooks"][0];
