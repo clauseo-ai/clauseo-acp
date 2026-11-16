@@ -25,7 +25,7 @@ use crate::actor::input::Input;
 use crate::actor::turn::idle::{Pending, Relaunch};
 use crate::actor::turn::own_turn;
 use crate::agent::AgentInput;
-use crate::config::{CAP_MIN_IDLE, IDLE_LIMIT};
+use crate::config::{CAP_MIN_IDLE, HostConfig, IDLE_LIMIT};
 use crate::pipeline::tests::support::TempDir;
 
 /// The relaunch's branch: `session/new` with `notes` alone, then one prompt answered.
@@ -79,6 +79,17 @@ fn rig(test: &str, steps: &[Value]) -> Rig {
 /// [`rig`], with the relaunch's branch `relaunch`, and the agent taking `session/load` when
 /// `load`.
 pub(super) fn rig_with(test: &str, steps: &[Value], relaunch: &Value, load: bool) -> Rig {
+    rig_adjusted(test, steps, relaunch, load, |config| config)
+}
+
+/// [`rig_with`], its host config then given to `adjust`.
+pub(super) fn rig_adjusted(
+    test: &str,
+    steps: &[Value],
+    relaunch: &Value,
+    load: bool,
+    adjust: impl FnOnce(HostConfig) -> HostConfig,
+) -> Rig {
     let dir = TempDir::new(test);
     let root = dir.path();
     let one_of = json!({"one_of":[first(steps), relaunch]});
@@ -105,10 +116,12 @@ pub(super) fn rig_with(test: &str, steps: &[Value], relaunch: &Value, load: bool
     Rig::open_with(dir, 0, None, |config| {
         // The program as typed is the path: no search of this computer's paths in a test.
         let resolve = |typed: &str| Some(std::path::PathBuf::from(typed));
-        config
-            .with_idle_limit(IDLE_LIMIT)
-            .with_live_agents(usize::MAX)
-            .with_mcp_resolver(std::sync::Arc::new(resolve))
+        adjust(
+            config
+                .with_idle_limit(IDLE_LIMIT)
+                .with_live_agents(usize::MAX)
+                .with_mcp_resolver(std::sync::Arc::new(resolve)),
+        )
     })
 }
 

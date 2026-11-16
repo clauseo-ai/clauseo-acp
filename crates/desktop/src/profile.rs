@@ -407,8 +407,6 @@ fn agent_browser_path(dir: &Path, macos: bool, exists: impl Fn(&Path) -> bool) -
     dir.join(name)
 }
 
-/// Where a release bundles stetdoc, in a folder of its own so that only that folder goes first
-/// on the agents' `PATH` (U13; `.github/scripts/sidecars.mjs`, `crates/desktop/stetdoc.toml`).
 /// The first program named `name` (with the OS's executable suffix, `.exe` on Windows) in an
 /// absolute folder of `path`, as `which` finds it: a file that is not a program
 /// ([`is_program`], no execute bit on Unix) is skipped and the walk goes on. A relative folder

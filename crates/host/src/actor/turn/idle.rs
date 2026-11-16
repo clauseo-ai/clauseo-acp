@@ -22,7 +22,7 @@
 //!   (every one is busy, or went idle less than `cap_min_idle` ago) the launch goes ahead and
 //!   the host logs a warning.
 //! - A relaunch mark ([`Relaunch`], [`mark_relaunch`]): an agent whose launch-time inputs
-//!   changed is idle-stopped once its idle clock is `cap_min_idle` (60 s) old ([`stop_marked`]),
+//!   changed is idle-stopped once its idle clock is its mark's grace old ([`stop_marked`]),
 //!   armed on the one deadline: an agent may still work after its turn's end (a command Claude
 //!   put in the background ends in a turn of its own, `own_turn.rs`), and any event of it starts
 //!   its clock again. Its next prompt relaunches it with the new inputs. A Tools change marks
@@ -30,8 +30,11 @@
 //! - The profile refresh ([`profile_changed`]): each agent keeps the launch profile generation
 //!   its launch's skills were of (`ProfileHook::generation`). When the hook tells of a newer
 //!   one (desktop's stetdoc try put a new profile in place), every live agent on an older one
-//!   is marked (`Relaunch::ProfileChanged`, [`mark_stale`]), so it is stopped as any marked
-//!   agent is, never mid-turn, and its next prompt relaunches it on the new profile.
+//!   is marked (`Relaunch::ProfileChanged`, [`mark_stale`]). That mark has no grace of its own:
+//!   with no prompt the agent stops at the idle limit, as any idle agent does, so work it goes
+//!   on with after its turn keeps its full idle limit, as before the change. Its next prompt
+//!   relaunches it on the new profile, unless a background command of its last turn may still
+//!   run ([`holds_relaunch`]); then that prompt goes to it as it is.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -120,21 +123,45 @@ impl Relaunch {
             Self::ProfileChanged => "profile_changed",
         }
     }
+
+    /// How long a marked agent is idle before it is stopped: `cap_min_idle` for a Tools change;
+    /// none for a profile change, whose agent stops at the idle limit as any idle agent does.
+    fn grace(self, config: &IdleStop) -> Option<Duration> {
+        match self {
+            Self::ToolsChanged => Some(config.cap_min_idle),
+            Self::ProfileChanged => None,
+        }
+    }
 }
 
-/// Marks `thread`'s live agent to stop once nothing is pending, for `why` (a mark already there
-/// stays); the tick after this input stops it if nothing is pending now. No agent: nothing to do,
-/// its next launch takes the new inputs.
+/// Whether `agent`'s mark waits rather than relaunch it for a prompt at `now`: a config, mode
+/// or relay call is in flight, or, for a profile change, its last turn closed within `window`
+/// after a steer during a tool call (`steered_end`), so a command Claude put in the background
+/// may still run.
+pub(super) fn holds_relaunch(agent: &agents::Agent, now: Duration, window: Duration) -> bool {
+    let background = agent
+        .idle
+        .steered_end
+        .is_some_and(|at| now.saturating_sub(at) <= window);
+    calls(agent) > 0 || (agent.idle.relaunch == Some(Relaunch::ProfileChanged) && background)
+}
+
+/// Marks `thread`'s live agent to stop once nothing is pending, for `why` (a Tools mark already
+/// there stays: its grace is the shorter); the tick after this input stops it if nothing is
+/// pending now. No agent: nothing to do, its next launch takes the new inputs.
 pub(super) fn mark_relaunch(actor: &mut Actor, thread: ThreadId, why: Relaunch) {
-    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
-        agent.idle.relaunch.get_or_insert(why);
+    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && agent.idle.relaunch != Some(Relaunch::ToolsChanged)
+    {
+        agent.idle.relaunch = Some(why);
     }
 }
 
 /// Stops each marked live agent that has nothing pending ([`stoppable`]) and whose idle clock is
-/// `cap_min_idle` old at `now`; one stopping already is not stoppable, so a mark makes one stop.
+/// its mark's grace old at `now`; one stopping already is not stoppable, so a mark makes one
+/// stop.
 fn stop_marked(actor: &mut Actor, now: Duration) {
-    let grace = actor.turn_path.idle.config.cap_min_idle;
+    let config = actor.turn_path.idle.config;
     let marked: Vec<(ThreadId, Relaunch)> = actor
         .turn_path
         .idle
@@ -142,8 +169,8 @@ fn stop_marked(actor: &mut Actor, now: Duration) {
         .iter()
         .filter_map(|thread| {
             let agent = actor.threads.get(thread)?.turn.agent.as_deref()?;
-            let since = agent.idle.since?;
-            (now.saturating_sub(since) >= grace).then_some((*thread, agent.idle.relaunch?))
+            let (since, why) = (agent.idle.since?, agent.idle.relaunch?);
+            (now.saturating_sub(since) >= why.grace(&config)?).then_some((*thread, why))
         })
         .collect();
     for (thread, why) in marked {
@@ -342,7 +369,7 @@ fn refresh(actor: &mut Actor, now: Duration) -> Option<Duration> {
             let grace = agent
                 .idle
                 .relaunch
-                .and_then(|_| since.checked_add(config.cap_min_idle));
+                .and_then(|why| since.checked_add(why.grace(&config)?));
             let due = match (config.deadline(since), grace) {
                 (Some(limit), Some(grace)) => Some(limit.min(grace)),
                 (limit, grace) => limit.or(grace),
@@ -381,8 +408,11 @@ fn arm(actor: &mut Actor, now: Duration, at: Option<Duration>) {
 }
 
 /// The hook told of profile generation `generation` (`Input::ProfileChanged`): live agents
-/// launched on an older one are marked by the [`tick`] after this input ([`mark_stale`]).
+/// launched on an older one are marked by the [`tick`] after this input ([`mark_stale`]). The
+/// hook's own generation bounds it: a launch reads that one, so no relaunch is marked again for
+/// a generation it could not get.
 pub(crate) fn profile_changed(actor: &mut Actor, generation: u64) {
+    let generation = generation.min(actor.profile.generation());
     let clock = &mut actor.turn_path.idle;
     clock.profile = clock.profile.max(generation);
     tracing::info!(

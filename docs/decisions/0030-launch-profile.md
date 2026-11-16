@@ -377,11 +377,18 @@ two dependencies, `profile` and `tracing`.
   failure what it had. A launch with no try in flight does not wait. An agent already running
   when a new profile lands (launched before it, or past the 20 s) is marked to relaunch, as a
   Tools change marks one (`Relaunch::ProfileChanged`, `ProfileHook::generation` and
-  `changed`, `turn/idle.rs`, 2026-11-15 and 2026-11-16): never mid-turn, it is idle-stopped
-  once it has had nothing pending for the grace (`cap_min_idle`, 60 s), and its next question
-  relaunches it on the new profile and resumes its session, at once when that question comes
-  within the grace; nothing else is shown to the lawyer. The `PATH` entry and the blackline's program were given
-  to the host at its start and stay until the app restarts.
+  `changed`, `turn/idle.rs`, 2026-11-15 to 2026-11-17). Its next question relaunches it on
+  the new profile and resumes its session. The mark has no grace of its own: with no question,
+  the agent stops at the idle limit (300 s) as any idle agent does, never mid-turn, so a
+  background command or helper of its last turn is not cut by a change the lawyer did not
+  make; and while such a command may still run (its last turn closed after a steer during a
+  tool call, within `cap_min_idle`), the next question goes to the agent as it is. Only a real
+  change makes a new profile: the background try puts its answer in place only when it
+  differs from the state the start had. stetdoc found broken (`State::Off`) is such a change,
+  and every agent launched before it relaunches once without stetdoc. That is intended: those
+  agents were told of a stetdoc that no longer answers. Nothing else is shown to the lawyer.
+  The `PATH` entry and the blackline's program were given to the host at its start and stay
+  until the app restarts.
   stetdoc 0.9.3 prints its skill's body with no frontmatter: Clauseo writes one, its
   description stetdoc's first `# ` heading, the body unchanged (2026-11-11).
   The rest of the build is file reads and rendering. The build finds the
