@@ -7,9 +7,10 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { HI } from "@clauseo/components/lib/words-folder.hi.ts";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { CommandOutcome, PickedFolderSupport } from "../../transport/protocol.ts";
 import { A, byId, mountFirstRun, press, sent, settle, text } from "./rig.tsx";
+import { uuid } from "../../testing/stream-script.ts";
 
 const FIRST = { folder: "folder-ref-1", display: "Volumes/Chambers/Rathi Steels" };
 const SECOND = { folder: "folder-ref-2", display: "Documents/Matters/Mehta v. Mehta" };
@@ -163,3 +164,126 @@ test.each([
     expect(step()).toBeNull();
   },
 );
+
+/** A promise the test settles. */
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+test("a folder with a backslash on a network drive: Open anyway on Locate's step shows the drive's step, and only its Open anyway makes the matter", async () => {
+  const transport = await mountFirstRun({
+    matters: [],
+    platform: "mac",
+    folderSupport: () => ({ support: "network" }),
+  });
+  transport.pickFolder = async () => ({
+    folder: "folder-ref-1",
+    display: "Documents/Clauseo\\ Test",
+  });
+  await press(byId("open-folder"));
+  expect(byId("first-backslash-warning")).not.toBeNull();
+  await press(byId("first-backslash-anyway"));
+  expect(byId("first-backslash-warning")).toBeNull();
+  expect(step()?.getAttribute("data-kind")).toBe("network");
+  expect(created(transport)).toEqual([]);
+  await press(byId("first-folder-anyway"));
+  expect(step()).toBeNull();
+  expect(created(transport)).toEqual([
+    { name: "Clauseo\\ Test", source: { existing_folder: { folder: "folder-ref-1" } } },
+  ]);
+});
+
+test("a folder with a backslash that a check says is fine: Open anyway makes it at once, no drive step", async () => {
+  const transport = await mountFirstRun({
+    matters: [],
+    platform: "mac",
+    folderSupport: () => ({}),
+  });
+  transport.pickFolder = async () => ({
+    folder: "folder-ref-1",
+    display: "Documents/Clauseo\\ Test",
+  });
+  await press(byId("open-folder"));
+  await press(byId("first-backslash-anyway"));
+  expect(step()).toBeNull();
+  expect(created(transport)).toHaveLength(1);
+});
+
+test("the check's 5 s wait runs out with no answer: no warning, and the folder is made", async () => {
+  const transport = await mountFirstRun({
+    matters: [],
+    folderSupport: () => new Promise<PickedFolderSupport>(() => {}),
+  });
+  transport.pickFolder = async () => FIRST;
+  vi.useFakeTimers();
+  await act(async () => byId("open-folder")?.click());
+  await act(async () => vi.advanceTimersByTimeAsync(4900));
+  expect(created(transport)).toEqual([]);
+  expect(byId("open-folder")?.hasAttribute("disabled")).toBe(true);
+  await act(async () => vi.advanceTimersByTimeAsync(200));
+  vi.useRealTimers();
+  await settle();
+  expect(step()).toBeNull();
+  expect(created(transport)).toEqual([
+    { name: "Rathi Steels", source: { existing_folder: { folder: FIRST.folder } } },
+  ]);
+});
+
+test("a second press of Open the folder while the check runs is ignored: one picker, one folder made", async () => {
+  const slow = deferred<PickedFolderSupport>();
+  const transport = await mountFirstRun({ matters: [], folderSupport: () => slow.promise });
+  let picks = 0;
+  transport.pickFolder = async () => {
+    picks += 1;
+    return FIRST;
+  };
+  await press(byId("open-folder"));
+  expect(byId<HTMLButtonElement>("open-folder")?.disabled).toBe(true);
+  await press(byId("open-folder"));
+  expect(picks).toBe(1);
+  slow.resolve({});
+  await settle();
+  expect(picks).toBe(1);
+  expect(created(transport)).toHaveLength(1);
+});
+
+test("Start a new matter is off while the folder is being checked", async () => {
+  const slow = deferred<PickedFolderSupport>();
+  const transport = await mountFirstRun({ matters: [], folderSupport: () => slow.promise });
+  transport.pickFolder = async () => FIRST;
+  await press(byId("open-folder"));
+  expect(byId<HTMLButtonElement>("start-new-matter")?.disabled).toBe(true);
+  expect(created(transport)).toEqual([]);
+});
+
+test("Start a new matter is off while the folder is being made", async () => {
+  const transport = await mountFirstRun({
+    matters: [],
+    folderSupport: () => ({}),
+    create: () => new Promise<CommandOutcome>(() => {}),
+  });
+  transport.pickFolder = async () => FIRST;
+  await press(byId("open-folder"));
+  expect(created(transport)).toHaveLength(1);
+  expect(byId<HTMLButtonElement>("start-new-matter")?.disabled).toBe(true);
+});
+
+test("a refusal naming a matter that is not on the list falls back to the refusal line: nothing opens", async () => {
+  const NOT_LISTED = { ...IS_MATTER, matter: uuid(9, 9) };
+  const transport = await mountFirstRun({
+    matters: [],
+    folderSupport: () => ({}),
+    create: (): CommandOutcome => {
+      throw NOT_LISTED;
+    },
+  });
+  transport.pickFolder = async () => FIRST;
+  await press(byId("open-folder"));
+  expect(created(transport)).toHaveLength(1);
+  expect(document.querySelector(".fl-refusal-head")).not.toBeNull();
+  expect(title()).toBeUndefined();
+});

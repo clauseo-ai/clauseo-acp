@@ -69,10 +69,13 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
   const [unpick, setUnpick] = useState(0);
   // the latest pick's check: an answer for any other is dropped
   const asked = useRef<Promise<Answer> | null>(null);
+  // a backslash's warning gone past with Create anyway, while a drive's warning (if the drive warns) waits behind it
+  const [pastBackslash, setPastBackslash] = useState(false);
   const check = (source: NextMatterSource) => {
     const done = answerOf(matters, source);
     asked.current = done;
     setAnswer(undefined);
+    setPastBackslash(false);
     void done.then((found) => {
       if (asked.current === done) setAnswer(found);
     });
@@ -80,6 +83,7 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
   const forget = () => {
     asked.current = null;
     setAnswer(null);
+    setPastBackslash(false);
   };
   const reset = () => {
     forget();
@@ -100,6 +104,7 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
     scan.start(picked.folder);
     return picked.display;
   };
+  const backslash = existing === null ? null : backslashAt(existing.display, platform);
   /** Where Create goes, once the check has answered: the existing folder picked, else the default location when
    * `useDefault`. Null stops the create: no folder chosen, a refused existing folder (its line shows), a warning that
    * shows only now, or a new pick meanwhile. Every folder comes through the picker: none is asked for here. */
@@ -114,14 +119,22 @@ export function usePickedFolder(matters: Matters, lang: Lang) {
     const said = now === null ? null : await within(now);
     if (asked.current !== now) return null;
     if (said !== null && "refused" in said) return null;
+    // a backslash's warning first: Create anyway on it shows a drive's warning behind it, if the drive warns
+    if (said !== null && "warn" in said && backslash !== null && !pastBackslash) {
+      setPastBackslash(true);
+      return null;
+    }
     if (said !== null && "warn" in said && !(shown != null && "warn" in shown)) return null;
     // the scan's first event says where the folder lives: a synced one waits for "Got it"
     if (!(await scan.settle())) return null;
     return found;
   };
-  const backslash = existing === null ? null : backslashAt(existing.display, platform);
   const warned: Warned | null =
-    backslash !== null ? "backslash" : answer != null && "warn" in answer ? answer.warn : null;
+    backslash !== null && !pastBackslash
+      ? "backslash"
+      : answer != null && "warn" in answer
+        ? answer.warn
+        : null;
   const checkRefused = answer != null && "refused" in answer ? answer.refused : null;
   const scanned = existing !== null && scan.scan?.folder === existing.folder ? scan.scan : null;
   return {

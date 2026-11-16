@@ -144,6 +144,7 @@ export function Welcome({
                   kind="quiet"
                   className={cn(WRAP, "fl-other min-h-control max-w-full py-s1")}
                   onClick={onNewMatter}
+                  disabled={making}
                   data-testid={testIds.newMatter}
                 >
                   <IconNewMatter size={16} />
