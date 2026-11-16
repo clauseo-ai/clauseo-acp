@@ -240,6 +240,8 @@ pub(crate) enum Input {
     SnoozeWake { generation: u64 },
     /// The idle stop's deadline armed with `generation` fired (`turn/idle.rs`).
     IdleDeadline { generation: u64 },
+    /// The launch profile changed to `generation` (`ProfileHook::changed`, `turn/idle.rs`).
+    ProfileChanged { generation: u64 },
     /// A turn task's result: an agent call or a log read.
     Turn(TurnInput),
     /// A subscription drained its channel after the actor found it full.
@@ -321,6 +323,7 @@ impl std::fmt::Debug for Input {
             Self::Timer(_) => "Timer",
             Self::SnoozeWake { .. } => "SnoozeWake",
             Self::IdleDeadline { .. } => "IdleDeadline",
+            Self::ProfileChanged { .. } => "ProfileChanged",
             Self::Turn(_) => "Turn",
             Self::Drained { .. } => "Drained",
             Self::Unsubscribed { .. } => "Unsubscribed",

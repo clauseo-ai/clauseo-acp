@@ -301,6 +301,7 @@ pub use config::mcp::{
     McpFileStamp, McpFinder, McpFound, McpHereFinder, McpImportFinder, McpLaunchAsk,
     McpLaunchConfirm, McpResolver, find_mcp_imports_in, shown as mcp_shown,
 };
+pub use config::profile_hook::{LaunchSkills, ProfileChange};
 pub use config::{
     CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT,
     LAUNCH_WAIT_LIMIT, LIVE_AGENTS, LaunchWait, NoProfile, PackRequest, ProfileHook, Sandbox,

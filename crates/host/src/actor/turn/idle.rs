@@ -27,6 +27,11 @@
 //!   put in the background ends in a turn of its own, `own_turn.rs`), and any event of it starts
 //!   its clock again. Its next prompt relaunches it with the new inputs. A Tools change marks
 //!   the agents whose lawyer servers would now differ ([`tools`]).
+//! - The profile refresh ([`profile_changed`]): each agent keeps the launch profile generation
+//!   its launch's skills were of (`ProfileHook::generation`). When the hook tells of a newer
+//!   one (desktop's stetdoc try put a new profile in place), every live agent on an older one
+//!   is marked (`Relaunch::ProfileChanged`, [`mark_stale`]), so it is stopped as any marked
+//!   agent is, never mid-turn, and its next prompt relaunches it on the new profile.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -83,6 +88,18 @@ pub(super) struct Mark {
     /// When that turn closed (monotonic): Claude may have put the command in the background,
     /// which a relaunch soon after would end (`agents::restart_if_marked` logs it).
     pub(super) steered_end: Option<Duration>,
+    /// The launch profile generation its launch's skills were of.
+    profile: u64,
+}
+
+impl Mark {
+    /// The mark of an agent launched on profile generation `profile`.
+    pub(super) fn on_profile(profile: u64) -> Self {
+        Self {
+            profile,
+            ..Self::default()
+        }
+    }
 }
 
 /// Why an agent is to be stopped once idle and relaunched by its next prompt: what it was
@@ -91,6 +108,8 @@ pub(super) struct Mark {
 pub(super) enum Relaunch {
     /// Its lawyer servers would differ now (Settings › Tools, [`tools`]).
     ToolsChanged,
+    /// The launch profile changed since its launch ([`profile_changed`]).
+    ProfileChanged,
 }
 
 impl Relaunch {
@@ -98,6 +117,7 @@ impl Relaunch {
     pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::ToolsChanged => "tools_changed",
+            Self::ProfileChanged => "profile_changed",
         }
     }
 }
@@ -143,6 +163,9 @@ pub(crate) struct IdleClock {
     /// The one deadline armed, if any.
     armed: Option<Armed>,
     generation: u64,
+    /// The newest launch profile generation the hook told of: live agents launched on an older
+    /// one are marked to relaunch ([`mark_stale`]).
+    profile: u64,
 }
 
 /// The deadline armed: when it falls on the monotonic clock, its generation and its handle.
@@ -285,6 +308,7 @@ pub(crate) fn tick(actor: &mut Actor) {
         None
     } else {
         tools::compare(actor);
+        mark_stale(actor);
         stop_marked(actor, now);
         refresh(actor, now)
     };
@@ -354,6 +378,62 @@ fn arm(actor: &mut Actor, now: Duration, at: Option<Duration>) {
         generation,
         handle,
     });
+}
+
+/// The hook told of profile generation `generation` (`Input::ProfileChanged`): live agents
+/// launched on an older one are marked by the [`tick`] after this input ([`mark_stale`]).
+pub(crate) fn profile_changed(actor: &mut Actor, generation: u64) {
+    let clock = &mut actor.turn_path.idle;
+    clock.profile = clock.profile.max(generation);
+    tracing::info!(
+        target: LIFECYCLE,
+        generation,
+        "the launch profile changed; agents launched on the old one are marked to relaunch"
+    );
+    watch_profile(actor);
+}
+
+/// At the host's start: the hook's generation now is the newest known, and the wait for the
+/// next begins.
+pub(crate) fn profile_start(actor: &mut Actor) {
+    actor.turn_path.idle.profile = actor.profile.generation();
+    watch_profile(actor);
+}
+
+/// Waits, on a host task, for the hook's profile to change past the newest generation known
+/// (`ProfileHook::changed`); its end posts `Input::ProfileChanged`. A hook whose profile never
+/// changes gives no wait.
+fn watch_profile(actor: &Actor) {
+    if let Some(change) = actor.profile.changed(actor.turn_path.idle.profile) {
+        actor.spawn_post(async move {
+            Input::ProfileChanged {
+                generation: change.await,
+            }
+        });
+    }
+}
+
+/// Marks every live agent launched on a profile generation older than the newest known
+/// (`Relaunch::ProfileChanged`); [`stop_marked`] stops it once nothing is pending.
+fn mark_stale(actor: &mut Actor) {
+    let newest = actor.turn_path.idle.profile;
+    let stale: Vec<ThreadId> = actor
+        .turn_path
+        .idle
+        .live
+        .iter()
+        .copied()
+        .filter(|thread| {
+            let agent = actor
+                .threads
+                .get(thread)
+                .and_then(|entry| entry.turn.agent.as_deref());
+            agent.is_some_and(|agent| agent.idle.profile < newest)
+        })
+        .collect();
+    for thread in stale {
+        mark_relaunch(actor, thread, Relaunch::ProfileChanged);
+    }
 }
 
 /// The deadline armed with `generation` fired. Every agent is looked at again here, at the

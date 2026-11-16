@@ -236,6 +236,7 @@ pub(super) fn launch_now(
     let unprotected = prepared.folder.is_some_and(agent::forced_ask::applies);
     let forced_ask = prepared.codex.is_none() && unprotected;
     let prepared_folder = prepared.folder;
+    let profile = prepared.profile;
     let shell_start = if prepared.settings.shell_carries {
         crate::sent::ShellStart::Unknown
     } else {
@@ -305,7 +306,7 @@ pub(super) fn launch_now(
         denied_data_folder: 0,
         start_failure: None,
         matter_spellings,
-        idle: super::idle::Mark::default(),
+        idle: super::idle::Mark::on_profile(profile),
         guard_blocks: super::updates::guard_blocks::Reads::default(),
     };
     if let Some(state) = state(actor, thread) {

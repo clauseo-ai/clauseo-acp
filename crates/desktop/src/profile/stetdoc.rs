@@ -4,9 +4,10 @@
 //! seen yet, then 20 s, then 30 s) on a thread of their own, whose answer goes into [`Live`] for
 //! the agent starts that follow. An agent launch while a try is in flight waits for that try's
 //! end, at most 20 s from the launch (`ProfileHook::launch_wait`), with its turn "starting"
-//! meanwhile. An agent already running keeps the profile it started with: a conversation whose
-//! agent started before the answer gets the skill when its agent starts again (after 300 s idle,
-//! for one) or in a new conversation. Nothing is shown to the lawyer.
+//! meanwhile. An agent already running when the answer lands is marked to relaunch
+//! (`ProfileHook::changed`): never stopped mid-turn, it stops once idle for a minute, and the
+//! next question in its conversation starts it again with the skill. Nothing is shown to the
+//! lawyer.
 //!
 //! Only the profile itself (the instructions' stetdoc line and the skills) changes after the
 //! start. stetdoc's folder on the agents' `PATH` and the Word blackline's program are given to
@@ -18,41 +19,99 @@
 //! session, when the background answer lands between them (within 70 s of the start), a
 //! launch may mix the two: a Codex launch may get the new skills index over the files the old
 //! profile wrote. The next launch is consistent.
+//!
+//! It also finds the stetdoc to run: the bundled one ([`bundled_stetdoc`]), or in a debug
+//! build the first on `PATH` ([`stetdoc_program`]).
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use clauseo_host::ProfileChange;
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions};
 use clauseo_profile::ClauseoProfile;
 use clauseo_profile::skills::stetdoc::start::{self, InFlight, Later, Limits, Start, State};
+use futures::channel::oneshot;
+
+use super::{STETDOC, first_on_path, is_program};
 
 /// The rendered profile the hook reads at each call, put in place whole when the background
-/// check ends. A read takes the lock only to clone an `Arc`; the profile is rendered before
-/// the write takes it, so no I/O or rendering happens under it.
+/// check ends, with its generation (0 at the start, one more at each change) and the waits for
+/// the next change (`ProfileHook::changed`). A read takes the lock only to clone an `Arc`; the
+/// profile is rendered before the write takes it, so no I/O or rendering happens under it.
 #[derive(Debug, Clone)]
-pub(crate) struct Live(Arc<RwLock<Arc<ClauseoProfile>>>);
+pub(crate) struct Live(Arc<Mutex<Held>>);
+
+/// What [`Live`] holds.
+#[derive(Debug)]
+struct Held {
+    generation: u64,
+    profile: Arc<ClauseoProfile>,
+    waits: Vec<oneshot::Sender<u64>>,
+}
 
 impl Live {
-    /// A cell holding `profile`.
+    /// A cell holding `profile`, generation 0.
     pub(crate) fn new(profile: ClauseoProfile) -> Self {
-        Self(Arc::new(RwLock::new(Arc::new(profile))))
+        Self(Arc::new(Mutex::new(Held {
+            generation: 0,
+            profile: Arc::new(profile),
+            waits: Vec::new(),
+        })))
     }
 
     /// The profile as it is now.
     pub(crate) fn get(&self) -> Arc<ClauseoProfile> {
-        Arc::clone(&self.0.read().unwrap_or_else(PoisonError::into_inner))
+        self.now().1
     }
 
-    /// Puts `profile` in place for every later [`Self::get`]. The old one is dropped after the
-    /// lock is released.
+    /// The generation and the profile as they are now, read together.
+    pub(crate) fn now(&self) -> (u64, Arc<ClauseoProfile>) {
+        let held = self.lock();
+        (held.generation, Arc::clone(&held.profile))
+    }
+
+    /// A wait that ends with the generation once it is past `seen`: at once when it is already.
+    /// A cell dropped first (the app ends) leaves the wait pending.
+    pub(crate) fn changed(&self, seen: u64) -> ProfileChange {
+        let receiver = {
+            let mut held = self.lock();
+            if held.generation > seen {
+                let generation = held.generation;
+                return Box::pin(async move { generation });
+            }
+            let (sender, receiver) = oneshot::channel();
+            held.waits.push(sender);
+            receiver
+        };
+        Box::pin(async move {
+            match receiver.await {
+                Ok(generation) => generation,
+                Err(oneshot::Canceled) => std::future::pending().await,
+            }
+        })
+    }
+
+    /// Puts `profile` in place for every later [`Self::get`] as the next generation, and ends
+    /// the waits for a change. The old profile is dropped after the lock is released.
     fn set(&self, profile: ClauseoProfile) {
         let profile = Arc::new(profile);
-        let old = {
-            let mut held = self.0.write().unwrap_or_else(PoisonError::into_inner);
-            std::mem::replace(&mut *held, profile)
+        let (generation, old, waits) = {
+            let mut held = self.lock();
+            held.generation += 1;
+            let old = std::mem::replace(&mut held.profile, profile);
+            (held.generation, old, std::mem::take(&mut held.waits))
         };
         drop(old);
+        for wait in waits {
+            // A wait nobody holds any more.
+            let _gone = wait.send(generation);
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Held> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -144,4 +203,44 @@ pub(super) fn recheck_later(recheck: Recheck, live: Live) {
     if let Err(err) = spawned {
         tracing::warn!(%err, "stetdoc's background check did not start; it stays on as it is");
     }
+}
+
+/// On macOS (`macos`), `Clauseo.app/Contents/Helpers/stetdoc/stetdoc`, found from `exe_dir`
+/// (`Contents/MacOS`): notarisation wants no program in `Contents/Resources`. Elsewhere
+/// `<resource_dir>/stetdoc/stetdoc[.exe]`, Tauri's resource folder (on Windows the install
+/// folder, beside `Clauseo.exe`; on Linux `/usr/lib/Clauseo`). None when that folder is not
+/// known.
+pub(crate) fn bundled_stetdoc(
+    macos: bool,
+    exe_dir: &Path,
+    resource_dir: Option<&Path>,
+) -> Option<PathBuf> {
+    let program = format!("{STETDOC}{}", std::env::consts::EXE_SUFFIX);
+    let folder = if macos {
+        exe_dir.parent()?.join("Helpers")
+    } else {
+        resource_dir?.to_path_buf()
+    };
+    Some(folder.join(STETDOC).join(program))
+}
+
+/// The stetdoc to run: `bundled` (from [`bundled_stetdoc`]) when it is a program there. When
+/// it is not, a `release` build runs none and warns (the profile then leaves stetdoc out), and
+/// a debug build takes the first `stetdoc` on `path` (the `PATH` value).
+pub(crate) fn stetdoc_program(
+    bundled: Option<&Path>,
+    path: Option<&OsStr>,
+    release: bool,
+) -> Option<PathBuf> {
+    if let Some(bundled) = bundled.filter(|bundled| is_program(bundled)) {
+        return Some(bundled.to_path_buf());
+    }
+    if release {
+        tracing::warn!(
+            expected = ?bundled,
+            "the bundled stetdoc is missing: agents start without it"
+        );
+        return None;
+    }
+    first_on_path(STETDOC, path?)
 }

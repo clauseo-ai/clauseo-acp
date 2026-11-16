@@ -330,20 +330,26 @@ fn an_unseen_stetdoc_holds_nothing_at_the_start_and_gets_its_skill_in_the_backgr
     let launch = hook
         .launch_wait(&agent(CLAUDE))
         .expect("a launch waits while the try is in flight");
+    assert_eq!(hook.generation(), 0);
+    let change = hook.changed(0).expect("the profile may change");
     scratch.file("Clauseo.app/Contents/Helpers/stetdoc/go", b"");
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let _sent = tx.send(futures::executor::block_on(launch));
     });
-    let writes = rx
+    let skills = rx
         .recv_timeout(Duration::from_secs(10))
         .expect("the launch's wait ends with the try");
-    let token = write_skills(&writes[0]).unwrap();
+    assert_eq!(skills.generation, 1, "the writes are of the new profile");
+    assert_eq!(hook.generation(), 1);
+    let token = write_skills(&skills.writes[0]).unwrap();
     assert!(token.root().join("stetdoc").join("SKILL.md").is_file());
     assert!(
         written_skill(&hook).is_some(),
         "later launches get the skill too"
     );
+    let changed = futures::executor::block_on(change);
+    assert_eq!(changed, 1, "the host is told of the change");
     assert!(
         hook.launch_wait(&agent(CLAUDE)).is_none(),
         "no try in flight: a launch does not wait"

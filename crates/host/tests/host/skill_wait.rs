@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use clauseo_host::{LAUNCH_WAIT_LIMIT, LaunchWait, ProfileHook};
+use clauseo_host::{LAUNCH_WAIT_LIMIT, LaunchSkills, LaunchWait, ProfileHook};
 use clauseo_profile::skills::stetdoc::start::Tries;
 use clauseo_profile::{ClauseoProfile, SkillWrite};
 use clauseo_protocol::{
@@ -53,7 +53,10 @@ impl ProfileHook for Loading {
         let writes = Arc::clone(&self.writes);
         Some(Box::pin(async move {
             end.await;
-            writes.lock().unwrap().clone()
+            LaunchSkills {
+                generation: 0,
+                writes: writes.lock().unwrap().clone(),
+            }
         }))
     }
 }
