@@ -43,12 +43,12 @@ pub(crate) const CONTEXT_LIMIT: usize = 1_040_000;
 
 /// The estimate past which a launch runs in ask mode: 900,000 bytes, about 87% of
 /// [`CONTEXT_LIMIT`], so the estimate's error and what it does not count stay under the line.
-pub(crate) const ASK_MODE_AT: usize = 900_000;
+pub const ASK_MODE_AT: usize = 900_000;
 
 /// The estimate at which a turn that ends on a blip of the auto-mode checks (a "gave no verdict"
 /// that is not the withheld kind) goes to ask mode instead of a plain notice: 832,000 bytes, 80%
 /// of [`CONTEXT_LIMIT`], where the limit may have moved under the estimate's error.
-pub(crate) const ASK_ON_BLIP_AT: usize = 832_000;
+pub const ASK_ON_BLIP_AT: usize = 832_000;
 
 const _: () = assert!(ASK_ON_BLIP_AT < ASK_MODE_AT && ASK_MODE_AT < CONTEXT_LIMIT);
 
@@ -88,7 +88,7 @@ const COUNTED: [&str; 2] = ["deny", "ask"];
 /// Claude Code 2.1.293's auto-mode context bytes, the server-verdict limit being
 /// [`CONTEXT_LIMIT`] (1,040,000), for a launch whose flag settings (the object Claude Code reads
 /// from `--settings`) are `settings`. The factors are in the module doc.
-pub(crate) fn estimate(settings: &Map<String, Value>) -> usize {
+pub fn estimate(settings: &Map<String, Value>) -> usize {
     let Some(permissions) = settings.get("permissions").and_then(Value::as_object) else {
         return FIXED;
     };
