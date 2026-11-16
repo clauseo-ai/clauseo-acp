@@ -20,10 +20,13 @@ use crate::agent::loads::browser::{self, BrowserInputs, Claims, Switch};
 use crate::agent::loads::case_law::{self, CaseLawInputs, Relay};
 use crate::agent::loads::lawyer;
 use crate::agent::loads::profile::{self, ClaudeKeys, Folders, Login};
-use crate::agent::loads::sandbox::{ClaudeSandbox, Off, SandboxOs, SandboxPaths};
 use crate::browser::seed_sites::SEED_SITES;
 use crate::error::Error;
 use crate::log_file::LIFECYCLE;
+
+mod sandbox;
+
+use sandbox::session_sandbox;
 
 /// `tools.web_search` and `tools.browser`, with whether each is locked.
 fn switches(actor: &Actor) -> (Switch, Switch) {
@@ -200,7 +203,7 @@ pub(super) fn session_loads(
     let browser_on = shell
         .as_ref()
         .is_some_and(|(_, part)| *part == BrowserPart::On);
-    let sandbox = session_sandbox(actor, thread, kind, &agent_id, &run, matter);
+    let sandbox = session_sandbox(actor, thread, kind, &agent_id, &run, matter)?;
     // The lawyer's servers this session gets, and those left out (a keychain value or the
     // program missing, the Safe workspace).
     let (lawyer_sent, left_out) = sent_lawyer_servers(&run, control);
@@ -226,20 +229,8 @@ pub(super) fn session_loads(
             matter,
             ask_all: forced_ask,
         });
-    // Without the guard's hook, a forced-ask session would rest on the ask rules alone, and a
-    // hook that is missing fails open: refuse it.
-    if let (true, Some(_), Some(reason)) = (forced_ask, &claude, loads::guard_missing(guard)) {
-        let matter_id = actor.check_thread(thread)?.row.matter;
-        tracing::warn!(
-            matter = %matter_id,
-            reason,
-            "a forced-ask Claude launch has no guard hook to give: the launch is refused"
-        );
-        return Err(Error::refused(
-            ErrorCode::AgentGuardMissing,
-            "this matter's folder is unprotected, and the guard that makes Claude ask before \
-             each change could not be set up",
-        ));
+    if claude.is_some() {
+        check_guard(actor, thread, forced_ask, guard)?;
     }
     let mut meta = loads::session_meta(
         actor
@@ -283,72 +274,33 @@ pub(super) fn session_loads(
     Ok((meta, servers, directories))
 }
 
-/// A Claude session's sandbox ([`claude_sandbox`]); none for another agent. Where one was meant
-/// to be and is not, holds `auto` back for `thread`.
-fn session_sandbox(
-    actor: &mut Actor,
-    thread: ThreadId,
-    kind: Option<AgentKind>,
-    agent_id: &clauseo_protocol::AgentId,
-    run: &RunFolders,
-    matter: &Path,
-) -> Option<ClaudeSandbox> {
-    let sandbox =
-        (kind == Some(AgentKind::Claude)).then(|| claude_sandbox(actor, agent_id, run, matter));
-    if let Some(Err(off)) = sandbox
-        && off.holds_auto_back()
-    {
-        // No sandbox where one was meant to be: no command may run on the classifier alone.
-        super::session::hold_auto_back(actor, thread);
-    }
-    sandbox.and_then(Result::ok)
-}
-
-/// Claude Code's own sandbox for a Claude session of `agent_id` in `run`, whose matter folder
-/// is `matter` (`agent::loads::sandbox`), or why there is none (on Windows, among others).
-/// Path joins only.
-fn claude_sandbox(
+/// A Claude launch's guard hook: without it, a forced-ask session would rest on the ask rules
+/// alone, and a hook that is missing fails open, so it is refused (`agent.guard_missing`);
+/// outside forced ask the launch goes on, with a warn line for support.
+fn check_guard(
     actor: &Actor,
-    agent_id: &clauseo_protocol::AgentId,
-    run: &RunFolders,
-    matter: &Path,
-) -> Result<ClaudeSandbox, Off> {
-    let tmp = crate::agent::temp::temp_dir(&run.root);
-    let skills: Vec<PathBuf> = run
-        .data_deny
-        .spellings
-        .iter()
-        .map(|data| {
-            crate::agent::data_fence::BUILT_IN_SKILLS
-                .iter()
-                .fold(data.clone(), |path, name| path.join(name))
-        })
-        .collect();
-    let claude_home = actor.effective.locations().agent_home(agent_id.as_str());
-    // Every other matter's folder the host knows now; one registered later is the residual.
-    let other_matters: Vec<PathBuf> = actor
-        .matters
-        .iter()
-        .filter(|(id, _)| **id != run.key.matter)
-        .map(|(_, entry)| PathBuf::from(&entry.row.folder_path))
-        .collect();
-    let paths = SandboxPaths {
-        matter,
-        work: &run.work,
-        tmp: &tmp,
-        claude_tmp: run.claude_tmp.as_deref(),
-        downloads: &run.downloads,
-        skill_packs: &run.skill_packs,
-        notes: &run.notes,
-        skills: &skills,
-        path: &run.path.dirs,
-        env_file: run.path.env_file.as_deref(),
-        ca_file: run.path.ca_file.as_deref(),
-        claude_home: &claude_home,
-        data: &run.data_deny.spellings,
-        other_matters: &other_matters,
+    thread: ThreadId,
+    forced_ask: bool,
+    guard: Option<loads::GuardHook<'_>>,
+) -> Result<(), Error> {
+    let Some(reason) = loads::guard_missing(guard) else {
+        return Ok(());
     };
-    ClaudeSandbox::for_os(SandboxOs::CURRENT, &paths)
+    if !forced_ask {
+        tracing::warn!(%thread, reason, "a Claude launch goes without the guard hook");
+        return Ok(());
+    }
+    let matter_id = actor.check_thread(thread)?.row.matter;
+    tracing::warn!(
+        matter = %matter_id,
+        reason,
+        "a forced-ask Claude launch has no guard hook to give: the launch is refused"
+    );
+    Err(Error::refused(
+        ErrorCode::AgentGuardMissing,
+        "this matter's folder is unprotected, and the guard that makes Claude ask before each \
+         change could not be set up",
+    ))
 }
 
 /// The run's snapshot of the lawyer's servers, made at launch ([`lawyer_servers`]), and those

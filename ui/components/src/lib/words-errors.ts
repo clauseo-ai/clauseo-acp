@@ -4,7 +4,7 @@
 // key, the exact string on screen. The Hindi is a specialist's draft, waiting for a Hindi-speaking lawyer: the formal
 // आप, the danda, Western digits, English names in Latin script. Nothing here says मैं, पेंसिल, स्याही, चरण or कदम.
 import type { Lang } from "./display.ts";
-import { wordsOf } from "./words-core.ts";
+import { isolate, wordsOf } from "./words-core.ts";
 import { BACKSLASH, backslashKey, byAgent, type BackslashPlace } from "./words-errors-backslash.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
@@ -126,6 +126,9 @@ export type ErrorCode =
   | "blackline.not_readable"
   | "blackline.too_large"
   | "blackline.format_unknown"
+  | "matter.folder_wildcard"
+  | "agent.sandbox_wildcard"
+  | "agent.sandbox_unavailable"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -162,6 +165,16 @@ export type WordlessCode = "signin.endpoint_in_use";
 
 /** A code that has its own sentence. */
 export type WordedCode = Exclude<ErrorCode, WordlessCode>;
+
+/** UC-472 (provisional): Claude's protection (its sandbox) couldn't be set up, so it didn't start; also
+ * matter.folder_wildcard's line when the folder with the * or ? can't be named. */
+const SANDBOX_UNAVAILABLE =
+  "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again. If this keeps happening, ask your firm's IT." satisfies ErrorKey;
+
+/** UC-470 (approved English): matter.folder_wildcard's line naming the folder (`{name}`, isolated) whose name has the
+ * * or ?: the deepest such folder in the matter folder's path, which may be the matter folder itself. */
+export const WILDCARD_FOLDER =
+  "Rename the folder '{name}' so it has no * or ? in its name, then try again. Clauseo can't protect conversations in a folder with those characters." satisfies ErrorKey;
 
 /** One sentence per code, in English; none for a WordlessCode. */
 export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
@@ -361,6 +374,19 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // Restart. Draft English (Rohan to approve); Hindi provisional
   "agent.folder_inaccessible":
     "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
+  // provisional (UC-470, UC-472): the host didn't start Claude because a * or ? in a folder name of the matter
+  // folder's path keeps Claude's protection (its sandbox) from naming it, on macOS or Linux. The line that names the
+  // folder (WILDCARD_FOLDER, UC-470) needs the matter's folder (errorWords' place); without it, or when the folder
+  // with the character is out of sight above the home folder, UC-472's line, never a blank slot. Hindi later
+  "matter.folder_wildcard": SANDBOX_UNAVAILABLE,
+  // provisional (UC-471): the same, for another matter's folder or a folder Clauseo keeps a conversation's own files
+  // in (data, work, temp, notes). Hindi later
+  "agent.sandbox_wildcard":
+    "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again. If you can't find it, ask your firm's IT.",
+  // provisional (UC-472): Claude's protection couldn't be set up for another reason (its short temp folder couldn't
+  // be made; a folder to keep it out of isn't UTF-8; Claude Code's own "sandbox required but unavailable"), so Claude
+  // didn't start. Hindi later
+  "agent.sandbox_unavailable": SANDBOX_UNAVAILABLE,
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
@@ -496,21 +522,34 @@ export function plannedKey(code: WordedCode, agent?: AgentName): { key: ErrorKey
 
 export type { BackslashPlace };
 
+/** Where a refusal about the matter's folder is, for the codes that name a folder: matter.folder_backslash's
+ * BackslashPlace, and `wildcard`, the name of the deepest folder in the matter folder's path whose name has a * or ?
+ * (matter.folder_wildcard), or null when the folder isn't known or the name is out of sight. */
+export type FolderPlace = BackslashPlace & { wildcard?: string | null | undefined };
+
 /** A code's sentence in the language; a code this version doesn't know reads as "unknown", which reads as "internal".
  * `agent` is the thread's agent (AgentName), for the codes whose sentence names it (plannedKey); a caller that
  * doesn't know the thread leaves it out. `place` is where matter.folder_backslash's backslash is (BackslashPlace), for
- * a caller that knows the matter; left out, its line names the folder's own name and Finder. */
+ * a caller that knows the matter; left out, its line names the folder's own name and Finder. Its `wildcard` names the
+ * folder in matter.folder_wildcard's line (in its `{name}` slot, never the agent's name); left out or null, that code
+ * reads as agent.sandbox_unavailable's line. */
 export function errorWords(
   lang: Lang,
   code: string,
   agent?: AgentName,
-  place?: BackslashPlace,
+  place?: FolderPlace,
 ): string {
   if (Object.hasOwn(APP_ERROR_WORDS, code))
     return own(lang, APP_ERROR_WORDS[code as keyof typeof APP_ERROR_WORDS]);
   if (code === "matter.folder_backslash" && place !== undefined) {
     const { key, slots } = backslashKey(agent, place);
     return own(lang, key as keyof typeof HI, slots);
+  }
+  if (code === "matter.folder_wildcard") {
+    const name = place?.wildcard ?? null;
+    return name === null || name === ""
+      ? own(lang, SANDBOX_UNAVAILABLE)
+      : own(lang, WILDCARD_FOLDER, { name: isolate(name) });
   }
   const known = Object.hasOwn(ERROR_WORDS, code) ? (code as WordedCode) : "unknown";
   const { key, name } = plannedKey(known, agent);

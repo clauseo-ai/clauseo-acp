@@ -193,3 +193,33 @@ fn claude_codes_working_directory_exit_is_folder_inaccessible_with_no_path() {
     let other = rpc("session/new", -32603, "Internal error", "keys [details]");
     assert!(session_refusal(&other).is_none());
 }
+
+/// Claude Code's exit at start when its sandbox can't start (`failIfUnavailable`), passed on
+/// as the adapter passes any exit at start (assumed the same shape as above):
+/// `agent.sandbox_unavailable`, with no path, never "Claude sent something Clauseo can't read".
+#[test]
+fn claude_codes_sandbox_exit_is_sandbox_unavailable_with_no_path() {
+    let details = r#"{"details":"Claude Code process exited with code 1. stderr: Error: sandbox required but unavailable: bwrap not found at /Users/rohan/x"}"#;
+    let error = Error::Acp(clauseo_acp::Error::Rpc {
+        method: "session/new".to_owned(),
+        code: -32603,
+        message: "Internal error".to_owned(),
+        data: "keys [details]".to_owned(),
+        data_text: Some(details.to_owned()),
+        data_fields: clauseo_acp::RpcData::default(),
+    });
+    let refusal = session_refusal(&error).expect("a refusal");
+    assert_eq!(refusal.code(), ErrorCode::AgentSandboxUnavailable);
+    let message = refusal.to_wire().message().to_owned();
+    assert!(!message.contains("rohan"), "{message}");
+    let in_message = rpc(
+        "initialize",
+        -32603,
+        "Error: sandbox required but unavailable: x",
+        "none",
+    );
+    assert_eq!(
+        session_refusal(&in_message).map(|error| error.code()),
+        Some(ErrorCode::AgentSandboxUnavailable)
+    );
+}

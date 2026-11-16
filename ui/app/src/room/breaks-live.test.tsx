@@ -340,6 +340,37 @@ test.each([
   },
 );
 
+// Claude's protection couldn't be set up (macOS, Linux; not retryable): matter.folder_wildcard's line names the deepest
+// folder in the matter's folder (folder_display) whose name has a * or ?, and with none in sight says the general line,
+// agent.sandbox_unavailable's; never Restart (even with H10 faked)
+const PROTECT =
+  "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again. If this keeps happening, ask your firm's IT.";
+const rename = (name: string) =>
+  `Rename the folder '\u2068${name}\u2069' so it has no * or ? in its name, then try again. Clauseo can't protect conversations in a folder with those characters.`;
+test.each([
+  ["matter.folder_wildcard", "~/Documents/stagec-1097/Test*", rename("Test*")],
+  ["matter.folder_wildcard", "Documents/Clients?/Acme", rename("Clients?")],
+  ["matter.folder_wildcard", "Documents/Acme", PROTECT],
+  [
+    "agent.sandbox_wildcard",
+    "Documents/Test*",
+    "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again. If you can't find it, ask your firm's IT.",
+  ],
+  ["agent.sandbox_unavailable", "Documents/Test*", PROTECT],
+] as const)("a turn failed with %s, the matter folder %j: %s", async (code, folder, said) => {
+  h = await asked({
+    next: H10,
+    platform: "linux",
+    matters: [{ ...THE_MATTER, folder_display: folder }],
+  });
+  h.deliver(failed(code));
+  await h.settle();
+  const row = h.one("turn-stopped");
+  expect(row?.dataset["failure"]).toBe(code);
+  expect(row?.textContent).toBe(said);
+  expect(h.one("restart")).toBeNull();
+});
+
 // offline truth: the agent couldn't get through to its service while the computer seemed online. The same line as
 // agent.quiet: Try again under the answer, never Restart (even with H10 faked), no time mark
 test("a Codex turn failed with agent.unreachable: ChatGPT's line and Try again, no Restart, no time mark", async () => {

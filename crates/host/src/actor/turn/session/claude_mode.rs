@@ -43,29 +43,16 @@ pub(crate) enum Auto {
     /// `session/set_mode auto` went out before the attach; the agent's held updates from index
     /// `held` on are its answer.
     Set { held: usize },
-    /// Not available: the session runs in `acceptEdits` and goes back to it.
+    /// Not available: the session runs in `acceptEdits` and goes back to it. (A launch whose
+    /// sandbox can't be built on macOS or Linux never gets here: it is refused,
+    /// `agent::loads::sandbox::Off::refusal`.)
     Unavailable,
-    /// Held back by the host: Claude's sandbox is off before the launch on macOS or Linux (a
-    /// `*` or `?` in a path, a path to deny that is not UTF-8, or no short temp folder:
-    /// `agent::loads::sandbox::Off::holds_auto_back`), so the session runs in `acceptEdits` and
-    /// goes back to it, as when unavailable, with no notice: the account has auto, and only this
-    /// launch's paths keep it off.
-    NoSandbox,
 }
 
 impl Auto {
     /// Whether the session runs in `acceptEdits` instead of `auto`.
     pub(crate) fn off(self) -> bool {
-        matches!(self, Self::Unavailable | Self::NoSandbox)
-    }
-}
-
-/// Holds `thread`'s Claude agent off `auto` for this launch ([`Auto::NoSandbox`]); set before
-/// its session starts (`profile_loads.rs`), so [`claude_start`] switches it to `acceptEdits`.
-pub(crate) fn hold_auto_back(actor: &mut Actor, thread: ThreadId) {
-    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
-        tracing::info!(%thread, "Claude's sandbox is off before its launch; acceptEdits");
-        agent.auto = Auto::NoSandbox;
+        self == Self::Unavailable
     }
 }
 
@@ -93,11 +80,9 @@ pub(super) fn claude_start(
         return no_mode(actor, thread, wanted, "reported no modes");
     };
     let offered = |id: &str| modes.available.iter().any(|mode| mode.id == id);
-    let target = if !forced_ask && agent.auto == Auto::NoSandbox {
-        CLAUDE_FALLBACK_MODE
-    } else if !forced_ask && (agent.auto == Auto::Unavailable || !offered(wanted)) {
+    let target = if !forced_ask && (agent.auto == Auto::Unavailable || !offered(wanted)) {
         if agent.auto != Auto::Unavailable {
-            tracing::info!(%thread, "Claude offered no auto mode; it runs in acceptEdits");
+            tracing::warn!(%thread, "Claude offered no auto mode; it runs in acceptEdits");
         }
         agent.auto = Auto::Unavailable;
         CLAUDE_FALLBACK_MODE
@@ -169,7 +154,7 @@ pub(super) fn prepared(actor: &mut Actor, thread: ThreadId, fell_back: bool) {
             )
         });
     agent.auto = if fell_back || moved {
-        tracing::info!(%thread, fell_back, moved, "Claude's auto mode is not available; it runs in acceptEdits");
+        tracing::warn!(%thread, fell_back, moved, "Claude's auto mode is not available; it runs in acceptEdits");
         Auto::Unavailable
     } else {
         Auto::Wanted

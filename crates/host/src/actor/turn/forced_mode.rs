@@ -69,7 +69,7 @@ pub(super) fn reset_if_refused(actor: &mut Actor, thread: ThreadId, mode: &str) 
     };
     let (id, client, forced_ask) = (agent.id, agent.link.client.clone(), agent.forced_ask);
     let matter = actor.threads.get(&thread).map(|entry| entry.row.matter);
-    tracing::info!(
+    tracing::warn!(
         matter = ?matter,
         mode,
         to = target,

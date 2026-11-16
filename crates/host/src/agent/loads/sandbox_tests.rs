@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::browser::Switch;
 use super::profile::{ClaudeKeys, Folders, Login, claude_options};
-use super::sandbox::{ClaudeSandbox, Off, SandboxOs, SandboxPaths};
+use super::sandbox::{ClaudeSandbox, Off, SandboxOs, SandboxPaths, Wild};
 use crate::agent::data_fence::LaunchDeny;
 
 static NO_DENY: LaunchDeny = LaunchDeny {
@@ -18,22 +18,22 @@ static NO_DENY: LaunchDeny = LaunchDeny {
 
 /// The paths of session `id` of the matter at `/Users/l/Clients/A`, with `<data>` under the
 /// lawyer's home as on a Mac.
-struct Session {
-    matter: PathBuf,
-    run: PathBuf,
-    tmp: PathBuf,
-    work: PathBuf,
-    downloads: PathBuf,
-    skill_packs: PathBuf,
-    notes: PathBuf,
-    skills: Vec<PathBuf>,
-    path: Vec<PathBuf>,
-    env_file: PathBuf,
-    ca_file: Option<PathBuf>,
-    home: PathBuf,
-    claude_tmp: Option<PathBuf>,
-    data: Vec<PathBuf>,
-    other_matters: Vec<PathBuf>,
+pub(super) struct Session {
+    pub(super) matter: PathBuf,
+    pub(super) run: PathBuf,
+    pub(super) tmp: PathBuf,
+    pub(super) work: PathBuf,
+    pub(super) downloads: PathBuf,
+    pub(super) skill_packs: PathBuf,
+    pub(super) notes: PathBuf,
+    pub(super) skills: Vec<PathBuf>,
+    pub(super) path: Vec<PathBuf>,
+    pub(super) env_file: PathBuf,
+    pub(super) ca_file: Option<PathBuf>,
+    pub(super) home: PathBuf,
+    pub(super) claude_tmp: Option<PathBuf>,
+    pub(super) data: Vec<PathBuf>,
+    pub(super) other_matters: Vec<PathBuf>,
 }
 
 const DATA: &str = "/Users/l/Library/Application Support/Clauseo";
@@ -41,7 +41,7 @@ const SHORT: &str = "/tmp/clsb-abcd1234";
 const PROJECT: &str = "/Users/l/Library/Application Support/Clauseo/agents/claude-acp/home/projects/-Users-l-Clients-A";
 
 impl Session {
-    fn new(id: &str) -> Self {
+    pub(super) fn new(id: &str) -> Self {
         let data = Path::new(DATA);
         let run = data.join("run").join(id);
         Self {
@@ -66,7 +66,7 @@ impl Session {
         }
     }
 
-    fn paths(&self) -> SandboxPaths<'_> {
+    pub(super) fn paths(&self) -> SandboxPaths<'_> {
         SandboxPaths {
             matter: &self.matter,
             work: &self.work,
@@ -101,7 +101,7 @@ fn folders(session: &Session) -> Folders<'_> {
 }
 
 /// The flag settings a Claude session gets with `sandbox`, in forced ask or not, over `hook`.
-fn settings(
+pub(super) fn settings(
     session: &Session,
     sandbox: Option<&ClaudeSandbox>,
     forced_ask: bool,
@@ -267,21 +267,26 @@ fn the_data_folder_and_other_matters_are_denied_wherever_they_are() {
 }
 
 /// `*` or `?` in any path the lists would hold turns the sandbox off: Claude Code reads both as
-/// a pattern with no escape. The caller then holds the session off `auto` (`Off::Wildcard`).
+/// a pattern with no escape. The off names the deepest folder holding one, the matter folder's
+/// first (`Off::Wildcard`); the launch is then refused (`sandbox_launch_tests.rs`).
 #[test]
 fn a_wildcard_in_any_path_sends_no_sandbox() {
+    let wild = |folder: &str, in_matter| {
+        let folder = folder.to_owned();
+        Err(Off::Wildcard(Wild { folder, in_matter }))
+    };
     for glob in ["A*", "Q?", "[A*]"] {
         let mut session = Session::new("s-1");
         session.matter = PathBuf::from("/Users/l/Clients").join(glob);
         for os in [SandboxOs::Mac, SandboxOs::Linux] {
             let off = ClaudeSandbox::for_os(os, &session.paths());
-            assert_eq!(off, Err(Off::Wildcard), "{glob}");
+            assert_eq!(off, wild(glob, true), "{glob}");
         }
         let mut session = Session::new("s-1");
         session
             .other_matters
             .push(PathBuf::from("/Users/l/Clients").join(glob));
-        assert_eq!(mac(&session.paths()), Err(Off::Wildcard), "{glob}");
+        assert_eq!(mac(&session.paths()), wild(glob, false), "{glob}");
         let settings = settings(&session, None, false, false, &json!({}));
         assert!(settings.get("sandbox").is_none());
     }
@@ -376,16 +381,6 @@ fn no_short_temp_folder_sends_no_sandbox() {
     let mut session = Session::new("s-1");
     session.claude_tmp = None;
     assert_eq!(mac(&session.paths()), Err(Off::NoTemp));
-}
-
-/// Every reason for no sandbox but Windows holds the session off `auto` (`acceptEdits`), so no
-/// command runs on the classifier alone where the sandbox was meant to be.
-#[test]
-fn no_sandbox_where_one_was_meant_holds_auto_back() {
-    for off in [Off::NoTemp, Off::NotUtf8, Off::Wildcard] {
-        assert!(off.holds_auto_back(), "{off:?}");
-    }
-    assert!(!Off::Windows.holds_auto_back());
 }
 
 /// Windows: no `sandbox` key at all, so Claude's commands keep asking there.
