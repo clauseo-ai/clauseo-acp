@@ -76,12 +76,13 @@
 //! into the own run folder, then `cd ..` twice), a glob inside a name (`run\01a1*`), other
 //! letter cases in Bash (`AI.CLAUSEO.DESKTOP`), an 8.3 short name of a name under the data
 //! folder, a script that opens the file, a run folder, matter or project made after the launch
-//! whose name starts no group, and, for a data folder written by its path (a generic name), its own path written other than
-//! whole: a `..` or `.\` step or a mixed separator inside it (`D:\FirmData\.\Records`), a share or
-//! device path to it (`\\localhost\D$\…`) or a variable other than `forms::VARS` naming part of
-//! it. Denied beyond the data folder (accepted): any command naming `claude-acp` or
-//! `agent-state` alone (`npm ls claude-acp`), and in PowerShell, which ignores case, a path such
-//! as `…\Projects\Deal\` after `claude-acp` and `home` in the same command.
+//! whose name starts no group, and, for a data folder written by its path (a generic name),
+//! its own path written other than whole: a `..` or `.\` step or a mixed separator inside it
+//! (`D:\FirmData\.\Records`), a share or device path to it (`\\localhost\D$\…`) or a
+//! variable other than `forms::VARS` naming part of it. Denied beyond the data folder
+//! (accepted): any command naming `claude-acp` or `agent-state` alone (`npm ls claude-acp`),
+//! and in PowerShell, which ignores case, a path such as `…\Projects\Deal\` after
+//! `claude-acp` and `home` in the same command.
 
 use std::collections::HashSet;
 use std::ffi::OsString;

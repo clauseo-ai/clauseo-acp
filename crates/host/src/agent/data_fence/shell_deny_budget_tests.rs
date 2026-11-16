@@ -197,7 +197,8 @@ fn a_windows_launch_stays_within_the_auto_mode_context() {
             continue;
         };
         if *matters == 200 && *short {
-            // known: over the 810,000 B bound, pending the orchestrator's decision on rule cuts for the second spelling
+            // known: over the 810,000 B bound, pending the orchestrator's decision on rule cuts
+            // for the second spelling
             continue;
         }
         assert!(
