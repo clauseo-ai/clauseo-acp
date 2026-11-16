@@ -10,7 +10,8 @@ use std::path::Path;
 
 /// Copies the ACL of the file `from` (opened without following a symlink) to the open file `to`;
 /// with none on `from`, `to` keeps its own. `copyfile` answers 0 even when it could not apply the
-/// ACL to `to`, so that case is not seen and not counted as lost.
+/// ACL to `to`, so that case is not seen and not counted as lost. It also writes a fresh
+/// quarantine stamp on `to` when `from` has one; [`super::keep`] copies the flag after it.
 pub(super) fn copy_acl(from: &Path, to: &File) -> io::Result<()> {
     let from = super::open_read_nofollow(from)?;
     // SAFETY: both descriptors are open for the whole call (the files outlive it); a null state
