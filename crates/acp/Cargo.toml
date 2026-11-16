@@ -9,6 +9,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Opens `clauseo_acp::fuzzing`, the internals the fuzz targets in `fuzz/` call. Only the fuzz
+# crate turns it on; no app crate may.
+fuzzing = []
+
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
 # Exactly what Claude Code and Codex use; never `unstable_subagents`, `unstable`, `schemars`,

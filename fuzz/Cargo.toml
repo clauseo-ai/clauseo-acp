@@ -12,7 +12,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-clauseo-acp = { path = "../crates/acp" }
+clauseo-acp = { path = "../crates/acp", features = ["fuzzing"] }
 clauseo-protocol = { path = "../crates/protocol" }
 clauseo-reducer = { path = "../crates/reducer" }
 clauseo-store = { path = "../crates/store" }

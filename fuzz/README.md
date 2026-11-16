@@ -12,7 +12,8 @@ libFuzzer needs. Run cargo from this folder so rustup picks that toolchain.
 Each target's `//!` header gives its input format, the crate items it drives and the invariants
 it asserts. All of them go through public APIs only, but two: `zip_marks` compiles the host's
 private `revisions/marks.rs` as a module of its own (its header says why and what that needs), and
-`acp_skipped_update` goes through `clauseo_acp::fuzzing`, a `#[doc(hidden)]` module that only the fuzz crate uses.
+`acp_skipped_update` goes through `clauseo_acp::fuzzing`, a module built only with clauseo-acp's
+`fuzzing` feature, which only this crate turns on.
 
 | target | what it feeds |
 |---|---|

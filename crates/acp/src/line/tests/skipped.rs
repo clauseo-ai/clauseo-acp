@@ -202,3 +202,16 @@ fn a_repeated_update_replaces_the_one_before() {
     let not_an_object = r#"{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"t-1","status":"failed"},"update":5}"#;
     assert_eq!(read(not_an_object), said(Some("s"), None, None, None));
 }
+
+#[test]
+fn ids_inside_a_nested_object_are_not_read() {
+    // Before the update's own `toolCallId`, after it, and a `sessionId` nested in `params`.
+    let before = r#"{"_meta":{"sessionId":"inner-s"},"sessionId":"s-1","update":{"meta":{"toolCallId":"inner","status":"completed"},"sessionUpdate":"tool_call_update","toolCallId":"outer","status":"failed"}}"#;
+    let expected = said(Some("s-1"), Some(true), Some("outer"), Some("failed"));
+    assert_eq!(read(before), expected);
+    let after = r#"{"sessionId":"s-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"outer","status":"failed","meta":[{"toolCallId":"inner"}]},"_meta":{"sessionId":"inner-s"}}"#;
+    assert_eq!(read(after), expected);
+    // Only the nested one: the update's id stays unknown.
+    let nested_only = r#"{"sessionId":"s-1","update":{"sessionUpdate":"tool_call_update","meta":{"toolCallId":"inner"},"content":"#;
+    assert_eq!(read(nested_only), said(Some("s-1"), Some(true), None, None));
+}
