@@ -12,6 +12,10 @@ Code sends back. It needs no login and no network, and nothing in CI runs it. It
 python3 scripts/claude-rule-probe/probe.py <path to package/claude> scripts/claude-rule-probe/cases.json
 ```
 
+At every Claude Code pin bump, and for any PR that changes the rules a launch emits, run the
+emitted settings through the pinned binary on Windows and the Mac and confirm every rule is kept
+("N in, N kept").
+
 It does two checks:
 
 - **Rules.** Claude Code loads the settings as its `--settings` file and lists the rules it
