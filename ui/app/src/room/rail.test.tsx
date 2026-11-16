@@ -7,7 +7,7 @@
 import { act } from "react";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import type { MatterSummary } from "../transport/protocol.ts";
 import { settled } from "@clauseo/components/lib/late.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
@@ -32,6 +32,20 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
 });
+
+// The room's first render and its first open matter load their modules and later chunks (the matter's view, Find's
+// results, the words), which under load takes longer than a test's 5 s; past it the test's act() is left pending and
+// every later test's render queues behind it, so the whole file fails with an empty rail. One room here, before any test
+// and with its own bound, opens a matter and loads them first.
+beforeAll(async () => {
+  await mount(today([A, SCRATCH]));
+  await act(async () => host?.querySelector<HTMLButtonElement>('[data-kind="scratch"]')?.click());
+  await settle();
+  await act(async () => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+}, 60_000);
 
 afterEach(async () => {
   await act(async () => root?.unmount());
