@@ -250,7 +250,7 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     if keys.login != Login::FirstParty {
         settings.insert("skipWebFetchPreflight".to_owned(), Value::Bool(true));
     }
-    deny_data_folder(&mut settings, keys.data);
+    deny_data_folder(&mut settings, keys.data, keys.sandbox.is_some());
     if keys.browser {
         browser_ask_settings(&mut settings);
     }
@@ -276,19 +276,21 @@ pub(crate) const SHED_AT: usize = 1_887_436;
 /// `Bash` and `PowerShell` rules, `data_fence::windows_shell_deny_rules`, without the variable
 /// forms when all of them would take the settings past [`SHED_AT`], counting the allow rules),
 /// and `permissions.allow` the Read of the built-in skills' folder and the own folders' listing
-/// and reading (`data_fence::claude_allow_rules`), each after any the hook put there. A hook
-/// value at `permissions`, `deny` or `allow` of another type is replaced. With no spelling (a
-/// unit test's keys) nothing changes.
+/// and reading (`data_fence::claude_allow_rules`), each after any the hook put there. The own
+/// folders' glob denies go in only without Claude's shell sandbox (`sandboxed`, `keys.sandbox`:
+/// on Windows, or with the sandbox `Off`). A hook value at `permissions`, `deny` or `allow` of
+/// another type is replaced. With no spelling (a unit test's keys) nothing changes.
 fn deny_data_folder(
     settings: &mut Map<String, Value>,
     data: &crate::agent::data_fence::LaunchDeny,
+    sandboxed: bool,
 ) {
     if data.spellings.is_empty() {
         return;
     }
     let mut permissions = take_object(settings, "permissions");
     let mut deny = take_array(&mut permissions, "deny");
-    for rule in crate::agent::data_fence::claude_deny_rules(data) {
+    for rule in crate::agent::data_fence::claude_deny_rules(data, sandboxed) {
         push_new(&mut deny, &rule);
     }
     let mut allow = take_array(&mut permissions, "allow");

@@ -212,7 +212,7 @@ fn a_sixty_matter_launch_carries_only_the_path() {
         .iter()
         .filter_map(Value::as_str)
         .collect();
-    let rules = claude_deny_rules(&big.deny);
+    let rules = claude_deny_rules(&big.deny, false);
     assert!(rules.len() > 2 * big_folder::MATTERS, "{}", rules.len());
     for rule in &rules {
         assert!(deny.contains(&rule.as_str()), "{rule}");
@@ -246,7 +246,7 @@ fn windows_deny(deny: &LaunchDeny) -> Vec<String> {
     let var = |name: &str| -> Option<std::ffi::OsString> {
         (name == "LOCALAPPDATA").then(|| r"C:\Users\clauseo-lawyer\AppData\Local".into())
     };
-    let mut rules = claude_deny_rules_on(&windows, true);
+    let mut rules = claude_deny_rules_on(&windows, true, false);
     rules.extend(crate::agent::data_fence::windows_shell_deny_rules(
         &windows, &var,
     ));

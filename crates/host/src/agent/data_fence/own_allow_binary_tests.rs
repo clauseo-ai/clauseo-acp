@@ -134,7 +134,7 @@ fn probe_cases_for_the_pinned_binary() {
         allow,
         ids,
     } = launch(&dir, &[DATA]);
-    let mut every = claude_deny_rules_on(&deny_launch, true);
+    let mut every = claude_deny_rules_on(&deny_launch, true, false);
     every.extend(windows_shell_deny_rules(
         &deny_launch,
         &super::super::super::cross_tests::env,

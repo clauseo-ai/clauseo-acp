@@ -639,8 +639,9 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     matched an allow rule and ran with no classifier and no deny (run on Linux against the
     pinned binary with `scripts/claude-rule-probe`: `*`, `?` and `[` each read through the
     link). The same went for a glob anywhere else in the command, since a rule's leading `*`
-    takes it (`cat <matter>/*/x <notes>`). Now `permissions.deny` holds, on every OS that has
-    the allow, for each allowed command (`ls`, `cat`, `head`; `Get-ChildItem`, `Get-Content`)
+    takes it (`cat <matter>/*/x <notes>`). Now `permissions.deny` holds, in a launch with no
+    shell sandbox (Windows, or Claude's sandbox `Off` on macOS or Linux, which falls back to
+    `acceptEdits`), for each allowed command (`ls`, `cat`, `head`; `Get-ChildItem`, `Get-Content`)
     and each own path in each spelling the allow writes, `<command> *<glob>*<path>*` and
     `<command> *<path>*<glob>*` with `<glob>` a literal `*` (written `\*`), `?` or `[`
     (`data_fence/own_allow.rs` `own_shell_glob_deny_rules`): 192 rules for the default folder.
@@ -654,6 +655,16 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     Windows PowerShell 5.1's `Get-ChildItem -Recurse` through a junction) can list the names
     in a linked target, not its contents; dropping the own-folder shell rules on Windows once
     #1098's per-call hook is in closes it there, and the sandbox wraps it on macOS.
+  - **The trade-off on Windows, accepted until PR (b).** Claude Code matches a deny on the whole
+    command as well as on each part, so an allowed own read followed by a pipe or a test that
+    holds `*`, `?` or `[` is now refused outright, where it went to a classifier before:
+    `cat <notes>/a.md | grep 'a.*b'`, `Get-Content <notes>\a.md | Select-String 'x*'`,
+    `Get-ChildItem <notes> | Where-Object Name -like '*.md'`, `ls <notes> && [ -f x ]`
+    (pinned by `on_windows_a_glob_after_an_own_read_is_refused_too`). Claude can search its
+    notes with its Grep tool instead. This lasts until PR (b) drops the own folders' shell rules
+    on Windows after #1098, and with them these denies. A sandboxed macOS or Linux launch gets
+    no denies at all: there Seatbelt (bubblewrap) checks the real path a glob reaches, so they
+    would cost those pipes and buy nothing.
 - **2026-11-10 (Rohan).** Claude should be as frictionless as Codex. Outside forced ask a
   Claude session starts in Claude Code's `acceptEdits`, not `default`
   (`agent/loads.rs` `CLAUDE_MODE`). claude-agent-acp 0.89.1 picks its own starting mode (the

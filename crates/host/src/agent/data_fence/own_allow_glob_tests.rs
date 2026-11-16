@@ -2,11 +2,13 @@
 //! 2.1.293's parser and matcher: each rule loads; an allowed listing or read of an own folder
 //! with a glob before or after its path is denied in every spelling the allow writes; a plain
 //! own read, another command's glob and a matter glob with no own path are not; nor is #1098's
-//! pinned PowerShell line; and the launch still fits its settings budget.
+//! pinned PowerShell line; and the launch still fits its settings budget. Only a launch with no
+//! shell sandbox (Windows, or Claude's sandbox `Off`) gets them.
 
 use std::path::PathBuf;
 
 use super::super::super::cross_tests::Rules;
+use super::super::super::tests::denied_by;
 use super::super::own_shell_glob_deny_rules;
 use super::{
     DATA, LAPTOP_MATTER, LAPTOP_RUN, Launch, MATTER, Verdict, launch, leads, own_reads_commands,
@@ -80,7 +82,7 @@ fn every_glob_deny_loads_and_starts_with_an_allowed_command() {
             ..base.clone()
         };
         let glob = own_shell_glob_deny_rules(&deny, windows);
-        let all = claude_deny_rules_on(&deny, windows);
+        let all = claude_deny_rules_on(&deny, windows, false);
         assert!(!glob.is_empty() && glob.iter().all(|rule| all.contains(rule)));
         let size = serde_json::to_string(&glob).unwrap().len();
         eprintln!("{spellings:?}: {} glob denies, {size} B", glob.len());
@@ -314,7 +316,7 @@ fn the_launch_with_the_glob_denies_fits_its_budget() {
         let Launch { deny, ids, .. } = launch(&dir, &spellings);
         assert_eq!(ids.len(), 60);
         let glob = own_shell_glob_deny_rules(&deny, true);
-        let read_edit = claude_deny_rules_on(&deny, true);
+        let read_edit = claude_deny_rules_on(&deny, true, false);
         let allow = claude_allow_rules_on(&deny, true);
         let shell = super::super::super::windows_shell_deny_rules(
             &deny,
@@ -328,5 +330,110 @@ fn the_launch_with_the_glob_denies_fits_its_budget() {
         );
         assert!(glob.iter().all(|rule| read_edit.contains(rule)));
         assert!(total < SHED_AT, "{total}");
+    }
+}
+
+/// The settings' `permissions.deny` a Claude launch of `deny` gets with `sandbox` (Claude's
+/// shell sandbox on, as on a Mac or Linux) or none (Windows, or the sandbox `Off`).
+fn launch_deny_rules(
+    deny: &LaunchDeny,
+    sandbox: Option<&crate::agent::loads::sandbox::ClaudeSandbox>,
+) -> Vec<String> {
+    use crate::agent::loads::browser::Switch;
+    use crate::agent::loads::profile::{ClaudeKeys, Folders, Login, claude_options};
+    let keys = ClaudeKeys {
+        web_search: Switch {
+            on: true,
+            locked: false,
+        },
+        login: Login::FirstParty,
+        folders: Folders {
+            work: "w",
+            notes: "n",
+            connectors: "",
+            browser: "",
+        },
+        seed_sites: &[],
+        forced_ask: false,
+        data: deny,
+        case_law: false,
+        browser: false,
+        sandbox,
+        matter: None,
+        trusted_servers: &[],
+    };
+    let mut options = serde_json::Map::new();
+    claude_options(&mut options, &keys);
+    options["settings"]["permissions"]["deny"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|rule| rule.as_str().map(str::to_owned))
+        .collect()
+}
+
+/// The glob denies go only to a launch with no shell sandbox: Windows, or a Mac or Linux launch
+/// whose sandbox is `Off` (`agent::loads::sandbox`, which falls back to `acceptEdits`). A
+/// sandboxed launch gets none: Seatbelt checks the real path a glob reaches, and the denies
+/// would only refuse an own read piped through a glob there.
+#[test]
+fn only_a_launch_with_no_shell_sandbox_gets_the_glob_denies() {
+    let dir = TempDir::new("own-glob-sandbox");
+    let unix = crate::testing::abs("/Users/asha/Library/Application Support/ai.clauseo.desktop");
+    let spelling = if cfg!(windows) { DATA } else { unix.as_str() };
+    let deny = LaunchDeny {
+        spellings: vec![PathBuf::from(spelling)],
+        ..launch(&dir, &[]).deny
+    };
+    let glob = own_shell_glob_deny_rules(&deny, cfg!(windows));
+    assert!(glob.len() >= 36, "{}", glob.len());
+    // The rule list alone, either way of writing the paths.
+    for windows in [true, false] {
+        let all = own_shell_glob_deny_rules(&deny, windows);
+        let with = claude_deny_rules_on(&deny, windows, false);
+        let without = claude_deny_rules_on(&deny, windows, true);
+        assert!(all.iter().all(|rule| with.contains(rule)));
+        assert!(!all.iter().any(|rule| without.contains(rule)));
+        assert_eq!(with.len(), without.len() + all.len());
+    }
+    // A whole launch's settings: no sandbox (Windows, or `Off`) and a sandbox.
+    let none = launch_deny_rules(&deny, None);
+    assert!(glob.iter().all(|rule| none.contains(rule)), "{none:?}");
+    let sandbox = crate::agent::loads::sandbox::ClaudeSandbox {
+        allow_write: Vec::new(),
+        deny_write: Vec::new(),
+        deny_read: Vec::new(),
+        allow_read: Vec::new(),
+        quiet: Vec::new(),
+    };
+    let sandboxed = launch_deny_rules(&deny, Some(&sandbox));
+    assert!(
+        !glob.iter().any(|rule| sandboxed.contains(rule)),
+        "{sandboxed:?}"
+    );
+    assert!(sandboxed.iter().any(|rule| rule.starts_with("Read(")));
+}
+
+/// The cost on Windows, accepted until PR (b) drops the own folders' shell rules there after
+/// #1098: Claude Code matches a deny on the whole command too, so an allowed own read followed
+/// by a pipe or a test holding a glob character is refused outright, where it went to a
+/// classifier before. Claude can search its notes with its Grep tool instead.
+#[test]
+fn on_windows_a_glob_after_an_own_read_is_refused_too() {
+    let (_, _, _, glob) = rules(&[DATA]);
+    let notes = format!(r"{DATA}\agent-state\{LAPTOP_MATTER}\notes");
+    for (tool, command) in [
+        ("Bash", format!(r"cat {notes}\a.md | grep 'a.*b'")),
+        (
+            "PowerShell",
+            format!(r"Get-Content {notes}\a.md | Select-String 'x*'"),
+        ),
+        (
+            "PowerShell",
+            format!("Get-ChildItem {notes} | Where-Object Name -like '*.md'"),
+        ),
+        ("Bash", format!("ls {notes} && [ -f x ]")),
+    ] {
+        assert!(denied_by(&glob, tool, &command), "{tool}: {command}");
     }
 }

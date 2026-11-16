@@ -154,15 +154,24 @@ pub(crate) fn is_python_runtime(name: &str) -> bool {
 /// Claude's `permissions.deny` rules for a launch: for the data folder spelled each way in
 /// `deny.spellings` (its canonical path first, then the path as configured when that differs),
 /// `Read` and `Edit` for each of `deny.targets`, then `Edit` alone for each of [`READ_ONLY`]
-/// and all under it; then the own folders' glob denies ([`own_shell_glob_deny_rules`]), which
-/// refuse an allowed listing or read of an own folder that holds a glob. A spelling that is not
-/// UTF-8 gets none (no rule could name it).
-pub(crate) fn claude_deny_rules(deny: &LaunchDeny) -> Vec<String> {
-    claude_deny_rules_on(deny, cfg!(windows))
+/// and all under it; then, unless the launch has Claude's shell sandbox (`sandboxed`: macOS
+/// or Linux with `agent::loads::sandbox` on; never Windows, nor a launch whose sandbox is
+/// `Off`), the own folders' glob denies ([`own_shell_glob_deny_rules`]), which refuse an
+/// allowed listing or read of an own folder that holds a glob. Under the sandbox they would buy
+/// nothing (Seatbelt checks the real path a glob reaches) and cost a pipe holding a glob after
+/// an own read (`cat <notes>/a.md | grep 'a.*b'`), which they refuse outright, the deny being
+/// matched on the whole command too. A spelling that is not UTF-8 gets none (no rule could
+/// name it).
+pub(crate) fn claude_deny_rules(deny: &LaunchDeny, sandboxed: bool) -> Vec<String> {
+    claude_deny_rules_on(deny, cfg!(windows), sandboxed)
 }
 
 /// [`claude_deny_rules`] with the paths in Windows' rule form when `windows` ([`rule_path`]).
-pub(crate) fn claude_deny_rules_on(deny: &LaunchDeny, windows: bool) -> Vec<String> {
+pub(crate) fn claude_deny_rules_on(
+    deny: &LaunchDeny,
+    windows: bool,
+    sandboxed: bool,
+) -> Vec<String> {
     let mut rules = Vec::new();
     let mut push = |rule: String| {
         if !rules.contains(&rule) {
@@ -182,8 +191,10 @@ pub(crate) fn claude_deny_rules_on(deny: &LaunchDeny, windows: bool) -> Vec<Stri
             push(format!("Edit({base}/{place}/**)"));
         }
     }
-    for rule in own_shell_glob_deny_rules(deny, windows) {
-        push(rule);
+    if !sandboxed {
+        for rule in own_shell_glob_deny_rules(deny, windows) {
+            push(rule);
+        }
     }
     rules
 }

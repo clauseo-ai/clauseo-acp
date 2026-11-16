@@ -276,7 +276,7 @@ fn in_a_sixty_matter_folder_only_the_own_folders_pass() {
 #[test]
 fn the_settings_files_are_denied_to_every_tool() {
     let deny = on_windows(LaunchDeny::fixed(vec![]), VM_DATA);
-    let read_edit = claude_deny_rules_on(&deny, true);
+    let read_edit = claude_deny_rules_on(&deny, true, false);
     let base = "//c/Users/clauseo-lawyer/AppData/Local/ai.clauseo.desktop";
     for tool in ["Read", "Edit"] {
         let rule = format!("{tool}({base}/launch-settings/**)");
@@ -310,7 +310,7 @@ fn a_thousand_matter_launch_stays_under_half_the_settings_file_cap() {
                 spellings,
                 ..big.deny.clone()
             };
-            let read_edit = claude_deny_rules_on(&deny, true);
+            let read_edit = claude_deny_rules_on(&deny, true, false);
             let shell = windows_shell_deny_rules(&deny, &vm_env);
             eprintln!(
                 "{matters} matters, {} spelling(s): {} targets; Read/Edit {} rules {} bytes; \
