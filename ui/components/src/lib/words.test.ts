@@ -18,8 +18,9 @@ test("Hindi puts the part of the day first", () => {
 });
 
 // The design's foot, "Version history is kept on this computer.", says what is kept, not the view's name: the phrase
-// "version history" (संस्करणों का इतिहास) alone may stand.
-const HISTORY = /"[^"\n]*(?<!version |संस्करणों का )(history|इतिहास)/i;
+// "version history" (संस्करणों का इतिहास) alone may stand, and so may Windows Security's own page, "Protection history",
+// named where a line sends the lawyer there.
+const HISTORY = /"[^"\n]*(?<!version |संस्करणों का |Protection )(history|इतिहास)/i;
 
 test("the versions view is Versions on screen: no words file says History or इतिहास in a string, but for the foot's version history", () => {
   const dir = new URL(".", import.meta.url);
@@ -36,4 +37,5 @@ test("the versions view is Versions on screen: no words file says History or इ
   expect('"Search covers the papers, the answers and History."').toMatch(HISTORY);
   expect('"Version history is kept on this computer."').not.toMatch(HISTORY);
   expect('"Open the matter\'s history."').toMatch(HISTORY);
+  expect('"Open Windows Security, choose Protection history."').not.toMatch(HISTORY);
 });

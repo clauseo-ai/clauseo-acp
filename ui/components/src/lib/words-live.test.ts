@@ -200,15 +200,6 @@ const PLANNED_LINES = [
     "AI ने वह बदलाव स्वीकार नहीं किया। फिर से प्रयास करें।",
   ],
   [
-    "agent.program_blocked",
-    "ChatGPT's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.",
-    "ChatGPT का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
-    "gemini's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.",
-    "gemini का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
-    "The AI's program is missing or blocked on this computer, so it didn't start. Ask your IT team. Your question is kept.",
-    "AI का प्रोग्राम इस कंप्यूटर पर मौजूद नहीं है या रोका गया है, इसलिए वह शुरू नहीं हुआ। अपनी IT टीम से पूछें। आपका प्रश्न सुरक्षित है।",
-  ],
-  [
     "agent.start_offline",
     "You're offline, so ChatGPT didn't start. Try again when you're back online. Your question is kept.",
     "आप ऑफ़लाइन हैं, इसलिए ChatGPT शुरू नहीं हुआ। ऑनलाइन होने पर फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
@@ -409,4 +400,42 @@ test("matter.folder_backslash with no place known: the Mac's line for the folder
   expect(errorWords("en", "matter.folder_backslash")).toBe(
     errorWords("en", "matter.folder_backslash", undefined, { platform: "mac", parent: null }),
   );
+});
+
+// agent.program_missing says the same on every computer; agent.program_blocked's Windows line (also Linux's, and a
+// caller with no place) points to Windows Security, the Mac's doesn't. Each names the thread's agent.
+test("agent.program_missing and agent.program_blocked: each names the thread's agent; only blocked's Mac line differs", () => {
+  const mac = { platform: "mac", parent: null } as const;
+  const missing =
+    "A program Claude needs is missing from this computer, so Claude didn't start. Quit Clauseo and open it again, then choose Install when Clauseo offers it. Your question is kept.";
+  expect(errorWords("en", "agent.program_missing")).toBe(missing);
+  expect(errorWords("en", "agent.program_missing", undefined, mac)).toBe(missing);
+  expect(errorWords("hi", "agent.program_missing")).toBe(missing);
+  expect(errorWords("en", "agent.program_missing", CODEX)).toMatch(
+    /^A program ChatGPT needs .* so ChatGPT didn't start\./,
+  );
+  expect(errorWords("en", "agent.program_missing", named("gemini"))).toMatch(
+    /^A program gemini needs .* so gemini didn't start\./,
+  );
+  const code = "agent.program_blocked";
+  const win =
+    "This computer stopped a program Claude needs from starting, so Claude didn't start. If your antivirus blocked it, open Windows Security, choose Protection history, and allow it, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.";
+  expect(errorWords("en", code)).toBe(win);
+  for (const platform of ["windows", "linux"] as const)
+    expect(errorWords("en", code, undefined, { platform, parent: null })).toBe(win);
+  expect(errorWords("en", code, undefined, mac)).toBe(
+    "This computer stopped a program Claude needs from starting, so Claude didn't start. If your antivirus blocked it, allow it there, then try again. Otherwise, whoever looks after this computer can allow it. Your question is kept.",
+  );
+  expect(errorWords("hi", code)).toBe(win);
+  expect(errorWords("en", code, CODEX, mac)).toMatch(
+    /ChatGPT needs .* allow it there, then try again\./,
+  );
+  expect(errorWords("en", code, named("gemini"))).toMatch(/gemini needs .* Windows Security/);
+  for (const none of [null, "", "  "]) {
+    expect(errorWords("en", code, named(none))).toMatch(/the AI needs .* so the AI didn't start/);
+    expect(errorWords("en", code, named(none), mac)).toMatch(/the AI needs .* allow it there/);
+    expect(errorWords("en", "agent.program_missing", named(none))).toMatch(
+      /^A program the AI needs/,
+    );
+  }
 });
