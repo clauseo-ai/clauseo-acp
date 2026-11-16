@@ -110,6 +110,13 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
     // Claude's sandbox's short temp folder (`agent::claude_tmp`), made by the launch prep.
     if kind == Some(AgentKind::Claude) && !cfg!(windows) {
         run.claude_tmp = crate::agent::claude_tmp::claude_tmp_dir();
+        // Every other matter's folder the host knows now, for its sandbox's denies.
+        run.other_matters = actor
+            .matters
+            .iter()
+            .filter(|(id, _)| **id != row.matter)
+            .map(|(_, entry)| PathBuf::from(&entry.row.folder_path))
+            .collect();
     }
     let skills = skills_prep(actor, &row.agent);
     let browser = browser_prep(actor, &row.agent, key);

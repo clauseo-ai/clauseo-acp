@@ -161,10 +161,11 @@ pub(crate) struct RunFolders {
     /// launch's `session_meta` and `codex_config` take it, and no other launch's.
     pub(crate) packs_written: Option<Arc<PacksWritten>>,
     /// Claude's data folder deny rules (`agent/data_fence.rs`): the data folder's canonical
-    /// path, then the path as configured when it differs, and the patterns under it, every
-    /// entry that is not this session's own enumerated by the launch prep. Run folders and
-    /// matters' notes made after the launch are in no rule (the accepted residual).
+    /// path, then as configured when it differs, and the patterns under it, every entry not this
+    /// session's own enumerated by the launch prep; later run folders and notes are in no rule.
     pub(crate) data_deny: LaunchDeny,
+    /// The other matters' folders Claude's sandbox denies, each spelling (`folders::fences`).
+    pub(crate) other_matters: Vec<PathBuf>,
     /// What the launch prep listed for Codex's data fence (`agent::codex_fence::list`): the
     /// siblings of this session's run folder and notes, `run.old-*`, and what of `<data>/agents`
     /// and its runtime folder the shell needs not. Each folder is denied whole until then.
@@ -236,6 +237,7 @@ impl RunFolders {
             browser_shell: false,
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
+            other_matters: Vec::new(),
             codex_listed: Listed::default(),
             case_law: relay::CaseLaw::Absent,
             egress: None,
@@ -377,7 +379,7 @@ pub(super) fn prepare(
                 make_guard(&mut run, &data, claude)?;
                 let short = run.claude_tmp.take();
                 run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
-                run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
+                folders::fences(&mut run, &stored, &data, claude_home.as_deref());
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);
                 run.mcp_secrets = Arc::new(mcp.read());
@@ -559,7 +561,6 @@ mod browser;
 mod claim;
 use claim::claim;
 pub(super) mod egress;
-use paths::Claims;
 pub(super) mod folder;
 pub(super) mod relay;
 mod straggler;
@@ -574,9 +575,9 @@ pub use packs::PackRequest;
 use packs::PackSkip;
 pub(super) use packs::{PackNotices, pack_notices};
 mod folders;
-use folders::{browser_run_dir, launch_deny, make_guard, notes_dir, remove_tree, run_dir};
+use folders::{browser_run_dir, make_guard, notes_dir, remove_tree, run_dir};
 mod paths;
-use paths::{LaunchPaths, launch_paths};
+use paths::{Claims, LaunchPaths, launch_paths};
 mod skill_wait;
 
 #[cfg(test)]

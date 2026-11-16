@@ -51,3 +51,48 @@ fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
     assert!(text(&run.downloads).ends_with("agent-browser/downloads"));
     assert!(sandbox.deny_read.contains(&text(&data)));
 }
+
+/// A matter registered through a link (`Linked` → `real/m`): Claude Code's sandbox resolves no
+/// link in a deny, so the launch prep gives both spellings, where it leads first, and the
+/// sandbox denies reads of both.
+#[cfg(unix)]
+#[test]
+fn a_matter_registered_through_a_link_is_denied_by_both_spellings() {
+    use crate::agent::loads::sandbox::{ClaudeSandbox, SandboxOs, SandboxPaths};
+    use crate::pipeline::tests::support::TempDir;
+    use crate::write;
+
+    let dir = TempDir::new("sandbox-matter-link");
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    write::create_dir_all(&root.join("real/m")).unwrap();
+    write::symlink(&root.join("real/m"), &root.join("Linked")).unwrap();
+    let (real, linked) = (root.join("real/m"), root.join("Linked"));
+    let spellings = super::super::folders::matter_spellings(&[linked.clone(), real.clone()]);
+    assert_eq!(spellings, [real.clone(), linked.clone()]);
+    let data = PathBuf::from("/Users/l/Library/Application Support/Clauseo");
+    let run = folders(&data, 1);
+    let tmp = crate::agent::temp::temp_dir(&run.root);
+    let short = PathBuf::from("/tmp/clsb-abcd1234");
+    let matter = PathBuf::from("/Users/l/Clients/A");
+    let paths = SandboxPaths {
+        matter: &matter,
+        work: &run.work,
+        tmp: &tmp,
+        claude_tmp: Some(&short),
+        downloads: &run.downloads,
+        skill_packs: &run.skill_packs,
+        notes: &run.notes,
+        skills: &[],
+        path: &[],
+        env_file: None,
+        ca_file: None,
+        claude_home: &data.join("agents/claude-acp/home"),
+        data: &run.data_deny.spellings,
+        other_matters: &spellings,
+    };
+    let sandbox = ClaudeSandbox::for_os(SandboxOs::Mac, &paths).unwrap();
+    for path in [&real, &linked] {
+        let path = path.to_str().unwrap().to_owned();
+        assert!(sandbox.deny_read.contains(&path), "{path}");
+    }
+}

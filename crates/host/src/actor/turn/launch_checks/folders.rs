@@ -79,6 +79,37 @@ fn data_spellings(data: &Path) -> Vec<PathBuf> {
     spellings
 }
 
+/// The launch's fences, made by the launch prep: Claude's data folder deny rules
+/// ([`launch_deny`]) and the other matters' folders Claude's sandbox denies, each spelling
+/// ([`matter_spellings`] of what [`super::launch_paths`] set, as stored, for a Claude session).
+/// A matter registered after the launch is in no list (the accepted residual).
+pub(super) fn fences(run: &mut RunFolders, stored: &Path, data: &Path, home: Option<&Path>) {
+    run.data_deny = launch_deny(run, stored, data, home);
+    run.other_matters = matter_spellings(&run.other_matters);
+}
+
+/// Each of `folders` where it leads (the network-safe walk, `network_paths::touchable`), then
+/// as stored when that differs; as stored alone when it is on a share, does not resolve, or is
+/// not absolute. Claude Code's sandbox resolves no link in a deny, so a matter registered
+/// through one is denied by both.
+pub(super) fn matter_spellings(folders: &[PathBuf]) -> Vec<PathBuf> {
+    let net = crate::network_paths::NetEnv::current();
+    let disk = crate::network_paths::resolve::Disk::resolved(&net);
+    let mut out: Vec<PathBuf> = Vec::new();
+    for folder in folders {
+        let walked = folder
+            .is_absolute()
+            .then(|| crate::network_paths::touchable(folder, folder, &disk))
+            .flatten();
+        for spelling in walked.into_iter().chain([folder.clone()]) {
+            if !out.contains(&spelling) {
+                out.push(spelling);
+            }
+        }
+    }
+    out
+}
+
 /// Claude's data folder deny rules for this launch: every entry of `data` that is not the
 /// session's own ([`own_folders`]), nor, for Claude, a `tool-results` folder in its project for
 /// the matter folder (`stored`, and the real path the agent works in); and the own work and

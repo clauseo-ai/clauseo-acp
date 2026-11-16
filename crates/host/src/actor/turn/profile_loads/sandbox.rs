@@ -58,13 +58,6 @@ fn claude_sandbox(
         })
         .collect();
     let claude_home = actor.effective.locations().agent_home(agent_id.as_str());
-    // Every other matter's folder the host knows now; one registered later is the residual.
-    let other_matters: Vec<PathBuf> = actor
-        .matters
-        .iter()
-        .filter(|(id, _)| **id != run.key.matter)
-        .map(|(_, entry)| PathBuf::from(&entry.row.folder_path))
-        .collect();
     let paths = SandboxPaths {
         matter,
         work: &run.work,
@@ -79,7 +72,7 @@ fn claude_sandbox(
         ca_file: run.path.ca_file.as_deref(),
         claude_home: &claude_home,
         data: &run.data_deny.spellings,
-        other_matters: &other_matters,
+        other_matters: &run.other_matters,
     };
     ClaudeSandbox::for_launch(SandboxOs::CURRENT, &paths)
 }
