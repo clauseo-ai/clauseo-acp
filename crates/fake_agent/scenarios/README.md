@@ -117,7 +117,7 @@ value matches a pattern by these rules (`pattern.rs`, `matches`):
 | Pattern | Matches |
 |---|---|
 | An object | An object that has every key the pattern names, each matching. Extra keys are fine (a subset match). `{}` matches any object, and only an object. |
-| An array | An array of the same length whose items match one by one, in order. |
+| An array | An array of the same length whose items match one by one, in order. When the pattern's last item is `"{{rest}}"`, the array may go on past the items before it: `["a", "{{rest}}"]` matches `["a"]` and `["a", "b", "c"]`. |
 | `"{{any}}"` | Any value that is present, `null` included. Only the whole string counts; `"x {{any}}"` is a plain string. |
 | A string holding `{{cwd}}` | The string with every `{{cwd}}` replaced by the session cwd. |
 | A number | An equal number. When either side is a float, both compare as 64-bit floats, so `1` matches `1.0`. Two integers compare exactly, so `9007199254740993` does not match `9007199254740992`. |

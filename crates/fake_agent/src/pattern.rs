@@ -5,6 +5,8 @@ use serde_json::Value;
 
 /// The pattern string that matches any present value.
 pub(crate) const ANY: &str = "{{any}}";
+/// The last item of an array pattern that matches any further items, none included.
+pub(crate) const REST: &str = "{{rest}}";
 /// The placeholder for the current session's `cwd`.
 pub(crate) const CWD: &str = "{{cwd}}";
 
@@ -48,7 +50,8 @@ pub(crate) fn scalar_eq(left: &Value, right: &Value) -> bool {
 /// Matches `actual` against `pattern`. `pointer` is the JSON pointer of both, for the message.
 ///
 /// An object pattern matches when every key it names matches; extra keys are fine. Arrays match
-/// element by element with equal length. `"{{any}}"` matches any present value. Scalars match
+/// element by element with equal length, unless the pattern's last item is `"{{rest}}"`, which
+/// matches any further items, none included. `"{{any}}"` matches any present value. Scalars match
 /// by equality. The error names the first pointer that differs.
 pub(crate) fn matches(
     pattern: &Value,
@@ -74,7 +77,12 @@ pub(crate) fn matches(
             let Value::Array(actual_items) = actual else {
                 return Err(format!("{at}: expected an array, got {}", short(actual)));
             };
-            if items.len() != actual_items.len() {
+            let (items, rest) = match items.split_last() {
+                Some((Value::String(last), head)) if last == REST => (head, true),
+                _ => (items.as_slice(), false),
+            };
+            let short_of = actual_items.len() < items.len();
+            if short_of || (!rest && items.len() != actual_items.len()) {
                 return Err(format!(
                     "{at}: expected {} items, got {}",
                     items.len(),
@@ -175,6 +183,20 @@ mod tests {
         assert_eq!(
             matches(&json!({"a~/": 1}), Some(&json!({})), ""),
             Err("/a~0~1: missing, expected 1".to_owned())
+        );
+
+        // `{{rest}}` ends an array pattern that takes any further items, none included.
+        let rest = json!({"b": {"c": [1, "{{rest}}"]}});
+        assert_eq!(matches(&rest, Some(&message), ""), Ok(()));
+        let exact = json!({"b": {"c": [1, 2, "{{rest}}"]}});
+        assert_eq!(matches(&exact, Some(&message), ""), Ok(()));
+        assert_eq!(
+            matches(
+                &json!({"b": {"c": [1, 2, 3, "{{rest}}"]}}),
+                Some(&message),
+                ""
+            ),
+            Err("/b/c: expected 3 items, got 2".to_owned())
         );
 
         // `{}` matches any object, and only an object.
