@@ -1,8 +1,11 @@
 // The open conversation's Let this conversation read (rail-triage-items.tsx), over FakeTransport: its submenu lists the
 // other folder matters by name, never its own matter nor the scratch matter, and a press sends one allow_matter_read
-// for the open conversation's thread. A conversation not open offers no such item: rail-snooze-fixes.test.tsx's
-// context menu test holds its items to Snooze and Mark as done.
+// for the open conversation's thread. The item is reached from the open row's chevron and from its context menu
+// (a right-click on the row), both tested here. A conversation not open offers no such item:
+// rail-snooze-fixes.test.tsx's context menu test holds its items to Snooze and Mark as done.
 // @vitest-environment happy-dom
+import { act } from "react";
+import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ThreadInfo } from "./host-next.ts";
 import { LISTS } from "./rail-needs-rig.ts";
@@ -10,6 +13,7 @@ import { railView } from "./rail-lists.ts";
 import { readableOthers } from "./read-matters.ts";
 import {
   A,
+  arm,
   B,
   C,
   D,
@@ -58,6 +62,26 @@ test("the open conversation's menu lists the other matters by name, and a press 
   await press(item(C.name));
   expect(sent(transport, "allow_matter_read")).toEqual([
     { thread: T_LIST.thread, matter: C.matter },
+  ]);
+});
+
+test("a right-click on the open conversation's row opens the same menu: Snooze, Mark as done, Let this conversation read", async () => {
+  await mount({ lists: withA([T_A, T_LIST]) });
+  const row = (await arm("List of dates"))?.querySelector<HTMLElement>(".room-conv");
+  expect(row).not.toBeNull();
+  const asked = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+    clientX: 40,
+    clientY: 300,
+  });
+  await act(async () => row?.dispatchEvent(asked));
+  await act(async () => settled());
+  expect(asked.defaultPrevented).toBe(true);
+  expect(menuItems().map((i) => i.textContent)).toEqual([
+    "Snooze",
+    "Mark as done",
+    "Let this conversation read",
   ]);
 });
 
