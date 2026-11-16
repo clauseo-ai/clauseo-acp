@@ -242,10 +242,11 @@ fn the_programs_2_stdin_stdout_and_stderr_pass_byte_for_byte() {
 )]
 fn a_program_at_a_path_over_260_characters_never_ends_with_0() {
     let root = crate::pipeline::tests::support::TempDir::new("ps-long");
+    // No folder name ends in a space: Windows drops one from a path it doesn't take verbatim.
     let folder = root
         .path()
-        .join("O'Brien & Sons ".repeat(9))
-        .join("Sharma v State 2024 ".repeat(7));
+        .join("O'Brien & Sons ".repeat(9).trim_end())
+        .join("Sharma v State 2024 ".repeat(7).trim_end());
     crate::write::create_dir_all(&folder).unwrap();
     let program = folder.join("clauseo guard.exe");
     assert!(program.as_os_str().len() > 260, "{program:?}");
