@@ -116,8 +116,8 @@ export type ComposerHandle = {
    * field's own row (Ask, just pressed), which it takes back to the field. With focus anywhere else on the page it is
    * emptied in place, so the lawyer's focus never moves, and that one step can't be undone. Given `only`, the
    * question just sent and accepted, it clears only while the composer holds exactly that, and Cmd/Ctrl+Z after it
-   * brings back no chip: the long pastes went with the question. While an input method composes it waits for the composition's end and
-   * clears then if the field still holds what it held. */
+   * brings back no chip: the long pastes went with the question. While an input method composes it waits for the
+   * composition's end and clears then if the field still holds what it held. */
   clear: (only?: string) => void;
   /** Puts `text` into the field only while it is empty, as one undoable step, and never moves the lawyer's focus:
    * it takes the focus only where clear may (mayTakeFocus), and anywhere else the words go in place. While an input
@@ -141,7 +141,8 @@ export type ComposerProps<V extends string = string> = {
   busy?: boolean;
   onStop?: () => void;
   /** What the composer starts with, such as the conversation's draft: a string is typed words for the field (as
-   * setText takes them), and a Draft brings its chips too. Read once, as the field mounts: key the composer to start it again with other words. */
+   * setText takes them), and a Draft brings its chips too. Read once, as the field mounts: key the composer to start
+   * it again with other words. */
   initialText?: string | Draft;
   /** Hears what the composer holds after each change, an input method's composing included: the field's words and
    * the long pastes' texts apart (a Draft), and whether it holds no words at all. Read `empty` rather than trimming:
