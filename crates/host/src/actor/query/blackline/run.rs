@@ -32,6 +32,7 @@ use futures::AsyncReadExt as _;
 use futures::future::{Either, join, select};
 
 use super::parse::receipt::read_compare;
+use super::parse::story::add_parts;
 use super::parse::{Read, ViewFailure, order, read_view};
 use super::tables::{self, TablesCompared};
 use crate::config::Stetdoc;
@@ -119,14 +120,21 @@ pub(crate) async fn blackline<T: Timer>(
     read.blackline.notices.extend(said.notices);
     read.warnings.extend(said.codes);
     order(&mut read.blackline.notices);
-    stories::show_parts(launcher, timer, stetdoc, dir, &mut read).await;
+    // The story views and the check run at once: the check's list is applied once the parts'
+    // ids are counted.
+    let (stories, listed) = join(
+        stories::view_stories(launcher, timer, stetdoc, dir),
+        cross::list_changes(launcher, timer, stetdoc, dir),
+    )
+    .await;
+    add_parts(&mut read, stories);
     // Two copies the host just wrote; one that can't be read counts as different.
     let sides = match (std::fs::read(dir.join(OLD)), std::fs::read(dir.join(NEW))) {
         (Ok(old), Ok(new)) => Some((old, new)),
         _ => None,
     };
     let differ = sides.as_ref().is_none_or(|(old, new)| old != new);
-    cross::cross_check(launcher, timer, stetdoc, dir, &mut read, differ).await;
+    cross::cross_check(launcher, timer, stetdoc, dir, &mut read, listed, differ).await;
     if differ {
         let compared = match &sides {
             Some((old, new)) => tables::compare(old, new),
