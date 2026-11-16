@@ -525,5 +525,6 @@ mod codex;
 mod devanagari;
 mod fixtures;
 mod gaps;
+mod powershell;
 mod record;
 mod timings;
