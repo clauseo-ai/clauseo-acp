@@ -148,10 +148,8 @@ mod tests {
         assert_eq!(ids("p1 a {--b--}{#3 C}{++c++}{#2 C} d"), [2, 3]);
         assert_eq!(ids("p2 {rev run #0 C} {¶- #7 RT} x"), [0, 7]);
         assert_eq!(ids("r1 {row inserted #16 C}"), [16]);
-        assert_eq!(
-            ids("p3 {++x++}{#15 JD move from #13} {#1,4 C}"),
-            [1, 4, 13, 15]
-        );
+        // #13 is the move's other end, named by its own marker (`an_id_carries_its_author`).
+        assert_eq!(ids("p3 {++x++}{#15 JD move from #13} {#1,4 C}"), [1, 4, 15]);
         // Text, escaped braces and quoted strings name no change.
         assert_eq!(
             ids(r#"p4 #5 \{#6 C\} {link "{#7 C}"}x{/link}"#),
