@@ -4,7 +4,8 @@
 // every other case's renders checked to be the same as before it loaded (hostile-dom-fixture.tsx says why, what
 // is checked and where the rest is).
 import { act } from "react";
-import { beforeAll, describe, expect, test, vi } from "vitest";
+import { assertWarm, warmUp } from "@clauseo/components/lib/warm-up.ts";
+import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { characterEntitiesLoaded } from "./entities.ts";
 import { CASES } from "./hostile-cases.ts";
 import { takesWholeSlice } from "./hostile-slice-fixture.ts";
@@ -54,16 +55,30 @@ const html = (el: Element) => el.innerHTML.replaceAll(/\bmd_r_[0-9a-z]+_/g, "md-
 /** The cases without an `&`, finished and streaming, as they rendered before the table loaded. */
 const before = new Map<string, string>();
 
+// A corpus render is CPU-bound and scales with the corpus: a second per case. A fixed 30 s hook failed here, on a
+// loaded 4-core machine where the file took 34 s, and skipped all 19 tests. The failure is recorded (warm-up.ts), so
+// each test fails once with it, rather than every test skipped by one hook timeout.
+const CORPUS_MS = CASES.length * 1_000;
+let warmFailure: string | null = null;
+beforeEach(() => {
+  assertWarm(warmFailure);
+});
+
 // The first state's renders, and `before` from them, for the whole file: every test below can run alone (`-t`).
-beforeAll(() => {
-  expect(characterEntitiesLoaded()).toBe(false);
-  for (const streaming of [true, false]) {
-    surface(streaming).render(casesNode(CASES, streaming));
-    for (const c of CASES.filter((c) => !hasReference(c)))
-      before.set(`${c.id} (streaming ${streaming})`, html(section(streaming, c.id)));
-  }
-  // Two renders of the corpus: what the per-render tests had, 30 s, not the hooks' default 10 s.
-}, 30_000);
+beforeAll(async () => {
+  warmFailure = await warmUp(
+    "the corpus's first renders",
+    async () => {
+      expect(characterEntitiesLoaded()).toBe(false);
+      for (const streaming of [true, false]) {
+        surface(streaming).render(casesNode(CASES, streaming));
+        for (const c of CASES.filter((c) => !hasReference(c)))
+          before.set(`${c.id} (streaming ${streaming})`, html(section(streaming, c.id)));
+      }
+    },
+    CORPUS_MS,
+  );
+}, CORPUS_MS + 5_000);
 
 test("the corpus holds G4's 28 cases and the ones added since, each with its own id", () => {
   expect(CASES[27]?.id).toBe("unterminated-fence");
@@ -98,11 +113,18 @@ test("the stream files between them stream every case once before the table load
 
 describe.each(["not loaded", "loaded"] as const)("entity table %s", (state) => {
   beforeAll(async () => {
-    if (state === "not loaded") return expect(characterEntitiesLoaded()).toBe(false);
-    // Mounted answers re-render when the table arrives, and are rendered again here.
-    await loadTable();
-    for (const streaming of [true, false]) surface(streaming).render(casesNode(CASES, streaming));
-  }, 30_000);
+    // Mounted answers re-render when the table arrives, and are rendered again here: the same budget per case.
+    warmFailure ??= await warmUp(
+      "the corpus's renders once the table loads",
+      async () => {
+        if (state === "not loaded") return expect(characterEntitiesLoaded()).toBe(false);
+        await loadTable();
+        for (const streaming of [true, false])
+          surface(streaming).render(casesNode(CASES, streaming));
+      },
+      CORPUS_MS,
+    );
+  }, CORPUS_MS + 5_000);
 
   test.each([true, false])(
     "every case passes G4's DOM checks (streaming %s)",
