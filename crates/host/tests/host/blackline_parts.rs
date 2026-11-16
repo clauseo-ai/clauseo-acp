@@ -1,7 +1,9 @@
-//! The Word blackline through the host for its notes, headers and footers and what compare says
-//! beside the redline: the footnotes, endnotes, headers and footers of two sections, each shown
-//! in its part; a header in one version only beside a body change, which compare warns of and
-//! does not mark; and a block compare could not mark up. The stand-in stetdoc answers stetdoc 0.9.3's real output
+//! The Word blackline through the host for its notes, headers and footers, what compare says
+//! beside the redline, and table formatting: the footnotes, endnotes, headers and footers of two
+//! sections, each shown in its part; a header in one version only beside a body change, which
+//! compare warns of and does not mark; a block compare could not mark up; and a cell's shading
+//! beside a body change, which compare does not mark and Clauseo's own comparison of the tables
+//! names. The stand-in stetdoc answers stetdoc 0.9.3's real output
 //! (`tests/fixtures/blackline/partial/`, `make_stories.py`'s pairs); the real stetdoc runs when
 //! one is on `PATH`.
 
@@ -9,14 +11,26 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clauseo_process::{PassthroughLauncher, SpawnOptions};
-use clauseo_protocol::BlacklineNotice::{HeaderOrFooterInOneVersion, MayDiffer};
-use clauseo_protocol::{BlacklinePartKind, HeaderSlot, HeaderUse, ParagraphChange, WordBlackline};
+use clauseo_protocol::BlacklineNotice::{CellFormatChanged, HeaderOrFooterInOneVersion, MayDiffer};
+use clauseo_protocol::{
+    BlacklinePartKind, ChangedTable, HeaderSlot, HeaderUse, ParagraphChange, TableFormat,
+    TablePlace, WordBlackline,
+};
 
 use crate::blackline::{
     DOC, blackline, fixture, pair_matter_launching, query, stetdoc_on_path, temp_entries,
 };
 use crate::blackline_crossed::through_fake;
 use crate::support::{Dir, FAKE, Scenario};
+
+/// The body's first table, its shading changed.
+fn shaded() -> ChangedTable {
+    ChangedTable {
+        place: TablePlace::Body,
+        number: 1,
+        formats: vec![TableFormat::Shading],
+    }
+}
 
 /// Whether `answer`'s body shows a change.
 fn body_changed(answer: &WordBlackline) -> bool {
@@ -84,6 +98,16 @@ fn what_compare_could_not_mark_up_may_differ() {
     assert_eq!(unread.notices, [MayDiffer]);
 }
 
+/// A cell's shading changed beside a body change: compare marks only the body's; the table is
+/// named, with the table notice.
+#[test]
+fn a_cells_shading_beside_a_body_change_is_named() {
+    let (answer, ..) = through_fake("blackline_parts_cellfmt", "cellfmt-body", None, &[]);
+    assert!(body_changed(&answer));
+    assert_eq!(answer.notices, [CellFormatChanged]);
+    assert_eq!(answer.changed_tables, [shaded()]);
+}
+
 /// The blackline of the pair `<pair>-old.docx`, `<pair>-new.docx` of `partial/` through the
 /// real stetdoc `stetdoc`.
 fn through_real(stetdoc: &std::path::Path, pair: &str) -> WordBlackline {
@@ -108,7 +132,8 @@ fn through_real(stetdoc: &std::path::Path, pair: &str) -> WordBlackline {
     answer
 }
 
-/// With a real stetdoc on `PATH` (0.9.3, the pin): the same pairs.
+/// With a real stetdoc on `PATH` (0.9.3, the pin): the same pairs, and a cell's shading alone,
+/// which stetdoc marks nothing for, named by the table comparison.
 #[test]
 fn the_real_stetdoc_shows_the_parts_and_names_what_compare_misses() {
     let Some(stetdoc) = stetdoc_on_path() else {
@@ -121,4 +146,9 @@ fn the_real_stetdoc_shows_the_parts_and_names_what_compare_misses() {
     assert!(body_changed(&unmatched));
     assert_eq!(unmatched.notices, [HeaderOrFooterInOneVersion]);
     assert_eq!(through_real(&stetdoc, "excluded").notices, [MayDiffer]);
+    for pair in ["cellfmt-body", "cellfmt"] {
+        let answer = through_real(&stetdoc, pair);
+        assert_eq!(answer.notices, [CellFormatChanged], "{pair}");
+        assert_eq!(answer.changed_tables, [shaded()], "{pair}");
+    }
 }

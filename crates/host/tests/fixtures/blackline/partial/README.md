@@ -49,8 +49,8 @@ What stetdoc 0.9.3's compare does not mark, or its view does not show (`make_lin
   `final-textbox-*.json`, `check-textbox.json`.
 - `cellfmt-old.docx`, `cellfmt-new.docx`: a cell's shading changes. stetdoc 0.9.3's compare marks
   nothing for it at all (nor for a cell's borders or alignment, a row's or a table's format), so
-  there is no view of it: the host's "may differ" for files that differ with nothing shown is all
-  that covers it.
+  there is no view of it: the host's own comparison of the two files' tables names it
+  (`src/actor/query/blackline/tables.rs`).
 - `footnote-*.docx`, `header-*.docx`: only the footnote, or only the header, changes.
   `view-footnote.json`, `view-header.json` (the body unchanged; the summary counts 2) and
   `check-footnote.json`, `check-header.json` (ids 2 and 3, in `p3` and `p2` of their stories).

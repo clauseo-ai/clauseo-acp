@@ -2,8 +2,9 @@
 //! `old.docx` and `new.docx` and says what it could not compare (`parse/receipt.rs`), then
 //! `stetdoc view --all --json` prints it, which `parse.rs` reads; then the views of its notes
 //! and headers (`stories.rs`), the runs that check it (`cross.rs`: `stetdoc check` on the
-//! redline and a view of each version), none of which fails the blackline: a run that fails
-//! leaves it with a notice.
+//! redline and a view of each version), and Clauseo's own comparison of the versions' table
+//! formatting (`tables.rs`), none of which fails the blackline: a run that fails leaves it with
+//! a notice.
 //!
 //! It answers: how stetdoc is started (through the host's launcher, as every child is: the
 //! absolute program, no shell, an environment of its own (`stetdoc_env`: nothing off Windows;
@@ -32,6 +33,7 @@ use futures::future::{Either, join, select};
 
 use super::parse::receipt::read_compare;
 use super::parse::{Read, ViewFailure, order, read_view};
+use super::tables::{self, TablesCompared};
 use crate::config::Stetdoc;
 use crate::matter_worker::{NEW, OLD};
 
@@ -119,13 +121,38 @@ pub(crate) async fn blackline<T: Timer>(
     order(&mut read.blackline.notices);
     stories::show_parts(launcher, timer, stetdoc, dir, &mut read).await;
     // Two copies the host just wrote; one that can't be read counts as different.
-    let differ = match (std::fs::read(dir.join(OLD)), std::fs::read(dir.join(NEW))) {
-        (Ok(old), Ok(new)) => old != new,
-        _ => true,
+    let sides = match (std::fs::read(dir.join(OLD)), std::fs::read(dir.join(NEW))) {
+        (Ok(old), Ok(new)) => Some((old, new)),
+        _ => None,
     };
+    let differ = sides.as_ref().is_none_or(|(old, new)| old != new);
     cross::cross_check(launcher, timer, stetdoc, dir, &mut read, differ).await;
+    if differ {
+        let compared = match &sides {
+            Some((old, new)) => tables::compare(old, new),
+            None => TablesCompared {
+                changed: Vec::new(),
+                may_differ: true,
+            },
+        };
+        note_tables(&mut read.blackline, compared);
+    }
     note_a_silent_difference(&mut read.blackline, differ);
     Ok(read)
+}
+
+/// Says in `blackline` what the comparison of the versions' table formatting found: the tables
+/// that changed, with [`BlacklineNotice::CellFormatChanged`], and that it may differ where it
+/// could not tell.
+pub(crate) fn note_tables(blackline: &mut WordBlackline, compared: TablesCompared) {
+    if !compared.changed.is_empty() {
+        blackline.notices.push(BlacklineNotice::CellFormatChanged);
+    }
+    if compared.may_differ {
+        blackline.notices.push(BlacklineNotice::MayDiffer);
+    }
+    blackline.changed_tables = compared.changed;
+    order(&mut blackline.notices);
 }
 
 /// Adds [`BlacklineNotice::MayDiffer`] when the two files differ (`differ`) but the blackline
@@ -142,6 +169,7 @@ pub(crate) fn note_a_silent_difference(blackline: &mut WordBlackline, differ: bo
     // it needless; one about something else (hidden text, numbers) does not say the versions
     // differ.
     let said = !blackline.changed_links.is_empty()
+        || !blackline.changed_tables.is_empty()
         || blackline.notices.iter().any(|notice| {
             matches!(
                 notice,

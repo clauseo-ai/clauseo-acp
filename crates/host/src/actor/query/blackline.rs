@@ -9,7 +9,8 @@
 //! 2. where the sides go: the matter's thread copies both into a fresh
 //!    `<data>/tmp/blackline-<id>/` (`matter_worker/sides.rs`), and copies only;
 //! 3. where stetdoc runs: on a `clauseo-blackline` thread of its own, never the actor
-//!    (`run.rs`), whose answer is read by `parse.rs`;
+//!    (`run.rs`), whose answer is read by `parse.rs`; and where the versions' table formatting
+//!    is compared, which stetdoc's compare does not mark: on the same thread (`tables.rs`);
 //! 4. what the caller gets: the blackline, with notices when part of it could not be shown or
 //!    stetdoc warned (`parse.rs`); or, when nothing can be shown, a refusal: stetdoc's own
 //!    (`blackline.nested_table` and the others `run.rs` names) or `blackline.failed` for any
@@ -36,6 +37,7 @@ use crate::matter_worker::{BlacklineDir, MatterJob, MatterReply, Sides};
 
 mod parse;
 mod run;
+mod tables;
 
 /// The name of the thread stetdoc runs on.
 const THREAD_NAME: &str = "clauseo-blackline";
