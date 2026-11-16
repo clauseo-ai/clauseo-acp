@@ -222,12 +222,12 @@ test("what the sheet doesn't mark says so: each changed link by its text, then a
   expect(page()?.querySelectorAll("[data-change]")).toHaveLength(2);
 });
 
-test("changes outside what's shown say so over the sheet, naming comments, not headers or footnotes", async () => {
+test("changes outside what's shown say so over the sheet, naming a footnote or header that couldn't be shown", async () => {
   h = await comparing(() => ({
     word_blackline: { ...MARKED.word_blackline!, notices: ["changes_outside_text"] },
   }));
   expect(lines()).toEqual([
-    "Some changes are outside what's shown here, such as in comments. Open both versions in Word to see them.",
+    "Some changes are outside what's shown here, such as in a footnote or header that couldn't be shown. Open both versions in Word to see them.",
   ]);
 });
 
@@ -333,7 +333,7 @@ test("the table notice names each table and what changed in it; past four, the f
     },
   }));
   expect(lines()).toEqual([
-    "Formatting changed in table 2 (borders, shading), Header (first page), table 1 (merged cells), table 1 in the footnotes (row height) and table 2 in the endnotes (other formatting).",
+    "Formatting changed in table 2 (borders, shading), table 1 in the header (first page) (merged cells), table 1 in the footnotes (row height) and table 2 in the endnotes (other formatting).",
   ]);
   await h.unmount();
   h = await comparing(() => ({
@@ -348,7 +348,26 @@ test("the table notice names each table and what changed in it; past four, the f
     },
   }));
   expect(lines()).toEqual([
-    "Formatting changed in table 2 (borders, shading), Header (first page), table 1 (merged cells), table 1 in the footnotes (row height) and 3 more.",
+    "Formatting changed in table 2 (borders, shading), table 1 in the header (first page) (merged cells), table 1 in the footnotes (row height) and 3 more.",
+  ]);
+});
+
+test("past the host's cap the table line counts every changed table: 60 changed, 50 named, says the first three and 57 more", async () => {
+  h = await comparing(() => ({
+    word_blackline: {
+      ...MARKED.word_blackline!,
+      notices: ["cell_format_changed", "may_differ"],
+      changed_tables: Array.from({ length: 50 }, (_, i) => ({
+        place: "body" as const,
+        number: i + 1,
+        formats: ["borders" as const],
+      })),
+      changed_tables_total: 60,
+    },
+  }));
+  expect(lines()).toEqual([
+    "Formatting changed in table 1 (borders), table 2 (borders), table 3 (borders) and 57 more.",
+    MAY_DIFFER,
   ]);
 });
 

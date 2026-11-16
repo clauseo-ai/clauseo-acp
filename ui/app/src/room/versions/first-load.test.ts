@@ -91,6 +91,7 @@ test("the room's first load reaches use-versions.ts and none of Versions' chunk"
     "app/src/room/versions/reading.ts",
     "app/src/room/versions/timeline.ts",
     "app/src/room/versions/words.ts",
+    "app/src/room/versions/blackline-words.ts",
     "app/src/room/versions/state.ts",
     "app/src/room/versions/seeking.ts",
     // Versions' words and what the matter allows: the toolbar's few words, and its Not protected mark, have homes of
