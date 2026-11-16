@@ -110,12 +110,17 @@ pub fn codex_shell(macos: bool) -> Option<&'static str> {
     macos.then(|| CODEX_SHELL_MACOS.trim())
 }
 
-/// The line a Codex session's instructions end with where Clauseo's own `pdftoppm` is on its
-/// `PATH` (the `clauseo-pdf` crate; the desktop adds the line on the same condition as the
-/// folder, `setup/hook.rs`): Codex has no PDF input and its image viewer reads PNG, JPEG, GIF
-/// and WebP only, so it renders pages into `{work_folder}`, which its sandbox may write and the
-/// host fills. [`ClauseoProfile`](crate::ClauseoProfile)'s own instructions never hold it.
-/// Claude gets none: its Read runs that `pdftoppm` itself for a PDF over 10 pages.
+/// The line a Codex session's instructions end with where Clauseo's own `pdftoppm`, `pdftotext`
+/// and `pdfinfo`
+/// are on its `PATH` (the `clauseo-pdf` crate; the desktop adds the line on the same condition as
+/// the folder, `setup/hook.rs`), on macOS and Windows alike: Codex has no PDF input, and reading
+/// one any other way (stage C's census saw `mdls` and `swift`) meets its sandbox and raises a
+/// "run outside the sandbox" card that can never be always-approved, so the line sends every PDF
+/// read to those tools (`pdftotext` for text, by OCR on scans). Its image viewer reads PNG, JPEG, GIF and WebP
+/// only, so it renders pages into `{work_folder}`, which its sandbox may write and the host
+/// fills. [`ClauseoProfile`](crate::ClauseoProfile)'s own instructions never hold it.
+/// Claude gets none: its Read takes a PDF itself (running that `pdftoppm` for one over 10
+/// pages), and its sandbox has no way out, so a blocked command raises no card.
 pub const CODEX_PDF: &str = include_str!("../assets/instructions/codex-pdf.txt");
 
 /// [`CODEX_PDF`], trimmed.
