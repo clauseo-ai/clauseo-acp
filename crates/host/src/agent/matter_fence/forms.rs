@@ -2,9 +2,13 @@
 //! and Unicode form as the disk keeps them), which the rules name, and, on macOS, its twin on
 //! the data volume (`/System/Volumes/Data/Users/…` for `/Users/…` and back, a firmlink no
 //! walk sees) when it is the same folder, which only comparisons use. Then the keys of a match
-//! that keeps a place out of a deny, folded as the file system folds names
-//! (`clauseo_matters::Fold::FileSystem`), never wider: `fold_name`'s safety fold would take
-//! `Zoë` (NFD) for `Zoë` (NFC), two folders on NTFS.
+//! that keeps a place out of a deny, folded about as the file system folds names
+//! (`clauseo_matters::Fold::FileSystem`): no Unicode normalising where the disk keeps forms
+//! apart, so `Zoë` (NFD) is not taken for `Zoë` (NFC), two folders on NTFS, as `fold_name`'s
+//! safety fold would. Not exact on Windows: Rust's `to_lowercase` folds wider than NTFS's
+//! upcase table, so the Kelvin sign and `K`, the Ångström sign and `Å`, the Ohm sign and `Ω`,
+//! `ϴ` and `θ`, `ẞ` and `ß` still match as one when keeping; the registry's create-time safety
+//! fold refuses such a pair of matters. NTFS-exact matching is a follow-up.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
