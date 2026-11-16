@@ -133,6 +133,8 @@ error_codes! {
         holds a `.codex` folder, whose settings Codex would load.";
     MatterAgentsFolder = "matter.agents_folder", retryable: false, meaning: "The matter folder \
         holds a `.agents` folder, whose skills Codex would offer as its own.";
+    MatterGitFolder = "matter.git_folder", retryable: false, meaning: "The matter folder holds a \
+        `.git` entry (a folder, a file or a link) of a code-tracking tool, which Codex won't work in.";
     MatterFileLocked = "matter.file_locked", retryable: true, meaning: "A file the operation \
         needs is locked by another program, such as an open document.";
     MatterTurnRunning = "matter.turn_running", retryable: true, meaning: "A turn is running in \

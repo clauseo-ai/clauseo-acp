@@ -8,6 +8,8 @@ import {
   AGENTS_FOLDER_MAC,
   ERROR_WORDS,
   errorSentence,
+  GIT_FOLDER_MAC,
+  GIT_FOLDER_PLANNED,
   errorWords,
   plannedKey,
   PLANNED_CODES,
@@ -364,6 +366,43 @@ test.each([
 test("matter.folder_backslash with no place known: the Mac's line for the folder's own name, as before", () => {
   expect(errorWords("en", "matter.folder_backslash")).toBe(
     errorWords("en", "matter.folder_backslash", undefined, { platform: "mac", parent: null }),
+  );
+});
+
+// matter.git_folder (U3-err-matter.git_folder and its variants): Claude's line, ChatGPT's, a named agent's and the
+// nameless one's, each with its Mac line (its .mac id) on the Mac only, and English on the Mac too (Hindi later)
+test("matter.git_folder: each agent's line; its Mac line on the Mac only, the base line elsewhere", () => {
+  const code = "matter.git_folder";
+  const tail =
+    " Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.";
+  const lines = [
+    [undefined, ERROR_WORDS[code], GIT_FOLDER_MAC.claude],
+    [CLAUDE, ERROR_WORDS[code], GIT_FOLDER_MAC.claude],
+    [CODEX, GIT_FOLDER_PLANNED.chatgpt, GIT_FOLDER_MAC.chatgpt],
+    [
+      named("gemini"),
+      GIT_FOLDER_PLANNED.named.replaceAll("{name}", "gemini"),
+      GIT_FOLDER_MAC.named.replaceAll("{name}", "gemini"),
+    ],
+    [named(null), GIT_FOLDER_PLANNED.nameless, GIT_FOLDER_MAC.nameless],
+  ] as const;
+  for (const [agent, base, mac] of lines) {
+    expect(errorWords("en", code, agent)).toBe(base);
+    expect(errorWords("en", code, agent, { platform: "windows" })).toBe(base);
+    expect(errorWords("en", code, agent, { platform: "linux" })).toBe(base);
+    expect(errorWords("en", code, agent, { platform: "mac" })).toBe(mac);
+    expect(errorWords("hi", code, agent, { platform: "mac" })).toBe(mac);
+  }
+  // the Mac lines are the base lines plus the Finder sentence
+  for (const variant of Object.values(GIT_FOLDER_MAC)) expect(variant.endsWith(tail)).toBe(true);
+  expect(GIT_FOLDER_MAC.chatgpt).toBe(`${GIT_FOLDER_PLANNED.chatgpt}${tail}`);
+  // ChatGPT's line names ChatGPT, not Claude, and no name slot is left unfilled
+  expect(errorWords("en", code, CODEX)).toContain("Clauseo doesn't start ChatGPT in a folder");
+  expect(errorWords("en", code, CODEX)).not.toContain("Claude");
+  expect(errorWords("en", code, named("gemini"))).not.toContain("{name}");
+  // the Mac's pick reaches no other code's line
+  expect(errorWords("en", "agent.folder_inaccessible", CLAUDE, { platform: "mac" })).toBe(
+    ERROR_WORDS["agent.folder_inaccessible"],
   );
 });
 

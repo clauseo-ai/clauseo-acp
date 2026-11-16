@@ -43,6 +43,7 @@ export type ErrorCode =
   | "matter.folder_refused"
   | "matter.codex_folder"
   | "matter.agents_folder"
+  | "matter.git_folder"
   | "matter.file_locked"
   | "matter.turn_running"
   | "matter.folder_is_drive"
@@ -203,6 +204,10 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // provisional (U3-err-matter.agents_folder): Codex would offer the skills in a matter's .agents folder as its own
   "matter.agents_folder":
     'This matter\'s folder holds a folder named ".agents", with instructions for AI tools. Clauseo doesn\'t let ChatGPT follow instructions kept in a matter\'s files. Rename or remove the ".agents" folder, and ChatGPT can work here.',
+  // provisional (U3-err-matter.git_folder): a code-tracking tool's .git entry in the matter folder; Claude's line, and
+  // the ChatGPT, named and nameless ones in PLANNED (GIT_FOLDER_PLANNED)
+  "matter.git_folder":
+    'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start Claude in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and Claude can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.',
   "matter.file_locked": "A paper is open in another program. Close it, then try again.",
   "matter.turn_running": "Wait for the answer to finish first.",
   // folder PR 2 (approved 2026-11-11): each folder refusal says its reason; a folder nested with a matter, here where
@@ -374,11 +379,6 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
 export const AGENTS_FOLDER_MAC =
   'This matter\'s folder holds a folder named ".agents", with instructions for AI tools. Clauseo doesn\'t let ChatGPT follow instructions kept in a matter\'s files. Rename or remove the ".agents" folder, and ChatGPT can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.' as const;
 
-/** The lines a code has on the Mac where they differ from ERROR_WORDS's, by the copy id `<code>.mac`. */
-const MAC_LINES: Partial<Record<string, keyof typeof HI>> = {
-  "matter.agents_folder": AGENTS_FOLDER_MAC,
-};
-
 /** Codes the app gives itself, never the host, so outside ErrorCode: an answer's link, or Versions' Open now, to a
  * paper the matter's folder no longer holds (room/open.ts). */
 export const APP_ERROR_WORDS = {
@@ -395,6 +395,30 @@ export function errorSentence(lang: Lang, key: ErrorKey): string {
   if (key === STOPPED) return th(lang, key);
   return isMark(key) ? versions(lang, key) : own(lang, key);
 }
+
+/** matter.git_folder's sentences for a thread on the ChatGPT plan, for an agent of no kind by its name, and for one with
+ * no name (PLANNED below); Claude's is ERROR_WORDS's. Provisional; Hindi later. */
+export const GIT_FOLDER_PLANNED = {
+  chatgpt:
+    'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start ChatGPT in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and ChatGPT can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.',
+  named:
+    'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start {name} in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and {name} can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.',
+  nameless:
+    'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start the AI in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and the AI can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.',
+} as const;
+
+/** matter.git_folder's lines on the Mac, one for each sentence above: the copy ids U3-err-matter.git_folder.mac,
+ * .chatgpt.mac, .named.mac and .nameless.mac. Picked on macOS only (errorWords' place). */
+export const GIT_FOLDER_MAC = {
+  claude:
+    'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start Claude in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and Claude can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.',
+  chatgpt:
+    'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start ChatGPT in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and ChatGPT can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.',
+  named:
+    'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start {name} in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and {name} can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.',
+  nameless:
+    'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start the AI in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and the AI can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.',
+} as const;
 
 /** The codes whose sentence names Claude, with their sentence for a thread on the ChatGPT plan, for an agent of no kind
  * by its name (`{name}`), and for one with no name at all. */
@@ -468,6 +492,8 @@ const PLANNED: Partial<
     nameless:
       "Clauseo couldn't reach the AI. The answer so far is kept. Try again. If this keeps happening, ask your firm's IT.",
   },
+  // provisional (U3-err-matter.git_folder): see GIT_FOLDER_PLANNED
+  "matter.git_folder": GIT_FOLDER_PLANNED,
 };
 
 /** The codes PLANNED gives a sentence per agent. */
@@ -515,6 +541,16 @@ export type { BackslashPlace };
  * doesn't know the thread leaves it out. `place` is where the refusal is on this computer: `platform` alone picks a
  * code's Mac line (MAC_LINES); a BackslashPlace, where matter.folder_backslash's backslash is (left out, its line
  * names the folder's own name and Finder). */
+/** The Mac's line for each sentence that has one, keyed by the sentence (as plannedKey gives it): matter.agents_folder's,
+ * and matter.git_folder's for Claude, ChatGPT, a named agent and one with no name. */
+const MAC_LINES: Partial<Record<string, keyof typeof HI>> = {
+  [ERROR_WORDS["matter.agents_folder"]]: AGENTS_FOLDER_MAC,
+  [ERROR_WORDS["matter.git_folder"]]: GIT_FOLDER_MAC.claude,
+  [GIT_FOLDER_PLANNED.chatgpt]: GIT_FOLDER_MAC.chatgpt,
+  [GIT_FOLDER_PLANNED.named]: GIT_FOLDER_MAC.named,
+  [GIT_FOLDER_PLANNED.nameless]: GIT_FOLDER_MAC.nameless,
+};
+
 export function errorWords(
   lang: Lang,
   code: string,
@@ -523,14 +559,14 @@ export function errorWords(
 ): string {
   if (Object.hasOwn(APP_ERROR_WORDS, code))
     return own(lang, APP_ERROR_WORDS[code as keyof typeof APP_ERROR_WORDS]);
-  const mac = place?.platform === "mac" ? MAC_LINES[code] : undefined;
-  if (mac !== undefined) return own(lang, mac);
   if (code === "matter.folder_backslash" && place !== undefined && "parent" in place) {
     const { key, slots } = backslashKey(agent, place);
     return own(lang, key as keyof typeof HI, slots);
   }
   const known = Object.hasOwn(ERROR_WORDS, code) ? (code as WordedCode) : "unknown";
   const { key, name } = plannedKey(known, agent);
+  const mac = place?.platform === "mac" ? MAC_LINES[key] : undefined;
+  if (mac !== undefined) return name === undefined ? own(lang, mac) : own(lang, mac, { name });
   return name === undefined || key === STOPPED || isMark(key)
     ? errorSentence(lang, key)
     : own(lang, key, { name });

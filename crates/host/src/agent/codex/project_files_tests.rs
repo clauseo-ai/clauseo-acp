@@ -47,15 +47,19 @@ fn home_config_sets_no_sandbox_mode_and_trusts_no_project() {
     assert!(!text.contains("sandbox_mode"), "{text}");
 }
 
-/// The refused entries are `.codex`, then `.agents`, each with its own code.
+/// The refused entries are `.codex`, then `.agents`, then `.git`, each with its own code.
 #[test]
-fn the_refused_entries_are_codex_then_agents() {
+fn the_refused_entries_are_codex_then_agents_then_git() {
     let names: Vec<&str> = REFUSED_ENTRIES.iter().map(|entry| entry.name).collect();
-    assert_eq!(names, [".codex", ".agents"]);
+    assert_eq!(names, [".codex", ".agents", ".git"]);
     let codes: Vec<ErrorCode> = REFUSED_ENTRIES.iter().map(|entry| entry.code).collect();
     assert_eq!(
         codes,
-        [ErrorCode::MatterCodexFolder, ErrorCode::MatterAgentsFolder]
+        [
+            ErrorCode::MatterCodexFolder,
+            ErrorCode::MatterAgentsFolder,
+            ErrorCode::MatterGitFolder,
+        ]
     );
 }
 
@@ -80,7 +84,7 @@ fn each_refused_entry_of_any_kind_refuses_the_folder() {
             let error = refuse_project_folders(&folder).unwrap_err();
             assert_eq!(error.code(), entry.code, "{}", entry.name);
             let words = error.to_string();
-            assert!(words.contains("Rename or remove"), "{words}");
+            assert!(words.contains("then try again"), "{words}");
             assert!(words.contains(&format!("\"{}\"", entry.name)), "{words}");
             assert!(!words.contains(&*root.to_string_lossy()), "{words}");
         }
@@ -98,6 +102,35 @@ fn a_link_named_agents_counts() {
     write::symlink(&root.join("nowhere"), &folder.join(".agents")).unwrap();
     let error = refuse_project_folders(&folder).unwrap_err();
     assert_eq!(error.code(), ErrorCode::MatterAgentsFolder);
+    write::remove_dir_all(&root).unwrap();
+}
+
+/// A link named `.git` counts too, wherever it points (here nowhere).
+#[cfg(unix)]
+#[test]
+fn a_link_named_git_counts() {
+    let root = scratch("link_git");
+    let folder = root.join("m");
+    write::create_dir_all(&folder).unwrap();
+    write::symlink(&root.join("nowhere"), &folder.join(".git")).unwrap();
+    let error = refuse_project_folders(&folder).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::MatterGitFolder);
+    write::remove_dir_all(&root).unwrap();
+}
+
+/// A `.git` junction in the matter folder counts as a link does: Windows' reparse point, which
+/// `symlink_metadata` finds whatever it points at (here a folder outside the matter).
+#[cfg(windows)]
+#[test]
+fn a_junction_named_git_counts() {
+    let root = scratch("junction_git");
+    let folder = root.join("m");
+    let target = root.join("elsewhere");
+    write::create_dir_all(&folder).unwrap();
+    write::create_dir_all(&target).unwrap();
+    clauseo_sandbox::windows::test_junction::junction(&folder.join(".git"), &target).unwrap();
+    let error = refuse_project_folders(&folder).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::MatterGitFolder);
     write::remove_dir_all(&root).unwrap();
 }
 

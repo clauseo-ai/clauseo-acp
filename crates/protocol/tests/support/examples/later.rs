@@ -108,6 +108,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::MatterAgentsFolder,
             "the matter folder holds a .agents folder",
         ),
+        failed(
+            ErrorCode::MatterGitFolder,
+            "the matter folder holds a .git folder",
+        ),
         failed(ErrorCode::BlacklineNoWordTool, "stetdoc is not configured"),
         failed(ErrorCode::BlacklineNotWord, "the path is not a .docx"),
         failed(ErrorCode::BlacklineFailed, "stetdoc compare exited 1"),

@@ -12,6 +12,8 @@ import {
   AGENTS_FOLDER_MAC,
   ERROR_WORDS,
   errorWords,
+  GIT_FOLDER_MAC,
+  GIT_FOLDER_PLANNED,
 } from "@clauseo/components/lib/words-errors.ts";
 import { afterEach, expect, test } from "vitest";
 import {
@@ -334,6 +336,34 @@ test.each([
     await act(async () => h!.store.flush());
     expect(h.one("error")?.dataset["code"]).toBe("matter.agents_folder");
     expect(h.one("error")?.textContent).toBe(said);
+    expect(h.host.textContent).not.toContain("raw host text");
+    expect(field().value).toBe(QUESTION);
+  },
+);
+
+// matter.git_folder in a ChatGPT thread: a Send now refused as it says ChatGPT's line, the Mac's own on the Mac
+test.each([
+  ["mac", GIT_FOLDER_MAC.chatgpt],
+  ["linux", GIT_FOLDER_PLANNED.chatgpt],
+] as const)(
+  "a ChatGPT thread's Send now refused as matter.git_folder on %s says %j",
+  async (platform, said) => {
+    h = await mountRoom({
+      platform,
+      threads: [{ ...summary(), agent: "codex-acp" }],
+      dispatch: (c) => {
+        if (c.send_prompt !== undefined)
+          throw { code: "matter.git_folder", message: "raw host text", retryable: false };
+        return defaultOutcome(c);
+      },
+    });
+    h.deliver([reset([userMessage(1, 1, "Q")], running(false, "codex-acp"))]);
+    await h.type(QUESTION);
+    await h.click(h.one("steer-send-now"));
+    await act(async () => h!.store.flush());
+    expect(h.one("error")?.dataset["code"]).toBe("matter.git_folder");
+    expect(h.one("error")?.textContent).toBe(said);
+    expect(h.one("error")?.textContent).toContain("ChatGPT");
     expect(h.host.textContent).not.toContain("raw host text");
     expect(field().value).toBe(QUESTION);
   },

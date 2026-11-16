@@ -1470,6 +1470,7 @@ expression: counts_schema()
         "matter.folder_refused",
         "matter.codex_folder",
         "matter.agents_folder",
+        "matter.git_folder",
         "matter.file_locked",
         "matter.turn_running",
         "matter.folder_is_drive",

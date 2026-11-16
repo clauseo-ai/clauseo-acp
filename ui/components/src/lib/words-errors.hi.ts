@@ -83,6 +83,23 @@ export const HI = {
   // provisional (U3-err-matter.agents_folder.mac, the Mac's line, picked on macOS only): Hindi later, so the English shows
   'This matter\'s folder holds a folder named ".agents", with instructions for AI tools. Clauseo doesn\'t let ChatGPT follow instructions kept in a matter\'s files. Rename or remove the ".agents" folder, and ChatGPT can work here. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
     null,
+  // provisional (U3-err-matter.git_folder, and its .chatgpt, .named, .nameless and .mac ids): Hindi later, so the English shows
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start Claude in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and Claude can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start ChatGPT in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and ChatGPT can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start {name} in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and {name} can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start the AI in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and the AI can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start Claude in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and Claude can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start ChatGPT in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and ChatGPT can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start {name} in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and {name} can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
+  'This matter\'s folder holds a folder named ".git", which belongs to a code-tracking tool. Clauseo doesn\'t start the AI in a folder that tool tracks. Move the ".git" folder out of this matter\'s folder or rename it, and the AI can work here. If this is a code project you\'re keeping, make a matter from a copy of its files without the ".git" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.':
+    null,
   "A paper is open in another program. Close it, then try again.":
     "कोई दस्तावेज़ किसी दूसरे प्रोग्राम में खुला है। उसे बंद करें, फिर दोबारा प्रयास करें।",
   "Wait for the answer to finish first.": "पहले उत्तर पूरा होने दें।",

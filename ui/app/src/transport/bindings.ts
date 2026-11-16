@@ -1809,6 +1809,8 @@ export type ErrorCode =
 "matter.codex_folder" | 
 /** The matter folder holds a `.agents` folder, whose skills Codex would offer as its own. */
 "matter.agents_folder" | 
+/** The matter folder holds a `.git` entry (a folder, a file or a link) of a code-tracking tool, which Codex won't work in. */
+"matter.git_folder" | 
 /** A file the operation needs is locked by another program, such as an open document. */
 "matter.file_locked" | 
 /** A turn is running in the matter, so undo or restore waits. */

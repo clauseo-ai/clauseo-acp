@@ -115,10 +115,18 @@ test("U3's ids are written as they are: one per error code but U3-07's and Versi
     // agent.unreachable's entry came after U3 closed to new ids: it is UC-530 (registry-offline.tsx)
     .filter(([code]) => code !== "agent.unreachable")
     .map(([code]) => `U3-err-${code}`);
-  // the Mac's own line of matter.agents_folder (registry-agents-folder.tsx) follows the codes' ids
+  // the Mac's own line of matter.agents_folder (registry-agents-folder.tsx), then matter.git_folder's variants and
+  // their Mac lines (registry-git-folder.tsx), follow the codes' ids
   expect(ids.filter((id) => id.startsWith("U3-err-"))).toEqual([
     ...codes,
     "U3-err-matter.agents_folder.mac",
+    "U3-err-matter.git_folder.chatgpt",
+    "U3-err-matter.git_folder.named",
+    "U3-err-matter.git_folder.nameless",
+    "U3-err-matter.git_folder.mac",
+    "U3-err-matter.git_folder.chatgpt.mac",
+    "U3-err-matter.git_folder.named.mac",
+    "U3-err-matter.git_folder.nameless.mac",
   ]);
   expect(ids.filter((id) => !id.startsWith("U3-err-"))).toEqual([
     ...Array.from({ length: 15 }, (_, i) => `U3-${String(i + 1).padStart(2, "0")}`),

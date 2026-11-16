@@ -385,10 +385,12 @@ pub(crate) struct RefusedEntry {
 /// - `.agents`: Codex lists every skill in `<cwd>/.agents/skills` as a `$` command, trusted or
 ///   not, and no config key turns that off (`ext/skills/src/host_roots.rs:68, 137-185` at
 ///   `rust-v0.162.1`; `skills.config` disables only by exact path or name).
+/// - `.git`: a code-tracking tool's folder, file or link in the matter folder. Clauseo doesn't
+///   start Codex in a folder that tool tracks; its line says so and how to move the folder out.
 ///
-/// The parents' `.codex`, `.agents/skills` and `AGENTS.md` need no check: with
+/// The parents' `.codex`, `.agents/skills`, `.git` and `AGENTS.md` need no check: with
 /// `project_root_markers = []` in [`home_config`] nothing loads from above the matter folder.
-pub(crate) const REFUSED_ENTRIES: [RefusedEntry; 2] = [
+pub(crate) const REFUSED_ENTRIES: [RefusedEntry; 3] = [
     RefusedEntry {
         name: ".codex",
         code: ErrorCode::MatterCodexFolder,
@@ -402,6 +404,14 @@ pub(crate) const REFUSED_ENTRIES: [RefusedEntry; 2] = [
         words: "Codex can't work in this matter while its folder holds a \".agents\" folder: \
                 Codex would offer the skills inside it as its own. Rename or remove that \
                 \".agents\" folder, then try again.",
+    },
+    RefusedEntry {
+        name: ".git",
+        code: ErrorCode::MatterGitFolder,
+        words: "Codex can't work in this matter while its folder holds a \".git\" entry: it \
+                belongs to a code-tracking tool, and Clauseo doesn't start Codex in a folder \
+                that tool tracks. Move that \".git\" entry out of the matter folder or rename \
+                it, then try again.",
     },
 ];
 

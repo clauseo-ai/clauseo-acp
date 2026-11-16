@@ -1,0 +1,66 @@
+{
+  "U3-err-matter.git_folder": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start Claude in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and Claude can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (matter.git_folder: the .git refusal for Codex, its variants and Mac lines; provisional)",
+    "note": "Claude's sentence (words-errors.ts ERROR_WORDS), for matter.git_folder: a .git entry in the matter folder (crates/host/src/agent/codex.rs REFUSED_ENTRIES). Hindi later."
+  },
+  "U3-err-matter.git_folder.chatgpt": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start ChatGPT in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and ChatGPT can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (matter.git_folder: the .git refusal for Codex, its variants and Mac lines; provisional)",
+    "note": "Codex's sentence (ChatGPT, a named agent, or the AI with no name; words-errors.ts GIT_FOLDER_PLANNED), for matter.git_folder: a .git entry in the matter folder (crates/host/src/agent/codex.rs REFUSED_ENTRIES). Hindi later."
+  },
+  "U3-err-matter.git_folder.named": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start {name} in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and {name} can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (matter.git_folder: the .git refusal for Codex, its variants and Mac lines; provisional)",
+    "note": "Codex's sentence (ChatGPT, a named agent, or the AI with no name; words-errors.ts GIT_FOLDER_PLANNED), for matter.git_folder: a .git entry in the matter folder (crates/host/src/agent/codex.rs REFUSED_ENTRIES). Hindi later."
+  },
+  "U3-err-matter.git_folder.nameless": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start the AI in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and the AI can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (matter.git_folder: the .git refusal for Codex, its variants and Mac lines; provisional)",
+    "note": "Codex's sentence (ChatGPT, a named agent, or the AI with no name; words-errors.ts GIT_FOLDER_PLANNED), for matter.git_folder: a .git entry in the matter folder (crates/host/src/agent/codex.rs REFUSED_ENTRIES). Hindi later."
+  },
+  "U3-err-matter.git_folder.mac": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start Claude in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and Claude can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (matter.git_folder: the .git refusal for Codex, its variants and Mac lines; provisional)",
+    "note": "The Mac's line: the same sentence plus how to show Finder's hidden dot-folders (words-errors.ts GIT_FOLDER_MAC), picked on macOS only; Claude's sentence (words-errors.ts ERROR_WORDS), for matter.git_folder: a .git entry in the matter folder (crates/host/src/agent/codex.rs REFUSED_ENTRIES). Hindi later."
+  },
+  "U3-err-matter.git_folder.chatgpt.mac": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start ChatGPT in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and ChatGPT can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (matter.git_folder: the .git refusal for Codex, its variants and Mac lines; provisional)",
+    "note": "The Mac's line: the same sentence plus how to show Finder's hidden dot-folders (words-errors.ts GIT_FOLDER_MAC), picked on macOS only; Codex's sentence (ChatGPT, a named agent, or the AI with no name; words-errors.ts GIT_FOLDER_PLANNED), for matter.git_folder: a .git entry in the matter folder (crates/host/src/agent/codex.rs REFUSED_ENTRIES). Hindi later."
+  },
+  "U3-err-matter.git_folder.named.mac": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start {name} in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and {name} can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (matter.git_folder: the .git refusal for Codex, its variants and Mac lines; provisional)",
+    "note": "The Mac's line: the same sentence plus how to show Finder's hidden dot-folders (words-errors.ts GIT_FOLDER_MAC), picked on macOS only; Codex's sentence (ChatGPT, a named agent, or the AI with no name; words-errors.ts GIT_FOLDER_PLANNED), for matter.git_folder: a .git entry in the matter folder (crates/host/src/agent/codex.rs REFUSED_ENTRIES). Hindi later."
+  },
+  "U3-err-matter.git_folder.nameless.mac": {
+    "en": "This matter's folder holds a folder named \".git\", which belongs to a code-tracking tool. Clauseo doesn't start the AI in a folder that tool tracks. Move the \".git\" folder out of this matter's folder or rename it, and the AI can work here. If this is a code project you're keeping, make a matter from a copy of its files without the \".git\" folder. Finder hides folders whose names start with a dot; press Command-Shift-period in Finder to show them.",
+    "hi": null,
+    "status": "provisional",
+    "at": "2026-11-17",
+    "by": "app track (matter.git_folder: the .git refusal for Codex, its variants and Mac lines; provisional)",
+    "note": "The Mac's line: the same sentence plus how to show Finder's hidden dot-folders (words-errors.ts GIT_FOLDER_MAC), picked on macOS only; Codex's sentence (ChatGPT, a named agent, or the AI with no name; words-errors.ts GIT_FOLDER_PLANNED), for matter.git_folder: a .git entry in the matter folder (crates/host/src/agent/codex.rs REFUSED_ENTRIES). Hindi later."
+  }
+}

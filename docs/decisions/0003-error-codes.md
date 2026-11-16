@@ -74,6 +74,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `matter.folder_refused` | The folder may not be a matter: a drive root, the home folder or a system folder. | no | matters |
 | `matter.codex_folder` | The matter folder holds a `.codex` folder, whose settings Codex would load. | no | host (a Codex agent's launch and each of its prompts; decision record 0025) |
 | `matter.agents_folder` | The matter folder holds a `.agents` folder, whose skills Codex would offer as its own. | no | host (a Codex agent's launch and each of its prompts; decision record 0025) |
+| `matter.git_folder` | The matter folder holds a `.git` entry (a folder, a file or a link) of a code-tracking tool, which Codex won't work in. | no | host (a Codex agent's launch and each of its prompts) |
 | `matter.file_locked` | A file the operation needs is locked by another program, such as an open document. | yes | matters |
 | `matter.turn_running` | A turn is running in the matter, so undo or restore waits. | yes | host, matters |
 | `matter.folder_is_drive` | The folder may not be a matter: it is the root of a drive or a mounted volume. | no | host (from matters' refusal; decision record 0022) |

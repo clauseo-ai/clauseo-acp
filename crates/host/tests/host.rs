@@ -110,6 +110,9 @@ mod codex_plans;
 #[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
+#[cfg(test)]
+#[path = "host/git_folder.rs"]
+mod git_folder;
 
 #[cfg(test)]
 #[path = "host/case_law.rs"]
