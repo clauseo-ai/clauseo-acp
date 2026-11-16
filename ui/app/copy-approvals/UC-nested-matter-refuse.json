@@ -1,0 +1,24 @@
+{
+  "UC-386": {
+    "en": "Clauseo won't work in this matter while another matter's folder is inside its folder. Your question is kept.",
+    "hi": "जब तक किसी दूसरे मामले का फ़ोल्डर इस मामले के फ़ोल्डर के अंदर है, Clauseo इस मामले में काम नहीं करेगा। आपका प्रश्न रखा गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "nestrefuse (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "nestrefuse (provisional; Rohan batch review)",
+    "note": "matter.holds_other_matter: the turn's stop line when another matter on Clauseo's list lies inside this matter's folder (folders moved outside Clauseo); at a launch, a resume or before a prompt. The question is kept; the UC-387 notice before it names the matter"
+  },
+  "UC-387": {
+    "en": "{matter} is inside this matter's folder. Move {matter}'s folder out of it, or remove one of the two matters from Clauseo.",
+    "hi": "{matter} इस मामले के फ़ोल्डर के अंदर है। {matter} का फ़ोल्डर इससे बाहर ले जाएँ, या दोनों में से एक मामले को Clauseo से हटा दें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-15",
+    "hi_by": "nestrefuse (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-15",
+    "by": "nestrefuse (provisional; Rohan batch review)",
+    "note": "Host notice NoticeKind::MatterInside, given with each turn refused matter.holds_other_matter: {matter} is the inner matter by its name now, bidi-isolated; what to do is move its folder out, or remove one of the two matters from Clauseo"
+  }
+}

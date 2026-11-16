@@ -87,6 +87,17 @@ export function refusedMatterOf(
   return { matter: refused.matter, name };
 }
 
+/** The matter a matter_inside notice names (UC-387), read by shape: its name now (the app's list), else as the host
+ * named it then, "" when neither is known; undefined for anything else. */
+function insideMatterOf(kind: NoticeKind | undefined, names: MatterNameOf): string | undefined {
+  const inside =
+    typeof kind === "object" && kind !== null && "matter_inside" in kind
+      ? kind.matter_inside
+      : undefined;
+  if (inside === undefined || typeof inside.matter !== "string") return undefined;
+  return names(inside.matter) ?? (typeof inside.name === "string" ? inside.name : "");
+}
+
 /** "Clauseo stopped a step: Claude tried to open Sharma's files. That's another matter.": the matter isolated, as a
  * name the lawyer typed. */
 function otherRefused(matter: string, w: NoticeWords, agent: AgentName): string {
@@ -195,6 +206,14 @@ export function noticeLine(
   const refused = refusedMatterOf(kind, names);
   if (refused !== undefined)
     return refused.name === "" ? null : otherRefused(refused.name, w, agent);
+  const inside = insideMatterOf(kind, names);
+  if (inside !== undefined)
+    return inside === ""
+      ? null
+      : w.th(
+          "{matter} is inside this matter's folder. Move {matter}'s folder out of it, or remove one of the two matters from Clauseo.",
+          { matter: isolate(inside) },
+        );
   const loose =
     typeof kind === "object" && kind !== null && "matters_unfenced" in kind
       ? kind.matters_unfenced

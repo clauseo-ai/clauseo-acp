@@ -149,6 +149,14 @@ const UNFENCED_NOTICE = notice(6, {
   text: "Clauseo couldn't fully keep the agent out of some matters.",
   kind: { matters_unfenced: { matters: [JOSHI.matter, KAPOOR.matter], more: 3 } },
 });
+const INSIDE =
+  "{matter} is inside this matter's folder. Move {matter}'s folder out of it, or remove one of the two matters from Clauseo.";
+/** Joshi's folder is inside this matter's: no turn runs here, and the notice says what to do (UC-387). */
+const INSIDE_NOTICE = notice(6, {
+  level: "warning",
+  text: "Joshi is inside this matter's folder. Move Joshi's folder out of it, or remove one of the two matters from Clauseo.",
+  kind: { matter_inside: { matter: JOSHI.matter, name: JOSHI.name } },
+});
 const iso = (name: string) => `\u2068${name}\u2069`;
 /** One paper a sync client put back after the undo. */
 const ONE_PAPER = notice(6, {
@@ -249,6 +257,12 @@ export const TN: Entry[] = [
     words: threadWords(OFFER),
     screen: "room/thread",
     render: thread(OTHER_NOTICE),
+  },
+  {
+    id: "UC-387",
+    words: threadWords(INSIDE),
+    screen: "room/thread",
+    render: thread(INSIDE_NOTICE),
   },
   {
     id: "UC-349",

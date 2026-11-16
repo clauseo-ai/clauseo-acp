@@ -41,6 +41,19 @@ test("Claude's commands kept out of some folders give the app's line (UC-382)", 
   );
 });
 
+test("a matter inside this one is named by its name now, else the host's, and says what to do (UC-387)", () => {
+  const SUB = "0190a000-0000-7000-8000-000000000011";
+  const kind = { matter_inside: { matter: SUB, name: "Sub (old)" } } as NoticeKind;
+  expect(noticeLine(kind, en, undefined, (m) => (m === SUB ? "Sub" : undefined))).toBe(
+    `${iso("Sub")} is inside this matter's folder. Move ${iso("Sub")}'s folder out of it, or remove one of the two matters from Clauseo.`,
+  );
+  expect(noticeLine(kind, words("hi"))).toBe(
+    `${iso("Sub (old)")} इस मामले के फ़ोल्डर के अंदर है। ${iso("Sub (old)")} का फ़ोल्डर इससे बाहर ले जाएँ, या दोनों में से एक मामले को Clauseo से हटा दें।`,
+  );
+  const nameless = { matter_inside: { matter: SUB } } as unknown as NoticeKind;
+  expect(noticeLine(nameless, en)).toBeNull();
+});
+
 test("the data-fence refusal's line names the agent as the stop line does", () => {
   const claude = { kind: "claude", name: "claude-acp" } as const;
   expect(noticeLine("outside_matter_blocked", en, claude)).toBe(

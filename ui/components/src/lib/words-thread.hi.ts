@@ -166,6 +166,10 @@ export const HI = {
   // or another matter's deny widened to a folder above it); its file tools still can (provisional, UC-382)
   "Claude's commands can't reach some folders right now; it can still read and edit this matter's files.":
     "Claude की कमांड अभी कुछ फ़ोल्डर तक नहीं पहुँच सकतीं; वह इस मामले की फ़ाइलें अब भी पढ़ और संपादित कर सकता है।",
+  // another matter on the list lies inside this matter's folder, so no turn runs; {matter} is that matter, with what
+  // to do (provisional, UC-387)
+  "{matter} is inside this matter's folder. Move {matter}'s folder out of it, or remove one of the two matters from Clauseo.":
+    "{matter} इस मामले के फ़ोल्डर के अंदर है। {matter} का फ़ोल्डर इससे बाहर ले जाएँ, या दोनों में से एक मामले को Clauseo से हटा दें।",
   // Clauseo's data fence refused, unasked, a request of the agent's that reached outside the
   // matter; {name} is the agent as the outside-matter stop names it (provisional, TN-11), and
   // the AI where none is known (provisional, TN-12)

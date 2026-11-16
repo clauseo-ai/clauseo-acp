@@ -20,6 +20,7 @@ export const ownEntry = (code: ErrorCode, key: ErrorKey): key is (typeof MARK_KE
   code === "agent.quiet" ||
   code === "matter.folder_backslash" ||
   code === "agent.folder_inaccessible" ||
+  code === "matter.holds_other_matter" ||
   (MARK_KEYS as readonly string[]).includes(key);
 
 /** agent.offline is never a send's refusal: the stop line under the answer so far, with Try again. */
@@ -118,6 +119,30 @@ const folderStop = (code: ErrorCode, key: Parameters<typeof errorWords>[0]): Ent
   },
 ];
 
+/** matter.holds_other_matter is never a send's refusal: the stop line under the question, after the notice naming the
+ * matter inside (UC-387), with Try again. Provisional (UC-386). */
+const HELD: Entry[] = [
+  {
+    id: "UC-386",
+    words: errorWords(
+      "Clauseo won't work in this matter while another matter's folder is inside its folder. Your question is kept.",
+    ),
+    screen: "room/thread",
+    render: () => (
+      <RoomOver
+        host={() =>
+          threadHost({
+            entries: [
+              userMessage(5, 1, "What does clause nine of the lease say about notice?"),
+              step(9, { stop: "failed", failure: "matter.holds_other_matter" }),
+            ],
+          })
+        }
+      />
+    ),
+  },
+];
+
 /** The entries in place of a refusal for a code `ownEntry` names, in their code's place. */
 const OWN: Partial<Record<ErrorCode, Entry[]>> = {
   "agent.offline": OFFLINE,
@@ -131,6 +156,7 @@ const OWN: Partial<Record<ErrorCode, Entry[]>> = {
     "agent.folder_inaccessible",
     "Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.",
   ),
+  "matter.holds_other_matter": HELD,
 };
 
 /** The entries in place of a refusal for a code `ownEntry` names: agent.offline's, agent.service_error's, agent.quiet's
