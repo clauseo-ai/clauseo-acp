@@ -1,7 +1,8 @@
 //! Claude's sign-in, status and logout runs take inherited `CLAUDE_*` and `ANTHROPIC_*` names by
-//! the agent launch's routing rule (`clauseo_process::env_routing`): a route and its companions
-//! reach them, a lone companion and every account-only name never do. So a status says signed in
-//! only on Clauseo's own sign-in: the fake CLI, like Claude Code, says signed in on an inherited
+//! the routing rule the agent launch will import (`clauseo_process::env_routing`): a route and its
+//! companions reach them, a lone companion and every account-only name never do, nor does a
+//! token beside something that is no route. So a status says signed in only on Clauseo's own
+//! sign-in or a firm's route: the fake CLI, like Claude Code, says signed in on an inherited
 //! `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_AUTH_TOKEN` alone.
 
 use std::collections::BTreeMap;
@@ -74,15 +75,21 @@ fn no_account_only_name_reaches_a_sign_in_status_or_logout_run_even_beside_a_rou
 #[test]
 fn a_route_and_its_companions_reach_every_run_and_a_lone_companion_none() {
     let companions = &ROUTING_KEPT[ROUTES.len()..];
+    // Windows reads a name in any case; macOS and Linux only as spelled.
+    let model = if cfg!(windows) {
+        "anthropic_model"
+    } else {
+        "ANTHROPIC_MODEL"
+    };
     let mut routed = Fixture::new("signin-creds-routed", "ok-after:0");
     routed.set_env("ANTHROPIC_BASE_URL", "https://gw.firm.example");
     routed.set_env("ANTHROPIC_CUSTOM_HEADERS", "X-Firm: 1");
-    routed.set_env("anthropic_model", "claude-firm");
+    routed.set_env(model, "claude-firm");
     for (word, run) in every_run(&routed) {
         for (name, value) in [
             ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
             ("ANTHROPIC_CUSTOM_HEADERS", "X-Firm: 1"),
-            ("anthropic_model", "claude-firm"),
+            (model, "claude-firm"),
         ] {
             let got = run.env.get(&OsString::from(name));
             assert_eq!(got, Some(&OsString::from(value)), "{name}, {word}");
@@ -146,4 +153,52 @@ fn an_auth_token_beside_a_route_reaches_the_status_run() {
     let status = fx.runs_of("status");
     let token = status[0].env.get(&OsString::from("ANTHROPIC_AUTH_TOKEN"));
     assert_eq!(token, Some(&OsString::from("firm-token")));
+}
+
+/// Starts a status check with `shape` and an inherited `ANTHROPIC_AUTH_TOKEN` and no sign-in of
+/// Clauseo's: it reads signed out, and the token never reaches the status run.
+fn token_beside_reads_signed_out(shape: &[(&str, &str)]) {
+    let mut fx = Fixture::new("signin-creds-no-route", "never");
+    for (name, value) in shape {
+        fx.set_env(name, value);
+    }
+    fx.set_env("ANTHROPIC_AUTH_TOKEN", "someone-elses-token");
+    let (agents, events) = fx.start();
+    agents.check_status(&claude()).unwrap();
+    let none = SigninState::SignedOut {
+        found: Some(Found::NoLogin),
+    };
+    assert_eq!(events.until_end().1, none, "{shape:?}");
+    let status = fx.runs_of("status");
+    assert_ne!(status, [], "{shape:?}");
+    for run in status {
+        let token = spelled(&run.env, "ANTHROPIC_AUTH_TOKEN");
+        assert_eq!(token, Vec::<String>::new(), "{shape:?}");
+    }
+}
+
+/// A provider address with its switch absent or off is no route: Claude Code goes to
+/// Anthropic's own API, so a token beside it is a lone token and reads signed out.
+#[test]
+fn an_auth_token_beside_a_provider_address_with_no_switch_on_reads_signed_out() {
+    let vertex = ("ANTHROPIC_VERTEX_BASE_URL", "https://vertex.example");
+    token_beside_reads_signed_out(&[vertex]);
+    token_beside_reads_signed_out(&[vertex, ("CLAUDE_CODE_USE_VERTEX", "0")]);
+}
+
+/// An `ANTHROPIC_BASE_URL` of only spaces, only U+FEFF or only U+3000 is blank to Claude Code
+/// (it trims JavaScript whitespace), so no route: a token beside it reads signed out.
+#[test]
+fn an_auth_token_beside_a_blank_base_url_reads_signed_out() {
+    for blank in ["   ", "\u{FEFF}", "\u{3000}"] {
+        token_beside_reads_signed_out(&[("ANTHROPIC_BASE_URL", blank)]);
+    }
+}
+
+/// On macOS and Linux Claude Code reads only the upper-case name, so a lower-case
+/// `anthropic_base_url` is no route: a token beside it reads signed out.
+#[cfg(not(windows))]
+#[test]
+fn an_auth_token_beside_a_lower_case_base_url_reads_signed_out() {
+    token_beside_reads_signed_out(&[("anthropic_base_url", "https://gw.firm.example")]);
 }

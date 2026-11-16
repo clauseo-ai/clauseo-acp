@@ -10,10 +10,10 @@
 //! - "the inherited one minus every `SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE`", and minus
 //!   `NODE_OPTIONS` and `NODE_PATH` (`clauseo_process::NODE_ENV`, which the spawn drops anyway),
 //!   and minus every inherited `CLAUDE_*` and `ANTHROPIC_*` name but a firm's routing
-//!   (`clauseo_process::env_routing`, the agent launch's rule: a route, and its companions
-//!   only beside one; and the launch's few other drops, `ALSO_DROPPED`), for both vendors, so
-//!   a status never says signed in on an inherited account (`CLAUDE_CODE_OAUTH_TOKEN`, a lone
-//!   `ANTHROPIC_AUTH_TOKEN`) the agent would not use;
+//!   (`clauseo_process::env_routing`, the rule the agent launch will import: a route, and its
+//!   companions only beside one; and the launch's few other drops, `ALSO_DROPPED`), for both
+//!   vendors, so a status never says signed in on an inherited account
+//!   (`CLAUDE_CODE_OAUTH_TOKEN`, a lone `ANTHROPIC_AUTH_TOKEN`) the agent would not use;
 //! - "plus the agent's home variables";
 //! - "`ANTHROPIC_API_KEY=""` for Claude and `CODEX_API_KEY=""` for Codex, so a stray key cannot
 //!   win and status reports only the plan login";
@@ -27,8 +27,9 @@
 //!   firm's TLS-inspecting proxy puts its root; Node 24.6 and 22.19 on, older ones ignore it);
 //! - "and `BROWSER`" (the shim, Claude's login runs on macOS and Linux).
 //!
-//! Names are matched without regard to ASCII case: Windows reads them that way, and on Unix a
-//! lowercase `ssh_tty` dropped as well costs nothing.
+//! This module's own names are matched without regard to ASCII case: Windows reads them that
+//! way, and on Unix a lowercase `ssh_tty` dropped as well costs nothing. The routing rule reads
+//! its names as each OS does (`clauseo_process::env_routing`).
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};

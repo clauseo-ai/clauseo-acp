@@ -310,9 +310,14 @@ fn with(pairs: &[(&str, &str)]) -> BTreeMap<OsString, OsString> {
 /// `ANTHROPIC_API_KEY` stays blanked for Claude even beside a route.
 #[test]
 fn every_run_keeps_a_route_and_its_companions() {
+    let token = if cfg!(windows) {
+        "anthropic_auth_token"
+    } else {
+        "ANTHROPIC_AUTH_TOKEN"
+    };
     let base = with(&[
         ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
-        ("anthropic_auth_token", "firm-token"),
+        (token, "firm-token"),
         ("ANTHROPIC_MODEL", "claude-firm"),
         ("CLAUDE_CODE_OAUTH_TOKEN", "account"),
     ]);
@@ -321,7 +326,7 @@ fn every_run_keeps_a_route_and_its_companions() {
             get(&env, "ANTHROPIC_BASE_URL"),
             Some("https://gw.firm.example")
         );
-        assert_eq!(get(&env, "anthropic_auth_token"), Some("firm-token"));
+        assert_eq!(get(&env, token), Some("firm-token"));
         assert_eq!(get(&env, "ANTHROPIC_MODEL"), Some("claude-firm"));
         assert_eq!(get(&env, "CLAUDE_CODE_OAUTH_TOKEN"), None, "{vendor:?}");
         if vendor == Vendor::Claude {
@@ -383,5 +388,58 @@ fn every_run_drops_the_names_the_launch_also_drops() {
                 assert_eq!(get(&env, &spelling), None, "{spelling}, {vendor:?}");
             }
         }
+    }
+}
+
+/// A lone inherited token never reaches a run: beside a provider address with its switch off or
+/// absent, a blank `ANTHROPIC_BASE_URL` (spaces, U+FEFF, U+3000) or, on macOS and Linux, a
+/// lower-case `anthropic_base_url`, there is no route, so the token drops.
+#[test]
+fn every_run_drops_a_token_beside_something_that_is_no_route() {
+    let mut shapes: Vec<Vec<(&str, &str)>> = vec![
+        vec![("ANTHROPIC_VERTEX_BASE_URL", "https://vertex.example")],
+        vec![
+            ("ANTHROPIC_BEDROCK_BASE_URL", "https://bedrock.example"),
+            ("CLAUDE_CODE_USE_BEDROCK", "0"),
+        ],
+        vec![("ANTHROPIC_BASE_URL", "   ")],
+        vec![("ANTHROPIC_BASE_URL", "\u{FEFF}")],
+        vec![("ANTHROPIC_BASE_URL", "\u{3000}")],
+    ];
+    if cfg!(not(windows)) {
+        shapes.push(vec![("anthropic_base_url", "https://gw.firm.example")]);
+    }
+    for mut shape in shapes {
+        shape.push(("ANTHROPIC_AUTH_TOKEN", "someone-elses-token"));
+        for (vendor, env) in every_run(&with(&shape)) {
+            assert_eq!(
+                get(&env, "ANTHROPIC_AUTH_TOKEN"),
+                None,
+                "{shape:?}, {vendor:?}"
+            );
+        }
+    }
+}
+
+/// The nonessential-traffic switch reaches every run with no route; the first-party assumption
+/// only beside one.
+#[test]
+fn every_run_keeps_the_nonessential_traffic_switch_and_the_first_party_assumption_by_route() {
+    let assume = "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL";
+    let lone = with(&[
+        ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"),
+        (assume, "1"),
+    ]);
+    for (vendor, env) in every_run(&lone) {
+        let traffic = get(&env, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC");
+        assert_eq!(traffic, Some("1"), "{vendor:?}");
+        assert_eq!(get(&env, assume), None, "{vendor:?}");
+    }
+    let routed = with(&[
+        (assume, "1"),
+        ("ANTHROPIC_BASE_URL", "https://gw.firm.example"),
+    ]);
+    for (vendor, env) in every_run(&routed) {
+        assert_eq!(get(&env, assume), Some("1"), "{vendor:?}");
     }
 }

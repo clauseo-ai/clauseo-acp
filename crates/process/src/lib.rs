@@ -23,8 +23,10 @@
 //!   Toolhelp snapshot on Windows.
 //! - The stderr ring (256 KiB per agent, never uploaded) and its redacted tail of at most 4 KiB.
 //! - [`env_routing`]: which inherited `CLAUDE_*` and `ANTHROPIC_*` names a Claude child keeps, the
-//!   one rule host's launch, sign-in's runs (`agents`) and the plan readers (`limits`) share. The
-//!   spawn itself applies none of it.
+//!   one rule sign-in's runs (`agents`) and the plan readers (`limits`) share, and host's launch
+//!   will import (#1167). The spawn itself applies none of it.
+//! - [`js_trim`]: JavaScript's whitespace trim, so Rust that predicts how Claude Code reads a
+//!   value trims it as Claude Code does.
 //!
 //! # Interface
 //!
@@ -104,6 +106,7 @@ mod descendants;
 pub mod env_routing;
 mod error;
 mod handle;
+mod js_text;
 mod launch;
 mod live;
 #[cfg(all(test, any(target_os = "macos", windows)))]
@@ -117,6 +120,7 @@ mod timer;
 pub use descendants::{Cutoff, Descendants, Snapshot, Swept};
 pub use error::Error;
 pub use handle::{ExitReport, Handle, ShutdownOutcome, TreeWatch};
+pub use js_text::{is_js_whitespace, js_trim};
 pub use launch::{
     Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, is_node_env, spawn_in_tree,
 };

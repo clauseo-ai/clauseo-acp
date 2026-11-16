@@ -201,11 +201,20 @@ fresh install, with no key stored yet; it can never replace or clear one.
    lawyer's ssh-agent keys, and they are a way out for data. Checkpoints use gix in-process, so
    agents need no remote git. `limits`' plan readers drop the same (`GIT_*`, `SSH_*`,
    `NO_BROWSER`, `CLAUDE_CODE_REMOTE` and Codex's `DROPPED_VARS`). Sign-in, status and logout
-   runs and the limits readers ignore inherited account credentials, matching the launch: they
-   keep an inherited `CLAUDE_*` or `ANTHROPIC_*` name only by the launch's routing rule
-   (`crates/process/src/env_routing.rs`), so Plans says signed in only on Clauseo's own sign-in
-   or a firm's route. Desktop gives the `agents`
-   worker two launchers: sign-in runs use the `clear_env` one (0046); install runs (npm, Node,
+   runs and the limits readers keep an inherited `CLAUDE_*` or `ANTHROPIC_*` name only by the
+   routing rule in `crates/process/src/env_routing.rs`, which the agent launch will import
+   (#1167): an inherited account variable never reaches them, and an inherited token or key
+   passes only beside a route (an `ANTHROPIC_BASE_URL` that is not blank, or a provider switch
+   that is on). The limits readers keep an inherited `ANTHROPIC_API_KEY` out only because the
+   installed settings entry sets its own blank `ANTHROPIC_API_KEY`, which wins over it; a
+   settings file edited to remove that entry would let an inherited key beside a route reach a
+   reader. Sign-in's runs set the blank key themselves. *Stated limit:* Claude Code also signs
+   in from a profile file, with no variable at all: it looks in `$ANTHROPIC_CONFIG_DIR` (which
+   the rule drops), else `$XDG_CONFIG_HOME/anthropic`, else `~/.config/anthropic`. An active
+   user-OAuth or federation profile there ranks ahead of the stored claude.ai login and can
+   carry its own `base_url`, so Plans can say signed in on it and traffic can follow that
+   address. The follow-up gives each Claude child an empty `ANTHROPIC_CONFIG_DIR` of Clauseo's
+   own. Desktop gives the `agents` worker two launchers: sign-in runs use the `clear_env` one (0046); install runs (npm, Node,
    the system-proxy check) build specs with partial environments and use one that does not
    clear, or Windows children would lose `SystemRoot` and `PATH`.
 4. *`LoginChanged`* is a Rust-only `HostHandle` call (above).

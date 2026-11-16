@@ -5,11 +5,14 @@ use std::ffi::{OsStr, OsString};
 
 /// The spec's env map: the `inherited` environment (read at each read) minus every `GIT_*` and
 /// `SSH_*` variable, the names in [`DROPPED_INHERITED`], every `CLAUDE_*` and `ANTHROPIC_*` name
-/// but a firm's routing and the launch's other drops (`clauseo_process::env_routing`, the agent
-/// launch's rule, decided over `inherited`: so a read never uses an inherited account the agent
-/// would not) and every name the agent's settings variables (`own`) also name, then `own`, all
-/// ignoring ASCII case. Every name in `dropped` (the Codex reader's [`CODEX_DROPPED`]) is left
-/// out of both, and so are `NODE_OPTIONS` and `NODE_PATH` (`clauseo_process::NODE_ENV`).
+/// but a firm's routing and the launch's other drops (`clauseo_process::env_routing`, the rule
+/// the agent launch will import, decided over `inherited`, with names read as each OS reads them:
+/// so a read never uses an inherited account the agent would not) and every name the agent's
+/// settings variables (`own`) also name, then `own`, the last two ignoring ASCII case. An
+/// inherited `ANTHROPIC_API_KEY` beside a route is a companion and passes the rule; what keeps it
+/// out is the settings entry's own blank `ANTHROPIC_API_KEY`, which `own` then names. Every name
+/// in `dropped` (the Codex reader's [`CODEX_DROPPED`]) is left out of both, and so are
+/// `NODE_OPTIONS` and `NODE_PATH` (`clauseo_process::NODE_ENV`).
 ///
 /// The map is the child's whole environment: the host's launcher clears the environment. The
 /// inherited variables are also in the map because `process`'s redactor takes its secrets only from
@@ -362,6 +365,33 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    /// A lone inherited token never reaches a reader: beside a provider address with its switch
+    /// off or absent, a blank `ANTHROPIC_BASE_URL` or, on macOS and Linux, a lower-case
+    /// `anthropic_base_url`, there is no route, so the token drops.
+    #[test]
+    fn a_token_beside_something_that_is_no_route_never_reaches_a_reader() {
+        let mut shapes: Vec<Vec<(&str, &str)>> = vec![
+            vec![("ANTHROPIC_GOOGLE_CLOUD_BASE_URL", "https://gcp.example")],
+            vec![
+                ("ANTHROPIC_FOUNDRY_BASE_URL", "https://foundry.example"),
+                ("CLAUDE_CODE_USE_FOUNDRY", "false"),
+            ],
+            vec![("ANTHROPIC_BASE_URL", "   ")],
+            vec![("ANTHROPIC_BASE_URL", "\u{FEFF}")],
+            vec![("ANTHROPIC_BASE_URL", "\u{3000}")],
+        ];
+        if cfg!(not(windows)) {
+            shapes.push(vec![("anthropic_base_url", "https://gw.firm.example")]);
+        }
+        for mut shape in shapes {
+            shape.push(("ANTHROPIC_AUTH_TOKEN", "someone-elses-token"));
+            for env in both_readers(&own(&[("ANTHROPIC_API_KEY", "")]), &shape) {
+                assert_eq!(get(&env, "ANTHROPIC_AUTH_TOKEN"), None, "{shape:?}");
+                assert_eq!(get(&env, "ANTHROPIC_API_KEY"), Some(&OsString::new()));
             }
         }
     }
