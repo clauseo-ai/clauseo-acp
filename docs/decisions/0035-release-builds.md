@@ -239,9 +239,17 @@ Every installed app reads `https://github.com/clauseo-ai/clauseo-acp/releases/la
 choice. `publish` passes `--latest` when it publishes a `v*` draft; a test run's pre-release is
 created with `--latest=false`; a dry run publishes nothing.
 
+Before anything builds, `check` refuses a `v*` release unless `plugins.updater.endpoints` is exactly
+that URL (no allowance for an empty list: the pubkey check already refuses a release until R23's
+PR 6 sets both; test and dry runs don't refuse, as an e2e/test build ignores the endpoint), and
+unless its version is above the current latest release's (`gh api .../releases/latest` with the
+job's read token; HTTP 404, no release yet, passes; a latest tag that is not `v<X.Y.Z>` fails). An
+equal or lower version would publish a release no installed app takes and make it the one new
+downloads get.
+
 The job `latest` (after `publish`, release mode only) then checks what the apps will read: the
-API's `releases/latest` names exactly the tag; `latest.json`, downloaded anonymously from the URL
-above (HTTPS only, redirects followed, retried up to six times 20 s apart for the API's and the
+API's `releases/latest` names exactly the tag; `latest.json`, downloaded anonymously from the app's
+own endpoint (`plugins.updater.endpoints[0]`, read from `tauri.conf.json`) (HTTPS only, redirects followed, retried up to six times 20 s apart for the API's and the
 CDN's lag), has the tag's version and every tier 1 platform (`latest-json.mjs`'s
 `tier1Platforms`); and each platform's `url` is an asset of the tag whose downloaded bytes
 minisign verifies against `plugins.updater.pubkey` (base64 of the minisign `.pub` text; the

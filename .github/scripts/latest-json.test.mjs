@@ -1062,13 +1062,16 @@ test("release.yml makes a published v* release the latest explicitly, and checks
   for (const line of [
     'latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name) || latest=""',
     '[ "$latest" = "$TAG" ] || fail "GitHub\'s latest release is ${latest:-none}, not $TAG"',
-    'if get "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json" "$manifest"; then',
+    "endpoint=$(jq -r '.plugins.updater.endpoints[0] // \"\"' crates/desktop/tauri.conf.json)",
+    'if get "$endpoint" "$manifest"; then',
     'key=$(jq -r \'.plugins.updater.pubkey // ""\' crates/desktop/tauri.conf.json)',
     '[ -n "$key" ] || fail "plugins.updater.pubkey in tauri.conf.json is empty, so latest.json can\'t be checked"',
     'out=$(minisign -V -p "$work/updater.pub" -m "$work/assets/$name" -x "$work/$platform.minisig") ||',
   ]) {
     assert.ok(latest.includes(line), line);
   }
+  // latest.json from the app's own endpoint, never a URL typed into the job.
+  assert.ok(!latest.some((line) => line.includes("releases/latest/download")), "a typed-in URL in latest");
   const get = latest.find((line) => line.startsWith("get() {"));
   assert.match(get ?? "", / --location --proto '=https' --proto-redir '=https' /);
 });
@@ -1116,6 +1119,104 @@ test("an unsigned beta goes out only with CLAUSEO_UNSIGNED_BETA 'true' and no Ap
   }
   assert.ok(inside.includes("guide=https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/install"));
   assert.ok(!assemble.slice(0, block).concat(assemble.slice(end)).some((line) => line.includes("Open Anyway")));
+});
+
+/** The script of the step named <name> in release.yml, dedented. */
+function stepScript(text, name) {
+  const lines = text.split("\n");
+  const at = lines.findIndex((line) => line.trim() === `- name: ${name}`);
+  assert.notEqual(at, -1, name);
+  const run = lines.findIndex((line, i) => i > at && /^\s+run: \|$/.test(line));
+  const indent = indentOf(lines[run]);
+  const body = [];
+  for (const line of lines.slice(run + 1)) {
+    if (line.trim() !== "" && indentOf(line) <= indent) {
+      break;
+    }
+    body.push(line);
+  }
+  const strip = Math.min(...body.filter((line) => line.trim() !== "").map(indentOf));
+  return body.map((line) => line.slice(strip)).join("\n");
+}
+
+test("check refuses a release whose endpoint is not releases/latest, or whose version is not above the latest", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const check = jobCommands(text, "check");
+  // The endpoint: exactly the one list, in release mode only.
+  assert.ok(
+    check.includes(
+      "want_endpoints='[\"https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json\"]'",
+    ),
+  );
+  assert.ok(
+    check.includes(
+      'if [ "$mode" = release ] && [ "$(jq -c \'.plugins.updater.endpoints // null\' crates/desktop/tauri.conf.json)" != "$want_endpoints" ]; then',
+    ),
+  );
+  // check stays read-only.
+  const permissions = check.indexOf("permissions:");
+  assert.deepEqual(check.slice(permissions + 1, permissions + 3), ["contents: read", "outputs:"]);
+  const name = "A release's version is above the latest release's";
+  const step = check.indexOf(`- name: ${name}`);
+  assert.equal(check[step + 1], "if: steps.mode.outputs.mode == 'release'");
+});
+
+test("the version check passes a first release or a higher version and refuses the rest", { skip: process.platform === "win32" }, () => {
+  const script = stepScript(readFileSync(RELEASE_YML, "utf8"), "A release's version is above the latest release's");
+  const dir = mkdtempSync(join(tmpdir(), "version-check-"));
+  try {
+    // gh api answers with $LATEST, or as gh does for a 404 or another failure.
+    writeFileSync(
+      join(dir, "gh"),
+      [
+        "#!/bin/bash",
+        'case "$LATEST" in',
+        '  404) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;',
+        '  500) echo "gh: Server Error (HTTP 500)" >&2; exit 1 ;;',
+        '  *) echo "$LATEST" ;;',
+        "esac",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const run = (version, latest) =>
+      spawnSync("bash", ["-c", script], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH}`,
+          RUNNER_TEMP: dir,
+          GITHUB_REPOSITORY: "clauseo-ai/clauseo-acp",
+          VERSION: version,
+          LATEST: latest,
+        },
+      });
+    for (const [version, latest] of [
+      ["0.1.0", "404"],
+      ["1.2.4", "v1.2.3"],
+      ["1.3.0", "v1.2.9"],
+      ["2.0.0", "v1.99.99"],
+      ["1.10.0", "v1.9.0"],
+    ]) {
+      const result = run(version, latest);
+      assert.equal(result.status, 0, `${version} over ${latest}: ${result.stdout}${result.stderr}`);
+    }
+    for (const [version, latest, error] of [
+      ["1.2.3", "v1.2.3", "::error::1.2.3 is not above the latest release, v1.2.3"],
+      ["1.2.2", "v1.2.3", "::error::1.2.2 is not above the latest release, v1.2.3"],
+      ["1.9.0", "v1.10.0", "::error::1.9.0 is not above the latest release, v1.10.0"],
+      ["0.9.9", "v1.0.0", "::error::0.9.9 is not above the latest release, v1.0.0"],
+      ["1.2.4", "test-v1.2.3", '::error::the latest release\'s tag is "test-v1.2.3", not v<X.Y.Z>'],
+      ["1.2.4", "v1.2", '::error::the latest release\'s tag is "v1.2", not v<X.Y.Z>'],
+      ["1.2.4", "500", "::error::could not read the latest release of clauseo-ai/clauseo-acp"],
+    ]) {
+      const result = run(version, latest);
+      assert.equal(result.status, 1, `${version} over ${latest}`);
+      assert.ok(result.stdout.includes(error), result.stdout);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the workflow lint fails each broken rule", () => {
