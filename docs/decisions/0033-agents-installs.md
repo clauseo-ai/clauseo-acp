@@ -422,7 +422,9 @@ mirror install works as before, from the same first use.
 ## Consequences
 
 - A pin bump in G16's file moves both agents to new `<hash>` folders by itself. The sizes table
-  must be measured again, and its test says so.
+  must be measured again, and its test says so. Until the launch checks the offered tools itself
+  (planned with #1167's canary), the explicit tool list and disallowedTools are the walls, and
+  stage B's system/init tool-list row is mandatory at every Claude Code pin bump.
 - `limits`' path rules hold for the layout. A test in `crates/limits/tests/` points a settings
   entry at a fixture install laid out by this crate.
 - R20 adds the four codes to `ErrorCode`, wires `Agents` into desktop, and writes `Installed` as

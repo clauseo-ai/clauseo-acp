@@ -229,6 +229,9 @@ whose policy turns it off counts no relative shell write), the pre-write guard's
   hook and before the guard's entry, so `hooks` and `disableAllHooks: false` still go last:
   - `disallowedTools` gains `WebSearch` and `WebFetch` while `tools.web_search` is off, and
     `allowedTools` loses every `WebSearch` and `WebFetch(...)` rule.
+  - `tools` is an explicit list of built-in tools per system (`agent/loads/tools.rs`), and
+    `disallowedTools` always names the ones left out, each with what a conversation loses
+    without it there.
   - While it is on, `allowedTools` gains `WebSearch` (not on Bedrock) and one
     `WebFetch(domain:<host>)` per host in `host/src/browser/seed_sites.rs`. That file is R21's
     copy of the hosts S27 names; S27 adds the High Courts.
