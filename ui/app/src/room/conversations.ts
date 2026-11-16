@@ -30,6 +30,7 @@ import type { AgentId, MatterId, MessageId, ThreadId, Timestamp } from "../trans
 import { AgentList } from "./conversations-agents.ts";
 import { agentOf, makeView, threadOf } from "./conversations-make.ts";
 import { rememberPlan } from "./plan-default.ts";
+import type { Drafts } from "./thread/session.ts";
 import { applyChange, freshState, keepKept, type MatterState } from "./conversations-state.ts";
 import { resting, type ConversationsView, type Known } from "./conversations-view.ts";
 import type { AppEvent, NextHost } from "./host-next.ts";
@@ -44,7 +45,7 @@ export class Conversations {
   readonly #matters: Matters;
   readonly #next: NextHost;
   /** The composer drafts, by conversation key (session.ts's Drafts): an empty one drops its draft row on leaving. */
-  readonly #drafts: Map<string, string>;
+  readonly #drafts: Drafts;
   readonly #focused: () => boolean;
   readonly #by = new Map<MatterId, MatterState>();
   readonly #listeners = new Set<() => void>();
@@ -64,7 +65,7 @@ export class Conversations {
     transport: HostTransport,
     store: ViewStore,
     matters: Matters,
-    drafts: Map<string, string>,
+    drafts: Drafts,
     /** Whether the window has focus, for H6's marks: the document's, unless given. */
     focused: () => boolean = () => document.hasFocus(),
   ) {

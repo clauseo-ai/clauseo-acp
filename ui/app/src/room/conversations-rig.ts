@@ -20,6 +20,7 @@ import type {
 import { Conversations, type ConversationRow } from "./conversations.ts";
 import { detailed, fakeNext } from "./fake-next.ts";
 import type { ThreadInfo } from "./host-next.ts";
+import type { Drafts } from "./thread/session.ts";
 import { Matters } from "./matters.ts";
 
 export const A: MatterSummary = { matter: uuid(1, 2), name: "Acme Ltd v. State", kind: "folder" };
@@ -62,7 +63,7 @@ export async function rig(host: FakeHost, focused: () => boolean = () => false) 
   const store = createViewStore(transport, { batch: () => manual });
   const matters = new Matters(transport, store, manual);
   stops.push(matters.start());
-  const drafts = new Map<string, string>();
+  const drafts: Drafts = new Map();
   const talks = new Conversations(transport, store, matters, drafts, focused);
   stops.push(talks.start());
   const settle = async () => {
