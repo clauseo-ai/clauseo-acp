@@ -477,7 +477,9 @@ fn a_share_path_and_a_star_are_escaped() {
         let rule = rule.to_lowercase();
         ["\\work", "/work"].iter().any(|name| {
             rule.match_indices(name).any(|(at, _)| {
-                let next = rule[at + name.len()..].chars().next();
+                let next = rule
+                    .get(at + name.len()..)
+                    .and_then(|rest| rest.chars().next());
                 matches!(next, None | Some('\\' | '/' | '*' | ')'))
             })
         })
