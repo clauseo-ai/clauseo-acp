@@ -410,9 +410,9 @@ fn the_guard_is_a_console_program() {
 
 /// The control: the same line run against a GUI twin of the guard never takes the guard's exit
 /// code (PowerShell sets no `$LASTEXITCODE` for a GUI program), so the tests above would fail for
-/// a GUI target: on every shell a listing doesn't end with 0. Under Windows PowerShell 5.1 the held
-/// file's refusal doesn't name it either; PowerShell 7 was seen passing the GUI program's stderr
-/// through (the guard's reason, then the shared line), so that half is 5.1's alone.
+/// a GUI target. Both shells were seen passing the GUI program's stderr through (the guard's
+/// reason), but its exit code never reached the line: on every shell a listing doesn't end with
+/// 0, and the held file's output ends with the shared could-not-check line.
 #[test]
 fn a_gui_twin_of_the_guard_gives_no_answer_of_the_guards() {
     let root = tempfile::Builder::new()
@@ -424,16 +424,13 @@ fn a_gui_twin_of_the_guard_gives_no_answer_of_the_guards() {
     let matter = folder(root.path(), "O'Brien मामला");
     let _held = held(&matter.path().join("अनुबंध.docx"));
     let command = line_for(&twin);
-    let named = "अनुबंध.docx is open in Word";
     for shell in &shells() {
         let input = codex_input(matter.path(), "Bash", "dir");
         let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
         assert_ne!(output.status.code(), Some(0), "{shell}: {output:?}");
-        if shell.to_ascii_lowercase().ends_with("powershell.exe") {
-            let input = codex_input(matter.path(), "apply_patch", &patch("अनुबंध.docx"));
-            let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
-            let errors = String::from_utf8_lossy(&output.stderr);
-            assert!(!errors.contains(named), "{shell}: {errors}");
-        }
+        let input = codex_input(matter.path(), "apply_patch", &patch("अनुबंध.docx"));
+        let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
+        let errors = String::from_utf8_lossy(&output.stderr);
+        assert!(errors.trim_end().ends_with(UNCHECKED), "{shell}: {errors}");
     }
 }
