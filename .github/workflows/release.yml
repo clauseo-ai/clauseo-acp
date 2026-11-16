@@ -207,6 +207,15 @@ jobs:
           if [ "$mode" = release ] && [ -z "$(jq -r '.plugins.updater.pubkey // ""' crates/desktop/tauri.conf.json)" ]; then
             fail "plugins.updater.pubkey in tauri.conf.json is empty; a v* release signs updates for it"
           fi
+          # Every installed app looks for updates where tauri.conf.json says, so a release refuses
+          # any endpoint list but the one the `latest` job checks after publishing. No allowance
+          # for an empty list: on main the pubkey and endpoints are both empty until R23's PR 6
+          # sets them, and the pubkey check above already refuses a release before then. A test
+          # or dry run doesn't refuse: an e2e/test build ignores the config's endpoint.
+          want_endpoints='["https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json"]'
+          if [ "$mode" = release ] && [ "$(jq -c '.plugins.updater.endpoints // null' crates/desktop/tauri.conf.json)" != "$want_endpoints" ]; then
+            fail "plugins.updater.endpoints in tauri.conf.json is $(jq -c '.plugins.updater.endpoints // null' crates/desktop/tauri.conf.json), not $want_endpoints"
+          fi
           if [ "$mode" = test ] && [ ! -s crates/desktop/release/updater-test.pub ]; then
             fail "crates/desktop/release/updater-test.pub (the test key's public key) is missing"
           fi
@@ -222,6 +231,41 @@ jobs:
             # (ui/app/vite.config.ts, appVersion). Tags show their own version alone.
             if [ "$mode" = dry ]; then echo "version_suffix=dev.${GITHUB_SHA:0:9}"; else echo "version_suffix="; fi
           } | tee -a "$GITHUB_OUTPUT"
+
+      # A v* release must be newer than the latest one: the updater offers only a higher
+      # version, so an equal or lower one would publish a release no installed app takes, and
+      # --latest would make it the one new downloads get. GitHub's latest release is a published
+      # v<X.Y.Z> (never a draft or pre-release); none yet (HTTP 404) passes. The job's read token
+      # is enough: check keeps contents: read.
+      - name: A release's version is above the latest release's
+        if: steps.mode.outputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.mode.outputs.version }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          if ! latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> "$RUNNER_TEMP/latest.err"); then
+            if grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err"; then
+              echo "No latest release yet: $VERSION is the first."
+              exit 0
+            fi
+            cat "$RUNNER_TEMP/latest.err"
+            fail "could not read the latest release of $GITHUB_REPOSITORY"
+          fi
+          [[ "$latest" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+            fail "the latest release's tag is \"$latest\", not v<X.Y.Z>"
+          have=("${BASH_REMATCH[@]:1:3}")
+          IFS=. read -r -a want <<< "$VERSION"
+          for i in 0 1 2; do
+            if (( 10#${want[i]} > 10#${have[i]} )); then
+              echo "$VERSION is above the latest release, $latest."
+              exit 0
+            elif (( 10#${want[i]} < 10#${have[i]} )); then
+              break
+            fi
+          done
+          fail "$VERSION is not above the latest release, $latest"
 
       # A v* release ships only English Rohan approved: every entry in ui/app/copy-approvals/*.json
       # "approved". Provisional Hindi only warns (Rohan, 2026-11-15: hindi later; provisional Hindi
@@ -1755,7 +1799,8 @@ jobs:
         run: node .github/scripts/record-release.mjs "$VERSION" stable
 
   # What every installed app reads, checked once the release is public, as the app reads it:
-  # GitHub's latest release is this tag; releases/latest/download/latest.json is this version;
+  # GitHub's latest release is this tag; latest.json, from the endpoint tauri.conf.json gives the
+  # app (plugins.updater.endpoints[0], which check holds to releases/latest), is this version;
   # and each platform's asset, downloaded from its url, verifies with minisign against the
   # app's own key (plugins.updater.pubkey), its trusted comment naming that file and version.
   # A job of its own after publish, not a step in it: the pinned minisign is a Linux build and
@@ -1807,8 +1852,9 @@ jobs:
           minisign -v
 
       # The API and the download CDN can lag the publish by a little, so each is retried, up
-      # to 6 times 20 s apart, until it shows this release; then it must. Downloads go without
-      # a token, as the app's do, over HTTPS only (redirects included), following redirects.
+      # to 6 times 20 s apart, until it shows this release; then it must. latest.json comes from
+      # the app's own endpoint, read from tauri.conf.json, never a copy of the URL typed here.
+      # Downloads go without a token, as the app's do, over HTTPS only (redirects included).
       # The signature field in latest.json is base64 of the .sig text, the key base64 of the
       # minisign .pub text, as build decodes it. TIER1 is latest-json.mjs's tier1Platforms
       # (latest-json.test.mjs keeps them equal): each must be in latest.json.
@@ -1839,18 +1885,21 @@ jobs:
           done
           [ "$latest" = "$TAG" ] || fail "GitHub's latest release is ${latest:-none}, not $TAG"
 
+          endpoint=$(jq -r '.plugins.updater.endpoints[0] // ""' crates/desktop/tauri.conf.json)
+          [ "${endpoint#https://}" != "$endpoint" ] ||
+            fail "plugins.updater.endpoints[0] in tauri.conf.json is \"$endpoint\", not an https:// URL"
+
           manifest=$work/latest.json
           version=""
           for attempt in 1 2 3 4 5 6; do
             version=""
-            if get "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json" "$manifest"; then
+            if get "$endpoint" "$manifest"; then
               version=$(jq -r '.version // ""' "$manifest") || version=""
             fi
             if [ "$version" = "$VERSION" ]; then break; fi
             if [ "$attempt" -lt 6 ]; then sleep 20; fi
           done
-          [ "$version" = "$VERSION" ] ||
-            fail "releases/latest/download/latest.json says version ${version:-nothing}, not $VERSION"
+          [ "$version" = "$VERSION" ] || fail "$endpoint says version ${version:-nothing}, not $VERSION"
 
           platforms=$(jq -r '.platforms // {} | keys[]' "$manifest")
           for want in $TIER1; do
@@ -1877,7 +1926,7 @@ jobs:
           {
             echo "### The latest release"
             echo "- GitHub's latest release: $TAG"
-            echo "- releases/latest/download/latest.json: version $VERSION"
+            echo "- $endpoint: version $VERSION"
             printf '%s\n' "${summary[@]}"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
