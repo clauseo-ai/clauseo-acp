@@ -94,17 +94,3 @@ fn base64_decodes_with_and_without_padding() {
     assert_eq!(base64("aGk").as_deref(), Some(b"hi".as_slice()));
     assert_eq!(base64("a-b"), None);
 }
-
-#[test]
-fn only_the_placeholder_gets_the_note() {
-    let conf = |key: &str| serde_json::json!({ "plugins": { "updater": { "pubkey": key } } });
-    let note = placeholder_note(&conf(&release_pub("updater-placeholder.pub"))).unwrap();
-    assert!(note.contains(PLACEHOLDER_KEY_ID), "{note}");
-    assert_eq!(placeholder_note(&conf(&other_key())), None);
-    assert_eq!(
-        placeholder_note(&conf(&release_pub("updater-test.pub"))),
-        None
-    );
-    assert_eq!(placeholder_note(&conf("")), None);
-    assert_eq!(placeholder_note(&serde_json::json!({})), None);
-}

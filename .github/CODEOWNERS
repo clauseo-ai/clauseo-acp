@@ -55,3 +55,6 @@ rustfmt.toml                         @ro-hansolo
 /ui/.oxfmtrc.json                    @ro-hansolo
 /crates/desktop/capabilities/        @ro-hansolo
 /crates/desktop/tauri.conf.json      @ro-hansolo
+# The release updater key's id, which release.yml's check and the desktop guard test require
+# tauri.conf.json's pubkey to have: a key rotation changes it, in front of the code owner.
+/crates/desktop/release/updater-release.keyid @ro-hansolo
