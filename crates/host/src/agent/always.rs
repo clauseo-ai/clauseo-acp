@@ -1,40 +1,32 @@
-//! "Always for this matter" on a Claude permission request, route A: the host keeps the rule
-//! itself instead of letting claude-agent-acp write it into the matter folder.
+//! "Always for this matter", kept by Clauseo for both agents (decision record 0063): the host
+//! keeps the rule itself, never an agent, and answers a later matching card with a one-time
+//! approval.
 //!
-//! Why: claude-agent-acp 0.89.1 answers its `allow-with-updates` option (kind `allow_always`)
-//! by handing Claude Code the CLI's own suggestions (`permissions/effects.js`
-//! `applyCommonSelection`), which name `destination: "localSettings"`, so Claude Code writes the
-//! rule into `<matter>/.claude/settings.local.json`, the lawyer's own folder. The client picks
-//! only an option id, never the destination, and the suggestions never reach it: the request
-//! carries the tool call (with `rawInput`) and the options, and the rule shows only in the
-//! option's label (`permissions/options/shell.js`). So the turn path answers the agent with the
-//! request's `allow_once` option instead (`actor/turn/always.rs`) and keeps the rule here:
+//! Why: each agent's own "always" writes a rule somewhere an agent or the lawyer's own tools
+//! read later (Codex an unsandboxed prefix rule in its shared home; claude-agent-acp 0.89.1
+//! Claude Code's suggestion into `<matter>/.claude/settings.local.json`). So the turn path drops
+//! every rule-writing option, offers its own `clauseo.always`, answers the agent with the
+//! request's allow-once option (`actor/turn/always.rs`) and keeps the rule here:
 //!
-//! - [`rule`]: the narrowest rule for the request, in Claude Code's permission rule syntax, from
-//!   the tool's name and `rawInput` alone: `Bash(<exact command>)`, `WebFetch(domain:<host>)`
-//!   (any page on that site), an MCP tool's exact name, `Edit(//<path>)` for `Edit`, `Write`
-//!   and `MultiEdit`, `Read(//<path>)`. Anything else, and any text that would not stay one
-//!   exact rule (a `)`, a glob character, a relative path), gives none, with why ([`NotKept`]):
-//!   the request is still answered once, and nothing is kept.
+//! - [`rule`]: the narrowest rule for the request, in Clauseo's own syntax, from the agent, the
+//!   tool's name or kind and `rawInput` alone (the table in 0063). Anything else, and any text
+//!   that would not stay one exact rule, gives none, with why ([`NotKept`]).
 //! - [`within`] and [`real_within`]: a path rule is kept and applied only for a file inside the
 //!   matter folder, by its text and by its real path (links resolved), never in `.clauseo` or a
 //!   `.claude` folder.
 //! - The file, `<data>/agent-state/<matter>/claude-allow.json` ([`file_beside`], [`store`]),
-//!   beside the matter's notes and not in them: Claude may write the notes folder
-//!   (`additionalDirectories`), while this file is in the data fence's fixed deny rules
-//!   (`data_fence::DENIED`) and outside every folder the auto-deny counts as the session's own.
-//!   Nothing is ever written in the matter folder, and a `.claude` folder the lawyer made there
-//!   is left as it is.
+//!   beside the matter's notes and not in them, in the data fence's fixed deny rules
+//!   (`data_fence::DENIED`). Nothing is ever written in the matter folder.
 //!
-//! The kept rules never reach Claude Code's own settings: Claude Code would then allow a matching
-//! call itself, past the host's data fence, its held-open check and its log. They answer only
-//! the requests Claude Code sends the host, after those checks, by exact match
-//! (`actor/turn/always.rs`).
+//! The kept rules never reach an agent's settings: the agent would then allow a matching call
+//! itself, past the host's data fence, its held-open check and its log.
 
 use std::path::{Path, PathBuf};
 
+use clauseo_protocol::{AgentKind, AlwaysKind, AlwaysOffer, ToolKind};
 use serde_json::Value;
 
+pub(crate) mod options;
 pub(crate) mod plain;
 mod store;
 
@@ -65,45 +57,219 @@ pub(crate) enum NotKept {
     Full,
 }
 
-/// The rule a request keeps, from its tool's `name` (the tool call's, as the agent sent it) and
-/// its `rawInput`, or why none (see the module doc). `windows`: a file path is a Windows one.
-pub(crate) fn rule(
-    tool: &str,
-    raw_input: Option<&Value>,
-    windows: bool,
-) -> Result<String, NotKept> {
+/// A permission request as [`rule`] reads it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Request<'a> {
+    /// Whose request it is: commands are kept per agent.
+    pub(crate) agent: AgentKind,
+    /// Claude Code's tool name (`_meta.claudeCode.toolName`); none for ChatGPT.
+    pub(crate) tool: Option<&'a str>,
+    /// The request's `toolCall.kind`: ChatGPT's command (`execute`) and file-change (`edit`)
+    /// cards are read by it.
+    pub(crate) kind: Option<ToolKind>,
+    /// `toolCall.rawInput`.
+    pub(crate) raw_input: Option<&'a Value>,
+    /// The matter folder, as text.
+    pub(crate) matter: &'a str,
+    /// Windows paths.
+    pub(crate) windows: bool,
+}
+
+/// What "Always for this matter" would keep from a request: its rule, and what the card says
+/// it covers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Kept {
+    pub(crate) rule: String,
+    pub(crate) offer: AlwaysOffer,
+}
+
+/// The one rule that covers every change to a file inside the matter folder.
+pub(crate) const EDIT_ALL: &str = "Edit(*)";
+
+/// Claude's web search, kept whole: a search names no site.
+pub(crate) const WEB_SEARCH: &str = "WebSearch";
+
+/// The rule a request keeps, and what the card says it covers, or why none (decision 0063):
+///
+/// - Claude: `Bash(<cmd>)` and `PowerShell(<cmd>)` for one plain command (`plain.rs`) whose
+///   arguments stay in the matter; `WebFetch(domain:<host>)`; `WebSearch`; an MCP tool's exact
+///   name; `Read(//<path>)`; `Edit(*)` for `Edit`, `Write`, `MultiEdit` and `NotebookEdit`.
+/// - ChatGPT: `Run(<cmd>)`, or `Run(<cmd>) in <cwd>` when it runs in a folder of the matter, for
+///   an `execute` card (`rawInput` `{command, cwd}`, `command` the text the card shows) that
+///   asks for no network; `Edit(*)` for an `edit` card.
+///
+/// `Edit(*)` is kept and applied only when every file the request names is inside the matter by
+/// its real path (`real_within`, on the matter thread).
+pub(crate) fn rule(request: &Request<'_>) -> Result<Kept, NotKept> {
+    let kept = match request.agent {
+        AgentKind::Claude => claude_rule(request)?,
+        AgentKind::Codex => codex_rule(request)?,
+    };
+    if kept.rule.len() <= MAX_RULE_LEN {
+        Ok(kept)
+    } else {
+        Err(NotKept::Refused)
+    }
+}
+
+fn offer(kind: AlwaysKind, shown: Option<String>, cwd: Option<String>) -> AlwaysOffer {
+    AlwaysOffer { kind, shown, cwd }
+}
+
+fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
+    let raw_input = request.raw_input;
     let text = |key: &str| {
         raw_input
             .and_then(|input| input.get(key)?.as_str())
             .ok_or(NotKept::Refused)
     };
     let exact = |made: Option<String>| made.ok_or(NotKept::Refused);
-    let rule = match tool {
-        "Bash" => format!(
-            "Bash({})",
-            exact(command(text("command")?).map(str::to_owned))?
-        ),
-        "WebFetch" => format!("WebFetch(domain:{})", exact(domain(text("url")?))?),
-        "Edit" | "Write" | "MultiEdit" => {
-            format!("Edit({})", exact(path(text("file_path")?, windows))?)
-        }
-        "Read" => format!("Read({})", exact(path(text("file_path")?, windows))?),
-        name if is_mcp_tool(name) => name.to_owned(),
-        _ => return Err(NotKept::NoRule),
+    let place = plain::Place {
+        matter: request.matter,
+        cwd: request.matter,
+        windows: request.windows,
     };
-    if rule.len() <= MAX_RULE_LEN {
-        Ok(rule)
-    } else {
-        Err(NotKept::Refused)
+    let shell = |tool: &str, grammar: plain::Grammar| -> Result<Kept, NotKept> {
+        let line = text("command")?;
+        let line = exact(command(line, grammar, plain::Agent::Claude).map(str::to_owned))?;
+        plain::plain(&line, grammar, plain::Agent::Claude, place).map_err(not_kept)?;
+        Ok(Kept {
+            rule: format!("{tool}({line})"),
+            offer: offer(AlwaysKind::Command, Some(line), None),
+        })
+    };
+    let kept = |rule: String, kind: AlwaysKind, shown: Option<String>| Kept {
+        offer: offer(kind, shown, None),
+        rule,
+    };
+    Ok(match request.tool.ok_or(NotKept::NoRule)? {
+        "Bash" => shell("Bash", plain::Grammar::Posix)?,
+        "PowerShell" => shell("PowerShell", plain::Grammar::PowerShell)?,
+        "WebFetch" => {
+            let host = exact(domain(text("url")?))?;
+            kept(
+                format!("WebFetch(domain:{host})"),
+                AlwaysKind::Site,
+                Some(host),
+            )
+        }
+        "WebSearch" => kept(
+            WEB_SEARCH.to_owned(),
+            AlwaysKind::Tool,
+            Some(WEB_SEARCH.to_owned()),
+        ),
+        "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => {
+            kept(EDIT_ALL.to_owned(), AlwaysKind::FileEdit, None)
+        }
+        "Read" => {
+            let file = text("file_path")?;
+            let rule = format!("Read({})", exact(path(file, request.windows))?);
+            kept(rule, AlwaysKind::Read, Some(file.to_owned()))
+        }
+        name if is_mcp_tool(name) => kept(name.to_owned(), AlwaysKind::Tool, Some(name.to_owned())),
+        _ => return Err(NotKept::NoRule),
+    })
+}
+
+fn codex_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
+    match request.kind {
+        Some(ToolKind::Edit) => Ok(Kept {
+            rule: EDIT_ALL.to_owned(),
+            offer: offer(AlwaysKind::FileEdit, None, None),
+        }),
+        Some(ToolKind::Execute) => {
+            let input = request.raw_input.ok_or(NotKept::Refused)?;
+            if input.get("url").is_some() {
+                return Err(NotKept::NoRule);
+            }
+            let text = |key: &str| input.get(key)?.as_str();
+            let (line, cwd) = text("command").zip(text("cwd")).ok_or(NotKept::Refused)?;
+            let grammar = codex_grammar(request.windows);
+            let line = command(line, grammar, plain::Agent::Codex).ok_or(NotKept::Refused)?;
+            let folder =
+                relative(request.matter, cwd, request.windows).ok_or(NotKept::OutsideMatter)?;
+            let place = plain::Place {
+                matter: request.matter,
+                cwd,
+                windows: request.windows,
+            };
+            plain::plain(line, grammar, plain::Agent::Codex, place).map_err(not_kept)?;
+            let rule = match &folder {
+                Some(folder) => format!("Run({line}) in {folder}"),
+                None => format!("Run({line})"),
+            };
+            Ok(Kept {
+                rule,
+                offer: offer(AlwaysKind::Command, Some(line.to_owned()), folder),
+            })
+        }
+        _ => Err(NotKept::NoRule),
     }
+}
+
+/// The grammar ChatGPT's shown command is in: PowerShell on Windows, a POSIX shell elsewhere.
+fn codex_grammar(windows: bool) -> plain::Grammar {
+    if windows {
+        plain::Grammar::PowerShell
+    } else {
+        plain::Grammar::Posix
+    }
+}
+
+fn not_kept(why: plain::NotPlain) -> NotKept {
+    match why {
+        plain::NotPlain::Outside => NotKept::OutsideMatter,
+        _ => NotKept::Refused,
+    }
+}
+
+/// `cwd` relative to the `matter` folder, `/`-separated: none inside for the folder itself;
+/// none at all for a folder outside it, in its `.clauseo` or a `.claude` folder, or one with a
+/// name a rule can't hold (empty, `.`, `..`, a parenthesis, a control character, a space at
+/// either end). By text: on Windows `\` is `/` and case is folded.
+fn relative(matter: &str, cwd: &str, windows: bool) -> Option<Option<String>> {
+    let norm = |text: &str| {
+        let text = if windows {
+            text.replace('\\', "/")
+        } else {
+            text.to_owned()
+        };
+        text.trim_end_matches('/').to_owned()
+    };
+    let (matter, cwd) = (norm(matter), norm(cwd));
+    let fold = |text: &str| {
+        if windows {
+            text.to_lowercase()
+        } else {
+            text.to_owned()
+        }
+    };
+    if matter.is_empty() || fold(&matter).len() != matter.len() || fold(&cwd).len() != cwd.len() {
+        return None;
+    }
+    let folded = fold(&cwd);
+    let rest = folded.strip_prefix(&fold(&matter))?;
+    if rest.is_empty() {
+        return Some(None);
+    }
+    rest.strip_prefix('/')?;
+    let rest = cwd.get(matter.len() + 1..)?;
+    let names_ok = rest.split('/').all(|name| {
+        !matches!(name, "" | "." | "..")
+            && name.trim() == name
+            && !own_folder(&name_as_opened(name, windows))
+            && !name
+                .chars()
+                .any(|c| matches!(c, '(' | ')') || c.is_control())
+    });
+    names_ok.then(|| Some(rest.to_owned()))
 }
 
 /// The file a path rule names, as an absolute path of this system (`//c/a` is `c:/a` on
 /// Windows); none for any other rule.
 pub(crate) fn rule_path(rule: &str, windows: bool) -> Option<PathBuf> {
-    let content = ["Edit(", "Read("]
-        .iter()
-        .find_map(|tool| rule.strip_prefix(tool))
+    let content = rule
+        .strip_prefix("Read(")
         .and_then(|rest| rest.strip_suffix(')'))?;
     let rest = content.strip_prefix("//")?;
     if windows {
@@ -114,58 +280,80 @@ pub(crate) fn rule_path(rule: &str, windows: bool) -> Option<PathBuf> {
     }
 }
 
+/// Whether `rule` applies only to files whose real path the matter thread found inside the
+/// matter: a `Read` rule's file, and every file of an `Edit(*)` request.
+pub(crate) fn needs_real(rule: &str) -> bool {
+    rule == EDIT_ALL || rule_path(rule, false).is_some()
+}
+
+/// A ChatGPT `Run` rule's command and working folder.
+pub(crate) fn run_parts(rule: &str) -> Option<(&str, Option<&str>)> {
+    let (line, rest) = rule.strip_prefix("Run(")?.split_once(')')?;
+    match rest {
+        "" => Some((line, None)),
+        rest => Some((line, Some(rest.strip_prefix(" in ")?))),
+    }
+}
+
 /// Whether `rule` is one [`rule`] could have made: a kept rule read back is checked again.
 pub(crate) fn well_formed(rule: &str) -> bool {
     if rule.len() > MAX_RULE_LEN {
         return false;
     }
-    if is_mcp_tool(rule) {
+    if is_mcp_tool(rule) || rule == EDIT_ALL || rule == WEB_SEARCH {
         return true;
+    }
+    if let Some((line, folder)) = run_parts(rule) {
+        let grammar = codex_grammar(cfg!(windows));
+        let folder_ok = folder.is_none_or(|folder| {
+            relative("/m", &format!("/m/{folder}"), false) == Some(Some(folder.to_owned()))
+        });
+        return folder_ok && command(line, grammar, plain::Agent::Codex).is_some();
     }
     let Some((tool, content)) = rule.strip_suffix(')').and_then(|rest| rest.split_once('(')) else {
         return false;
     };
     match tool {
-        "Bash" => command(content).is_some(),
+        "Bash" => command(content, plain::Grammar::Posix, plain::Agent::Claude).is_some(),
+        "PowerShell" => {
+            command(content, plain::Grammar::PowerShell, plain::Agent::Claude).is_some()
+        }
         "WebFetch" => content
             .strip_prefix("domain:")
             .is_some_and(|host| domain_name(host) && !host.is_empty()),
-        "Edit" | "Read" => content
+        "Read" => content
             .strip_prefix('/')
             .is_some_and(|rest| path(rest, false).as_deref() == Some(content)),
         _ => false,
     }
 }
 
-/// A shell command as an exact `Bash(…)` rule's content: not empty, no space at either end,
-/// none of `(`, `)` (they end the rule), `*` (a wildcard in Claude Code's Bash rules),
-/// `\` (an escape there) or a control character such as a line break, and one plain command.
-fn command(command: &str) -> Option<&str> {
+/// A shell command as an exact rule's content: not empty, no space at either end, none of
+/// `(`, `)` (they end the rule), `*`, `\` or a control character such as a line break, and one
+/// plain command in `grammar`.
+fn command(command: &str, grammar: plain::Grammar, agent: plain::Agent) -> Option<&str> {
     let plain = !command.is_empty()
         && command.trim() == command
         && !command
             .chars()
             .any(|c| matches!(c, '(' | ')' | '*' | '\\') || c.is_control())
-        && one_plain_command(command);
+        && one_plain_command(command, grammar, agent);
     plain.then_some(command)
 }
 
 /// Whether `command` is one plain command (`plain.rs`): no chain, pipe, redirection,
 /// substitution or wrapper. Read here without the matter folder (a rule read back has none), so
-/// an absolute path is not judged; the request's own check reads the folder too.
-fn one_plain_command(command: &str) -> bool {
+/// no place is judged; the request's own check reads the folder too.
+fn one_plain_command(command: &str, grammar: plain::Grammar, agent: plain::Agent) -> bool {
     let anywhere = plain::Place {
         matter: "/",
         cwd: "/",
         windows: false,
     };
-    plain::plain(
-        command,
-        plain::Grammar::Posix,
-        plain::Agent::Claude,
-        anywhere,
-    )
-    .is_ok()
+    match plain::plain(command, grammar, agent, anywhere) {
+        Ok(_) | Err(plain::NotPlain::Outside) => true,
+        Err(_) => false,
+    }
 }
 
 /// The host of an `http` or `https` URL, lower case, for a `WebFetch(domain:…)` rule; none for
@@ -257,7 +445,7 @@ pub(crate) fn matter_roots<'a>(
 /// trailing dots and spaces. By text only: [`real_within`] resolves links. Any other rule names
 /// no path and passes.
 pub(crate) fn within(rule: &str, roots: &[String], windows: bool) -> bool {
-    let content = ["Edit(", "Read("]
+    let content = ["Read("]
         .iter()
         .find_map(|tool| rule.strip_prefix(tool))
         .and_then(|rest| rest.strip_suffix(')'));

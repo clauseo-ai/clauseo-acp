@@ -82,13 +82,12 @@ fn superseded(applied: &mut Applied, file: &Path, rule: &str, seq: u64) -> bool 
     false
 }
 
-/// A Claude launch's kept rules (`claude`), read from [`file_beside`] `notes`; none for any
-/// other agent. File system calls: off the actor.
-pub(crate) fn read_beside(notes: &Path, claude: bool) -> Vec<String> {
-    match file_beside(notes) {
-        Some(file) if claude => read(&file),
-        _ => Vec::new(),
-    }
+/// A launch's kept rules, read from [`file_beside`] `notes`, for either agent. File system
+/// calls: off the actor.
+pub(crate) fn read_beside(notes: &Path) -> Vec<String> {
+    file_beside(notes)
+        .map(|file| read(&file))
+        .unwrap_or_default()
 }
 
 /// The rules kept in `file`; none when it is missing, a link, or one this host cannot take.

@@ -155,24 +155,31 @@ pub(crate) fn describe(rule: &str, roots: &[String], windows: bool) -> Option<Ke
         kind,
         subject: subject.to_owned(),
         server: server.map(str::to_owned),
+        cwd: None,
     };
     if let Some(name) = rule.strip_prefix("mcp__") {
         let (server, tool) = name.split_once("__")?;
         return Some(kept(KeptKind::Tool, tool, Some(server)));
     }
+    if rule == always::WEB_SEARCH {
+        return Some(kept(KeptKind::Tool, rule, None));
+    }
+    if rule == always::EDIT_ALL {
+        return Some(kept(KeptKind::Edit, "", None));
+    }
+    if let Some((line, folder)) = always::run_parts(rule) {
+        let mut run = kept(KeptKind::Run, line, None);
+        run.cwd = folder.map(str::to_owned);
+        return Some(run);
+    }
     let (tool, content) = rule.strip_suffix(')')?.split_once('(')?;
     match tool {
-        "Bash" => Some(kept(KeptKind::Run, content, None)),
+        "Bash" | "PowerShell" => Some(kept(KeptKind::Run, content, None)),
         "WebFetch" => Some(kept(KeptKind::Site, content.strip_prefix("domain:")?, None)),
-        "Edit" | "Read" => {
-            let kind = if tool == "Edit" {
-                KeptKind::Edit
-            } else {
-                KeptKind::Read
-            };
+        "Read" => {
             let subject = inside(content, roots, windows)
                 .or_else(|| Some(always::rule_path(rule, windows)?.display().to_string()))?;
-            Some(kept(kind, &subject, None))
+            Some(kept(KeptKind::Read, &subject, None))
         }
         _ => None,
     }

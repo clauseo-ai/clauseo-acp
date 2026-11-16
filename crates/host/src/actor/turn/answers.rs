@@ -53,13 +53,23 @@ pub(super) fn answer_permission(
     let agent = state(actor, thread)
         .and_then(|state| state.agent.as_deref_mut())
         .ok_or_else(not_pending)?;
+    // A host option goes to the agent as its own (`agent::always::options`): "Always for this
+    // matter" as the request's allow once (`always.rs`), a session option as the agent's id.
+    // The log keeps the lawyer's choice.
+    let own = crate::agent::always::options::agent_choice(&option_id);
+    if own.is_none() && !super::always::has_ask(agent, request) {
+        return Err(Error::refused(
+            ErrorCode::PermissionUnknownOption,
+            format!("option {option_id} is not offered for this request"),
+        ));
+    }
     let key = agent.permissions.remove(&request).ok_or_else(not_pending)?;
-    // A Claude "Always for this matter" reaches the agent as allow once (`always.rs`); the log
-    // keeps the lawyer's choice.
     let mut answered = super::always::answer(agent, request, &option);
-    let sent = answered
-        .as_ref()
-        .map_or(option_id, |answered| answered.once.clone());
+    let sent = match (&answered, own) {
+        (Some(answered), _) => answered.once.clone(),
+        (None, Some(own)) => own,
+        (None, None) => return Err(super::lost("the allow-once option of an always answer")),
+    };
     let refused = matches!(
         option.kind,
         PermissionKind::RejectOnce | PermissionKind::RejectAlways

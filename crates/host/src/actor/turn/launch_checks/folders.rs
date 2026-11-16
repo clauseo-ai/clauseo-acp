@@ -12,13 +12,13 @@ use super::{Prepared, RunFolders, relay};
 use crate::agent::{always, claude_tmp, data_fence};
 
 /// Claude's own parts of `run`, after [`RunFolders::make`]: its short temp folder, none
-/// again when it could not be made (`agent::claude_tmp`), and, for `claude`, the matter's kept
+/// again when it could not be made (`agent::claude_tmp`), and, for either agent, the matter's kept
 /// "Always for this matter" rules (`agent::always::read_beside`). File system calls: off the
 /// actor.
-pub(super) fn make_claude(run: &mut RunFolders, claude: bool) {
+pub(super) fn make_claude(run: &mut RunFolders) {
     let short = run.claude_tmp.take();
     run.claude_tmp = short.filter(|dir| claude_tmp::make_claude_tmp(&run.root, dir));
-    run.always = always::read_beside(&run.notes, claude);
+    run.always = always::read_beside(&run.notes);
 }
 
 /// A prep nobody waits for any more takes back what it made: the relay's token first, then the

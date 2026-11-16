@@ -7,9 +7,11 @@
 //! A Codex approval of one of the guarded `browser` server's tools is allowed for the session
 //! with nothing logged ([`browser_tool_to_allow`]), and one of a server the lawyer added is
 //! allowed once with nothing logged ([`trusted_tool_to_allow`]); one giving a shell command the
-//! network is refused without asking, told by a notice once a turn (`shell_network.rs`). A
-//! Claude request whose rule the lawyer chose to keep (`always.rs`) is allowed once for the
-//! lawyer, logged.
+//! network is refused without asking, told by a notice once a turn (`shell_network.rs`). Past
+//! those checks the lawyer never sees an agent option that would write a rule
+//! (`agent::always::options`); a request whose rule the lawyer chose to keep for the matter
+//! (`always.rs`) is allowed once for the lawyer, logged, and one that could be kept offers
+//! `clauseo.always`.
 
 use std::path::PathBuf;
 
@@ -81,12 +83,15 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         mut options,
         mut paths,
         raw_input,
+        tool_kind,
     } = event
     else {
         return;
     };
     // The agent got through: a request of the live turn clears its offline watch (`offline.rs`).
     active(actor, thread);
+    // No agent may name a host option (`clauseo.*`), whatever filter runs next.
+    crate::agent::always::options::drop_host_ids(&mut options);
     // Forced ask (`agent/forced_ask.rs`): no option that would stop later asks is offered, so
     // an answer naming one is refused as one the agent did not offer.
     if agent(actor, thread).is_some_and(|agent| agent.forced_ask) {
@@ -96,7 +101,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     let plans = agent(actor, thread).and_then(|agent| agent.plan_notes.clone());
     let about = crate::agent::plan_note::about(plans.as_deref(), &paths, cfg!(windows));
     let (id, raw) = (&acp_tool_call_id, raw_input.as_ref());
-    let always = super::always::ask(actor, thread, &session, id, &mut options, raw);
+    let always = super::always::ask(actor, thread, &session, id, &options, raw, tool_kind);
     let ask = PermissionAsk {
         session,
         key,
@@ -120,6 +125,10 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     if super::shell_network::refused(actor, thread, &ask, raw_input.as_ref()) {
         return;
     }
+    // From here on the lawyer may see the options: none that would write a rule or claim a
+    // scope it lacks (`agent::always::options`). The checks above read the agent's own.
+    let mut ask = ask;
+    crate::agent::always::options::agent_options(&mut ask.options);
     let fence = fence_check(actor, thread, &paths, raw_input.as_ref());
     if paths.is_empty() {
         paths = tool_call_paths(actor, thread, &ask);
@@ -131,7 +140,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     let sent = (|| -> Result<(), Error> {
         let matter = matter_of(actor, thread)?;
         let folder = PathBuf::from(&actor.check_matter(matter)?.row.folder_path);
-        let real = super::always::real_path(ask.always.as_ref());
+        let real = super::always::real_paths(ask.always.as_ref(), &paths, &folder);
         let job = MatterJob::HeldOpen {
             folder,
             paths,
@@ -309,16 +318,21 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk, real:
         session,
         key,
         acp_tool_call_id,
-        options,
+        mut options,
         about,
         always,
     } = ask;
     let tool_call = known_tool(actor, thread, &session, &acp_tool_call_id);
     let logged = (|| -> Result<(), Error> {
         let request: PermissionRequestId = actor.ids.mint(actor.clock.now().wall)?;
+        let mut offered = None;
         if let Some(agent) = agent(actor, thread) {
             agent.permissions.insert(request, key);
-            super::always::asked(agent, request, always);
+            offered = super::always::offer(agent, always.as_ref(), real);
+            if offered.is_some() {
+                crate::agent::always::options::with_always(&mut options);
+            }
+            super::always::asked(agent, request, always.filter(|_| offered.is_some()));
         }
         let event = PermissionRequested {
             request,
@@ -326,6 +340,7 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk, real:
             options,
             deliverable: Deliverable::Live,
             about,
+            always: offered,
         };
         commit(actor, thread, [event.into()], Vec::new())
     })();
@@ -388,6 +403,7 @@ fn refuse_held_open(
             options,
             deliverable: Deliverable::Live,
             about,
+            always: None,
         },
     )?;
     out.push(

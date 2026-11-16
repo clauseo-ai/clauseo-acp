@@ -1,36 +1,33 @@
-//! The turn path's half of a Claude "Always for this matter" (route A; `agent/always.rs` has
-//! why and the rules). Only for a Claude agent outside forced ask; forced ask
-//! (`agent/forced_ask.rs`) offers no `allow_always` option at all, and keeps and applies nothing.
+//! The turn path's half of "Always for this matter" (decision record 0063; `agent/always.rs`
+//! has why and the rules), for both agents, in forced ask too.
 //!
 //! - [`ask`]: a request that comes in gets its rule (or why none) and its first `allow_once`
-//!   option, unless it is a plan exit (an `exit-plan-*` option, or the `ExitPlanMode` tool),
-//!   which passes through unchanged. One with an `allow_always` option but no `allow_once` loses
-//!   its `allow_always` options, so none can reach the adapter. A path rule's file goes with the
-//!   request's matter-thread check ([`real_path`]), which resolves its real path
-//!   (`agent::always::real_within`).
-//! - [`answer`]: the lawyer's `allow_always` answer is logged as chosen, but the agent gets the
-//!   request's `allow_once` option, so claude-agent-acp writes nothing into the matter; the
-//!   rule is kept for the session and in the matter's file ([`keep`], numbered by the actor's
-//!   `kept::Ledger`), unless it is a path rule outside the matter folder by its text
-//!   (`agent::always::within`) or its real path. What was not kept, and why, goes back for the
-//!   lawyer's notice ([`Answered`]).
+//!   option, unless it is a plan exit (an `exit-plan-*` option, or the `ExitPlanMode` tool).
+//!   The files whose real paths the request's matter-thread check resolves go with it
+//!   ([`real_paths`], `agent::always::real_within`). The agent's rule-writing options are
+//!   dropped in `asks.rs` (`agent::always::options`).
+//! - [`offer`]: when the request is logged for the lawyer, `clauseo.always` is added and the
+//!   card says what it would keep (`PermissionRequested.always`), when the rule can be kept.
+//! - [`answer`]: the lawyer's `clauseo.always` answer is logged as chosen, but the agent gets
+//!   the request's `allow_once` option, so no agent writes a rule; the rule is kept for the
+//!   session and in the matter's file ([`keep`], numbered by the actor's `kept::Ledger`).
+//!   What was not kept, and why, goes back for the lawyer's notice ([`Answered`]).
 //! - [`auto_allow`]: a later request whose rule is kept is answered `allow_once` by the host,
 //!   after the data-fence and held-open checks, logged as `PermissionRequested` and
 //!   `PermissionResolved` in one commit, as `asks::refuse_held_open` logs its answer; a path
-//!   rule only when its real path is inside the matter now. The answer is `by: local_desktop`,
-//!   the only principal there is: it applies the lawyer's own standing choice from this desktop
-//!   app, as the held-open refusal answers for the lawyer.
+//!   or `Edit(*)` rule only when its files' real paths are inside the matter now. The answer is
+//!   `by: local_desktop`: it applies the lawyer's own standing choice from this desktop app.
 //!
-//! The kept rules reach no launch settings: Claude Code asks the host for every request, and
-//! only the host answers from them (`agent/always.rs`).
+//! Rules apply only to threads of their own matter: an agent reads its matter's file at launch,
+//! and a removal reaches only that matter's agents ([`forget`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use clauseo_protocol::{
-    AgentChoiceId, AgentKind, AgentSessionId, Deliverable, PermissionChoice, PermissionKind,
-    PermissionOption, PermissionRequestId, PermissionRequested, PermissionResolved, Principal,
-    StreamId, ThreadId,
+    AgentChoiceId, AgentKind, AgentSessionId, AlwaysOffer, Deliverable, PermissionChoice,
+    PermissionKind, PermissionOption, PermissionRequestId, PermissionRequested, PermissionResolved,
+    Principal, StreamId, ThreadId, ToolKind,
 };
 use serde_json::Value;
 
@@ -42,17 +39,18 @@ use super::asks::PermissionAsk;
 use super::launch_checks::RunFolders;
 use super::out::Out;
 use super::updates::{agent, known_tool};
-use crate::agent::always::{self, NotKept};
+use crate::agent::always::{self, Kept, NotKept, options};
 use crate::error::Error;
 use crate::log_file::Cause;
 
-/// What a request needs for route A: its rule, if it gives one, and the option the agent gets.
+/// What a request needs for "Always": its rule and what the card says, if it gives one, and
+/// the option the agent gets.
 #[derive(Debug, Clone)]
 pub(super) struct AlwaysAsk {
-    rule: Result<String, NotKept>,
+    kept: Result<Kept, NotKept>,
     once: AgentChoiceId,
-    /// Whether a path rule's file is inside the matter by its real path, as the request's
-    /// matter-thread check found it; none when it was not checked.
+    /// Whether a path or `Edit(*)` rule's files are inside the matter by their real paths, as
+    /// the request's matter-thread check found them; none when they were not checked.
     real: Option<bool>,
 }
 
@@ -66,11 +64,13 @@ pub(super) struct Answered {
     pub(super) keep: Option<(PathBuf, String)>,
 }
 
-/// A Claude agent's kept rules for its matter, and its pending requests' [`AlwaysAsk`].
+/// An agent's kept rules for its matter, and its pending requests' [`AlwaysAsk`].
 #[derive(Debug, Default)]
 pub(super) struct Always {
-    /// The matter's rules file; none for any agent but Claude outside forced ask.
+    /// The matter's rules file; none for an agent other than Claude or ChatGPT.
     file: Option<PathBuf>,
+    /// The agent's kind: commands are kept per agent.
+    kind: Option<AgentKind>,
     rules: BTreeSet<String>,
     /// The matter folder's spellings as path rules (`always::matter_roots`): a path rule
     /// outside them is neither kept nor applied (`always::within`).
@@ -80,21 +80,17 @@ pub(super) struct Always {
 
 impl Always {
     /// For a launch of an agent of `kind`: the rules its prep read (`RunFolders::always`), for
-    /// Claude outside forced ask only, without those the lawyer removed since (`kept`, the
+    /// Claude or ChatGPT, in forced ask too, without those the lawyer removed since (`kept`, the
     /// actor's ledger): the prep read the file off the actor, maybe before a removal's write.
-    pub(super) fn at_launch(
-        run: &RunFolders,
-        kind: Option<AgentKind>,
-        forced_ask: bool,
-        kept: &Ledger,
-    ) -> Self {
-        if kind != Some(AgentKind::Claude) || forced_ask {
+    pub(super) fn at_launch(run: &RunFolders, kind: Option<AgentKind>, kept: &Ledger) -> Self {
+        if !matches!(kind, Some(AgentKind::Claude | AgentKind::Codex)) {
             return Self::default();
         }
         let mut rules = run.always.iter().cloned().collect();
         kept.drop_removed(run.key.matter, &mut rules);
         Self {
             file: always::file_beside(&run.notes),
+            kind,
             rules,
             roots: Vec::new(),
             asked: BTreeMap::new(),
@@ -117,50 +113,79 @@ impl Always {
     }
 }
 
-/// The plan exit's option ids start so (`agent/forced_ask.rs` `SKIPPING_OPTIONS`).
-const PLAN_EXIT_OPTION: &str = "exit-plan-";
-
 /// Claude Code's plan exit tool.
 const PLAN_EXIT_TOOL: &str = "ExitPlanMode";
 
-/// A request's [`AlwaysAsk`] (see the module doc); `options` may lose its `allow_always` ones.
+/// A request's [`AlwaysAsk`] (see the module doc), for an agent that keeps rules.
 pub(super) fn ask(
     actor: &mut Actor,
     thread: ThreadId,
     session: &AgentSessionId,
     acp_tool_call_id: &str,
-    options: &mut Vec<PermissionOption>,
+    options: &[PermissionOption],
     raw_input: Option<&Value>,
+    tool_kind: Option<ToolKind>,
 ) -> Option<AlwaysAsk> {
-    agent(actor, thread)?.always.file.as_ref()?;
-    let plan_exit = options.iter().any(|option| {
-        let id = option.option_id.as_bytes();
-        id.get(..PLAN_EXIT_OPTION.len())
-            .is_some_and(|start| start.eq_ignore_ascii_case(PLAN_EXIT_OPTION.as_bytes()))
-    });
+    let agent_ref = agent(actor, thread)?;
+    agent_ref.always.file.as_ref()?;
+    let kind = agent_ref.always.kind?;
+    let matter = agent_ref.folder.to_str()?.to_owned();
     let tool = tool_name(actor, thread, session, acp_tool_call_id);
-    if plan_exit || tool.as_deref() == Some(PLAN_EXIT_TOOL) {
+    if options::plan_exit(options) || tool.as_deref() == Some(PLAN_EXIT_TOOL) {
         return None;
     }
     let once = options
         .iter()
         .find(|option| option.kind == PermissionKind::AllowOnce)
-        .and_then(|option| AgentChoiceId::new(&option.option_id).ok());
-    let Some(once) = once else {
-        options.retain(|option| option.kind != PermissionKind::AllowAlways);
-        return None;
+        .and_then(|option| AgentChoiceId::new(&option.option_id).ok())?;
+    let request = always::Request {
+        agent: kind,
+        tool: tool.as_deref(),
+        kind: tool_kind,
+        raw_input,
+        matter: &matter,
+        windows: cfg!(windows),
     };
-    let rule = tool.map_or(Err(NotKept::NoRule), |tool| {
-        always::rule(&tool, raw_input, cfg!(windows))
-    });
-    let real = None;
-    Some(AlwaysAsk { rule, once, real })
+    let kept = always::rule(&request);
+    Some(AlwaysAsk {
+        kept,
+        once,
+        real: None,
+    })
 }
 
-/// The file whose real path the request's matter-thread check resolves: a path rule's.
-pub(super) fn real_path(ask: Option<&AlwaysAsk>) -> Option<PathBuf> {
-    let rule = ask?.rule.as_ref().ok()?;
-    always::rule_path(rule, cfg!(windows))
+/// The files whose real paths the request's matter-thread check resolves: a `Read` rule's file,
+/// or every file an `Edit(*)` request names (`paths`, absolute or relative to `folder`).
+pub(super) fn real_paths(
+    ask: Option<&AlwaysAsk>,
+    paths: &[PathBuf],
+    folder: &std::path::Path,
+) -> Vec<PathBuf> {
+    let Some(Ok(kept)) = ask.map(|ask| ask.kept.as_ref()) else {
+        return Vec::new();
+    };
+    if kept.rule == always::EDIT_ALL {
+        return paths.iter().map(|path| folder.join(path)).collect();
+    }
+    always::rule_path(&kept.rule, cfg!(windows))
+        .into_iter()
+        .collect()
+}
+
+/// What the card's `clauseo.always` would keep, when the request's rule can be kept now: in the
+/// matter (a path or `Edit(*)` rule's files by their real paths, `real`), and room left.
+pub(super) fn offer(
+    agent: &Agent,
+    ask: Option<&AlwaysAsk>,
+    real: Option<bool>,
+) -> Option<AlwaysOffer> {
+    let kept = ask?.kept.as_ref().ok()?;
+    let always = &agent.always;
+    always.file.as_ref()?;
+    let inside = always::within(&kept.rule, &always.roots, cfg!(windows))
+        && (!always::needs_real(&kept.rule) || real == Some(true));
+    let room = always.rules.len() < always::MAX_RULES || always.rules.contains(&kept.rule);
+    (inside && room).then(|| kept.offer.clone())
 }
 
 /// The tool `name` of the call the request is about, as the thread's log (or the replay being
@@ -194,22 +219,26 @@ pub(super) fn asked(agent: &mut Agent, request: PermissionRequestId, ask: Option
     }
 }
 
-/// The lawyer answered `request` with `option`: for an `allow_always` one with an
-/// [`AlwaysAsk`], the option the agent gets instead, its rule kept for the session and given
-/// back to be stored ([`keep`]).
+/// Whether `request` waits for an answer with an [`AlwaysAsk`].
+pub(super) fn has_ask(agent: &Agent, request: PermissionRequestId) -> bool {
+    agent.always.asked.contains_key(&request)
+}
+
+/// The lawyer answered `request` with `option`: for `clauseo.always` with an [`AlwaysAsk`],
+/// the option the agent gets instead, its rule kept for the session and given back to be stored
+/// ([`keep`]).
 pub(super) fn answer(
     agent: &mut Agent,
     request: PermissionRequestId,
     option: &PermissionOption,
 ) -> Option<Answered> {
     let ask = agent.always.asked.remove(&request)?;
-    if option.kind != PermissionKind::AllowAlways {
+    if option.option_id != options::ALWAYS {
         return None;
     }
-    let kept = ask.rule.and_then(|rule| {
-        let path = always::rule_path(&rule, cfg!(windows)).is_some();
+    let kept = ask.kept.and_then(|Kept { rule, .. }| {
         let inside = always::within(&rule, &agent.always.roots, cfg!(windows))
-            && (!path || ask.real == Some(true));
+            && (!always::needs_real(&rule) || ask.real == Some(true));
         let full = agent.always.rules.len() >= always::MAX_RULES;
         match (inside, full) {
             (false, _) => Err(NotKept::OutsideMatter),
@@ -227,6 +256,7 @@ pub(super) fn answer(
     };
     tracing::info!(
         ?not_kept,
+        kind = ?agent.always.kind,
         "an \"Always for this matter\" answer goes to the agent as allow once"
     );
     Some(Answered {
@@ -265,18 +295,21 @@ pub(super) fn auto_allow(
     let kept = ask
         .always
         .as_ref()
-        .and_then(|always| always.rule.as_ref().ok());
+        .and_then(|always| always.kept.as_ref().ok());
     let agent = agent(actor, thread)?;
-    let applies = kept.is_some_and(|rule| {
-        agent.always.rules.contains(rule)
-            && (always::rule_path(rule, cfg!(windows)).is_none() || real == Some(true))
+    let applies = kept.is_some_and(|kept| {
+        agent.always.rules.contains(&kept.rule)
+            && (!always::needs_real(&kept.rule) || real == Some(true))
     });
+    let entry = kept.map(|kept| kept.offer.kind);
     if !applies {
         return Some(ask);
     }
+    let kind = agent.always.kind;
     if let Err(error) = allow(actor, thread, ask) {
         tracing::warn!(%thread, error = %Cause(&error), "a kept rule's answer was not logged");
     }
+    tracing::info!(%thread, agent = ?kind, entry = ?entry, "a request matching a kept rule was allowed once");
     None
 }
 
@@ -312,6 +345,7 @@ fn allow(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) -> Result<(), 
             options,
             deliverable,
             about,
+            always: None,
         },
     )?;
     let by = Principal::LocalDesktop;
@@ -331,7 +365,6 @@ fn allow(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) -> Result<(), 
     if let Some(agent) = agent(actor, thread) {
         agent.run = None;
     }
-    tracing::info!(%thread, "a request matching a kept rule was allowed once");
     Ok(())
 }
 

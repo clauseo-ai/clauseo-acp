@@ -185,13 +185,14 @@ pub(crate) enum MatterJob {
     },
     /// The first of `paths` (as the agent named them: absolute, or relative to `folder`) in
     /// `folder` that Word or another program holds open (`clauseo_matters::held_open_at`), after
-    /// the `fence` check (`agent/data_fence.rs`); and whether `real`, a kept rule's file, is
-    /// inside `folder` by its real path (`agent::always::real_within`). Needs no open matter.
+    /// the `fence` check (`agent/data_fence.rs`); and whether every file of `real`, a kept
+    /// rule's files, is inside `folder` by its real path (`agent::always::real_within`), none
+    /// when `real` is empty. Needs no open matter.
     HeldOpen {
         folder: PathBuf,
         paths: Vec<PathBuf>,
         fence: Option<Box<FenceCheck>>,
-        real: Option<PathBuf>,
+        real: Vec<PathBuf>,
     },
     /// `Matter::papers`: the folder as it is now, its first `limit` files.
     ListPapers { limit: usize },
@@ -517,7 +518,10 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             fence,
             real,
         } => {
-            let inside = real.map(|real| real_within(&real, &folder, cfg!(windows)));
+            let inside = (!real.is_empty()).then(|| {
+                real.iter()
+                    .all(|real| real_within(real, &folder, cfg!(windows)))
+            });
             MatterReply::HeldOpen(check_paths(&folder, paths, fence.as_deref()), inside)
         }
         MatterJob::ListPapers { limit } => {

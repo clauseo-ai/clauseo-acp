@@ -201,8 +201,8 @@ pub(crate) struct RunFolders {
     /// Where the run's Claude session calls write their flag settings (`agent::launch_settings`,
     /// `<data>/launch-settings/<run id>.json`); gone with the run folder.
     pub(crate) launch_settings: crate::agent::launch_settings::Target,
-    /// A Claude launch's kept "Always for this matter" rules, read by the launch prep
-    /// (`folders::make_claude`, `agent/always.rs`); empty for any other agent.
+    /// The matter's kept "Always for this matter" rules, read by the launch prep
+    /// (`folders::make_claude`, `agent/always.rs`), for either agent.
     pub(crate) always: Vec<String>,
 }
 
@@ -396,7 +396,7 @@ pub(super) fn prepare(
                     }
                 }
                 run.make(&data, &sweep)?;
-                make_claude(&mut run, claude_home.is_some());
+                make_claude(&mut run);
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
                 run.codex_listed = crate::agent::codex_fence::list(&data, &run.root, &run.notes);
                 claim(&mut run, &data, claims, slot);

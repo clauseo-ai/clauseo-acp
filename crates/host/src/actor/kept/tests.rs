@@ -35,12 +35,15 @@ fn each_rule_reads_as_a_kind_and_a_subject() {
             "find_case",
             Some("court-search"),
         ),
+        ("Edit(*)", KeptKind::Edit, "", None),
         (
-            "Edit(//work/smith/work/out.txt)",
-            KeptKind::Edit,
-            "work/out.txt",
+            "PowerShell(Get-ChildItem)",
+            KeptKind::Run,
+            "Get-ChildItem",
             None,
         ),
+        ("Run(mdls a.pdf)", KeptKind::Run, "mdls a.pdf", None),
+        ("WebSearch", KeptKind::Tool, "WebSearch", None),
         (
             "Read(//work/smith/notes.txt)",
             KeptKind::Read,
@@ -55,8 +58,8 @@ fn each_rule_reads_as_a_kind_and_a_subject() {
         ),
         // A sibling folder that starts with the matter's name is outside it.
         (
-            "Edit(//work/smithers/a.txt)",
-            KeptKind::Edit,
+            "Read(//work/smithers/a.txt)",
+            KeptKind::Read,
             "/work/smithers/a.txt",
             None,
         ),
@@ -70,23 +73,33 @@ fn each_rule_reads_as_a_kind_and_a_subject() {
     }
 }
 
+/// A kept ChatGPT command run in a folder of the matter lists that folder apart.
+#[test]
+fn a_codex_command_lists_its_folder() {
+    let roots = crate::agent::always::matter_roots(["/work/smith"], false);
+    let kept = describe("Run(mdls a.pdf) in Drafts/2026", &roots, false).unwrap();
+    assert_eq!(kept.kind, KeptKind::Run);
+    assert_eq!(kept.subject, "mdls a.pdf");
+    assert_eq!(kept.cwd.as_deref(), Some("Drafts/2026"));
+}
+
 #[test]
 fn a_windows_file_inside_the_matter_is_relative_in_any_case() {
     let shown = shown(
-        "Edit(//c/users/ann/smith/Drafts/a.docx)",
+        "Read(//c/users/ann/smith/Drafts/a.docx)",
         r"C:\Users\Ann\Smith",
         true,
     );
     assert_eq!(
         shown,
-        Some((KeptKind::Edit, "Drafts/a.docx".to_owned(), None))
+        Some((KeptKind::Read, "Drafts/a.docx".to_owned(), None))
     );
 }
 
 #[test]
 fn text_no_kept_rule_has_reads_as_none() {
     for rule in [
-        "PowerShell(ls)",
+        "Edit(//work/smith/a.txt)",
         "Bash(ls",
         "mcp__nameonly",
         "WebFetch(example.com)",
