@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use crate::network_paths::fold_name;
 
-use crate::pre_write_guard::{Escape, shell_script};
+use crate::pre_write_guard::{Escape, powershell_words, shell_script};
 
 /// The tokens of a shell command line that may be paths: each word ([`segments`]), and of a
 /// word holding `=` the part after it (`--file=/x`, `VAR=/x`), when it starts with `~`, `$HOME`
@@ -433,9 +433,13 @@ fn segments(line: &str, windows: bool) -> Vec<Vec<String>> {
 
 /// A command line's simple commands (split at `;`, `|`, `&`, `(`, `)`, backticks and line
 /// ends), each as its words, as a POSIX shell would split them, near enough for paths: quotes
-/// joined, `\` an escape outside single quotes except on Windows, words split at blanks, `<`
-/// and `>`.
+/// joined, `\` an escape outside single quotes, words split at blanks, `<` and `>`. With
+/// Windows' rules the line is PowerShell's, read by the reader the pre-write guard and every
+/// other PowerShell reader share (`pre_write_guard`'s `powershell_words`).
 fn split_line(line: &str, windows: bool) -> Vec<Vec<String>> {
+    if windows {
+        return powershell_words(line);
+    }
     let mut segments = Vec::new();
     let mut words = Vec::new();
     let mut word = String::new();
@@ -444,7 +448,7 @@ fn split_line(line: &str, windows: bool) -> Vec<Vec<String>> {
     while let Some(c) = chars.next() {
         match (quote, c) {
             (Some(open), c) if c == open => quote = None,
-            (Some('"') | None, '\\') if !windows => {
+            (Some('"') | None, '\\') => {
                 if let Some(next) = chars.next() {
                     word.push(next);
                 }

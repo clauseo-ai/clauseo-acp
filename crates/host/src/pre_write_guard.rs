@@ -29,7 +29,11 @@
 //!     change; nothing else changes, the layers below still apply. When the command names a
 //!     folder change anywhere, a relative word is also taken from `cwd` with its leading `..`
 //!     parts off (a rare false refusal when a write elsewhere has a held file's name, accepted).
-//!     PowerShell's `\` separates folders on every OS. A patch in the command (Codex's
+//!     PowerShell's `\` separates folders on every OS. Claude Code's `PowerShell` command, and a
+//!     `Bash` one under Codex's hook on Windows (Codex's shell there is PowerShell; such a
+//!     command is read the Bash way too, a refusal by either standing), is read with
+//!     PowerShell's quoting (`about_Quoting_Rules`: `'O''Brien'`, `"a ""b"""`, the typographic
+//!     quotes, the backtick; `words/powershell.rs`). A patch in the command (Codex's
 //!     `exec_command` applies `apply_patch <<'EOF' …`) counts, its lines taken from `cwd`.
 //!   - Names, a backstop that does not depend on following folders (`names.rs`). The files of
 //!     the matter held open right now are listed (the folders with an Office owner file `~$…`,
@@ -176,7 +180,9 @@ use codex::{has_codex_part, in_codex_folder, patch_targets};
 use reach::Reach;
 pub(crate) use shell::script as shell_script;
 use shell::{shell_targets, walked_resolutions};
-pub(crate) use words::Escape;
+pub(crate) use words::{
+    ARRAY_COMMA, Escape, Joint, Role, Segments, powershell_words, shell_segments,
+};
 
 /// The first argument that makes the desktop binary run [`run`] on its stdin and stderr and
 /// exit, before anything else starts. The hook entry passes it (`agent/loads.rs`).
@@ -383,40 +389,76 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
         .and_then(Value::as_str)
         .ok_or(Ignored::NoTool)?;
     let input = hook.get("tool_input").ok_or(Ignored::NoTool)?;
-    let Some(targets) = targets(tool, input, &base, &reach)? else {
-        return Ok(None);
+    let place = Place {
+        folder: &folder,
+        base: &base,
+        reach: &reach,
+        codex_bash: matter.is_none() && tool == "Bash",
     };
-    timings::mark("targets");
-    let into_codex = match &targets {
+    // Under Codex's hook on Windows a `Bash` command is read as PowerShell and as Bash: a
+    // refusal by either refuses.
+    let bash = bash_escape(matter.is_none(), cfg!(windows));
+    let readings: &[Escape] = if tool == "Bash" && bash == Escape::Backtick {
+        &[Escape::Backtick, Escape::Backslash]
+    } else {
+        &[bash]
+    };
+    for escape in readings {
+        let Some(targets) = targets(tool, input, &base, &reach, *escape)? else {
+            return Ok(None);
+        };
+        timings::mark("targets");
+        if let Some(refusal) = judge(&targets, &place) {
+            return Ok(Some(refusal));
+        }
+    }
+    Ok(None)
+}
+
+/// Where a tool's targets are judged: the matter `folder`, the `base` its relative paths start
+/// from, the walk that resolves them, and whether it is a `Bash` call under Codex's hook.
+struct Place<'a> {
+    folder: &'a Path,
+    base: &'a Path,
+    reach: &'a Reach,
+    codex_bash: bool,
+}
+
+/// Why `targets` are refused at `place`, if they are ([`refusal`]).
+fn judge(targets: &Targets, place: &Place<'_>) -> Option<Refusal> {
+    let Place {
+        folder,
+        base,
+        reach,
+        codex_bash,
+    } = *place;
+    let into_codex = match targets {
         Targets::Named(_) => false,
         Targets::Patch(paths) => paths
             .iter()
-            .any(|path| in_codex_folder(&folder, &base, path, &reach)),
+            .any(|path| in_codex_folder(folder, base, path, reach)),
         Targets::Shell {
             patch, names_codex, ..
-        } => {
-            patch.iter().any(|path| has_codex_part(path))
-                || (*names_codex && matter.is_none() && tool == "Bash")
-        }
+        } => patch.iter().any(|path| has_codex_part(path)) || (*names_codex && codex_bash),
     };
     if into_codex {
-        return Ok(Some(Refusal::CodexFolder));
+        return Some(Refusal::CodexFolder);
     }
     let held_at = |paths: &[PathBuf]| {
         paths
             .iter()
-            .flat_map(|path| walked_resolutions(&base.join(path), &reach))
-            .find_map(|path| clauseo_matters::held_open_resolved(&folder, &path))
+            .flat_map(|path| walked_resolutions(&base.join(path), reach))
+            .find_map(|path| clauseo_matters::held_open_resolved(folder, &path))
             .map(|(path, _)| path)
     };
     // A held file found by a tool's path, as the matter lists it (the walk keeps the agent's
     // spelling, [`names::as_listed`]).
-    let listed = |held: Option<MatterPath>| held.map(|path| names::listed_spelling(&folder, path));
-    match &targets {
+    let listed = |held: Option<MatterPath>| held.map(|path| names::listed_spelling(folder, path));
+    match targets {
         Targets::Named(paths) | Targets::Patch(paths) => {
             let held = listed(held_at(paths));
             timings::mark("resolve");
-            Ok(held.map(Refusal::HeldOpen))
+            held.map(Refusal::HeldOpen)
         }
         Targets::Shell {
             files,
@@ -428,7 +470,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
         } => {
             if let Some(path) = listed(held_at(patch)) {
                 timings::mark("resolve");
-                return Ok(Some(Refusal::HeldOpen(path)));
+                return Some(Refusal::HeldOpen(path));
             }
             // The first held file the words name by path, and every word that names one.
             let mut found = None;
@@ -442,9 +484,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
                 }
             }
             timings::mark("resolve");
-            Ok(names::shell_refusal(
-                text, line, *escape, &folder, found, &hits, &reach,
-            ))
+            names::shell_refusal(text, line, *escape, folder, found, &hits, reach)
         }
     }
 }
@@ -470,13 +510,15 @@ enum Targets {
 }
 
 /// The paths the tool `tool` with `input` would write, `None` for a tool the guard does not
-/// check; a shell command's words are files when they exist, taken from `base`. A checked tool
-/// whose input lacks the field its paths come from is ignored.
+/// check; a shell command's words are files when they exist, taken from `base`, a `Bash` one's
+/// read with `bash`'s escape ([`bash_escape`]). A checked tool whose input lacks the field its
+/// paths come from is ignored.
 fn targets(
     tool: &str,
     input: &Value,
     base: &Path,
     reach: &Reach,
+    bash: Escape,
 ) -> Result<Option<Targets>, Ignored> {
     let text = |key: &str| input.get(key).and_then(Value::as_str);
     let targets = match tool {
@@ -489,11 +531,26 @@ fn targets(
                 return Err(Ignored::Shape("file_path, notebook_path or command string"));
             }
         }
-        "Bash" => shell_targets(input.get("command"), base, Escape::Backslash, reach)?,
+        "Bash" => shell_targets(input.get("command"), base, bash, reach)?,
         "PowerShell" => shell_targets(input.get("command"), base, Escape::Backtick, reach)?,
         _ => return Ok(None),
     };
     Ok(Some(targets))
+}
+
+/// How a `Bash` tool's command is read: as `PowerShell` under Codex's hook (no `--matter`) on
+/// Windows, else as Bash. Codex names every shell call `Bash` (codex-rs `HookToolName::bash`,
+/// `tools/handlers/shell/shell_command.rs`, `unified_exec/exec_command.rs`) and sends the
+/// model's script as it is, which on Windows its shell runs as `powershell.exe -Command
+/// <script>`: a real Codex 0.162.1 hook input on Windows (VM, 16 Nov 2026) was `tool_name`
+/// `Bash` with `Set-Content -LiteralPath 'notes.txt' -Value 'hello'`. Claude Code's `Bash`
+/// (with `--matter`) is Git Bash on Windows, so it stays Bash.
+fn bash_escape(codex: bool, windows: bool) -> Escape {
+    if codex && windows {
+        Escape::Backtick
+    } else {
+        Escape::Backslash
+    }
 }
 
 /// The longest path [`existing_resolved`] resolves; a longer one (no OS opens it) is only

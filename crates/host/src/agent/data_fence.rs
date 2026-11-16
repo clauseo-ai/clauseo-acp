@@ -574,6 +574,8 @@ mod network_tests;
 mod no_file_ids_tests;
 #[cfg(test)]
 mod powershell_env_tests;
+#[cfg(test)]
+mod powershell_quote_tests;
 mod resolve;
 mod search;
 #[cfg(test)]

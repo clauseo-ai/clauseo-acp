@@ -1,5 +1,12 @@
-//! The shell side of the guard's heuristic: a command's words, the simple shell way, and the
-//! file names a word may hold.
+//! The shell side of the guard's heuristic: a command's words, the simple shell way or
+//! `PowerShell`'s (`powershell.rs`), and the file names a word may hold. Every reader of a
+//! `PowerShell` command in the host reads it here.
+
+mod powershell;
+mod segments;
+
+use segments::Known;
+pub(crate) use segments::{Joint, Role, Segment, Segments};
 
 /// Which character escapes the next one in a shell command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,95 +17,11 @@ pub(crate) enum Escape {
     Backtick,
 }
 
-/// One simple command's words, or a heredoc body's (`command` false: its lines are data, not
-/// commands, but their words still name files), and the targets of its output redirections
-/// (`>x`, `>>x`, `2>x`, `&>x`; a duplication such as `2>&1` as `&1`), which are words too.
-#[derive(Debug, Default)]
-pub(crate) struct Segment {
-    pub(crate) words: Vec<String>,
-    /// For each of `words`, whether any part of it was quoted or escaped (so a wildcard in it is
-    /// not expanded).
-    pub(crate) quoted: Vec<bool>,
-    pub(crate) command: bool,
-    pub(crate) redirects: Vec<String>,
-}
-
-/// A shell command's words, grouped by the simple command (segment) each belongs to, the first
-/// `limit` words in all.
-#[derive(Debug)]
-pub(crate) struct Segments {
-    /// The segments in order; the last may be empty.
-    list: Vec<Segment>,
-    /// How many words `list` holds.
-    count: usize,
-    /// The most words kept.
-    limit: usize,
-}
-
-impl Segments {
-    pub(crate) fn new(limit: usize) -> Self {
-        Self {
-            list: Vec::new(),
-            count: 0,
-            limit,
-        }
-    }
-
-    /// Whether it holds `limit` words.
-    pub(crate) fn full(&self) -> bool {
-        self.count >= self.limit
-    }
-
-    /// Adds `word` to the last segment, unless it is full.
-    pub(crate) fn push(&mut self, word: String) {
-        self.push_word(word, false);
-    }
-
-    /// Adds `word`, quoted or escaped in part or not, to the last segment, unless it is full.
-    fn push_word(&mut self, word: String, quoted: bool) {
-        if self.full() {
-            return;
-        }
-        if self.list.is_empty() {
-            self.start(true);
-        }
-        if let Some(last) = self.list.last_mut() {
-            last.words.push(word);
-            last.quoted.push(quoted);
-            self.count += 1;
-        }
-    }
-
-    /// Ends the last segment: the next word starts a new command.
-    pub(crate) fn split(&mut self) {
-        self.start(true);
-    }
-
-    /// Starts a new segment, a command or a heredoc body.
-    fn start(&mut self, command: bool) {
-        match self.list.last_mut() {
-            Some(last) if last.words.is_empty() => last.command = command,
-            _ => self.list.push(Segment {
-                words: Vec::new(),
-                quoted: Vec::new(),
-                command,
-                redirects: Vec::new(),
-            }),
-        }
-    }
-
-    /// Notes `target` as an output redirection of the last segment.
-    fn redirect(&mut self, target: String) {
-        if let Some(last) = self.list.last_mut() {
-            last.redirects.push(target);
-        }
-    }
-
-    /// The segments, empty ones left out.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &Segment> {
-        self.list.iter().filter(|segment| !segment.words.is_empty())
-    }
-}
+/// What an unquoted `,` becomes in a word under `PowerShell`'s rules, for every reader:
+/// `PowerShell`'s array separator (and cmd's argument delimiter), told apart from a quoted comma,
+/// which is part of a name (`'C:\Clients\Smith, Jones & Co'`). [`candidates`] takes each
+/// element of such a word as a name of its own.
+pub(crate) const ARRAY_COMMA: char = '\u{1f}';
 
 /// Adds `command`'s words to `segments` until it is full, the simple shell way, with no
 /// expansion:
@@ -116,6 +39,15 @@ impl Segments {
 ///   `)`.
 /// - A heredoc (`<<WORD`, `<<-WORD`, quoted or not) has its body, the lines after the command's
 ///   line up to the one that is `WORD`, put in a segment of its own that is not a command.
+///
+/// Under [`Escape::Backtick`] a word is read as `PowerShell` reads it (`powershell.rs`, after
+/// `about_Quoting_Rules`): `''` in single quotes and `""` in double quotes stand for one quote,
+/// the typographic quotes count as quotes, a backtick escapes in double quotes and out of quotes
+/// (`` `n `` a new line), a here-string (`@'` … `'@`) is one word, an unquoted `,` becomes
+/// [`ARRAY_COMMA`], and a word with an expansion (`$name`, `$(…)`, in double quotes or bare) is
+/// unknown ([`Segment::unknown`]); the commands inside a `$(…)` are read too, as segments of
+/// their own after the command's. Under either escape, a quote left open makes the reading
+/// [`Segments::unsure`] and its word unknown.
 pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segments) {
     let escape = match escape {
         Escape::Backslash => '\\',
@@ -125,15 +57,23 @@ pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segme
         chars: command.chars().peekable(),
         escape,
         ansi_c: escape == '\\',
+        powershell: escape == '`',
         word: String::new(),
         in_word: false,
         quoted: false,
+        unknown: false,
+        stream: false,
         awaiting_delimiter: None,
         redirecting: None,
         heredocs: Vec::new(),
+        inner: Vec::new(),
     };
     segments.split();
     scanner.run(segments);
+    let inner = std::mem::take(&mut scanner.inner);
+    for body in inner {
+        shell_segments(&body, Escape::Backtick, segments);
+    }
 }
 
 /// The state of [`shell_segments`].
@@ -146,12 +86,20 @@ struct Scanner<'a> {
     in_word: bool,
     /// Whether a quote or the escape character was part of the word being read.
     quoted: bool,
+    /// `PowerShell`'s rules (`powershell.rs`).
+    powershell: bool,
+    /// Whether the word being read holds an expansion, or a quote that never closed.
+    unknown: bool,
+    /// Whether the word being read is a stream's number before `>` ([`Role::Stream`]).
+    stream: bool,
     /// After `<<` or `<<-`: the next word is a heredoc's delimiter; whether tabs are stripped.
     awaiting_delimiter: Option<bool>,
     /// After `>`: the next word is a redirection's target; whether it duplicates a descriptor.
     redirecting: Option<bool>,
     /// Heredocs whose bodies start after this line: delimiter, tabs stripped.
     heredocs: Vec<(String, bool)>,
+    /// The bodies of the `$(…)` read so far (`PowerShell`), read as commands after this one.
+    inner: Vec<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -171,45 +119,34 @@ impl Scanner<'_> {
                 return;
             }
             let unquoted = quote == Quote::None;
+            if self.powershell
+                && let Some(next) = self.powershell_char(quote, c, segments)
+            {
+                quote = next;
+                if unquoted {
+                    prev = c;
+                }
+                continue;
+            }
             match (quote, c) {
                 (Quote::None, '#') if !self.in_word => {
-                    while self.chars.peek().is_some_and(|&next| next != '\n') {
+                    // `PowerShell` ends a comment at a CR too (VM row 2, 5.1 and 7.4).
+                    let cr_ends = self.powershell;
+                    while self
+                        .chars
+                        .peek()
+                        .is_some_and(|&next| next != '\n' && !(cr_ends && next == '\r'))
+                    {
                         self.chars.next();
                     }
                 }
-                (Quote::None, '\n') => {
-                    self.end_word(segments);
-                    segments.split();
-                    self.bodies(segments);
+                // `PowerShell` takes a lone CR, and CRLF, as one new line (VM rows 2 and 3).
+                (Quote::None, '\r') if self.powershell => {
+                    self.chars.next_if_eq(&'\n');
+                    self.operator('\n', prev, segments);
                 }
-                (Quote::None, ';' | '(' | ')') => {
-                    self.end_word(segments);
-                    segments.split();
-                }
-                (Quote::None, '&') => {
-                    self.end_word(segments);
-                    if prev == '>' {
-                        self.redirecting = Some(true);
-                    }
-                    if self.chars.peek() == Some(&'&') {
-                        self.chars.next();
-                        segments.split();
-                    } else if !matches!(prev, '>' | '<') && self.chars.peek() != Some(&'>') {
-                        segments.split();
-                    }
-                }
-                (Quote::None, '|') => {
-                    self.end_word(segments);
-                    if prev != '>' {
-                        if matches!(self.chars.peek(), Some('|' | '&')) {
-                            self.chars.next();
-                        }
-                        segments.split();
-                    }
-                }
-                (Quote::None, '>') => {
-                    self.end_word(segments);
-                    self.redirecting = Some(false);
+                (Quote::None, '\n' | ';' | '(' | ')' | '&' | '|' | '>') => {
+                    self.operator(c, prev, segments);
                 }
                 (Quote::None, '<') if self.escape == '`' && self.chars.peek() == Some(&'#') => {
                     self.end_word(segments);
@@ -276,7 +213,177 @@ impl Scanner<'_> {
                 prev = c;
             }
         }
+        if quote != Quote::None {
+            self.unknown = true;
+            segments.set_unsure();
+        }
         self.end_word(segments);
+        if self.redirecting.is_some() {
+            segments.set_unsure();
+        }
+    }
+
+    /// An unquoted new line, `;`, `(`, `)`, `&`, `|` or `>` (`c`, after the unquoted `prev`):
+    /// the word before it ends, and the segment too at each [`Joint`]; after `>`, the next word
+    /// is a redirection's target, and the word it ends a stream's number when it is one.
+    fn operator(&mut self, c: char, prev: char, segments: &mut Segments) {
+        if c == '>'
+            && self.in_word
+            && !self.quoted
+            && (self.word == "*" || self.word.chars().all(|d| d.is_ascii_digit()))
+        {
+            self.stream = true;
+        }
+        self.end_word(segments);
+        let next = self.chars.peek().copied();
+        match c {
+            '\n' => {
+                segments.end(Joint::Then);
+                self.bodies(segments);
+            }
+            ';' => segments.end(Joint::Then),
+            '(' => {
+                // `> (Join-Path …)` writes where the expression leads (VM row 5): a target only
+                // the run knows.
+                if self.redirecting.take().is_some() {
+                    segments.redirect("(".to_owned());
+                    let known = Known {
+                        quoted: false,
+                        unknown: true,
+                        role: Role::Target,
+                    };
+                    segments.push_word("(".to_owned(), known);
+                }
+                segments.end(Joint::Open);
+            }
+            ')' => segments.end(Joint::Close),
+            '&' => {
+                if prev == '>' {
+                    self.redirecting = Some(true);
+                }
+                if next == Some('&') {
+                    self.chars.next();
+                    segments.end(Joint::And);
+                } else if !matches!(prev, '>' | '<') && next != Some('>') {
+                    segments.end(Joint::Background);
+                }
+            }
+            '|' if prev != '>' => {
+                let joint = if next == Some('|') {
+                    Joint::Or
+                } else {
+                    Joint::Pipe
+                };
+                if matches!(next, Some('|' | '&')) {
+                    self.chars.next();
+                }
+                segments.end(joint);
+            }
+            '>' => self.redirecting = Some(false),
+            _ => {}
+        }
+    }
+
+    /// One character under `PowerShell`'s rules (`powershell.rs`), where they differ from the
+    /// simple shell way: the quote after it, or `None` when the simple way reads it.
+    fn powershell_char(&mut self, quote: Quote, c: char, segments: &mut Segments) -> Option<Quote> {
+        use powershell::{escaped, expands, is_double, is_single};
+        match quote {
+            Quote::None if is_single(c) => Some(self.open(Quote::Single)),
+            Quote::None if is_double(c) => Some(self.open(Quote::Double)),
+            Quote::None | Quote::Double if c == '`' => {
+                match self.chars.next() {
+                    // A backtick right before CR, LF or CRLF joins the lines; before anything
+                    // else, a blank too, it escapes that character (VM rows 1 and 1b).
+                    Some('\n') | None => {}
+                    Some('\r') => {
+                        self.chars.next_if_eq(&'\n');
+                    }
+                    Some(next) => {
+                        self.in_word = true;
+                        self.quoted = true;
+                        let decoded = escaped(next, &mut self.chars);
+                        self.word.push(decoded);
+                    }
+                }
+                Some(quote)
+            }
+            Quote::None | Quote::Double if c == '$' && expands(self.chars.peek().copied()) => {
+                self.in_word = true;
+                self.unknown = true;
+                self.word.push(c);
+                let start = self.word.len();
+                let closed = powershell::expansion(&mut self.chars, &mut self.word);
+                if !closed {
+                    segments.set_unsure();
+                }
+                if let Some(body) = self.word.get(start..).and_then(|e| e.strip_prefix('(')) {
+                    let body = if closed {
+                        body.strip_suffix(')').unwrap_or(body)
+                    } else {
+                        body
+                    };
+                    self.inner.push(body.to_owned());
+                }
+                Some(quote)
+            }
+            Quote::None if c == ',' => {
+                self.in_word = true;
+                self.word.push(ARRAY_COMMA);
+                Some(quote)
+            }
+            // Blanks after an array's comma continue the array (`'a', $p`): one word still.
+            Quote::None if c.is_whitespace() && self.word.ends_with(ARRAY_COMMA) => Some(quote),
+            Quote::None if c == '@' => {
+                let (body, double) = match powershell::here_string(&mut self.chars)? {
+                    Ok(read) => read,
+                    Err(body) => {
+                        segments.set_unsure();
+                        self.unknown = true;
+                        (body, false)
+                    }
+                };
+                self.unknown |= double && powershell::has_expansion(&body);
+                self.in_word = true;
+                self.quoted = true;
+                self.word.push_str(&body);
+                Some(quote)
+            }
+            Quote::Single if is_single(c) => Some(self.close_or_double(quote, is_single, segments)),
+            Quote::Double if is_double(c) => Some(self.close_or_double(quote, is_double, segments)),
+            Quote::None | Quote::Single | Quote::Double | Quote::AnsiC => None,
+        }
+    }
+
+    /// At a quote of `quote`'s kind (`same`): two in a row stand for the second, kept in the word
+    /// (`quote` stays open; `'a'’b'` keeps `’`, VM row 8); one alone closes it. Right after the
+    /// closing quote, an unquoted `.`, `[` or `(` makes the word unknown (`'abc'.ToUpper()` calls
+    /// the method, VM row 4a), and bare text starts another word (`'a'b` is two arguments, VM
+    /// row 4b): rows observed on Windows PowerShell 5.1 and PowerShell 7.4, 16 Nov 2026.
+    fn close_or_double(
+        &mut self,
+        quote: Quote,
+        same: fn(char) -> bool,
+        segments: &mut Segments,
+    ) -> Quote {
+        use powershell::{is_double, is_single};
+        if let Some(second) = self.chars.next_if(|next| same(*next)) {
+            self.word.push(second);
+            return quote;
+        }
+        match self.chars.peek().copied() {
+            Some('.' | '[' | '(') => self.unknown = true,
+            Some(next)
+                if !next.is_whitespace()
+                    && !is_single(next)
+                    && !is_double(next)
+                    && !matches!(next, ',' | ';' | '|' | '&' | ')' | '>' | '<' | '}') =>
+            {
+                self.end_word(segments);
+            }
+            _ => {}
+        }
+        Quote::None
     }
 
     /// Opens `quote` in the word being read, which so counts as quoted.
@@ -293,19 +400,29 @@ impl Scanner<'_> {
         }
         self.in_word = false;
         let quoted = std::mem::take(&mut self.quoted);
+        let unknown = std::mem::take(&mut self.unknown);
+        let stream = std::mem::take(&mut self.stream);
         let word = std::mem::take(&mut self.word);
         if let Some(dash) = self.awaiting_delimiter.take() {
             self.heredocs.push((word, dash));
             return;
         }
+        let mut role = if stream { Role::Stream } else { Role::Arg };
         if let Some(duplicate) = self.redirecting.take() {
-            segments.redirect(if duplicate {
+            role = Role::Target;
+            let target = if duplicate {
                 format!("&{word}")
             } else {
                 word.clone()
-            });
+            };
+            segments.redirect(target);
         }
-        segments.push_word(word, quoted);
+        let known = Known {
+            quoted,
+            unknown,
+            role,
+        };
+        segments.push_word(word, known);
     }
 
     /// Reads the bodies of the heredocs the line just ended opened, each into a segment that is
@@ -341,6 +458,41 @@ impl Scanner<'_> {
         }
         segments.split();
     }
+}
+
+/// A `PowerShell` command's simple commands, each as its words, as [`shell_segments`] reads them
+/// under [`Escape::Backtick`] with no limit: an array's elements (`'a','b'`) each a word of their
+/// own, a quoted comma part of its word; and a word of more than one line (a here-string's body)
+/// also split at blanks, so a path written inside it is a word too, as the data folder fence's
+/// own reader read it before. For readers that keep no other state per word (the data folder
+/// fence's, `agent/data_fence/command.rs`).
+pub(crate) fn powershell_words(command: &str) -> Vec<Vec<String>> {
+    let mut segments = Segments::new(usize::MAX);
+    shell_segments(command, Escape::Backtick, &mut segments);
+    segments
+        .iter()
+        .map(|segment| {
+            segment
+                .words
+                .iter()
+                .flat_map(|word| word.split(ARRAY_COMMA))
+                .flat_map(word_and_lines)
+                .filter(|word| !word.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .filter(|words| !words.is_empty())
+        .collect()
+}
+
+/// `word`, then, when it has more than one line, its parts between blanks, quotes trimmed
+/// ([`powershell_words`]).
+fn word_and_lines(word: &str) -> impl Iterator<Item = &str> {
+    let parts = word.contains(['\n', '\r']).then(|| {
+        word.split_whitespace()
+            .map(|part| part.trim_matches(['\'', '"']))
+    });
+    std::iter::once(word).chain(parts.into_iter().flatten())
 }
 
 /// The character an ANSI-C escape (`$'…'`) stands for, read from `chars` just after its
@@ -384,7 +536,13 @@ pub(crate) fn ansi_c_char(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) 
 /// `>Contract.docx`, `>>x`, `>|x` or `2>x`), its part after the first `=`
 /// (`--out=Contract.docx`), and for a word starting with `-` its part after the first `:`
 /// without quotes around it (PowerShell's colon form of a parameter, `-Path:Contract.docx`).
+/// A word holding [`ARRAY_COMMA`] gives those of each element (`-Path 'a','Contract.docx'`).
 pub(crate) fn candidates(word: &str) -> impl Iterator<Item = &str> {
+    word.split(ARRAY_COMMA).flat_map(element_candidates)
+}
+
+/// [`candidates`] of one element of a word.
+fn element_candidates(word: &str) -> impl Iterator<Item = &str> {
     let word = word.trim_end_matches([';', '|', '&']);
     let redirected = word
         .rfind(['>', '<', '|'])
@@ -402,3 +560,7 @@ pub(crate) fn candidates(word: &str) -> impl Iterator<Item = &str> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_powershell;
+#[cfg(test)]
+mod tests_rows;

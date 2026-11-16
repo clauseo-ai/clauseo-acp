@@ -1,78 +1,83 @@
 //! A PowerShell command split into simple commands, for [`super::add_script`]: the plain forms
 //! an agent writes (`cd "C:\Matter"; stetdoc edit 'Main Agreement.docx' --ops ops.json`).
 //!
-//! `'…'` is literal (`''` a quote), `"…"` too but for `""` (a quote); a `\` is a folder
-//! separator, never an escape. Commands split at `;`, `&`, `&&`, `|`, `||`, `(`, `)` and new
-//! lines; `#` at a word's start comments out the rest of the line. `>` and `>>` (after `2`,
-//! `*` and the like) redirect to a file, `>&1` to a stream. Anything PowerShell could expand
-//! or read another way leaves its word unclear, so it writes nothing: a `$`, a backtick, a
-//! glob (`*`, `?`, `[`), a brace, `@` (a splat, an array or a here-string) or a leading `~`.
+//! Read by the reader every PowerShell reader in the host shares (`pre_write_guard`'s
+//! `shell_segments`, PowerShell's own quoting: `''` and `""`, the typographic quotes, the
+//! backtick's escapes, here-strings), then taken as this module needs. Commands split at `;`,
+//! `&`, `&&`, `|`, `||`, `(`, `)` and new lines; `#` at a word's start comments out the rest of
+//! the line. `>` and `>>` (after `2`, `*` and the like) redirect to a file, `>&1` to a stream.
+//! Anything PowerShell could expand or read another way leaves its word unclear, so it writes
+//! nothing: an expansion (`$name`, `$(…)`, bare or in double quotes), an unquoted glob (`*`,
+//! `?`, `[`), brace or `@` (a splat or an array), a leading unquoted `~`, an array's `,`, or a
+//! quote that never closes.
 
-use super::{Reader, Segment, Sep, sep_of};
+use crate::pre_write_guard::{ARRAY_COMMA, Escape, Joint, Role, Segments, shell_segments};
+
+use super::{Segment, Sep, Word};
 
 /// The simple commands of `script`, as PowerShell splits them.
 pub(super) fn segments(script: &str) -> Vec<Segment> {
-    let mut r = Reader::default();
-    let mut chars = script.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\'' => {
-                r.started = true;
-                while let Some(q) = chars.next() {
-                    if q == '\'' && chars.next_if_eq(&'\'').is_none() {
-                        break;
-                    }
-                    r.word.push(q);
-                }
-            }
-            '"' => {
-                r.started = true;
-                while let Some(q) = chars.next() {
-                    match q {
-                        '"' if chars.next_if_eq(&'"').is_none() => break,
-                        '$' | '`' => {
-                            r.unclear = true;
-                            r.word.push(q);
-                        }
-                        _ => r.word.push(q),
-                    }
-                }
-            }
-            '#' if !r.started => while chars.next_if(|d| *d != '\n').is_some() {},
-            '$' | '`' | '*' | '?' | '[' | '{' | '}' | '@' => {
-                r.unclear = true;
-                r.push(c);
-            }
-            '~' if !r.started => {
-                r.unclear = true;
-                r.push(c);
-            }
-            '>' => {
-                // `2>`, `*>`: the stream before it is no word
-                if r.started && !r.unclear && r.word.chars().all(|d| d.is_ascii_digit())
-                    || r.word == "*"
-                {
-                    r.word.clear();
-                    r.started = false;
-                    r.unclear = false;
-                }
-                r.end_word();
-                chars.next_if_eq(&'>');
-                if chars.next_if_eq(&'&').is_some() {
-                    // `2>&1`: a copy of another stream, no file
-                    while chars.next_if(char::is_ascii_digit).is_some() {}
-                } else {
-                    r.redirect = true;
-                }
-            }
-            ';' | '&' | '|' | '\n' | '(' | ')' | '<' => {
-                let double = matches!(c, '&' | '|') && chars.next_if_eq(&c).is_some();
-                r.end_segment(sep_of(c, double));
-            }
-            c if c.is_whitespace() => r.end_word(),
-            _ => r.push(c),
-        }
+    let mut read = Segments::new(usize::MAX);
+    shell_segments(script, Escape::Backtick, &mut read);
+    // A quote, here-string or `$(…)` that never closes, or a redirection with no target: a
+    // parse error, so PowerShell runs none of it.
+    if read.unsure() {
+        return Vec::new();
     }
-    r.end_segment(Sep::End);
-    r.out
+    read.iter()
+        .map(|segment| {
+            let mut out = Segment {
+                ender: sep(segment.ender),
+                nested: segment.nested,
+                ..Segment::default()
+            };
+            let known = segment.quoted.iter().zip(&segment.unknown);
+            // The targets, in the order of `redirects`: a duplication (`2>&1`) there as `&1`.
+            let mut redirects = segment.redirects.iter();
+            for ((text, (quoted, unknown)), role) in
+                segment.words.iter().zip(known).zip(&segment.roles)
+            {
+                let word = Word {
+                    text: text.clone(),
+                    clear: clear(text, *quoted, *unknown),
+                };
+                match role {
+                    Role::Arg => out.words.push(word),
+                    Role::Target => {
+                        let stream = redirects
+                            .next()
+                            .is_none_or(|target| target.starts_with('&'));
+                        if !stream && !text.is_empty() {
+                            out.redirects.push(word);
+                        }
+                    }
+                    Role::Stream => {}
+                }
+            }
+            out
+        })
+        .filter(|segment| !segment.words.is_empty() || !segment.redirects.is_empty())
+        .collect()
+}
+
+/// [`Sep`] for the shared reader's [`Joint`].
+fn sep(joint: Joint) -> Sep {
+    match joint {
+        Joint::Then => Sep::Then,
+        Joint::And => Sep::And,
+        Joint::Or => Sep::Or,
+        Joint::Pipe => Sep::Pipe,
+        Joint::Background => Sep::Background,
+        Joint::Open => Sep::Open,
+        Joint::Close => Sep::Close,
+        Joint::End => Sep::End,
+    }
+}
+
+/// Whether the word `text` (with any part `quoted`, holding an expansion when `unknown`) is
+/// plain text (the module doc).
+fn clear(text: &str, quoted: bool, unknown: bool) -> bool {
+    let bare_special =
+        !quoted && (text.contains(['*', '?', '[', '{', '}', '@']) || text.starts_with('~'));
+    !(unknown || bare_special || text.contains(ARRAY_COMMA))
 }

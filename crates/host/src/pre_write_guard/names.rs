@@ -16,7 +16,7 @@ use clauseo_protocol::MatterPath;
 use unicode_normalization::UnicodeNormalization;
 
 use super::shell::script;
-use super::words::{Escape, Segments, ansi_c_char, candidates, shell_segments};
+use super::words::{ARRAY_COMMA, Escape, Segments, ansi_c_char, candidates, shell_segments};
 use super::{MAX_WORDS, Refusal, timings};
 
 pub(super) use allow::{read_only, textutil_writes};
@@ -232,10 +232,12 @@ fn case(text: &str) -> String {
     }
 }
 
-/// Whether `c` may stand before or after a whole file name in a command: whitespace, a quote or
-/// a shell metacharacter; before it also a folder separator.
+/// Whether `c` may stand before or after a whole file name in a command: whitespace, a quote,
+/// a shell metacharacter or `PowerShell`'s array comma ([`ARRAY_COMMA`]); before it also a folder
+/// separator.
 fn bounds(c: char, before: bool) -> bool {
     c.is_whitespace()
+        || c == ARRAY_COMMA
         || matches!(
             c,
             '\'' | '"'
