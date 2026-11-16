@@ -247,7 +247,7 @@ pub(super) fn launch_now(
     let kind = kind.and_then(|entry| clauseo_protocol::AgentKind::of(&entry.row.agent));
     let always = super::always::Always::at_launch(&prepared.run, kind, &actor.kept);
     let mut tree = None;
-    let (link, folder, codex, plan_notes, matter_spellings, claude_home, fence_vars, probe) =
+    let (link, folder, codex, plan_notes, matter_spellings, claude_home, fence_vars, probe, search) =
         match launch(actor, thread, prepared, &mut tree) {
             Ok(launched) => launched,
             Err(error) => {
@@ -271,7 +271,7 @@ pub(super) fn launch_now(
         pid = link.pid(),
         "agent launched"
     );
-    let always = always.in_matter(&folder, &matter_spellings);
+    let always = always.in_matter(&folder, &matter_spellings, search);
     let agent = Agent {
         id,
         link,

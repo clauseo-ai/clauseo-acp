@@ -31,6 +31,7 @@ pub(super) type Launched = (
     Option<PathBuf>,
     Vec<(String, String)>,
     Option<Target>,
+    Option<std::ffi::OsString>,
 );
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
@@ -110,6 +111,12 @@ pub(super) fn launch(
         .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
         .flatten();
     let fence_vars = agent::data_fence::launch_vars(spec.env());
+    // Where a kept command's program must be found (`agent::always::Program`).
+    let search = spec
+        .env()
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+        .map(|(_, value)| value.clone());
     // The service and route the offline probe asks, from the env the agent gets, unless the
     // agent's own settings files move them (read by the prep).
     let kind = AgentKind::of(&row.agent);
@@ -140,6 +147,7 @@ pub(super) fn launch(
         claude_home,
         fence_vars,
         probe,
+        search,
     ))
 }
 

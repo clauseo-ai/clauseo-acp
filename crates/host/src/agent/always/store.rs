@@ -92,9 +92,21 @@ fn key() -> Option<[u8; 32]> {
             return None;
         }
     };
-    let key = stored
-        .and_then(|bytes| <[u8; 32]>::try_from(bytes.as_slice()).ok())
-        .or_else(|| new_key(&*store))?;
+    let key = match stored {
+        // A key of another length was never written by this host: it is not replaced, which
+        // would void every matter's rules, and nothing is kept until it is dealt with.
+        Some(bytes) => match <[u8; 32]>::try_from(bytes.as_slice()) {
+            Ok(key) => key,
+            Err(_) => {
+                tracing::error!(
+                    len = bytes.len(),
+                    "the kept-permissions key is malformed; nothing is kept or offered"
+                );
+                return None;
+            }
+        },
+        None => new_key(&*store)?,
+    };
     *cached = Some(key);
     Some(key)
 }
@@ -272,10 +284,11 @@ pub(crate) fn store(file: PathBuf, rule: String, seq: u64) {
     }
 }
 
-/// [`store`]'s work, on the calling thread; nothing when a later operation on `rule` applied.
+/// [`store`]'s work, on the calling thread; nothing when a later operation on `rule` applied,
+/// or the matter was forgotten after the lawyer's answer ([`delete`]).
 pub(crate) fn store_now(file: &Path, rule: String, seq: u64) -> std::io::Result<()> {
     let mut held = locked();
-    if superseded(&mut held, file, &rule, seq) {
+    if forgotten_after(&held, file, seq) || superseded(&mut held, file, &rule, seq) {
         return Ok(());
     }
     if key().is_none() {
@@ -315,14 +328,26 @@ pub(crate) fn remove_now(file: &Path, rule: &str, seq: u64) -> std::io::Result<b
     Ok(true)
 }
 
-/// Deletes a forgotten matter's `file`, on a thread of its own, under the lock: nothing the
-/// lawyer kept for it outlives it (decision record 0063). A missing file is fine; a failure is a
-/// warning.
-pub(crate) fn delete(file: PathBuf) {
+/// The [`Applied`] key under which a forgotten matter's file records its deletion's number:
+/// no rule is empty (`well_formed`).
+const FORGOTTEN: &str = "";
+
+/// Whether `file`'s matter was forgotten by an operation numbered after `seq`.
+fn forgotten_after(applied: &Applied, file: &Path, seq: u64) -> bool {
+    applied
+        .get(&(file.to_owned(), FORGOTTEN.to_owned()))
+        .is_some_and(|forgotten| *forgotten > seq)
+}
+
+/// Deletes a forgotten matter's `file` and any of it set aside, as operation `seq`, on a
+/// thread of its own, under the lock: nothing the lawyer kept for it outlives it (decision
+/// record 0063), not even an add answered before the forget whose write was still pending, which
+/// is skipped. A missing file is fine; a failure is a warning.
+pub(crate) fn delete(file: PathBuf, seq: u64) {
     let spawned = std::thread::Builder::new()
         .name("clauseo-always".to_owned())
         .spawn(move || {
-            if let Err(error) = delete_now(&file) {
+            if let Err(error) = delete_now(&file, seq) {
                 tracing::warn!(%error, "a forgotten matter's kept rules were not deleted");
             }
         });
@@ -332,8 +357,19 @@ pub(crate) fn delete(file: PathBuf) {
 }
 
 /// [`delete`]'s work, on the calling thread.
-pub(crate) fn delete_now(file: &Path) -> std::io::Result<()> {
-    let _held = locked();
+pub(crate) fn delete_now(file: &Path, seq: u64) -> std::io::Result<()> {
+    let mut held = locked();
+    let latest = held
+        .entry((file.to_owned(), FORGOTTEN.to_owned()))
+        .or_insert(seq);
+    *latest = (*latest).max(seq);
+    let name = file
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    for n in 1..=MAX_ASIDE {
+        crate::write::remove_old_file(&file.with_file_name(format!("{name}.bad-{n}")))?;
+    }
     crate::write::remove_old_file(file)
 }
 

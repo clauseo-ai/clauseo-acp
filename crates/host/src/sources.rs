@@ -132,8 +132,8 @@ impl Sources {
         self.codex_mcp.take_oldest(server, tool)
     }
 
-    /// [`Self::take_codex_mcp_call`] without taking it.
-    #[cfg(test)]
+    /// [`Self::take_codex_mcp_call`] without taking it: whether a request is for a paid tool is
+    /// read before any check takes the call (`actor/turn/always.rs` `spends`).
     pub(crate) fn codex_mcp_call(&self, acp_id: &str) -> Option<(&str, &str)> {
         self.codex_mcp.call(acp_id)
     }

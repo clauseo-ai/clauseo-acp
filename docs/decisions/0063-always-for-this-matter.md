@@ -61,35 +61,71 @@ Commands are kept per agent. Codex runs an approved escalation outside its sandb
 command Claude was allowed to run does not answer a Codex card.
 
 **What a command must be to be kept.** The key is the command text the card shows, byte for
-byte. Until permission-shown lands, that text comes from `always::shown_command`, a copy of its
-builder; it swaps to the real field on rebase. The text must parse as **one plain command**:
+byte: `rawInput.command` as the agent sent it (Claude's `Bash`/`PowerShell` input; Codex's
+`stripShellPrefix(shlex_join(argv))`). Eligibility is an **allowlist**
+(`always/table.rs`, read by `always/plain.rs`). A command is kept only when all of these hold:
 
-- Words with plain characters, `'…'` and `"…"` without `$`, a backquote, `\` or `!` inside.
-  Anything else fails closed: `; & | < > ( ) $ \` \ ! ^ * ? [ ] { } ~ #`, a line break, a
-  control or invisible character, or a first word with `=` or a `/`.
-- The program is not on the wrapper list (`always/command.rs`, `WRAPPERS`): shells,
-  interpreters, program runners, build and package tools, network tools, editors and pagers,
-  privilege tools, and `git`, whose config and hooks can run programs. `find` with `-exec`,
-  `-execdir`, `-ok`, `-okdir`, `-delete` or `-fprint*`, and `sed -f`, are refused too.
-- No argument is an absolute path outside the matter, or leads out of it with `..`.
-- Codex's card: `toolCall.kind` `execute`, `rawInput` `{command, cwd}` where `command` is the
-  text the card shows; a card with `rawInput.url` (a network approval) gives no rule. A file
-  change is `kind: edit`. The acp crate passes `toolCall.kind` on (`tool_kind`).
-- Agents' own wrappers: codex-acp shows `stripShellPrefix(shlex_join(argv))`. For
-  `[zsh, -lc, script]` that is the script. A shown `bash|sh|zsh -c|-lc <script>` form is read
-  through once, for Codex only, and its script must itself be one plain command. Claude's Bash
-  string is the script. A `bash -c` the model writes is a wrapper.
-- PowerShell (Claude's tool, Codex's `powershell -Command`): words of letters, digits and
-  `- _ . / \ : , = +`, or `'…'`. No `$`, a backquote, `;`, `|`, `&`, `(`, `{`, `@`, `>`.
-  Cmdlets that run other code (`Invoke-Expression`, `Start-Process`, `Invoke-Command`,
-  `Set-Alias`, `Add-Type`, …) are on the list.
+- It parses as **one plain command**: words of letters, digits and `_ - . / : , + = @ %`
+  (PowerShell: `_ - . / : +` only), or `'…'` and `"…"` holding those and spaces. Anything else
+  fails closed: `; & | < > ( ) $ ` \ ! ^ * ? [ ] { } ~ #`, any quote mark inside a quote (PowerShell
+  ends a string at a typographic quote too), a line break, a control or invisible character.
+- The program is a **bare name on the list**, never a path (a program in the matter is a file the
+  agent can write). The list, from the 2026-11-16 card census and the plain commands beside it:
+  `ls cat head tail wc file grep mdls cp mv mkdir`, `stetdoc view|inspect|check`, and the cmdlets
+  `Get-Content Get-ChildItem Get-Item Test-Path Select-String Copy-Item Move-Item`. Nothing that
+  runs code, reaches the network, deletes, links or runs another program is on it, so no
+  runner, interpreter, preprocessor flag or file-reading config can come in by not being named.
+- Every option is one the program's entry lists, with a value of the kind it says (a number, a
+  text the program never opens, or a path). One-letter flags may be joined (`-la`) only when none
+  takes a value; `--name=value` only for a listed long option; PowerShell takes no
+  `-Param:value` form and no joined flags.
+- Every path word is a plain path: no leading `-` or `=` (zsh's `=prog`), no `=` or `~`, no
+  `\`, no `:` but a drive letter's (`HKCU:`, `Env:`, `FileSystem::` refuse), no `..` name.
+  None names an absolute place outside the matter.
+- Codex's card: `toolCall.kind` `execute` and `rawInput` holding only `command` and `cwd`. A
+  card that also asks for a site (`url`) or more sandbox permissions (`additionalPermissions`)
+  gives no rule, so a kept rule never grants more than the plain run it was kept for.
+- Codex's own wrapper is read through only at the paths Codex launches: `/bin/zsh`,
+  `/bin/bash` or `/bin/sh` with `-c` or `-lc` and one script; on Windows
+  `C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe [-NoProfile|-NoLogo|-NonInteractive]
+  -Command <script>`. A shell by a bare name, a relative path or a path in the matter is a
+  program off the list. Claude's Bash string is the script; a `bash -c` the model writes is off
+  the list too.
+
+**What a command reaches, by real path** (`always/reach.rs`). The matter thread checks it when
+the card is about to offer "Always" and again before every answer the host gives from the rule
+(`MatterJob::HeldOpen`, `Reach::check`). When it fails, the lawyer is asked:
+
+- The working folder and every path word, resolved through every link and junction, are the
+  matter folder or inside it, under none of the names in the next paragraph. A file swapped for
+  a link to another matter after the rule was kept is caught at the next use.
+- The program is the first file of its name on the agent's own `PATH` (as its launch set it), and
+  by real path in a folder its entry names: `/bin` or `/usr/bin` (`mdls` `/usr/bin` only; Git
+  for Windows' `usr/bin` for Claude's Bash on Windows), or for `stetdoc` one of the folders
+  Clauseo puts first on that `PATH`. Never in the matter; a relative `PATH` entry before it
+  fails. A cmdlet is part of PowerShell and is matched by name.
+- For Codex, no entry of the working folder bears the program's name: codex-acp shows a run of
+  `bash <name>` as `<name>`.
+
+Claude's working folder is always the matter folder: Clauseo sets
+`CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1` (`agent/loads.rs`), and Claude Code then starts
+every Bash call there (its binary resets the shell's cwd after each call). So a Claude rule needs
+no folder, and its card's `{folder}` is "this matter's folder".
+
+**A helper's requests.** A Codex `multi_agent` helper asks on the parent's session with a tool
+call the host never saw announced. A kept rule answers the helper's identical command (same
+text, same folder, same reach checks) as it answers the parent's. Its card never offers "Always":
+the card shows a generic line, not the command, and the lawyer would keep a rule they never saw.
+The same holds for any request whose tool call the host did not log.
 
 **File edits.** One `Edit(*)` per matter covers every file whose real path is inside the
 matter folder. The matter thread resolves the path the same way the held-open check does:
 links and junctions followed, `..` resolved, case folded on Windows and macOS, trailing dots and
 spaces dropped on Windows. A network path in its UNC form is compared after the same
-resolution. The `.clauseo` and `.claude` folders are never inside. A path that fails to resolve
-asks.
+resolution. The names agents and Clauseo read their own settings, skills and instructions
+from are never inside, at any depth and in any case: `.clauseo`, `.claude`, `.codex`, `.agents`,
+`.mcp.json`, `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`, `CLAUDE.local.md` (`OWN_NAMES`). A
+path that fails to resolve asks.
 
 **Answering.** A later card matching an entry is answered by the host after the data-fence and
 held-open checks, with a **one-time** approval:
@@ -125,6 +161,14 @@ Two host options take their place:
 - `clauseo.session:<agent id>`: an agent's session-only option (Codex MCP `allow_session`),
   shown as "For this conversation". Answering it sends the agent's own id.
 
+A tool that spends the lawyer's money (case law's `recharge`, `always::SPENDS`) offers neither:
+its card keeps only the agent's one-time options (`options::once_only`), for both agents,
+recognised by Claude's tool name or by the MCP call codex-acp announced for the request.
+
+When the host answers from a kept rule but cannot log the answer, it asks the lawyer instead. When
+the matter-thread check cannot be sent, the request reaches the lawyer with no "Always" and no
+rule answers it.
+
 Plan-exit options pass unchanged.
 
 **Forced ask (Windows network or unprotected folders, 0030).** The store applies there too. The
@@ -145,15 +189,16 @@ card what "Always" would keep. #1109's `HostQuery::KeptPermissions` and
 | UC-810 | card, command | Always allow this exact command in {folder}. (`{folder}` = cwd, or "this matter's folder") |
 | UC-811 | card, file edit | Always allow changes to files in this matter. |
 | UC-812 | card, site | Always allow {site} in this matter. |
-| UC-813 | not saved | Clauseo couldn't save this, so it applies only until Clauseo closes. |
 | UC-814 | thread, host answered | Allowed: always for this matter. |
 | UC-815 | thread, "No" holds | You said no to this before. {agent} asked again, so Clauseo said no for you. |
 | UC-816 | empty list | Nothing is always allowed in this matter yet. |
 | UC-817 | session option | For this conversation |
 
 The list reuses #1109's "Kept permissions…" dialog and `UBL-26` "Remove". The words are in
-`ui/app/copy-approvals/UC-always-for-this-matter.json` (UC-810..820; UC-818..820 replace
-#1109's UC-502, UC-503 and UC-507, UC-816 replaces UC-505).
+`ui/app/copy-approvals/UC-always-for-this-matter.json` (UC-810..819 and UC-857; UC-818, UC-819
+and UC-857 replace #1109's UC-502, UC-503 and UC-507, UC-816 replaces UC-505). UC-813 ("applies
+only until Clauseo closes") is gone: no notice shows a failed save, and a rule the host could not
+write holds only in the answering agent's memory until that agent stops.
 
 Later, with the folder grant (`folder_save`, provisional, Hindi later; the list shows a grant
 in the same words):
@@ -200,12 +245,15 @@ stops with a sentence and never goes on in the wider mode.
 
 | Case | Example | Census |
 |---|---|---|
-| A command with a shell, interpreter or runner | `swift read.swift Brief.pdf`, `python3 x.py`, `bash -c "…"`, `npx …` | S5:22, S5:32 |
+| A program off the list | `swift read.swift Brief.pdf`, `python3 x.py`, `curl -sI https://…`, `agent-browser eval …`, `bash -c "…"`, `npx …`, `find`, `rm` | S5:22, S5:32; census 2026-11-16: 26 of 28 shell cards |
+| An option off a program's list | `grep -e x a`, `head -n5 a`, `cp -t /tmp a` | |
+| A command whose file is now a link out of the matter, or whose program is not where its entry says | `cat notes.txt` after `notes.txt` became a link | |
+| A request whose card cannot show the command | a Codex helper's request | |
 | A chain, pipe, redirection or substitution | `cd sub && ls`, `ls > list.txt`, `cat $(ls)` | |
 | A command with an argument outside the matter, both agents | `mv ../Q ../Q2`; Codex's `cp witness-statement.docx "/Users/Shared/…/witness-statement.docx"` | S249:25 |
 | A command with a web address (Codex) | `curl -L -o judgment.pdf https://…` (refused unasked, `shell_network.rs`) | S3:48, S22:63 |
 | Network approvals for Codex | any host (Codex sites: `docs/notes/codex-network-sites.md`) | |
-| A Codex command with a backslash | `type C:\m\a.txt` (Codex on Windows) | |
+| A command with a backslash | `Get-Content .\a.txt`, `type C:\m\a.txt` (PowerShell paths must use `/`) | |
 | An ordinary command in a new folder | `mdls a.pdf` in `Drafts` after it was allowed in the matter folder | S5:33 |
 | `git` | `git status` (hooks and config can run programs) | |
 | A file outside the matter | an edit of `../B/notes.txt` | row 10 |
@@ -251,9 +299,30 @@ Claude in `auto` raised no card in any task of the record.
 - **Every agent `allow_always` option is dropped**, not only the listed ids.
 - **`recharge` never gives a rule**, so its card offers no "Always".
 - **Codex on Windows** reads the shown command as PowerShell; a backslash refuses.
+- **The command check is an allowlist**, not a list of wrappers: a program or option not named
+  is asked about each time. Rules kept before it for programs not on the list are dropped on
+  read (`well_formed`).
+- **Sites are public**: `localhost`, a name with no dot, `.local`, `.internal`, `.lan`,
+  `.home.arpa`, and loopback, private, link-local and shared IPv4 addresses are never kept.
+- **A malformed key** (not 32 bytes) in the secret store is an error: it is never replaced, and
+  nothing is kept or offered.
+- **UC-813 is gone**: a rule the host could not write lasts only in the answering agent's memory
+  until it stops; other live threads of the matter ask until they relaunch.
+
+### Residuals
+
+- A check of what a command reaches is the state when it runs on the matter thread; a link made
+  between the check and the run is not seen.
+- A cmdlet is matched by name: a PowerShell profile that defines an alias or function of the
+  same name would run instead (Claude's PowerShell and Codex's `powershell.exe` load profiles
+  unless `-NoProfile`).
+- `stetdoc` is found only when its real file is named `stetdoc` in its folder.
+- MCP rules (`mcp__<server>__<tool>`) cover every argument of the tool, as #1109's did.
 - **Protocol**: `AlwaysKind` has a fifth kind, `read`; `KeptPermission.cwd` carries a kept
   Codex command's folder.
-- **Forgetting** a matter deletes its file; bringing the matter back (an import) starts empty.
+- **Forgetting** a matter deletes its file and its set-aside `.bad-<n>` files, ordered after every
+  add answered before it (an add still pending is skipped); bringing the matter back (an import)
+  starts empty.
 
 ## Consequences
 

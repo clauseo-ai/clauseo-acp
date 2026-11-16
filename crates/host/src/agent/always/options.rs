@@ -82,6 +82,19 @@ pub(crate) fn agent_options(options: &mut Vec<PermissionOption>) {
     });
 }
 
+/// `options` without any that would allow more than this one call: for a tool that spends the
+/// lawyer's money (`always::spends`), whose every call asks. Drops the session-only ones
+/// ([`SESSION_ONLY`], and any already renamed [`SESSION`]) and every `allow_always` one.
+pub(crate) fn once_only(options: &mut Vec<PermissionOption>) {
+    options.retain(|option| {
+        let id = option.option_id.as_str();
+        !SESSION_ONLY.contains(&id)
+            && !id.starts_with(SESSION)
+            && !DROPPED.contains(&id)
+            && option.kind != PermissionKind::AllowAlways
+    });
+}
+
 /// `options` with [`ALWAYS`] after the first allow-once option (or first, with none).
 pub(crate) fn with_always(options: &mut Vec<PermissionOption>) {
     if options.iter().any(|option| option.option_id == ALWAYS) {

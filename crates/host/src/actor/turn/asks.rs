@@ -94,6 +94,17 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     active(actor, thread);
     // No agent may name a host option (`clauseo.*`), whatever filter runs next.
     crate::agent::always::options::drop_host_ids(&mut options);
+    // A paid call (case law's `recharge`) asks every time: no option on its card covers more
+    // than this call, for either agent.
+    if super::always::spends(
+        actor,
+        thread,
+        &session,
+        &acp_tool_call_id,
+        raw_input.as_ref(),
+    ) {
+        crate::agent::always::options::once_only(&mut options);
+    }
     // Forced ask (`agent/forced_ask.rs`): no option that would stop later asks is offered, so
     // an answer naming one is refused as one the agent did not offer.
     if agent(actor, thread).is_some_and(|agent| agent.forced_ask) {
@@ -138,14 +149,21 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     if paths.is_empty() {
         paths = tool_call_paths(actor, thread, &ask);
     }
-    if paths.is_empty() && fence.is_none() {
+    // A kept rule's reach (a command's program, folder and path words) is checked on the
+    // matter thread too, whether or not the request names a path.
+    let reaches = ask
+        .always
+        .as_ref()
+        .is_some_and(|always| always.has_command());
+    if paths.is_empty() && fence.is_none() && !reaches {
         log_for_lawyer(actor, thread, ask, None);
         return;
     }
     let sent = (|| -> Result<(), Error> {
         let matter = matter_of(actor, thread)?;
         let folder = PathBuf::from(&actor.check_matter(matter)?.row.folder_path);
-        let real = super::always::real_paths(ask.always.as_ref(), &paths, &folder);
+        let agent = agent(actor, thread).map(|agent| &*agent);
+        let real = super::always::reach(agent, ask.always.as_ref(), &paths, &folder);
         let job = MatterJob::HeldOpen {
             folder,
             paths,
@@ -170,6 +188,10 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
             error = %Cause(&error),
             "a permission request's paths were not checked"
         );
+        // Unchecked, no kept rule answers it and none is offered: the data fence, the
+        // held-open check and a rule's reach were never looked at.
+        let mut ask = ask;
+        ask.always = None;
         log_for_lawyer(actor, thread, ask, None);
     }
 }
@@ -331,9 +353,12 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk, real:
     let logged = (|| -> Result<(), Error> {
         let request: PermissionRequestId = actor.ids.mint(actor.clock.now().wall)?;
         let mut offered = None;
+        // "Always" only on a card that shows what it is about: a request whose tool call the
+        // host never logged (a `multi_agent` helper's, say) shows a generic line.
+        let shown = tool_call.is_some();
         if let Some(agent) = agent(actor, thread) {
             agent.permissions.insert(request, key);
-            offered = super::always::offer(agent, always.as_ref(), real);
+            offered = super::always::offer(agent, always.as_ref(), real).filter(|_| shown);
             if offered.is_some() {
                 crate::agent::always::options::with_always(&mut options);
             }

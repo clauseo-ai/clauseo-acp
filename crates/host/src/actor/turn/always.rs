@@ -3,8 +3,8 @@
 //!
 //! - [`ask`]: a request that comes in gets its rule (or why none) and its first `allow_once`
 //!   option, unless it is a plan exit (an `exit-plan-*` option, or the `ExitPlanMode` tool).
-//!   The files whose real paths the request's matter-thread check resolves go with it
-//!   ([`real_paths`], `agent::always::real_within`). The agent's rule-writing options are
+//!   What its rule reaches on disk goes with the request's matter-thread check ([`reach`],
+//!   `agent::always::Reach`): files, a command's program, working folder and path words. The agent's rule-writing options are
 //!   dropped in `asks.rs` (`agent::always::options`).
 //! - [`offer`]: when the request is logged for the lawyer, `clauseo.always` is added and the
 //!   card says what it would keep (`PermissionRequested.always`), when the rule can be kept.
@@ -22,7 +22,8 @@
 //! and a removal reaches only that matter's agents ([`forget`]).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{
     AgentChoiceId, AgentKind, AgentSessionId, AlwaysOffer, Deliverable, PermissionChoice,
@@ -39,7 +40,7 @@ use super::asks::PermissionAsk;
 use super::launch_checks::RunFolders;
 use super::out::Out;
 use super::updates::{agent, known_tool};
-use crate::agent::always::{self, Kept, NotKept, options};
+use crate::agent::always::{self, Kept, NotKept, Program, Reach, options};
 use crate::error::Error;
 use crate::log_file::Cause;
 
@@ -52,6 +53,13 @@ pub(super) struct AlwaysAsk {
     /// Whether a path or `Edit(*)` rule's files are inside the matter by their real paths, as
     /// the request's matter-thread check found them; none when they were not checked.
     real: Option<bool>,
+}
+
+impl AlwaysAsk {
+    /// Whether its rule is a command's, whose reach the matter thread checks.
+    pub(super) fn has_command(&self) -> bool {
+        self.kept.as_ref().is_ok_and(|kept| kept.command.is_some())
+    }
 }
 
 /// The lawyer's `allow_always` answer as the agent gets it: the `allow_once` option, and why
@@ -77,6 +85,11 @@ pub(super) struct Always {
     roots: Vec<String>,
     /// The matter folder's spellings as text, the agent's own first, for `always::rule`.
     spellings: Vec<String>,
+    /// The agent's search path, `PATH` as its launch set it, where a kept command's program
+    /// must be found (`always::Program`).
+    search: Option<OsString>,
+    /// Clauseo's own folders first on it (`shell_path::SessionPath::dirs`).
+    bundled: Vec<PathBuf>,
     asked: BTreeMap<PermissionRequestId, AlwaysAsk>,
 }
 
@@ -108,14 +121,23 @@ impl Always {
             rules,
             roots: Vec::new(),
             spellings: Vec::new(),
+            search: None,
+            bundled: run.path.dirs.clone(),
             asked: BTreeMap::new(),
         }
     }
 
-    /// Once the agent is launched in `folder` (spelled `spellings` too): the rules read that do
-    /// not stay within it are dropped (`always::within`), so the data fence's deny rules are
-    /// never the only thing between a kept rule and what lies outside the matter.
-    pub(super) fn in_matter(mut self, folder: &std::path::Path, spellings: &[String]) -> Self {
+    /// Once the agent is launched in `folder` (spelled `spellings` too) with `search` its
+    /// `PATH`: the rules read that do not stay within it are dropped (`always::within`), so the
+    /// data fence's deny rules are never the only thing between a kept rule and what lies
+    /// outside the matter.
+    pub(super) fn in_matter(
+        mut self,
+        folder: &Path,
+        spellings: &[String],
+        search: Option<OsString>,
+    ) -> Self {
+        self.search = search;
         let mut texts: Vec<String> = folder.to_str().map(str::to_owned).into_iter().collect();
         for spelling in spellings {
             if !texts.contains(spelling) {
@@ -172,22 +194,50 @@ pub(super) fn ask(
     })
 }
 
-/// The files whose real paths the request's matter-thread check resolves: a `Read` rule's file,
-/// or every file an `Edit(*)` request names (`paths`, absolute or relative to `folder`).
-pub(super) fn real_paths(
+/// What the request's rule reaches on disk, for its matter-thread check (`Reach::check`): a
+/// `Read` rule's file; every file an `Edit(*)` request names (`paths`, absolute or relative to
+/// `folder`); a command's program, working folder and path words. Empty for any other rule.
+pub(super) fn reach(
+    agent: Option<&Agent>,
     ask: Option<&AlwaysAsk>,
     paths: &[PathBuf],
-    folder: &std::path::Path,
-) -> Vec<PathBuf> {
+    folder: &Path,
+) -> Reach {
     let Some(Ok(kept)) = ask.map(|ask| ask.kept.as_ref()) else {
-        return Vec::new();
+        return Reach::default();
     };
     if kept.rule == always::EDIT_ALL {
-        return paths.iter().map(|path| folder.join(path)).collect();
+        return Reach {
+            files: paths.iter().map(|path| folder.join(path)).collect(),
+            ..Reach::default()
+        };
     }
-    always::rule_path(&kept.rule, cfg!(windows))
-        .into_iter()
-        .collect()
+    if let Some(command) = &kept.command {
+        let cwd = PathBuf::from(&command.cwd);
+        let mut places = vec![cwd.clone()];
+        places.extend(command.paths.iter().map(|word| cwd.join(word)));
+        let always = agent.map(|agent| &agent.always);
+        let program = Program {
+            name: command.program.name.to_owned(),
+            at: command.program.at,
+            search: always.and_then(|always| always.search.clone()),
+            bundled: always
+                .map(|always| always.bundled.clone())
+                .unwrap_or_default(),
+        };
+        return Reach {
+            places,
+            program: Some(program),
+            absent: command.codex.then(|| cwd.join(command.program.name)),
+            ..Reach::default()
+        };
+    }
+    Reach {
+        files: always::rule_path(&kept.rule, cfg!(windows))
+            .into_iter()
+            .collect(),
+        ..Reach::default()
+    }
 }
 
 /// What the card's `clauseo.always` would keep, when the request's rule can be kept now: in the
@@ -222,6 +272,44 @@ fn tool_name(
         let replay = agent(actor, thread)?.replay.as_ref()?;
         let (_, tool) = replay.tool_call(session, acp_id)?;
         tool.tool_name.as_deref().map(str::to_owned)
+    })
+}
+
+/// Whether the request is for a tool that spends the lawyer's money (`always::spends`): Claude's
+/// by the logged call's tool name, Codex's by the MCP call codex-acp announced for it or, for
+/// a standalone request, the server and tool it names. Read before any check takes the call.
+pub(super) fn spends(
+    actor: &mut Actor,
+    thread: ThreadId,
+    session: &AgentSessionId,
+    acp_tool_call_id: &str,
+    raw_input: Option<&Value>,
+) -> bool {
+    let named = tool_name(actor, thread, session, acp_tool_call_id).is_some_and(|name| {
+        name.strip_prefix("mcp__")
+            .and_then(|rest| rest.split_once("__"))
+            .is_some_and(|(server, tool)| always::spends(server, tool))
+    });
+    if named {
+        return true;
+    }
+    let standalone = crate::agent::mcp_trust::codex_standalone_server(
+        session.as_str(),
+        acp_tool_call_id,
+        raw_input,
+    )
+    .and_then(|server| {
+        let tool = crate::agent::mcp_trust::codex_standalone_tool(server, raw_input)?;
+        Some(always::spends(server, tool))
+    });
+    if standalone == Some(true) {
+        return true;
+    }
+    super::state(actor, thread).is_some_and(|state| {
+        state
+            .sources
+            .codex_mcp_call(acp_tool_call_id)
+            .is_some_and(|(server, tool)| always::spends(server, tool))
     })
 }
 
@@ -324,8 +412,10 @@ pub(super) fn auto_allow(
         return Some(ask);
     }
     let kind = agent.always.kind;
-    if let Err(error) = allow(actor, thread, ask) {
-        tracing::warn!(%thread, error = %Cause(&error), "a kept rule's answer was not logged");
+    if let Err(error) = allow(actor, thread, ask.clone()) {
+        // Never left unanswered: the lawyer is asked instead.
+        tracing::warn!(%thread, error = %Cause(&error), "a kept rule's answer was not logged; asking");
+        return Some(ask);
     }
     tracing::info!(%thread, agent = ?kind, entry = ?entry, "a request matching a kept rule was allowed once");
     None

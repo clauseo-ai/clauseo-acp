@@ -178,7 +178,6 @@ impl CodexCalls {
     }
 
     /// The server and tool of the unfinished MCP call `acp_id`, if it is one.
-    #[cfg(test)]
     pub(crate) fn call(&self, acp_id: &str) -> Option<(&str, &str)> {
         self.calls
             .get(acp_id)

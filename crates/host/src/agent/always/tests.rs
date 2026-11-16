@@ -116,7 +116,12 @@ fn web_fetch_keeps_the_host() {
             "http://Example.COM:8080/x?y=1",
             Some("WebFetch(domain:example.com)"),
         ),
-        ("https://10.0.0.1/", Some("WebFetch(domain:10.0.0.1)")),
+        ("https://8.8.8.8/", Some("WebFetch(domain:8.8.8.8)")),
+        // This machine and the lawyer's own network are never kept (`site::public`).
+        ("https://10.0.0.1/", None),
+        ("http://localhost:3000/", None),
+        ("http://intranet/", None),
+        ("http://printer.local/", None),
         ("https://[::1]/", None),
         ("file:///etc/passwd", None),
         ("ftp://example.com/", None),
@@ -225,17 +230,20 @@ fn a_codex_command_keeps_its_text_and_folder() {
     assert_eq!(kept.offer.kind, AlwaysKind::Command);
     assert_eq!(kept.offer.shown.as_deref(), Some("ls"));
     assert_eq!(kept.offer.cwd.as_deref(), Some("Drafts"));
-    // Codex's own shell wrapper is read through once; its script must be one plain command.
+    // Codex's own shell wrapper is read through once, at its system path; its script must be
+    // one plain command of a listed program.
     assert_eq!(
-        run("zsh -lc 'wc -l a.txt'", "/m").as_deref(),
-        Ok("Run(zsh -lc 'wc -l a.txt')")
+        run("/bin/zsh -lc 'wc -l a.txt'", "/m").as_deref(),
+        Ok("Run(/bin/zsh -lc 'wc -l a.txt')")
     );
+    assert_eq!(run("zsh -lc 'wc -l a.txt'", "/m"), Err(NotKept::Refused));
     assert_eq!(run("bash -lc 'ls && rm a'", "/m"), Err(NotKept::Refused));
     for (command, cwd, why) in [
         ("ls", "/elsewhere", NotKept::OutsideMatter),
         ("ls", "/m/.clauseo", NotKept::OutsideMatter),
         ("ls", "/m/../x", NotKept::OutsideMatter),
-        ("cat ../other/a.txt", "/m", NotKept::OutsideMatter),
+        ("cat ../other/a.txt", "/m", NotKept::Refused),
+        ("cat /elsewhere/a.txt", "/m", NotKept::OutsideMatter),
         ("cd a && ls", "/m", NotKept::Refused),
         ("python3 x.py", "/m", NotKept::Refused),
         ("git status", "/m", NotKept::Refused),
@@ -365,7 +373,7 @@ fn a_file_without_this_hosts_mac_for_this_matter_holds_nothing() {
     let mut value: Value = serde_json::from_str(&good).unwrap();
     assert_eq!(value["version"], json!(2));
     // A rule added by hand, or one removed by hand: the MAC no longer fits.
-    value["allow"] = json!(["Bash(ls)", "Bash(pwd)"]);
+    value["allow"] = json!(["Bash(ls)", "Bash(ls -l)"]);
     crate::write::write_file(&file, value.to_string().as_bytes()).unwrap();
     assert_eq!(read(&file), Vec::<String>::new());
     value["allow"] = json!([]);
@@ -415,9 +423,114 @@ fn a_forgotten_matters_file_is_deleted() {
     let dir = TempDir::new("always_forget");
     let file = in_matter(&dir, "m1");
     store_now(&file, "Bash(ls)".to_owned(), 1).unwrap();
-    super::store::delete_now(&file).unwrap();
+    super::store::delete_now(&file, 2).unwrap();
     assert!(!file.exists());
-    super::store::delete_now(&file).unwrap();
+    super::store::delete_now(&file, 3).unwrap();
+}
+
+/// An add the lawyer answered before forgetting the matter, whose write reaches the lock after
+/// the deletion, keeps nothing: no rule outlives its matter. A file set aside goes too.
+#[test]
+fn an_add_pending_when_the_matter_is_forgotten_keeps_nothing() {
+    keyed();
+    let dir = TempDir::new("always_forget_race");
+    let file = in_matter(&dir, "m1");
+    crate::write::write_file(&file, b"not this host's").unwrap();
+    store_now(&file, "Bash(ls)".to_owned(), 1).unwrap();
+    let aside = file.with_file_name(format!("{FILE}.bad-1"));
+    assert!(aside.exists());
+    super::store::delete_now(&file, 3).unwrap();
+    assert!(!aside.exists(), "a set-aside file is the matter's too");
+    store_now(&file, "Bash(ls -l)".to_owned(), 2).unwrap();
+    assert!(
+        !file.exists(),
+        "an add numbered before the forget wrote the file back"
+    );
+    assert_eq!(read(&file), Vec::<String>::new());
+}
+
+/// A key of the wrong length in the secret store is never replaced (that would void every
+/// matter's rules): nothing is read, kept or offered until it is dealt with.
+#[test]
+fn a_malformed_key_is_not_replaced() {
+    let store = keyed();
+    store.set(super::store::KEY_ACCOUNT, &[7_u8; 16]).unwrap();
+    let dir = TempDir::new("always_bad_key");
+    let notes = dir.path().join("agent-state").join("m1").join("notes");
+    crate::write::create_dir_all(&notes).unwrap();
+    assert_eq!(super::read_beside(&notes), None);
+    let file = file_beside(&notes).unwrap();
+    assert!(store_now(&file, "Bash(ls)".to_owned(), 1).is_err());
+    let kept = store.get(super::store::KEY_ACCOUNT).unwrap().unwrap();
+    assert_eq!(kept, [7_u8; 16]);
+}
+
+/// A Codex request that asks for more than the command (`additionalPermissions`, a site, any
+/// key codex-acp adds) keeps nothing: a rule never grants more than the plain run it was kept
+/// for.
+#[test]
+fn a_codex_command_with_more_permissions_keeps_nothing() {
+    for extra in [
+        json!({"command": "ls", "cwd": "/m", "additionalPermissions": {"fileSystem": {"write": ["/"]}}}),
+        json!({"command": "ls", "cwd": "/m", "additionalPermissions": {}}),
+        json!({"command": "ls", "cwd": "/m", "url": "https://a.in"}),
+        json!({"command": "ls", "cwd": "/m", "sandbox": "none"}),
+    ] {
+        assert_eq!(
+            codex(ToolKind::Execute, &extra),
+            Err(NotKept::NoRule),
+            "{extra}"
+        );
+    }
+    assert!(codex(ToolKind::Execute, &json!({"command": "ls", "cwd": "/m"})).is_ok());
+}
+
+/// A command rule carries what the matter thread checks by real path: its program, its working
+/// folder (Claude's is the matter folder) and its path words.
+#[test]
+fn a_command_rule_carries_what_it_reaches() {
+    let kept = claude(
+        "Bash",
+        Some(&json!({"command": "cp a.txt Drafts/b.txt"})),
+        false,
+    )
+    .unwrap();
+    let command = kept.command.unwrap();
+    assert_eq!(command.program.name, "cp");
+    assert_eq!(command.cwd, "/m");
+    assert_eq!(command.paths, ["a.txt", "Drafts/b.txt"]);
+    assert!(!command.codex);
+    assert!(needs_real(&kept.rule));
+    let run = codex(
+        ToolKind::Execute,
+        &json!({"command": "grep -n term a.txt", "cwd": "/m/Drafts"}),
+    )
+    .unwrap();
+    let command = run.command.unwrap();
+    assert_eq!(command.program.name, "grep");
+    assert_eq!(command.cwd, "/m/Drafts");
+    assert_eq!(command.paths, ["a.txt"], "the pattern is not a path");
+    assert!(command.codex);
+    for rule in ["Bash(ls)", "PowerShell(Get-ChildItem)", "Run(ls) in a"] {
+        assert!(needs_real(rule), "{rule}");
+    }
+    let site = of("WebFetch", &json!({"url": "https://sci.gov.in/"})).unwrap();
+    assert!(!needs_real(&site));
+}
+
+/// No kept rule reaches a name an agent reads its own settings or instructions from.
+#[test]
+fn an_agents_own_files_are_never_within() {
+    let roots = matter_roots(["/cases/m"], false);
+    for name in super::OWN_NAMES {
+        let rule = format!("Read(//cases/m/{name})");
+        assert!(!within(&rule, &roots, false), "{rule}");
+        let nested = format!("Read(//cases/m/sub/{name}/x)");
+        assert!(!within(&nested, &roots, false), "{nested}");
+    }
+    let codex = |cwd: &str| codex(ToolKind::Execute, &json!({"command": "ls", "cwd": cwd}));
+    assert_eq!(codex("/m/.codex"), Err(NotKept::OutsideMatter));
+    assert_eq!(codex("/m/.agents/skills"), Err(NotKept::OutsideMatter));
 }
 
 #[test]
@@ -551,9 +664,9 @@ fn a_bad_file_is_set_aside_not_overwritten() {
     assert_eq!(std::fs::read_to_string(&aside).unwrap(), "not json");
     assert_eq!(read(&file), ["Bash(ls)"]);
     crate::write::write_file(&file, &vec![b' '; (1 << 20) + 1]).unwrap();
-    store_now(&file, "Bash(pwd)".to_owned(), 7).unwrap();
+    store_now(&file, "Bash(ls -l)".to_owned(), 7).unwrap();
     assert!(dir.path().join(format!("{FILE}.bad-2")).exists());
-    assert_eq!(read(&file), ["Bash(pwd)"]);
+    assert_eq!(read(&file), ["Bash(ls -l)"]);
 }
 
 /// The lawyer's removal takes one rule out and keeps the rest.
@@ -563,10 +676,10 @@ fn a_removed_rule_is_gone_and_the_rest_stay() {
     let dir = TempDir::new("always_remove");
     let file = dir.path().join(FILE);
     store_now(&file, "Bash(ls)".to_owned(), 8).unwrap();
-    store_now(&file, "Bash(pwd)".to_owned(), 9).unwrap();
+    store_now(&file, "Bash(ls -l)".to_owned(), 9).unwrap();
     assert!(remove_now(&file, "Bash(ls)", 10).unwrap());
     assert!(!remove_now(&file, "Bash(ls)", 11).unwrap());
-    assert_eq!(read(&file), ["Bash(pwd)"]);
+    assert_eq!(read(&file), ["Bash(ls -l)"]);
 }
 
 /// An add whose write was still pending when the lawyer removed its rule runs after the removal
@@ -576,13 +689,13 @@ fn a_pending_add_never_undoes_a_removal() {
     keyed();
     let dir = TempDir::new("always_pending");
     let file = dir.path().join(FILE);
-    store_now(&file, "Bash(pwd)".to_owned(), 1).unwrap();
+    store_now(&file, "Bash(ls -l)".to_owned(), 1).unwrap();
     // The add numbered 2 reaches the lock only after the removal numbered 3.
     assert!(!remove_now(&file, "Bash(ls)", 3).unwrap());
     store_now(&file, "Bash(ls)".to_owned(), 2).unwrap();
-    assert_eq!(read(&file), ["Bash(pwd)"]);
+    assert_eq!(read(&file), ["Bash(ls -l)"]);
     // A removal that comes after a later add of the same rule leaves it.
     store_now(&file, "Bash(ls)".to_owned(), 5).unwrap();
     assert!(!remove_now(&file, "Bash(ls)", 4).unwrap());
-    assert_eq!(read(&file), ["Bash(pwd)", "Bash(ls)"]);
+    assert_eq!(read(&file), ["Bash(ls -l)", "Bash(ls)"]);
 }

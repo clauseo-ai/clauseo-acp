@@ -35,6 +35,9 @@ mod always;
 #[path = "host/always_kept.rs"]
 mod always_kept;
 #[cfg(test)]
+#[path = "host/always_reach.rs"]
+mod always_reach;
+#[cfg(test)]
 #[path = "host/always_sites.rs"]
 mod always_sites;
 #[cfg(test)]

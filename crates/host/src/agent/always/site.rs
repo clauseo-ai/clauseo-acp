@@ -15,13 +15,43 @@ pub(super) fn domain(url: &str) -> Option<String> {
 }
 
 /// Letters, digits, `.` and `-` only, not starting with `.` or `-` nor ending in `.` (`a.com.`
-/// is the same site as `a.com`, and would be a second entry).
+/// is the same site as `a.com`, and would be a second entry), and a public site ([`public`]).
 pub(super) fn domain_name(host: &str) -> bool {
     !host.starts_with(['.', '-'])
         && !host.ends_with('.')
         && host
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '-'))
+        && public(host)
+}
+
+/// Whether `host` names a site on the internet, not this machine or the lawyer's own network,
+/// which a kept site would open to every later fetch (and, shared, to Claude's shell): never
+/// `localhost` or a name under it, a name with no dot (a machine on the local network), a
+/// `.local`, `.internal`, `.lan` or `.home.arpa` name, nor an IPv4 address that is loopback,
+/// private, link-local, shared (`100.64.0.0/10`), unspecified or broadcast. A name whose last
+/// label is all digits is an address or nothing.
+fn public(host: &str) -> bool {
+    const LOCAL: [&str; 5] = [".localhost", ".local", ".internal", ".lan", ".home.arpa"];
+    if host == "localhost" || !host.contains('.') || LOCAL.iter().any(|end| host.ends_with(end)) {
+        return false;
+    }
+    let last = host.rsplit('.').next().unwrap_or(host);
+    if !last.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    let Ok(address) = host.parse::<std::net::Ipv4Addr>() else {
+        return false;
+    };
+    let [first, second, ..] = address.octets();
+    let shared = first == 100 && (64..128).contains(&second);
+    !(address.is_loopback()
+        || address.is_private()
+        || address.is_link_local()
+        || address.is_unspecified()
+        || address.is_broadcast()
+        || first == 0
+        || shared)
 }
 
 /// A Claude `SandboxNetworkAccess` card's `rawInput.host` as a site: not empty, none of

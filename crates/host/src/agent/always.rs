@@ -31,8 +31,12 @@ use site::{domain, domain_name, sandbox_host};
 
 pub(crate) mod options;
 pub(crate) mod plain;
+mod reach;
 mod site;
 mod store;
+pub(crate) mod table;
+
+pub(crate) use reach::{Program, Reach};
 
 pub(crate) use store::{delete, list, next_seq, read_beside, remove_now, store, use_secrets};
 #[cfg(test)]
@@ -86,6 +90,24 @@ pub(crate) struct Request<'a> {
 pub(crate) struct Kept {
     pub(crate) rule: String,
     pub(crate) offer: AlwaysOffer,
+    /// A command rule's program, working folder and path words, which the matter thread checks
+    /// by real path at keep time and at every use (`reach.rs`); none for any other rule.
+    pub(crate) command: Option<Command>,
+}
+
+/// What a command rule's request runs, for its real-path check (`Reach`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Command {
+    /// Its program's entry in the allowlist (`table.rs`).
+    pub(crate) program: &'static table::Spec,
+    /// Its working folder, absolute, as text: Codex's `cwd`; for Claude the matter folder,
+    /// where Clauseo has its shell start every call (`loads::CLAUDE_SHELL_FOLDER_VAR`).
+    pub(crate) cwd: String,
+    /// Its path words as typed, absolute or relative to `cwd`.
+    pub(crate) paths: Vec<String>,
+    /// Whether it is Codex's: codex-acp shows `bash <name>` as `<name>`, so no entry of the
+    /// working folder may bear the program's name.
+    pub(crate) codex: bool,
 }
 
 /// The one rule that covers every change to a file inside the matter folder.
@@ -93,6 +115,12 @@ pub(crate) const EDIT_ALL: &str = "Edit(*)";
 
 /// Tools that spend the lawyer's money: each call asks (decision record 0063).
 const SPENDS: &[&str] = &["mcp__case-law__recharge"];
+
+/// Whether the MCP tool `server`'s `tool` spends the lawyer's money ([`SPENDS`]): its card
+/// never offers "Always" nor "For this conversation".
+pub(crate) fn spends(server: &str, tool: &str) -> bool {
+    SPENDS.contains(&format!("mcp__{server}__{tool}").as_str())
+}
 
 /// Claude's web search, kept whole: a search names no site.
 pub(crate) const WEB_SEARCH: &str = "WebSearch";
@@ -140,23 +168,32 @@ fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
         for matter in request.matter {
             let place = plain::Place {
                 matter,
-                cwd: matter,
                 windows: request.windows,
             };
-            checked = plain::plain(&line, grammar, plain::Agent::Claude, place).map_err(not_kept);
+            checked = plain::plain(&line, grammar, plain::Agent::Claude, place)
+                .map(|plain| (matter, plain))
+                .map_err(not_kept);
             if checked.is_ok() {
                 break;
             }
         }
-        checked?;
+        let (matter, plain) = checked?;
+        let command = Command {
+            program: plain.program,
+            cwd: matter.clone(),
+            paths: plain.paths,
+            codex: false,
+        };
         Ok(Kept {
             rule: format!("{tool}({line})"),
             offer: offer(AlwaysKind::Command, Some(line), None),
+            command: Some(command),
         })
     };
     let kept = |rule: String, kind: AlwaysKind, shown: Option<String>| Kept {
         offer: offer(kind, shown, None),
         rule,
+        command: None,
     };
     Ok(match request.tool.ok_or(NotKept::NoRule)? {
         "Bash" => shell("Bash", plain::Grammar::Posix)?,
@@ -203,10 +240,20 @@ fn codex_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
         Some(ToolKind::Edit) => Ok(Kept {
             rule: EDIT_ALL.to_owned(),
             offer: offer(AlwaysKind::FileEdit, None, None),
+            command: None,
         }),
         Some(ToolKind::Execute) => {
             let input = request.raw_input.ok_or(NotKept::Refused)?;
-            if input.get("url").is_some() {
+            // Only a request for the command alone, in its folder: one that also asks for a
+            // site (`url`) or for more sandbox permissions (`additionalPermissions`, or any key
+            // codex-acp adds later) is asked each time, so a kept rule never grants more than
+            // the plain run it was kept for.
+            let only_command = input.as_object().is_some_and(|input| {
+                input
+                    .keys()
+                    .all(|key| matches!(key.as_str(), "command" | "cwd"))
+            });
+            if !only_command {
                 return Err(NotKept::NoRule);
             }
             let text = |key: &str| input.get(key)?.as_str();
@@ -221,20 +268,27 @@ fn codex_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
             let folder = (!folder.is_empty()).then_some(folder);
             let place = plain::Place {
                 matter,
-                cwd,
                 windows: request.windows,
             };
             // An argument outside the matter refuses (decision record 0063, Deviations): an
             // exact command replayed unsandboxed is a standing hole, as a name inside the
             // matter can later be swapped for a link to another matter's file.
-            plain::plain(line, grammar, plain::Agent::Codex, place).map_err(not_kept)?;
+            let plain =
+                plain::plain(line, grammar, plain::Agent::Codex, place).map_err(not_kept)?;
             let rule = match &folder {
                 Some(folder) => format!("Run({line}) in {folder}"),
                 None => format!("Run({line})"),
             };
+            let command = Command {
+                program: plain.program,
+                cwd: cwd.to_owned(),
+                paths: plain.paths,
+                codex: true,
+            };
             Ok(Kept {
                 rule,
                 offer: offer(AlwaysKind::Command, Some(line.to_owned()), folder),
+                command: Some(command),
             })
         }
         _ => Err(NotKept::NoRule),
@@ -253,7 +307,7 @@ fn codex_grammar(windows: bool) -> plain::Grammar {
 fn not_kept(why: plain::NotPlain) -> NotKept {
     match why {
         plain::NotPlain::Outside => NotKept::OutsideMatter,
-        plain::NotPlain::Size | plain::NotPlain::Unparsed | plain::NotPlain::Wrapper => {
+        plain::NotPlain::Size | plain::NotPlain::Unparsed | plain::NotPlain::NotListed => {
             NotKept::Refused
         }
     }
@@ -316,10 +370,18 @@ pub(crate) fn rule_path(rule: &str, windows: bool) -> Option<PathBuf> {
     }
 }
 
-/// Whether `rule` applies only to files whose real path the matter thread found inside the
-/// matter: a `Read` rule's file, and every file of an `Edit(*)` request.
+/// Whether `rule` applies only once the matter thread found what it reaches inside the matter
+/// by real path: a `Read` rule's file, every file of an `Edit(*)` request, and a command's
+/// program, working folder and path words (`Reach`).
 pub(crate) fn needs_real(rule: &str) -> bool {
-    rule == EDIT_ALL || rule_path(rule, false).is_some()
+    rule == EDIT_ALL || rule_path(rule, false).is_some() || is_command(rule)
+}
+
+/// Whether `rule` is a command rule: `Bash(…)`, `PowerShell(…)` or `Run(…)`.
+fn is_command(rule: &str) -> bool {
+    ["Bash(", "PowerShell(", "Run("]
+        .iter()
+        .any(|tool| rule.starts_with(tool))
 }
 
 /// A Codex `Run` rule's command and working folder.
@@ -387,7 +449,6 @@ fn command(command: &str, grammar: plain::Grammar, agent: plain::Agent) -> Optio
 fn one_plain_command(command: &str, grammar: plain::Grammar, agent: plain::Agent) -> bool {
     let anywhere = plain::Place {
         matter: "/",
-        cwd: "/",
         windows: false,
     };
     match plain::plain(command, grammar, agent, anywhere) {
@@ -506,29 +567,37 @@ pub(crate) fn file_of(data: &Path, matter: clauseo_protocol::MatterId) -> PathBu
 
 /// Whether `requested`, a file a kept path rule names, is inside the matter `folder` by its
 /// real path: both resolved through every link and junction (a file not made yet by its folder),
-/// the file strictly inside the folder and in neither its `.clauseo` nor a `.claude` folder
-/// (any case; on Windows each name without its trailing dots and spaces, as Windows opens it).
+/// the file strictly inside the folder and under none of its own names ([`OWN_NAMES`]; any
+/// case; on Windows each name without its trailing dots and spaces, as Windows opens it).
 /// A link the agent swapped in after the rule was kept is caught here. False when either does
 /// not resolve. File system calls: off the actor.
 pub(crate) fn real_within(requested: &Path, folder: &Path, windows: bool) -> bool {
+    real_rest(requested, folder, windows)
+        .is_some_and(|rest| !rest.is_empty() && rest.iter().all(|name| !own_folder(name)))
+}
+
+/// Whether `requested` is the matter `folder` itself or inside it by its real path, in none of
+/// its own folders ([`real_within`], the folder itself allowed): a command's working folder or
+/// path word. False when either does not resolve. File system calls: off the actor.
+pub(crate) fn real_inside(requested: &Path, folder: &Path, windows: bool) -> bool {
+    real_rest(requested, folder, windows)
+        .is_some_and(|rest| rest.iter().all(|name| !own_folder(name)))
+}
+
+/// The names of `requested`'s real path past `folder`'s, each as the system opens it; none when
+/// it is not inside it or either does not resolve (a file not made yet by its folder).
+fn real_rest(requested: &Path, folder: &Path, windows: bool) -> Option<Vec<String>> {
     if !requested.is_absolute() {
-        return false;
+        return None;
     }
-    let Ok(root) = dunce::canonicalize(folder) else {
-        return false;
-    };
+    let root = dunce::canonicalize(folder).ok()?;
     let real = match dunce::canonicalize(requested) {
         Ok(real) => real,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let (Some(parent), Some(name)) = (requested.parent(), requested.file_name()) else {
-                return false;
-            };
-            match dunce::canonicalize(parent) {
-                Ok(parent) => parent.join(name),
-                Err(_) => return false,
-            }
+            let (parent, name) = (requested.parent()?, requested.file_name()?);
+            dunce::canonicalize(parent).ok()?.join(name)
         }
-        Err(_) => return false,
+        Err(_) => return None,
     };
     let names = |path: &Path| -> Vec<String> {
         path.components()
@@ -536,16 +605,7 @@ pub(crate) fn real_within(requested: &Path, folder: &Path, windows: bool) -> boo
             .collect()
     };
     let (root, real) = (names(&root), names(&real));
-    let Some(rest) = real.strip_prefix(root.as_slice()) else {
-        return false;
-    };
-    !rest.is_empty() && rest.iter().all(|name| !own_folder(name))
-}
-
-/// Whether every one of `files` is inside `folder` by its real path ([`real_within`]); none
-/// when there are none. File system calls: off the actor.
-pub(crate) fn all_within(files: &[PathBuf], folder: &Path, windows: bool) -> Option<bool> {
-    (!files.is_empty()).then(|| files.iter().all(|file| real_within(file, folder, windows)))
+    real.strip_prefix(root.as_slice()).map(<[String]>::to_vec)
 }
 
 /// A file name as the system opens it, for comparing: on Windows lower case and without its
@@ -558,12 +618,27 @@ fn name_as_opened(name: &str, windows: bool) -> String {
     }
 }
 
-/// `.clauseo` or `.claude`, in any case.
+/// A name an agent or Clauseo reads its own settings, skills or instructions from, in any
+/// case: `.clauseo`, `.claude`, `.codex`, `.agents` (Codex's skills), `.mcp.json`, and the
+/// instruction files `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md` and `CLAUDE.local.md`.
+/// A kept rule never writes or reads one: an agent that could write its own next instructions
+/// with no card would no longer be asking.
 fn own_folder(name: &str) -> bool {
-    [".clauseo", ".claude"]
-        .iter()
-        .any(|own| own.eq_ignore_ascii_case(name))
+    OWN_NAMES.iter().any(|own| own.eq_ignore_ascii_case(name))
 }
+
+/// The names [`own_folder`] keeps out of every kept rule.
+pub(crate) const OWN_NAMES: &[&str] = &[
+    ".clauseo",
+    ".claude",
+    ".codex",
+    ".agents",
+    ".mcp.json",
+    "AGENTS.md",
+    "AGENTS.override.md",
+    "CLAUDE.md",
+    "CLAUDE.local.md",
+];
 
 #[cfg(test)]
 mod tests;

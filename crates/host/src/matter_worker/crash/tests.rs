@@ -331,7 +331,7 @@ fn held_open(case: &Case) -> MatterJob {
         folder: case.folder(),
         paths: vec![case.folder().join("brief.docx")],
         fence: None,
-        real: Vec::new(),
+        real: crate::agent::always::Reach::default(),
     }
 }
 

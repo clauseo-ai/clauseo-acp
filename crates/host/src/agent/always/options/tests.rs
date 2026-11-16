@@ -1,6 +1,6 @@
 use clauseo_protocol::{AgentChoiceId, PermissionKind, PermissionOption};
 
-use super::{ALWAYS, agent_choice, agent_options, with_always};
+use super::{ALWAYS, agent_choice, agent_options, once_only, with_always};
 
 fn option(id: &str, kind: PermissionKind) -> PermissionOption {
     PermissionOption {
@@ -91,4 +91,22 @@ fn a_host_option_maps_back_to_the_agents_own() {
     );
     assert_eq!(agent_choice(id("clauseo.other")), None);
     assert_eq!(agent_choice(id("allow_once")), Some(id("allow_once")));
+}
+
+/// A paid tool's card (case law's `recharge`) offers only this call: no session option, renamed
+/// or not, and nothing of kind `allow_always`.
+#[test]
+fn a_paid_tool_offers_only_this_call() {
+    use PermissionKind::{AllowAlways, AllowOnce, RejectOnce};
+    let mut options = vec![
+        option("allow_once", AllowOnce),
+        option("allow_session", AllowAlways),
+        option("clauseo.session:allow_session", AllowOnce),
+        option("allow_always", AllowAlways),
+        option("decline", RejectOnce),
+    ];
+    once_only(&mut options);
+    assert_eq!(ids(&options), ["allow_once", "decline"]);
+    assert!(crate::agent::always::spends("case-law", "recharge"));
+    assert!(!crate::agent::always::spends("case-law", "search_law"));
 }

@@ -348,3 +348,61 @@ fn codex_runs_case_law_search_unasked_only_with_our_entry() {
     assert_eq!(seen, [None, Some("tc-recharge")], "{}", events.dump());
     host.shutdown();
 }
+
+/// Case law's `recharge` spends the lawyer's money, so every call asks: its card offers neither
+/// codex-acp's `allow_session` ("For this conversation") nor "Always", only this call.
+#[test]
+fn codex_recharge_offers_only_this_call() {
+    use crate::case_law::{Connector, wire};
+    let connector = Connector::new(true);
+    let dir = Dir::new("mcp_trust_recharge_session", &[]);
+    let opts = json!([{"optionId": "allow_once", "name": "Allow", "kind": "allow_once"},
+        {"optionId": "allow_session", "name": "Allow for this session", "kind": "allow_always"},
+        {"optionId": "allow_always", "name": "Always allow", "kind": "allow_always"},
+        {"optionId": "cancel", "name": "Cancel", "kind": "reject_once"}]);
+    let added = [
+        json!({"update": {"update": {"sessionUpdate": "tool_call", "toolCallId": "tc-recharge",
+            "title": "mcp.case-law.recharge", "kind": "execute", "status": "in_progress",
+            "rawInput": {"server": "case-law", "tool": "recharge", "arguments": {}}}}}),
+        json!({"request": {"id": "perm-recharge", "method": "session/request_permission",
+            "params": {"sessionId": "sess-1", "toolCall": {"toolCallId": "tc-recharge",
+            "kind": "execute", "status": "pending"}, "options": opts,
+            "_meta": {"is_mcp_tool_approval": true}}}}),
+        json!({"expect_response": {"id": "perm-recharge", "result": {"outcome": {
+            "outcome": "selected", "optionId": "cancel"}}}}),
+    ];
+    let base = codex_lines("cl-recharge", &json!({"cwd": "{{any}}"}));
+    let mut lines: Vec<String> = base.lines().map(str::to_owned).collect();
+    let prompt = lines
+        .iter()
+        .position(|line| line.contains("\"session/prompt\""))
+        .unwrap();
+    for (n, line) in added.iter().enumerate() {
+        lines.insert(prompt + 1 + n, line.to_string());
+    }
+    let codex = template(&dir, "cl-recharge", &lines.join("\n"));
+    settings(&dir, agents(&[(CODEX, &codex, json!({}))]), json!({}));
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| {
+        wire(config, Some(&connector.relays))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Top up the case law account.");
+    answer_from(&host, &mut events, thread, 0, &["cancel"]);
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let cards: Vec<Vec<String>> = crate::always::resolutions(&events)
+        .into_iter()
+        .map(|(card, _)| card)
+        .collect();
+    assert_eq!(
+        cards,
+        [vec!["allow_once".to_owned(), "cancel".to_owned()]],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}

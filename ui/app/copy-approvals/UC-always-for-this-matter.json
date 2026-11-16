@@ -8,7 +8,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "always_core words (provisional)",
-    "note": "the approval card's Always for this matter option on a command, for Claude or ChatGPT. {folder} is the working folder relative to the matter (\"Drafts\"), or \"this matter's folder\" at its top. Clauseo keeps the command text byte for byte, with its folder for ChatGPT, and answers the same command there later"
+    "note": "the approval card's Always for this matter option on a command, for Claude or ChatGPT. {folder} is the working folder relative to the matter (\"Drafts\"), or \"this matter's folder\" at its top. Claude's shell starts in the matter's folder for every command (Clauseo sets CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR), so its {folder} is always \"this matter's folder\". Offered only for a program on Clauseo's list, with options the list allows and every file inside the matter. Clauseo keeps the command text byte for byte, with its folder for ChatGPT, and answers the same command there later"
   },
   "UC-811": {
     "en": "Always allow changes to files in this matter.",
@@ -19,7 +19,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "always_core words (provisional)",
-    "note": "the approval card's Always for this matter option on a file edit, for Claude or ChatGPT. Clauseo keeps one rule (Edit(*)) that covers every file inside the matter folder, never a file outside it or in .clauseo or .claude"
+    "note": "the approval card's Always for this matter option on a file edit, for Claude or ChatGPT. Clauseo keeps one rule (Edit(*)) that covers every file inside the matter folder by its real path, never a file outside it, nor .clauseo, .claude, .codex, .agents, .mcp.json, AGENTS.md, AGENTS.override.md, CLAUDE.md or CLAUDE.local.md"
   },
   "UC-812": {
     "en": "Always allow {site} in this matter.",
@@ -31,17 +31,6 @@
     "at": "2026-11-16",
     "by": "always_core words (provisional)",
     "note": "the approval card's Always for this matter option on a web page (Claude's WebFetch, or a network card). {site} is the exact host, and the rule covers every page on it"
-  },
-  "UC-813": {
-    "en": "Clauseo couldn't save this, so it applies only until Clauseo closes.",
-    "hi": "Clauseo इसे सहेज नहीं सका, इसलिए यह सिर्फ़ Clauseo बंद होने तक लागू रहेगा।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-16",
-    "hi_by": "always_core words (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-16",
-    "by": "always_core words (provisional)",
-    "note": "thread notice after the lawyer chose Always for this matter and the write to the matter's kept list failed. The rule holds in memory until Clauseo quits. With no secret store at all the card offers no Always, so this line doesn't show then"
   },
   "UC-814": {
     "en": "Allowed: always for this matter.",
@@ -109,7 +98,7 @@
     "by": "always_core words (provisional)",
     "note": "Replaces UC-503: one row per kept rule in Kept permissions, by kind. A Claude command; a ChatGPT command with its working folder relative to the matter; the one file-edit rule, which covers the whole matter; #1109's per-file read; WebFetch for every page on a host; an MCP server's tool; web search, kept whole"
   },
-  "UC-820": {
+  "UC-857": {
     "en": "Allowed this once only: Clauseo keeps \"Always\" only for one plain command, a site, a tool, or changes to files in this matter.",
     "hi": "सिर्फ़ इस बार अनुमति दी गई: Clauseo \"हमेशा\" सिर्फ़ किसी एक सादी कमांड, वेबसाइट, टूल, या इस मामले की फ़ाइलों में बदलाव के लिए रखता है।",
     "hi_status": "provisional",
@@ -118,6 +107,6 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "always_core words (provisional)",
-    "note": "Replaces UC-507: thread notice NoticeKind::AlwaysNotKept, reason refused, for either agent. UC-507 said \"one exact command, site or file\", but a file-edit rule now covers the whole matter and tools and web search can be kept. Keeps the \"Allowed this once only:\" opening of UC-506, UC-508 and UC-509"
+    "note": "Replaces UC-507: thread notice NoticeKind::AlwaysNotKept, reason refused, for either agent. UC-507 said \"one exact command, site or file\", but a file-edit rule now covers the whole matter and tools and web search can be kept. Keeps the \"Allowed this once only:\" opening of UC-506, UC-508 and UC-509. Renumbered from UC-820 (taken by the Windows protection line)"
   }
 }
