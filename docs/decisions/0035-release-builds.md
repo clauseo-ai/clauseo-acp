@@ -330,8 +330,8 @@ silent fall-through:
 
 - The switch is the repository variable `CLAUSEO_UNSIGNED_BETA`, exactly `'true'` (a tag push has
   no inputs). The release is an unsigned beta when it is `'true'` and no Apple secret is set
-  (`APPLE_CERTIFICATE`, `APPLE_ID` or `APPLE_API_KEY`, Tauri's names, read only as a boolean on
-  the step's env).
+  (any of the six the Developer ID path reads, below, or Tauri's `APPLE_ID`, `APPLE_PASSWORD`
+  and `APPLE_TEAM_ID`, read only as a boolean on the step's env).
 - `custody` decides it once, at the start of the run, as two boolean job outputs: `has_apple`
   (any Apple secret it can see: in release mode the `release` environment's as well as the
   repository's) and `unsigned_beta` (the variable `'true'` and no Apple secret). `assemble` (the
@@ -339,7 +339,8 @@ silent fall-through:
   variable flipped mid-run can't publish an ad hoc release without its first-open notes. In a test
   or dry run `custody` takes no environment, so it sees what `assemble` read before (the
   repository's variable and secrets) and the notes are as before. `latest-json.test.mjs` fails
-  if the variable or an Apple secret is read anywhere else.
+  if the variable is read anywhere else, and `release-apple.test.mjs` if an Apple secret is read
+  anywhere but the Developer ID path's steps (below).
 - Unset, or with any Apple secret: `publish` refuses exactly as before unless every DMG passes
   `xcrun stapler validate`. The variable never weakens a signed set-up.
 - An unsigned beta: `publish` mounts each DMG and requires its `Clauseo.app` to pass
@@ -363,6 +364,84 @@ silent fall-through:
   `custody` in release mode, so they end the beta. Apple secrets kept only in `release-publish`
   are not: `publish`'s ad hoc check still refuses a DMG signed with a real identity. S20a deletes
   the variable when the Developer ID arrives.
+
+## Apple Developer ID (2026-11-16)
+
+Rohan decided macOS ships signed with his individual Apple Developer ID and notarised, from
+`release.yml`'s own build, once the account exists. Until then, and if it isn't there on release
+day, the unsigned beta above is the fallback. Test (`test-v*`) and dry runs stay ad hoc and hold
+no Apple secret.
+
+**Secrets**, in the `release` environment only, all six or none: `APPLE_CERTIFICATE` (base64 of
+the Developer ID Application identity's .p12), `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_SIGNING_IDENTITY` (`Developer ID Application: <legal name> (<TEAMID>)`; the Team ID every
+check expects is the one in its brackets, so there is no `APPLE_TEAM_ID`), and the App Store
+Connect API key notarytool uses: `APPLE_API_KEY` (its Key ID), `APPLE_API_ISSUER` (the Issuer ID)
+and `APPLE_API_KEY_P8` (the .p8's text). Tauri's Apple ID names (`APPLE_ID`, `APPLE_PASSWORD`,
+`APPLE_TEAM_ID`) are refused. Each secret is on the env of the steps below only, behind the mode
+or `DEVELOPER_ID`, never in a `run:` script, never printed; `release-apple.test.mjs` holds that.
+
+**What runs**, with `has_apple` true in a `v*` release (otherwise everything is ad hoc, as before):
+
+- `custody` (Linux, before any leg): any Apple secret set means all six, else it fails naming the
+  missing names. Then, with openssl and node, no Mac needed: the .p12 opens with its password and
+  holds one certificate and its key; the certificate's common name is `APPLE_SIGNING_IDENTITY`, its
+  OU the Team ID, its issuer Developer ID Certification Authority, and it is not expired (a
+  warning inside 30 days); and Apple's notary service accepts the API key (`apple-notary.mjs`: an
+  ES256 token, `GET /notary/v2/submissions`, what `notarytool history` asks). A wrong certificate, password or
+  key fails before any build. Not in the macOS legs: their first steps run sidecars.mjs and the
+  build, and no secret may be in a step before that (`latest-json.test.mjs`'s workflow lint).
+- `build`'s macOS legs (`DEVELOPER_ID` 'true'), in the bundle step, after the build: the .p12 goes
+  into a keychain of the step's own (Tauri's own `APPLE_CERTIFICATE` import can't serve: it lives
+  only as long as the `tauri bundle` process, and the helpers are signed before it runs, since
+  Tauri never signs `bundle.macOS.files`). The helpers (`Contents/Helpers`: clauseo-agent-browser,
+  stetdoc/stetdoc, pdf/pdftoppm, pdf/pdfinfo, pdf/pdftotext) are signed
+  `--options runtime --timestamp`. Tauri 2.10.2's bundler (CLI 2.12.2) then signs the externalBin sidecars, the main binary and the .app
+  with the identity (`--options runtime` from `hardenedRuntime`, the entitlements below; it passes
+  no `--timestamp`, and codesign timestamps a Developer ID signature by default, which the check
+  below requires), notarises the .app with `APPLE_API_KEY`, `APPLE_API_ISSUER` and
+  `APPLE_API_KEY_PATH` (the .p8 written to `$RUNNER_TEMP`), prints the notary log if it is refused,
+  and staples it. Tauri never notarises the DMG, so the step signs it again with `--timestamp`,
+  submits it with `notarytool submit --wait --timeout 20m`, prints `notarytool log` and fails on
+  anything but Accepted, then staples and validates it. The step has `timeout-minutes: 50`; the
+  keychain and the .p8 go when it ends. Tauri notarises only when it finds the credentials and
+  ignores a failed staple, so the next step, not the bundler, decides.
+- The Developer ID check (the next step, holding only the identity): every Mach-O in the .app is
+  exactly the main binary, the externalBin sidecars and the four helpers, and each, and the .app,
+  passes `codesign --verify --strict` with `Authority=` the identity, `TeamIdentifier=` its Team
+  ID, `flags=0x10000(runtime)` and a `Timestamp=`, with none of the entitlements left out below;
+  `spctl -a -vv -t exec` on the .app and `spctl -a -vv -t open --context context:primary-signature`
+  on the DMG say `source=Notarized Developer ID`; `stapler validate` passes on the .app, the DMG,
+  and the .app inside the DMG and the updater archive.
+- `assemble` and `publish` are unchanged: `has_apple` true means no first-open block in the notes
+  and `publish`'s `stapler validate` on every DMG. Delete `CLAUSEO_UNSIGNED_BETA` once it ships.
+
+**Entitlements**: `crates/desktop/macos/app.entitlements.plist`, named by
+`bundle.macOS.entitlements`, is an empty dict on purpose. Tauri passes it to every codesign it runs
+(the .app, the main binary, the externalBin sidecars); the helpers get none. Kept: nothing, since
+nothing Clauseo runs needs a hardened-runtime exception. Left out, and refused by the check:
+`get-task-allow` (lets any process of the user attach a debugger; notarisation refuses it; never on
+a release); `cs.allow-jit` and `cs.allow-unsigned-executable-memory` (WKWebView's JavaScript JIT
+runs in WebKit's own WebContent process, not in the app; the Rust host, clauseo-mcp,
+agent-browser (a native Rust binary), stetdoc and poppler generate no code); and
+`cs.disable-library-validation` (the app loads no dylib that isn't Apple's or its own: no plugin,
+and `dlopen2` and `libloading` are on Linux only), as well as
+`cs.allow-dyld-environment-variables`, `cs.disable-executable-page-protection` and `cs.debugger`.
+Chrome, which agent-browser drives, the agents and any node or python they start are processes of
+their own, assessed under their own signatures: the parent's hardened runtime doesn't pass to them.
+The app is not sandboxed (Developer ID, outside the Mac App Store), so no App Sandbox, network or
+file entitlement applies, and it uses no privacy-protected device (camera, microphone, Apple
+Events). The ad hoc builds (test, dry, the beta) already sign the .app, the main binary and
+the sidecars with the hardened runtime (`hardenedRuntime: true`) and the helpers with
+`--options runtime`; with the file they also carry the empty entitlements, which changes nothing
+they may do.
+
+**Proven before the account exists**: the workflow's logic (`release-apple.test.mjs`, a dry run);
+the entitlements and the hardened runtime (an ad hoc build on the VM, which now carries the file);
+custody's certificate checks (the test runs them on a throwaway certificate). **Proven only with
+it**, on the first `v0.1.0` draft, checked on the VM before `release-publish` is approved:
+Developer ID signing, the notary's acceptance and log, stapling, Gatekeeper's "Notarized Developer
+ID", and whether the Keychain stops asking after an update once the Team ID is stable.
 
 ## Linux and sizes (S20 follow-up, 2026-11-03)
 

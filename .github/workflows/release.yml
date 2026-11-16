@@ -368,7 +368,10 @@ jobs:
   # secret: has_apple, any Apple secret it can see (in release mode the `release` environment's
   # as well as the repository's), and unsigned_beta, CLAUSEO_UNSIGNED_BETA 'true' and no Apple
   # secret. In a test or dry run it takes no environment, so it sees what assemble read before
-  # (the repository's variable and secrets) and assemble behaves as before.
+  # (the repository's variable and secrets) and assemble behaves as before. build reads has_apple
+  # too: a v* release's macOS legs sign with the Developer ID while it is 'true'. In release mode
+  # custody also checks the Apple secrets, before any leg: all six or none, the certificate and
+  # the notary API key working (decision 0035, "Apple Developer ID").
   custody:
     name: custody
     needs: check
@@ -384,15 +387,15 @@ jobs:
       MODE: ${{ needs.check.outputs.mode }}
       VERSION: ${{ needs.check.outputs.version }}
     steps:
-      # Booleans only: no secret's value reaches the step. Tauri's names (local-mac-dmg.sh unsets
-      # the same): APPLE_CERTIFICATE signs, APPLE_ID or APPLE_API_KEY notarises. The safe rule:
-      # an Apple secret always means notarisation is required, so the variable never weakens a
-      # signed set-up. In every mode.
+      # Booleans only: no secret's value reaches the step. Every Apple name counts: the six the
+      # Developer ID path reads (the next check's) and Tauri's Apple ID notary names, which it
+      # refuses. The safe rule: an Apple secret always means notarisation is required, so the
+      # variable never weakens a signed set-up. In every mode.
       - name: Decide the unsigned beta
         id: beta
         env:
           BETA_VARIABLE: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}
-          HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}
+          HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_CERTIFICATE_PASSWORD != '' || secrets.APPLE_SIGNING_IDENTITY != '' || secrets.APPLE_API_KEY != '' || secrets.APPLE_API_ISSUER != '' || secrets.APPLE_API_KEY_P8 != '' || secrets.APPLE_ID != '' || secrets.APPLE_PASSWORD != '' || secrets.APPLE_TEAM_ID != '' }}
         run: |
           set -euo pipefail
           case "$BETA_VARIABLE/$HAS_APPLE" in
@@ -423,7 +426,79 @@ jobs:
           node-version-file: ui/package.json
           package-manager-cache: false
 
-      # Before the secret: the Tauri CLI from the lock file.
+      # The Developer ID path's secrets, checked here, before any build leg starts, so a wrong
+      # certificate, password or API key fails minutes into the run (decision 0035, "Apple
+      # Developer ID"). With no Apple secret it says so: the build signs ad hoc (the unsigned
+      # beta's path). With any, all six must be set, else it names the missing ones (names only),
+      # and Tauri's Apple ID names are refused. Then, on Linux with openssl and node, no macOS
+      # needed: APPLE_CERTIFICATE opens with its password and holds one certificate and its key;
+      # the certificate is APPLE_SIGNING_IDENTITY's, of the Team ID in its "(TEAMID)", issued
+      # by Developer ID Certification Authority and not expired; and the notary service accepts
+      # the API key (apple-notary.mjs, what `notarytool history` asks). Before the ui install;
+      # nothing prints a secret. The build's macOS legs import the same certificate later.
+      - name: Every Apple secret is set or none is, and the certificate and the API key work
+        if: needs.check.outputs.mode == 'release'
+        env:
+          APPLE_CERTIFICATE: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_API_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_ISSUER: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY_P8: ${{ needs.check.outputs.mode == 'release' && secrets.APPLE_API_KEY_P8 || '' }}
+          HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' || secrets.APPLE_PASSWORD != '' || secrets.APPLE_TEAM_ID != '' }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          [ "$HAS_APPLE_ID" = false ] ||
+            fail "APPLE_ID, APPLE_PASSWORD or APPLE_TEAM_ID is set; release.yml notarises with the API key (APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_P8) and reads none of them: delete them"
+          names="APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_P8"
+          have=() missing=()
+          for name in $names; do
+            if [ -n "${!name}" ]; then have+=("$name"); else missing+=("$name"); fi
+          done
+          if [ "${#have[@]}" = 0 ]; then
+            echo "custody: no Apple secret; the macOS legs sign ad hoc" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          [ "${#missing[@]}" = 0 ] ||
+            fail "the release environment has ${have[*]} but not ${missing[*]}: set all six, or none"
+          [[ "$APPLE_SIGNING_IDENTITY" =~ ^Developer\ ID\ Application:\ .+\ \(([A-Z0-9]{10})\)$ ]] ||
+            fail "APPLE_SIGNING_IDENTITY is not \"Developer ID Application: <name> (<TEAMID>)\""
+          team=${BASH_REMATCH[1]}
+          dir=$RUNNER_TEMP/apple-custody
+          (umask 077 && mkdir -p "$dir")
+          trap 'rm -rf "$dir"' EXIT
+          printf '%s' "$APPLE_CERTIFICATE" | tr -d '[:space:]' | base64 -d > "$dir/cert.p12" 2> /dev/null ||
+            fail "APPLE_CERTIFICATE is not base64"
+          # The password from the environment, never on the command line. Keychain Access's .p12
+          # may use the algorithms OpenSSL 3 keeps in its legacy provider.
+          p12() {
+            openssl pkcs12 -in "$dir/cert.p12" -passin env:APPLE_CERTIFICATE_PASSWORD "$@" 2> /dev/null ||
+              openssl pkcs12 -legacy -in "$dir/cert.p12" -passin env:APPLE_CERTIFICATE_PASSWORD "$@" 2> /dev/null
+          }
+          p12 -clcerts -nokeys -out "$dir/cert.pem" ||
+            fail "APPLE_CERTIFICATE does not open with APPLE_CERTIFICATE_PASSWORD"
+          p12 -nocerts -nodes -out "$dir/key.pem" || fail "APPLE_CERTIFICATE holds no private key"
+          [ "$(grep -c -- '-----BEGIN CERTIFICATE-----' "$dir/cert.pem")" = 1 ] ||
+            fail "APPLE_CERTIFICATE must hold exactly one certificate with its key (the Developer ID Application identity)"
+          field() { openssl x509 -in "$dir/cert.pem" -noout "$1" -nameopt multiline,utf8,-esc_msb | sed -n "s/^ *$2 *= //p"; }
+          [ "$(field -subject commonName)" = "$APPLE_SIGNING_IDENTITY" ] ||
+            fail "APPLE_CERTIFICATE's certificate is not APPLE_SIGNING_IDENTITY's"
+          [ "$(field -subject organizationalUnitName)" = "$team" ] ||
+            fail "APPLE_CERTIFICATE's certificate is not of the Team ID in APPLE_SIGNING_IDENTITY"
+          [ "$(field -issuer commonName)" = "Developer ID Certification Authority" ] ||
+            fail "APPLE_CERTIFICATE's certificate is not issued by Developer ID Certification Authority"
+          cmp -s <(openssl x509 -in "$dir/cert.pem" -noout -pubkey) <(openssl pkey -in "$dir/key.pem" -pubout) ||
+            fail "APPLE_CERTIFICATE's private key is not its certificate's"
+          end=$(openssl x509 -in "$dir/cert.pem" -noout -enddate | cut -d= -f2)
+          openssl x509 -in "$dir/cert.pem" -noout -checkend 0 > /dev/null || fail "the Developer ID certificate expired on $end"
+          openssl x509 -in "$dir/cert.pem" -noout -checkend 2592000 > /dev/null ||
+            echo "::warning::the Developer ID certificate expires on $end, within 30 days: make the next one"
+          node .github/scripts/apple-notary.mjs --check
+          echo "custody: Developer ID of team $team, valid until $end; the notary service accepts the API key" |
+            tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Before the release key: the Tauri CLI from the lock file.
       - name: Install the ui workspace
         if: needs.check.outputs.mode == 'release'
         run: pnpm -C ui install --frozen-lockfile
@@ -676,6 +751,10 @@ jobs:
       # blocklist.conf.json with the block-list switch on, else empty: each tauri build and bundle
       # passes ${BLOCKLIST_OVERLAY:+--config "$BLOCKLIST_OVERLAY"}.
       BLOCKLIST_OVERLAY: ${{ needs.check.outputs.bundle_blocklist == 'true' && 'release/blocklist.conf.json' || '' }}
+      # 'true' on a macOS leg of a v* release while custody saw the Apple secrets (custody has
+      # then checked all six): the leg signs with the Developer ID and notarises. Else 'false':
+      # ad hoc, as every test and dry run (decision 0035, "Apple Developer ID").
+      DEVELOPER_ID: ${{ needs.check.outputs.mode == 'release' && needs.custody.outputs.has_apple == 'true' && matrix.signs }}
     defaults:
       run:
         shell: bash
@@ -896,14 +975,26 @@ jobs:
           esac
           jq -n --arg key "$pub" '{plugins: {updater: {pubkey: $key}}}' > "$RUNNER_TEMP/updater-key.conf.json"
 
-      # The bundler signs the .app ad hoc (APPLE_SIGNING_IDENTITY "-") until S20a's Developer ID,
-      # then the updater archive with the mode's key, which only this step holds. First this step
-      # signs the browser helper, stetdoc and the PDF tools, which the overlay's bundle.macOS.files
-      # puts in Contents/Helpers, Contents/Helpers/stetdoc and Contents/Helpers/pdf:
-      # the bundler copies those files without signing them, and the .app's seal needs nested code
-      # signed before it. The same identity and options as the bundler's own codesign (--force,
-      # the hardened runtime of tauri.conf.json, no entitlements); a real identity adds a secure
-      # timestamp, which an ad hoc signature cannot take.
+      # The bundler signs the .app, then the updater archive with the mode's key, which only this
+      # step holds. Ad hoc (APPLE_SIGNING_IDENTITY "-") in a test or dry run, and in a release
+      # without the Apple secrets; with them (DEVELOPER_ID 'true', decision 0035, "Apple Developer
+      # ID") with the Developer ID. First this step signs the browser helper, stetdoc and the PDF
+      # tools, which the overlay's bundle.macOS.files puts in Contents/Helpers,
+      # Contents/Helpers/stetdoc and Contents/Helpers/pdf: the bundler copies those files without
+      # signing them, and the .app's seal needs nested code signed before it. The same identity
+      # and options as the bundler's own codesign (--force, the hardened runtime of
+      # tauri.conf.json), with no entitlements: none of them needs one. The Developer ID adds a
+      # secure timestamp, which an ad hoc signature cannot take.
+      # The Developer ID: this step imports APPLE_CERTIFICATE into a keychain of its own, since the
+      # helpers are signed before the bundler runs and the bundler's own APPLE_CERTIFICATE import
+      # lives only as long as its process; the bundler then finds APPLE_SIGNING_IDENTITY in the
+      # search list and signs the externalBin sidecars, the main binary and the .app with it
+      # (--options runtime, macos/app.entitlements.plist, codesign's secure timestamp for a
+      # Developer ID), notarises the .app with the API key (APPLE_API_KEY, APPLE_API_ISSUER and
+      # APPLE_API_KEY_PATH, the .p8 written here), prints the notary log if it is refused, and
+      # staples it; the DMG and the updater archive hold the stapled .app. The bundler never
+      # notarises the DMG, so this step does, staples and validates it, and prints the notary log
+      # on a refusal. The keychain and the .p8 go when the step ends; the next step checks it all.
       # After the bundle, both legs' bundler names the updater archive Clauseo.app.tar.gz, and its
       # .sig's trusted comment says file:Clauseo.app.tar.gz, so the step renames it to the published
       # Clauseo_<version>_<arch>.app.tar.gz, drops the bundler's .sig and signs it again, as
@@ -911,12 +1002,19 @@ jobs:
       # the app's updater checks (#728).
       - name: Bundle the .app and the DMG, and sign the updater archive under its arch name
         if: runner.os == 'macOS'
+        timeout-minutes: 50
         env:
-          APPLE_SIGNING_IDENTITY: "-"
+          APPLE_SIGNING_IDENTITY: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          APPLE_CERTIFICATE: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_ISSUER: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY_P8: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_API_KEY_P8 || '' }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST_PASSWORD || '' }}
         run: |
           set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
           if [ "$MODE" = dry ]; then
             TAURI_SIGNING_PRIVATE_KEY=$(cat "$RUNNER_TEMP/dry-updater.key")
             TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$(cat "$RUNNER_TEMP/dry-updater.password")
@@ -924,21 +1022,68 @@ jobs:
           fi
           [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }
           [ -n "$APPLE_SIGNING_IDENTITY" ] || { echo "::error::APPLE_SIGNING_IDENTITY is empty"; exit 1; }
+          if [ "$DEVELOPER_ID" = true ]; then
+            [ "$APPLE_SIGNING_IDENTITY" != - ] || fail "a Developer ID leg with the ad hoc identity"
+            apple=$RUNNER_TEMP/apple
+            keychain=$apple/signing.keychain-db
+            (umask 077 && mkdir -p "$apple")
+            trap 'security delete-keychain "$keychain" 2> /dev/null || true; rm -rf "$apple"' EXIT
+            keychain_password=$(openssl rand -hex 24)
+            security create-keychain -p "$keychain_password" "$keychain"
+            security set-keychain-settings -lut 3600 "$keychain"
+            security unlock-keychain -p "$keychain_password" "$keychain"
+            printf '%s' "$APPLE_CERTIFICATE" | tr -d '[:space:]' | base64 --decode > "$apple/cert.p12"
+            security import "$apple/cert.p12" -k "$keychain" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign > /dev/null ||
+              fail "security could not import APPLE_CERTIFICATE with APPLE_CERTIFICATE_PASSWORD"
+            rm "$apple/cert.p12"
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+            # This keychain first in the search list, then the user's (xargs keeps their quotes).
+            security list-keychains -d user | xargs security list-keychains -d user -s "$keychain"
+            security find-identity -p codesigning "$keychain" | grep -qF "\"$APPLE_SIGNING_IDENTITY\"" ||
+              fail "the keychain made from APPLE_CERTIFICATE has no APPLE_SIGNING_IDENTITY"
+            APPLE_API_KEY_PATH=$apple/AuthKey_$APPLE_API_KEY.p8
+            printf '%s\n' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY_PATH"
+            export APPLE_API_KEY_PATH
+          else
+            [ "$APPLE_SIGNING_IDENTITY" = - ] || fail "an ad hoc leg with a real identity"
+            unset APPLE_API_KEY APPLE_API_ISSUER
+          fi
+          # From here the bundler sees no certificate (an empty APPLE_CERTIFICATE would make it
+          # import nothing and fail) and only the .p8's path.
+          unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_API_KEY_P8
           for key in Helpers/clauseo-agent-browser Helpers/stetdoc/stetdoc Helpers/pdf/pdftoppm Helpers/pdf/pdfinfo Helpers/pdf/pdftotext; do
             rel=$(jq -er --arg key "$key" '.bundle.macOS.files[$key]' crates/desktop/release/sidecars.generated.json) ||
               { echo "::error::sidecars.generated.json puts nothing at Contents/$key"; exit 1; }
             helper=crates/desktop/$rel
             [ -f "$helper" ] || { echo "::error::no helper for Contents/$key at $helper"; exit 1; }
-            if [ "$APPLE_SIGNING_IDENTITY" = - ]; then
-              codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime "$helper"
+            if [ "$DEVELOPER_ID" = true ]; then
+              codesign --force -s "$APPLE_SIGNING_IDENTITY" --keychain "$keychain" --options runtime --timestamp "$helper"
             else
-              codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime --timestamp "$helper"
+              codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime "$helper"
             fi
             codesign --verify --strict --verbose=2 "$helper" || { echo "::error::$helper does not verify after signing"; exit 1; }
           done
           pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles app,dmg \
             --config release/release.conf.json ${BLOCKLIST_OVERLAY:+--config "$BLOCKLIST_OVERLAY"} \
             --config "$RUNNER_TEMP/updater-key.conf.json" --config release/sidecars.generated.json
+          if [ "$DEVELOPER_ID" = true ]; then
+            dmg=$RELEASE_DIR/bundle/dmg/Clauseo_${VERSION}_${{ matrix.arch }}.dmg
+            # The bundler's DMG signature again, explicitly timestamped and without the app's
+            # entitlements, which a disk image has no use for.
+            codesign --force -s "$APPLE_SIGNING_IDENTITY" --keychain "$keychain" --timestamp "$dmg"
+            notary=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER")
+            submitted=$(xcrun notarytool submit "$dmg" "${notary[@]}" --wait --timeout 20m --output-format json) || true
+            id=$(jq -r '.id // ""' <<< "$submitted" 2> /dev/null) || id=""
+            verdict=$(jq -r '.status // ""' <<< "$submitted" 2> /dev/null) || verdict=""
+            if [ "$verdict" != Accepted ]; then
+              echo "::error::the notary service did not accept $(basename "$dmg") (status: ${verdict:-no answer})"
+              # The log names each problem; it holds no secret.
+              [ -z "$id" ] || xcrun notarytool log "$id" "${notary[@]}" || true
+              exit 1
+            fi
+            xcrun stapler staple "$dmg"
+            xcrun stapler validate "$dmg" || fail "$(basename "$dmg") is notarised but its ticket does not validate"
+          fi
           macos=$RELEASE_DIR/bundle/macos
           tarball=Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz
           mv "$macos/Clauseo.app.tar.gz" "$macos/$tarball"
@@ -981,6 +1126,80 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app" ||
             { echo "::error::codesign --verify --deep --strict fails on $app"; exit 1; }
           echo "- $TARGET Clauseo.app: Contents/MacOS holds $have; Contents/Helpers holds $helpers(stetdoc/stetdoc, pdf/pdftoppm, pdf/pdfinfo, pdf/pdftotext; signed); the .app verifies --deep --strict" |
+            tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The Developer ID's leg, after the layout check above, before anything uploads it. Every
+      # Mach-O file in the .app is exactly the main binary, the externalBin sidecars and the five
+      # helpers (`file` finds them, so one the layout gains is named here), and each, and the .app,
+      # verifies strictly and shows in `codesign -dvvv` APPLE_SIGNING_IDENTITY as its authority,
+      # its Team ID (the identity's "(TEAMID)", which custody checked against the certificate), the
+      # hardened runtime alone (flags=0x10000(runtime)) and a secure timestamp, with none of the
+      # entitlements decision 0035 leaves out (get-task-allow first). The .app is "Notarized
+      # Developer ID" to Gatekeeper (spctl, as a downloaded app is assessed) and its ticket
+      # validates; so are the DMG's (spctl --context context:primary-signature) and the .app inside
+      # the DMG and inside the updater archive, which are what lawyers install. The step holds
+      # only the identity.
+      - name: Every Mach-O is signed with the Developer ID, and the .app and the DMG are notarised and stapled
+        if: env.DEVELOPER_ID == 'true'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ env.DEVELOPER_ID == 'true' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          [[ "$APPLE_SIGNING_IDENTITY" =~ ^Developer\ ID\ Application:\ .+\ \(([A-Z0-9]{10})\)$ ]] ||
+            fail "APPLE_SIGNING_IDENTITY is not \"Developer ID Application: <name> (<TEAMID>)\""
+          team=${BASH_REMATCH[1]}
+          app=$RELEASE_DIR/bundle/macos/Clauseo.app
+          dmg=$RELEASE_DIR/bundle/dmg/Clauseo_${VERSION}_${{ matrix.arch }}.dmg
+          archive=$RELEASE_DIR/bundle/macos/Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz
+          # $1 the signed file, bundle or DMG: signed by the identity, of the team, timestamped.
+          # Leaves codesign -dvvv's lines in $info.
+          signed() {
+            codesign --verify --strict --verbose=2 "$1" || fail "codesign --verify --strict fails on $1"
+            info=$(codesign -dvvv "$1" 2>&1) || fail "codesign -dvvv fails on $1"
+            grep -qxF "Authority=$APPLE_SIGNING_IDENTITY" <<< "$info" || fail "$1 is not signed with APPLE_SIGNING_IDENTITY"
+            grep -qx "TeamIdentifier=$team" <<< "$info" || fail "$1's TeamIdentifier is not $team"
+            grep -q '^Timestamp=' <<< "$info" || fail "$1 has no secure timestamp"
+          }
+          # $1 code (a Mach-O or the .app): signed, hardened runtime alone, no left-out entitlement.
+          code() {
+            local entitlements
+            signed "$1"
+            grep -q ' flags=0x10000(runtime) ' <<< "$info" || fail "$1 is not signed with flags=0x10000(runtime) alone"
+            entitlements=$(codesign -d --entitlements - --xml "$1" 2> /dev/null) || fail "codesign cannot read $1's entitlements"
+            for left_out in get-task-allow cs.allow-jit cs.allow-unsigned-executable-memory \
+              cs.disable-library-validation cs.allow-dyld-environment-variables cs.disable-executable-page-protection cs.debugger; do
+              if grep -qF "com.apple.security.$left_out" <<< "$entitlements"; then
+                fail "$1 is signed with com.apple.security.$left_out"
+              fi
+            done
+          }
+          want=$({ echo Contents/MacOS/Clauseo
+            jq -r '.bundle.externalBin[] | "Contents/MacOS/" + ltrimstr("binaries/")' crates/desktop/release/sidecars.generated.json
+            printf '%s\n' Contents/Helpers/clauseo-agent-browser Contents/Helpers/stetdoc/stetdoc \
+              Contents/Helpers/pdf/pdftoppm Contents/Helpers/pdf/pdfinfo Contents/Helpers/pdf/pdftotext; } | LC_ALL=C sort)
+          have=$(cd "$app" && find . -type f -print0 | xargs -0 file -N -F '|' | sed -n '/ (for architecture /d; s/^\.\/\(.*\)| Mach-O.*/\1/p' | LC_ALL=C sort)
+          [ "$have" = "$want" ] ||
+            fail "the Mach-O files in $app are $(echo $have); they must be exactly $(echo $want)"
+          while IFS= read -r macho; do code "$app/$macho"; done <<< "$have"
+          code "$app"
+          assessed=$(spctl -a -vv -t exec "$app" 2>&1) || fail "Gatekeeper refuses $app: $assessed"
+          grep -qx 'source=Notarized Developer ID' <<< "$assessed" || fail "Gatekeeper does not see $app as Notarized Developer ID: $assessed"
+          xcrun stapler validate "$app" || fail "$app has no valid notarisation ticket stapled"
+          signed "$dmg"
+          assessed=$(spctl -a -vv -t open --context context:primary-signature "$dmg" 2>&1) || fail "Gatekeeper refuses $dmg: $assessed"
+          grep -qx 'source=Notarized Developer ID' <<< "$assessed" || fail "Gatekeeper does not see $dmg as Notarized Developer ID: $assessed"
+          xcrun stapler validate "$dmg" || fail "$dmg has no valid notarisation ticket stapled"
+          inside=$(mktemp -d "$RUNNER_TEMP/inside.XXXXXX")
+          mkdir "$inside/dmg" "$inside/archive"
+          hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$inside/dmg" "$dmg" > /dev/null
+          tar -xzf "$archive" -C "$inside/archive"
+          for copy in "$inside/dmg/Clauseo.app" "$inside/archive/Clauseo.app"; do
+            codesign --verify --deep --strict --verbose=2 "$copy" || fail "codesign --verify --deep --strict fails on $copy"
+            xcrun stapler validate "$copy" || fail "$copy has no valid notarisation ticket stapled"
+          done
+          hdiutil detach "$inside/dmg" > /dev/null
+          echo "- $TARGET: Developer ID of team $team; $(grep -c . <<< "$have") Mach-O files and the .app signed with the hardened runtime and a secure timestamp; the .app, the DMG and the .app in each are notarised and stapled" |
             tee -a "$GITHUB_STEP_SUMMARY"
 
       # Each leg's assets, under the names latest-json.mjs lists.

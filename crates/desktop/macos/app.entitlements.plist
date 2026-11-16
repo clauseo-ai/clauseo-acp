@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The hardened runtime's entitlements for Clauseo.app: tauri.conf.json's bundle.macOS.entitlements.
+  The bundler passes this file to every codesign it runs: the .app, its main binary and the
+  externalBin sidecars in Contents/MacOS. The helpers in Contents/Helpers (agent-browser, stetdoc,
+  pdftoppm, pdfinfo, pdftotext) are signed by release.yml with none. Empty on purpose: nothing Clauseo runs
+  needs an exception (decision 0035, "Apple Developer ID", says why each common one is left out).
+  Never add com.apple.security.get-task-allow: release.yml's Developer ID check and
+  release-apple.test.mjs refuse it.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

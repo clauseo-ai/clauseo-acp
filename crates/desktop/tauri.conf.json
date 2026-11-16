@@ -30,6 +30,7 @@
     "macOS": {
       "minimumSystemVersion": "13.0",
       "hardenedRuntime": true,
+      "entitlements": "macos/app.entitlements.plist",
       "dmg": {}
     },
     "windows": {
