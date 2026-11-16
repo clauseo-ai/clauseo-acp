@@ -109,11 +109,12 @@ fn off_the_guard_writes_only_its_own_lines() {
     assert_eq!(timed(&free, false), (0, Vec::new()));
 }
 
-/// Input it ignores still gets the timings, with the phases that ran.
+/// Input it ignores (Claude's hook, which names its matter) still gets the timings, with the
+/// phases that ran.
 #[test]
 fn ignored_input_is_timed_too() {
     let mut errors = Vec::new();
-    let args: [OsString; 0] = [];
+    let args: [OsString; 2] = ["--matter".into(), std::env::temp_dir().into()];
     assert_eq!(
         run_timed(&args, &b"not json"[..], (Vec::new(), &mut errors), true),
         0

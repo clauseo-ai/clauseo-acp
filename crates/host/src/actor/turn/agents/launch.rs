@@ -188,12 +188,6 @@ fn codex_hooks(
     }
     // On Windows the console program beside the app, which PowerShell waits for.
     let program = agent::loads::codex_guard_program(actor.pre_write_guard.as_deref()?);
-    if !program.is_file() {
-        tracing::warn!(
-            "Codex's guard program is not beside the app, so the guard refuses every Codex step \
-             (a build without the host's programs)"
-        );
-    }
     let config = agent::loads::codex_hook_config(&program, record);
     let Some(serde_json::Value::Object(hooks)) = config else {
         tracing::warn!(

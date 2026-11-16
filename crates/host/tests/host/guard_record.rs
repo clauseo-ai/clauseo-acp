@@ -127,7 +127,8 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
             format!("{:016x}{:032x}", meta.dev(), u128::from(meta.ino()))
         );
     }
-    let expected = clauseo_host::codex_hook_config(Path::new(PROGRAM), Some((&record, id)));
+    let guard = clauseo_host::codex_guard_program(Path::new(PROGRAM));
+    let expected = clauseo_host::codex_hook_config(&guard, Some((&record, id)));
     assert_eq!(config["hooks"], expected.unwrap());
     host.shutdown();
     assert!(!folder.exists(), "the guard folder goes with the session");
