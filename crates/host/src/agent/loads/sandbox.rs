@@ -1,19 +1,20 @@
 //! Claude Code's own sandbox for a Claude session on macOS (and Linux, for development;
 //! decision record 0030, "Claude's sandbox"): the `sandbox` object of the flag settings, which
 //! runs each Bash command under Seatbelt (bubblewrap on Linux) and lets a sandboxed command run
-//! without asking (`autoAllowBashIfSandboxed`). A session gets none ([`ClaudeSandbox::for_os`],
-//! [`Off`]), so its commands go to the mode (`auto`'s classifier):
+//! without asking (`autoAllowBashIfSandboxed`). There is none ([`ClaudeSandbox::for_os`],
+//! [`Off`]):
 //!
-//! - on Windows: Claude Code 2.1.293 never auto-allows there, and its Windows sandbox needs a
-//!   one-time admin install behind a feature gate;
+//! - on Windows, by design: Claude Code 2.1.293 never auto-allows there, and its Windows sandbox
+//!   needs a one-time admin install behind a feature gate, so its commands go to the mode
+//!   (`auto`'s classifier) under the guard hook;
 //! - when Claude's short temp folder could not be made (`agent::temp::make_claude_tmp`);
-//! - when a path in its lists holds `*` or `?`, which Claude Code reads as a pattern with no
-//!   escape ([`Off::Wildcard`]);
+//! - when a path in its lists holds one of [`WILDCARDS`], which Claude Code reads as a pattern
+//!   with no escape ([`Off::Wildcard`], with the folder holding it);
 //! - when a path it must deny is not UTF-8 (it could not be named).
 //!
-//! Each of those but Windows also leaves `auto` for `acceptEdits` ([`Off::holds_auto_back`],
-//! `actor/turn/session/claude_mode.rs`, `Auto::NoSandbox`), so no command runs on the
-//! classifier alone where the sandbox was meant to be.
+//! Each of those but Windows refuses the launch ([`ClaudeSandbox::for_launch`], [`Off::refusal`]:
+//! `matter.folder_wildcard`, `agent.sandbox_wildcard`, `agent.sandbox_unavailable`), with one
+//! warn line: Claude never starts on macOS or Linux without its sandbox.
 //!
 //! A `[` (in `Smith [2024]`) is escaped instead ([`escape_brackets`]). Claude Code 2.1.293
 //! reads a sandbox path holding `*`, `?`, `[` or `]` as a glob (its `W4t`: `[…]` stays a
@@ -37,8 +38,7 @@
 //!   fails the command instead of running it unsandboxed, and a Mac (or a Linux machine without
 //!   bubblewrap) where it can't start at all ends Claude at start-up, so the launch fails rather
 //!   than run commands with no sandbox (the setting's own description). The host's own checks
-//!   come first and still fall back, before the launch, to no sandbox and `acceptEdits` (the
-//!   list above).
+//!   come first and refuse the launch (the list above).
 //! - `allowAppleEvents: false`: `open` and `osascript` can't launch or drive other apps. With
 //!   the Spotlight and Quick Look services outside the sandbox's Mach list, `mdls`, `mdfind` and
 //!   `qlmanage` fail too: the accepted breakages, which Claude is told of on macOS
@@ -86,7 +86,10 @@
 
 use std::path::{Path, PathBuf};
 
+use clauseo_protocol::ErrorCode;
 use serde_json::{Map, Value, json};
+
+use crate::error::Error;
 
 /// The hosts a sandboxed command may not reach even through Claude Code's proxy: loopback, where
 /// the browser's debugging port and agent-browser's daemon listen, and the any-address
@@ -99,8 +102,10 @@ pub(crate) const DENIED_DOMAINS: [&str; 6] =
 /// Claude Code expands it, and macOS's shared places where matters may be kept.
 pub(crate) const DENY_READ: [&str; 3] = ["~/", "/Volumes", "/Users/Shared"];
 
-/// The characters Claude Code reads as a pattern in a sandbox path that no escape makes literal.
-const WILDCARDS: [char; 2] = ['*', '?'];
+/// The characters Claude Code reads as a pattern in a sandbox path that no escape makes literal:
+/// a path holding one turns the sandbox off and refuses the launch ([`Off::Wildcard`]). The UI
+/// names the folder by the same set (`ui/app/src/room/folder-wildcard.ts`); change both.
+pub(crate) const WILDCARDS: [char; 2] = ['*', '?'];
 
 /// The OS a sandbox is built for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,7 +130,7 @@ impl SandboxOs {
 }
 
 /// Why a session gets no sandbox.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Off {
     /// Windows (see the module doc).
     Windows,
@@ -133,15 +138,48 @@ pub(crate) enum Off {
     NoTemp,
     /// A path to deny is not UTF-8.
     NotUtf8,
-    /// A path holds `*` or `?`.
-    Wildcard,
+    /// A path holds one of [`WILDCARDS`].
+    Wildcard(Wild),
+}
+
+/// Where a wildcard sits: the deepest folder name holding one, in the matter folder's own path
+/// when that holds one, else in the first path of the lists that does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Wild {
+    /// The folder's name, as the refusal's words name it (the UI finds it the same way).
+    pub(crate) folder: String,
+    /// Whether it is in the matter folder's own path, which the lawyer can rename.
+    pub(crate) in_matter: bool,
 }
 
 impl Off {
-    /// Whether a session with no sandbox for this reason runs in `acceptEdits`, not `auto`:
-    /// every reason but Windows, where no sandbox was meant to be (see the module doc).
-    pub(crate) fn holds_auto_back(self) -> bool {
-        self != Self::Windows
+    /// The launch refusal for this reason: none on Windows, where no sandbox was meant to be;
+    /// `matter.folder_wildcard` for a wildcard in the matter folder's path,
+    /// `agent.sandbox_wildcard` for one in another path (Clauseo's own folders, another
+    /// matter's), `agent.sandbox_unavailable` otherwise. The detail names no path.
+    pub(crate) fn refusal(&self) -> Option<Error> {
+        let (code, detail) = match self {
+            Self::Windows => return None,
+            Self::Wildcard(Wild {
+                in_matter: true, ..
+            }) => (
+                ErrorCode::MatterFolderWildcard,
+                "the matter folder's path holds * or ?, which Claude's sandbox cannot name",
+            ),
+            Self::Wildcard(_) => (
+                ErrorCode::AgentSandboxWildcard,
+                "a sandbox path outside the matter folder holds * or ?, which it cannot name",
+            ),
+            Self::NoTemp => (
+                ErrorCode::AgentSandboxUnavailable,
+                "Claude's short temp folder was not made, so it has no sandbox",
+            ),
+            Self::NotUtf8 => (
+                ErrorCode::AgentSandboxUnavailable,
+                "a folder Claude's sandbox must deny is not UTF-8",
+            ),
+        };
+        Some(Error::refused(code, detail))
     }
 }
 
@@ -208,20 +246,32 @@ pub(crate) struct SandboxPaths<'a> {
 const RUNTIME_PREFIX: &str = "clauseo-python-";
 
 impl ClaudeSandbox {
+    /// A Claude launch's sandbox for `paths` on `os`: none on Windows, else the sandbox or the
+    /// launch's refusal ([`ClaudeSandbox::for_os`], [`Off::refusal`]), never neither.
+    pub(crate) fn for_launch(
+        os: SandboxOs,
+        paths: &SandboxPaths<'_>,
+    ) -> Result<Option<Self>, Error> {
+        match Self::for_os(os, paths) {
+            Ok(sandbox) => Ok(Some(sandbox)),
+            Err(off) => off.refusal().map_or(Ok(None), Err),
+        }
+    }
+
     /// The sandbox for `paths` on `os`; none on Windows, without Claude's short temp folder,
-    /// when a path to deny is not UTF-8, or when any path holds `*` or `?` (one info line, no
-    /// path). A `[` is escaped ([`escape_brackets`]).
+    /// when a path to deny is not UTF-8, or when any path holds one of [`WILDCARDS`] (one warn
+    /// line each, naming only a wildcard's folder). A `[` is escaped ([`escape_brackets`]).
     pub(crate) fn for_os(os: SandboxOs, paths: &SandboxPaths<'_>) -> Result<Self, Off> {
         if os == SandboxOs::Windows {
             return Err(Off::Windows);
         }
         let Some(claude_tmp) = paths.claude_tmp else {
-            tracing::info!("Claude's sandbox is off: its temp folder was not made");
+            tracing::warn!("Claude's sandbox is off: its temp folder was not made; refused");
             return Err(Off::NoTemp);
         };
         let denied = paths.data.iter().chain(paths.other_matters);
         let Some(mut deny_read) = strict_texts(denied.map(PathBuf::as_path)) else {
-            tracing::info!("Claude's sandbox is off: a folder to deny is not UTF-8");
+            tracing::warn!("Claude's sandbox is off: a folder to deny is not UTF-8; refused");
             return Err(Off::NotUtf8);
         };
         deny_read.splice(0..0, DENY_READ.iter().map(|path| (*path).to_owned()));
@@ -233,9 +283,13 @@ impl ClaudeSandbox {
             allow_read: Self::allow_read(paths, claude_tmp),
             quiet: texts([paths.claude_home.join(SNAPSHOTS).as_path()]),
         };
-        if sandbox.has_wildcard() {
-            tracing::info!("Claude's sandbox is off: a sandbox path holds * or ?; acceptEdits");
-            return Err(Off::Wildcard);
+        if let Some(wild) = sandbox.wildcard(paths.matter) {
+            tracing::warn!(
+                folder = %wild.folder,
+                in_matter = wild.in_matter,
+                "Claude's sandbox is off: a sandbox path holds a wildcard; refused"
+            );
+            return Err(Off::Wildcard(wild));
         }
         let mut sandbox = sandbox.escaped(os);
         sandbox
@@ -267,18 +321,24 @@ impl ClaudeSandbox {
         }
     }
 
-    /// Whether any path in the lists holds one of [`WILDCARDS`].
-    fn has_wildcard(&self) -> bool {
-        [
+    /// Where a path in the lists holds one of [`WILDCARDS`], if one does: in `matter`'s own
+    /// path first ([`Wild`]).
+    fn wildcard(&self, matter: &Path) -> Option<Wild> {
+        let lists = [
             &self.allow_write,
             &self.deny_write,
             &self.deny_read,
             &self.allow_read,
             &self.quiet,
-        ]
-        .into_iter()
-        .flatten()
-        .any(|path| path.contains(WILDCARDS))
+        ];
+        let first = lists
+            .into_iter()
+            .flatten()
+            .find(|path| path.contains(WILDCARDS))?;
+        let matter = matter.to_str().filter(|text| text.contains(WILDCARDS));
+        let in_matter = matter.is_some();
+        let folder = wild_folder(matter.unwrap_or(first)).to_owned();
+        Some(Wild { folder, in_matter })
     }
 
     /// `filesystem.allowRead`: the writable folders, the browser's downloads, the skill packs,
@@ -361,6 +421,13 @@ fn tool_results(home: &Path, matter: &Path) -> Vec<String> {
     let key = crate::agent::data_fence::claude_project_key(matter);
     let base = format!("{}/projects/{key}/*/tool-results", escape_brackets(home));
     vec![base.clone(), format!("{base}/**")]
+}
+
+/// The deepest folder name in `path` that holds one of [`WILDCARDS`] (the whole path if none).
+pub(crate) fn wild_folder(path: &str) -> &str {
+    path.rsplit('/')
+        .find(|name| name.contains(WILDCARDS))
+        .unwrap_or(path)
 }
 
 /// `text` with each `[` as `[[]`, a glob class holding only `[`; a lone `]` is literal already

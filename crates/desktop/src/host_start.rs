@@ -197,7 +197,10 @@ pub(crate) fn host_config(effective: Effective) -> HostConfig {
     // With no path to this executable no guard hook goes; the permission check remains.
     match std::env::current_exe() {
         Ok(exe) => config.with_pre_write_guard(exe),
-        Err(_) => config,
+        Err(err) => {
+            tracing::warn!(%err, "no path to this executable: Claude launches get no guard hook");
+            config
+        }
     }
 }
 

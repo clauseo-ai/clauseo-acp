@@ -5,7 +5,8 @@
 // its error line when the open fails, with Show in folder beside it for a path too long for Word, or in a quiet line
 // under the note when Word opened the file in Protected View (until the next open or Undo). Focus follows the lock: to Try again when the lines come, back to Undo (or the
 // note) when they go. A stop macOS kept out of the matter's folder offers Open Privacy settings on the Mac
-// (privacy-settings.tsx). A folder Claude can't start in (matter.folder_backslash) is said by the matter's folder.
+// (privacy-settings.tsx). A folder Claude can't start in (matter.folder_backslash) is said by the matter's folder, as
+// is a folder Claude's protection can't name (matter.folder_wildcard).
 import { lazy, Suspense, use, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { ChangeNote } from "@clauseo/components/clauseo/change-note.tsx";
@@ -24,6 +25,7 @@ import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import { FolderPlaceContext } from "../folder-place.ts";
 import { backslashPlace } from "../folder-backslash.ts";
+import { wildcardName } from "../folder-wildcard.ts";
 import { useMatterFolder } from "../folder-support.ts";
 import { undoneRestoredOf, unversionedOf } from "../undone-marker.ts";
 import { toHostError } from "../../transport/host-transport.ts";
@@ -284,7 +286,8 @@ export function StepRow({
   const w = useWords();
   const plan = useAgentPlan();
   const { platform } = useDisplay();
-  // matter.folder_backslash's line names the folder above the matter's whose name has the backslash
+  // matter.folder_backslash's line names the folder above the matter's whose name has the backslash, and
+  // matter.folder_wildcard's the deepest folder whose name has a * or ?
   const folder = useMatterFolder();
   const line = sentNow ? null : stopLine(entry, plan);
   return (
@@ -301,7 +304,10 @@ export function StepRow({
         <p className={QUIET} data-code={line.code}>
           <Say>
             {line.kind === "error"
-              ? errorWords(w.lang, line.code, plan, backslashPlace(folder, platform))
+              ? errorWords(w.lang, line.code, plan, {
+                  ...backslashPlace(folder, platform),
+                  wildcard: wildcardName(folder),
+                })
               : th(w.lang, line.key, line.slots)}
           </Say>
         </p>

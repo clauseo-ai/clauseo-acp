@@ -1223,8 +1223,8 @@ this record and firm-it §8.
     with the earlier run's folders after a crash or a stop. It is in `allowWrite` and
     `allowRead`. Sandboxed commands' `TMPDIR` is made under it. The agent's own `TMPDIR`
     stays `<run>/tmp` (#930), which Claude Code itself uses.
-    A folder that can't be made gives the session no sandbox, and it runs in `acceptEdits`,
-    not `auto` (2026-11-11, `Off::holds_auto_back`).
+    A folder that can't be made gives the session no sandbox, and the launch is refused with
+    `agent.sandbox_unavailable` (2026-11-16, RC3 gate; it ran in `acceptEdits` before).
   - **Glob characters** (2026-11-11, security review). Claude Code 2.1.293 reads a sandbox
     path holding `*`, `?`, `[` or `]` as a pattern (`W4t`): unescaped, `Smith [2024]` would
     open `Smith 2` and not itself. A `[` is escaped as `[[]`, a class holding only `[` (a
@@ -1232,11 +1232,13 @@ this record and firm-it §8.
     allow only what it names, so each escaped allowed folder also goes in with `/**`. Every
     list reads globs on macOS; on Linux only `denyRead` and `allowRead` (it skips a glob write
     path), so the write lists stay as written there. `*` and `?` have no escape (`W4t`
-    rewrites them even inside a class): a path holding one gives the session **no sandbox,
-    and it runs in `acceptEdits`, not `auto`**, with no notice, so no command runs on the
-    classifier alone where the sandbox was meant to be (`Auto::NoSandbox`). A path to deny
-    that is not UTF-8 also gives no sandbox (one info line, no path), and `acceptEdits` too
-    since 2026-11-11 (`Off::holds_auto_back`). Not checked live on a Mac.
+    rewrites them even inside a class): a path holding one gives the session **no sandbox, and
+    the launch is refused** (2026-11-16, RC3 gate; before, it ran silently in `acceptEdits`):
+    `matter.folder_wildcard` when the matter folder's own path holds it (the words name the
+    deepest folder holding it, found by the UI from the folder's display), else
+    `agent.sandbox_wildcard`. One warn line names that folder. A path to deny that is not
+    UTF-8 also gives no sandbox and refuses with `agent.sandbox_unavailable`. The characters
+    are one constant (`sandbox::WILDCARDS`, mirrored in the UI). Not checked live on a Mac.
   - **On:** `enabled` and `autoAllowBashIfSandboxed`. Forced ask still sends
     `autoAllowBashIfSandboxed: false` after it, so a forced-ask session asks for every command,
     sandboxed or not.
@@ -1247,10 +1249,11 @@ this record and firm-it §8.
     sandbox that fails at run time fails the command instead of running it unsandboxed, and a
     Mac (or a Linux machine without bubblewrap) where the sandbox can't start at all ends Claude
     at start-up, so the session fails to launch instead of running with no sandbox: the
-    setting's own description. The host's own checks still come first and still fall back
-    before the launch to no sandbox and `acceptEdits` (`Auto::NoSandbox`): no short temp
-    folder, a path to deny that is not UTF-8, or a `*` or `?` in a path ("Glob
-    characters"). Not checked live on a Mac where Seatbelt can't start.
+    setting's own description. Claude Code's exit for it ("sandbox required but unavailable")
+    is `agent.sandbox_unavailable` (`agent/folder_access.rs`), not "can't read". The host's
+    own checks come first and refuse the launch (no short temp folder, a path to deny that is
+    not UTF-8, or a `*` or `?` in a path, "Glob characters"). Not checked live on a Mac where
+    Seatbelt can't start.
   - **Files:** `denyRead` holds:
     - the home (`~/`): other clients' files and `~/.ssh`;
     - each spelling of `<data>`, which `CLAUSEO_DATA_DIR` may put outside the home;

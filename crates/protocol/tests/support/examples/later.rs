@@ -159,6 +159,18 @@ fn agent_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentUnreachable,
             "the agent could not reach its service; probe class=refused via=direct status=0",
         ),
+        failed(
+            ErrorCode::MatterFolderWildcard,
+            "the matter folder's path holds * or ?, which Claude's sandbox cannot name",
+        ),
+        failed(
+            ErrorCode::AgentSandboxWildcard,
+            "a sandbox path outside the matter folder holds * or ?, which it cannot name",
+        ),
+        failed(
+            ErrorCode::AgentSandboxUnavailable,
+            "Claude's short temp folder was not made, so it has no sandbox",
+        ),
     ]
 }
 
