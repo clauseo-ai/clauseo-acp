@@ -38,7 +38,7 @@ use crate::agent::loads::browser::Switch;
 use crate::connectors::{RelaySession, Relays, TurnHandle};
 
 /// The token file's name in the session's run folder.
-pub(crate) const TOKEN_FILE: &str = "relay-token";
+pub(crate) const TOKEN_FILE: &str = crate::run_tokens::RELAY_TOKEN;
 
 /// What the launch prep made of the session's case law.
 #[derive(Debug, Clone, Default)]

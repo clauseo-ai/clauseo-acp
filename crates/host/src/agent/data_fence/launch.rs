@@ -96,15 +96,17 @@ pub(crate) struct LaunchDeny {
 }
 
 impl LaunchDeny {
-    /// The rules for `spellings` of `<data>` before the launch prep enumerates it: [`DENIED`]
-    /// and Claude's config folder's names (`claude_home::CLAUDE_HOME`).
+    /// The rules for `spellings` of `<data>` before the launch prep enumerates it: each run
+    /// folder's token files (`run/*/<name>`, `run_tokens::RUN_TOKEN_FILES`), [`DENIED`] and
+    /// Claude's config folder's names (`claude_home::CLAUDE_HOME`).
     pub(crate) fn fixed(spellings: Vec<PathBuf>) -> Self {
         let home = super::claude_home::CLAUDE_HOME
             .iter()
             .map(|name| format!("agents/claude-acp/home/{name}"));
-        let targets = DENIED
+        let targets = crate::run_tokens::RUN_TOKEN_FILES
             .iter()
-            .map(|target| (*target).to_owned())
+            .map(|name| format!("run/*/{name}"))
+            .chain(DENIED.iter().map(|target| (*target).to_owned()))
             .chain(home)
             .collect();
         let shared = SHARED.iter().map(|(place, _)| escape(place));

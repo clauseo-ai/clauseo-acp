@@ -9,6 +9,7 @@ use super::windows_shell_deny_rules;
 use crate::agent::data_fence::big_folder::{self, OWN_RUN, PREFIX_RUN, matter_id};
 use crate::agent::data_fence::{LaunchDeny, claude_deny_rules_on, claude_projects, launch_deny};
 use crate::pipeline::tests::support::TempDir;
+use crate::run_tokens::RUN_TOKEN_FILES;
 use crate::write;
 
 /// The VM's data folder and matter.
@@ -57,7 +58,9 @@ fn vm_launch(root: &Path, own: &str) -> LaunchDeny {
         "01a1d5be-5efa-73f6-a24b-dc90c01883d9-11",
     ] {
         files.push(format!("run/{run}/work/x.md"));
-        files.push(format!("run/{run}/relay-token"));
+        for token in RUN_TOKEN_FILES {
+            files.push(format!("run/{run}/{token}"));
+        }
     }
     let home = data.join("agents/claude-acp/home");
     let mut folders = vec![VM_FOLDER.to_owned()];
@@ -205,6 +208,7 @@ fn in_a_sixty_matter_folder_only_the_own_folders_pass() {
         format!("run/{PREFIX_RUN}/work/draft.md"),
         format!("run/{PREFIX_RUN}"),
         format!("run/{OWN_RUN}/relay-token"),
+        format!("run/{OWN_RUN}/versions-token"),
         "launch-settings/other-run.json".to_owned(),
         "launch-settings".to_owned(),
         "run".to_owned(),
@@ -351,6 +355,10 @@ fn a_dot_dot_after_the_data_folder_is_denied() {
                 at(&format!("run/{OWN_RUN}/../{PREFIX_RUN}/relay-token"))
             ),
             format!(
+                r#"type "{}""#,
+                at(&format!("run/{OWN_RUN}/../{PREFIX_RUN}/versions-token"))
+            ),
+            format!(
                 "cat {}",
                 at(&format!("agent-state/{own}/notes/../../x/notes/n.md"))
             ),
@@ -375,6 +383,10 @@ fn a_dot_dot_after_the_data_folder_is_denied() {
             ),
             format!(
                 r"cat {}\..\{PREFIX_RUN}\relay-token",
+                at(&format!("run/{OWN_RUN}"))
+            ),
+            format!(
+                r"cat {}\..\{PREFIX_RUN}\versions-token",
                 at(&format!("run/{OWN_RUN}"))
             ),
         ] {

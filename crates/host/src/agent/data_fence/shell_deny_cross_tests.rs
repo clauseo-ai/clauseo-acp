@@ -361,6 +361,7 @@ fn a_configured_folders_spellings_are_denied_and_its_residuals_listed() {
         r"type D:\FirmData\Clauseo/logs\host.log",
         r"type D:\FirmData\Clauseo/launch-settings\own.json",
         r"type D:\FirmData\Clauseo/run\01a1d5be-5efa-73f6-a24b-dc90c01883d9-10\relay-token",
+        r"type D:\FirmData\Clauseo/run\01a1d5be-5efa-73f6-a24b-dc90c01883d9-10\versions-token",
         r"type D:\FirmData\Clauseo/matters\x",
         r"copy /y evil.exe D:\FirmData\Clauseo/tools\agent-browser\agent-browser",
         r"type D:\FirmData\Clauseo.\settings.json",

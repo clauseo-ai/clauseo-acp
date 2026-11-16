@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{LaunchDeny, claude_projects, launch_deny};
+use crate::run_tokens::RUN_TOKEN_FILES;
 use crate::write;
 
 /// How many matters the folder holds.
@@ -57,7 +58,9 @@ pub(crate) fn big_with(root: &Path, matters: usize, project_count: usize) -> Big
             format!("01a1d5c4-90d5-7548-96d0-4a161074492{n}-{n}")
         };
         files.push(format!("run/{name}/work/draft.md"));
-        files.push(format!("run/{name}/relay-token"));
+        for token in RUN_TOKEN_FILES {
+            files.push(format!("run/{name}/{token}"));
+        }
     }
     big_rest(data, files, matters, project_count)
 }
@@ -91,12 +94,10 @@ const COMMON: [&str; 23] = [
 
 /// The rest of [`big_with`]: the own run, the matters and projects, written and enumerated.
 fn big_rest(data: PathBuf, mut files: Vec<String>, matters: usize, project_count: usize) -> Big {
-    for own in [
-        "work/reply.md",
-        "relay-token",
-        "skill-packs/p/x",
-        "clauseo-env.sh",
-    ] {
+    for own in ["work/reply.md", "skill-packs/p/x", "clauseo-env.sh"]
+        .into_iter()
+        .chain(RUN_TOKEN_FILES)
+    {
         files.push(format!("run/{OWN_RUN}/{own}"));
     }
     let home = data.join("agents/claude-acp/home");

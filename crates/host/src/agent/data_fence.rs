@@ -76,11 +76,13 @@ pub(crate) use variables::launch_vars;
 /// its memory; not the whole of `projects`, which also holds the large tool results the model
 /// must Read back, `launch.rs`); the rest of that home is [`claude_home::CLAUDE_HOME`]. Not
 /// Claude's home whole: Claude Code writes its plan note to `plans` there with its own Edit
-/// tool, and a deny rule has no exceptions. And in every run folder, the own one too, the
-/// case-law relay's token file (R24): `clauseo-mcp` reads it itself, so Claude's tools never
-/// need it, and a token read through them would land in the transcript; the session proxy's
-/// password file (`proxy-secret`, ADR 0053), for the same reasons (the browser guard reads and
-/// deletes it); and the shell
+/// tool, and a deny rule has no exceptions. And in every run folder, the own one too, each
+/// token file, `run/*/<name>` for each of `run_tokens::RUN_TOKEN_FILES` (the case-law relay's,
+/// R24, and the version-history listener's), added from that list ahead of these by
+/// [`LaunchDeny::fixed`]: `clauseo-mcp` reads it itself, so Claude's tools never need it, and
+/// a token read through them would land in the transcript; the session proxy's password file
+/// (`proxy-secret`, ADR 0053), for the same reasons (the browser guard reads and deletes it);
+/// and the shell
 /// browser's config file
 /// (`browser::SESSION_CONFIG`), which agent-browser reads itself: an edit to it could set what
 /// the `agent-browser` deny rules refuse as flags (`--profile`, `--config`).
@@ -89,8 +91,7 @@ pub(crate) use variables::launch_vars;
 /// session's Claude settings file (`agent::launch_settings`), its own too: Claude Code reads
 /// it itself at its start, so its tools never need it, and it holds every session's rules.
 /// And Claude's config folder's names (`claude_home::CLAUDE_HOME`, added by the launch).
-pub(crate) const DENIED: [&str; 32] = [
-    "run/*/relay-token",
+pub(crate) const DENIED: [&str; 31] = [
     "run/*/proxy-secret",
     "run/*/agent-browser/config.json",
     "skill-packs/**",

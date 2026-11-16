@@ -533,6 +533,7 @@ fn the_siblings_of_a_growing_folder_go_in_groups() {
         .iter()
         .map(String::as_str)
         .filter(|target| target.starts_with("run/") && !DENIED.contains(target))
+        .filter(|target| !target.starts_with("run/*/"))
         .collect();
     assert_eq!(
         run,

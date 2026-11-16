@@ -470,6 +470,10 @@ fn a_share_path_and_a_star_are_escaped() {
         rules.contains(&r"Bash(*C:\d\run*\relay-token*)".to_owned()),
         "{rules:#?}"
     );
+    assert!(
+        rules.contains(&r"Bash(*C:\d\run*\versions-token*)".to_owned()),
+        "{rules:#?}"
+    );
     assert!(!denied_by(
         &rules,
         "Bash",

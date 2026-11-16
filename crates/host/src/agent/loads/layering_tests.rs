@@ -396,7 +396,9 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
         assert!(
             !rules.iter().any(|rule| {
                 (rule.contains("/run/")
-                    && !rule.ends_with("/run/*/relay-token)")
+                    && !crate::run_tokens::RUN_TOKEN_FILES
+                        .iter()
+                        .any(|token| rule.ends_with(&format!("/run/*/{token})")))
                     && !rule.ends_with("/run/*/proxy-secret)")
                     && !rule.ends_with("/run/*/agent-browser/config.json)"))
                     || rule.contains("/agent-state")

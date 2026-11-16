@@ -336,6 +336,7 @@ fn siblings(ids: &[String]) -> Vec<Vec<String>> {
         names(format!(r"run\{LAPTOP_RUN}0\work")),
         names(format!(r"run\{LAPTOP_RUN}\work2")),
         names(format!(r"run\{LAPTOP_RUN}\relay-token")),
+        names(format!(r"run\{LAPTOP_RUN}\versions-token")),
         names(format!(r"run\{LAPTOP_RUN}")),
         names(r"run\01a1d673-4d5a-776d-9061-201035c7d75e-2\work".to_owned()),
     ]
@@ -408,6 +409,7 @@ fn every_deny_still_wins_beside_the_allow() {
         names(clauseo_settings::SETTINGS_FILE),
         names(r"logs\host.log"),
         names(&format!(r"run\{LAPTOP_RUN}\relay-token")),
+        names(&format!(r"run\{LAPTOP_RUN}\versions-token")),
         names(r"run\01a1d672-1c0e-7d3b-8e11-5a2b9c0d4e6f-2\x"),
         names(r"run\01a1d673-4d5a-776d-9061-201035c7d75e-2\work"),
     ];
@@ -448,6 +450,7 @@ fn every_deny_still_wins_beside_the_allow() {
     for command in [
         format!(r"ls {n}\..\..\{}\notes", ids[0]),
         format!(r"cat {w}\..\..\x\relay-token"),
+        format!(r"cat {w}\..\..\x\versions-token"),
     ] {
         assert_eq!(
             verdict(&deny, &allow, "Bash", &command),

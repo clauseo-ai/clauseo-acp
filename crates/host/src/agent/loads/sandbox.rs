@@ -71,8 +71,8 @@
 //!   what a sandboxed command needs, with the `PATH` file Claude Code reads into each command
 //!   (`<run>/clauseo-env.sh`, `agent::shell_path`), the trust roots file on macOS
 //!   (`<data>/tls/roots.pem`, [`super::tls_roots`], the file alone) and each folder first on
-//!   `PATH`. Not the whole run folder: it holds the case-law relay's token and a browser's
-//!   profile (the visited sites' cookies). Of Claude's own project
+//!   `PATH`. Not the whole run folder: it holds the token files (`run_tokens.rs`) and a
+//!   browser's profile (the visited sites' cookies). Of Claude's own project
 //!   folder only `<home>/projects/<key>/*/tool-results`, where `WebFetch` keeps the files it
 //!   fetches (a PDF among them): never the transcripts or the memory beside them.
 //! - `ignoreViolations`: Claude Code's shell snapshot folder in its home, which the data fence
