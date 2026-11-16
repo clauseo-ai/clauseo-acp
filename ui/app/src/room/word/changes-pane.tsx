@@ -62,7 +62,7 @@ export function ChangesPane({
   const file = baseName(path);
   const line =
     s.refused !== null
-      ? { code: s.refused.code, retry: s.refused.again !== null }
+      ? { ...s.refused, retry: s.refused.again !== null }
       : s.unread !== null
         ? { code: s.unread, retry: false }
         : null;

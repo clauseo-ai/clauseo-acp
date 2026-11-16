@@ -9,6 +9,7 @@ import { internalError, toHostError, type HostTransport } from "../../transport/
 import type {
   CheckpointId,
   DocVersion,
+  HostError,
   HostQuery,
   MatterId,
   QueryResult,
@@ -45,8 +46,10 @@ export type RevisionsView = {
   unread: string | null;
   /** A decision or an undo is on its way. */
   sending: boolean;
-  /** What the last decision or undo was refused with, and the decision Try again sends again, where it offers one. */
-  refused: { code: string; again: Decision | null } | null;
+  /** What the last decision or undo was refused with (its code, and the files, refusal and write failure
+   * matter.file_refused's and matter.file_write_failed's lines name), and the decision Try again sends again, where it
+   * offers one. */
+  refused: (Refused & { again: Decision | null }) | null;
   /** The decision a file Word holds kept back: the lock's dialog is open while it is set. */
   locked: Decision | null;
   /** The dialog's act, kept past its closing, so its words don't change as it fades. */
@@ -75,6 +78,15 @@ function seen(last: Decided, version: DocVersion): Decided | null {
 
 const LOCKED = "matter.file_locked";
 const EDIT_FAILED = "word.edit_failed";
+
+type Refused = Pick<HostError, "code" | "files" | "refusal" | "write_failure">;
+/** A refusal as the panel's line reads it: its code, and the files, refusal and write failure it names. */
+const refusedOf = ({ code, files, refusal, write_failure }: HostError): Refused => ({
+  code,
+  ...(files && { files }),
+  ...(refusal && { refusal }),
+  ...(write_failure && { write_failure }),
+});
 
 type ListRevisionsQuery = Extract<HostQuery, { list_revisions: unknown }>;
 
@@ -198,9 +210,14 @@ export class Revisions {
       });
       await this.read();
     } catch (error) {
-      const { code } = toHostError(error);
+      const refused = refusedOf(toHostError(error));
+      const { code } = refused;
       if (code === LOCKED) this.#set({ locked: d, lockAct: d.decision });
-      else this.#set({ locked: null, refused: { code, again: code === EDIT_FAILED ? d : null } });
+      else
+        this.#set({
+          locked: null,
+          refused: { ...refused, again: code === EDIT_FAILED ? d : null },
+        });
       // whatever refused it, the panel shows the list as the file is now
       await this.read();
     } finally {
@@ -227,7 +244,7 @@ export class Revisions {
       this.#set({ last: null });
       await this.read();
     } catch (error) {
-      this.#set({ refused: { code: toHostError(error).code, again: null } });
+      this.#set({ refused: { ...refusedOf(toHostError(error)), again: null } });
       await this.read();
     } finally {
       this.#set({ sending: false });

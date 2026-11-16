@@ -6,8 +6,7 @@
 // only the host's answers, the view store's flushes and the lawyer's acts change it: no timer, no clock at rest.
 import type { ViewStore } from "../../store/store.ts";
 import type { StreamView } from "../../store/view.ts";
-import type { HostTransport } from "../../transport/host-transport.ts";
-import { toHostError } from "../../transport/host-transport.ts";
+import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type {
   FileChoice,
   HostCommand,
@@ -61,8 +60,9 @@ import { lookAt, newestUndo, timelineOf, undoable, type VersionMeta } from "./ti
 export type { Ask, Done, Look, Snapshot, Unsaved };
 
 type UndoAsk = Extract<Ask, { act: "undo" }>;
-/** A refusal: its code, the files the host names as held (matter.file_locked), and whether the dialog is still open. */
-type Refusal = Pick<HostError, "code" | "files"> & { kind: "refused"; current: boolean };
+/** A refusal: the host's error (its code, the files it names, its refusal or write failure), and whether the dialog is
+ * still open. */
+type Refusal = HostError & { kind: "refused"; current: boolean };
 type RestoreAsk = Extract<Ask, { act: "restore" }>;
 
 export class VersionsController {
@@ -357,10 +357,10 @@ export class VersionsController {
   ): Promise<RestorePreview | null> =>
     previewRestore(this.#transport, this.matter, id, undoes, file);
 
-  /** A refusal's code, kept with what a clash names for its words (file: the one file being restored). */
-  #code(e: Pick<HostError, "code" | "files">, file: string | null): string {
+  /** A refusal, kept with what a clash names for its words (file: the one file being restored). */
+  #noted<E extends Pick<HostError, "code" | "files">>(e: E, file: string | null): E {
     this.#snap = { ...this.#snap, clash: clashOf(e, file) };
-    return e.code;
+    return e;
   }
 
   /** Opens the restore dialog for a version, with what restoring it would write now; undoes: the restore this one
@@ -382,7 +382,7 @@ export class VersionsController {
       });
     } catch (e) {
       const ask = await refusedPreview(id, undoes, file, toHostError(e), again);
-      if (asked === this.#asked) await this.#refused(this.#code(toHostError(e), file), () => ask);
+      if (asked === this.#asked) await this.#refused(this.#noted(toHostError(e), file), () => ask);
     }
   }
 
@@ -404,7 +404,7 @@ export class VersionsController {
         const now = this.#snap.ask;
         if (asked !== this.#asked || now?.act !== "restore" || now.stage !== "confirm") return;
         if (now.id === ask.id)
-          this.#set({ ask: { ...now, failed: this.#code(toHostError(error), now.file) } });
+          this.#set({ ask: { ...now, failed: this.#noted(toHostError(error), now.file).code } });
       },
     );
   }
@@ -469,7 +469,7 @@ export class VersionsController {
       // documents; otherwise the dialog keeps the lawyer's choices, says why, and offers Try again
       const word = wordLocks(outcome.code, lockedFiles(outcome, papers));
       await this.#refused(
-        outcome.code,
+        outcome,
         outcome.current
           ? () =>
               word === null
@@ -503,11 +503,13 @@ export class VersionsController {
     const clash = outcome.kind === "refused" && outcome.code === "matter.file_folder_clash";
     if (clash && outcome.current)
       // the file can't come back as things stand: the dialog says why, and Try again once it's renamed or moved
-      return this.#set({ ask: { ...ask, stage: "confirm", failed: this.#code(outcome, file) } });
+      return this.#set({
+        ask: { ...ask, stage: "confirm", failed: this.#noted(outcome, file).code },
+      });
     if (outcome.kind === "refused") {
       const again = (p: string) => this.#preview(p, undoes, file);
       await this.#refused(
-        this.#code(outcome, file),
+        this.#noted(outcome, file),
         outcome.current ? () => lockedRestore(ask, outcome, again) : undefined,
       );
       return;
@@ -544,16 +546,16 @@ export class VersionsController {
       this.#set({ failed: null });
       return outcome;
     } catch (e) {
-      const { code, files } = toHostError(e);
-      return { kind: "refused", code, ...(files && { files }), current: asked === this.#asked };
+      return { ...toHostError(e), kind: "refused", current: asked === this.#asked };
     } finally {
       this.#acting = false;
       this.#set({}); // busy changed, though nothing else may have: the room's New conversation hears it
     }
   }
 
-  /** Says why the host refused; locked: the dialog to show when a program holds a file. */
-  async #refused(code: string, locked?: () => Ask | null | Promise<Ask | null>): Promise<void> {
+  /** Says why the host refused (matter.file_refused by its files); locked: the dialog for a file a program holds. */
+  async #refused(error: HostError, locked?: () => Ask | null | Promise<Ask | null>) {
+    const { code } = error;
     if (code === "matter.turn_running" || code === "thread.turn_running") {
       // an answer runs after all: Restore and Undo wait, and the conversations' statuses are read again
       this.#refusedAt = { list: this.#talks.next, rests: this.#talks.rests };
@@ -569,7 +571,7 @@ export class VersionsController {
       if (asked === this.#asked) this.#set({ failed: code, ask });
       return;
     }
-    this.#set({ failed: code, ask: null });
+    this.#set({ failed: code, failedOf: error, ask: null });
   }
 
   /** Try again, from the dialog that says a program holds a file, or that the act failed. */
@@ -589,7 +591,7 @@ export class VersionsController {
       preview = await this.#preview(ask.id, ask.undoes, ask.file);
     } catch (e) {
       if (asked === this.#asked)
-        await this.#refused(this.#code(toHostError(e), ask.file), () => ask);
+        await this.#refused(this.#noted(toHostError(e), ask.file), () => ask);
       return;
     }
     if (asked !== this.#asked || preview === null) return;

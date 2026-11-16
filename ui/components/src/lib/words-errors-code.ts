@@ -128,4 +128,6 @@ export type ErrorCode =
   | "word.too_large"
   | "matter.file_folder_clash"
   | "agent.home_failed"
+  | "matter.file_refused"
+  | "matter.file_write_failed"
   | "unknown";

@@ -114,7 +114,22 @@ test("U3's ids are written as they are: one per error code but U3-07's and Versi
     )
     // agent.unreachable's entry came after U3 closed to new ids: it is UC-530 (registry-offline.tsx)
     .filter(([code]) => code !== "agent.unreachable")
-    .map(([code]) => `U3-err-${code}`);
+    // matter.file_refused's nine sentences each have their own: "U3-err-matter.file_refused.<reach>.<cause>", and
+    // many.mixed; matter.file_write_failed's three too: "U3-err-matter.file_write_failed.<case>"
+    .flatMap(([code]) =>
+      code === "matter.file_refused"
+        ? [
+            ...["only", "one", "many"].flatMap((reach) =>
+              ["permissions", "second_name", "saved_copy"].map(
+                (cause) => `U3-err-${code}.${reach}.${cause}`,
+              ),
+            ),
+            `U3-err-${code}.many.mixed`,
+          ]
+        : code === "matter.file_write_failed"
+          ? ["only.put_back", "others.put_back", "damaged"].map((c) => `U3-err-${code}.${c}`)
+          : [`U3-err-${code}`],
+    );
   // agent.program_missing's and agent.program_blocked's agent and Mac lines are U3-err-<code>.<variant>
   // (registry-program.tsx), after the codes' own; agent.home_failed's lines per plan take its own id with the plan's
   // suffix (registry-home-failed.tsx)

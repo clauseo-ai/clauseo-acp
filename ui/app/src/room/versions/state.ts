@@ -4,6 +4,7 @@ import type {
   CommandOutcome,
   FileChange,
   FileChoice,
+  HostError,
   RestorePreview,
   SkippedFile,
   StepEntry,
@@ -181,6 +182,9 @@ export type Snapshot = {
   failed: string | null;
   /** What the last matter.file_folder_clash refusal named, for its words; null when it named nothing. */
   clash: Clash | null;
+  /** The files, refusal and write failure of that refusal, read for matter.file_refused's and
+   * matter.file_write_failed's words (failedLine); stale for other codes. */
+  failedOf?: Pick<HostError, "files" | "refusal" | "write_failure">;
   unsaved: Unsaved | null;
   /** Comparing: the files that differ between the version and the folder now, null while they're asked for. */
   compare: { id: string; changes: readonly FileChange[] | null } | null;

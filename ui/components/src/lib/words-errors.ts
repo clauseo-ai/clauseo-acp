@@ -8,6 +8,8 @@ import type { ErrorCode } from "./words-errors-code.ts";
 import { wordsOf } from "./words-core.ts";
 import { BACKSLASH, backslashKey, byAgent, type BackslashPlace } from "./words-errors-backslash.ts";
 import { PROGRAM_BLOCKED, PROGRAM_MAC, PROGRAM_MISSING } from "./words-errors-program.ts";
+import { REFUSED, refusedKey, type RefusedDetail } from "./words-errors-refused.ts";
+import { WRITTEN, writtenKey } from "./words-errors-written.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
 import type { VersionKey } from "./words-versions.ts";
@@ -86,6 +88,12 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   "matter.codex_folder":
     "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.",
   "matter.file_locked": "A paper is open in another program. Close it, then try again.",
+  // the folder refused a change to a file; its line is picked from the error's files and refusal (errorWordsOf,
+  // words-errors-refused.ts). Draft English (Rohan to approve); the Hindi is to come
+  "matter.file_refused": REFUSED.only.permissions,
+  // writing a file in place stopped partway; its line is picked from the error's files and write failure (errorWordsOf,
+  // words-errors-written.ts). Draft English (Rohan to approve); the Hindi is to come
+  "matter.file_write_failed": WRITTEN.damaged,
   "matter.turn_running": "Wait for the answer to finish first.",
   // folder PR 2 (approved 2026-11-11): each folder refusal says its reason; a folder nested with a matter, here where
   // no name is at hand, and the rare folder_is_matter take the line of a folder Clauseo can't make a matter of
@@ -483,9 +491,37 @@ export function errorWords(
     const { key, name } = byAgent(mac, agent);
     return own(lang, key as keyof typeof HI, name === undefined ? undefined : { name });
   }
-  const known = Object.hasOwn(ERROR_WORDS, code) ? (code as WordedCode) : "unknown";
+  // matter.file_refused and matter.file_write_failed name their file: with no error to name it from, each reads as
+  // internal does (errorWordsOf)
+  const known =
+    Object.hasOwn(ERROR_WORDS, code) && !NAMES_FILE.has(code) ? (code as WordedCode) : "unknown";
   const { key, name } = plannedKey(known, agent);
   return name === undefined || key === STOPPED || isMark(key)
     ? errorSentence(lang, key)
     : own(lang, key, { name });
+}
+
+/** The codes whose line names a file from the whole error (errorWordsOf). */
+const NAMES_FILE: ReadonlySet<string> = new Set([
+  "matter.file_refused",
+  "matter.file_write_failed",
+]);
+
+/** A host error's sentence in the language, from the whole error: matter.file_refused's is picked from its files and
+ * refusal (refusedKey), matter.file_write_failed's from its files and write failure (writtenKey); any other code's,
+ * and either's when it names no file, is errorWords'. */
+export function errorWordsOf(
+  lang: Lang,
+  error: { code: string } & RefusedDetail,
+  agent?: AgentName,
+  place?: BackslashPlace,
+): string {
+  const refused =
+    error.code === "matter.file_refused"
+      ? refusedKey(error)
+      : error.code === "matter.file_write_failed"
+        ? writtenKey(error)
+        : null;
+  if (refused === null) return errorWords(lang, error.code, agent, place);
+  return own(lang, refused.key as keyof typeof HI, refused.slots);
 }

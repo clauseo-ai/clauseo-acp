@@ -223,3 +223,69 @@ test("Word holding a file: the dialog names it with Try again, the page says why
   expect(document.body.textContent).not.toContain(errorWords("en", "matter.file_locked"));
   expect(document.body.textContent).toMatch(/Restored to .+ today\. 2 documents changed\./);
 });
+
+test("a restore the folder refused for a file says which, by the error's files and refusal, and the dialog closes", async () => {
+  h = await mountVersions(VERSIONS, STEPS, {
+    query: answering({
+      preview_restore: {
+        restore_preview: {
+          changes: [file("brief.txt"), file("notes.docx")],
+          added_since: [],
+          kept: [],
+          locked: [],
+        },
+      },
+    }),
+    dispatch: () => {
+      throw {
+        code: "matter.file_refused",
+        message: "C:\\Matters\\Deeds\\notes.docx: access denied",
+        retryable: true,
+        files: ["Deeds/notes.docx"],
+        refusal: { because: "second_name", of: 2 },
+      };
+    },
+  });
+  await h.openVersions();
+  await lookAt(h, "cp2");
+  await h.click(h.one("version-restore"));
+  await h.click(h.one("dialog-confirm"));
+  expect(dialog()).toBeNull();
+  expect(document.body.textContent).toContain(
+    "Clauseo couldn't change \u2068notes.docx\u2069 because the same file also appears somewhere else on this computer. Everything else was done.",
+  );
+  expect(document.body.textContent).not.toContain("access denied");
+});
+
+test("a restore stopped partway says so by the error's file and write failure, never the host's message", async () => {
+  h = await mountVersions(VERSIONS, STEPS, {
+    query: answering({
+      preview_restore: {
+        restore_preview: {
+          changes: [file("brief.txt"), file("notes.docx")],
+          added_since: [],
+          kept: [],
+          locked: [],
+        },
+      },
+    }),
+    dispatch: () => {
+      throw {
+        code: "matter.file_write_failed",
+        message: "C:\\Matters\\Deeds\\notes.docx: write failed",
+        retryable: true,
+        files: ["Deeds/notes.docx"],
+        write_failure: { put_back: true, of: 2 },
+      };
+    },
+  });
+  await h.openVersions();
+  await lookAt(h, "cp2");
+  await h.click(h.one("version-restore"));
+  await h.click(h.one("dialog-confirm"));
+  expect(dialog()).toBeNull();
+  expect(document.body.textContent).toContain(
+    "Clauseo couldn't finish changing \u2068notes.docx\u2069, so it put that file back as it was. It may already have changed other papers. To put them back, restore the version from just before this in Versions.",
+  );
+  expect(document.body.textContent).not.toContain("write failed");
+});
