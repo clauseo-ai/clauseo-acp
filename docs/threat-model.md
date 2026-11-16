@@ -284,3 +284,41 @@ lawyer's documents somewhere.
   closed; `designed`: the host raising its open-file limit at start (R17)
 - `built`: A blocked domain becomes a denial (rate-capped per launch); `designed`: the denial
   event and an "Allow this site?" card that opens a native dialog
+
+## Claude's shell network
+
+**What an attacker controls.** A Bash command Claude runs, steered by a prompt injection in a
+document, aimed at sending the lawyer's documents to a site of the attacker's choosing.
+
+**What stops them.**
+
+- `built` (macOS, Linux): Claude Code's sandbox sends each sandboxed command's traffic through
+  its own proxy, which lets through without asking only the seeded legal sites Claude may also
+  fetch unasked, plus the hosts the shell needs (empty until stage C's census)
+  (`agent/loads/sandbox_network.rs`, [0065](decisions/0065-claude-shell-network.md)). It was
+  every host. Each entry matches its host exactly, the same reach as the seeded
+  `WebFetch(domain:…)` rules. Loopback and the any-address stay denied whatever the list says
+- `built` (macOS, Linux): In `auto`, the mode a Claude session launches in, any other host
+  is refused without asking (`network.strictAllowlist`), and the matter's kept sites at launch
+  are listed too, so a site the lawyer removed works until the next conversation. Without
+  strict, Claude Code would send an unlisted host from the shell to Anthropic's classifier, never
+  to a card, the same as an unlisted `WebFetch` (which strict does not gate: an unlisted fetch
+  in `auto` is still the classifier's, and fails closed when it is unavailable). A conversation
+  launched in `auto` keeps strict after a switch to forced ask until it is launched again
+- `built` (macOS, Linux): In forced ask an unlisted host is a card per site, and one Yes covers
+  that host, on every port and path, for the rest of the session; a kept site's card is
+  answered by the host, so a Remove acts at once
+- `built` (macOS, Linux): The matter folder's `.claude/settings.json` and
+  `.claude/settings.local.json` cannot widen the list: Claude Code loads only the user settings
+  (`settingSources: ["user"]`), and the launch's `--settings` sets
+  `allowUnsandboxedCommands: false`, under which project settings' `allowedDomains` and
+  `WebFetch(domain:…)` allow rules are ignored anyway. Nothing of Clauseo's writes a settings
+  file into a client's folder: "Always for this matter" is kept by the host
+  ([0063](decisions/0063-always-for-this-matter.md)), and Claude Code's sandbox denies writes to
+  those two files. Gap: the user settings do merge in. For a Claude agent with a kind they are
+  Clauseo's own home for it; an agent with no kind reads the lawyer's own `~/.claude`, whose
+  `sandbox.network.allowedDomains` and `WebFetch(domain:…)` allow rules widen the list
+- Windows: Claude has no sandbox there, so a shell command's network is judged by Anthropic's
+  classifier alone. The host's Windows shell scan adds a belt: URL tokens and network verbs in a
+  command are checked against the same list, and a match outside it asks. On Windows the check
+  of a command's text is advisory, not a fence

@@ -29,6 +29,13 @@ mod profile_keys_tests;
 #[cfg(test)]
 mod profile_tests;
 pub(crate) mod sandbox;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "sandbox.rs takes its list in the next commit")
+)]
+pub(crate) mod sandbox_network;
+#[cfg(test)]
+mod sandbox_network_tests;
 #[cfg(test)]
 mod sandbox_tests;
 pub(crate) mod subagents;
