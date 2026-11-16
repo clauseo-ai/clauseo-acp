@@ -344,6 +344,8 @@ crates/host/src/config/wiring/stetdoc.rs HostConfig clippy::multiple_inherent_im
 crates/host/src/config/mcp.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/config/idle.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/agent/loads/lawyer.rs server_path clippy::disallowed_methods
+# Always for this matter (0063): a kept command's program is found by walking the agent's own
+# PATH, as its launch set it (std::env::split_paths), and checked by real path inside the matter.
 crates/host/src/agent/always/reach.rs first_on clippy::disallowed_methods
 crates/host/src/actor/query.rs query clippy::too_many_lines
 crates/host/src/actor/query/blackline/parse/tests/partial.rs joining_wrapped_lines_is_linear clippy::disallowed_methods
