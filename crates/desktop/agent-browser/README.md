@@ -2,9 +2,8 @@
 
 The desktop bundles agent-browser as a sidecar (ADR 0029, "Bundling (desktop)"). macOS and
 Windows take our build: upstream's source at a pinned commit, plus the patches in `patches/`,
-built by our own workflow. Linux keeps upstream's release binary for now: it is used for
-development and CI only, and the stream server is still on there. This folder holds the patches;
-the pin is `crates/desktop/agent-browser.toml`.
+built by our own workflow. Linux keeps upstream's release binary for now (see below). This
+folder holds the patches; the pin is `crates/desktop/agent-browser.toml`.
 
 ## Upstream
 
@@ -91,7 +90,13 @@ one. `agent-browser-build.mjs` refuses the patched source unless its `cli/Cargo.
 `cli/Cargo.lock` both say the version the pin's `patched_tag` names, so a `-clauseo.2` rebuild
 cannot report `.1`.
 
-Linux keeps upstream's binary for now: dev and CI only, the stream server still on there.
+Linux keeps upstream's binary for now. release.yml builds a tier-2 Linux release (release.yml:468)
+and puts upstream's agent-browser inside the shipped .deb (measured at release.yml:842ff). So a
+Linux build today carries upstream's binary, whose stream server is on: an unauthenticated
+loopback listener that can drive the browser, and the browser guard lets it run (crates/mcp
+env.rs:43-48). No Linux release ships that listener: the launch build turns the browser off on
+Linux (PR browser-off-linux) until our patched Linux binary, release
+agent-browser-v0.41.1-clauseo.2 (Linux x86_64 only), is pinned.
 
 ## Checking that the patches apply
 
@@ -120,7 +125,8 @@ Each target builds on its own runner: x86_64 Windows on `windows-2025`, ARM64 Wi
 `cargo build --release --locked` in `cli/`, then the patched source's own tests
 (`cargo test --locked`; on Windows these include the pipe's restricted-token test, the session
 key tests and the hardening tests). Failed tests still fail the leg, so nothing is published,
-but the binary is written first, for later jobs to test. The build runs
+but the binary is written first, for later jobs to test. The tests exercise the test-profile
+build, not the released binary. The build runs
 with rust-toolchain.toml's toolchain, path remaps and `SOURCE_DATE_EPOCH` set to the commit's
 time, plus on Windows `+crt-static` (no VC++ runtime DLL imports; the leg checks with
 `.github/scripts/pe-crt-imports.mjs`) and `/Brepro`. Each leg uploads the binary and its build
