@@ -93,3 +93,40 @@ fn the_claude_home_is_forced_over_an_inherited_and_a_settings_config_dir() {
     );
     assert!(spec.env().get(OsStr::new("CLAUDE_CONFIG_DIR")).is_none());
 }
+
+/// Every read keeps Claude Code's scheduler off and adds no repository status, whatever the
+/// entry or the inherited environment say, as the host's Claude launches do.
+#[test]
+fn every_read_keeps_the_scheduler_off() {
+    let scratch = Scratch::new("claude-prepare-cron");
+    let script = scratch.file(CLAUDE_SCRIPT, "");
+    scratch.file(CLAUDE_SDK, SDK_PACKAGE);
+    let launch = AgentLaunch {
+        command: node(),
+        args: vec![script.to_string_lossy().into_owned()],
+        env: BTreeMap::from([("claude_code_disable_cron".to_owned(), "0".to_owned())]),
+    };
+    let run_dir = scratch.path("data/limits/run");
+    let inherited = [(
+        OsString::from("CLAUDE_CODE_DISABLE_CRON"),
+        OsString::from(""),
+    )];
+    let spec = prepare(&launch, &run_dir, None, inherited.into_iter()).unwrap();
+    let named: Vec<_> = spec
+        .env()
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("CLAUDE_CODE_DISABLE_CRON"))
+        .collect();
+    assert_eq!(
+        named,
+        [(
+            &OsString::from("CLAUDE_CODE_DISABLE_CRON"),
+            &OsString::from("1")
+        )]
+    );
+    assert_eq!(
+        spec.env()
+            .get(OsStr::new("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS")),
+        Some(&OsString::from("1"))
+    );
+}

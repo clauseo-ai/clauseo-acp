@@ -1,8 +1,10 @@
 //! The host's half of the launch profile (R21, R22; decision record 0030): what it adds after
 //! the profile hook, per agent kind, from the settings and the session.
 //!
-//! - Claude ([`claude_options`]): `disallowedTools` always holds `WebSearch` and `WebFetch`
-//!   when `tools.web_search` is off, whatever the hook sent; when it is on, `allowedTools` gains
+//! - Claude ([`claude_options`]): `tools` is the explicit list of built-in tools and
+//!   `disallowedTools` always holds the ones left out (`agent/loads/tools.rs`); it also holds
+//!   `WebSearch` and `WebFetch` when `tools.web_search` is off, whatever the hook sent; when it
+//!   is on, `allowedTools` gains
 //!   `WebSearch` (not on a Bedrock login, which has none), a bare `WebFetch` (every page fetched
 //!   unasked) and one `WebFetch(domain:…)` per seed site, and `mcp__case-law__<tool>` per
 //!   search and read tool (`case_law::UNASKED_TOOLS`) only in a session that got the
@@ -233,9 +235,8 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         allowed.extend(clauseo_profile::claude::agent_browser_allowed().map(Value::String));
         disallowed.extend(clauseo_profile::claude::agent_browser_denied().map(Value::String));
     }
-    if !disallowed.is_empty() {
-        options.insert("disallowedTools".to_owned(), Value::Array(disallowed));
-    }
+    super::tools::offer(options, &mut disallowed, keys.web_search.on);
+    options.insert("disallowedTools".to_owned(), Value::Array(disallowed));
     if !keys.forced_ask {
         options.insert("allowedTools".to_owned(), Value::Array(allowed));
     }
