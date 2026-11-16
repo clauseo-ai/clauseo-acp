@@ -39,6 +39,7 @@ fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
     for secret in [
         &run.root,
         &run.relay_token,
+        &run.proxy_secret,
         &run.agent_browser,
         &run.browser_config,
         &run.browser_profile,

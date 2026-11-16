@@ -165,8 +165,7 @@ pub(crate) struct RunFolders {
     /// path, then as configured when it differs, and the patterns under it, every entry not this
     /// session's own enumerated by the launch prep; later run folders and notes are in no rule.
     pub(crate) data_deny: LaunchDeny,
-    /// The other matters Claude's sandbox denies, each folder as stored and where it leads
-    /// (`folders::fences`).
+    /// The other matters the sandbox denies, as stored and where each leads (`folders::fences`).
     pub(crate) other_matters: Vec<OtherMatter>,
     /// This session's matter folder's other spellings (`folders::own_spellings`, Claude).
     pub(crate) matter_also: Vec<PathBuf>,

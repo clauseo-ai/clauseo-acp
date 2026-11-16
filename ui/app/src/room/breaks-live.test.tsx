@@ -340,22 +340,19 @@ test.each([
   },
 );
 
-// Claude's protection couldn't be set up (macOS, Linux; not retryable): matter.folder_wildcard's line names the deepest
-// folder in the matter's folder (folder_display) whose name has a * or ?, and with none in sight says the general line,
-// agent.sandbox_unavailable's; never Restart (even with H10 faked)
+// Claude's protection couldn't be set up (macOS, Linux; not retryable): matter.folder_wildcard names the deepest folder
+// of folder_display with a * or ?, else says agent.sandbox_unavailable's line; never Restart (even with H10 faked)
 const PROTECT =
   "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again.";
+const OTHER_WILD =
+  "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again.";
 const rename = (name: string) =>
   `Rename the folder '\u2068${name}\u2069' so it has no * or ? in its name, then try again. Clauseo can't protect conversations in a folder with those characters.`;
 test.each([
   ["matter.folder_wildcard", "~/Documents/stagec-1097/Test*", rename("Test*")],
   ["matter.folder_wildcard", "Documents/Clients?/Acme", rename("Clients?")],
   ["matter.folder_wildcard", "Documents/Acme", PROTECT],
-  [
-    "agent.sandbox_wildcard",
-    "Documents/Test*",
-    "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again.",
-  ],
+  ["agent.sandbox_wildcard", "Documents/Test*", OTHER_WILD],
   ["agent.sandbox_unavailable", "Documents/Test*", PROTECT],
 ] as const)("a turn failed with %s, the matter folder %j: %s", async (code, folder, said) => {
   h = await asked({
@@ -371,8 +368,7 @@ test.each([
   expect(h.one("restart")).toBeNull();
 });
 
-// agent.sandbox_wildcard names the other matter's folder whose * or ? pattern would cover this matter's folder (the
-// listed matters' folder displays, folder-wildcard.ts' coveringWildcard); one that wouldn't is not named
+// agent.sandbox_wildcard names the listed matter's folder whose * or ? would cover this one's (coveringWildcard)
 test.each([
   [["Documents/Ac?e"], "Ac?e"],
   [["Documents/Elsewhere/What?", "Documents/A*"], "A*"],
@@ -392,9 +388,8 @@ test.each([
   });
   h.deliver(failed("agent.sandbox_wildcard"));
   await h.settle();
-  expect(h.one("turn-stopped")?.textContent).toBe(
-    `Clauseo can't protect conversations here because the folder '\u2068${name}\u2069' has * or ? in its name. Rename it so it has no * or ?, then try again.`,
-  );
+  const said = `Clauseo can't protect conversations here because the folder '\u2068${name}\u2069' has * or ? in its name. Rename it so it has no * or ?, then try again.`;
+  expect(h.one("turn-stopped")?.textContent).toBe(said);
 });
 
 // offline truth: the agent couldn't get through to its service while the computer seemed online. The same line as

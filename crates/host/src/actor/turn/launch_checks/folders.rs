@@ -107,6 +107,7 @@ pub(super) fn respell_run(run: &mut RunFolders, data: &Path) -> PathBuf {
         &mut run.browser_profile,
         &mut run.skill_packs,
         &mut run.relay_token,
+        &mut run.proxy_secret,
     ] {
         *path = respelled(path, data, &real);
     }
