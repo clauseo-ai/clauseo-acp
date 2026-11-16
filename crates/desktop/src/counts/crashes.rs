@@ -54,7 +54,7 @@ fn renderer_gone<R: Runtime>(app: &AppHandle<R>, reason: RendererGoneReason) {
     }
 }
 
-/// macOS: records each WebContent process that ends, then loads the page again.
+/// macOS: records each `WebContent` process that ends, then loads the page again.
 #[cfg(target_os = "macos")]
 pub(crate) fn on_renderer_gone<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder.on_web_content_process_terminate(|webview| {

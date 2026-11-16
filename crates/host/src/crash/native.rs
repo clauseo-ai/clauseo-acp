@@ -3,10 +3,11 @@
 //! was there before runs, so the process ends as it would have. Everything the handler does is
 //! safe in a signal handler: atomic loads and one `write` on a file already open.
 //!
-//! What counts as evidence of a crash, and nothing else: on macOS and Linux, SIGSEGV, SIGBUS,
-//! SIGILL and SIGFPE raised by the kernel for a fault (a `kill` sending one is passed on and not
-//! recorded), and SIGABRT, which `abort` raises (on Linux, one another process sent is passed
-//! on); on Windows, an exception no handler took (the unhandled-exception filter). A user's kill
+//! What counts as evidence of a crash, and nothing else: on Linux, SIGSEGV, SIGBUS, SIGILL and
+//! SIGFPE raised by the kernel for a fault (a `kill` sending one is passed on and not recorded),
+//! and SIGABRT, which `abort` raises (one another process sent is passed on); on macOS, which
+//! cannot tell a sent one from a fault, each of the five that reaches the handler; on Windows,
+//! an exception no handler took (the unhandled-exception filter). A user's kill
 //! (SIGTERM, SIGKILL, Task Manager), a power loss or a Windows shutdown raises none of these.
 //! Rust's panic abort raises SIGABRT on macOS and Linux after the panic was recorded, so the
 //! record stays the panic's alone; on Windows it fails fast, past every filter.

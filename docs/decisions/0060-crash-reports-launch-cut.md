@@ -46,12 +46,56 @@ symbols job and no new crates.
     raises none of these, so it never makes a report, and the `SIGABRT` that follows a panic is
     the panic's report. The next start turns the record into a report, with the version that
     crashed.
+  - macOS can't tell a sent SEGV/BUS/ILL from a fault (XNU sets fixed si_codes), so on macOS
+    every such signal that reaches the handler is recorded; an outside kill -SEGV leaves one
+    report. XNU's `sendsig` (`bsd/dev/arm/unix_signal.c`) gives SIGSEGV `SEGV_ACCERR`, SIGBUS
+    `BUS_ADRALN` and SIGILL `ILL_ILLTRP` however the signal came, and on Intel
+    (`bsd/dev/i386/unix_signal.c`) a real general protection fault arrives with `si_code` 0.
+    The handler records and raises the signal again under the previous action, so the process
+    still dies. SIGTERM and SIGKILL are never recorded.
+  - Windows: the unhandled-exception filter (`crates/host/src/crash/native/win.rs:32`) takes
+    every exception no handler took, a stack overflow (`0xC00000FD`) included; `abort` fails fast
+    past every filter, so its own report is the panic hook's. Inside a crashed process the
+    filter avoids (H = `crates/host/src/crash`, C = `crates/counts/src`):
+    - heap allocation: the line is built in a stack buffer (H `native.rs:66`) by
+      `native_line` (C `crash/native.rs:27`), with no `String` or `Vec`;
+    - locks, the CRT's included: `OnceLock::get` is an atomic load (H `native.rs:60`,
+      H `native/win.rs:39`), and `recording`, `launched` and `begin_crash` are atomics
+      (C `crash.rs:137`, `:147`, `:154`); there is no `Mutex`, `malloc` or CRT stdio;
+    - file APIs beyond one handle opened at start: one `WriteFile` through `&File`
+      (H `native.rs:70`), with no open, flush or path;
+    - formatting machinery: no `format!`, `Display` or `tracing`; the digits are written by
+      hand (C `crash/native.rs:33`).
+    A second fault inside the filter finds this run's one crash taken (`begin_crash`, a
+    swap), so it writes nothing. The filter never returns `EXCEPTION_CONTINUE_EXECUTION` itself
+    (H `native/win.rs:39`), so nothing loops, and the process ends with the first code.
   - The webview's renderer gone, once per run (a renderer that keeps failing makes one report):
     macOS's `webViewWebContentProcessDidTerminate:` through Tauri's
     builder hook (the page is loaded again, as Tauri does with no hook; no reason given, so
     `other`), WebView2's `ProcessFailed` for a render process that exited (not `TERMINATED`,
     an end from outside), WebKitGTK's `web-process-terminated` for a crash or out of memory (not
     an end the app asked for).
+    Real-machine row for WebView2's `ProcessFailed` wiring (`watch`, `reason_of`); the mapping
+    itself, `gone_reason` (`crates/desktop/src/counts/crashes/win.rs`), is unit-tested. It gives
+    `Crashed` → `crashed`, `OutOfMemory` → `out_of_memory`, `Unresponsive` → `unresponsive`,
+    `LaunchFailed` → `launch_failed`, and `Unexpected` (or no reason, on an older runtime) →
+    `other`. `Terminated` gives no report, and neither does any kind but a render process that
+    exited.
+    - (a) End the renderer from outside: `taskkill /PID` on the `msedgewebview2.exe` with
+      `--type=renderer`. Expect no report: WebView2 says `Terminated`, which records nothing by
+      design.
+    - (b) A real renderer crash, with no app code. Expect one `renderer_gone` report with reason
+      `crashed`, and no page content or URL beyond what this record allows.
+      1. Launch Clauseo with the user env var
+         `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`. It still applies:
+         WebView2 takes the variable in place of the app's arguments, and `keep_no_dns_in_env`
+         (`crates/desktop/src/navigation/browser_args.rs:160`, first in `main`) keeps the flags it
+         has and only appends the no-DNS rule.
+      2. In Edge, open `edge://inspect`, find the Clauseo target and Inspect it.
+      3. In DevTools, turn on Settings › Experiments › Protocol monitor, then send `Page.crash`.
+      4. Fallback, if the target is not reachable: an out-of-memory loop in that DevTools
+         console. Expect one report with reason `out_of_memory`. If neither is reachable, mark (b)
+         NOT RUN with the reason.
   - `area` comes from the panic's file's crate, else the crashing thread's name from a fixed
     list, else `other`; `after_launch` is whether the main window had had the focus.
 - **The tally still counts.** Each crash adds one `crash` cell to the weekly tally while counts
