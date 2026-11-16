@@ -20,7 +20,7 @@ use crate::agent::data_fence::{claude_allow_rules, claude_deny_rules, rule_path}
 use crate::pipeline::tests::support::TempDir;
 
 /// Registers the folder `name` under `papers` as a matter with command `n`.
-fn other_matter(rig: &mut Rig, papers: &Path, name: &str, n: u128) -> MatterId {
+pub(super) fn other_matter(rig: &mut Rig, papers: &Path, name: &str, n: u128) -> MatterId {
     let folder = papers.join(name);
     crate::write::create_dir_all(&folder).unwrap();
     let now = rig.actor.now().wall;

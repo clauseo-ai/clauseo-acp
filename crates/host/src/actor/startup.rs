@@ -195,8 +195,9 @@ fn start_services(actor: &mut Actor, cached: Vec<AccountLimits>) {
     super::protection::start(actor);
     super::settings::log_lock_causes(&mut actor.lock_causes, &actor.effective);
     // No way through Clauseo nests one matter in another; a registry that holds one anyway
-    // (folders moved while Clauseo was quit, an older registry) is not repaired: each launch
-    // treats it as a matter it is not invited into (`agent::matter_fence::MatterFence::own_shut`).
+    // (folders moved while Clauseo was quit, an older registry) is not repaired: a turn in the
+    // outer matter is refused (`agent::matter_fence::held`), and the fence still treats it as a
+    // matter not invited into (`agent::matter_fence::MatterFence::own_shut`).
     let folders: Vec<_> = actor
         .matters
         .values()

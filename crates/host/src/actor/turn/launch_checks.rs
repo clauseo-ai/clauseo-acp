@@ -494,10 +494,10 @@ fn write_skills(writes: &[SkillWrite]) -> Option<SkillsWritten> {
     first
 }
 
-/// Phase two: the checks `id` answered. The agent launches with what they found, or the
-/// waiting work fails with their error; during shutdown it fails as closed. On every way that
-/// does not end in a launched agent, the launch's run folder is removed off the actor; an answer
-/// for an earlier launch removes only its own.
+/// Phase two: the checks `id` answered. The agent launches with what they found, or the waiting
+/// work fails with their error (or with a matter on the list inside this one, `outside::held`);
+/// during shutdown it fails as closed. On every way that does not end in a launched agent, the
+/// run folder is removed off the actor; an answer for an earlier launch removes only its own.
 pub(super) fn on_prepared(
     actor: &mut Actor,
     thread: ThreadId,
@@ -535,7 +535,8 @@ pub(super) fn on_prepared(
         agents::fail_all(actor, thread, waiting, &error);
         return;
     }
-    if let Err(error) = super::sign_in::check_launch(actor, thread, &prepared) {
+    let held = super::outside::held::refuse(actor, thread, &prepared.run);
+    if let Err(error) = held.and_then(|()| super::sign_in::check_launch(actor, thread, &prepared)) {
         discard(actor, thread, prepared.run, None);
         agents::fail_all(actor, thread, waiting, &error);
         return;

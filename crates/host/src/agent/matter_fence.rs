@@ -24,7 +24,8 @@
 //! beats its `denyRead`, so it re-opens none of the own matter then ([`MatterFence::own_shut`]):
 //! Claude's commands can't open the matter, its file tools still can, and the lawyer is told.
 //! A matter only gets inside another by folders moved outside Clauseo (or an older registry):
-//! every way through Clauseo refuses it. Windows has no OS fence: there a command in the own
+//! every way through Clauseo refuses it, and a turn in the outer matter is refused too (`held`):
+//! this is the second layer. Windows has no OS fence: there a command in the own
 //! matter that never names the nested one (`rg x .`) reads it.
 //!
 //! Who uses which: Claude's `Read` deny rules and Codex's profile name the fence paths of the
@@ -55,6 +56,9 @@ pub(crate) struct Other {
     pub(crate) folder: PathBuf,
     /// Whether the lawyer let this conversation read its files.
     pub(crate) invited: bool,
+    /// Whether it is on Clauseo's list (not forgotten): one on the list inside the session's own
+    /// matter refuses the launch (`held`).
+    pub(crate) listed: bool,
     /// Its folder's spellings ([`MatterFence::resolve`]); empty before.
     pub(crate) spellings: Vec<PathBuf>,
     /// What of it the session is kept out of (the module doc); empty before the resolve.
@@ -69,6 +73,7 @@ impl Other {
             name,
             folder,
             invited,
+            listed: true,
             spellings: Vec::new(),
             paths: Vec::new(),
         }
@@ -421,6 +426,8 @@ pub(crate) fn innermost<'a>(fence: &'a MatterFence, path: &Path) -> Option<&'a O
         .max_by_key(|(_, deepest)| *deepest)?;
     (own_depth.is_none_or(|own| own < deepest)).then_some(other)
 }
+
+pub(crate) mod held;
 
 #[cfg(test)]
 #[path = "matter_fence/tests.rs"]

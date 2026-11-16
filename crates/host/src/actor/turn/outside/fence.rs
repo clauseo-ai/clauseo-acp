@@ -47,7 +47,9 @@ pub(crate) fn matter_fence(actor: &Actor, thread: ThreadId, own: MatterId) -> Ma
             let row = &entry.row;
             let folder = PathBuf::from(&row.folder_path);
             let invited = on_list && invited.contains(&row.id);
-            Other::new(row.id, row.name.clone(), folder, invited)
+            let mut other = Other::new(row.id, row.name.clone(), folder, invited);
+            other.listed = on_list;
+            other
         })
         .collect();
     let mut fence = MatterFence::asked(others);

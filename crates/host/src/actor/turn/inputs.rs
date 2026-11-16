@@ -75,7 +75,8 @@ pub(crate) enum AgentReply {
         turn: TurnId,
         result: Result<PromptEnd, clauseo_acp::Error>,
     },
-    /// A Codex prompt's `.codex` re-check (or its wait) refused it before it was sent.
+    /// A prompt's re-checks (a Codex agent's `.codex`, any agent's matter inside its matter,
+    /// `agent::matter_fence::held`) or their wait refused it before it was sent.
     PromptRefused {
         turn: TurnId,
         error: crate::error::Error,

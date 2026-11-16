@@ -11,7 +11,7 @@
 //! prompt (`note.rs`); the offline-shell note is spent once sent, or once the agent is gone.
 
 use clauseo_protocol::{ContentBlock, ErrorCode, ThreadId, TurnId};
-use futures::future::{AbortHandle, Abortable, join};
+use futures::future::{AbortHandle, Abortable, join3};
 
 use super::super::Actor;
 use super::super::input::Input;
@@ -107,18 +107,21 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let clock = std::sync::Arc::clone(&actor.clock);
     let matter = actor.threads.get(&thread).map(|entry| entry.row.matter);
     let list_clock = std::sync::Arc::clone(&actor.clock);
+    let held = held_check(actor, thread);
     let call = Abortable::new(
         async move {
-            // A Codex agent's matter folder is checked for `.codex` again first, and the agent's
-            // descendants are listed, both off the actor, before the prompt goes out: a
+            // A Codex agent's matter folder is checked for `.codex` again first, every agent's
+            // for a matter on the list inside it (`matter_fence::held`), and the agent's
+            // descendants are listed, all off the actor, before the prompt goes out: a
             // cancelled turn ends what is new since this listing.
-            let (checked, listed) = join(
+            let (checked, listed, held) = join3(
                 codex::prepare::recheck(clock, matter, check),
                 leftovers::snapshot(descendants, list_clock),
+                held,
             )
             .await;
             *before.borrow_mut() = listed;
-            if let Err(error) = checked {
+            if let Err(error) = checked.and(held) {
                 return AgentReply::PromptRefused { turn, error };
             }
             tracing::info!(target: LIFECYCLE, %thread, %turn, "prompt sent");
@@ -142,4 +145,28 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             let _gone = post.try_send(Input::Turn(input));
         }
     });
+}
+
+/// The re-check, before a prompt to `thread`'s live agent, for a matter on the list inside its
+/// matter (`agent::matter_fence::held::recheck`): the other matters its launch fenced and the
+/// matter folder as stored, each resolved again off the actor. None to check passes.
+fn held_check(
+    actor: &Actor,
+    thread: ThreadId,
+) -> impl std::future::Future<Output = Result<(), crate::error::Error>> + use<> {
+    let entry = actor.threads.get(&thread);
+    let matter = entry.map(|entry| entry.row.matter);
+    let stored = matter.and_then(|matter| actor.matters.get(&matter));
+    let stored = stored.map(|entry| std::path::PathBuf::from(&entry.row.folder_path));
+    let fence = entry.and_then(|entry| entry.turn.run.as_ref());
+    let fence = fence.map(|run| run.data_deny.matters.clone());
+    let clock = std::sync::Arc::clone(&actor.clock);
+    async move {
+        let (Some(fence), Some(stored)) = (fence, stored) else {
+            return Ok(());
+        };
+        let job = codex::prepare::Job::short("the matter-inside re-check", matter);
+        let check = move || crate::agent::matter_fence::held::recheck(&fence, &stored);
+        codex::prepare::off_actor(clock, job, check).await
+    }
 }
