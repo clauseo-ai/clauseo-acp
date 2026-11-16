@@ -406,3 +406,21 @@ test("a last turn that failed for another reason shows its own line, never the s
     expect(document.body.textContent).toContain(line);
   }
 });
+
+test("key unreadable: the card's gate also says where the key can be changed, Settings then Plans", async () => {
+  await mount({ signIn: { failed: { code: "agent.key_unreadable", at: AT } }, reason: "sign_in" });
+  expect(words()).toContain(errorWords("en", "agent.key_unreadable"));
+  expect(words()).toContain("To change it, open Settings, then Plans.");
+});
+
+test("a last turn that failed with agent.key_unreadable shows the key's line in the thread, never the sign-in card", async () => {
+  await mount({
+    signIn: { failed: { code: "agent.key_unreadable", at: AT } },
+    reason: "sign_in",
+    entries: [ASKED, step(3, { stop: "failed", failure: "agent.key_unreadable", ts: 3000 })],
+  });
+  expect(card()).toBeNull();
+  expect(document.body.textContent).toContain(errorWords("en", "agent.key_unreadable"));
+  expect(document.body.textContent).not.toContain("Sign in with Claude first.");
+  expect(document.body.textContent).not.toContain("sign-in has expired");
+});

@@ -367,6 +367,13 @@ impl Compose {
         });
     }
 
+    /// Whether `agent` is on a firm plan: an endpoint or a provider, the lawyer's or a policy's.
+    pub(crate) fn firm_plan(&self, agent: &AgentId) -> bool {
+        lock(&self.agents)
+            .get(agent)
+            .is_some_and(|known| known.facts.managed.or(known.facts.firm).is_some())
+    }
+
     /// What bars `agent`'s sign-in now, if anything (`admit::sign_in_bar`): its key unreadable
     /// as rule 3 reads it, a firm plan, a key, an endpoint.
     pub(crate) fn sign_in_bar(&self, agent: &AgentId) -> Option<SignInBar> {

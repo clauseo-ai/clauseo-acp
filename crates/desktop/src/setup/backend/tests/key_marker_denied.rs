@@ -28,11 +28,11 @@ use crate::setup::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNote, KeyNotes
 use crate::setup::refusal::in_force;
 use crate::test_support::{Scratch, within};
 
-const OUT: SigninState = SigninState::SignedOut { found: None };
+pub(super) const OUT: SigninState = SigninState::SignedOut { found: None };
 
 /// How the prompt went: denied, or not answered by the first load's bound.
 #[derive(Clone, Copy, Debug)]
-enum Prompt {
+pub(super) enum Prompt {
     Denied,
     Unanswered,
 }
@@ -40,7 +40,7 @@ enum Prompt {
 /// A rig whose first load read Claude's stored key, marked by the "key stored" marker in
 /// `scratch`, with the prompt going as `prompt`; both agents signed out as S18 sees them, and the
 /// windows told as `start.rs` tells them. The notes of each mark's change come with it.
-fn marked_rig(scratch: &Scratch, prompt: Prompt) -> (Rig, UnboundedReceiver<KeyNote>) {
+pub(super) fn marked_rig(scratch: &Scratch, prompt: Prompt) -> (Rig, UnboundedReceiver<KeyNote>) {
     let marker = KeyMarker::new(scratch.path(), [&claude(), &codex()]);
     marker.set(&claude()).unwrap();
     let keychain = stored();
@@ -65,7 +65,11 @@ fn marked_rig(scratch: &Scratch, prompt: Prompt) -> (Rig, UnboundedReceiver<KeyN
 }
 
 /// The setup thread's first load over `keychain`, `marker` and `timer`, with its notes.
-fn load(keychain: &Keychain, marker: KeyMarker, timer: &impl Timer) -> (KeyCache, KeyNotes) {
+pub(super) fn load(
+    keychain: &Keychain,
+    marker: KeyMarker,
+    timer: &impl Timer,
+) -> (KeyCache, KeyNotes) {
     let notes = KeyNotes::new();
     let agents = [&claude(), &codex()];
     let keys = KeyCache::load_bounded(
@@ -79,7 +83,7 @@ fn load(keychain: &Keychain, marker: KeyMarker, timer: &impl Timer) -> (KeyCache
     (keys, notes)
 }
 
-fn is_key_unreadable(shown: Option<&SignIn>) -> bool {
+pub(super) fn is_key_unreadable(shown: Option<&SignIn>) -> bool {
     matches!(
         shown,
         Some(SignIn::Failed {
@@ -90,7 +94,7 @@ fn is_key_unreadable(shown: Option<&SignIn>) -> bool {
 }
 
 /// A sign-in press for `agent` from the first run (the card's Try again): its refusal's code.
-fn press(rig: &Rig, agent: &AgentId) -> Option<ErrorCode> {
+pub(super) fn press(rig: &Rig, agent: &AgentId) -> Option<ErrorCode> {
     let start = command("start_sign_in", agent, &json!({}));
     within("the press", rig.setup().run(MAIN, start))
         .err()
@@ -98,7 +102,7 @@ fn press(rig: &Rig, agent: &AgentId) -> Option<ErrorCode> {
 }
 
 /// Waits until a read lands Claude's key in memory, note by note.
-fn until_read(rig: &Rig, notes: &mut UnboundedReceiver<KeyNote>) {
+pub(super) fn until_read(rig: &Rig, notes: &mut UnboundedReceiver<KeyNote>) {
     while !rig.backend.keys.in_memory(&claude()) {
         let note = within("a key note", notes.next());
         assert!(note.is_some(), "the notes ended before the key was read");
