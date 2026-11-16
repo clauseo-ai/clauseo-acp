@@ -567,7 +567,7 @@ fn a_folder_named_in_another_unicode_form_is_fenced_beside_the_own_matter() {
         write::create_dir_all(file.parent().unwrap()).unwrap();
         write::write_file(&file, b"x").unwrap();
     }
-    let fence = matters(&[(root.clone(), false)], &[own.as_path()], &[]);
+    let fence = matters(&[(root, false)], &[own.as_path()], &[]);
     let rules = claude_deny_rules(
         &LaunchDeny {
             matters: fence,
