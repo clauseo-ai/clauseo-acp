@@ -277,7 +277,9 @@ mod window;
 mod write;
 
 #[cfg(feature = "test-support")]
-pub use agent::auto_context::{ASK_MODE_AT, ASK_ON_BLIP_AT, estimate as auto_context_estimate};
+pub use agent::auto_context::test_support::{
+    ASK_MODE_AT, ASK_ON_BLIP_AT, estimate as auto_context_estimate,
+};
 pub use agent::loads::codex_hook_config;
 pub use agent::login_link::{
     AgentsStopped, LoginCheck, LoginLink, LoginSplit, Shared, SignInAgain, StopFor,

@@ -43,12 +43,12 @@ pub(crate) const CONTEXT_LIMIT: usize = 1_040_000;
 
 /// The estimate past which a launch runs in ask mode: 900,000 bytes, about 87% of
 /// [`CONTEXT_LIMIT`], so the estimate's error and what it does not count stay under the line.
-pub const ASK_MODE_AT: usize = 900_000;
+pub(crate) const ASK_MODE_AT: usize = 900_000;
 
 /// The estimate at which a turn that ends on a blip of the auto-mode checks (a "gave no verdict"
 /// that is not the withheld kind) goes to ask mode instead of a plain notice: 832,000 bytes, 80%
 /// of [`CONTEXT_LIMIT`], where the limit may have moved under the estimate's error.
-pub const ASK_ON_BLIP_AT: usize = 832_000;
+pub(crate) const ASK_ON_BLIP_AT: usize = 832_000;
 
 const _: () = assert!(ASK_ON_BLIP_AT < ASK_MODE_AT && ASK_MODE_AT < CONTEXT_LIMIT);
 
@@ -88,7 +88,7 @@ const COUNTED: [&str; 2] = ["deny", "ask"];
 /// Claude Code 2.1.293's auto-mode context bytes, the server-verdict limit being
 /// [`CONTEXT_LIMIT`] (1,040,000), for a launch whose flag settings (the object Claude Code reads
 /// from `--settings`) are `settings`. The factors are in the module doc.
-pub fn estimate(settings: &Map<String, Value>) -> usize {
+pub(crate) fn estimate(settings: &Map<String, Value>) -> usize {
     let Some(permissions) = settings.get("permissions").and_then(Value::as_object) else {
         return FIXED;
     };
@@ -138,6 +138,24 @@ fn file_content(rule: &str) -> Option<&str> {
 /// `text`'s length as a JSON string.
 fn json_len(text: &str) -> usize {
     serde_json::to_string(text).map_or(text.len() + 2, |json| json.len())
+}
+
+/// The measure and its thresholds for the host's integration tests, re-exported at the crate
+/// root under `test-support`.
+#[cfg(feature = "test-support")]
+pub mod test_support {
+    use serde_json::{Map, Value};
+
+    /// [`super::ASK_MODE_AT`].
+    pub const ASK_MODE_AT: usize = super::ASK_MODE_AT;
+
+    /// [`super::ASK_ON_BLIP_AT`].
+    pub const ASK_ON_BLIP_AT: usize = super::ASK_ON_BLIP_AT;
+
+    /// [`super::estimate`].
+    pub fn estimate(settings: &Map<String, Value>) -> usize {
+        super::estimate(settings)
+    }
 }
 
 #[cfg(test)]
