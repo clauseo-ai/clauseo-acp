@@ -25,6 +25,7 @@ import type {
   MatterSummary,
   QueryResult,
   RestorePreview,
+  RestoreScope,
   SkippedFile,
   StepEntry,
   ViewEntry,
@@ -87,6 +88,7 @@ const restoreMarker = (
   from: string,
   checkpoint: string,
   undoes?: string,
+  scope: RestoreScope = "matter",
 ): ViewEntry => ({
   marker: {
     order,
@@ -96,7 +98,7 @@ const restoreMarker = (
       version_restored: {
         from,
         checkpoint,
-        scope: "matter",
+        scope,
         ...(undoes === undefined ? {} : { undoes }),
       },
     },
@@ -153,6 +155,8 @@ export type Matter = {
   revisions?: FileChange[];
   /** The newest version is a restore to the turn's version three days ago, cp7, marked by the host. */
   restored?: boolean;
+  /** The restored version leaves the matter's window as the restore lands (UC-428). */
+  forgets?: boolean;
   /** preview_restore's removes, when it is asked to undo a restore. */
   removes?: string[];
   /** The conversation's stream records a restore made from Versions while it was open, or the undo of one. */
@@ -308,7 +312,14 @@ export function versionsHost(m: Matter): FakeTransport {
           event(
             batch(
               2,
-              [upsert(version(5, "restore", Date.now())), upsert(restoreMarker(50, to, "cp5"))],
+              [
+                upsert(version(5, "restore", Date.now())),
+                upsert(
+                  restoreMarker(50, to, "cp5", undefined, envelope.command.restore_version?.scope),
+                ),
+                // a version gone from the matter's window since: the line can't say its time
+                ...(m.forgets === true ? [{ remove: { entry_id: `version:${to}` } }] : []),
+              ],
               undefined,
               MATTER_STREAM,
             ),

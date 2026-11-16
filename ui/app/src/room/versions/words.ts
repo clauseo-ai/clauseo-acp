@@ -198,7 +198,9 @@ function fileAskOf(
           ? vt(lang, "'{paper}' comes back as it was then. You can undo this.", { paper })
           : kept
             ? vt(lang, "Nothing will change.")
-            : vt(lang, "Nothing will change. '{paper}' already stands as it did then.", { paper }),
+            : vt(lang, "Nothing will change. '{paper}' is already the same as it was then.", {
+                paper,
+              }),
     stays: null,
     edited: [],
     editedHead: null,
@@ -321,7 +323,9 @@ export function doneLine(lang: Lang, cal: Calendar, s: Snapshot, done: Done): st
       const to = versionOf(s, done.to);
       const time = to === undefined ? "" : timeOf(lang, to);
       const paper = fileName(done.file);
-      return to === undefined || to.day === cal.today
+      // a version no longer in the timeline: no time to say
+      if (to === undefined) return vt(lang, "Restored {paper}.", { paper });
+      return to.day === cal.today
         ? vt(lang, "Restored {paper} to how it was at {time} today.", { paper, time })
         : vt(lang, "Restored {paper} to how it was at {time} on {date}.", {
             paper,
@@ -330,6 +334,11 @@ export function doneLine(lang: Lang, cal: Calendar, s: Snapshot, done: Done): st
           });
     }
     case "undidRestore":
+      if (done.file !== null)
+        return vt(lang, "Undid the restore. '{paper}' is back as it was at {time}.", {
+          paper: fileName(done.file),
+          time: timeOfTs(lang, s, done.at),
+        });
       return vt(lang, "Undid the restore. The matter stands as it did at {time}.", {
         time: timeOfTs(lang, s, done.at),
       });

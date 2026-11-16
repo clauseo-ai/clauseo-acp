@@ -1,4 +1,4 @@
-// UC's entries for restoring one document from Versions (UC-316 to UC-324): Restore this document beside the
+// UC's entries for restoring one document from Versions (UC-316 to UC-325, and UC-428): Restore this document beside the
 // documents that differ from now, the restore dialog it opens for that document alone, and the line once it is done,
 // in the room with Versions open over registry-u8.tsx's host, after the presses that bring each state. The English
 // is provisional until Rohan's review, its Hindi too.
@@ -22,6 +22,7 @@ const TODAY = '[data-testid="version"][data-checkpoint="cp3"]';
 const COMPARE = ".ver-compare";
 const RESTORE_FILE = '[data-testid="version-restore-file"]';
 const CONFIRM = '[data-testid="dialog-confirm"]';
+const UNDO_DONE = ".ver-restored-undo";
 const ASK_EARLIER = [OPEN, EARLIER, COMPARE, RESTORE_FILE] as const;
 const ASK_TODAY = [OPEN, TODAY, COMPARE, RESTORE_FILE] as const;
 
@@ -67,7 +68,7 @@ export const UC_ONE_FILE: Entry[] = [
   ),
   state(
     "UC-322",
-    versionWords("Nothing will change. '{paper}' already stands as it did then."),
+    versionWords("Nothing will change. '{paper}' is already the same as it was then."),
     { ...MODIFIED, changes: [] },
     ASK_EARLIER,
   ),
@@ -76,6 +77,18 @@ export const UC_ONE_FILE: Entry[] = [
     CONFIRM,
   ]),
   state("UC-324", versionWords("Restored {paper} to how it was at {time} on {date}."), MODIFIED, [
+    ...ASK_EARLIER,
+    CONFIRM,
+  ]),
+  // Undo on the done line, through the undo's own dialog
+  state(
+    "UC-325",
+    versionWords("Undid the restore. '{paper}' is back as it was at {time}."),
+    MODIFIED,
+    [...ASK_TODAY, CONFIRM, UNDO_DONE, CONFIRM],
+  ),
+  // the version restored to has left the matter's window by the time the line is said
+  state("UC-428", versionWords("Restored {paper}."), { ...MODIFIED, forgets: true }, [
     ...ASK_EARLIER,
     CONFIRM,
   ]),

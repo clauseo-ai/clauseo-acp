@@ -26,6 +26,8 @@ export type MatterRead = {
   versions: readonly VersionEntry[];
   /** Each restore's checkpoint, to the checkpoint it restored from. */
   restores: ReadonlyMap<string, string>;
+  /** Each restore of one file (Versions' Restore this document), to that file. */
+  oneFile: ReadonlyMap<string, string>;
 };
 
 /** Reads entries, oldest first: older pages first, then the view's window. */
@@ -36,6 +38,7 @@ export function readMatter(view: StreamView | undefined, older: readonly ViewEnt
       : null;
   const versions: VersionEntry[] = [];
   const restores = new Map<string, string>();
+  const oneFile = new Map<string, string>();
   const seen = new Set<string>();
   const take = (e: ViewEntry) => {
     if (e.version !== undefined) {
@@ -45,6 +48,8 @@ export function readMatter(view: StreamView | undefined, older: readonly ViewEnt
     } else if (e.marker !== undefined && e.marker.kind.version_restored !== undefined) {
       const r = e.marker.kind.version_restored;
       restores.set(r.checkpoint, r.from);
+      const paths = typeof r.scope === "object" ? r.scope.files.paths : [];
+      if (paths.length === 1 && paths[0] !== undefined) oneFile.set(r.checkpoint, paths[0]);
     }
   };
   for (const e of older) take(e);
@@ -53,7 +58,7 @@ export function readMatter(view: StreamView | undefined, older: readonly ViewEnt
     if (e !== undefined) take(e);
   }
   versions.sort((a, b) => a.order - b.order);
-  return { header: header ?? null, versions, restores };
+  return { header: header ?? null, versions, restores, oneFile };
 }
 
 /** The order of an entry, whatever its kind. */
