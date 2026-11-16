@@ -7,7 +7,8 @@
 //!
 //! - `write_file_in`, `remove_in`: write one file directly in a folder, remove one entry directly
 //!   in a folder. `make_dirs`: make a folder and its missing parents. `copy_file_in`: copy one
-//!   file, with its permissions, to a new name directly in a folder.
+//!   file, with its permissions, to a new name directly in a folder. `write_private_file_in`: a
+//!   new file only its owner may read, for a secret.
 //! - `LockFile::open`: a lock file directly in a folder, whose exclusive lock keeps a second run
 //!   of a tool out.
 //! - `Guard`, `Backups`: the tracked-file guard. Any tool that edits a tracked file saves its
@@ -39,6 +40,20 @@ pub(crate) fn write_file_in(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<
     plain_name(name, "file name")?;
     sys::create_dir_all(dir)?;
     sys::write(&dir.join(name), bytes)
+}
+
+/// Writes `bytes` to a new `<dir>/<name>` that only its owner may read or write: mode 0600 on
+/// Unix (made so by `open`, never widened later); on Windows it takes its folder's ACL. Refuses a
+/// `name` that is not one plain file name, and a `<dir>/<name>` already there (`create_new`, so
+/// it never writes through a file or symlink left in its place). For a secret a tool reads back.
+pub(crate) fn write_private_file_in(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
+    plain_name(name, "file name")?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = sys::open(&options, &dir.join(name))?;
+    io::Write::write_all(&mut file, bytes)
 }
 
 /// Makes `dir` and its missing parents; a folder already there is fine.

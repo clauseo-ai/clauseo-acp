@@ -72,3 +72,28 @@ fn a_symlink_in_the_folder_is_removed_and_never_followed() {
         "what it pointed at stays"
     );
 }
+
+#[test]
+fn a_private_file_is_new_and_readable_by_its_owner_alone() {
+    let dir = Scratch::new("write-private-file-in");
+    write_private_file_in(&dir, "secret", b"one").expect("written");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("secret")).expect("read it"),
+        "one"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(dir.join("secret"))
+            .expect("stat")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    let refused = write_private_file_in(&dir, "secret", b"two").expect_err("never replaced");
+    assert_eq!(refused.kind(), io::ErrorKind::AlreadyExists);
+    for name in NOT_PLAIN {
+        let refused = write_private_file_in(&dir, name, b"x").expect_err("refused");
+        assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
+    }
+}

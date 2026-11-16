@@ -291,6 +291,11 @@ jobs:
 
       - name: Re-check the hashes and ask OSV for advisories
         id: audit
+        env:
+          # GitHub's API allows 60 unauthenticated requests an hour per runner IP, which shared
+          # runners use up (a 403 on pandoc's release). xtask sends this token to api.github.com
+          # alone. With the job's `contents: read` it can only read this public repo.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
           cargo xtask python-runtime check --online --advisories "$RUNNER_TEMP/advisories.json" \
