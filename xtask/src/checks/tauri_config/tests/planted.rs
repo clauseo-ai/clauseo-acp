@@ -124,6 +124,39 @@ crate::checks::planted::cases! {
         "plugins.updater has endpoints but no pubkey",
         Fix::Pubkey,
     )], inspects 2 => super::repos::whitespace_pubkey_with_endpoints,
+    /// An endpoint other than the release endpoint fails at the `endpoints` line.
+    other_endpoint: Fails[fails(
+        "crates/desktop/tauri.conf.json:21",
+        "plugins.updater.endpoints is not exactly \
+         [\"https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json\"]",
+        Fix::Endpoint,
+    )], inspects 2 => super::repos::other_endpoint,
+    /// A second endpoint after the release endpoint fails too: the plugin would try it.
+    second_endpoint: Fails[fails(
+        "crates/desktop/tauri.conf.json:21",
+        "plugins.updater.endpoints is not exactly \
+         [\"https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json\"]",
+        Fix::Endpoint,
+    )], inspects 2 => super::repos::second_endpoint,
+    /// R23 PR 6's placeholder key (the committed `updater-placeholder.pub`) fails at `pubkey`.
+    placeholder_pubkey: Fails[fails(
+        "crates/desktop/tauri.conf.json:20",
+        "plugins.updater.pubkey is R23 PR 6's placeholder key (AC986E7C6BA67AB9)",
+        Fix::PubkeyPlaceholder,
+    )], inspects 2 => super::repos::placeholder_pubkey,
+    /// The throwaway test key (the committed `updater-test.pub`) fails at `pubkey`.
+    test_pubkey: Fails[fails(
+        "crates/desktop/tauri.conf.json:20",
+        "plugins.updater.pubkey is the throwaway test key (B142942ACEC5F521)",
+        Fix::PubkeyTest,
+    )], inspects 2 => super::repos::test_pubkey,
+    /// A pubkey that does not decode to a minisign public key fails at `pubkey`.
+    pubkey_not_a_key: Fails[fails(
+        "crates/desktop/tauri.conf.json:20",
+        "plugins.updater.pubkey is not a minisign public key: its first line is not a minisign \
+         public key's comment",
+        Fix::PubkeyFormat,
+    )], inspects 2 => super::repos::pubkey_not_a_key,
     /// `bundle.createUpdaterArtifacts` set to `"v1Compatible"` fails at its line.
     updater_v1_compatible: Fails[fails(
         "crates/desktop/tauri.conf.json:17",

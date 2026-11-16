@@ -4,8 +4,9 @@
 //! In `tauri.conf.json`: the global Tauri object is off, the prototype is frozen, the CSP is
 //! exactly `PINNED_CSP`, `build.frontendDist` is a local folder (no URL, no file list), no window
 //! is built from config, the asset protocol is off, and no `dangerous*` key appears at any depth.
-//! The updater has a public key once it has endpoints, and `bundle.createUpdaterArtifacts` is not
-//! `"v1Compatible"`, which needs the updater's `zip` feature that the workspace leaves off.
+//! The updater (`updater.rs`): its endpoints are none or exactly the release endpoint, with a
+//! public key; that key is a minisign public key, and neither R23 PR 6's placeholder nor the test
+//! key; `bundle.createUpdaterArtifacts` is not `"v1Compatible"`.
 //! No platform config (`tauri.<platform>.conf.json`, `.json5` or `Tauri.<platform>.toml`) exists:
 //! Tauri merges one over `tauri.conf.json` and could turn a setting back on for one OS.
 //! In `build.rs`, parsed with syn: an `AppManifest` is declared (`app_manifest(` and
@@ -30,6 +31,9 @@ mod fix;
 pub(crate) use fix::Fix;
 
 mod sources;
+
+mod updater;
+use updater::updater_violations;
 
 use crate::checks::json_text::key_line;
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
@@ -243,35 +247,6 @@ fn is_url(text: &str) -> bool {
         .next()
         .is_some_and(|first| first.is_ascii_alphabetic())
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
-}
-
-/// Endpoints need the public key that verifies updates, and no artifacts in the v1 format, which
-/// needs the updater's `zip` feature.
-fn updater_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
-    let mut found = Vec::new();
-    let has_endpoints = conf
-        .pointer("/plugins/updater/endpoints")
-        .and_then(Value::as_array)
-        .is_some_and(|endpoints| !endpoints.is_empty());
-    let has_pubkey = conf
-        .pointer("/plugins/updater/pubkey")
-        .and_then(Value::as_str)
-        .is_some_and(|key| !key.trim().is_empty());
-    if has_endpoints && !has_pubkey {
-        found.push(at(
-            &["plugins", "updater", "endpoints"],
-            "plugins.updater has endpoints but no pubkey".to_owned(),
-            Fix::Pubkey,
-        ));
-    }
-    if conf.pointer("/bundle/createUpdaterArtifacts") == Some(&Value::from("v1Compatible")) {
-        found.push(at(
-            &["bundle", "createUpdaterArtifacts"],
-            "bundle.createUpdaterArtifacts is \"v1Compatible\"".to_owned(),
-            Fix::V1Compatible,
-        ));
-    }
-    found
 }
 
 /// The file names of every platform config Tauri would merge over `tauri.conf.json`.

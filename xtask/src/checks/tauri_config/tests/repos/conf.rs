@@ -13,18 +13,77 @@ pub(in crate::checks::tauri_config::tests) fn dev_csp_not_checked() -> Repo {
     )
 }
 
-pub(in crate::checks::tauri_config::tests) fn endpoints_with_pubkey_passes() -> Repo {
-    let conf = edited_conf(
-        "\"endpoints\": []",
-        "\"endpoints\": [\"https://releases.example/latest.json\"]",
-    )
-    .replace(
-        "\"pubkey\": \"\"",
-        "\"pubkey\": \"dW50cnVzdGVkIGNvbW1lbnQ=\"",
-    );
+/// `CONF` with `endpoints` and `pubkey` set to these JSON texts.
+fn updater_conf(endpoints: &str, pubkey: &str) -> String {
+    edited_conf("\"endpoints\": []", &format!("\"endpoints\": {endpoints}"))
+        .replace("\"pubkey\": \"\"", &format!("\"pubkey\": {pubkey}"))
+}
+
+/// A desktop crate whose `tauri.conf.json` is [`updater_conf`].
+fn updater_case(case: &str, endpoints: &str, pubkey: &str) -> Repo {
+    let conf = updater_conf(endpoints, pubkey);
     desktop_repo(
-        "endpoints-with-pubkey",
+        case,
         &[(CONF_AT, conf.as_bytes()), (BUILD_AT, BUILD.as_bytes())],
+    )
+}
+
+/// The release endpoint as a JSON array.
+fn release_endpoints() -> String {
+    format!("[\"{}\"]", updater::RELEASE_ENDPOINT)
+}
+
+pub(in crate::checks::tauri_config::tests) fn endpoints_with_pubkey_passes() -> Repo {
+    updater_case(
+        "endpoints-with-pubkey",
+        &release_endpoints(),
+        &format!("\"{}\"", updater::tests::other_key()),
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn other_endpoint() -> Repo {
+    updater_case(
+        "other-endpoint",
+        "[\"https://releases.example/latest.json\"]",
+        &format!("\"{}\"", updater::tests::other_key()),
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn second_endpoint() -> Repo {
+    updater_case(
+        "second-endpoint",
+        &format!(
+            "[\"{}\", \"https://releases.example/latest.json\"]",
+            updater::RELEASE_ENDPOINT
+        ),
+        &format!("\"{}\"", updater::tests::other_key()),
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn placeholder_pubkey() -> Repo {
+    updater_case(
+        "placeholder-pubkey",
+        &release_endpoints(),
+        &format!(
+            "\"{}\"",
+            updater::tests::release_pub("updater-placeholder.pub")
+        ),
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn test_pubkey() -> Repo {
+    updater_case(
+        "test-pubkey",
+        &release_endpoints(),
+        &format!("\"{}\"", updater::tests::release_pub("updater-test.pub")),
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn pubkey_not_a_key() -> Repo {
+    updater_case(
+        "pubkey-not-a-key",
+        &release_endpoints(),
+        "\"dW50cnVzdGVkIGNvbW1lbnQ=\"",
     )
 }
 
@@ -146,22 +205,18 @@ pub(in crate::checks::tauri_config::tests) fn asset_protocol_enabled() -> Repo {
 }
 
 pub(in crate::checks::tauri_config::tests) fn updater_endpoints_without_pubkey() -> Repo {
-    conf_case(
+    updater_case(
         "updater-endpoints-without-pubkey",
-        "\"endpoints\": []",
-        "\"endpoints\": [\"https://releases.example/latest.json\"]",
+        &release_endpoints(),
+        "\"\"",
     )
 }
 
 pub(in crate::checks::tauri_config::tests) fn whitespace_pubkey_with_endpoints() -> Repo {
-    let conf = edited_conf(
-        "\"endpoints\": []",
-        "\"endpoints\": [\"https://releases.example/latest.json\"]",
-    )
-    .replace("\"pubkey\": \"\"", "\"pubkey\": \"   \"");
-    desktop_repo(
+    updater_case(
         "whitespace-pubkey-with-endpoints",
-        &[(CONF_AT, conf.as_bytes()), (BUILD_AT, BUILD.as_bytes())],
+        &release_endpoints(),
+        "\"   \"",
     )
 }
 
