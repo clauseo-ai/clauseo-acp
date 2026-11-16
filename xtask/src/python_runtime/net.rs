@@ -1,5 +1,14 @@
 //! Downloads with curl, each file checked against its pinned sha256 before anything reads it,
 //! and PBS's build attestation checked with `gh`. Every command goes through the process door.
+//!
+//! GitHub's API allows 60 unauthenticated requests an hour per IP, which shared CI runners use
+//! up. So when `GH_TOKEN` is set, a request to `GITHUB_API` (and only there) sends it as
+//! `Authorization: Bearer`. The token never reaches curl's command line, which process lists and
+//! the failure messages here (which quote the command) show: it goes in `AUTH_HEADER`, a 0600 file
+//! in the download folder that curl reads with `-H @file` and that is removed when curl ends.
+//! curl drops a custom `Authorization` header when a redirect leaves the host it was sent to
+//! (since 7.58.0, CVE-2018-1000007; also on a port or scheme change since 7.83.0,
+//! CVE-2022-27776) unless `--location-trusted` is given, which nothing here passes.
 
 use super::Failure;
 use crate::process::{self, Cmd, Output, Program, Status};
@@ -21,6 +30,14 @@ const DOWNLOAD_TIMEOUT: Duration =
 /// `gh attestation verify` fetches the attestation and the Sigstore trust root: seconds.
 const GH_TIMEOUT: Duration = Duration::from_mins(5);
 
+/// The only URL prefix a request sends `GH_TOKEN` to. The trailing `/` ends the host, so
+/// `https://api.github.com.example/` or `https://api.github.com@example/` never matches.
+const GITHUB_API: &str = "https://api.github.com/";
+/// The variable the token comes from: CI sets it to the job's `github.token`.
+const TOKEN_VAR: &str = "GH_TOKEN";
+/// The header file curl reads the token from, in the download folder while curl runs.
+const AUTH_HEADER: &str = ".github-api-auth-header";
+
 /// The repository whose release workflow builds and attests the PBS archives.
 pub(crate) const PBS_REPO: &str = "astral-sh/python-build-standalone";
 /// The workflow that signs PBS's attestations; `gh` refuses one signed by any other.
@@ -35,31 +52,35 @@ pub(crate) fn pbs_url(release: &str, asset: &str) -> String {
 }
 
 /// The curl command that downloads `url` to `name` in its working dir, HTTPS only, redirects
-/// included.
-fn curl(name: &str, url: &str) -> Cmd {
-    Cmd::new(
-        Program::Named("curl"),
-        [
-            "-sSfL",
-            "--proto",
-            "=https",
-            "--proto-redir",
-            "=https",
-            "--retry",
-            "3",
-            "--retry-all-errors",
-            "--retry-max-time",
-            &CURL_RETRY_MAX_TIME_S.to_string(),
-            "--connect-timeout",
-            "30",
-            "--max-time",
-            &CURL_MAX_TIME_S.to_string(),
-            "-o",
-            name,
-            url,
-        ],
-        DOWNLOAD_TIMEOUT,
-    )
+/// included, with the headers in the file `header_file` (in that dir) when given. It takes a
+/// file name and never a header, so no secret can reach its arguments.
+fn curl(name: &str, url: &str, header_file: Option<&str>) -> Cmd {
+    let retry_max_time = CURL_RETRY_MAX_TIME_S.to_string();
+    let max_time = CURL_MAX_TIME_S.to_string();
+    let mut args = vec![
+        "-sSfL",
+        "--proto",
+        "=https",
+        "--proto-redir",
+        "=https",
+        "--retry",
+        "3",
+        "--retry-all-errors",
+        "--retry-max-time",
+        &retry_max_time,
+        "--connect-timeout",
+        "30",
+        "--max-time",
+        &max_time,
+        "-o",
+        name,
+    ];
+    let header = header_file.map(|file| format!("@{file}"));
+    if let Some(header) = &header {
+        args.extend(["-H", header]);
+    }
+    args.push(url);
+    Cmd::new(Program::Named("curl"), args, DOWNLOAD_TIMEOUT)
 }
 
 /// Runs `cmd` in `dir` with its output kept, and fails with what it printed.
@@ -159,16 +180,84 @@ fn check_size(path: &Path, url: &str, size: Option<u64>) -> Result<PathBuf, Fail
 }
 
 /// Downloads `url` to `<dir>/<name>`, unchecked: for files whose content is checked by reading it
-/// (PBS's SHA256SUMS, `PyPI`'s JSON).
+/// (PBS's SHA256SUMS, `PyPI`'s JSON). Sends `GH_TOKEN` when `url` is GitHub's API. Fails on any
+/// failed download (curl's `-f` makes an HTTP error such as a 403 rate limit one): nothing is
+/// skipped.
 pub(crate) fn fetch(dir: &Path, name: &str, url: &str) -> Result<PathBuf, Failure> {
+    let token = match std::env::var(TOKEN_VAR) {
+        Ok(token) => Some(token),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => return Err(bad_token()),
+    };
+    fetch_with(dir, name, url, token.as_deref(), |cmd| {
+        run(
+            cmd,
+            dir,
+            &format!("downloading {url}"),
+            "check the network and that curl 7.71 or newer is on PATH, then run it again",
+        )
+    })
+}
+
+/// `fetch` with `token` for `GH_TOKEN` and `run_curl` running the command, so a test can look
+/// at the command and the header file while it "runs". The header file is removed whether curl
+/// succeeded or not, and either failure fails.
+fn fetch_with(
+    dir: &Path,
+    name: &str,
+    url: &str,
+    token: Option<&str>,
+    run_curl: impl FnOnce(&Cmd) -> Result<String, Failure>,
+) -> Result<PathBuf, Failure> {
     write::make_dirs(dir).map_err(|error| Failure::io("making the download folder", &error))?;
-    run(
-        &curl(name, url),
-        dir,
-        &format!("downloading {url}"),
-        "check the network and that curl 7.71 or newer is on PATH, then run it again",
-    )?;
+    let header = match api_token(url, token) {
+        Some(token) => Some(write_auth_header(dir, token)?),
+        None => None,
+    };
+    let ran = run_curl(&curl(name, url, header));
+    let removed = match header {
+        Some(file) => remove(dir, file),
+        None => Ok(()),
+    };
+    ran?;
+    removed?;
     Ok(dir.join(name))
+}
+
+/// `token` when `url` is GitHub's API and `token` is set and not empty; else none, and the
+/// request goes unauthenticated.
+fn api_token<'a>(url: &str, token: Option<&'a str>) -> Option<&'a str> {
+    token.filter(|token| !token.is_empty() && url.starts_with(GITHUB_API))
+}
+
+/// Writes `token` as an `Authorization` header to a new 0600 `<dir>/AUTH_HEADER`, replacing one
+/// a killed run left, and returns its name. Refuses a token that is not one printable ASCII word,
+/// which would end the header line or add another.
+fn write_auth_header(dir: &Path, token: &str) -> Result<&'static str, Failure> {
+    if !token.bytes().all(|byte| byte.is_ascii_graphic()) {
+        return Err(bad_token());
+    }
+    if std::fs::symlink_metadata(dir.join(AUTH_HEADER)).is_ok() {
+        remove(dir, AUTH_HEADER)?;
+    }
+    let line = format!("Authorization: Bearer {token}\n");
+    if let Err(error) = write::write_private_file_in(dir, AUTH_HEADER, line.as_bytes()) {
+        if std::fs::symlink_metadata(dir.join(AUTH_HEADER)).is_ok() {
+            remove(dir, AUTH_HEADER)?;
+        }
+        return Err(Failure::io("writing the GitHub API header file", &error));
+    }
+    Ok(AUTH_HEADER)
+}
+
+/// The failure for a `GH_TOKEN` no header can carry. It never quotes the token.
+fn bad_token() -> Failure {
+    Failure::new(
+        format!("{TOKEN_VAR} holds a space, a control or a non-ASCII character"),
+        format!(
+            "set {TOKEN_VAR} to the token alone, or unset it to call GitHub's API unauthenticated"
+        ),
+    )
 }
 
 /// The JSON at `url`, downloaded to `<dir>/<name>`.
@@ -249,3 +338,6 @@ pub(crate) fn verify_pbs_attestation(file: &Path) -> Result<(), Failure> {
     )
     .map(drop)
 }
+
+#[cfg(test)]
+mod tests;
