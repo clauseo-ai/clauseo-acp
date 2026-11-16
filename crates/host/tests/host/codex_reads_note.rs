@@ -134,8 +134,9 @@ fn setup(test: &str) -> (Dir, std::path::PathBuf, std::path::PathBuf, String) {
     let dir = Dir::new(test, &[]);
     let folder = dir.folder("m", &[("a.txt", "a")]);
     let smith = dir.folder("Smith", &[("lease.pdf", "x")]);
-    let stored = dunce::canonicalize(&smith).unwrap();
-    let invited = reads_note(&[("Smith", stored.to_str().unwrap())]);
+    // The note names the folder as the lawyer picked it, as the registry stores it: not where
+    // it leads (macOS's temp folder is under `/var`, a link to `/private/var`).
+    let invited = reads_note(&[("Smith", smith.to_str().unwrap())]);
     let scenario = scenario(&folder, &invited);
     dir.set_agents(&[(CODEX, scenario)]);
     (dir, folder, smith, invited)
