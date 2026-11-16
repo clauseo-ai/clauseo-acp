@@ -22,7 +22,8 @@ Developer ID.
   and by `workflow_dispatch`. Its `check` job sets the mode:
   - `release`: tag `vX.Y.Z` on a commit on `main`. The jobs that sign use the environment `release`;
     `assemble` leaves a draft GitHub Release; `publish` (environment `release-publish`, Rohan as
-    required reviewer) refuses unless every DMG passes `xcrun stapler validate`, then publishes it.
+    required reviewer) refuses unless every DMG passes `xcrun stapler validate`, then publishes it
+    with `gh release edit --draft=false --latest`, so it is the latest release explicitly. `latest` then checks it as installed apps read it (below).
   - `test`: tag `test-vX.Y.Z` on a commit of a `release-test/*` branch (a branch from `main` with only
     the version bumped, deleted after the run). Built with the `e2e` feature under the environment
     `release-test`, its updater files signed with the throwaway test key, published as a pre-release,
@@ -38,7 +39,8 @@ Developer ID.
   its `dist` folder before any leg embeds it); `build` (the matrix below); `build`'s macOS legs rename the bundler's `Clauseo.app.tar.gz` to `Clauseo_<v>_<arch>.app.tar.gz`, drop its `.sig` and sign the renamed file; `sign-windows` (SignPath's slot, then both NSIS
   installers from the one exe with `tauri bundle --no-binary-patching`, then the updater signature,
   last); `assemble` (refuses a bundler-named `Clauseo.app.tar.gz`, checks each Mac archive's signature, writes `latest.json` and
-  `SHA256SUMS.txt`, attests every asset, creates the Release); `publish`; `measure-builds` (the
+  `SHA256SUMS.txt`, attests every asset, creates the Release: a draft, or a test run's pre-release
+  with `--latest=false`); `publish`; `latest`; `measure-builds` (the
   `marks` build on macOS and the `e2e` build on Windows for the laptop pass, never on a Release).
 - **Workflow rules:** every action pinned by commit SHA; `permissions:` on every job (none at the
   top); each secret on the one step that uses it; `pnpm install --frozen-lockfile` and `cargo fetch
@@ -228,6 +230,26 @@ Developer ID.
   `requireSignedVersion`.
 - The binary is called `Clauseo` only in release builds; dev and CI builds keep `clauseo-desktop`, so
   the other workflows' paths stay as they are.
+
+## The latest release, checked (2026-11-16)
+
+Every installed app reads `https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json`
+(R23), so which release GitHub calls latest is part of the update path, never left to its automatic
+choice. `publish` passes `--latest` when it publishes a `v*` draft; a test run's pre-release is
+created with `--latest=false`; a dry run publishes nothing.
+
+The job `latest` (after `publish`, release mode only) then checks what the apps will read: the
+API's `releases/latest` names exactly the tag; `latest.json`, downloaded anonymously from the URL
+above (HTTPS only, redirects followed, retried up to six times 20 s apart for the API's and the
+CDN's lag), has the tag's version and every tier 1 platform (`latest-json.mjs`'s
+`tier1Platforms`); and each platform's `url` is an asset of the tag whose downloaded bytes
+minisign verifies against `plugins.updater.pubkey` (base64 of the minisign `.pub` text; the
+`signature` field is base64 of the `.sig` text), with a trusted comment naming that file and
+version. An empty key fails it. It is a job of its own, not a step in `publish`: the pinned
+minisign (the `blocklist` job's tarball and SHA-256, which `latest-json.test.mjs` keeps equal) is
+a Linux build and `publish` runs on macOS for the stapler, and this way the check needs no
+environment, no approval and only a read token, and can be re-run alone. A failure there means the
+release is already public: it is the signal to fix or pull it, not a gate before it.
 
 ## Linux and sizes (S20 follow-up, 2026-11-03)
 

@@ -10,7 +10,9 @@
 # Three modes, which `check` decides from what started the run:
 # - release: a pushed tag v<X.Y.Z> on a commit on main. Builds under the environment `release`
 #   and leaves a draft GitHub Release; `publish` waits for Rohan's approval (environment
-#   `release-publish`), refuses unless every DMG is notarised and stapled, then publishes it.
+#   `release-publish`), refuses unless every DMG is notarised and stapled, then publishes it as
+#   the latest release; `latest` checks that GitHub names it latest and that
+#   releases/latest/download/latest.json verifies against the app's key.
 # - test: a pushed tag test-v<X.Y.Z> on a commit of a release-test/* branch. Builds with the
 #   `e2e` feature under `release-test`, signs the updater files with the throwaway test key, and
 #   makes a public pre-release (a draft's assets need a signed-in download) for the updater's
@@ -1617,18 +1619,23 @@ jobs:
         with:
           subject-path: dist/*
 
+      # A release is a draft, which `publish` makes the latest release explicitly. A test run's
+      # pre-release says --latest=false: GitHub never makes a pre-release the latest, and saying
+      # so here keeps it that way should gh's default ever change, since every installed app
+      # reads latest.json through releases/latest.
       - name: Create the GitHub Release
         if: env.MODE != 'dry'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ "$MODE" = release ]; then kind=--draft; else kind=--prerelease; fi
-          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag "$kind" \
+          if [ "$MODE" = release ]; then kind=(--draft); else kind=(--prerelease --latest=false); fi
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag "${kind[@]}" \
             --title "Clauseo $VERSION" --notes-file notes.md
 
-  # Publishes a v* draft once Rohan approves it (environment release-publish). Refuses while a DMG
-  # is missing or not notarised and stapled: no release before the Apple account (QF.2 (a)).
+  # Publishes a v* draft once Rohan approves it (environment release-publish) and makes it the
+  # latest release explicitly; `latest` then checks what installed apps will read. Refuses while
+  # a DMG is missing or not notarised and stapled: no release before the Apple account (QF.2 (a)).
   publish:
     name: publish
     needs: [check, assemble]
@@ -1658,10 +1665,12 @@ jobs:
             xcrun stapler validate "$dmg" || { echo "::error::$(basename "$dmg") is not notarised and stapled"; exit 1; }
           done
 
-      - name: Publish the draft
+      # --latest makes this release the one releases/latest names, which every installed app's
+      # updater reads latest.json through; never left to GitHub's automatic choice.
+      - name: Publish the draft as the latest release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: vars.COUNTS_RELEASES_ENABLED == 'true'
@@ -1676,6 +1685,133 @@ jobs:
           CLAUSEO_RELEASE_ACCESS_CLIENT_ID: ${{ secrets.CLAUSEO_RELEASE_ACCESS_CLIENT_ID }}
           CLAUSEO_RELEASE_ACCESS_CLIENT_SECRET: ${{ secrets.CLAUSEO_RELEASE_ACCESS_CLIENT_SECRET }}
         run: node .github/scripts/record-release.mjs "$VERSION" stable
+
+  # What every installed app reads, checked once the release is public, as the app reads it:
+  # GitHub's latest release is this tag; releases/latest/download/latest.json is this version;
+  # and each platform's asset, downloaded from its url, verifies with minisign against the
+  # app's own key (plugins.updater.pubkey), its trusted comment naming that file and version.
+  # A job of its own after publish, not a step in it: the pinned minisign is a Linux build and
+  # publish runs on macOS for the stapler; this job needs no environment, no approval and only
+  # a read token, and a failed check can be re-run alone without publishing again. Defence in
+  # depth: check refuses a release with an empty key, and assemble checked each signature
+  # before the draft existed.
+  latest:
+    name: latest
+    needs: [check, publish]
+    if: needs.check.outputs.mode == 'release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      TAG: ${{ needs.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: crates/desktop/tauri.conf.json
+          sparse-checkout-cone-mode: false
+
+      # The blocklist job's minisign, the same tarball and SHA-256 (latest-json.test.mjs keeps
+      # the two pins equal); see the comment there for why it is not from apt.
+      - name: Install minisign
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tarball=minisign-0.12-linux.tar.gz
+          sha=9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
+          for attempt in 1 2 3 4 5; do
+            if gh release download 0.12 --repo jedisct1/minisign --clobber --pattern "$tarball"; then
+              break
+            elif [ "$attempt" -eq 5 ]; then
+              echo "::error::could not download $tarball from jedisct1/minisign (5 attempts)"
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "$sha  $tarball" | sha256sum -c - ||
+            { echo "::error::$tarball does not have the pinned SHA-256"; exit 1; }
+          tar -xzf "$tarball" minisign-linux/x86_64/minisign
+          sudo install -m 0755 minisign-linux/x86_64/minisign /usr/local/bin/minisign
+          rm -rf "$tarball" minisign-linux
+          minisign -v
+
+      # The API and the download CDN can lag the publish by a little, so each is retried, up
+      # to 6 times 20 s apart, until it shows this release; then it must. Downloads go without
+      # a token, as the app's do, over HTTPS only (redirects included), following redirects.
+      # The signature field in latest.json is base64 of the .sig text, the key base64 of the
+      # minisign .pub text, as build decodes it. TIER1 is latest-json.mjs's tier1Platforms
+      # (latest-json.test.mjs keeps them equal): each must be in latest.json.
+      - name: The latest release is this tag, and its latest.json verifies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          get() { curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --retry 3 --retry-delay 10 --max-time 600 --output "$2" "$1"; }
+          TIER1="darwin-aarch64-app windows-x86_64-nsis windows-x86_64 windows-aarch64-nsis windows-aarch64"
+          work=$RUNNER_TEMP/latest
+          mkdir -p "$work/assets"
+          key=$(jq -r '.plugins.updater.pubkey // ""' crates/desktop/tauri.conf.json)
+          [ -n "$key" ] || fail "plugins.updater.pubkey in tauri.conf.json is empty, so latest.json can't be checked"
+          printf '%s' "$key" | base64 -d | tr -d '\r' > "$work/updater.pub" ||
+            fail "plugins.updater.pubkey is not base64"
+          [ "$(sed -n 1p "$work/updater.pub" | cut -c 1-38)" = "untrusted comment: minisign public key" ] &&
+            sed -n 2p "$work/updater.pub" | grep -q '^RW' ||
+            fail "plugins.updater.pubkey is not base64 of a minisign public key file"
+
+          latest=""
+          for attempt in 1 2 3 4 5 6; do
+            latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name) || latest=""
+            if [ "$latest" = "$TAG" ]; then break; fi
+            if [ "$attempt" -lt 6 ]; then sleep 20; fi
+          done
+          [ "$latest" = "$TAG" ] || fail "GitHub's latest release is ${latest:-none}, not $TAG"
+
+          manifest=$work/latest.json
+          version=""
+          for attempt in 1 2 3 4 5 6; do
+            version=""
+            if get "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json" "$manifest"; then
+              version=$(jq -r '.version // ""' "$manifest") || version=""
+            fi
+            if [ "$version" = "$VERSION" ]; then break; fi
+            if [ "$attempt" -lt 6 ]; then sleep 20; fi
+          done
+          [ "$version" = "$VERSION" ] ||
+            fail "releases/latest/download/latest.json says version ${version:-nothing}, not $VERSION"
+
+          platforms=$(jq -r '.platforms // {} | keys[]' "$manifest")
+          for want in $TIER1; do
+            grep -qxF "$want" <<< "$platforms" || fail "latest.json has no $want (tier 1)"
+          done
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/"
+          summary=()
+          for platform in $platforms; do
+            url=$(jq -r --arg p "$platform" '.platforms[$p].url // ""' "$manifest")
+            name=${url#"$base"}
+            [ "$name" != "$url" ] && [ -n "$name" ] && [ "${name#*/}" = "$name" ] ||
+              fail "latest.json's $platform url is $url, not an asset of $TAG"
+            [ -f "$work/assets/$name" ] || get "$url" "$work/assets/$name" ||
+              fail "$platform: $url did not download"
+            jq -r --arg p "$platform" '.platforms[$p].signature // ""' "$manifest" | base64 -d \
+              > "$work/$platform.minisig" || fail "$platform: the signature in latest.json is not base64"
+            out=$(minisign -V -p "$work/updater.pub" -m "$work/assets/$name" -x "$work/$platform.minisig") ||
+              fail "$platform: $name does not verify with plugins.updater.pubkey"
+            comment=$(sed -n 's/^Trusted comment: //p' <<< "$out" | tr '\t' '\n')
+            grep -qxF "file:$name" <<< "$comment" && grep -qxF "version:$VERSION" <<< "$comment" ||
+              fail "$platform: $name's signed comment does not name file:$name and version:$VERSION"
+            summary+=("- $platform: \`$name\` verifies (file:$name, version:$VERSION)")
+          done
+          {
+            echo "### The latest release"
+            echo "- GitHub's latest release: $TAG"
+            echo "- releases/latest/download/latest.json: version $VERSION"
+            printf '%s\n' "${summary[@]}"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
   # S24's measuring builds: the shipped ui, release flags and profile, with `marks` on macOS and
   # `e2e` on Windows, each with fake_agent beside it. No environment, no secret, never on a
