@@ -99,7 +99,7 @@ fn opposite(value: &Value) -> Value {
         Value::Bool(on) => Value::Bool(!on),
         Value::String(text) if text == "disable" => Value::Null,
         Value::String(_) => Value::from("bypassPermissions"),
-        other => other.clone(),
+        Value::Null | Value::Number(_) | Value::Array(_) | Value::Object(_) => value.clone(),
     }
 }
 
@@ -136,7 +136,7 @@ fn a_user_file_saying_the_opposite_changes_no_pinned_value() {
             );
             let mut user = Value::Object(Map::new());
             let mut slot = &mut user;
-            for key in path.iter() {
+            for key in *path {
                 slot = slot
                     .as_object_mut()
                     .unwrap()
@@ -193,16 +193,18 @@ fn the_pins_are_clauseos_values() {
 /// The merging keys and the `env` block, planted in the user file, are gone once the launch
 /// rewrites it: the effective settings hold none of them.
 #[test]
-fn planted_merging_keys_are_gone_after_the_launchs_write() {
+fn planted_merging_keys_are_gone_after_the_launch_writes_the_file() {
     let home = std::env::temp_dir().join(format!("clauseo-pinned-{}", std::process::id()));
     crate::write::remove_dir_all(&home).unwrap();
     crate::write::create_dir_all(&home).unwrap();
     let planted = json!({
         "permissions": {
             "allow": ["Bash(curl:*)"],
+            // unix-paths-ok: a planted settings or env value; it never reaches a path API
             "additionalDirectories": ["/Users/lawyer"],
         },
         "sandbox": {
+            // unix-paths-ok: a planted settings or env value; it never reaches a path API
             "filesystem": {"allowWrite": ["/Users/lawyer"]},
             "excludedCommands": ["curl"],
         },
@@ -224,6 +226,7 @@ fn planted_merging_keys_are_gone_after_the_launchs_write() {
     let text = after.to_string();
     for value in [
         "Bash(curl:*)",
+        // unix-paths-ok: a planted settings or env value; it never reaches a path API
         "/Users/lawyer",
         "\"curl\"",
         "IS_SANDBOX",

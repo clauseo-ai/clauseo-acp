@@ -2,22 +2,23 @@ use serde_json::json;
 
 use super::{AdminPolicy, Doc, admin_docs, plist_doc, user_policy_touches};
 
-fn doc(value: serde_json::Value) -> Doc {
+fn doc(value: &serde_json::Value) -> Doc {
     Doc::from_text(&value.to_string())
 }
 
 #[test]
 fn an_admin_policy_that_turns_hooks_off_is_named_by_its_key() {
-    let none = AdminPolicy::of(&[doc(json!({"model": "opus"})), Doc::Absent]);
+    let none = AdminPolicy::of(&[doc(&json!({"model": "opus"})), Doc::Absent]);
     assert_eq!(none.hooks_off, None);
     assert!(none.content);
-    let off = AdminPolicy::of(&[doc(json!({"disableAllHooks": true}))]);
+    let off = AdminPolicy::of(&[doc(&json!({"disableAllHooks": true}))]);
     assert_eq!(off.hooks_off, Some("disableAllHooks"));
-    let managed_only = AdminPolicy::of(&[Doc::Absent, doc(json!({"allowManagedHooksOnly": true}))]);
+    let managed_only =
+        AdminPolicy::of(&[Doc::Absent, doc(&json!({"allowManagedHooksOnly": true}))]);
     assert_eq!(managed_only.hooks_off, Some("allowManagedHooksOnly"));
     // `false`, or a string, turns nothing off.
     let on = AdminPolicy::of(&[doc(
-        json!({"disableAllHooks": false, "allowManagedHooksOnly": "true"}),
+        &json!({"disableAllHooks": false, "allowManagedHooksOnly": "true"}),
     )]);
     assert_eq!(on.hooks_off, None);
 }
@@ -29,7 +30,7 @@ fn absent_empty_and_unreadable_documents() {
     assert_eq!(Doc::from_text("{"), Doc::Unreadable);
     assert_eq!(Doc::from_read(&Err(())), Doc::Unreadable);
     assert_eq!(Doc::from_read(&Ok(None)), Doc::Absent);
-    let empty = AdminPolicy::of(&[Doc::Absent, doc(json!({}))]);
+    let empty = AdminPolicy::of(&[Doc::Absent, doc(&json!({}))]);
     assert!(!empty.content);
     let unreadable = AdminPolicy::of(&[Doc::Unreadable]);
     assert_eq!(
@@ -53,14 +54,11 @@ fn the_user_tier_refuses_only_when_it_applies_and_touches_a_guarded_area() {
         json!({"allowManagedHooksOnly": false}),
         json!({"allowManagedPermissionRulesOnly": true}),
     ] {
-        assert!(
-            user_policy_touches(none, &doc(touching.clone())),
-            "{touching}"
-        );
+        assert!(user_policy_touches(none, &doc(&touching)), "{touching}");
     }
     assert!(!user_policy_touches(
         none,
-        &doc(json!({"model": "opus", "env": {"X": "1"}}))
+        &doc(&json!({"model": "opus", "env": {"X": "1"}}))
     ));
     assert!(!user_policy_touches(none, &Doc::Absent));
     assert!(
@@ -68,10 +66,10 @@ fn the_user_tier_refuses_only_when_it_applies_and_touches_a_guarded_area() {
         "unsure is refused"
     );
     // An administrator's policy outranks it: Claude Code does not read it then.
-    let admin = AdminPolicy::of(&[doc(json!({"model": "opus"}))]);
+    let admin = AdminPolicy::of(&[doc(&json!({"model": "opus"}))]);
     assert!(!user_policy_touches(
         admin,
-        &doc(json!({"sandbox": {"enabled": false}}))
+        &doc(&json!({"sandbox": {"enabled": false}}))
     ));
 }
 
@@ -79,16 +77,16 @@ fn the_user_tier_refuses_only_when_it_applies_and_touches_a_guarded_area() {
 fn admin_files_are_read_from_the_managed_folder_with_their_drop_ins() {
     let dir = super::super::tests::folder("policy_keys_admin_files");
     assert!(!AdminPolicy::of(&admin_docs(dir.as_path(), false)).content);
-    std::fs::write(
-        dir.as_path().join("managed-settings.json"),
-        r#"{"model":"opus"}"#,
+    crate::write::replace_private_file(
+        &dir.as_path().join("managed-settings.json"),
+        br#"{"model":"opus"}"#,
     )
     .unwrap();
     let drop_ins = dir.as_path().join("managed-settings.d");
-    std::fs::create_dir(&drop_ins).unwrap();
-    std::fs::write(
-        drop_ins.join("10-hooks.json"),
-        r#"{"disableAllHooks":true}"#,
+    crate::write::create_dir_all(&drop_ins).unwrap();
+    crate::write::replace_private_file(
+        &drop_ins.join("10-hooks.json"),
+        br#"{"disableAllHooks":true}"#,
     )
     .unwrap();
     let policy = AdminPolicy::of(&admin_docs(dir.as_path(), false));
@@ -113,7 +111,7 @@ fn a_managed_preferences_list_turning_hooks_off_is_read() {
 
 #[test]
 fn server_managed_settings_turn_hooks_off_but_leave_the_user_tier_checked() {
-    let remote = doc(json!({"disableAllHooks": true}));
+    let remote = doc(&json!({"disableAllHooks": true}));
     let policy = AdminPolicy::of(&[Doc::Absent]).with_remote(&remote);
     assert_eq!(policy.hooks_off, Some("disableAllHooks"));
     assert!(policy.remote);
@@ -121,7 +119,7 @@ fn server_managed_settings_turn_hooks_off_but_leave_the_user_tier_checked() {
     assert!(!policy.content);
     assert!(user_policy_touches(
         policy,
-        &doc(json!({"sandbox": {"enabled": false}}))
+        &doc(&json!({"sandbox": {"enabled": false}}))
     ));
     let plain = AdminPolicy::default().with_remote(&Doc::Absent);
     assert_eq!(plain, AdminPolicy::default());

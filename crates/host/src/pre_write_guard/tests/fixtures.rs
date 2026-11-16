@@ -88,7 +88,7 @@ fn claude_tools_are_refused_in_a_mode_that_skips_the_lawyer() {
     let matter = fx.path("m");
     let escaped = serde_json::to_string(&matter).unwrap();
     let escaped = escaped.trim_matches('"');
-    for (name, text, with_matter) in FIXTURES.into_iter().filter(|(_, _, claude)| *claude) {
+    for (name, text, _) in FIXTURES.into_iter().filter(|(_, _, claude)| *claude) {
         let free = text
             .replace("{matter}", escaped)
             .replace("Contract.docx", "Free.docx");

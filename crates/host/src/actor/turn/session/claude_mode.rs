@@ -209,7 +209,7 @@ pub(super) async fn switch(
     };
     let asked = CompactString::from(asked.as_str());
     if let Some(modes) = &mut start.modes {
-        modes.current = asked.clone();
+        modes.current.clone_from(&asked);
     }
     Ok(held.map(|held| Switched {
         held,

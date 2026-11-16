@@ -303,7 +303,7 @@ pub(super) fn launch_now(
         forced_ask,
         folder_check: prepared_folder,
         auto: session::Auto::default(),
-        modes: Default::default(),
+        modes: super::forced_mode::read_back::Reports::default(),
         claude_home,
         admin_tier: super::profile_loads::policy::AdminTier::Present,
         mcp_sent: (!unprotected).then(Vec::new),

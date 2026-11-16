@@ -4,10 +4,9 @@
 //!
 //! A turn moves through the steps of the brief's "The turn": the `UserMessage` commit, the
 //! agent's launch (`agents.rs`), the writer queue and the before-turn checkpoint, the prompt, and
-//! the end (`steps.rs`); a thread's queue of prompts waiting behind its turn, send now and steer
-//! are in `queue.rs`. Agent updates are mapped in `updates.rs`, text goes through the
-//! coalescer in `text.rs`, and every commit of a thread stream starts by flushing that thread's
-//! held text (`out.rs`), so text and other events keep their order.
+//! the end (`steps.rs`); queued prompts, send now and steer are in `queue.rs`. Updates are mapped
+//! in `updates.rs`, text goes through the coalescer in `text.rs`, and every commit of a thread
+//! stream first flushes its held text (`out.rs`), so text and other events keep their order.
 
 mod agents;
 mod answers;

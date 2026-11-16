@@ -86,7 +86,9 @@ fn only_the_claude_and_anthropic_variables_clauseo_sets_reach_the_agent() {
         .iter()
         .map(|name| (OsString::from(name), OsString::from("planted")))
         .chain([
+            // unix-paths-ok: a planted settings or env value; it never reaches a path API
             (OsString::from("HOME"), OsString::from("/home/ada")),
+            // unix-paths-ok: a planted settings or env value; it never reaches a path API
             (OsString::from("PATH"), OsString::from("/usr/bin")),
             (
                 OsString::from("CLAUDEISH"),
@@ -129,6 +131,7 @@ fn only_the_claude_and_anthropic_variables_clauseo_sets_reach_the_agent() {
         env.get(&OsString::from("CLAUDEISH")).unwrap(),
         "kept: no prefix"
     );
+    // unix-paths-ok: a planted settings or env value; it never reaches a path API
     assert_eq!(env.get(&OsString::from("HOME")).unwrap(), "/home/ada");
 }
 

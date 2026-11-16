@@ -68,7 +68,7 @@ fn a_planted_link_and_cowork_file_are_replaced_not_followed() {
 /// matches (Claude Code's own writer may reformat it), and any change does not: a key added or
 /// changed, a file that is no JSON or gone, a cowork file beside it, a link in its place.
 #[test]
-fn the_compare_helper_says_whether_the_file_is_still_the_launchs() {
+fn the_compare_helper_says_whether_the_file_is_still_what_the_launch_wrote() {
     let home = home("compare");
     let file = home.join(CLAUDE_SETTINGS_FILE);
     assert!(!claude_settings_intact(&home), "no file yet");
@@ -82,7 +82,7 @@ fn the_compare_helper_says_whether_the_file_is_still_the_launchs() {
     for changed in [
         r#"{"syncClaudeAiSkills": false, "disableAllHooks": true}"#,
         r#"{"syncClaudeAiSkills": true}"#,
-        r#"{}"#,
+        "{}",
         "not json",
     ] {
         write::write_file(&file, changed.as_bytes()).unwrap();
@@ -98,7 +98,7 @@ fn the_compare_helper_says_whether_the_file_is_still_the_launchs() {
     {
         write_claude_settings(&home).unwrap();
         let copy = home.join("copy.json");
-        std::fs::copy(&file, &copy).unwrap();
+        write::write_new_private_file(&copy, &std::fs::read(&file).unwrap()).unwrap();
         write::remove_file(&file).unwrap();
         write::symlink(&copy, &file).unwrap();
         assert!(!claude_settings_intact(&home), "a link to the same text");
@@ -146,6 +146,7 @@ fn claude_codes_own_writes_pass_the_compare_and_nothing_else_does() {
         json!({"permissions": {"defaultMode": "auto", "allow": ["Bash"]}}),
         json!({"permissions": {"allow": ["Bash(curl:*)"]}}),
         json!({"permissions": {"deny": []}}),
+        // unix-paths-ok: a planted settings or env value; it never reaches a path API
         json!({"permissions": {"additionalDirectories": ["/Users/lawyer"]}}),
         json!({"permissions": {}}),
         json!({"sandbox": {"enabled": false}}),

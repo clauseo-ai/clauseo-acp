@@ -68,24 +68,28 @@ impl Reports {
 /// The mode `update` reports: a `current_mode_update`'s, or the current value of the
 /// mode-category select option in a `config_option_update`.
 pub(crate) fn reported(update: &AgentUpdate) -> Option<&str> {
-    match update {
-        AgentUpdate::CurrentMode { mode_id } => Some(mode_id.as_str()),
-        AgentUpdate::ConfigOptions(options) => options
-            .iter()
-            .filter(|option| option.category == ConfigCategory::Mode)
-            .find_map(|option| match &option.kind {
-                ConfigOptionKind::Select { current_value, .. } => Some(current_value.as_str()),
-                ConfigOptionKind::Boolean { .. } | ConfigOptionKind::Unknown { .. } => None,
-            }),
-        _ => None,
+    if let AgentUpdate::CurrentMode { mode_id } = update {
+        return Some(mode_id.as_str());
     }
+    let AgentUpdate::ConfigOptions(options) = update else {
+        return None;
+    };
+    options
+        .iter()
+        .filter(|option| option.category == ConfigCategory::Mode)
+        .find_map(|option| match &option.kind {
+            ConfigOptionKind::Select { current_value, .. } => Some(current_value.as_str()),
+            ConfigOptionKind::Boolean { .. } | ConfigOptionKind::Unknown { .. } => None,
+        })
 }
 
 /// The last mode `events` report, if any.
 pub(crate) fn last_reported(events: &[AcpEvent]) -> Option<&str> {
-    events.iter().rev().find_map(|event| match event {
-        AcpEvent::Update { update, .. } => reported(update),
-        _ => None,
+    events.iter().rev().find_map(|event| {
+        let AcpEvent::Update { update, .. } = event else {
+            return None;
+        };
+        reported(update)
     })
 }
 

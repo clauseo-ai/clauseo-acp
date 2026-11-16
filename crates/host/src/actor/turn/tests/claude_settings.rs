@@ -32,13 +32,17 @@ fn start(test: &str, lines: &[String]) -> (Rig, ThreadId, Arc<Mutex<UserTierRead
 /// `turn`'s stop and failure code in `thread`'s log.
 fn end(rig: &mut Rig, thread: ThreadId, turn: TurnId) -> (Option<StopReason>, Option<ErrorCode>) {
     let log = rig.log(thread);
-    let stop = log.iter().find_map(|event| match event {
-        DomainEvent::TurnEnded(ended) if ended.turn == turn => Some(ended.stop),
-        _ => None,
+    let stop = log.iter().find_map(|event| {
+        let DomainEvent::TurnEnded(ended) = event else {
+            return None;
+        };
+        (ended.turn == turn).then_some(ended.stop)
     });
-    let code = log.iter().find_map(|event| match event {
-        DomainEvent::TurnFailed(failed) if failed.turn == turn => Some(failed.code),
-        _ => None,
+    let code = log.iter().find_map(|event| {
+        let DomainEvent::TurnFailed(failed) = event else {
+            return None;
+        };
+        (failed.turn == turn).then_some(failed.code)
     });
     (stop, code)
 }
