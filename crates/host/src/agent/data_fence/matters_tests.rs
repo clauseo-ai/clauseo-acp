@@ -554,6 +554,39 @@ fn denies_inside_counts_a_matter_whose_paths_were_dropped() {
     assert!(!deny.denies_inside(&[]), "no spelling, no answer");
 }
 
+/// Beside the own matter `Zoë` (NFC), a folder `Zoë` (NFD) is another folder on ext4 and
+/// NTFS (APFS takes them for one, so not there): a parent registered as a matter fences it, and
+/// leaves the own matter out. The keep side folds as the file system does, never NFD.
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn a_folder_named_in_another_unicode_form_is_fenced_beside_the_own_matter() {
+    let dir = layout("matters-unicode-forms");
+    let root = dunce::canonicalize(dir.path()).unwrap().join("Clients");
+    let (own, other) = (root.join("Zo\u{eb}"), root.join("Zoe\u{308}"));
+    for file in [own.join("a.txt"), other.join("b.txt")] {
+        write::create_dir_all(file.parent().unwrap()).unwrap();
+        write::write_file(&file, b"x").unwrap();
+    }
+    let fence = matters(&[(root.clone(), false)], &[own.as_path()], &[]);
+    let rules = claude_deny_rules(
+        &LaunchDeny {
+            matters: fence,
+            ..LaunchDeny::default()
+        },
+        false,
+    );
+    for tool in ["Read", "Edit"] {
+        assert!(
+            denied(&rules, tool, &other.join("b.txt")),
+            "{tool}: {rules:#?}"
+        );
+        assert!(
+            !denied(&rules, tool, &own.join("a.txt")),
+            "{tool}: {rules:#?}"
+        );
+    }
+}
+
 #[cfg(unix)]
 #[path = "matters_link_tests.rs"]
 mod link;
