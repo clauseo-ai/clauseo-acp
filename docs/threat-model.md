@@ -141,8 +141,12 @@ any ACP message, including permission requests with misleading text.
 
 - `designed`: The sandbox wraps the whole agent process (adapter and agent), not only its shell
   commands
-- `designed`: Auto mode is on by default only where the sandbox is active; in tier C the adapters'
-  ask modes apply and the matter shows Not protected
+- `built`: Every Claude session outside forced ask starts in Claude Code's auto mode, on every
+  system (`agent/loads.rs` `CLAUDE_MODE`); where Claude's shell sandbox runs (macOS, Linux with it
+  on) the sandbox stands behind it, and on Windows only Claude Code's classifier, the deny rules
+  and the guard do. In tier C the matter shows Not protected
+- `built`: Claude is offered an explicit list of built-in tools, and the ones left out are denied
+  by name too (`agent/loads/tools.rs`)
 - `designed`: A human approves only escalations: paths outside the matter, new web domains, sandbox
   off, full-access modes, "always allow", all through native dialogs drawn by Rust or a denial card that
   opens one

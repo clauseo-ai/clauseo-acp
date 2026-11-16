@@ -422,7 +422,9 @@ mirror install works as before, from the same first use.
 ## Consequences
 
 - A pin bump in G16's file moves both agents to new `<hash>` folders by itself. The sizes table
-  must be measured again, and its test says so.
+  must be measured again, and its test says so. Until the launch checks the offered tools itself
+  (planned with #1167's canary), the explicit tool list and disallowedTools are the walls, and
+  stage B's system/init tool-list row is mandatory at every Claude Code pin bump.
 - At every Claude Code pin bump, and for any PR that changes the rules a launch emits, run the
   emitted settings through the pinned binary on Windows and the Mac and confirm every rule is
   kept ("N in, N kept"; `scripts/claude-rule-probe`).
