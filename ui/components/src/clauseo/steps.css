@@ -194,6 +194,16 @@
     color: var(--muted);
     overflow-wrap: anywhere;
   }
+  /* a picture that came back (a screenshot), scaled down to the column and a bounded height, its shape kept */
+  .step-row-result-image {
+    display: block;
+    max-width: 100%;
+    max-height: var(--step-picture-max);
+    width: auto;
+    height: auto;
+    margin: var(--s1) 0;
+    border-radius: var(--r-control);
+  }
   .step-row-result-note {
     display: block;
     color: var(--muted);

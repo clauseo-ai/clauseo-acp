@@ -7,11 +7,13 @@ import {
   LONG_RESULT,
   MCP_ERROR,
   MCP_MIXED,
+  MCP_SHOT,
   MCP_TEXT,
   NO_BLOCKS,
   NOT_JSON,
   NULL,
   OPAQUE_ERROR,
+  PNG,
   QUOTED,
   QUOTED_OBJECT,
 } from "./fixtures.ts";
@@ -22,6 +24,7 @@ const plain = (face: "words" | "code", text: string, error = false) => ({
   face,
   text,
   error,
+  images: [],
   pictures: 0,
   others: 0,
 });
@@ -39,11 +42,39 @@ test("an opaque error shows its text as an error; one that isn't a string, as JS
   expect(readOutput('{"error":"denied"}')).toEqual(plain("words", "denied", true));
 });
 
+test("a raster picture (a screenshot) is drawn; one of another type or with data that isn't base64 is counted", () => {
+  expect(read(MCP_SHOT)).toEqual({
+    ...plain("words", "Took a screenshot."),
+    images: [{ mime: "image/png", data: PNG }],
+  });
+  const of = (block: object) =>
+    readOutput(JSON.stringify({ result: { content: [block] }, error: null }));
+  for (const mime of ["image/png", "IMAGE/JPEG", "image/gif", "image/webp"])
+    expect(of({ type: "image", data: PNG, mimeType: mime })!.images).toEqual([
+      { mime: mime.toLowerCase(), data: PNG },
+    ]);
+  for (const bad of [
+    { type: "image", data: PNG, mimeType: "image/svg+xml" },
+    { type: "image", data: '"><script>', mimeType: "image/png" },
+    { type: "image", data: "", mimeType: "image/png" },
+    { type: "image", data: PNG },
+    { type: "image", uri: "https://example.com/x.png", mimeType: "image/png" },
+  ])
+    expect(of(bad)).toMatchObject({ images: [], pictures: 1 });
+  // a blob read whole for its picture is read past MAX_TEXT
+  const whole = JSON.stringify({
+    content: [{ type: "image", data: "A".repeat(MAX_TEXT * 2), mimeType: "image/png" }],
+  });
+  expect(readOutput(whole)).toEqual(plain("code", whole.slice(0, MAX_TEXT)));
+  expect(readOutput(whole, whole.length)!.images[0]!.data).toHaveLength(MAX_TEXT * 2);
+});
+
 test("MCP text blocks show in order, a blank line apart; pictures and other blocks are counted, not drawn", () => {
   expect(read(MCP_MIXED)).toEqual({
     face: "words",
     text: "The page has two figures.",
     error: false,
+    images: [],
     pictures: 2,
     others: 1,
   });

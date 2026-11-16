@@ -1,7 +1,9 @@
 // What came back from a tool call, under its row in an open group (U17): the output read by parse.ts, drawn as plain
 // text in one element (pre-wrap, dir="auto", inside <bdi>), never HTML and never a link; folded at 12 lines with
-// "Show all", cut at 2,000 lines or 64 KB. A blob is read on the press (blob.ts); past 64 KB, or when its read fails,
-// one quiet line says it is too large. An error tells the row (onFailed), which then says Failed. Loaded lazily
+// "Show all", cut at 2,000 lines or 64 KB. An MCP picture of a raster type (a screenshot) is drawn under the text,
+// scaled down to the column and a bounded height, never cut, with an empty alt (it adds no words). A blob is read on
+// the press (blob.ts); past 64 KB without a picture in its preview, or when its read fails, one quiet line says it is
+// too large. An error tells the row (onFailed), which then says Failed. Loaded lazily
 // (result-load.ts) with its words: nothing here runs before the press.
 import { use, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
@@ -9,7 +11,7 @@ import type { Lang } from "@clauseo/components/lib/display.ts";
 import { tr } from "@clauseo/components/lib/words-tool-result.ts";
 import type { BlobRef, TextOrBlob } from "../../../transport/protocol.ts";
 import { SourcesTransport } from "../sources.ts";
-import { readAlready, readBlob, tooLarge } from "./blob.ts";
+import { MAX_PICTURE_READ, holdsPicture, readAlready, readBlob, tooLarge } from "./blob.ts";
 import { cut, readOutput } from "./parse.ts";
 
 export type ResultBlockProps = {
@@ -102,22 +104,33 @@ function BlobResult({
         <Note>{tr(lang, TOO_LARGE)}</Note>
       </Block>
     );
-  return <Shown id={id} text={got} lang={lang} onFailed={onFailed} />;
+  return (
+    <Shown
+      id={id}
+      text={got}
+      max={holdsPicture(blob) ? MAX_PICTURE_READ : undefined}
+      lang={lang}
+      onFailed={onFailed}
+    />
+  );
 }
 
 /** Text read and drawn: folded at 12 lines until "Show all", the cap's line past 2,000 lines or 64 KB. */
 function Shown({
   id,
   text,
+  max,
   lang,
   onFailed,
 }: {
   id: string;
   text: string;
+  /** How much of the text is read: MAX_TEXT unless a picture's blob was read whole. */
+  max?: number | undefined;
   lang: Lang;
   onFailed: (failed: true) => void;
 }) {
-  const read = useMemo(() => readOutput(text), [text]);
+  const read = useMemo(() => readOutput(text, max), [text, max]);
   const shown = useMemo(() => (read === null ? null : cut(read.text)), [read]);
   const [all, setAll] = useState(false);
   const error = read?.error === true;
@@ -140,6 +153,16 @@ function Shown({
           </span>
         </bdi>
       )}
+      {read.images.map((picture, i) => (
+        <img
+          // the pictures never reorder: their place is their key
+          key={i}
+          className="step-row-result-image"
+          data-testid="tool-result-image"
+          src={`data:${picture.mime};base64,${picture.data}`}
+          alt=""
+        />
+      ))}
       {read.pictures > 0 && (
         <Note>
           {read.pictures === 1

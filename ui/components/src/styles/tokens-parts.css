@@ -397,6 +397,8 @@
   --os-win-line: rgba(0, 0, 0, 0.0578); /* Windows' own stroke round a control and over the foot */
   --os-shadow:
     0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 22px 70px 4px rgba(0, 0, 0, 0.26); /* a system window's own */
+  /* Steps: a picture that came back from a tool (a screenshot), scaled down to at most this tall */
+  --step-picture-max: calc(480px * var(--k));
   /* Matters: the rail's conversations, the queue and the corridor */
   --mat-queue-max: calc(
     196px * var(--k)
