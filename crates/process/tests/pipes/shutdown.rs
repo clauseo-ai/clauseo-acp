@@ -263,7 +263,7 @@ fn exit_mid_turn_reports_code_and_tail() {
 }
 
 #[test]
-fn missing_program_is_launch_failed() {
+fn missing_program_is_program_blocked() {
     let dir = RunDir::new();
     let missing = dir.path().join("no-such-agent");
     let error = launch_program(missing.clone(), &[], &dir).unwrap_err();
@@ -272,5 +272,5 @@ fn missing_program_is_launch_failed() {
     };
     assert_eq!(program, &missing);
     assert_eq!(source.kind(), io::ErrorKind::NotFound);
-    assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+    assert_eq!(error.code(), ErrorCode::AgentProgramBlocked);
 }
