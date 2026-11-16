@@ -1693,7 +1693,9 @@ jobs:
             # The first-open steps, only in an unsigned beta, decided exactly as publish decides
             # it (UNSIGNED_BETA and HAS_APPLE, below and in publish), so a signed release never
             # carries them; the Windows lines also only while SignPath is off. The words are
-            # docs/install/macos.md's and windows.md's, which the links lead to.
+            # docs/install/macos.md's and windows.md's, which the links lead to, and each line is
+            # a copy review string (UC-751 to UC-755, registry-release-notes.tsx): latest-json's
+            # test fails unless the lines, read as GitHub shows them, are the registered ones.
             if [ "$UNSIGNED_BETA" = true ] && [ "$HAS_APPLE" != true ]; then
               guide=https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/install
               echo
