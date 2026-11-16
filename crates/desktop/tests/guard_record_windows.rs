@@ -130,7 +130,7 @@ fn the_real_hook_command_refuses_and_records_under_powershell_from_an_apostrophe
     let quoted = |path: &str| format!("'{}'", path.replace('\'', "''"));
     assert!(
         command.starts_with(&format!(
-            "& {} --pre-write-guard --record {} --record-id {id}; $c = $LASTEXITCODE;",
+            "$global:LASTEXITCODE = -1; & {} --pre-write-guard --record {} --record-id {id}; $c",
             quoted(APP),
             quoted(&record.display().to_string()),
         )),

@@ -128,14 +128,15 @@ pub(crate) const UNCHECKED: &str = "Clauseo could not check this step, so it did
 
 /// `words` (the program, then its arguments, each quoted as it must be) as one line of
 /// PowerShell: the call operator runs the program, whose stdin, stdout and stderr are the hook's
-/// own; its exit code 0 (go on) or 2 (refused, the reason on its stderr) ends the hook unchanged.
-/// Any other ending (no program at that path, which leaves `$LASTEXITCODE` unset, a crash, 1, an
-/// NTSTATUS) writes [`UNCHECKED`] to stderr and ends with 2, so Codex blocks the tool with
-/// that line as its reason (`hooks/src/events/pre_tool_use.rs:261-291`).
+/// own; its exit code 0 (go on) or 2 (refused, the reason on its stderr) ends the hook with that
+/// same code. `$LASTEXITCODE` is set to -1 first, so a program that never started can't leave an
+/// unset or stale code. Any other ending (no program at that path, a crash, 1, an NTSTATUS)
+/// writes [`UNCHECKED`] to stderr and ends with 2, so Codex blocks the tool with that line as its
+/// reason (`hooks/src/events/pre_tool_use.rs:261-291`).
 pub(crate) fn ps_command(words: &[String]) -> String {
     format!(
-        "& {}; $c = $LASTEXITCODE; if ($c -eq 0 -or $c -eq 2) {{ exit $c }}; \
-         [Console]::Error.WriteLine({}); exit 2",
+        "$global:LASTEXITCODE = -1; & {}; $c = $LASTEXITCODE; if ($c -eq 0 -or $c -eq 2) \
+         {{ exit $c }}; [Console]::Error.WriteLine({}); exit 2",
         words.join(" "),
         ps_quoted(UNCHECKED),
     )
@@ -287,7 +288,9 @@ mod tests {
             config["PreToolUse"][0]["hooks"][0]["commandWindows"]
                 .as_str()
                 .unwrap()
-                .starts_with(r"& 'C:\100%\clauseo.exe' --pre-write-guard; $c = $LASTEXITCODE;")
+                .starts_with(
+                    r"$global:LASTEXITCODE = -1; & 'C:\100%\clauseo.exe' --pre-write-guard; $c"
+                )
         );
     }
 
@@ -302,9 +305,9 @@ mod tests {
         ]);
         assert_eq!(
             line,
-            "& 'C:\\a b\\clauseo.exe' --pre-write-guard; $c = $LASTEXITCODE; if ($c -eq 0 -or $c -eq \
-             2) { exit $c }; [Console]::Error.WriteLine('Clauseo could not check this step, so it did \
-             not run.'); exit 2"
+            "$global:LASTEXITCODE = -1; & 'C:\\a b\\clauseo.exe' --pre-write-guard; $c = \
+             $LASTEXITCODE; if ($c -eq 0 -or $c -eq 2) { exit $c }; [Console]::Error.WriteLine('Clauseo \
+             could not check this step, so it did not run.'); exit 2"
         );
         assert!(!line.contains('\n'));
     }
