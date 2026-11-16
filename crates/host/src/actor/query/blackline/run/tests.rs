@@ -174,7 +174,7 @@ fn a_difference_the_blackline_does_not_show_may_differ() {
     for said in [
         BlacklineNotice::PartNotShown,
         BlacklineNotice::ChangesOutsideText,
-        BlacklineNotice::HeaderOrFooterInOneVersion,
+        BlacklineNotice::HeaderOrFooterNotCompared,
         BlacklineNotice::CommentChanged,
         BlacklineNotice::TextBoxChanged,
         BlacklineNotice::CellFormatChanged,

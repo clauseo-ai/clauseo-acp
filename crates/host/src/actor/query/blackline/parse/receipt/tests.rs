@@ -1,7 +1,7 @@
 //! Compare's answer read: stetdoc 0.9.3's real answers for a header in one version, a block it
 //! could not mark up and a plain compare, and the answers that do not read.
 
-use clauseo_protocol::BlacklineNotice::{HeaderOrFooterInOneVersion, MayDiffer};
+use clauseo_protocol::BlacklineNotice::{HeaderOrFooterNotCompared, MayDiffer};
 
 use super::{CompareSaid, read_compare};
 
@@ -28,7 +28,7 @@ fn warning(codes: &[&str]) -> String {
 #[test]
 fn a_header_in_one_version_is_noticed() {
     let said = read_compare(fixture!("compare-unmatched.json"));
-    assert_eq!(said.notices, [HeaderOrFooterInOneVersion]);
+    assert_eq!(said.notices, [HeaderOrFooterNotCompared]);
     assert_eq!(said.codes, ["compare_story_unmatched"]);
 }
 

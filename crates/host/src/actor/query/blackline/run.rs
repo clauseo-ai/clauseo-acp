@@ -184,7 +184,7 @@ pub(crate) fn note_a_silent_difference(blackline: &mut WordBlackline, differ: bo
                 BlacklineNotice::MayDiffer
                     | BlacklineNotice::PartNotShown
                     | BlacklineNotice::ChangesOutsideText
-                    | BlacklineNotice::HeaderOrFooterInOneVersion
+                    | BlacklineNotice::HeaderOrFooterNotCompared
                     | BlacklineNotice::CommentChanged
                     | BlacklineNotice::TextBoxChanged
                     | BlacklineNotice::CellFormatChanged

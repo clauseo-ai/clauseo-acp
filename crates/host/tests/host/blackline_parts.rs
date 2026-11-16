@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clauseo_process::{PassthroughLauncher, SpawnOptions};
-use clauseo_protocol::BlacklineNotice::{CellFormatChanged, HeaderOrFooterInOneVersion, MayDiffer};
+use clauseo_protocol::BlacklineNotice::{CellFormatChanged, HeaderOrFooterNotCompared, MayDiffer};
 use clauseo_protocol::{
     BlacklinePartKind, ChangedTable, HeaderSlot, HeaderUse, ParagraphChange, TableFormat,
     TablePlace, WordBlackline,
@@ -81,7 +81,7 @@ fn a_header_in_one_version_beside_a_body_change_is_noticed() {
     let (answer, ..) = through_fake("blackline_parts_unmatched", "unmatched", None, &[]);
     assert!(body_changed(&answer));
     assert_eq!(answer.parts, []);
-    assert_eq!(answer.notices, [HeaderOrFooterInOneVersion]);
+    assert_eq!(answer.notices, [HeaderOrFooterNotCompared]);
 }
 
 /// compare's answer that lists a block it could not mark up, or that does not read, may differ.
@@ -144,7 +144,7 @@ fn the_real_stetdoc_shows_the_parts_and_names_what_compare_misses() {
     assert_eq!((kinds(&stories), stories.notices), (two_sections(), vec![]));
     let unmatched = through_real(&stetdoc, "unmatched");
     assert!(body_changed(&unmatched));
-    assert_eq!(unmatched.notices, [HeaderOrFooterInOneVersion]);
+    assert_eq!(unmatched.notices, [HeaderOrFooterNotCompared]);
     assert_eq!(through_real(&stetdoc, "excluded").notices, [MayDiffer]);
     for pair in ["cellfmt-body", "cellfmt"] {
         let answer = through_real(&stetdoc, pair);

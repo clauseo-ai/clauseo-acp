@@ -289,9 +289,11 @@ open_unit_enum! {
         /// than the blackline shows, in its body and its parts: the others are outside what it
         /// shows (a comment, or a footnote, endnote, header or footer it could not show).
         ChangesOutsideText,
-        /// A header or footer is in one version only: stetdoc's compare does not compare it, so
-        /// the blackline does not show it as a change.
-        HeaderOrFooterInOneVersion,
+        /// A header or footer was not compared between the two versions: one version has it and
+        /// the other does not, or both have one but stetdoc's compare found no one-to-one partner
+        /// for it, or it is on a section the other version lacks. The blackline does not show
+        /// what changed in it.
+        HeaderOrFooterNotCompared,
         /// The text of a comment differs between the two versions; the blackline does not show
         /// comments, and stetdoc 0.9.3's compare marks no change for it.
         CommentChanged,
