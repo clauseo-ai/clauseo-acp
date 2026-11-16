@@ -124,7 +124,7 @@ pub(crate) async fn blackline<T: Timer>(
     order(&mut read.blackline.notices);
     // The story views and the check run at once: the check's list is applied once the parts'
     // ids are counted.
-    let ((stories, headers_read), listed) = join(
+    let (stories, listed) = join(
         stories::view_stories(launcher, timer, stetdoc, dir),
         cross::list_changes(launcher, timer, stetdoc, dir),
     )
@@ -145,7 +145,7 @@ pub(crate) async fn blackline<T: Timer>(
                 ..TablesCompared::default()
             },
         };
-        note_tables(&mut read.blackline, compared, headers_read);
+        note_tables(&mut read.blackline, compared);
     }
     note_a_silent_difference(&mut read.blackline, differ);
     Ok(read)
@@ -157,15 +157,13 @@ pub(crate) const TABLES_MAX: usize = 50;
 
 /// Says in `blackline` what the comparison of the versions' files found: the tables that
 /// changed, with [`BlacklineNotice::CellFormatChanged`], the first [`TABLES_MAX`] named and all
-/// counted; that it may differ where it could not tell, or past the cap; and, when the headers'
-/// view read (`headers_read`; when it did not, stetdoc's list of changes says what it holds is
-/// not shown), [`BlacklineNotice::HeaderOrFooterNotCompared`] for a header's or footer's text
-/// one version only has that no part the blackline shows holds, in its older or newer text.
-pub(crate) fn note_tables(
-    blackline: &mut WordBlackline,
-    compared: TablesCompared,
-    headers_read: bool,
-) {
+/// counted; that it may differ where it could not tell, or past the cap; and
+/// [`BlacklineNotice::HeaderOrFooterNotCompared`] for a header's or footer's text one version
+/// only has that no part the blackline shows holds, in its older or newer text. When the
+/// headers' view failed, no part is shown and the notice is said for every such text: stetdoc's
+/// list of changes names only a header's marked changes, and the header of a section the other
+/// version lacks has none.
+pub(crate) fn note_tables(blackline: &mut WordBlackline, compared: TablesCompared) {
     if !compared.changed.is_empty() {
         blackline.notices.push(BlacklineNotice::CellFormatChanged);
     }
@@ -176,11 +174,10 @@ pub(crate) fn note_tables(
     }
     changed.truncate(TABLES_MAX);
     let shown = shown_header_texts(blackline);
-    if headers_read
-        && compared
-            .lone_header_texts
-            .iter()
-            .any(|text| !shown.contains(text))
+    if compared
+        .lone_header_texts
+        .iter()
+        .any(|text| !shown.contains(text))
     {
         blackline
             .notices

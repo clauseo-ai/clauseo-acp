@@ -84,6 +84,24 @@ fn a_header_in_one_version_beside_a_body_change_is_noticed() {
     assert_eq!(answer.notices, [HeaderOrFooterNotCompared]);
 }
 
+/// A header in the newer version only that compare does not warn of, when the headers' view
+/// fails: stetdoc's list of changes names nothing in it (it holds no marked change), so the
+/// blackline still says, from the header's text, that it was not compared.
+#[test]
+fn a_header_compare_is_silent_on_is_noticed_when_the_headers_view_fails() {
+    let (answer, ..) = through_fake(
+        "blackline_parts_unmatched_unviewed",
+        "unmatched",
+        None,
+        &[
+            ("compare.json", br#"{"receipt":{"warnings":[]}}"#),
+            ("view-story-mode.txt", b"exit 2"),
+        ],
+    );
+    assert!(body_changed(&answer));
+    assert_eq!(answer.notices, [HeaderOrFooterNotCompared]);
+}
+
 /// compare's answer that lists a block it could not mark up, or that does not read, may differ.
 #[test]
 fn what_compare_could_not_mark_up_may_differ() {
