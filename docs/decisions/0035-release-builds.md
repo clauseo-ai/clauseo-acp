@@ -330,8 +330,8 @@ silent fall-through:
 
 - The switch is the repository variable `CLAUSEO_UNSIGNED_BETA`, exactly `'true'` (a tag push has
   no inputs). The release is an unsigned beta when it is `'true'` and no Apple secret is set
-  (any of the six the Developer ID path reads, below, or Tauri's `APPLE_ID`, `APPLE_PASSWORD`
-  and `APPLE_TEAM_ID`, read only as a boolean on the step's env).
+  (any of the nine the Developer ID path reads, below: the certificate trio and the two notary
+  trios, read only as a boolean on the step's env).
 - `custody` decides it once, at the start of the run, as two boolean job outputs: `has_apple`
   (any Apple secret it can see: in release mode the `release` environment's as well as the
   repository's) and `unsigned_beta` (the variable `'true'` and no Apple secret). `assemble` (the
@@ -372,47 +372,64 @@ Rohan decided macOS ships signed with his individual Apple Developer ID and nota
 day, the unsigned beta above is the fallback. Test (`test-v*`) and dry runs stay ad hoc and hold
 no Apple secret.
 
-**Secrets**, in the `release` environment only, all six or none: `APPLE_CERTIFICATE` (base64 of
-the Developer ID Application identity's .p12), `APPLE_CERTIFICATE_PASSWORD`,
-`APPLE_SIGNING_IDENTITY` (`Developer ID Application: <legal name> (<TEAMID>)`; the Team ID every
-check expects is the one in its brackets, so there is no `APPLE_TEAM_ID`), and the App Store
-Connect API key notarytool uses: `APPLE_API_KEY` (its Key ID), `APPLE_API_ISSUER` (the Issuer ID)
-and `APPLE_API_KEY_P8` (the .p8's text). Tauri's Apple ID names (`APPLE_ID`, `APPLE_PASSWORD`,
-`APPLE_TEAM_ID`) are refused. Each secret is on the env of the steps below only, behind the mode
-or `DEVELOPER_ID`, never in a `run:` script, never printed; `release-apple.test.mjs` holds that.
+**Secrets**, in the `release` environment only: none, or exactly one complete set, the
+certificate trio plus one notary trio.
+- Certificate: `APPLE_CERTIFICATE` (base64 of the Developer ID Application identity's .p12),
+  `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` (`Developer ID Application: <legal name>
+  (<TEAMID>)`; every check takes the Team ID from its brackets).
+- Notary, the Apple ID's (recommended first: it works the day the membership is active):
+  `APPLE_ID` (the Apple Account's email), `APPLE_PASSWORD` (an app-specific password) and
+  `APPLE_TEAM_ID`, Tauri's names.
+- Or notary, the App Store Connect API key's (it needs Apple's case-by-case approval of API
+  access): `APPLE_API_KEY` (its Key ID), `APPLE_API_ISSUER` (the Issuer ID) and `APPLE_API_KEY_P8`
+  (the .p8's text).
+
+Never both notary trios, never part of one. Each secret is on the env of the steps below only,
+behind the mode or `DEVELOPER_ID`, never in a `run:` script, never printed;
+`release-apple.test.mjs` holds that. The Apple ID's password reaches `notarytool` on its command
+line, as Tauri's own call passes it: GitHub masks it, and the runner is the job's alone.
 
 **What runs**, with `has_apple` true in a `v*` release (otherwise everything is ad hoc, as before):
 
-- `custody` (Linux, before any leg): any Apple secret set means all six, else it fails naming the
-  missing names. Then, with openssl and node, no Mac needed: the .p12 opens with its password and
-  holds one certificate and its key; the certificate's common name is `APPLE_SIGNING_IDENTITY`, its
-  OU the Team ID, its issuer Developer ID Certification Authority, and it is not expired (a
-  warning inside 30 days); and Apple's notary service accepts the API key (`apple-notary.mjs`: an
-  ES256 token, `GET /notary/v2/submissions`, what `notarytool history` asks). A wrong certificate, password or
-  key fails before any build. Not in the macOS legs: their first steps run sidecars.mjs and the
-  build, and no secret may be in a step before that (`latest-json.test.mjs`'s workflow lint).
+- `custody` (Linux, before any leg): any Apple secret set means exactly one complete set, else it
+  fails naming what is wrong (both notary sets, or the names a set lacks). Then, with openssl and
+  node, no Mac needed: the .p12 opens with its password and holds one certificate and its key; the
+  certificate's common name is `APPLE_SIGNING_IDENTITY`, its OU the Team ID, its issuer Developer ID
+  Certification Authority, and it is not expired (a warning inside 30 days). For the API key,
+  Apple's notary service accepts it (`apple-notary.mjs`: an ES256 token, `GET
+  /notary/v2/submissions`, what `notarytool history` asks). For the Apple ID, `APPLE_TEAM_ID` must
+  be that Team ID and `APPLE_PASSWORD` must have an app-specific password's shape. Its sign-in can't
+  be tried on Linux: notarytool's Apple ID sign-in is Apple's own protocol, and the notary's web API
+  takes only an API key's token. So the bundle step tries it first (`notarytool history`), before it
+  signs anything, about 20 minutes into the run. A wrong certificate, password or key fails before
+  any build. Not in the macOS legs: their first steps run sidecars.mjs and the build, and no secret
+  may be in a step before that (`latest-json.test.mjs`'s workflow lint).
 - `build`'s macOS legs (`DEVELOPER_ID` 'true'), in the bundle step, after the build: the .p12 goes
   into a keychain of the step's own (Tauri's own `APPLE_CERTIFICATE` import can't serve: it lives
-  only as long as the `tauri bundle` process, and the helpers are signed before it runs, since
-  Tauri never signs `bundle.macOS.files`). The helpers (`Contents/Helpers`: clauseo-agent-browser,
+  only as long as the `tauri bundle` process, and the helpers are signed before it runs, since Tauri
+  never signs `bundle.macOS.files`). The helpers (`Contents/Helpers`: clauseo-agent-browser,
   stetdoc/stetdoc, pdf/pdftoppm, pdf/pdfinfo, pdf/pdftotext) are signed
-  `--options runtime --timestamp`. Tauri 2.10.2's bundler (CLI 2.12.2) then signs the externalBin sidecars, the main binary and the .app
-  with the identity (`--options runtime` from `hardenedRuntime`, the entitlements below; it passes
-  no `--timestamp`, and codesign timestamps a Developer ID signature by default, which the check
-  below requires), notarises the .app with `APPLE_API_KEY`, `APPLE_API_ISSUER` and
-  `APPLE_API_KEY_PATH` (the .p8 written to `$RUNNER_TEMP`), prints the notary log if it is refused,
+  `--options runtime --timestamp`. Tauri 2.10.2's bundler (CLI 2.12.2) then signs the externalBin
+  sidecars, the main binary and the .app with the identity (`--options runtime` from `hardenedRuntime`, the entitlements below). Tauri
+  passes no `--timestamp` and has no setting for it, so a `codesign` wrapper first in `PATH` adds it
+  to every signing and fails at once, before anything is notarised, if a signature has no
+  `Timestamp=` line. Before signing anything, the step tries the notary set with `notarytool
+  history` (for the Apple ID, its first try). Tauri then notarises the .app with whichever set is
+  there (`APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`; or `APPLE_API_KEY`, `APPLE_API_ISSUER` and
+  `APPLE_API_KEY_PATH`, the .p8 written to `$RUNNER_TEMP`), prints the notary log if it is refused,
   and staples it. Tauri never notarises the DMG, so the step signs it again with `--timestamp`,
-  submits it with `notarytool submit --wait --timeout 20m`, prints `notarytool log` and fails on
-  anything but Accepted, then staples and validates it. The step has `timeout-minutes: 50`; the
-  keychain and the .p8 go when it ends. Tauri notarises only when it finds the credentials and
-  ignores a failed staple, so the next step, not the bundler, decides.
+  submits it with `notarytool submit --wait --timeout 20m` and the same set (`--apple-id --password
+  --team-id` or `--key --key-id --issuer`), prints `notarytool log` and fails on anything but
+  Accepted, then staples and validates it. The step has `timeout-minutes: 50`; the keychain and the
+  .p8 go when it ends. Tauri notarises only when it finds the credentials and ignores a failed
+  staple, so the next step, not the bundler, decides.
 - The Developer ID check (the next step, holding only the identity): every Mach-O in the .app is
   exactly the main binary, the externalBin sidecars and the four helpers, and each, and the .app,
   passes `codesign --verify --strict` with `Authority=` the identity, `TeamIdentifier=` its Team
-  ID, `flags=0x10000(runtime)` and a `Timestamp=`, with none of the entitlements left out below;
-  `spctl -a -vv -t exec` on the .app and `spctl -a -vv -t open --context context:primary-signature`
-  on the DMG say `source=Notarized Developer ID`; `stapler validate` passes on the .app, the DMG,
-  and the .app inside the DMG and the updater archive.
+  ID, `flags=0x10000(runtime)` and a `Timestamp=` (never `Signed Time=`), with none of the
+  entitlements left out below; `spctl -a -vv -t exec` on the .app and `spctl -a -vv -t open
+  --context context:primary-signature` on the DMG say `source=Notarized Developer ID`; `stapler
+  validate` passes on the .app, the DMG, and the .app inside the DMG and the updater archive.
 - `assemble` and `publish` are unchanged: `has_apple` true means no first-open block in the notes
   and `publish`'s `stapler validate` on every DMG. Delete `CLAUSEO_UNSIGNED_BETA` once it ships.
 

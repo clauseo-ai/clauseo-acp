@@ -146,14 +146,11 @@ function appleSecretProblems(text) {
     ["custody/Decide the unsigned beta", [hasApple]],
     [
       `custody/${CUSTODY_STEP}`,
-      [
-        ...APPLE_SIX.map(custodyGate),
-        "HAS_APPLE_ID: ${{ " + APPLE_ID_NAMES.map((name) => `secrets.${name} != ''`).join(" || ") + " }}",
-      ],
+      [...APPLE_SIX, ...APPLE_ID_NAMES].map(custodyGate),
     ],
     [
       `build/${BUNDLE_STEP}`,
-      APPLE_SIX.map((name) => buildGate(name, name === "APPLE_SIGNING_IDENTITY" ? "'-'" : "''")),
+      [...APPLE_SIX, ...APPLE_ID_NAMES].map((name) => buildGate(name, name === "APPLE_SIGNING_IDENTITY" ? "'-'" : "''")),
     ],
     [`build/${CHECK_STEP}`, [buildGate("APPLE_SIGNING_IDENTITY")]],
   ]);
@@ -340,6 +337,7 @@ function developerIdProblems(text) {
   const onlyDeveloperId = [
     /^security (create-keychain|import|set-key-partition-list|list-keychains)\b/,
     /\bxcrun notarytool submit\b/,
+    /\bxcrun notarytool history\b/,
     /\bxcrun notarytool log\b/,
     /^xcrun stapler\b/,
     /^APPLE_API_KEY_PATH=/,
@@ -518,8 +516,7 @@ function runCustodyCheck(script, env) {
       PATH: `${bin}:${process.env.PATH}`,
       RUNNER_TEMP: dir,
       GITHUB_STEP_SUMMARY: summary,
-      HAS_APPLE_ID: "false",
-      ...Object.fromEntries(APPLE_SIX.map((name) => [name, ""])),
+      ...Object.fromEntries([...APPLE_SIX, ...APPLE_ID_NAMES].map((name) => [name, ""])),
       ...env,
     };
     const result = spawnSync("bash", ["-c", script], { cwd: ROOT, env: full, encoding: "utf8" });
@@ -556,34 +553,55 @@ function custodyProblems(script) {
     APPLE_CERTIFICATE: "c2VjcmV0LWNlcnQ=",
     APPLE_CERTIFICATE_PASSWORD: "secret-password-value",
   });
-  const missing = ["APPLE_SIGNING_IDENTITY", "APPLE_API_KEY", "APPLE_API_ISSUER", "APPLE_API_KEY_P8"];
-  if (partial.status === 0 || !missing.every((name) => partial.out.includes(name))) {
+  if (partial.status === 0 || !partial.out.includes("the certificate set lacks APPLE_SIGNING_IDENTITY")) {
     problems.push(`a partial set is not refused with the missing names (${partial.status}: ${partial.out.trim()})`);
   }
   if (/secret-password-value|c2VjcmV0LWNlcnQ=/.test(partial.out)) {
     problems.push("the refusal prints a secret's value");
   }
-  const appleId = runCustodyCheck(script, { HAS_APPLE_ID: "true" });
-  if (appleId.status === 0 || !appleId.out.includes("APPLE_ID")) {
-    problems.push("Tauri's Apple ID names are not refused");
+  const certificate = { APPLE_CERTIFICATE: "Y2VydA==", APPLE_CERTIFICATE_PASSWORD: "pw", APPLE_SIGNING_IDENTITY: "x" };
+  const apiKey = { APPLE_API_KEY: "ABCDEFGHIJ", APPLE_API_ISSUER: "i", APPLE_API_KEY_P8: "k" };
+  const appleId = { APPLE_ID: "rohan@example.com", APPLE_PASSWORD: "abcd-efgh-ijkl-mnop", APPLE_TEAM_ID: "ABCDE12345" };
+  const refusals = [
+    ["both notary sets complete", { ...certificate, ...apiKey, ...appleId }, "both notary sets"],
+    ["a mixture of the two notary sets", { ...certificate, APPLE_API_KEY: "ABCDEFGHIJ", APPLE_ID: "rohan@example.com" }, "both notary sets"],
+    ["a partial API key set", { ...certificate, APPLE_API_KEY: "ABCDEFGHIJ" }, "the API key set lacks APPLE_API_ISSUER APPLE_API_KEY_P8"],
+    ["a partial Apple ID set", { ...certificate, APPLE_ID: "rohan@example.com", APPLE_TEAM_ID: "ABCDE12345" }, "the Apple ID set lacks APPLE_PASSWORD"],
+    ["a notary set without the certificate", { ...appleId }, "the certificate set lacks APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY"],
+    ["the certificate without a notary set", { ...certificate }, "no notary set"],
+  ];
+  for (const [what, env, words] of refusals) {
+    const result = runCustodyCheck(script, env);
+    if (result.status === 0 || !result.out.includes(words)) {
+      problems.push(`${what} is not refused with "${words}" (${result.status}: ${result.out.trim()})`);
+    }
+    if (result.out.includes("abcd-efgh-ijkl-mnop") || result.out.includes("Y2VydA==")) {
+      problems.push(`refusing ${what} prints a secret`);
+    }
   }
   return problems;
 }
 
-test("custody refuses a partial set of Apple secrets, naming only the missing names", { skip: !haveBash || process.platform === "win32" }, () => {
+test("custody accepts exactly one complete set, refusing a mixture or a partial set by name", { skip: !haveBash || process.platform === "win32" }, () => {
   const step = stepNamed(workflow(), "custody", CUSTODY_STEP);
   assert.ok(step, "custody's Apple step");
   assert.equal(step.if, "needs.check.outputs.mode == 'release'");
   const custody = stepsOf(workflow(), "custody").map((one) => one.name);
   assert.ok(custody.indexOf(CUSTODY_STEP) < custody.indexOf("Install the ui workspace"), "before the ui install");
   assert.deepEqual(custodyProblems(step.run), []);
-  // Broken on purpose: the missing names are not checked, so a partial set gets further.
-  const broken = step.run.replace('[ "${#missing[@]}" = 0 ] ||', "true ||");
-  assert.notEqual(broken, step.run);
-  assert.notDeepEqual(custodyProblems(broken), []);
-  const noAppleId = step.run.replace('[ "$HAS_APPLE_ID" = false ] ||', "true ||");
-  assert.notEqual(noAppleId, step.run);
-  assert.notDeepEqual(custodyProblems(noAppleId), []);
+  // Broken on purpose, each refusal once.
+  const breaks = [
+    ['if [ -n "$(names set "$api_key")" ] && [ -n "$(names set "$apple_id")" ]; then', "if false; then"],
+    ['[ -z "$(names missing "$api_key")" ] ||', "true ||"],
+    ['[ -z "$(names missing "$apple_id")" ] ||', "true ||"],
+    ['[ -z "$(names missing "$certificate")" ] ||', "true ||"],
+    ['fail "no notary set: set', 'true "no notary set: set'],
+  ];
+  for (const [from, to] of breaks) {
+    const broken = step.run.replace(from, to);
+    assert.notEqual(broken, step.run, from);
+    assert.notDeepEqual(custodyProblems(broken), [], from);
+  }
 });
 
 test("custody opens the certificate and checks its identity, team, issuer and dates", { skip: !haveBash || !haveOpenssl || process.platform === "win32" }, () => {
@@ -610,6 +628,28 @@ test("custody opens the certificate and checks its identity, team, issuer and da
       assert.ok(!result.out.includes(good.password), "no secret printed");
     };
     refused({ APPLE_CERTIFICATE_PASSWORD: "wrong" }, "does not open with APPLE_CERTIFICATE_PASSWORD");
+    // The Apple ID set instead of the API key's: its Team ID must be the certificate's.
+    const appleIdSet = {
+      ...secrets,
+      APPLE_API_KEY: "",
+      APPLE_API_ISSUER: "",
+      APPLE_API_KEY_P8: "",
+      APPLE_ID: "rohan@example.com",
+      APPLE_PASSWORD: "abcd-efgh-ijkl-mnop",
+      APPLE_TEAM_ID: "ABCDE12345",
+    };
+    const viaAppleId = runCustodyCheck(script, appleIdSet);
+    assert.equal(viaAppleId.status, 0, viaAppleId.out);
+    assert.ok(!viaAppleId.out.includes("abcd-efgh-ijkl-mnop"), "no secret printed");
+    const mismatch = runCustodyCheck(script, { ...appleIdSet, APPLE_TEAM_ID: "ZZZZZ99999" });
+    assert.notEqual(mismatch.status, 0);
+    assert.ok(mismatch.out.includes("APPLE_TEAM_ID is not the Team ID"), mismatch.out);
+    const notAnAsp = runCustodyCheck(script, { ...appleIdSet, APPLE_PASSWORD: "my-real-password" });
+    assert.ok(notAnAsp.status !== 0 && notAnAsp.out.includes("not an app-specific password"), notAnAsp.out);
+    // Broken on purpose: the Team ID not compared, so the mismatch passes.
+    const lax = script.replace('[ "$APPLE_TEAM_ID" = "$team" ] ||', "true ||");
+    assert.notEqual(lax, script);
+    assert.equal(runCustodyCheck(lax, { ...appleIdSet, APPLE_TEAM_ID: "ZZZZZ99999" }).status, 0);
     refused({ APPLE_SIGNING_IDENTITY: "Developer ID Application: Someone Else (ABCDE12345)" }, "is not APPLE_SIGNING_IDENTITY's");
     refused({ APPLE_SIGNING_IDENTITY: "Apple Development: Test Person (ABCDE12345)" }, "is not \"Developer ID Application");
     refused({ APPLE_CERTIFICATE: "%%%" }, "is not base64");
