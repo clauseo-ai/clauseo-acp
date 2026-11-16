@@ -83,10 +83,25 @@ fn typographic_quotes_are_quotes() {
 
 #[test]
 fn the_backtick_escapes_in_double_quotes_and_out() {
+    let command = r#"echo "a`"b `$x ``" Fees` `$500 a`tb "c`nd" `u{48}i"#;
+    // `` `u{48} `` is PowerShell 7's: the word as 5.1 spells it follows, a role of its own.
     assert_eq!(
-        words(r#"echo "a`"b `$x ``" Fees` `$500 a`tb "c`nd" `u{48}i"#),
-        ["echo", "a\"b $x `", "Fees $500", "a\tb", "c\nd", "Hi"]
+        words(command),
+        [
+            "echo",
+            "a\"b $x `",
+            "Fees $500",
+            "a\tb",
+            "c\nd",
+            "Hi",
+            "u{48}i"
+        ]
     );
+    let mut segments = Segments::new(64);
+    shell_segments(command, Escape::Backtick, &mut segments);
+    let roles: Vec<Role> = segments.iter().flat_map(|s| s.roles.clone()).collect();
+    assert_eq!(roles.last(), Some(&Role::Alt));
+    assert_eq!(roles.iter().filter(|role| **role == Role::Alt).count(), 1);
     // Inside single quotes nothing is special.
     assert_eq!(words("echo 'a`b $x'"), ["echo", "a`b $x"]);
     // A backtick before a new line joins the lines.

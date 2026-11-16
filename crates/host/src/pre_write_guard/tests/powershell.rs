@@ -299,3 +299,49 @@ fn codex_bash_is_read_as_powershell_on_windows() {
     };
     assert_eq!(guard_json(&powershell), expected);
 }
+
+/// On 5.1, ``> Contract`e.docx`` writes `Contracte.docx` (`` `e `` is PowerShell 7's), so with
+/// that file held the redirection is refused, its 5.1 spelling a target too.
+#[test]
+fn a_redirection_spelled_with_a_7_only_escape_is_refused_by_its_5_1_name() {
+    let fx = Fixture::new("ps-alt-redirect");
+    hold(&fx, "Contracte.docx");
+    let input = json!({ "command": "Get-Content x > Contract`e.docx" });
+    assert_eq!(
+        guard_json(&fx.hook("PowerShell", &input)),
+        deny("Contracte.docx")
+    );
+}
+
+/// The PowerShell tool's whole command, `Set-Content` with a value of `lines` backtick escapes
+/// (each `` `n ``, ` line` text between), through the guard; how long it took.
+fn escapes_call(fx: &Fixture, lines: usize) -> std::time::Duration {
+    use crate::clock::{Clock, SystemClock};
+    let value = "line`n".repeat(lines);
+    let command = format!("Set-Content -LiteralPath 'notes.txt' -Value \"{value}\"");
+    let input = json!({ "command": command });
+    let start = SystemClock.now().mono;
+    assert_eq!(guard_json(&fx.hook("PowerShell", &input)), "");
+    SystemClock.now().mono.saturating_sub(start)
+}
+
+/// A command of 360 KB and 720 KB with 60 000 and 120 000 backtick escapes is
+/// read in time proportional to its length (each escape looks at most 8 characters ahead). As in
+/// `a_huge_word_or_path_is_read_quickly`, the scaling is checked, not the time, so a loaded
+/// machine does not fail it: three rounds each, interleaved, and the ratio of the two minimum
+/// times stays at or under 3.4 (linear about 2, quadratic about 4).
+#[test]
+fn a_long_command_with_many_escapes_is_read_quickly() {
+    let fx = Fixture::new("ps-escapes");
+    let mut small = std::time::Duration::MAX;
+    let mut large = std::time::Duration::MAX;
+    for _ in 0..3 {
+        small = small.min(escapes_call(&fx, 60_000));
+        large = large.min(escapes_call(&fx, 120_000));
+    }
+    let ratio = large.as_secs_f64() / small.as_secs_f64().max(1e-6);
+    assert!(
+        ratio <= 3.4,
+        "the time grew {ratio:.2}x for twice the input ({small:?}, then {large:?})"
+    );
+}

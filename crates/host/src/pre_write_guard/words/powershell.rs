@@ -91,9 +91,8 @@ pub(super) fn is_double(c: char) -> bool {
 
 /// The character a backtick before `c` stands for (`about_Special_Characters`), reading a
 /// `` `u{XXXX} `` escape's digits from `chars`. `` `e `` and `` `u{…} `` are PowerShell 7's:
-/// Windows PowerShell 5.1 reads `"`u{43}"` as `u{43}` and 7.4 as `C` (VM row 9). Decoding always
-/// reads as 7 does, a name 5.1 would not write; that fails safe (the name backstop and the held
-/// file's path still match what 7 writes), so it stays.
+/// Windows PowerShell 5.1 reads ``"`u{43}"`` as `u{43}` and 7.4 as `C` (VM row 9). This reads
+/// as 7 does; the reader adds the word as 5.1 spells it too (`Role::Alt`).
 pub(super) fn escaped(c: char, chars: &mut Peekable<Chars<'_>>) -> char {
     match c {
         '0' => '\0',

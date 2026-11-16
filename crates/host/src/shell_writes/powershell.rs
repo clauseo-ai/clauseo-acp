@@ -51,7 +51,8 @@ pub(super) fn segments(script: &str) -> Vec<Segment> {
                             out.redirects.push(word);
                         }
                     }
-                    Role::Stream => {}
+                    // A 5.1 spelling is no position: `cp`'s last argument stays the last.
+                    Role::Stream | Role::Alt => {}
                 }
             }
             out
