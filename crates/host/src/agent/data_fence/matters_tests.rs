@@ -236,6 +236,7 @@ fn a_linked_matter_folder_is_denied_at_both_places() {
 /// Whether Claude Code refuses `tool` on the existing `path` under `rules`: it resolves links
 /// before it checks a literal path (`own_allow`'s module doc), so a rule for the path as given
 /// or for where it leads refuses it.
+#[cfg(unix)]
 fn claude_denies(rules: &[String], tool: &str, path: &Path) -> bool {
     denied(rules, tool, path) || denied(rules, tool, &dunce::canonicalize(path).unwrap())
 }
@@ -377,7 +378,7 @@ fn the_own_matters_short_form_is_never_fenced_and_another_is_by_both() {
     }
     let both = |path: &Path| match short_form(path) {
         Looked::Form(short) if short != path => vec![path.to_owned(), short],
-        _ => vec![path.to_owned()],
+        Looked::Form(_) | Looked::Missing | Looked::Unread => vec![path.to_owned()],
     };
     let (owns, others) = (both(&own), both(&other));
     let registered: Vec<(PathBuf, bool)> = [both(&parent), owns.clone(), others.clone()]
