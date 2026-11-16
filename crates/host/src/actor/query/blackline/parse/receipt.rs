@@ -12,9 +12,10 @@
 //!   mark up: that block is shown as the newer version has it, or rejecting its changes would
 //!   not give the older one back, so the blackline may differ ([`BlacklineNotice::MayDiffer`]);
 //! - `compare_revisions_accepted` (the versions' own tracked changes accepted first),
-//!   `compare_paragraph_replaced` and `compare_table_replaced` (shown as deleted and inserted)
-//!   and `compare_keys_merged` (a note for stetdoc's own check): none, since the blackline still
-//!   shows every change;
+//!   `compare_paragraph_replaced` and `compare_table_replaced` (shown as deleted and inserted),
+//!   `compare_keys_merged` (a note for stetdoc's own check) and `repaired` (stetdoc declared a
+//!   markup prefix the input named and never declared, so Word can open the redline): none,
+//!   since the blackline still shows every change;
 //! - any other code (something in deleted content compare could not carry, such as a picture or
 //!   a note, or a code this version does not know): the blackline may differ.
 //!
@@ -81,7 +82,8 @@ fn notice_of(code: &str) -> Option<BlacklineNotice> {
         "compare_revisions_accepted"
         | "compare_paragraph_replaced"
         | "compare_table_replaced"
-        | "compare_keys_merged" => None,
+        | "compare_keys_merged"
+        | "repaired" => None,
         _ => Some(BlacklineNotice::MayDiffer),
     }
 }

@@ -169,6 +169,26 @@ fn noise_alone_is_no_change() {
     assert_eq!(bodies(&plain, &plain), TablesCompared::default());
 }
 
+/// A tracked change's old grid (`w:tblGridChange`) and old table exceptions
+/// (`w:tblPrExChange`), and the style marks Word works out from a row's place
+/// (`w:cnfStyle`), are no change.
+#[test]
+fn old_grids_old_exceptions_and_style_marks_are_no_change() {
+    let plain = grid("T", "", "", "");
+    let marks = r#"<w:cnfStyle w:val="100000000000"/>"#;
+    let noisy = grid("T", "", marks, marks)
+        .replace(
+            "</w:tblGrid>",
+            r#"<w:tblGridChange w:id="4" w:author="A"><w:tblGrid><w:gridCol w:w="9000"/></w:tblGrid></w:tblGridChange></w:tblGrid>"#,
+        )
+        .replacen(
+            "<w:tr>",
+            r#"<w:tr><w:tblPrEx><w:tblPrExChange w:id="5" w:author="A"><w:tblPrEx><w:tblBorders><w:top w:val="single"/></w:tblBorders></w:tblPrEx></w:tblPrExChange></w:tblPrEx>"#,
+            1,
+        );
+    assert_eq!(bodies(&plain, &noisy), TablesCompared::default());
+}
+
 /// A table inserted before one whose shading changed: the tables pair by their text, and the
 /// changed one is named by its number in the newer version. Nothing is unpaired on both sides.
 #[test]

@@ -212,7 +212,7 @@ fn capture<R: BufRead>(reader: &mut NsReader<R>) -> Option<Vec<Captured>> {
         match reader.read_event_into(&mut buf).ok()? {
             Event::Start(element) => {
                 depth += 1;
-                if element.local_name().as_ref().ends_with("PrChange") {
+                if noise(element.local_name().as_ref()) {
                     skip(reader)?;
                     depth -= 1;
                     continue;
@@ -220,7 +220,7 @@ fn capture<R: BufRead>(reader: &mut NsReader<R>) -> Option<Vec<Captured>> {
                 open_element(&element, depth, &mut current);
             }
             Event::Empty(element) => {
-                if element.local_name().as_ref().ends_with("PrChange") {
+                if noise(element.local_name().as_ref()) {
                     continue;
                 }
                 open_element(&element, depth + 1, &mut current);
@@ -247,6 +247,14 @@ fn capture<R: BufRead>(reader: &mut NsReader<R>) -> Option<Vec<Captured>> {
             | Event::GeneralRef(_) => {}
         }
     }
+}
+
+/// Whether a property element's child named `name` is left out: a tracked change's old
+/// properties (`*PrChange`, `w:tblGridChange`, `w:tblPrExChange`), and the style marks Word
+/// works out from a row's or a cell's place in the table (`w:cnfStyle`), which change when a row
+/// is inserted above.
+fn noise(name: &str) -> bool {
+    name.ends_with("PrChange") || matches!(name, "tblGridChange" | "tblPrExChange" | "cnfStyle")
 }
 
 /// Starts `element` at `depth` below the captured one: a child (depth 1) starts a new canonical

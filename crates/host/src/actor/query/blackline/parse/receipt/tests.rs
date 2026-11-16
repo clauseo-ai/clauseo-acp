@@ -54,6 +54,7 @@ fn a_plain_compare_says_nothing() {
         "compare_paragraph_replaced",
         "compare_table_replaced",
         "compare_keys_merged",
+        "repaired",
     ]);
     assert_eq!(read_compare(&shown).notices, []);
 }
