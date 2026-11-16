@@ -2,13 +2,14 @@
 //! public key, never the placeholder PR 6 was built against.
 //!
 //! The placeholder is a throwaway minisign key made for PR 6 alone; its private half and password
-//! were deleted at once, so nothing can sign for it. Its public half is committed beside the test
-//! key until Rohan's key replaces it. The swap: paste his `.pub` text into `tauri.conf.json`,
-//! delete the placeholder's `.pub` file and
-//! [`the_committed_placeholder_has_the_key_id_the_guard_refuses`]. The guard stays: it refuses the
-//! placeholder by its key id, held here, so the placeholder can never come back. The key id is
-//! read from the key's own bytes and must match the comment's ([`key_id`]). `release.yml`'s
-//! check job refuses the same keys in a release run, which is the control a merge cannot skip.
+//! were deleted at once, so nothing can sign for it. Its public half stays committed beside the
+//! test key (`release/updater-placeholder.pub`), as this guard's fixture, after Rohan's key
+//! replaces it. The swap is one line: his `.pub` text as `plugins.updater.pubkey` in
+//! `tauri.conf.json` (0037, "The swap"). The guard stays: it refuses the placeholder by its key
+//! id, held here, so the placeholder can never come back. The key id is read from the key's own
+//! bytes and must match the comment's ([`key_id`]). xtask's `tauri-config` check refuses the same
+//! keys in the fast lane, and `release.yml`'s check job in a release run, which is the control a
+//! merge cannot skip.
 
 use serde_json::Value;
 
@@ -70,14 +71,14 @@ fn the_release_pubkey_is_not_the_placeholder() {
         assert_ne!(
             id, PLACEHOLDER_KEY_ID,
             "{config}: PR 6 can't merge until Rohan's public key replaces the placeholder \
-             (R23-key-steps.md)"
+             (decision record 0037, \"The swap\")"
         );
         assert_ne!(id, test_key_id, "{config}: the release key is the test key");
     }
 }
 
-/// The placeholder's committed public half is the key the guard refuses. Deleted with that file
-/// when Rohan's key lands.
+/// The placeholder's committed public half is the key the guard refuses. It stays after Rohan's
+/// key lands, as the fixture of this test and the doctored keys below.
 #[test]
 fn the_committed_placeholder_has_the_key_id_the_guard_refuses() {
     let placeholder =
