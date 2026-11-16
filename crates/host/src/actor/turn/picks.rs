@@ -343,19 +343,38 @@ pub(super) async fn apply(
     picked
 }
 
+/// The longest value a host.log line about picks writes as itself.
+const LOGGED_VALUE_MAX: usize = 40;
+
 /// The model and the effort among `picks`, by their options' categories in `options`; `-` for
-/// none. All a host.log line about picks carries besides the agent id: no other option.
+/// none. All a host.log line about picks carries besides the agent id: no other option. A value
+/// shows only when it is one its option in `options` lists and a short plain id ([`loggable`]);
+/// otherwise `-`: record 0047 keeps settings values out of the log, and a firm's model id on
+/// a cloud provider can carry its account number (a Bedrock ARN).
 fn model_and_effort<'a>(options: &[ConfigOption], picks: &'a [Pick]) -> (&'a str, &'a str) {
     let of = |category: ConfigCategory| {
         picks
             .iter()
-            .find(|(id, _)| {
-                (options.iter())
-                    .any(|option| option.id == id.as_str() && option.category == category)
+            .find_map(|(id, value)| {
+                let option = options
+                    .iter()
+                    .find(|option| option.id == id.as_str() && option.category == category)?;
+                Some(loggable(option, value.as_str()))
             })
-            .map_or("-", |(_, value)| value.as_str())
+            .unwrap_or("-")
     };
     (of(ConfigCategory::Model), of(ConfigCategory::ThoughtLevel))
+}
+
+/// `value` when `option` lists it among its choices and it is at most [`LOGGED_VALUE_MAX`]
+/// characters of `[A-Za-z0-9._-]`; else `-`.
+fn loggable<'a>(option: &ConfigOption, value: &'a str) -> &'a str {
+    let listed = matches!(&option.kind, ConfigOptionKind::Select { options, .. }
+        if options.iter().any(|choice| choice.value == value));
+    let short = !value.is_empty()
+        && value.len() <= LOGGED_VALUE_MAX
+        && (value.bytes()).all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+    if listed && short { value } else { "-" }
 }
 
 /// The start's picks were set: host.log says which (the agent id, the model and the effort, as
@@ -537,3 +556,6 @@ fn prefs_row(
     matter.row.agent_prefs = (!prefs.0.is_empty()).then_some(prefs);
     Some(matter.row.clone())
 }
+
+#[cfg(test)]
+mod tests;
