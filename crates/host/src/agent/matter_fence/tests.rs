@@ -278,3 +278,61 @@ fn a_short_path_into_the_own_matter_names_no_parent() {
         Some(id(1))
     );
 }
+
+/// A forgotten matter inside the session's own is part of it: no rule, sandbox list or Codex
+/// deny names it, and nothing shuts the own matter; a third matter's session still fences it,
+/// and a matter on the list beside it stays fenced.
+#[test]
+fn a_forgotten_matter_inside_the_own_is_part_of_it_and_fenced_from_every_other() {
+    let (_dir, root) = tree("mfence-forgotten-inside", &["own/W/Old", "third", "data"]);
+    let ask = |n: u128, folder: &str, listed: bool| {
+        let mut other = Other::new(id(n), format!("M{n}"), root.join(folder), false);
+        other.listed = listed;
+        other
+    };
+    let data = root.join("data");
+    let own = root.join("own");
+    let outer = MatterFence::asked(vec![ask(1, "own/W/Old", false), ask(2, "third", true)])
+        .resolve(&[own.as_path()], &[data.as_path()]);
+    assert_eq!(
+        outer.others.iter().map(|o| o.id).collect::<Vec<_>>(),
+        [id(2)]
+    );
+    let old = root.join("own/W/Old");
+    assert!(
+        outer.denied_reads().all(|path| !path.starts_with(&old)),
+        "Read rules"
+    );
+    assert!(
+        outer.denied_edits().all(|path| !path.starts_with(&old)),
+        "Edit rules"
+    );
+    assert!(
+        outer.fenced_folders().all(|path| !path.starts_with(&old)),
+        "sandbox reads"
+    );
+    assert!(
+        outer.inside_own.is_empty() && !outer.own_shut,
+        "sandbox writes, own shut"
+    );
+    assert!(
+        outer
+            .codex_denied()
+            .iter()
+            .all(|path| !path.starts_with(&old)),
+        "Codex"
+    );
+    assert_eq!(paths(&outer, 0), [root.join("third")]);
+
+    let third = root.join("third");
+    let other = MatterFence::asked(vec![ask(1, "own/W/Old", false), ask(3, "own", true)])
+        .resolve(&[third.as_path()], &[data.as_path()]);
+    assert!(
+        other.denied_reads().any(|path| path == old),
+        "a third matter still may not read it"
+    );
+    assert!(
+        other.fenced_folders().any(|path| path == old),
+        "nor its commands"
+    );
+}

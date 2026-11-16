@@ -434,6 +434,7 @@ mod host_event {
                         at: Timestamp::new(1_760_000_007_000).unwrap(),
                     },
                 }),
+                inside: None,
             }],
             removed: vec![matter_id(3)],
             all: false,

@@ -22,8 +22,10 @@
 //! A matter on the list inside the session's own matter refuses the launch, and the next prompt
 //! of a live session (`held`, `matter.holds_other_matter`), for every agent and OS: a matter
 //! only gets inside another by folders moved outside Clauseo (or an older registry), since every
-//! way through Clauseo refuses it, so no conversation runs in the outer matter. What follows for
-//! a nested matter is reached only for a forgotten one, or before that refusal existed.
+//! way through Clauseo refuses it, so no conversation runs in the outer matter. A forgotten
+//! matter inside the own matter is part of it: the launch drops it from the fence ([`within`]),
+//! and every other matter's launch still fences it. So what follows for a nested matter is
+//! reached only before that refusal existed.
 //!
 //! On macOS and Linux Claude's sandbox re-opens the own matter for reading, and its `allowRead`
 //! beats its `denyRead`, so with a matter it is not invited into inside the own one it re-opens
@@ -160,6 +162,8 @@ impl MatterFence {
         for other in &mut self.others {
             other.spellings = spellings(&other.folder, &disk);
         }
+        self.others
+            .retain(|other| other.listed || !within(other, own));
         let invited: Vec<PathBuf> = self
             .others
             .iter()
@@ -292,6 +296,17 @@ impl MatterFence {
             .filter(|other| !other.invited)
             .flat_map(|other| other.spellings.iter().map(PathBuf::as_path))
     }
+}
+
+/// Whether a spelling of `other`'s folder is, or lies inside, a spelling of the own matter
+/// folder `own`: a forgotten matter there is part of the own matter (the orchestrator's
+/// decision for #1146), so the launch fences none of it, while every other matter's launch
+/// still does.
+fn within(other: &Other, own: &[&Path]) -> bool {
+    other.spellings.iter().any(|spelling| {
+        let at = key(spelling);
+        own.iter().any(|place| at.starts_with(&key(place)))
+    })
 }
 
 /// `folder`'s spellings: where it leads (`touchable`'s walk), then as stored when that differs;

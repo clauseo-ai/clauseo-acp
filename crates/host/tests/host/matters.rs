@@ -97,6 +97,7 @@ fn a_create_keeps_its_details_and_list_matters_shows_every_field() {
             // No sandbox wired: the Safe workspace is parked for launch, so no protection (0051).
             protection: None,
             agent_prefs: None,
+            inside: None,
         }
     );
     // The Scratch matter is listed first (oldest), with no details, and outside this home it

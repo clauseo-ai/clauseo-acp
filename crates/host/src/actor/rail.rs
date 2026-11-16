@@ -295,7 +295,25 @@ fn matter_row(
             .protection
             .sandbox_wired()
             .then(|| actor.protection.computer().clone()),
+        inside: inside_of(actor, row.id, &row.folder_path),
     }
+}
+
+/// The listed matter whose folder holds `folder` (matter `matter`'s), the innermost, by the
+/// folders' text (`agent::matter_fence::key`: case folded where the file system folds it,
+/// drive and share prefixes in one form), as start-up counts nested matters: no disk.
+fn inside_of(actor: &Actor, matter: MatterId, folder: &str) -> Option<MatterId> {
+    let at = crate::agent::matter_fence::key(Path::new(folder));
+    actor
+        .matters
+        .values()
+        .filter(|other| other.row.id != matter)
+        .filter_map(|other| {
+            let held = crate::agent::matter_fence::key(Path::new(&other.row.folder_path));
+            (at.len() > held.len() && at.starts_with(&held)).then_some((held.len(), other.row.id))
+        })
+        .max()
+        .map(|(_, id)| id)
 }
 
 /// The row of the listed matter `matter` alone: one pass over the threads.

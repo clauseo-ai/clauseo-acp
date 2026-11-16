@@ -32,6 +32,7 @@ fn matter() -> MatterSummary {
         folder_state: FolderState::Found,
         folder_support: None,
         protection: None,
+        inside: None,
     }
 }
 
@@ -103,6 +104,10 @@ fn every_other_shown_field_is_a_change() {
         },
         MatterSummary {
             folder_support: Some(FolderSupportKind::CantChangePermissions),
+            ..matter()
+        },
+        MatterSummary {
+            inside: Some(MatterId::new(id(3)).unwrap()),
             ..matter()
         },
     ];

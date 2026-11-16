@@ -244,12 +244,17 @@ anything the agent starts.
   link pointed elsewhere included), or old data. Then no conversation runs in the outer matter,
   for Claude and Codex on every OS: its launch and resume are refused, and so is the next prompt
   of a conversation already open, with `matter.holds_other_matter` and a notice naming the inner
-  matter and the way out (move one folder out, or remove one of the two matters from Clauseo);
+  matter and the way out (move its folder out, or remove it from the list: a forgotten matter
+  inside this one is part of it, open to this matter's conversations and fenced from every other
+  matter's);
   the inner matter's conversations run (`agent::matter_fence::held`). Stage C Mac row 1
   (b0d68aad7) showed why the shell layer alone was not enough: with `own_shut` set, Claude's
   `rg NOTE .` in the outer matter printed the nested matter's file. Gap, documented and not
   built for: a matter that becomes nested during a running turn (an agent's `mv` of a folder
-  above it) is caught at the next prompt, not within that turn
+  above it) is caught at the next prompt, not within that turn. Gap for network matters: a
+  share's two spellings, `\\srv\share\…` and a mapped drive's `Z:\…`, are not matched to each
+  other, by this refusal or by the fence; stage D's network-matter work uses one spelling per
+  matter
 
 ## Egress proxy
 

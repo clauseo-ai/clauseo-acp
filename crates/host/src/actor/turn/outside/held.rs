@@ -42,8 +42,8 @@ pub(crate) fn tell(actor: &mut Actor, thread: ThreadId, error: &Error) {
     let notice = Notice {
         level: NoticeLevel::Warning,
         text: format!(
-            "{name} is inside this matter's folder. Move {name}'s folder out of it, or remove \
-             one of the two matters from Clauseo."
+            "{name}'s folder is inside this matter's folder. Move it out, or remove {name} from \
+             the list. If you remove it, its papers count as part of this matter."
         ),
         kind: Some(NoticeKind::MatterInside { matter, name }),
     };

@@ -88,3 +88,83 @@ fn the_recheck_follows_a_link_moved_since_the_launch() {
     assert_eq!(refused.code(), ErrorCode::MatterHoldsOtherMatter);
     assert_eq!(refused.to_wire().matter(), Some(id(1)));
 }
+
+#[test]
+fn a_network_or_cloud_folder_is_never_walked() {
+    let net = crate::network_paths::NetEnv::current();
+    assert!(
+        !super::walks(std::path::Path::new(r"\\srv\share\Sub"), &net),
+        "share"
+    );
+    let cloud = PathBuf::from(abs("/Users/a/Library/CloudStorage/OneDrive-Firm/Sub"));
+    assert!(
+        super::cloud(&cloud) && !super::walks(&cloud, &net),
+        "File Provider"
+    );
+    let icloud = PathBuf::from(abs(
+        "/Users/a/Library/Mobile Documents/com~apple~CloudDocs/Sub",
+    ));
+    assert!(!super::walks(&icloud, &net), "iCloud Drive");
+    assert!(
+        super::walks(&PathBuf::from(abs("/Users/a/Matters/Sub")), &net),
+        "local"
+    );
+}
+
+/// A link under a cloud folder that leads into the matter is not followed: the re-check decides
+/// from its text, so nothing in the cloud folder is looked up.
+#[cfg(unix)]
+#[test]
+fn the_recheck_does_not_follow_a_link_in_a_cloud_folder() {
+    use super::recheck;
+    use crate::pipeline::tests::support::TempDir;
+    let dir = TempDir::new("held-cloud");
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    let cloud = root.join("Library/CloudStorage/Box");
+    for folder in [root.join("Acme/W/Sub"), cloud.clone()] {
+        crate::write::create_dir_all(&folder).unwrap();
+    }
+    crate::write::symlink(&root.join("Acme/W"), &cloud.join("Link")).unwrap();
+    let asked = Other::new(id(1), "Sub".into(), cloud.join("Link/Sub"), false);
+    assert!(recheck(&MatterFence::asked(vec![asked]), &root.join("Acme")).is_ok());
+}
+
+fn manual() -> crate::ManualClock {
+    crate::ManualClock::new(clauseo_protocol::Timestamp::new(1_790_000_000_000).unwrap())
+}
+
+/// A re-check that does not answer in time fails closed: `agent.launch_failed`, retryable, so
+/// the question is kept and the lawyer may try again.
+#[test]
+fn a_hung_recheck_fails_closed() {
+    use std::sync::{Arc, Mutex, mpsc};
+    let clock = manual();
+    let (entered, started) = async_channel::unbounded::<()>();
+    let (release, blocked) = mpsc::channel::<()>();
+    let blocked = Mutex::new(blocked);
+    let hung = super::wait(Arc::new(clock.clone()), None, move || {
+        let _told = entered.send_blocking(());
+        let _released = blocked.lock().map(|blocked| blocked.recv());
+        Ok(())
+    });
+    let move_on = async move {
+        started.recv().await.unwrap();
+        let wait = clock.next_armed().await;
+        clock.advance(wait);
+    };
+    let (result, ()) = futures::executor::block_on(futures::future::join(hung, move_on));
+    let error = result.unwrap_err();
+    assert_eq!(error.code(), clauseo_protocol::ErrorCode::AgentLaunchFailed);
+    assert!(error.code().is_retryable());
+    drop(release);
+}
+
+/// A re-check whose thread panics fails closed the same way.
+#[test]
+fn a_panicking_recheck_fails_closed() {
+    let failed = super::wait(std::sync::Arc::new(manual()), None, || -> Result<(), _> {
+        panic!("the walk failed")
+    });
+    let error = futures::executor::block_on(failed).unwrap_err();
+    assert_eq!(error.code(), clauseo_protocol::ErrorCode::AgentLaunchFailed);
+}

@@ -154,6 +154,54 @@ fn an_open_conversation_is_refused_at_its_next_turn_once_a_link_puts_a_matter_in
     rig.finish();
 }
 
+/// The rail's row of a listed matter inside another names the outer one; the outer's row, and a
+/// row once moved apart, name none.
+#[test]
+fn the_row_of_a_matter_inside_another_names_the_outer() {
+    let mut rig = rig("held-row", TWO_ANSWERS, "exit");
+    let papers = TempDir::new("held-row-papers");
+    let sub = other_matter(&mut rig, papers.path(), "Sub", 5);
+    let scratch_id = rig.matter();
+    let row = |rig: &Rig, matter| crate::actor::rail::matter_summary(&rig.actor, matter).unwrap();
+    assert_eq!(row(&rig, sub).inside, None, "apart");
+    let inner = scratch(&rig).join("W").join("Sub");
+    move_to(&mut rig, sub, &inner);
+    assert_eq!(row(&rig, sub).inside, Some(scratch_id), "inside");
+    assert_eq!(row(&rig, scratch_id).inside, None, "the outer");
+    let mut beside = scratch(&rig).into_os_string();
+    beside.push("2");
+    move_to(&mut rig, sub, &PathBuf::from(beside));
+    assert_eq!(row(&rig, sub).inside, None, "a name prefix is not inside");
+    rig.finish();
+}
+
+/// A matter forgotten while inside this one is part of it: the launch runs, and its fence
+/// names the forgotten folder nowhere (`agent::matter_fence::within`).
+#[test]
+fn a_forgotten_inner_matter_lets_the_outer_launch_and_is_not_fenced() {
+    let mut rig = rig("held-forgotten", TWO_ANSWERS, "exit");
+    let papers = TempDir::new("held-forgotten-papers");
+    let thread = rig.thread();
+    let sub = other_matter(&mut rig, papers.path(), "Sub", 5);
+    let inner = scratch(&rig).join("W").join("Sub");
+    move_to(&mut rig, sub, &inner);
+    rig.dispatch(6, HostCommand::ForgetMatter { matter: sub })
+        .unwrap();
+    assert!(rig.actor.forgotten.contains_key(&sub), "forgotten");
+    turn(&mut rig, thread, 10);
+    assert_eq!(told(&mut rig, thread), (vec![], vec![]));
+    assert!(live(&rig.actor, thread), "the outer matter's agent runs");
+    let run = rig.actor.threads[&thread].turn.run.as_ref().unwrap();
+    assert!(
+        run.data_deny
+            .matters
+            .others
+            .iter()
+            .all(|other| other.id != sub)
+    );
+    rig.finish();
+}
+
 #[test]
 fn the_inner_matters_conversation_runs() {
     let mut rig = rig("held-inner", TWO_ANSWERS, "exit");

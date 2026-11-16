@@ -291,6 +291,7 @@ fn same_matter(a: &MatterSummary, b: &MatterSummary) -> bool {
         folder_state,
         folder_support,
         protection,
+        inside,
     } = a;
     *matter == b.matter
         && *name == b.name
@@ -306,6 +307,7 @@ fn same_matter(a: &MatterSummary, b: &MatterSummary) -> bool {
         && *folder_state == b.folder_state
         && *folder_support == b.folder_support
         && *protection == b.protection
+        && *inside == b.inside
 }
 
 /// Whether two thread rows show the same: every field but `last_activity`.

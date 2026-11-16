@@ -18,10 +18,12 @@
 //!   the second layer.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use clauseo_protocol::{ErrorCode, HostError};
+use clauseo_protocol::{ErrorCode, HostError, MatterId};
 
 use super::{MatterFence, Other, key_as, spellings};
+use crate::clock::Clock;
 use crate::error::Error;
 use crate::network_paths::resolve::Disk;
 use crate::network_paths::{FOLD_CASE, NetEnv};
@@ -48,39 +50,99 @@ pub(crate) fn held_as<'a>(
 }
 
 /// The own matter folder `stored`, each way the launch spells it (`launch_checks::folders`): as
-/// the agent works in it, as stored, and canonical; never canonical on a network location.
+/// the agent works in it, as stored, and canonical; never canonical where [`walks`] says no.
 fn own_places(stored: &Path, net: &NetEnv) -> Vec<PathBuf> {
     let cwd = crate::agent::session_folder(stored);
-    let local = !net.is_network(&cwd) && !net.is_network(stored);
+    let local = walks(&cwd, net) && walks(stored, net);
     let real = local.then(|| dunce::canonicalize(&cwd).ok()).flatten();
     let mut places = vec![cwd, stored.to_owned()];
     places.extend(real);
     places
 }
 
-/// [`held`] with every folder resolved again now: `fence`'s other matters (as the launch asked
-/// them) and the own matter folder `stored`. Reads the file system: off the actor, waited on
-/// for `codex::prepare::PREPARE_WAIT` (5 s) before each prompt; one that does not answer in
-/// time lets the prompt through (`actor::turn::prompt`).
+/// [`held`] with every folder resolved again now: `fence`'s other matters on the list (as the
+/// launch asked them) and the own matter folder `stored`. Reads the file system: off the actor.
 ///
-/// What it touches: the mount table once (`NetEnv::current`), then for each other matter
-/// `touchable`'s walk: an `lstat` of each name on the way, and a `readlink` of each link,
-/// each checked as text against the network locations first, so a folder on a share (or a
-/// link into one) is never touched and counts as stored. No folder is listed or opened for
-/// reading, so a cloud folder (File Provider, `OneDrive`) is not downloaded; on Windows the
-/// walk's canonical form opens a handle to the path, as the launch's does. About ten calls
-/// per matter: well under a millisecond each on a local disk, for 50 matters a few ms.
+/// What it touches: the mount table once (`NetEnv::current`), and nothing for a folder whose
+/// text lies on a network location (a share, a remote mount, a mapped drive) or a cloud folder
+/// ([`cloud`]: File Provider's `Library/CloudStorage`, iCloud's `Library/Mobile Documents`,
+/// `OneDrive`): those count as stored, decided from the text alone. Any other folder gets
+/// `touchable`'s walk: an `lstat` of each name on the way and a `readlink` of each link (each
+/// target checked as text first), never a listing or a read; on Windows the walk's canonical
+/// form opens a handle to the path, as the launch does. About ten calls per matter on a local
+/// disk: for 50 matters a few ms.
 pub(crate) fn recheck(fence: &MatterFence, stored: &Path) -> Result<(), Error> {
     let net = NetEnv::current();
     let disk = Disk::resolved(&net);
-    let mut others = fence.others.clone();
+    let mut others: Vec<Other> = fence.others.iter().filter(|o| o.listed).cloned().collect();
     for other in &mut others {
-        other.spellings = spellings(&other.folder, &disk);
+        other.spellings = if walks(&other.folder, &net) {
+            spellings(&other.folder, &disk)
+        } else {
+            vec![other.folder.clone()]
+        };
     }
     match held_as(&others, &own_places(stored, &net), FOLD_CASE) {
         Some(other) => Err(refusal(other)),
         None => Ok(()),
     }
+}
+
+/// Whether the re-check may walk `folder` on the disk: not on a network location, nor in a cloud
+/// folder ([`cloud`]), both judged from the text and the mount table only.
+pub(crate) fn walks(folder: &Path, net: &NetEnv) -> bool {
+    folder.is_absolute() && !net.is_network(folder) && !cloud(folder)
+}
+
+/// Whether `folder`'s text lies in a cloud folder whose names a walk could make its provider
+/// fetch: under `Library/CloudStorage` or `Library/Mobile Documents` (macOS File Provider,
+/// iCloud Drive), or under a `OneDrive` folder the environment names (Windows). Text only.
+pub(crate) fn cloud(folder: &Path) -> bool {
+    let names = key_as(folder, true);
+    let library = |second: &str| {
+        names.windows(2).any(|pair| {
+            pair.first().is_some_and(|n| n == "library") && pair.get(1).is_some_and(|n| n == second)
+        })
+    };
+    if library("cloudstorage") || library("mobile documents") {
+        return true;
+    }
+    ["OneDrive", "OneDriveCommercial", "OneDriveConsumer"]
+        .iter()
+        .any(|var| {
+            std::env::var_os(var).is_some_and(|root| {
+                let root = key_as(Path::new(&root), true);
+                !root.is_empty() && names.starts_with(&root)
+            })
+        })
+}
+
+/// The re-check before a prompt to a live agent, waited on for `codex::prepare::PREPARE_WAIT`
+/// (5 s) off the actor: a refusal, or, failing closed, `agent.launch_failed` (retryable, the
+/// question kept) when the check does not answer in time or its thread ends without an answer
+/// (a panic). No thread when no matter on the list could be inside. The wait is on the system
+/// clock, not the host's: a test's manual clock moving past it would fail a turn the disk
+/// answered in time.
+pub(crate) async fn recheck_off_actor(
+    matter: Option<MatterId>,
+    fence: MatterFence,
+    stored: PathBuf,
+) -> Result<(), Error> {
+    if !fence.others.iter().any(|other| other.listed) {
+        return Ok(());
+    }
+    let clock: Arc<dyn Clock> = Arc::new(crate::clock::SystemClock);
+    wait(clock, matter, move || recheck(&fence, &stored)).await
+}
+
+/// `work` off the actor for at most `PREPARE_WAIT`, failing closed.
+async fn wait(
+    clock: Arc<dyn Clock>,
+    matter: Option<MatterId>,
+    work: impl FnOnce() -> Result<(), Error> + Send + 'static,
+) -> Result<(), Error> {
+    let job = crate::agent::codex::prepare::Job::short("the matter-inside re-check", matter);
+    crate::agent::codex::prepare::off_actor(clock, job, work).await
 }
 
 /// `matter.holds_other_matter`, naming `other`: its name is for the notice, never the log.
