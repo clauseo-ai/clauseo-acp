@@ -1,9 +1,11 @@
 //! The body's ids against stetdoc's own list (`check --json`), on stetdoc 0.9.3's real output:
 //! a change in a footnote alone and in a header alone, the lease (its footnote changed), and a
-//! document that holds a cell's and a section's format change the view never marks.
+//! document that holds a cell's and a section's format change the view never marks; and the
+//! footnote and header shown in their parts (`story.rs`).
 
 use clauseo_protocol::BlacklineNotice::{CellFormatChanged, ChangesOutsideText, MayDiffer};
 
+use super::super::story::{Story, add_parts, read_story};
 use super::super::{Read, read_view};
 use super::{Change, apply, read_check};
 
@@ -42,6 +44,32 @@ fn a_footnote_or_header_change_alone_is_noted() {
         let read = checked(view, check);
         assert_eq!(read.blackline.notices, [ChangesOutsideText]);
         assert!(read.ids.is_empty());
+    }
+}
+
+/// The same changes once the part that holds each is read: its ids are shown, and nothing is
+/// said to be outside what the blackline shows.
+#[test]
+fn a_footnote_or_header_change_shown_in_its_part_is_covered() {
+    for (view, story, kind, check) in [
+        (
+            fixture!("partial/view-footnote.json"),
+            fixture!("partial/story-notes-footnote.json"),
+            Story::Notes,
+            fixture!("partial/check-footnote.json"),
+        ),
+        (
+            fixture!("partial/view-header.json"),
+            fixture!("partial/story-headers-header.json"),
+            Story::Headers,
+            fixture!("partial/check-header.json"),
+        ),
+    ] {
+        let mut read = read_view(view).unwrap();
+        add_parts(&mut read, vec![read_story(story, kind).unwrap()]);
+        apply(&mut read, &read_check(check).unwrap());
+        assert_eq!(read.blackline.notices, [], "{kind:?}");
+        assert_eq!(read.blackline.parts.len(), 1, "{kind:?}");
     }
 }
 

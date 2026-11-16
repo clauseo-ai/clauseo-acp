@@ -62,6 +62,37 @@ What stetdoc 0.9.3's compare does not mark, or its view does not show (`make_lin
 - `../check.json`: `stetdoc check --json` of the lease's redline (ids 2 to 17; 16 and 17 are its
   footnote's).
 
+The notes, headers and footers, what compare says beside the redline, and table formatting
+(`make_stories.py`; read by `parse/story/tests.rs`, `parse/receipt/tests.rs`,
+`parse/ledger/tests.rs`, `tests/host/blackline_crossed.rs` and `tests/host/blackline_parts.rs`):
+
+- `story-notes-<pair>.json`, `story-headers-<pair>.json`: `stetdoc view --all --json --story notes`
+  and `--story headers` of the redline of each of `footnote`, `header`, `notes`, `stories`,
+  `unmatched`, `excluded` and `cellfmt-body` (`{footnote 1}`, `{endnote 1}`, `{header default
+  sections=1,2}`, `{footer first sections=2}`; a story with nothing in it prints `{position:
+  nothing of notes (0 of 0 blocks)}`).
+- `unmatched-old.docx`, `unmatched-new.docx`: a header in the newer version only, beside a body
+  change. `compare-unmatched.json` is compare's whole answer: its receipt warns
+  `compare_story_unmatched`, and the redline's header shows no change.
+- `stories-old.docx`, `stories-new.docx`: two sections; a footnote, an endnote, a header both
+  sections use and a first-page footer in the second, each changed. `compare-stories.json` warns
+  nothing.
+- `excluded-old.docx`, `excluded-new.docx`: an inserted paragraph that ends a section, which
+  compare can't mark up whole: `compare-excluded.json` warns `compare_not_restored` for `p2` (one
+  of its exclusions), and the section's break shows no mark.
+- `cellfmt-body-old.docx`, `cellfmt-body-new.docx`: the shading of `cellfmt-*.docx` beside a body
+  change; compare marks the body's change only.
+- Each of these four pairs has `view-<pair>.json`, `check-<pair>.json` and
+  `final-<pair>-old.json`, `final-<pair>-new.json` as above.
+
+All of them came from the pinned v0.9.3 release binary for aarch64-apple-darwin:
+
+```text
+stetdoc compare --json --author=Clauseo -o redline.docx <pair>-old.docx <pair>-new.docx > compare-<pair>.json
+stetdoc view --all --json --story notes redline.docx
+stetdoc view --all --json --story headers redline.docx
+```
+
 `make_docs.py` (from the stetdoc thread's repro, unchanged) made the first three pairs; it also
 writes two files for another blocker, so run it in a temporary folder. `make_more.py` makes the
 other pairs, and `make_links.py` (which reads both for their helpers) the ones above. Both are Python 3, standard library only. The views and the compare's answer came

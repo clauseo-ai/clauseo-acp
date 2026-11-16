@@ -2,12 +2,15 @@
 //! `#<id> <author>` names a change, which the blackline shows (the paragraph's change) or says
 //! may differ; a tag the reader does not know, or an id with no author, gives "may differ". One
 //! test for each form, the lines as stetdoc 0.9.3 prints them (`partial/view-props.json` holds
-//! the table, grid, row, paragraph and move forms), and the words its next release adds.
+//! the table, grid, row, paragraph and move forms), and the words its next release adds. Then
+//! the lines that open a footnote, an endnote, a header and a footer in the story views
+//! (`story.rs`), one test for each.
 
-use clauseo_protocol::BlacklineNotice::MayDiffer;
+use clauseo_protocol::BlacklineNotice::{MayDiffer, PartNotShown};
 use clauseo_protocol::ParagraphChange::{self, Added, Changed, Formatted, Removed, Same as Kept};
-use clauseo_protocol::{BlacklineNotice, RunKind};
+use clauseo_protocol::{BlacklineNotice, BlacklinePartKind, HeaderSlot, HeaderUse, RunKind};
 
+use super::super::story::{Story, read_story};
 use super::super::{Read, read_view};
 
 /// A view whose body is `lines`, with a head and a summary that counts none (so no count
@@ -230,4 +233,112 @@ fn the_real_forms_are_named_by_id() {
         read.ids.into_iter().collect::<Vec<_>>(),
         [22, 23, 24, 25, 31, 33]
     );
+}
+
+/// A `--story <story>` view whose lines after the head are `lines`.
+fn story_view(story: Story, lines: &str) -> String {
+    let text = format!(
+        "{{stet 1 view={} mode=redline}}\n{{authors: C \"Clauseo\"}}\n\
+         {{summary: 2 tracked changes (C 2)}}\n{lines}\n",
+        story.word()
+    );
+    serde_json::json!({
+        "mode": "redline",
+        "text": text,
+        "next": null,
+        "position": {"shown": 1, "total": 1},
+        "warnings": [],
+    })
+    .to_string()
+}
+
+/// The kinds of the parts `lines` show, each holding `p1 {++new++}{#1 C}`, and the notices.
+fn parts(story: Story, opener: &str) -> (Vec<BlacklinePartKind>, Vec<BlacklineNotice>) {
+    let lines = format!("{opener}\np1 Term {{++new++}}{{#1 C}}.");
+    let read = read_story(&story_view(story, &lines), story).unwrap();
+    let kinds = read.parts.into_iter().map(|part| part.kind).collect();
+    (kinds, read.notices)
+}
+
+/// A header's or footer's uses, each a slot and its sections.
+fn uses(slots: &[(HeaderSlot, &[u32])]) -> Vec<HeaderUse> {
+    slots
+        .iter()
+        .map(|&(slot, sections)| HeaderUse {
+            slot,
+            sections: sections.to_vec(),
+        })
+        .collect()
+}
+
+#[test]
+fn story_footnote() {
+    assert_eq!(
+        parts(Story::Notes, "{footnote 3}"),
+        (vec![BlacklinePartKind::Footnote { number: 3 }], vec![])
+    );
+}
+
+/// The number read is the note's own; `mark=` is the one Word shows when it is another.
+#[test]
+fn story_endnote_with_mark() {
+    assert_eq!(
+        parts(Story::Notes, "{endnote 2 mark=1}"),
+        (vec![BlacklinePartKind::Endnote { number: 2 }], vec![])
+    );
+    assert_eq!(
+        parts(Story::Notes, "{endnote 1}"),
+        (vec![BlacklinePartKind::Endnote { number: 1 }], vec![])
+    );
+}
+
+#[test]
+fn story_header_on_two_kinds_of_page() {
+    let header = BlacklinePartKind::Header {
+        uses: uses(&[
+            (HeaderSlot::Default, &[1, 3]),
+            (HeaderSlot::FirstPage, &[2]),
+        ]),
+    };
+    assert_eq!(
+        parts(
+            Story::Headers,
+            "{header default sections=1,3 first sections=2}"
+        ),
+        (vec![header], vec![])
+    );
+}
+
+#[test]
+fn story_footer_even_pages_and_on_none() {
+    let even = BlacklinePartKind::Footer {
+        uses: uses(&[(HeaderSlot::EvenPages, &[1])]),
+    };
+    assert_eq!(
+        parts(Story::Headers, "{footer even sections=1}"),
+        (vec![even], vec![])
+    );
+    let none = BlacklinePartKind::Footer { uses: Vec::new() };
+    assert_eq!(parts(Story::Headers, "{footer}"), (vec![none], vec![]));
+}
+
+/// A part named in a form the reader does not know is left out, its lines with it, and said to
+/// be not shown; so is a block line before the first part.
+#[test]
+fn story_part_in_an_unknown_form() {
+    for opener in [
+        "{header odd sections=1}",
+        "{header default sections=}",
+        "{footnote x}",
+        "{footnote 0}",
+        "{footnote 1 label=a}",
+    ] {
+        assert_eq!(
+            parts(Story::Notes, opener),
+            (vec![], vec![PartNotShown]),
+            "{opener}"
+        );
+    }
+    let read = read_story(&story_view(Story::Notes, "p1 Loose."), Story::Notes).unwrap();
+    assert_eq!((read.parts.len(), read.notices), (0, vec![PartNotShown]));
 }

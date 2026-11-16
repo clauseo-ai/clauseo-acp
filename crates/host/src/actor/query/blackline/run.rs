@@ -1,7 +1,9 @@
 //! The stetdoc runs of a Word blackline, off the actor: `stetdoc compare` writes the redline of
-//! `old.docx` and `new.docx`, then `stetdoc view --all --json` prints it, which `parse.rs`
-//! reads; then the runs that check it (`cross.rs`: `stetdoc check` on the redline and a view of
-//! each version), whose failures leave the blackline with a notice, never fail it.
+//! `old.docx` and `new.docx` and says what it could not compare (`parse/receipt.rs`), then
+//! `stetdoc view --all --json` prints it, which `parse.rs` reads; then the views of its notes
+//! and headers (`stories.rs`), the runs that check it (`cross.rs`: `stetdoc check` on the
+//! redline and a view of each version), none of which fails the blackline: a run that fails
+//! leaves it with a notice.
 //!
 //! It answers: how stetdoc is started (through the host's launcher, as every child is: the
 //! absolute program, no shell, an environment of its own (`stetdoc_env`: nothing off Windows;
@@ -11,7 +13,7 @@
 //! ([`STDOUT_MAX`]); what counts as a failure ([`Failed`]): a launch that fails, an exit
 //! other than 0, the deadline, stdout past the cap or not UTF-8, and a view with nothing in it
 //! that can be shown (a view that reads in part, or warns, is a blackline with notices); that
-//! the blackline may differ when the two files differ but it shows no change
+//! the blackline may differ when the two files differ but it shows no change and names none
 //! ([`note_a_silent_difference`]); and which code a failure gets ([`refusal_code`]): stetdoc's
 //! own refusals (a table inside a table, a compare it refused, a version it can't read, a size
 //! limit) their own, the rest `blackline.failed`.
@@ -28,7 +30,8 @@ use clauseo_protocol::{BlacklineNotice, ErrorCode, ParagraphChange, WordBlacklin
 use futures::AsyncReadExt as _;
 use futures::future::{Either, join, select};
 
-use super::parse::{Read, ViewFailure, read_view};
+use super::parse::receipt::read_compare;
+use super::parse::{Read, ViewFailure, order, read_view};
 use crate::config::Stetdoc;
 use crate::matter_worker::{NEW, OLD};
 
@@ -83,7 +86,7 @@ pub(crate) async fn blackline<T: Timer>(
         path(OLD),
         path(NEW),
     ];
-    run(
+    let compared = run(
         launcher,
         timer,
         stetdoc,
@@ -110,6 +113,11 @@ pub(crate) async fn blackline<T: Timer>(
             }
         },
     })?;
+    let said = read_compare(&compared);
+    read.blackline.notices.extend(said.notices);
+    read.warnings.extend(said.codes);
+    order(&mut read.blackline.notices);
+    stories::show_parts(launcher, timer, stetdoc, dir, &mut read).await;
     // Two copies the host just wrote; one that can't be read counts as different.
     let differ = match (std::fs::read(dir.join(OLD)), std::fs::read(dir.join(NEW))) {
         (Ok(old), Ok(new)) => old != new,
@@ -121,14 +129,15 @@ pub(crate) async fn blackline<T: Timer>(
 }
 
 /// Adds [`BlacklineNotice::MayDiffer`] when the two files differ (`differ`) but the blackline
-/// shows no change and no notice says part of it may be missing or names what changed: stetdoc
-/// 0.9.3's compare marks no change for some differences (a table cell's shading, a table's or a
-/// row's format), and "no changes" must never stand for two different files.
+/// shows no change (in its body or a part) and nothing names what changed or says part of it
+/// may be missing: stetdoc 0.9.3's compare marks no change for some differences, and "no
+/// changes" must never stand for two different files.
 pub(crate) fn note_a_silent_difference(blackline: &mut WordBlackline, differ: bool) {
-    let shown = blackline
-        .paragraphs
-        .iter()
-        .any(|paragraph| paragraph.change != ParagraphChange::Same);
+    let shown = !blackline.parts.is_empty()
+        || blackline
+            .paragraphs
+            .iter()
+            .any(|paragraph| paragraph.change != ParagraphChange::Same);
     // Only a notice that already says something may be missing, or names what changed, makes
     // it needless; one about something else (hidden text, numbers) does not say the versions
     // differ.
@@ -139,6 +148,7 @@ pub(crate) fn note_a_silent_difference(blackline: &mut WordBlackline, differ: bo
                 BlacklineNotice::MayDiffer
                     | BlacklineNotice::PartNotShown
                     | BlacklineNotice::ChangesOutsideText
+                    | BlacklineNotice::HeaderOrFooterInOneVersion
                     | BlacklineNotice::CommentChanged
                     | BlacklineNotice::TextBoxChanged
                     | BlacklineNotice::CellFormatChanged
@@ -339,6 +349,7 @@ pub(crate) fn refusal_code(code: &str, message: &str) -> ErrorCode {
 }
 
 mod cross;
+mod stories;
 
 #[cfg(test)]
 mod tests;

@@ -1,0 +1,16 @@
+{
+  "base": "be0d13f1dbe88da2:0:be0d13f1dbe88da2",
+  "mode": "final",
+  "next": null,
+  "position": {
+    "first": "p1",
+    "last": "p1",
+    "remaining_tokens": 0,
+    "scope": "p1..p1",
+    "shown": 1,
+    "total": 1
+  },
+  "text": "{stet 1 view=body base=be0d13f1dbe88da2:0:be0d13f1dbe88da2 mode=final common-style=\"Normal\" range=p1..p1}\n{summary: 1 section}\np1 The term is two years.\n{position: p1..p1 of p1..p1 (1 of 1 blocks)}\n",
+  "tokens": 50,
+  "warnings": []
+}

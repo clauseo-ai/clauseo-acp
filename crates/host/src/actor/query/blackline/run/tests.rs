@@ -1,6 +1,7 @@
 //! stetdoc's environment (`stetdoc_env`): empty off Windows; on Windows `SystemRoot`, `windir`,
 //! `TEMP` and `TMP`, the last two the blackline's own folder. And the code a failed run gives
-//! (`error_of`, `refusal_code`).
+//! (`error_of`, `refusal_code`). What the blackline says of a difference it does not show, and of
+//! what the versions' views found.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -8,7 +9,10 @@ use std::path::Path;
 
 use clauseo_protocol::ErrorCode;
 
-use clauseo_protocol::{BlacklineNotice, BlacklineParagraph, ParagraphChange, WordBlackline};
+use clauseo_protocol::{
+    BlacklineNotice, BlacklineParagraph, BlacklinePart, BlacklinePartKind, ParagraphChange,
+    WordBlackline,
+};
 
 use super::cross::{LINKS_MAX, note_what_compare_missed};
 use super::{author_arg, error_of, note_a_silent_difference, refusal_code, stetdoc_env};
@@ -163,11 +167,11 @@ fn a_difference_the_blackline_does_not_show_may_differ() {
         [BlacklineNotice::HiddenText, BlacklineNotice::MayDiffer]
     );
     assert_eq!(noted(hidden, false), [BlacklineNotice::HiddenText]);
-    // One that already says part may be missing does.
     // One that already says part may be missing, or names what changed, does.
     for said in [
         BlacklineNotice::PartNotShown,
         BlacklineNotice::ChangesOutsideText,
+        BlacklineNotice::HeaderOrFooterInOneVersion,
         BlacklineNotice::CommentChanged,
         BlacklineNotice::TextBoxChanged,
         BlacklineNotice::CellFormatChanged,
@@ -179,6 +183,13 @@ fn a_difference_the_blackline_does_not_show_may_differ() {
     let mut linked = blackline(ParagraphChange::Same);
     linked.changed_links.push("the account".to_owned());
     assert_eq!(noted(linked, true), []);
+    // A part shown says what changed.
+    let mut parted = blackline(ParagraphChange::Same);
+    parted.parts.push(BlacklinePart {
+        kind: BlacklinePartKind::Footnote { number: 1 },
+        paragraphs: Vec::new(),
+    });
+    assert_eq!(noted(parted, true), []);
 }
 
 /// What the versions' views found goes on the blackline: the links by text, to the cap (past it,

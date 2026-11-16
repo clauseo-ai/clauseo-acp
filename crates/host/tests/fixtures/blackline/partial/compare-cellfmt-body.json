@@ -1,0 +1,94 @@
+{
+  "next": "stetdoc view cellfmt-body-red.docx --revisions",
+  "output": "cellfmt-body-red.docx",
+  "receipt": {
+    "added": [],
+    "added_count": 0,
+    "base": "f05ea277928ecaed:0:f05ea277928ecaed",
+    "blocks": [],
+    "blocks_omitted": 0,
+    "comments": [],
+    "dry_run": false,
+    "moves": [],
+    "operations": [],
+    "retired": [],
+    "revisions": [
+      {
+        "author": "Clauseo",
+        "changes": [
+          {
+            "block": "p1",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              1
+            ],
+            "kind": "deletion"
+          },
+          {
+            "block": "p1",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              0
+            ],
+            "kind": "insertion"
+          }
+        ],
+        "counts": [
+          [
+            "insertion",
+            1
+          ],
+          [
+            "deletion",
+            1
+          ]
+        ]
+      }
+    ],
+    "stamp": {
+      "author": "Clauseo",
+      "date": "2026-11-16T08:22:30Z"
+    },
+    "text": "compared: 2 revisions, tracked as Clauseo 2026-11-16T08:22:30Z. base f05ea277928ecaed:0:f05ea277928ecaed\nClauseo: insertion 1, deletion 1\nvalidated 1 unit: no problems, and this file needs no separate check.\n",
+    "tracked": true,
+    "validation": {
+      "carried": [],
+      "carried_total": 0,
+      "notes": [],
+      "parts": 1,
+      "units": 1
+    },
+    "warnings": []
+  },
+  "saved": {
+    "base": "2477f9e310b99a7a:1:a0352540f4cb4f91",
+    "edited": true,
+    "revisions": [
+      {
+        "author": "Clauseo",
+        "block": "p1",
+        "date": "2026-11-16T08:22:30Z",
+        "deleted": "one year",
+        "ids": [
+          1
+        ],
+        "kind": "deletion",
+        "story": "body",
+        "text_truncated": false
+      },
+      {
+        "author": "Clauseo",
+        "block": "p1",
+        "date": "2026-11-16T08:22:30Z",
+        "ids": [
+          0
+        ],
+        "inserted": "two years",
+        "kind": "insertion",
+        "story": "body",
+        "text_truncated": false
+      }
+    ],
+    "sha256": "1f8be5322e0605d54b504302d9640b34bea7c0e375363e68c260cbe476e2214c"
+  }
+}

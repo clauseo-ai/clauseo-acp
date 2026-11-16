@@ -31,8 +31,13 @@ extend-exclude = [
 ]
 
 [default]
-# A code point in a stylesheet's unicode-range (U+0100-02BA) is hex, not a word.
-extend-ignore-re = ["U\\+[0-9A-Fa-f]{4,6}(?:-[0-9A-Fa-f]{4,6})?"]
+# A code point in a stylesheet's unicode-range (U+0100-02BA) is hex, not a word; so is the base
+# token stetdoc prints in its JSON (be0d13f1dbe88da2:0:be0d13f1dbe88da2), in the blackline's
+# captured fixtures.
+extend-ignore-re = [
+  "U\\+[0-9A-Fa-f]{4,6}(?:-[0-9A-Fa-f]{4,6})?",
+  "\\b[0-9a-f]{16}:[0-9]+:[0-9a-f]{16}\\b",
+]
 
 [default.extend-words]
 # HTML's named character reference for ¤ (the currency sign), in ui/patches/'s entity decoder.

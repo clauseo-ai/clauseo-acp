@@ -1,0 +1,51 @@
+{
+  "base": "f7bd4d4a9dbd1d97:0:f7bd4d4a9dbd1d97",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Clauseo",
+        "count": 8
+      }
+    ],
+    "count": 8,
+    "first": [
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "change": 0,
+        "deleted": "one",
+        "inserted": null,
+        "kind": "delete"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "change": 1,
+        "deleted": null,
+        "inserted": "two",
+        "kind": "insert"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p4",
+        "change": 2,
+        "deleted": "one",
+        "inserted": null,
+        "kind": "delete"
+      }
+    ]
+  },
+  "position": {
+    "first": "p1",
+    "last": "p2",
+    "remaining_tokens": 0,
+    "scope": "p1..p2",
+    "shown": 2,
+    "total": 2
+  },
+  "text": "{stet 1 view=body base=f7bd4d4a9dbd1d97:0:f7bd4d4a9dbd1d97 mode=redline common-style=\"Normal\" range=p1..p2}\n{summary: 8 tracked changes (C 8) · 1 footnote · 1 endnote · 2 sections}\np1 Part one.{fn1}\n{section 1 ends: next-page title-page}\np2 Part two.{en1}\n{appendix}\n{fn1} Footnote two.\n{en1} Endnote two.\n{position: p1..p2 of p1..p2 (2 of 2 blocks)}\n",
+  "tokens": 90,
+  "warnings": []
+}

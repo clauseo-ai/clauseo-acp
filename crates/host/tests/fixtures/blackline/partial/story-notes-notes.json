@@ -1,0 +1,51 @@
+{
+  "base": "05b59a0f5c4e2b21:0:05b59a0f5c4e2b21",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Clauseo",
+        "count": 6
+      }
+    ],
+    "count": 6,
+    "first": [
+      {
+        "author": "Clauseo",
+        "block": "p1",
+        "change": 0,
+        "deleted": "one year",
+        "inserted": null,
+        "kind": "delete"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p1",
+        "change": 1,
+        "deleted": null,
+        "inserted": "two years",
+        "kind": "insert"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p2",
+        "change": 2,
+        "deleted": "one year",
+        "inserted": null,
+        "kind": "delete"
+      }
+    ]
+  },
+  "position": {
+    "first": "p3",
+    "last": "p3",
+    "remaining_tokens": 0,
+    "scope": "p3..p3",
+    "shown": 1,
+    "total": 1
+  },
+  "text": "{stet 1 view=notes base=05b59a0f5c4e2b21:0:05b59a0f5c4e2b21 mode=redline common-style=\"Normal\" range=p3..p3}\n{authors: C \"Clauseo\"}\n{summary: 6 tracked changes (C 6) · 1 footnote · 1 section}\n{footnote 1}\np3 Note {--one year--}{#7 C}{++two years++}{#6 C}.\n{position: p3..p3 of p3..p3 (1 of 1 blocks)}\n",
+  "tokens": 77,
+  "warnings": []
+}

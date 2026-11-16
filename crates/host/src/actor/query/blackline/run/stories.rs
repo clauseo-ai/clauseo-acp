@@ -1,0 +1,75 @@
+//! The runs that show the redline's footnotes, endnotes, headers and footers, off the actor:
+//! `stetdoc view --all --json --story notes` and `--story headers` on the redline, read by
+//! `parse/story.rs` into the blackline's parts.
+//!
+//! It answers what a run that fails means: never a failed blackline. The parts of that story
+//! are not shown, and their changes' ids are not counted as shown, so stetdoc's list of changes
+//! (`parse/ledger.rs`), or its summary's count when there is no list, says there are changes
+//! outside what the blackline shows. The log gets the step and the rule, never a document's
+//! text.
+
+use std::path::Path;
+
+use clauseo_process::{Launcher, Timer};
+use futures::future::join;
+
+use super::{REDLINE, VIEW_LIMIT, run};
+use crate::actor::query::blackline::parse::Read;
+use crate::actor::query::blackline::parse::story::{Story, StoryRead, add_parts, read_story};
+use crate::config::Stetdoc;
+
+/// Shows in `read` the parts of the redline in `dir` that hold a change: both story views, run
+/// at once.
+pub(crate) async fn show_parts<T: Timer>(
+    launcher: &dyn Launcher,
+    timer: &T,
+    stetdoc: &Stetdoc,
+    dir: &Path,
+    read: &mut Read,
+) {
+    let (notes, headers) = join(
+        view_story(launcher, timer, stetdoc, dir, Story::Notes),
+        view_story(launcher, timer, stetdoc, dir, Story::Headers),
+    )
+    .await;
+    let mut stories = Vec::new();
+    for (story, viewed) in [(Story::Notes, notes), (Story::Headers, headers)] {
+        match viewed {
+            Ok(viewed) => stories.push(viewed),
+            Err(why) => {
+                tracing::info!(%why, story = story.word(), "a story of the Word blackline is not shown");
+            }
+        }
+    }
+    add_parts(read, stories);
+}
+
+/// The redline's view of `story`, read.
+async fn view_story<T: Timer>(
+    launcher: &dyn Launcher,
+    timer: &T,
+    stetdoc: &Stetdoc,
+    dir: &Path,
+    story: Story,
+) -> Result<StoryRead, String> {
+    let view = vec![
+        "view".into(),
+        "--all".into(),
+        "--json".into(),
+        "--story".into(),
+        story.word().into(),
+        dir.join(REDLINE).into_os_string(),
+    ];
+    let out = run(
+        launcher,
+        timer,
+        stetdoc,
+        dir,
+        "story view",
+        view,
+        VIEW_LIMIT,
+    )
+    .await
+    .map_err(|failed| failed.to_string())?;
+    read_story(&out, story).map_err(|why| format!("stetdoc story view: {why}"))
+}

@@ -1,0 +1,51 @@
+{
+  "base": "f7bd4d4a9dbd1d97:0:f7bd4d4a9dbd1d97",
+  "mode": "redline",
+  "next": null,
+  "others": {
+    "by_author": [
+      {
+        "author": "Clauseo",
+        "count": 8
+      }
+    ],
+    "count": 8,
+    "first": [
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "change": 0,
+        "deleted": "one",
+        "inserted": null,
+        "kind": "delete"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p3",
+        "change": 1,
+        "deleted": null,
+        "inserted": "two",
+        "kind": "insert"
+      },
+      {
+        "author": "Clauseo",
+        "block": "p4",
+        "change": 2,
+        "deleted": "one",
+        "inserted": null,
+        "kind": "delete"
+      }
+    ]
+  },
+  "position": {
+    "first": "p3",
+    "last": "p4",
+    "remaining_tokens": 0,
+    "scope": "p3..p4",
+    "shown": 2,
+    "total": 2
+  },
+  "text": "{stet 1 view=headers base=f7bd4d4a9dbd1d97:0:f7bd4d4a9dbd1d97 mode=redline common-style=\"Normal\" range=p3..p4}\n{authors: C \"Clauseo\"}\n{summary: 8 tracked changes (C 8) · 1 footnote · 1 endnote · 2 sections}\n{header default sections=1,2}\np3 Header {--one--}{#3 C}{++two++}{#2 C}.\n{footer first sections=2}\np4 First footer {--one--}{#5 C}{++two++}{#4 C}.\n{position: p3..p4 of p3..p4 (2 of 2 blocks)}\n",
+  "tokens": 102,
+  "warnings": []
+}

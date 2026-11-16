@@ -1,0 +1,16 @@
+{
+  "base": "2a8b23d9a61892f8:0:2a8b23d9a61892f8",
+  "mode": "final",
+  "next": null,
+  "position": {
+    "first": "p1",
+    "last": "p2",
+    "remaining_tokens": 0,
+    "scope": "p1..p2",
+    "shown": 2,
+    "total": 2
+  },
+  "text": "{stet 1 view=body base=2a8b23d9a61892f8:0:2a8b23d9a61892f8 mode=final common-style=\"Normal\" range=p1..p2}\n{summary: 1 footnote · 1 endnote · 2 sections}\np1 Part one.{fn1}\n{section 1 ends: next-page title-page}\np2 Part two.{en1}\n{appendix}\n{fn1} Footnote two.\n{en1} Endnote two.\n{position: p1..p2 of p1..p2 (2 of 2 blocks)}\n",
+  "tokens": 83,
+  "warnings": []
+}

@@ -1,0 +1,76 @@
+{
+  "next": "stetdoc view excluded-red.docx --revisions",
+  "output": "excluded-red.docx",
+  "receipt": {
+    "added": [],
+    "added_count": 0,
+    "base": "c7cced9950b7a7a1:0:c7cced9950b7a7a1",
+    "blocks": [],
+    "blocks_omitted": 0,
+    "comments": [],
+    "dry_run": false,
+    "moves": [],
+    "operations": [],
+    "retired": [],
+    "revisions": [
+      {
+        "author": "Clauseo",
+        "changes": [
+          {
+            "block": "p2",
+            "date": "2026-11-16T08:22:30Z",
+            "ids": [
+              0
+            ],
+            "kind": "insertion"
+          }
+        ],
+        "counts": [
+          [
+            "insertion",
+            1
+          ]
+        ]
+      }
+    ],
+    "stamp": {
+      "author": "Clauseo",
+      "date": "2026-11-16T08:22:30Z"
+    },
+    "text": "compared: 1 revision, tracked as Clauseo 2026-11-16T08:22:30Z. base c7cced9950b7a7a1:0:c7cced9950b7a7a1\nClauseo: insertion 1\nwarning compare_not_restored p2: rejecting the changes does not give p2 back as the original has it: the paragraph ends a section: rejecting its insertion leaves an empty paragraph with the break.\nvalidated 1 unit: no problems, and this file needs no separate check.\n",
+    "tracked": true,
+    "validation": {
+      "carried": [],
+      "carried_total": 0,
+      "notes": [],
+      "parts": 1,
+      "units": 1
+    },
+    "warnings": [
+      {
+        "block": "p2",
+        "code": "compare_not_restored",
+        "message": "rejecting the changes does not give p2 back as the original has it: the paragraph ends a section: rejecting its insertion leaves an empty paragraph with the break."
+      }
+    ]
+  },
+  "saved": {
+    "base": "ac91aaf3eb50d373:1:fe21521884fe1475",
+    "edited": true,
+    "revisions": [
+      {
+        "author": "Clauseo",
+        "block": "p2",
+        "date": "2026-11-16T08:22:30Z",
+        "ids": [
+          0
+        ],
+        "inserted": "End of the section",
+        "kind": "insertion",
+        "story": "body",
+        "text_truncated": false
+      }
+    ],
+    "sha256": "3fc535417d702287dd6134ef7bbf194891c9c8210b5bb2b3012fbec8f1557c65"
+  }
+}
