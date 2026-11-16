@@ -114,7 +114,6 @@ fn protected() -> Vec<Vec<String>> {
         names(r"profile\claude-plugin\skills\x\SKILL.md"),
         names(&format!(r"agent-state\{}\notes\x", matter_id(7))),
         names(&format!(r"run\{PREFIX_RUN}\work\x")),
-        names(&format!(r"run\{OWN_RUN}\work\x")),
         names(&format!(
             r"agent-state\{}\work\{OTHER_THREAD}\x",
             matter_id(0)

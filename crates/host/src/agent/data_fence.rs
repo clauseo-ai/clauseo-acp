@@ -10,15 +10,15 @@
 //!   run ([`READ_ONLY`]: the agents' commands, Clauseo's Python runtime). Claude Code applies
 //!   them to its file tools and to the file commands it recognises in Bash, never to the
 //!   processes those start (`agent-browser`, `python3` read what they need). A deny rule has no
-//!   exceptions, so the session's own run folder, its work folder, this matter's notes
-//!   and Claude's plans folder are left out by naming their siblings instead, and so are the
-//!   tool results Claude saves in its own project folder. Run folders, matters' notes and other
-//!   matters' Claude projects made after the launch are the accepted residual of these rules.
+//!   exceptions, so the session's own run and work folders, this matter's notes and Claude's
+//!   plans folder are left out by naming their siblings instead, and so are the tool results
+//!   Claude saves in its own project folder. Run folders, matters' notes and other matters'
+//!   Claude projects made after the launch are the accepted residual of these rules.
 //!   On Windows, where Claude has no sandbox, `Bash(…)` and `PowerShell(…)` rules name the same
 //!   targets in every spelling of `<data>` a command may use (`shell_deny.rs`): the own run
 //!   and work folders, this matter's notes, Claude's plans folder, its tool results and the
-//!   read-only tools stay reachable by a command, and everything else under `<data>`, the folder
-//!   itself too, is denied when a command names it. The rules go to Claude Code in a settings file
+//!   read-only tools stay reachable by a command, and all else under `<data>`, the folder too,
+//!   is denied when a command names it. The rules go to Claude Code in a settings file
 //!   (`agent::launch_settings`), since a busy data folder's rules outgrow a command line.
 //! - The host's auto-deny ([`FenceCheck`]): a permission request whose paths ([`candidates`]:
 //!   the request's locations and diffs, `rawInput`'s path keys and every string in it shaped
@@ -80,14 +80,9 @@ pub(crate) use variables::launch_vars;
 /// case-law relay's token file (R24): `clauseo-mcp` reads it itself, so Claude's tools never
 /// need it, and a token read through them would land in the transcript; the session proxy's
 /// password file (`proxy-secret`, ADR 0053), for the same reasons (the browser guard reads and
-/// deletes it); and the shell
-/// browser's config file
-/// (`browser::SESSION_CONFIG`), which agent-browser reads itself: an edit to it could set what
-/// the `agent-browser` deny rules refuse as flags (`--profile`, `--config`). And a `work` folder
-/// in any run folder: the work folder is the conversation's, under `agent-state`, so a resumed
-/// session's path into an earlier launch's run folder is refused, never made there anew (on
-/// Windows its shell rule, Claude's `*` taking separators, also refuses a command naming a run
-/// folder and then any `\work`, the own work folder's included: the accepted cost).
+/// deletes it); and the shell browser's config file (`browser::SESSION_CONFIG`), which
+/// agent-browser reads itself: an edit to it could set what the `agent-browser` deny rules
+/// refuse as flags (`--profile`, `--config`). And a run folder's `work` ([`STALE_WORK`]).
 /// Under `agents/runtime`, Node and the half-unpacked `.tmp-` folders, but not Clauseo's Python
 /// runtime ([`READ_ONLY`]); the launch denies every other entry there that exists. And every
 /// session's Claude settings file (`agent::launch_settings`), its own too: Claude Code reads
@@ -97,7 +92,7 @@ pub(crate) const DENIED: [&str; 33] = [
     "run/*/relay-token",
     "run/*/proxy-secret",
     "run/*/agent-browser/config.json",
-    "run/*/work/**",
+    STALE_WORK,
     "skill-packs/**",
     "matters/**",
     "logs/**",
@@ -128,6 +123,9 @@ pub(crate) const DENIED: [&str; 33] = [
     "agents/npmrc*",
     "launch-settings/**",
 ];
+
+/// An earlier launch's work folder; file tools only (a shell rule would match `\Workpapers`).
+pub(crate) const STALE_WORK: &str = "run/*/work/**";
 
 /// What of `<data>` every session may read, with the reason: neither denied to Claude nor listed
 /// per launch, and an own folder of every session for the auto-deny (while it resolves to its
@@ -304,10 +302,9 @@ pub(crate) struct FenceCheck {
     /// `<data>` as configured; resolved by the check.
     pub(crate) data: PathBuf,
     /// The session's own folders in `<data>`, as `<data>` (as configured) joined with their
-    /// place in Clauseo's layout: its run folder, its work folder, this matter's notes and
-    /// Claude's plans folder.
-    /// Each counts only while it resolves to exactly `<data>`'s canonical path joined with that
-    /// place: one that is, or sits under, a link counts for nothing.
+    /// place in Clauseo's layout: its run and work folders, this matter's notes and Claude's
+    /// plans folder. Each counts only while it resolves to exactly `<data>`'s canonical path
+    /// joined with that place: one that is, or sits under, a link counts for nothing.
     pub(crate) allowed: Vec<PathBuf>,
     /// The agent's working folder (the matter folder): its own too, and the folder a relative
     /// path is taken from. It counts for nothing when it resolves to `<data>` or a folder above
@@ -599,3 +596,5 @@ mod windows_real_tests;
 #[cfg(test)]
 mod windows_tests;
 mod words;
+#[cfg(test)]
+mod work_folders_tests;

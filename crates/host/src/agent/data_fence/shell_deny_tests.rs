@@ -470,21 +470,28 @@ fn a_share_path_and_a_star_are_escaped() {
         rules.contains(&r"Bash(*C:\d\run*\relay-token*)".to_owned()),
         "{rules:#?}"
     );
-    // A stale work folder in a run folder, the own one too (the work folder is in agent-state).
+    // A stale work folder in a run folder is the file tools' alone (`STALE_WORK`): no shell
+    // rule names it, so a command naming a run folder and then a `Workpapers` passes.
     assert!(
-        rules.contains(&r"Bash(*C:\d\run*\work*)".to_owned()),
+        !rules
+            .iter()
+            .any(|rule| rule.to_lowercase().contains(r"\work")),
         "{rules:#?}"
     );
-    assert!(denied_by(
-        &rules,
-        "Bash",
-        r"type C:\d\run\own\work\reply.md"
-    ));
-    assert!(!denied_by(
-        &rules,
-        "Bash",
-        r"type C:\d\run\own\tmp\reply.md"
-    ));
+    for (tool, command) in [
+        ("Bash", r"type C:\d\run\own\work\reply.md"),
+        ("Bash", r"type C:\d\run\own\tmp\reply.md"),
+        (
+            "Bash",
+            r"copy C:\d\run\own\tmp\a.docx C:\Matter\Workpapers\a.docx",
+        ),
+        (
+            "PowerShell",
+            r"Copy-Item C:\d\run\own\tmp\a.docx C:\Matter\workpapers\a.docx",
+        ),
+    ] {
+        assert!(!denied_by(&rules, tool, command), "{tool}: {command}");
+    }
     // No rule holds a globstar (`/**/`), which Claude Code reads otherwise.
     assert!(
         !rules.iter().any(|rule| rule.contains("/**/")),

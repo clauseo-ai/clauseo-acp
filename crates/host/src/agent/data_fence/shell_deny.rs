@@ -175,7 +175,13 @@ fn rules(
         .filter(|place| !shared.contains(place))
         .map(|place| parse(place).0)
         .collect();
-    let mut targets: Vec<String> = deny.targets.clone();
+    // A stale work folder is the file tools' alone (`super::STALE_WORK`).
+    let mut targets: Vec<String> = deny
+        .targets
+        .iter()
+        .filter(|target| target.as_str() != super::STALE_WORK)
+        .cloned()
+        .collect();
     for place in &shared {
         let target = format!("{place}/**");
         if !targets.contains(&target) {

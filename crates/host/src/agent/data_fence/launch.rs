@@ -240,13 +240,28 @@ fn names(place: &Path) -> Option<Vec<String>> {
         .collect()
 }
 
-/// The folders whose entries grow with the matters (run folders, matters' state, Claude's
-/// projects), whose other entries [`walk`] names in groups ([`group_prefix`]).
-const GROUPED: [&[&str]; 3] = [
+/// The folders whose entries grow with the matters and their conversations (run folders,
+/// matters' state, a matter's work folders, Claude's projects), whose other entries [`walk`]
+/// names in groups ([`group_prefix`]); [`ANY_NAME`] stands for any one name (the matter's id).
+/// Without the work folders' groups, every other conversation of the matter ever launched adds
+/// its own rules to a launch's, per spelling of `<data>` on Windows (`work_folders_tests.rs`).
+const GROUPED: [&[&str]; 4] = [
     &["run"],
     &["agent-state"],
+    &["agent-state", ANY_NAME, "work"],
     &["agents", "claude-acp", "home", "projects"],
 ];
+
+/// Whether `at` is one of the [`GROUPED`] folders.
+fn grouped(at: &[String]) -> bool {
+    GROUPED.iter().any(|folder| {
+        folder.len() == at.len()
+            && folder
+                .iter()
+                .zip(at)
+                .all(|(name, at)| *name == ANY_NAME || *name == at.as_str())
+    })
+}
 
 /// [`existing_targets`] for the folder `dir`, at `at` (its names under `<data>`). In a
 /// [`GROUPED`] folder, each entry that is not kept and whose name no kept name there starts
@@ -261,11 +276,7 @@ fn walk(dir: &Path, at: &mut Vec<String>, places: &Places, out: &mut Vec<String>
     };
     let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
     entries.sort_by_key(std::fs::DirEntry::file_name);
-    let kept_here = GROUPED
-        .iter()
-        .any(|folder| folder.iter().copied().eq(at.iter().map(String::as_str)))
-        .then(|| kept_names(places, at))
-        .flatten();
+    let kept_here = grouped(at).then(|| kept_names(places, at)).flatten();
     let mut groups = std::collections::BTreeSet::new();
     for entry in entries {
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {

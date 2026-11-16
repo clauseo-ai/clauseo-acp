@@ -430,6 +430,11 @@ mirror install works as before, from the same first use.
   (`crates/host/src/actor/agent_options/seed.rs`): its model and effort option ids against the
   new adapters' code, and that any model or effort row it holds is still offered to every
   account. Its constants name the versions they came from.
+- On every Codex pin bump, read its Windows sandbox's permission model again
+  (`windows-sandbox-rs` at the new tag: `cap.rs`, `spawn_prep.rs`, `token.rs`). At 0.162.1 each
+  writable root has its own SID, kept in `CODEX_HOME\cap_sid`, and its allow entry stays on the
+  folder; Clauseo gives a command only its own conversation's folders as roots
+  (`launch_checks/tests/codex_roots.rs`).
 - `limits`' path rules hold for the layout. A test in `crates/limits/tests/` points a settings
   entry at a fixture install laid out by this crate.
 - R20 adds the four codes to `ErrorCode`, wires `Agents` into desktop, and writes `Installed` as

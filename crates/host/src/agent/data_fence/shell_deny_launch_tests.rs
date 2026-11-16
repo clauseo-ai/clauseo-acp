@@ -215,7 +215,6 @@ fn in_a_sixty_matter_folder_only_the_own_folders_pass() {
         format!("run/{PREFIX_RUN}/work/draft.md"),
         format!("run/{PREFIX_RUN}"),
         format!("run/{OWN_RUN}/relay-token"),
-        format!("run/{OWN_RUN}/work/reply.md"),
         format!("agent-state/{}/work/{OTHER_THREAD}/draft.md", matter_id(0)),
         "launch-settings/other-run.json".to_owned(),
         "launch-settings".to_owned(),

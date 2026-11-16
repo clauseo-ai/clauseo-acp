@@ -17,6 +17,7 @@ use crate::error::Error;
 pub(super) fn make(run: &RunFolders, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
     sweep.once(data);
     let tmp = crate::agent::temp::temp_dir(&run.root);
+    clear_work(&run.work);
     for folder in [&run.work, &tmp, &run.notes] {
         if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
             run.remove();
@@ -26,16 +27,12 @@ pub(super) fn make(run: &RunFolders, data: &Path, sweep: &RunSweep) -> Result<()
             ));
         }
     }
-    // The notes folder may be an earlier session's: it is set to 0700 whatever it was.
-    #[cfg(unix)]
-    if let Err(error) = crate::write::make_private_dir(&run.notes) {
+    // The work and notes folders may be an earlier session's ([`ready_own`]).
+    if let Err((folder, error)) = ready_own(&run.work, &run.notes) {
         run.remove();
         return Err(Error::refused(
             ErrorCode::AgentLaunchFailed,
-            format!(
-                "cannot make the folder {} private: {error}",
-                run.notes.display()
-            ),
+            format!("cannot ready the folder {}: {error}", folder.display()),
         ));
     }
     make_fallback_folder(data, &run.notes);
@@ -156,6 +153,46 @@ pub(crate) fn work_dir(data: &Path, matter: MatterId, thread: ThreadId) -> PathB
         .join(matter.to_string())
         .join("work")
         .join(thread.to_string())
+}
+
+/// Readies the conversation's work folder `work` before it is made: anything there that is not
+/// a real folder (a link, a junction or a file an agent put in its place) is removed itself,
+/// never followed, so the launch makes the folder anew instead of failing at every launch of
+/// the conversation. A failure is a warning; making the folder then fails the launch.
+pub(super) fn clear_work(work: &Path) {
+    if std::fs::symlink_metadata(work).is_ok() && !crate::write::is_real_dir(work) {
+        tracing::warn!("a conversation's work folder was not a folder; it is made anew");
+        if let Err(error) = crate::write::remove_link(work) {
+            tracing::warn!(%error, "the entry in a work folder's place stays");
+        }
+    }
+}
+
+/// The name of Claude Code's project folder, which it reads in each added directory.
+const CLAUDE_DIR: &str = ".claude";
+
+/// Readies the made work and notes folders, either of which may be an earlier session's: each
+/// is set to 0700 whatever it was (on Unix), and loses a `.claude` in it, through no link (a
+/// link or file removed itself, a folder with all it holds). Both are Claude's added
+/// directories (`agent::loads::profile`), and each launch starts them with no `.claude` in
+/// either. The folder, or the error, that failed.
+pub(super) fn ready_own<'a>(
+    work: &'a Path,
+    notes: &'a Path,
+) -> Result<(), (&'a Path, std::io::Error)> {
+    for folder in [work, notes] {
+        #[cfg(unix)]
+        crate::write::make_private_dir(folder).map_err(|error| (folder, error))?;
+        let claude = folder.join(CLAUDE_DIR);
+        let removed = match std::fs::symlink_metadata(&claude) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+            Ok(meta) if meta.is_dir() => crate::write::remove_tree(&claude),
+            Ok(_) => crate::write::remove_link(&claude),
+        };
+        removed.map_err(|error| (folder, error))?;
+    }
+    Ok(())
 }
 
 /// Removes `folder` and all it holds, through no link; a failure is a warning.
