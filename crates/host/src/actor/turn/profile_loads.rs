@@ -336,6 +336,7 @@ fn claude_sandbox(
         tmp: &tmp,
         claude_tmp: run.claude_tmp.as_deref(),
         downloads: &run.downloads,
+        browser: &run.browser,
         skill_packs: &run.skill_packs,
         notes: &run.notes,
         skills: &skills,

@@ -22,6 +22,7 @@ fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
         tmp: &tmp,
         claude_tmp: Some(&short),
         downloads: &run.downloads,
+        browser: &run.browser,
         skill_packs: &run.skill_packs,
         notes: &run.notes,
         skills: &[],
@@ -50,4 +51,68 @@ fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
     assert!(sandbox.allow_read.contains(&text(&run.downloads)));
     assert!(text(&run.downloads).ends_with("agent-browser/downloads"));
     assert!(sandbox.deny_read.contains(&text(&data)));
+}
+
+/// A data folder reached through a link: the launch's deny spellings start with its real path,
+/// and the sandbox denies the session's guard folder (Chrome's profile in it), `<data>/browser`
+/// and `<data>/browsers` by that real path as well as by the link, for reads and writes.
+#[test]
+#[cfg(unix)]
+fn the_browser_profile_under_a_linked_data_folder_is_denied_by_its_real_path() {
+    use crate::agent::loads::sandbox::{ClaudeSandbox, SandboxOs, SandboxPaths};
+    use crate::write;
+    let root = super::scratch("linked-browser");
+    let real = root.join("real");
+    let link = root.join("link");
+    write::create_dir_all(&real).unwrap();
+    write::symlink(&real, &link).unwrap();
+    let real = dunce::canonicalize(&real).unwrap();
+    let run = folders(&link, 1);
+    let matter = root.join("matter");
+    let deny = super::super::folders::launch_deny(&run, &matter, &link, None);
+    assert_eq!(deny.spellings, [real.clone(), link.clone()]);
+    let short = PathBuf::from("/tmp/clsb-abcd1234");
+    let tmp = crate::agent::temp::temp_dir(&run.root);
+    let paths = SandboxPaths {
+        matter: &matter,
+        work: &run.work,
+        tmp: &tmp,
+        claude_tmp: Some(&short),
+        downloads: &run.downloads,
+        browser: &run.browser,
+        skill_packs: &run.skill_packs,
+        notes: &run.notes,
+        skills: &[],
+        path: &[],
+        env_file: None,
+        ca_file: None,
+        claude_home: &link.join("agents/claude-acp/home"),
+        data: &deny.spellings,
+        other_matters: &[],
+    };
+    let guard = run.browser.strip_prefix(&link).unwrap();
+    assert!(guard.starts_with("browser/run"), "{}", guard.display());
+    let profile = real.join(guard).join("chrome-profile-1-0000abcd");
+    for os in [SandboxOs::Mac, SandboxOs::Linux] {
+        let sandbox = ClaudeSandbox::for_os(os, &paths).unwrap();
+        for denied in [
+            real.join(guard),
+            real.join("browser"),
+            real.join("browsers"),
+        ] {
+            let denied = denied.to_str().unwrap().to_owned();
+            assert!(sandbox.deny_read.contains(&denied), "{os:?} read {denied}");
+            assert!(
+                sandbox.deny_write.contains(&denied),
+                "{os:?} write {denied}"
+            );
+        }
+        for open in sandbox.allow_read.iter().chain(&sandbox.allow_write) {
+            assert!(
+                !profile.starts_with(open),
+                "{os:?}: {open} opens the profile"
+            );
+        }
+    }
+    write::remove_dir_all(&root).unwrap();
 }

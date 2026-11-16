@@ -24,6 +24,7 @@ struct Session {
     tmp: PathBuf,
     work: PathBuf,
     downloads: PathBuf,
+    browser: PathBuf,
     skill_packs: PathBuf,
     notes: PathBuf,
     skills: Vec<PathBuf>,
@@ -49,6 +50,7 @@ impl Session {
             tmp: run.join("tmp"),
             work: run.join("work"),
             downloads: run.join("agent-browser/downloads"),
+            browser: data.join("browser/run").join(id),
             skill_packs: run.join("skill-packs"),
             notes: data.join("agent-state/m-1/notes"),
             skills: vec![data.join("profile/claude-plugin/skills")],
@@ -73,6 +75,7 @@ impl Session {
             tmp: &self.tmp,
             claude_tmp: self.claude_tmp.as_deref(),
             downloads: &self.downloads,
+            browser: &self.browser,
             skill_packs: &self.skill_packs,
             notes: &self.notes,
             skills: &self.skills,
@@ -154,6 +157,7 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
             "allowUnsandboxedCommands": false,
             "failIfUnavailable": true,
             "allowAppleEvents": false,
+            "enableWeakerNestedSandbox": false,
             "network": {
                 "allowedDomains": ["*"],
                 "deniedDomains": [
@@ -168,8 +172,22 @@ fn a_claude_session_runs_its_commands_in_claude_codes_sandbox() {
                     format!("{DATA}/agent-state/m-1/notes"),
                     SHORT,
                 ],
-                "denyWrite": ["/Users/l/Clients/A/.clauseo"],
-                "denyRead": ["~/", "/Volumes", "/Users/Shared", DATA, "/Users/l/Clients/B"],
+                "denyWrite": [
+                    "/Users/l/Clients/A/.clauseo",
+                    format!("{DATA}/browser"),
+                    format!("{DATA}/browsers"),
+                    format!("{DATA}/browser/run/s-1"),
+                ],
+                "denyRead": [
+                    "~/",
+                    "/Volumes",
+                    "/Users/Shared",
+                    DATA,
+                    format!("{DATA}/browser"),
+                    format!("{DATA}/browsers"),
+                    format!("{DATA}/browser/run/s-1"),
+                    "/Users/l/Clients/B",
+                ],
                 "allowRead": [
                     "/Users/l/Clients/A",
                     format!("{run}/work"),
@@ -266,6 +284,47 @@ fn the_data_folder_and_other_matters_are_denied_wherever_they_are() {
     );
 }
 
+/// The browser's folders (`<data>/browser`, the session's guard folder with Chrome's profile in
+/// it, and `<data>/browsers`) are denied for reads and writes on macOS and Linux, in each
+/// spelling of `<data>`, and nothing allowed opens them.
+#[test]
+#[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
+fn the_browsers_folders_are_denied_on_mac_and_linux() {
+    let mut session = Session::new("s-1");
+    session.data = vec![PathBuf::from("/srv/real"), PathBuf::from("/srv/link")];
+    session.browser = PathBuf::from("/srv/link/browser/run/s-1");
+    for os in [SandboxOs::Mac, SandboxOs::Linux] {
+        let sandbox = ClaudeSandbox::for_os(os, &session.paths()).unwrap();
+        for data in ["/srv/real", "/srv/link"] {
+            for denied in [
+                format!("{data}/browser"),
+                format!("{data}/browsers"),
+                format!("{data}/browser/run/s-1"),
+            ] {
+                assert!(sandbox.deny_read.contains(&denied), "{os:?} read {denied}");
+                assert!(
+                    sandbox.deny_write.contains(&denied),
+                    "{os:?} write {denied}"
+                );
+                for open in sandbox.allow_read.iter().chain(&sandbox.allow_write) {
+                    let under = denied.strip_prefix(open.as_str());
+                    assert!(
+                        !under.is_some_and(|rest| rest.is_empty() || rest.starts_with('/')),
+                        "{os:?}: {open} opens {denied}"
+                    );
+                }
+            }
+        }
+        let filesystem = &sandbox.settings()["filesystem"];
+        let listed = |key: &str| texts(&filesystem[key]).contains(&"/srv/real/browsers");
+        assert!(listed("denyRead") && listed("denyWrite"), "{os:?}");
+        assert_eq!(
+            sandbox.settings()["enableWeakerNestedSandbox"],
+            json!(false)
+        );
+    }
+}
+
 /// `*` or `?` in any path the lists would hold turns the sandbox off: Claude Code reads both as
 /// a pattern with no escape. The caller then holds the session off `auto` (`Off::Wildcard`).
 #[test]
@@ -311,7 +370,7 @@ fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
                 .any(|p| p.contains("[2024]") && !p.contains("[[]"))
         );
     }
-    assert_eq!(on_mac.deny_write, [format!("{escaped}/.clauseo")]);
+    assert_eq!(on_mac.deny_write[0], format!("{escaped}/.clauseo"));
     assert!(
         on_mac
             .deny_read
@@ -332,7 +391,10 @@ fn a_bracket_is_escaped_and_the_sandbox_stays_on() {
             .iter()
             .any(|p| p == "/Users/l/Clients/Smith [2024]")
     );
-    assert_eq!(linux.deny_write, ["/Users/l/Clients/Smith [2024]/.clauseo"]);
+    assert_eq!(
+        linux.deny_write[0],
+        "/Users/l/Clients/Smith [2024]/.clauseo"
+    );
     assert!(linux.allow_read.iter().any(|p| p == escaped));
     assert!(
         linux

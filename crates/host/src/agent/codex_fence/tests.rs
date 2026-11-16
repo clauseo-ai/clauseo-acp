@@ -473,6 +473,26 @@ fn the_guard_folder_and_the_browser_socket_folder_are_denied() {
     assert_eq!(filesystem[socket_dir().to_str().unwrap()], json!("deny"));
 }
 
+/// The Chrome for Testing downloads (`<data>/browsers`), which the unfenced guard runs, are
+/// denied for reads and writes, ordinary and escalated: no shell can plant a program there.
+#[test]
+fn the_downloaded_browsers_are_denied() {
+    let keys = fence_with(&listed());
+    let browsers = data().join(crate::browser::chrome::BROWSERS_DIR);
+    assert!(browsers.ends_with("browsers"));
+    for path in [
+        browsers.clone(),
+        browsers
+            .join("chrome-148.0.7778.97")
+            .join("chrome-mac-arm64"),
+    ] {
+        assert_eq!(access(&keys, &path), "deny", "{}", path.display());
+        assert_eq!(escalated_access(&keys, &path), "deny", "{}", path.display());
+    }
+    let scoped = &keys["permissions"][PROFILE]["filesystem"][data().to_str().unwrap()];
+    assert_eq!(scoped["browsers"], json!("deny"));
+}
+
 #[test]
 fn windows_gets_no_fence() {
     let (run_root, notes, codex_home) = (run_root(), notes(), codex_home());

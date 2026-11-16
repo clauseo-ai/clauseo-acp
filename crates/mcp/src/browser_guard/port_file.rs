@@ -24,10 +24,20 @@
 //!   unreadable): the guard ends agent-browser's tree and exits 1.
 //!
 //! The file is read without following a link: a link at its name is refused, and the file read
-//! must be the one `symlink_metadata` saw. The socket folder is writable by the agent (`<cwd>`
-//! is, and on Unix the jail allows the socket folder to the whole session), so this check
-//! catches agent-browser's silent fallback; it is not a boundary against the agent, which can
-//! write the claimed port into the file itself.
+//! must be the one `symlink_metadata` saw. This check catches agent-browser's silent fallback.
+//! It is not a boundary: the folder is written by the guard's own tree (agent-browser and
+//! Chrome), and anything that runs in that tree could write the claimed port into the file
+//! itself. Whether an agent's shell can write the folder depends on the OS:
+//!
+//! - macOS and Linux: no agent's shell can. Codex's data fence denies `<data>/browser`
+//!   (`<cwd>`'s parent) and the session's socket folder to reads and writes, escalated commands
+//!   included (`clauseo_host`'s `agent/codex_fence.rs`). Claude's sandbox writes only its
+//!   allowed folders and denies `<data>/browser` to reads and writes (`agent/loads/sandbox.rs`).
+//! - Windows (the folder is `<data>\browser\run\<session>\run`): Codex's shell can't, because its
+//!   write-restricted token writes only the sandbox's writable roots and this folder is not one of
+//!   them (the data fence does not apply on Windows). Claude's shell can, since Claude has no OS
+//!   sandbox there. What stops a forged record or a foreign client is the patched agent-browser's
+//!   key-signed pipe record and its key handshake (decision record 0060), not this check.
 
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};

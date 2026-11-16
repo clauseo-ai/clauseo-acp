@@ -62,11 +62,32 @@
 //!   matter's notes and Claude's short temp folder (`CLAUDE_CODE_TMPDIR`, where sandboxed
 //!   commands' `TMPDIR` is made).
 //! - `filesystem.denyWrite`: the matter's `.clauseo` folder, which holds `matter.json`, the
-//!   marker that finds a moved matter folder again.
+//!   marker that finds a moved matter folder again; and the browser's folders (below).
 //! - `filesystem.denyRead`: the lawyer's home (other clients' files, `~/.ssh`), each spelling of
 //!   `<data>` (it may lie outside the home), every other matter's folder the host knows at the
 //!   launch, `/Volumes` and `/Users/Shared`; the data fence's `Read(…)` deny rules become read
 //!   denies too. A matter registered after the launch is in no list: the accepted residual.
+//! - The browser's folders, in `denyRead` and `denyWrite` both, in each spelling of `<data>`
+//!   ([`browser_denied`]): `<data>/browser` (agent-browser's config and every session's guard
+//!   folder), `<data>/browsers` (the Chrome for Testing the guard may run) and the session's
+//!   own guard folder (`<data>/browser/run/<session id>`, Chrome's profile in it). Chrome runs
+//!   with a mock keychain and the basic password store, so the profile's cookies are protected
+//!   by a public key alone: a command that read them could take any signed-in session. The
+//!   `<data>` deny covers them already; these name them so that no allowed folder can reopen
+//!   them. On macOS sandbox-runtime 0.0.83 (Claude Code 2.1.293) emits the read denies, then the
+//!   `allowRead` allows, then again each literal deny that sits under a literal allowed folder
+//!   (`dist/sandbox/macos-sandbox-utils.js:281-305, 646-651`; Seatbelt's last match wins), and
+//!   the write denies after the write allows (`:703-722`), so a deny here beats an allowed
+//!   folder that holds it. It resolves the links on a deny's path itself too (`:199-222`). An
+//!   allowed folder inside one of them (a matter kept in `<data>/browsers`) stays open: the
+//!   data folder's own gap (`agent::data_folder`).
+//! - `enableWeakerNestedSandbox: false`: on Linux each command keeps its own PID namespace and
+//!   a fresh `/proc` (sandbox-runtime's `linux-sandbox-utils.js:3039, 3059`), so it can't see,
+//!   signal or trace Chrome or read its environment. On macOS the profile allows
+//!   `process-info*`, `signal` and `mach-priv-task-port` only within the same sandbox
+//!   (`macos-sandbox-utils.js:764-766`), and Chrome, started by the guard, is outside it; the
+//!   process list sysctls (`kern.proc.*`, `:891-893`) show its pid and name, not its arguments
+//!   or environment, and no setting takes them away.
 //! - `filesystem.allowRead` ([`ClaudeSandbox::allow_read`]): re-opens, within those denies,
 //!   what a sandboxed command needs, with the `PATH` file Claude Code reads into each command
 //!   (`<run>/clauseo-env.sh`, `agent::shell_path`), the trust roots file on macOS
@@ -179,6 +200,9 @@ pub(crate) struct SandboxPaths<'a> {
     pub(crate) claude_tmp: Option<&'a Path>,
     /// `<run>/agent-browser/downloads`, the browser's downloads.
     pub(crate) downloads: &'a Path,
+    /// `{browser_dir}`, the guard's folder for this session, `<data>/browser/run/<session id>`,
+    /// which holds Chrome's profile (`chrome-profile-<run id>`), whether or not it was made.
+    pub(crate) browser: &'a Path,
     /// `<run>/skill-packs`, the launch's skill packs.
     pub(crate) skill_packs: &'a Path,
     /// The matter's notes.
@@ -219,16 +243,22 @@ impl ClaudeSandbox {
             tracing::info!("Claude's sandbox is off: its temp folder was not made");
             return Err(Off::NoTemp);
         };
-        let denied = paths.data.iter().chain(paths.other_matters);
-        let Some(mut deny_read) = strict_texts(denied.map(PathBuf::as_path)) else {
+        let browser = browser_denied(paths.data, paths.browser);
+        let denied = paths.data.iter().chain(&browser).chain(paths.other_matters);
+        let (Some(mut deny_read), Some(browser)) = (
+            strict_texts(denied.map(PathBuf::as_path)),
+            strict_texts(browser.iter().map(PathBuf::as_path)),
+        ) else {
             tracing::info!("Claude's sandbox is off: a folder to deny is not UTF-8");
             return Err(Off::NotUtf8);
         };
         deny_read.splice(0..0, DENY_READ.iter().map(|path| (*path).to_owned()));
         let marker = paths.matter.join(MATTER_MARKER);
+        let mut deny_write = texts([marker.as_path()]);
+        deny_write.extend(browser);
         let sandbox = Self {
             allow_write: texts([paths.matter, paths.work, paths.tmp, paths.notes, claude_tmp]),
-            deny_write: texts([marker.as_path()]),
+            deny_write,
             deny_read,
             allow_read: Self::allow_read(paths, claude_tmp),
             quiet: texts([paths.claude_home.join(SNAPSHOTS).as_path()]),
@@ -323,6 +353,7 @@ impl ClaudeSandbox {
             "allowUnsandboxedCommands": false,
             "failIfUnavailable": true,
             "allowAppleEvents": false,
+            "enableWeakerNestedSandbox": false,
             "network": {
                 "allowedDomains": ["*"],
                 "deniedDomains": DENIED_DOMAINS,
@@ -342,6 +373,34 @@ impl ClaudeSandbox {
         sandbox
     }
 }
+
+/// The browser's folders, denied for reads and writes in each spelling of `<data>` (see the
+/// module doc): `<data>/browser` (agent-browser's config and every session's guard folder),
+/// `<data>/browsers` (Chrome for Testing), and the session's own guard folder `browser`, which
+/// holds Chrome's profile, as given and rebased onto each spelling (`browser` is built from
+/// the data folder as configured, the canonical spelling comes first). Path joins only.
+fn browser_denied(data: &[PathBuf], browser: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for spelling in data {
+        out.push(spelling.join(BROWSER_DIR));
+        out.push(spelling.join(BROWSERS_DIR));
+    }
+    let under = data
+        .iter()
+        .find_map(|spelling| browser.strip_prefix(spelling).ok());
+    out.extend(
+        under
+            .into_iter()
+            .flat_map(|rest| data.iter().map(move |spelling| spelling.join(rest))),
+    );
+    out.push(browser.to_path_buf());
+    out
+}
+
+/// `<data>/browser` (`crate::browser::CONFIG_DIR`).
+const BROWSER_DIR: &str = crate::browser::CONFIG_DIR;
+/// `<data>/browsers` (`crate::browser::chrome::BROWSERS_DIR`).
+const BROWSERS_DIR: &str = crate::browser::chrome::BROWSERS_DIR;
 
 /// Puts `sandbox`'s object in `settings`, in place of any `sandbox` the hook sent.
 pub(crate) fn sandbox_settings(settings: &mut Map<String, Value>, sandbox: &ClaudeSandbox) {

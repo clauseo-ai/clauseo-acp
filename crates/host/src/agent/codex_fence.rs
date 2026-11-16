@@ -107,19 +107,24 @@ const CODEX_HOME_DENIED: [&str; 4] = [
     "history.jsonl",
 ];
 
-/// The folders under `<data>` no Codex shell needs that no `Locations` accessor names: the
+/// The folders under `<data>` no Codex shell needs that no `Locations` accessor names (macOS and
+/// Linux only, like the whole fence: see the module doc's "Not on Windows"): the
 /// skill packs' sources, the matters' store, the counts, the Windows sandbox's ledger, the
 /// limits reader's state, the browser's config and every session's browser folder (the guard's
 /// `--cwd`, `<data>/browser/run/<session>`: the guard runs unfenced and writes through it, so
-/// the shell must not plant a link there), the block list's store and the lawyer's allowed
-/// sites, and Claude sessions' settings files (`agent::launch_settings`).
-const DATA_DENIED: [&str; 8] = [
+/// the shell must not plant a link there), the Chrome for Testing downloads (`<data>/browsers`,
+/// which the guard, unfenced, runs: no shell may plant a program there, and no agent's shell
+/// runs a Chrome for launch, `clauseo_profile::servers::shell_browser`), the block list's store
+/// and the lawyer's allowed sites, and Claude sessions' settings files
+/// (`agent::launch_settings`).
+const DATA_DENIED: [&str; 9] = [
     "skill-packs",
     "matters",
     "counts",
     "sandbox",
     "limits",
     "browser",
+    crate::browser::chrome::BROWSERS_DIR,
     "blocklist",
     crate::agent::launch_settings::FOLDER,
 ];
