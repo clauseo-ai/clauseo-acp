@@ -23,7 +23,7 @@
 //! that spells another matter's folder, printed by a failing `grep`, would otherwise have
 //! Clauseo offer the lawyer to open that other client's matter.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use clauseo_protocol::{
     ContentBlock, TextOrBlob, ThreadId, ToolCallContent, ToolCallStatus, ToolKind, ToolLocation,
@@ -31,15 +31,17 @@ use clauseo_protocol::{
 
 use super::super::super::Actor;
 use super::super::current;
-use crate::agent::matter_fence::innermost;
+use crate::agent::matter_fence::{MatterFence, Other, innermost_as};
+use crate::network_paths::FOLD_CASE;
 use crate::sent::CallFields;
 
 /// Words in a failed call's output that say it was refused: the OS's (`access is denied`,
 /// `permission denied`, `operation not permitted`) and Claude Code's permission rules'
 /// (`Permission to read … has been denied`, `File is in a directory that is denied by your
 /// permission settings.`, `File is covered by a Read deny rule in your permission settings
-/// and cannot be edited.`, Claude Code 0.3.293).
-const PHRASES: [&str; 7] = [
+/// and cannot be edited.`, Claude Code 0.3.293), and its working-folder block of a shell path
+/// ([`WORKING_FOLDER_BLOCK`]).
+const PHRASES: [&str; 8] = [
     "access is denied",
     "access denied",
     "permission denied",
@@ -47,7 +49,13 @@ const PHRASES: [&str; 7] = [
     "has been denied",
     "was denied",
     "your permission settings",
+    WORKING_FOLDER_BLOCK,
 ];
+
+/// The end of Claude Code's refusal of a command whose path lies outside the working folders
+/// (`… was blocked. For security, Claude Code may only access files in the allowed working
+/// directories …`), folded.
+const WORKING_FOLDER_BLOCK: &str = "may only access files in the allowed working directories";
 
 /// Error codes that say the same, as whole words.
 const CODES: [&str; 3] = ["error_access_denied", "eacces", "eperm"];
@@ -72,10 +80,13 @@ pub(in crate::actor::turn) fn seen(
     if fence.others.is_empty() {
         return;
     }
+    // The conversation's working folder: the launch puts it first (`launch_checks::folders`).
     let own = fence.own.first().cloned().unwrap_or_default();
-    let found = paths(fields, &own);
+    let found = paths(fields, &own, cfg!(windows));
     let failed = fields.status == Some(ToolCallStatus::Failed);
     let refused = failed && says_refused(fields.content, raw_output);
+    let shell_refused =
+        failed && texts(fields.content, raw_output).any(|text| says_shell_refused(&text));
     let Some(current) = current(actor, thread) else {
         return;
     };
@@ -106,17 +117,58 @@ pub(in crate::actor::turn) fn seen(
         return;
     };
     let fence = &run.data_deny.matters;
-    let hit = named.iter().find_map(|path| innermost(fence, path));
+    let insensitive = FOLD_CASE || cfg!(windows);
+    let hit = matter_hit(fence, &named, insensitive);
     if let Some(other) = hit
-        && (refused || (file_call && !other.invited))
+        && tells(other, refused, shell_refused, file_call)
     {
         super::tell_other_matter(actor, thread, other.id);
     }
 }
 
-/// The paths `fields` name: each location (a matter path taken from `own`, the matter
-/// folder), then `rawInput`'s (`data_fence::candidates`); a relative one taken from `own`.
-fn paths(fields: &CallFields<'_>, own: &Path) -> Vec<PathBuf> {
+/// The innermost other matter one of `named` lies in (`matter_fence::innermost`), names
+/// compared folded when `insensitive`; none for a path in no registered matter.
+fn matter_hit<'a>(
+    fence: &'a MatterFence,
+    named: &[PathBuf],
+    insensitive: bool,
+) -> Option<&'a Other> {
+    named
+        .iter()
+        .find_map(|path| innermost_as(fence, path, insensitive))
+}
+
+/// Whether a failed call whose paths hit `other` tells the lawyer: Claude Code's own refusal of a
+/// shell path (`shell_refused`, [`says_shell_refused`]) only for a matter not invited (its
+/// line offers the invite); any other refusal (`refused`) always; a failed Read or Edit
+/// (`file_call`) for a matter not invited.
+fn tells(other: &Other, refused: bool, shell_refused: bool, file_call: bool) -> bool {
+    if shell_refused {
+        return !other.invited;
+    }
+    refused || (file_call && !other.invited)
+}
+
+/// Whether `text` is one of Claude Code's own refusals of a shell command's path: `Permission to
+/// use Bash with command … has been denied` (PowerShell's too), from a deny rule, or `… was
+/// blocked. For security, Claude Code may only access files in the allowed working directories`
+/// ([`WORKING_FOLDER_BLOCK`]), for a path outside the working folders.
+fn says_shell_refused(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    let denied = [
+        "permission to use bash with command",
+        "permission to use powershell with command",
+    ]
+    .iter()
+    .any(|start| text.contains(start))
+        && text.contains("has been denied");
+    denied || text.contains(WORKING_FOLDER_BLOCK)
+}
+
+/// The paths `fields` name: each location (a matter path taken from `own`, the conversation's
+/// working folder), then `rawInput`'s (`data_fence::candidates`, a command's read with
+/// Windows' rules when `windows`); a relative one taken from `own` ([`resolved`]).
+fn paths(fields: &CallFields<'_>, own: &Path, windows: bool) -> Vec<PathBuf> {
     let located = fields
         .locations
         .iter()
@@ -129,17 +181,46 @@ fn paths(fields: &CallFields<'_>, own: &Path) -> Vec<PathBuf> {
         Some(TextOrBlob::Inline(text)) => serde_json::from_str(text).ok(),
         Some(TextOrBlob::Blob(_)) | None => None,
     };
-    let candidates = crate::agent::data_fence::candidates(&[], input.as_ref(), cfg!(windows));
+    let candidates = crate::agent::data_fence::candidates(&[], input.as_ref(), windows);
     located
         .chain(candidates)
-        .map(|path| {
-            if path.is_absolute() {
-                path
-            } else {
-                own.join(path)
-            }
-        })
+        .map(|path| resolved(&path, own, windows))
         .collect()
+}
+
+/// `path` taken from `own` when relative (its `\` read as a separator when `windows`:
+/// `..\B\f.txt`), with each `.` dropped and each `..` taking the name before it away, as the
+/// shell resolves a path word (`own``/../B/f.txt` is the sibling `B`'s), so the fence's prefix
+/// comparison sees where it leads.
+fn resolved(path: &Path, own: &Path, windows: bool) -> PathBuf {
+    let joined = if path.is_absolute() || path.has_root() {
+        path.to_path_buf()
+    } else {
+        let text = path.to_string_lossy();
+        let text = if windows {
+            text.replace('\\', "/")
+        } else {
+            text.into_owned()
+        };
+        own.join(text)
+    };
+    let mut out = PathBuf::new();
+    for part in joined.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
+                    out.pop();
+                } else {
+                    out.push(part);
+                }
+            }
+            other @ (Component::Prefix(_) | Component::RootDir | Component::Normal(_)) => {
+                out.push(other);
+            }
+        }
+    }
+    out
 }
 
 /// Whether a failed call's text content or `rawOutput` says it was refused ([`PHRASES`],

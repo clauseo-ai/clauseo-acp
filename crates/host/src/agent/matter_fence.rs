@@ -422,11 +422,22 @@ fn down_to(parent: &Path, ways: &[Vec<OsString>], out: &mut Vec<PathBuf>) -> Opt
 
 /// The innermost other matter `path` lies in by name (each spelling compared folded), unless
 /// the session's own matter (each spelling) lies deeper on the way: a refused path there is the
-/// session's own. Paths only.
+/// session's own. Paths only. The tests' form of [`innermost_as`].
+#[cfg(test)]
 pub(crate) fn innermost<'a>(fence: &'a MatterFence, path: &Path) -> Option<&'a Other> {
-    let at = key(path);
+    innermost_as(fence, path, FOLD_CASE)
+}
+
+/// [`innermost`], names compared folded when `insensitive` (`FOLD_CASE`, or always for a path a
+/// Windows command named).
+pub(crate) fn innermost_as<'a>(
+    fence: &'a MatterFence,
+    path: &Path,
+    insensitive: bool,
+) -> Option<&'a Other> {
+    let at = key_as(path, insensitive);
     let depth = |spelling: &Path| {
-        let spelling = key(spelling);
+        let spelling = key_as(spelling, insensitive);
         at.starts_with(&spelling).then_some(spelling.len())
     };
     let own_depth = fence.own.iter().filter_map(|place| depth(place)).max();
