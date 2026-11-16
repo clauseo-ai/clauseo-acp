@@ -69,11 +69,37 @@ pub(in crate::actor::turn) fn stop_stale_at_turn_end(actor: &mut Actor, thread: 
     }
 }
 
+/// `waiting` back to run as usual (`agents::ensure`), unless it is a turn whose agent is attached
+/// with a stale fence ([`fence_stale`]): that agent stops first and the turn waits for the
+/// relaunch, so the prompt never runs on the old rules.
+pub(in crate::actor::turn) fn stop_stale_first(
+    actor: &mut Actor,
+    thread: ThreadId,
+    waiting: agents::Waiting,
+) -> Option<agents::Waiting> {
+    let turn = matches!(waiting, agents::Waiting::Turn(_));
+    if !turn || !fence_stale(actor, thread) {
+        return Some(waiting);
+    }
+    let agent = actor
+        .threads
+        .get_mut(&thread)
+        .and_then(|entry| entry.turn.agent.as_deref_mut())
+        .filter(|agent| agent.stage == agents::Stage::Attached && !agent.link.closed());
+    let Some(agent) = agent else {
+        return Some(waiting);
+    };
+    agent.after_stop.push(waiting);
+    tracing::info!(target: LIFECYCLE, %thread, "agent stopped before a prompt for a matter fence change");
+    agents::idle_stop(actor, thread);
+    None
+}
+
 /// Whether `thread`'s live launch took another fence key than a launch would take now, for a
 /// prompt about to reach it (`agents::ensure`): a read invite withdrawn or a matter added while
 /// the prompt waited on its command stops the agent first, and the prompt waits for the
 /// relaunch, so it never runs on the old rules.
-pub(in crate::actor::turn) fn fence_stale(actor: &Actor, thread: ThreadId) -> bool {
+fn fence_stale(actor: &Actor, thread: ThreadId) -> bool {
     stale(actor, thread, matters_hash(actor))
 }
 

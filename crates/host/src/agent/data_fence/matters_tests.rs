@@ -102,7 +102,7 @@ fn whole_launch(root: &Path) -> Vec<String> {
     );
     let mut deny = launch_deny(data_spellings, &data, &own, &projects);
     deny.matters = matters;
-    claude_deny_rules(&deny)
+    claude_deny_rules(&deny, false)
 }
 
 /// Every other matter's folder and its files, other sessions' run folders, other matters'
@@ -219,7 +219,7 @@ fn a_linked_matter_folder_is_denied_at_both_places() {
         matters: found,
         ..LaunchDeny::default()
     };
-    let rules = claude_deny_rules(&deny);
+    let rules = claude_deny_rules(&deny, false);
     for path in [link.join("a.pdf"), real.join("a.pdf"), link, real] {
         assert!(denied(&rules, "Read", &path), "{path:?}: {rules:#?}");
     }
@@ -241,7 +241,7 @@ fn an_other_matters_rules_name_the_folder_and_all_under_it() {
         matters: MatterFence::asked(vec![other]),
         ..LaunchDeny::default()
     };
-    let rules = claude_deny_rules(&deny);
+    let rules = claude_deny_rules(&deny, false);
     assert_eq!(
         rules,
         [
@@ -254,7 +254,7 @@ fn an_other_matters_rules_name_the_folder_and_all_under_it() {
     // Invited: its Read deny goes, a Read allow comes, its Edit deny stays.
     deny.matters.others[0].invited = true;
     assert_eq!(
-        claude_deny_rules(&deny),
+        claude_deny_rules(&deny, false),
         [r"Edit(//m/Smith \[2024\])", r"Edit(//m/Smith \[2024\]/**)"]
     );
     let allow = claude_allow_rules(&deny);
@@ -291,7 +291,7 @@ fn a_child_matter_stays_denied_inside_the_matters_own_allow() {
         matters: fence,
         ..LaunchDeny::default()
     };
-    let rules = claude_deny_rules(&deny);
+    let rules = claude_deny_rules(&deny, false);
     let mut allow = claude_allow_rules(&deny);
     let base = rule_path(matter.to_str().unwrap(), cfg!(windows));
     allow.push(format!("Read({base}/**)"));

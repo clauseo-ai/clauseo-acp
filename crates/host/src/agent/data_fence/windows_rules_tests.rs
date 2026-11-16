@@ -88,7 +88,7 @@ fn rendered() -> String {
             out.push('\n');
         }
     };
-    section("deny", claude_deny_rules_on(&deny, true));
+    section("deny", claude_deny_rules_on(&deny, true, false));
     section("allow", claude_allow_rules_on(&deny, true));
     section("data shell", windows_shell_deny_rules(&deny, &env));
     for variables in [true, false] {

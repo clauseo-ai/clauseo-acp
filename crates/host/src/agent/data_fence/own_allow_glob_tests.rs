@@ -352,6 +352,7 @@ fn launch_deny_rules(
             notes: "n",
             connectors: "",
             browser: "",
+            other_matters: "",
         },
         seed_sites: &[],
         forced_ask: false,

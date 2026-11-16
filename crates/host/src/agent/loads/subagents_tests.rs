@@ -30,6 +30,7 @@ static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence:
     targets: Vec::new(),
     kept: Vec::new(),
     own_reads: Vec::new(),
+    matters: crate::agent::matter_fence::MatterFence::NONE,
 };
 
 fn keys(web_search: Switch, login: Login, browser: bool) -> ClaudeKeys<'static> {
@@ -41,6 +42,7 @@ fn keys(web_search: Switch, login: Login, browser: bool) -> ClaudeKeys<'static> 
             notes: "/data/agent-state/m/notes",
             connectors: "",
             browser: "",
+            other_matters: "",
         },
         seed_sites: SEED_SITES,
         forced_ask: false,
