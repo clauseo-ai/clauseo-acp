@@ -37,6 +37,31 @@ pub(crate) fn twin_text(path: &Path, (top, data): (&Path, &Path)) -> Option<Path
     (!rest.as_os_str().is_empty() && !data.starts_with(path)).then(|| data.join(rest))
 }
 
+/// macOS's fixed links into `/private`: `/tmp`, `/var` and `/etc` lead to `/private/tmp`, … on
+/// every Mac; none elsewhere.
+pub(crate) const PRIVATE_LINKS: &[&str] = if cfg!(target_os = "macos") {
+    &["tmp", "var", "etc"]
+} else {
+    &[]
+};
+
+/// `path` in one form by its text alone, for matching a path nothing resolved (a refused
+/// call's) against spellings in the same form, never a rule: on the data volume `volume` without
+/// its prefix (`/Users/…` for `/System/Volumes/Data/Users/…`), then through `links` under
+/// `/private` (`/private/tmp/x` for `/tmp/x`).
+pub(crate) fn plain(path: &Path, links: &[&str], volume: DataVolume<'_>) -> PathBuf {
+    let path = volume
+        .and_then(|(top, data)| Some(top.join(path.strip_prefix(data).ok()?)))
+        .unwrap_or_else(|| path.to_path_buf());
+    let private = Path::new("/private");
+    for link in links {
+        if let Ok(rest) = path.strip_prefix(Path::new("/").join(link)) {
+            return private.join(link).join(rest);
+        }
+    }
+    path
+}
+
 /// Where the local, absolute `path` leads, canonicalised (case and Unicode form as the disk
 /// keeps them), after the walk vouched for every link on the way, so no share is touched; none
 /// on a share, for a path that is not absolute, or when it is `path` itself.

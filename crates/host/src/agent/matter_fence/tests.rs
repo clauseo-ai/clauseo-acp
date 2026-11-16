@@ -326,3 +326,46 @@ fn a_matter_registered_through_a_link_is_fenced_by_both_spellings() {
     let allowed: Vec<&Path> = invited.read_allowed().collect();
     assert_eq!(allowed, both);
 }
+
+/// A refused path spelled through macOS's `/tmp` or `/var` link, or on its data volume, names
+/// the other matter stored the other way, and never the own matter however it is spelled: the
+/// path and the spellings are put in one form by their text (`forms::plain`), with no disk.
+#[test]
+fn a_refused_path_through_tmp_var_or_the_data_volume_names_the_matter() {
+    let at = |path: &str| PathBuf::from(path);
+    let other = |n: u128, folder: &str| {
+        let mut other = Other::new(id(n), format!("M{n}"), at(folder), false);
+        other.spellings = vec![at(folder)];
+        other
+    };
+    let mut fence = MatterFence::asked(vec![
+        other(1, "/private/tmp/x/Beta"),
+        other(2, "/var/folders/ab/T/Gamma"),
+        other(3, "/Users/a/Clients"),
+    ]);
+    fence.own = vec![at("/private/tmp/x/Own"), at("/Users/a/Clients/Own")];
+    let links = ["tmp", "var", "etc"];
+    let volume = Some((Path::new("/"), Path::new("/System/Volumes/Data")));
+    let named = |path: &str| {
+        super::innermost_by(&fence, &at(path), false, &links, volume).map(|other| other.id)
+    };
+    assert_eq!(named("/tmp/x/Beta/f.pdf"), Some(id(1)));
+    assert_eq!(named("/private/tmp/x/Beta/f.pdf"), Some(id(1)));
+    assert_eq!(named("/private/var/folders/ab/T/Gamma/f"), Some(id(2)));
+    assert_eq!(
+        named("/System/Volumes/Data/Users/a/Clients/B/f"),
+        Some(id(3))
+    );
+    // The own matter, by any of those spellings, is never named.
+    for own in [
+        "/tmp/x/Own/f",
+        "/private/tmp/x/Own/f",
+        "/System/Volumes/Data/Users/a/Clients/Own/f",
+        "/Users/a/Clients/Own/f",
+    ] {
+        assert_eq!(named(own), None, "{own}");
+    }
+    // Without the links (another system), `/tmp` is its own folder: no match.
+    let elsewhere = super::innermost_by(&fence, &at("/tmp/x/Beta/f.pdf"), false, &[], None);
+    assert!(elsewhere.is_none());
+}

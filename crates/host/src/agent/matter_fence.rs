@@ -523,9 +523,30 @@ pub(crate) fn innermost_as<'a>(
     path: &Path,
     insensitive: bool,
 ) -> Option<&'a Other> {
-    let at = key_as(path, insensitive);
+    innermost_by(
+        fence,
+        path,
+        insensitive,
+        forms::PRIVATE_LINKS,
+        forms::data_volume(),
+    )
+}
+
+/// [`innermost_as`], the path and every spelling first put in one form by their text
+/// (`forms::plain`: through `links`, macOS's `/tmp` for `/private/tmp`, and off the data
+/// volume `volume`), as nothing resolves a refused call's path on the actor: a read of
+/// `/tmp/x/B/f` names the matter stored at `/private/tmp/x/B`.
+pub(crate) fn innermost_by<'a>(
+    fence: &'a MatterFence,
+    path: &Path,
+    insensitive: bool,
+    links: &[&str],
+    volume: forms::DataVolume<'_>,
+) -> Option<&'a Other> {
+    let key = |path: &Path| key_as(&forms::plain(path, links, volume), insensitive);
+    let at = key(path);
     let depth = |spelling: &Path| {
-        let spelling = key_as(spelling, insensitive);
+        let spelling = key(spelling);
         at.starts_with(&spelling).then_some(spelling.len())
     };
     let own_depth = fence.own.iter().filter_map(|place| depth(place)).max();
