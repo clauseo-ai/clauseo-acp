@@ -464,8 +464,8 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     no login keychain, where every read fails, showed "Sign-in didn't finish." in place of Sign
     in for agents that had never stored a key.) The accepted cost: a marker lost together with a
     keychain error means a session without the stored key, until a read answers and the marker
-    is set again. That session is not always a refused one: the launch empties the key variable
-    (`setup/backend/entry.rs`), so the agent signs in with whatever login it finds, Clauseo's
+    is set again. That session is not always a refused one: the session launch sets no key variable
+    (`setup/hook.rs`, `setup_parts`; the entry's placeholder stays empty), so the agent signs in with whatever login it finds, Clauseo's
     own or the lawyer's reused one, and a firm's matter can run on a personal account, under
     that account's data terms, in place of the firm's key. What the lawyer sees then follows
     the login in use, not the key: the sign-in line is S18's, with that account's email and

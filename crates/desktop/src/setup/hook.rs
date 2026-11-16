@@ -172,7 +172,20 @@ fn setup_parts(
         .unwrap_or_else(PoisonError::into_inner)
         .get(agent)
         .cloned();
-    if let Some(plan) = plan {
+    if let Some(mut plan) = plan {
+        // A firm plan whose key read failed (`KeyCache::unreadable_for`) loses its endpoint and
+        // provider here, whatever the host's refusal says yet: a launch in the gap before
+        // `refusal::sync_all` (a settings change) never goes keyless to a firm's gateway, where
+        // Claude Code would offer the lawyer's own claude.ai token (decision record 0048).
+        let firm = plan.endpoint.is_some() || plan.provider.is_some();
+        if firm
+            && keys
+                .get()
+                .is_some_and(|keys| keys.unreadable_for(agent, true))
+        {
+            plan.endpoint = None;
+            plan.provider = None;
+        }
         plan_env(kind, &plan, &mut vars);
     }
     let route = network.read().unwrap_or_else(PoisonError::into_inner);
