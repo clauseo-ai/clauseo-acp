@@ -14,11 +14,11 @@ use crate::network_paths::resolve::tests::{Fake, FakeFs};
 use crate::network_paths::tests::{mac_net, plain_net};
 
 const DATA: &str = "/Users/a/Library/Application Support/Clauseo";
-const MATTER: &str = "/Users/a/Matters/Smith";
+pub(super) const MATTER: &str = "/Users/a/Matters/Smith";
 const OTHER: &str = "/Users/a/Matters/Jones";
 
 /// The data folder's root as the host writes it, with its identity `(1, 7)` and its line.
-fn data_root() -> FencedRoot {
+pub(super) fn data_root() -> FencedRoot {
     let read = [
         "run/*/relay-token",
         "run/*/file-fence.json",
@@ -37,7 +37,7 @@ fn data_root() -> FencedRoot {
 }
 
 /// Another matter's folder, denied whole.
-fn other_root() -> FencedRoot {
+pub(super) fn other_root() -> FencedRoot {
     FencedRoot {
         kind: RootKind::Matter,
         spellings: vec![OTHER.to_owned()],
@@ -103,7 +103,7 @@ fn decide_on(
     let ground = Ground {
         cwd: Path::new(MATTER),
         home: Some(&home),
-        matter: Some(Path::new(MATTER)),
+        shares: &[PathBuf::from(MATTER)],
         disk: &disk,
     };
     decide(&fence, tool, input, &ground)
@@ -251,7 +251,7 @@ fn var_and_private_var_are_one_place_on_macos() {
     let ground = Ground {
         cwd: Path::new(MATTER),
         home: None,
-        matter: None,
+        shares: &[],
         disk: &disk,
     };
     for path in [
@@ -361,8 +361,9 @@ fn a_path_the_fence_cannot_vouch_for_is_refused() {
             Fake::Link("/net/evil/share".into()),
         ),
     ]);
+    let network = json!({"file_path": "/net/evil/share/x"});
+    assert_eq!(decide_plain(&fs, "Read", &network), Some(Denial::Network));
     for path in [
-        "/net/evil/share/x",
         "/Users/a/Matters/Smith/bad/x",
         "/Users/a/Matters/Smith/server/x",
     ] {
@@ -439,7 +440,7 @@ fn windows_spellings_of_a_drive_are_each_read() {
     let ground = Ground {
         cwd: Path::new("C:\\m"),
         home: None,
-        matter: None,
+        shares: &[],
         disk: &disk,
     };
     let read = |text: &str| readings(text, &ground);

@@ -23,21 +23,29 @@ use crate::network_paths::{NetEnv, refused_windows_name, under_share_matter};
 pub(crate) enum Spot {
     /// A local path, resolved.
     Local(PathBuf),
-    /// By its text in the matter folder kept on a network share: never touched.
-    ShareMatter,
-    /// A network location, or one the walk can't vouch for: never touched, denied.
+    /// By its text in a matter folder kept on a network share that the session may use (its
+    /// own, or one it is invited into): never touched, judged by its text.
+    Share(PathBuf),
+    /// A network location outside every such matter, as the agent named it: never touched.
+    Network(PathBuf),
+    /// A place the walk can't vouch for (a link it can't read, a loop, a name Windows reads as
+    /// another place), or a network path that may be a share matter spelled another way (a
+    /// `.` or `..` name, a name Windows trims, a drive letter where the matter is stored by
+    /// its server name, or the reverse): never touched, denied.
     Unvouched,
 }
 
 /// What a path is read against: the folder a relative path is taken from, the lawyer's home
-/// for `~`, the session's matter folder (for one kept on a share), and the network rules.
+/// for `~`, the matter folders the session may use (for those kept on a share), and the
+/// network rules.
 pub(crate) struct Ground<'a> {
     /// The tool input's working folder, else the matter folder.
     pub(crate) cwd: &'a Path,
     /// The lawyer's home, when known.
     pub(crate) home: Option<&'a Path>,
-    /// The session's matter folder (`--matter`), when given.
-    pub(crate) matter: Option<&'a Path>,
+    /// The session's matter folder (`--matter`), then the folders of the matters it is
+    /// invited into (the fence's roots it may read).
+    pub(crate) shares: &'a [PathBuf],
     /// How the disk is looked at and what counts as the network.
     pub(crate) disk: &'a Disk<'a>,
 }
@@ -69,7 +77,18 @@ pub(crate) fn readings(text: &str, ground: &Ground<'_>) -> Vec<PathBuf> {
     {
         out.push(home.join(rest.trim_start_matches(separator)));
     }
-    out.push(ground.cwd.join(text));
+    // With Windows' rules a UNC or drive path is absolute whatever OS reads the text, so the
+    // working folder never comes before it.
+    let mut chars = text.chars();
+    let drive = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.next() == Some(':')
+        && chars.next().is_some_and(separator);
+    let unc = text.chars().take(2).filter(|c| separator(*c)).count() == 2;
+    if windows && (drive || unc) {
+        out.push(PathBuf::from(text));
+    } else {
+        out.push(ground.cwd.join(text));
+    }
     out
 }
 
@@ -95,16 +114,26 @@ fn posix_drive(text: &str) -> Option<(String, bool)> {
     ))
 }
 
-/// Where the absolute `path` lands ([`Spot`]).
+/// Where the absolute `path` lands ([`Spot`]). What is network is read from the text and
+/// from this system's lists alone (`NetEnv::is_network`), never by opening the path.
 pub(crate) fn locate(path: &Path, ground: &Ground<'_>) -> Spot {
     let net = ground.net();
-    if let Some(matter) = ground.matter
-        && under_share_matter(path, matter, net)
+    if ground
+        .shares
+        .iter()
+        .any(|share| under_share_matter(path, share, net))
     {
-        return Spot::ShareMatter;
+        return Spot::Share(path.to_path_buf());
     }
     if refused_windows_name(path, net) {
         return Spot::Unvouched;
+    }
+    if net.is_network(path) {
+        return if another_spelling(path, ground.shares, net) {
+            Spot::Unvouched
+        } else {
+            Spot::Network(path.to_path_buf())
+        };
     }
     match walk(path, ground.disk) {
         Walked::Local(real) => Spot::Local(real),
@@ -118,4 +147,25 @@ pub(crate) fn spots(text: &str, ground: &Ground<'_>) -> Vec<Spot> {
         .iter()
         .map(|path| locate(path, ground))
         .collect()
+}
+
+/// Whether the network path `path`, in none of `shares`, may still be one of them spelled
+/// another way: it has a `.` or `..` name, or with Windows' rules a name the system trims (a
+/// trailing dot or space), or names a drive letter where a share matter is stored by its server
+/// name (or the reverse). Only the server could say; the fence asks none.
+fn another_spelling(path: &Path, shares: &[PathBuf], net: &NetEnv) -> bool {
+    let text = path.to_string_lossy();
+    let separator = |c: char| c == '/' || (net.windows && c == '\\');
+    let trimmed = |name: &str| net.windows && (name.ends_with('.') || name.ends_with(' '));
+    let odd = text
+        .split(separator)
+        .any(|name| name == "." || name == ".." || (!name.is_empty() && trimmed(name)));
+    if odd {
+        return true;
+    }
+    let lettered = |text: &str| net.windows && text.as_bytes().get(1) == Some(&b':');
+    shares
+        .iter()
+        .filter(|share| net.is_network(share))
+        .any(|share| lettered(&share.to_string_lossy()) != lettered(&text))
 }

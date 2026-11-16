@@ -50,7 +50,7 @@ fn a_short_name_lands_in_the_fenced_folder() {
     let ground = Ground {
         cwd: &own,
         home: None,
-        matter: Some(own.as_path()),
+        shares: std::slice::from_ref(&own),
         disk: &disk,
     };
     let lease = short.join("lease.pdf");

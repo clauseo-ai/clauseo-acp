@@ -18,7 +18,7 @@ use serde_json::Value;
 
 use super::decide::{Denial, FENCED_TOOLS, Fence, decide, home};
 use super::real::Ground;
-use super::{FLAG, load};
+use super::{FLAG, FenceFile, load};
 use crate::network_paths::resolve::Disk;
 use crate::network_paths::{FOLD_CASE, NetEnv};
 
@@ -110,13 +110,30 @@ fn checked(arg: FenceArg, bytes: &[u8], matter: Option<&Path>) -> Option<Denial>
     let net = NetEnv::current();
     let disk = Disk::real(&net);
     let home = home();
+    let shares = shares(&file, matter);
     let ground = Ground {
         cwd: &cwd,
         home: home.as_deref(),
-        matter,
+        shares: &shares,
         disk: &disk,
     };
     decide(&fence, tool, input, &ground)
+}
+
+/// The matter folders the session may use, for those kept on a share: its own (`matter`), then
+/// each fenced root it may read (a matter it is invited into: denied to the writing tools
+/// alone), every spelling.
+pub(crate) fn shares(file: &FenceFile, matter: Option<&Path>) -> Vec<PathBuf> {
+    let invited = file
+        .roots
+        .iter()
+        .filter(|root| root.read.is_empty())
+        .flat_map(|root| root.spellings.iter().map(PathBuf::from));
+    matter
+        .map(Path::to_path_buf)
+        .into_iter()
+        .chain(invited)
+        .collect()
 }
 
 /// A deadline that fires once unless disarmed first.

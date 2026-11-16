@@ -19,9 +19,15 @@ use super::real::{Ground, Spot, locate};
 pub(crate) const MAX_ENTRIES: usize = 200_000;
 
 /// The refusal a search from the local folder `root` earns through a link, junction or mount
-/// point below it, if any. A file, or a folder that can't be read (the search can't read it
-/// either), is not walked.
-pub(crate) fn below(fence: &Fence, root: &Path, ground: &Ground<'_>) -> Option<Denial> {
+/// point below it, if any (a link to a network location refused as [`Denial::Network`] when
+/// `refuse_network`, else judged by its text). A file, or a folder that can't be read (the
+/// search can't read it either), is not walked.
+pub(crate) fn below(
+    fence: &Fence,
+    root: &Path,
+    ground: &Ground<'_>,
+    refuse_network: bool,
+) -> Option<Denial> {
     let meta = std::fs::symlink_metadata(root).ok()?;
     if !meta.is_dir() {
         return None;
@@ -49,7 +55,12 @@ pub(crate) fn below(fence: &Fence, root: &Path, ground: &Ground<'_>) -> Option<D
                         }
                     }
                     Spot::Unvouched => return Some(Denial::Unvouched),
-                    Spot::ShareMatter => {}
+                    Spot::Network(_) if refuse_network => return Some(Denial::Network),
+                    Spot::Network(path) | Spot::Share(path) => {
+                        if let Some(kind) = fence.reached_text(&path) {
+                            return Some(Denial::Holds(kind));
+                        }
+                    }
                 }
             } else if kind.is_dir() {
                 let dev = entry.metadata().map_or(on, |meta| device(&meta));

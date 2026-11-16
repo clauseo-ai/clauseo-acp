@@ -453,3 +453,60 @@ fn the_link_walk_cost_on_a_large_matter() {
     eprintln!("fence walk: {entries} entries, mean {mean:?} per Grep over {rounds} calls");
     assert!(mean < DEADLINE / 4, "{mean:?}");
 }
+
+/// Windows: a real junction inside the matter, to another matter and to the data folder (made
+/// with the project's junction helper, as `mklink /J` does). Read, Grep and Glob through it are
+/// refused, and so is a search from the matter folder that holds it.
+#[cfg(windows)]
+#[test]
+fn a_junction_from_the_matter_into_a_fenced_place_is_refused() {
+    let setup = setup("fence-junction");
+    let jones = setup.matter.join("Jones shortcut");
+    let data = setup.matter.join("Data shortcut");
+    clauseo_sandbox::windows::test_junction::junction(&jones, &setup.other).unwrap();
+    clauseo_sandbox::windows::test_junction::junction(&data, &setup.data).unwrap();
+    let matter_hit = Some(Denial::Fenced(RootKind::Matter));
+    let data_hit = Some(Denial::Fenced(RootKind::Data));
+    assert_eq!(
+        setup.check("Read", &file(&jones.join("lease.pdf"))),
+        matter_hit
+    );
+    assert_eq!(
+        setup.check("Read", &file(&data.join("state.sqlite"))),
+        data_hit
+    );
+    let holds_matter = Some(Denial::Holds(RootKind::Matter));
+    let holds_data = Some(Denial::Holds(RootKind::Data));
+    assert_eq!(
+        setup.check("Grep", &json!({"pattern": "x", "path": jones})),
+        holds_matter
+    );
+    assert_eq!(
+        setup.check("Grep", &json!({"pattern": "x", "path": data})),
+        holds_data
+    );
+    let glob = json!({"pattern": "Jones shortcut/**/*.pdf"});
+    assert_eq!(setup.check("Glob", &glob), holds_matter);
+    let from_matter = setup.check("Grep", &json!({"pattern": "x", "path": setup.matter}));
+    assert!(
+        from_matter == holds_matter || from_matter == holds_data,
+        "{from_matter:?}"
+    );
+    let all = setup.check("Glob", &json!({"pattern": "**/*"}));
+    assert!(all == holds_matter || all == holds_data, "{all:?}");
+}
+
+/// The guard's own default (`REFUSE_NETWORK_OUTSIDE_MATTERS`): a network path outside the
+/// matters is refused, untouched.
+#[test]
+fn the_guard_refuses_a_network_path_outside_the_matters_by_default() {
+    let setup = setup("fence-network");
+    let path = if cfg!(windows) {
+        r"\\server\docs\precedent.docx"
+    } else {
+        // unix-paths-ok: a network form by its text, never opened
+        "/net/server/docs/precedent.docx"
+    };
+    let read = json!({"file_path": path});
+    assert_eq!(setup.check("Read", &read), Some(Denial::Network));
+}

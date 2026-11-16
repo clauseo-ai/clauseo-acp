@@ -344,7 +344,7 @@ impl Refusal {
             Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
                                    in its shell: run the stetdoc command you need directly."
                 .to_owned(),
-            Self::Fence(denial) => denial.reason().to_owned(),
+            Self::Fence(denial) => denial.reason(),
         }
     }
 }

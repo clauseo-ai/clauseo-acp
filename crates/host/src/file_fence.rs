@@ -35,12 +35,16 @@
 //!   walked, following nothing, and each link, junction or mount point below it resolved
 //!   ([`links`]): one into a fenced place refuses the search.
 //! - Fail closed ([`guard`]): on the fence's path, any error (input it cannot read, a fence
-//!   file it cannot trust, a path it cannot vouch for, such as a network location) or a panic
-//!   refuses, and so does the fence taking longer than [`guard::DEADLINE`]: Claude Code treats
-//!   a hook that times out or exits with another code as no answer and runs the tool. What only
+//!   file it cannot trust, a path it cannot vouch for) or a panic refuses, and so does the
+//!   fence taking longer than [`guard::DEADLINE`]: Claude Code treats a hook that times out or
+//!   exits with another code as no answer and runs the tool. What only
 //!   the deny rules still stop: a hook process that cannot start, one Claude Code's own timeout
 //!   kills before the fence's deadline (a start that takes most of the 10 seconds), and a
 //!   session launched with no guard program.
+//! - Network paths ([`real::locate`], told from text and the system's lists, never touched):
+//!   inside a matter kept on a share that the session may use (its own, or one it is invited
+//!   into) they are judged by their text; outside every such matter they are refused while
+//!   [`decide::REFUSE_NETWORK_OUTSIDE_MATTERS`] is on, the one switch.
 //! - The refusal's words ([`decide::Denial::reason`]) hold `has been denied` and `your
 //!   permission settings`, which the host's refusal detector reads as a refused call.
 //!
@@ -57,6 +61,8 @@ pub(crate) mod real;
 mod tests;
 #[cfg(all(test, unix))]
 mod tests_decide;
+#[cfg(all(test, unix))]
+mod tests_share;
 #[cfg(all(test, windows))]
 mod tests_windows;
 
