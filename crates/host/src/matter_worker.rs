@@ -160,8 +160,9 @@ pub(crate) enum MatterJob {
     WriteSides(Sides),
     /// Tracked changes in a Word file: list them, or decide some (`revisions.rs`).
     Revisions(Box<crate::revisions::RevisionsJob>),
-    /// A version-history read (`versions.rs`), run with the open matter; it answers its caller
-    /// itself, and its reply is [`MatterReply::Read`].
+    /// A version-history read (`versions.rs`), run with the matter when it is already open (with
+    /// none otherwise: the read never opens or relinks it); it answers its caller itself, and its
+    /// reply is [`MatterReply::Read`].
     Read(crate::versions::MatterRead),
 }
 
@@ -490,7 +491,14 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         }),
         MatterJob::WriteSides(sides) => sides.reply(settings, slot),
         MatterJob::Read(read) => {
-            read.run(open(settings, slot).map(|matter| &*matter));
+            // Never the job that opens (or relinks) the matter: only one already open is read.
+            match slot {
+                Slot::Open(matter) => read.run(Some(crate::versions::Opened {
+                    matter,
+                    cap: settings.limits.effective_cap(),
+                })),
+                Slot::Empty | Slot::Unopened { .. } => read.run(None),
+            }
             MatterReply::Read
         }
     }
@@ -551,7 +559,7 @@ pub(crate) use paths::tool_paths;
 use paths::writes_in;
 pub(crate) use relocate::{Registry, Relink};
 use relocate::{locate, relink_matter};
-pub(crate) use sides::{BlacklineDir, NEW, OLD, Sides};
+pub(crate) use sides::{BlacklineDir, Capped, NEW, OLD, Sides};
 pub(crate) use too_deep::refuse_too_deep;
 
 #[cfg(test)]

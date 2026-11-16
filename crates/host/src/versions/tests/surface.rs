@@ -7,7 +7,7 @@ use super::Fixture;
 use crate::versions::texts::{LIST_DESCRIPTION, READ_DESCRIPTION, Refusal};
 use crate::versions::{
     DEFAULT_LIMIT, MAX_CALLS_PER_TURN, MAX_DOCX_RUNS_PER_TURN, MAX_FILES_PER_VERSION, MAX_LIMIT,
-    PAGE_BYTES, SERVER_NAME,
+    MAX_TEXT_BYTES, PAGE_BYTES, SERVER_NAME,
 };
 
 fn ask(method: &str, params: Value) -> Value {
@@ -69,9 +69,10 @@ fn tools_list_gives_two_read_only_tools_that_say_what_they_return() {
     }
     assert!(LIST_DESCRIPTION.contains("deleted are listed"));
     assert!(READ_DESCRIPTION.contains(
-        "Earlier versions of files the matter still holds can be read, including text the \
-         lawyer later removed from them; files the matter no longer holds are listed by \
-         list_versions but cannot be read."
+        "Earlier versions of a file the matter has held ever since can be read, including text \
+         the lawyer later removed from it. A file that was deleted is listed by list_versions, \
+         but its earlier versions cannot be read, even when a file with its name is there again, \
+         unless the lawyer brought it back with Undo or from Versions."
     ));
     assert_eq!(
         tools[1]["inputSchema"]["required"],
@@ -94,6 +95,19 @@ fn the_limits_the_texts_name_are_the_ones_in_force() {
     assert!(LIST_DESCRIPTION.contains(&format!("{DEFAULT_LIMIT} versions by default")));
     assert!(LIST_DESCRIPTION.contains(&format!("{MAX_LIMIT} at most")));
     assert!(READ_DESCRIPTION.contains(&format!("{} KiB a page", PAGE_BYTES / 1024)));
+    let mib = format!("{} MiB", MAX_TEXT_BYTES / (1024 * 1024));
+    assert!(READ_DESCRIPTION.contains(&format!("up to {mib}")));
+    assert!(Refusal::TooLarge.text().contains(&mib));
+    // True on every path: a Latin-1 text file is text, but not UTF-8; a bucket between turns
+    // started after the lawyer's last message.
+    assert!(Refusal::Unsupported.text().contains("saved as UTF-8"));
+    for capped in [Refusal::TooManyCalls, Refusal::TooManyDocx] {
+        assert!(!capped.text().contains("this turn"), "{capped:?}");
+        assert!(
+            capped.text().contains("since the lawyer's last message"),
+            "{capped:?}"
+        );
+    }
     // Each refusal is one plain sentence or two, none empty, none alike.
     for (index, refusal) in Refusal::ALL.iter().enumerate() {
         assert!(refusal.text().ends_with('.'), "{refusal:?}");
@@ -128,4 +142,30 @@ fn notifications_get_nothing_and_bad_messages_get_json_rpc_errors() {
         .answer(&json!({ "jsonrpc": "2.0", "id": {}, "method": "ping" }))
         .unwrap();
     assert_eq!(bad_id["error"]["code"], -32600);
+}
+
+#[test]
+fn a_page_reaches_the_model_once_in_structured_content() {
+    let mut fixture = Fixture::new("versions-surface-shape");
+    let text = "Clause 7: the rent is reviewed each year. ".repeat(100);
+    fixture.put("lease.txt", text.as_bytes());
+    let v2 = fixture.checkpoint(2);
+    let result = super::read(&fixture.backend(), v2, "lease.txt");
+    assert_eq!(result["isError"], false);
+    assert_eq!(result["structuredContent"]["text"], text.as_str());
+    let content = result["content"].as_array().unwrap();
+    assert_eq!(content.len(), 1);
+    let line = content[0]["text"].as_str().unwrap();
+    assert!(!line.contains("Clause 7"), "{line}");
+    assert!(
+        line.contains("lease.txt") && line.contains("structuredContent.text"),
+        "{line}"
+    );
+    let page = super::call(&fixture.backend(), "list_versions", json!({}));
+    let line = page["content"][0]["text"].as_str().unwrap();
+    assert_eq!(
+        line,
+        "2 versions of this matter, newest first, are in structuredContent.versions."
+    );
+    assert!(!line.contains("lease.txt"), "{line}");
 }

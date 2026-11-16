@@ -146,7 +146,7 @@ fn call(backend: &Backend, id: &Value, params: Option<&Map<String, Value>>) -> V
     };
     let result = match outcome {
         Ok(structured) => {
-            let text = structured.to_string();
+            let text = summary(&structured);
             json!({
                 "content": [{ "type": "text", "text": text }],
                 "structuredContent": structured,
@@ -168,6 +168,41 @@ fn call(backend: &Backend, id: &Value, params: Option<&Map<String, Value>>) -> V
         }
     };
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
+}
+
+/// The one line `content` carries beside `structuredContent`, which holds the answer itself:
+/// Claude Code shows its model only `structuredContent` when a result has one (as the case-law
+/// relay found, `connectors/relay/forward/reply.rs`), so the page goes there once and the line
+/// only says where it is.
+fn summary(structured: &Value) -> String {
+    if let Some(versions) = structured.get("versions").and_then(Value::as_array) {
+        let more = if structured.get("next_before").is_some() {
+            "; older ones page with next_before"
+        } else {
+            ""
+        };
+        return format!(
+            "{} versions of this matter, newest first, are in structuredContent.versions{more}.",
+            versions.len()
+        );
+    }
+    let field = |name: &str| {
+        structured
+            .get(name)
+            .map(ToString::to_string)
+            .unwrap_or_default()
+    };
+    let read = structured
+        .get("text")
+        .and_then(Value::as_str)
+        .map_or(0, str::len);
+    format!(
+        "{} at version {}: {read} bytes from offset {} of {}, in structuredContent.text.",
+        field("path"),
+        field("version"),
+        field("offset"),
+        field("total_bytes"),
+    )
 }
 
 /// A JSON-RPC error answer.

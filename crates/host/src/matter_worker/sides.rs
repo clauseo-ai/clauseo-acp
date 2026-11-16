@@ -172,19 +172,25 @@ fn folder_side(
 }
 
 /// A writer that takes at most `left` bytes: a write past them fails, and `over` says why.
-struct Capped<W> {
+/// The version-history tool's Word copies use it too (`versions/docx.rs`).
+pub(crate) struct Capped<W> {
     inner: W,
     left: u64,
     over: bool,
 }
 
 impl<W> Capped<W> {
-    fn new(inner: W, cap: u64) -> Self {
+    pub(crate) fn new(inner: W, cap: u64) -> Self {
         Self {
             inner,
             left: cap,
             over: false,
         }
+    }
+
+    /// Whether a write went past the cap.
+    pub(crate) const fn over(&self) -> bool {
+        self.over
     }
 }
 

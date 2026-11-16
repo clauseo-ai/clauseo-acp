@@ -1,47 +1,44 @@
 //! `read_version {version, path, offset?}`: one version's file as text, a page at a time.
 //!
-//! On the matter's thread, in this order, each refused with its own sentence:
+//! The checks, in this order, each refused with its own sentence:
 //! 1. the version is on this matter's timeline ([`Refusal::UnknownVersion`]: an id of another
 //!    matter is unknown here, as a made-up one is, so nothing tells them apart);
-//! 2. the path is in that version's file list, `Matter::files_at`, which leaves out excluded
-//!    paths ([`Refusal::NotInVersion`]); only then is anything read, since `Matter::read_file`
-//!    checks no exclusion: an old `.claude` file, or a path out of the folder, never is;
-//! 3. unless deleted files are readable ([`super::DELETED_FILES_READABLE`]), the file is in the
-//!    folder now (`clauseo_matters::holds_now`, every call), or `changes_between(version, last
-//!    checkpoint)` records it `Renamed` (exact content) to a file in the folder now; else
-//!    [`Refusal::Deleted`]. A rename with an edit is a delete and an add, so it stays refused;
-//! 4. its format: a `.docx` (any case) is copied out for stetdoc, unless its text is kept from
-//!    the page before; a `.pdf` is [`Refusal::Unsupported`]; any other file streams through
-//!    a [`Window`], and is text only when all of it is UTF-8 with no NUL.
+//! 2. the path is in that version's tree as `Matter::files_at` lists it, excluded paths left out
+//!    (`clauseo_matters::version_file`, one tree lookup; [`Refusal::NotInVersion`]); only then is
+//!    anything read, since `Matter::read_file` checks no exclusion: an old `.claude` file, or a
+//!    path out of the folder, never is;
+//! 3. unless deleted files are readable ([`super::DELETED_FILES_READABLE`]), the matter held the
+//!    file from that version on (`continuity.rs`) and the folder holds it now under the name it
+//!    ends with (`clauseo_matters::holds_now`), checked in the job that reads it; else
+//!    [`Refusal::Deleted`];
+//! 4. its format: a `.pdf` is [`Refusal::Unsupported`]; a `.docx` (any case) needs stetdoc and a
+//!    stetdoc run left this turn, both settled (the run reserved) before anything is copied,
+//!    unless its text is kept from an earlier page; any other file must be at most
+//!    [`MAX_TEXT_BYTES`] by its size in history, then streams through a [`Window`] and is text
+//!    only when all of it is UTF-8 with no NUL.
 //!
-//! Off the matter's thread: the stetdoc run (counted against the turn's runs), the page, and
-//! the version's time from the matter's log.
+//! The format is decided after step 2, but its refusal is given only once step 3 passes, so the
+//! order holds. Off the matter's thread: the stetdoc run (one per session at a time), the page,
+//! and the version's time from the matter's log.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use clauseo_matters::{Matter, holds_now};
-use clauseo_protocol::{ChangeKind, CheckpointId, ContentId, MatterPath};
+use clauseo_matters::{Matter, VersionFile, holds_now, version_file};
+use clauseo_protocol::{CheckpointId, MatterPath};
 use serde_json::{Map, Value, json};
 
-use super::docx::Copied;
+use super::caps::Reserved;
+use super::continuity::{Step, Walk};
+use super::docx::{self, Copied};
 use super::mcp::Outcome;
 use super::texts::Refusal;
 use super::window::{Page, PastEnd, Window, page_of};
-use super::{Backend, docx, lock, utc_time};
+use super::{Backend, MAX_TEXT_BYTES, Opened, lock, utc_time};
 use crate::log_file::Cause;
 
 /// The tool's name.
 pub(super) const NAME: &str = "read_version";
-
-/// What the matter's thread made of a read.
-enum Read {
-    /// A text file's page, and the file's size.
-    Text { page: Page, total: u64 },
-    /// A Word file whose text is kept from before.
-    DocxKept(ContentId),
-    /// A Word file copied out, with its content.
-    DocxCopied(Copied, ContentId),
-}
 
 /// How a path is read, by its name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +46,61 @@ enum Format {
     Text,
     Docx,
     Pdf,
+}
+
+/// What the read will do once the deleted-file limit passes, decided off the matter's thread.
+enum Plan<'a> {
+    /// Stream the text file.
+    Text,
+    /// Page the Word text kept from before.
+    Kept(Arc<str>),
+    /// Copy the Word file out for stetdoc, with the run reserved for it.
+    Copy(Run<'a>),
+    /// Refuse, once the limit has passed.
+    Refuse(Refusal),
+}
+
+/// What the matter's thread does once the limit passes: [`Plan`] without the reservation.
+#[derive(Debug, Clone)]
+enum Finish {
+    Text { offset: u64 },
+    Kept,
+    Copy { dir: PathBuf },
+    Refuse(Refusal),
+}
+
+/// What the matter's thread made of the read.
+enum Done {
+    Text(Page),
+    Kept,
+    Copied(Copied),
+}
+
+/// A job's outcome: more of the walk, or the read done.
+enum Next {
+    More(Walk),
+    Done(Done),
+}
+
+/// A stetdoc run reserved from the turn's: given back when dropped unspent.
+struct Run<'a> {
+    backend: &'a Backend,
+    reserved: Option<Reserved>,
+}
+
+impl Run<'_> {
+    /// The run goes ahead: it stays counted.
+    fn spend(&mut self) {
+        self.reserved = None;
+    }
+}
+
+impl Drop for Run<'_> {
+    fn drop(&mut self) {
+        if let Some(reserved) = self.reserved.take() {
+            lock(&self.backend.caps).give_back(&reserved);
+        }
+    }
 }
 
 /// Runs `read_version` with `args`.
@@ -66,38 +118,68 @@ pub(super) fn run(backend: &Backend, args: &Map<String, Value>) -> Outcome {
         Some(value) => value.as_u64().ok_or(Refusal::BadOffset)?,
     };
     let version = version.ok_or(Refusal::UnknownVersion)?;
-    let config = &backend.config;
     let deleted_readable = backend.deleted_readable;
-    let word = Docx {
-        kept: backend.docx.content(),
-        run_left: lock(&backend.caps).docx_run_left(),
-        dir: docx::copy_dir(&config.data_dir, &*config.clock),
-    };
-    let read_path = path.clone();
-    let read = backend.on_matter(move |matter| {
-        check_and_read(matter, version, read_path, offset, deleted_readable, word)
+    let (file, mut walk) = backend.on_matter(move |opened| {
+        let matter = opened.matter;
+        if !matter.timeline().iter().any(|entry| entry.id == version) {
+            return Err(Refusal::UnknownVersion);
+        }
+        let path = path.ok_or(Refusal::NotInVersion)?;
+        let file = version_file(matter, version, &path)
+            .map_err(|error| not_read(&error))?
+            .ok_or(Refusal::NotInVersion)?;
+        let walk = if deleted_readable {
+            None
+        } else {
+            Some(Walk::from(matter, version, path).ok_or(Refusal::UnknownVersion)?)
+        };
+        Ok((file, walk))
     })?;
-    let (format, page, total) = match read {
-        Read::Text { page, total } => ("text", page, total),
-        Read::DocxKept(content) => {
-            let text = backend.docx.get(&content).ok_or(Refusal::WordFailed)?;
-            docx_page(&text, offset)?
-        }
-        Read::DocxCopied(copied, content) => {
-            if !lock(&backend.caps).take_docx_run() {
-                return Err(Refusal::TooManyDocx);
+    let mut plan = plan(backend, &file);
+    let finish = match &plan {
+        Plan::Text => Finish::Text { offset },
+        Plan::Kept(_) => Finish::Kept,
+        Plan::Copy(_) => Finish::Copy {
+            dir: docx::copy_dir(&backend.config.data_dir, &*backend.config.clock),
+        },
+        Plan::Refuse(refusal) => Finish::Refuse(*refusal),
+    };
+    let done = loop {
+        let (finish, path) = (finish.clone(), file.path.clone());
+        let next = backend.on_matter(move |opened| {
+            if let Some(walk) = walk {
+                match walk.step(opened.matter)? {
+                    Step::More(walk) => return Ok(Next::More(walk)),
+                    Step::Held(now) => {
+                        if !here(opened.matter, &now)? {
+                            return Err(Refusal::Deleted);
+                        }
+                    }
+                }
             }
-            let program = config.stetdoc.as_deref().ok_or(Refusal::WordFailed)?;
-            let text: Arc<str> = docx::view(program, &config.clock, &copied)?.into();
-            drop(copied);
-            backend.docx.put(content, &text);
-            docx_page(&text, offset)?
+            finish_read(&opened, version, &path, finish).map(Next::Done)
+        })?;
+        match next {
+            Next::More(more) => walk = Some(more),
+            Next::Done(done) => break done,
         }
     };
+    let (format, page, total) = match (done, &mut plan) {
+        (Done::Text(page), _) => ("text", page, file.size),
+        (Done::Kept, Plan::Kept(text)) => docx_page(text, offset)?,
+        (Done::Copied(copied), Plan::Copy(run)) => {
+            let text = show(backend, run, &file, &copied)?;
+            drop(copied);
+            docx_page(&text, offset)?
+        }
+        (Done::Kept | Done::Copied(_), _) => return Err(Refusal::WordFailed),
+    };
+    drop(plan);
+    let config = &backend.config;
     let logged = config.source.logged(config.session.matter, &[version]);
     let mut answer = json!({
         "version": version.to_string(),
-        "path": path.as_ref().map(MatterPath::as_str),
+        "path": file.path.as_str(),
         "at": logged.at.get(&version).map(|at| utc_time(*at)),
         "format": format,
         "text": page.text,
@@ -110,64 +192,56 @@ pub(super) fn run(backend: &Backend, args: &Map<String, Value>) -> Outcome {
     Ok(answer)
 }
 
-/// A page of a Word file's text: `docx_text`, the page and the text's length.
-fn docx_page(text: &str, offset: u64) -> Result<(&'static str, Page, u64), Refusal> {
-    let page = page_of(text, offset).ok_or(Refusal::PastEnd)?;
-    Ok(("docx_text", page, text.len() as u64))
-}
-
-/// What the matter's thread needs to know for a Word file.
-struct Docx {
-    /// The Word file whose text is kept.
-    kept: Option<ContentId>,
-    /// Whether the turn may still run stetdoc: a copy that could not be shown is not made.
-    run_left: bool,
-    /// Where a Word file is copied when its text is not kept.
-    dir: std::path::PathBuf,
-}
-
-/// The checks and the read, on the matter's thread (see the module's list).
-fn check_and_read(
-    matter: &Matter,
-    version: CheckpointId,
-    path: Option<MatterPath>,
-    offset: u64,
-    deleted_readable: bool,
-    word: Docx,
-) -> Result<Read, Refusal> {
-    if !matter.timeline().iter().any(|entry| entry.id == version) {
-        return Err(Refusal::UnknownVersion);
-    }
-    let path = path.ok_or(Refusal::NotInVersion)?;
-    let file = matter
-        .files_at(version)
-        .map_err(|error| not_read(&error))?
-        .into_iter()
-        .find(|file| file.path == path)
-        .ok_or(Refusal::NotInVersion)?;
-    if !deleted_readable {
-        still_here(matter, version, &path)?;
-    }
-    match format(&path) {
-        Format::Pdf => Err(Refusal::Unsupported),
-        Format::Docx if word.kept.as_ref() == Some(&file.content) => {
-            Ok(Read::DocxKept(file.content))
+/// What the read of `file` will do, by its name and size, and for a Word file whether its text
+/// is kept, stetdoc is there and a run is left (reserved now).
+fn plan<'a>(backend: &'a Backend, file: &VersionFile) -> Plan<'a> {
+    match format(&file.path) {
+        Format::Pdf => Plan::Refuse(Refusal::Unsupported),
+        Format::Text if file.size > MAX_TEXT_BYTES => Plan::Refuse(Refusal::TooLarge),
+        Format::Text => Plan::Text,
+        Format::Docx => {
+            if let Some(text) = backend.docx.get(&file.content) {
+                Plan::Kept(text)
+            } else if backend.config.stetdoc.is_none() {
+                Plan::Refuse(Refusal::NoWordTool)
+            } else {
+                match lock(&backend.caps).reserve_docx_run() {
+                    Some(reserved) => Plan::Copy(Run {
+                        backend,
+                        reserved: Some(reserved),
+                    }),
+                    None => Plan::Refuse(Refusal::TooManyDocx),
+                }
+            }
         }
-        Format::Docx if !word.run_left => Err(Refusal::TooManyDocx),
-        Format::Docx => Ok(Read::DocxCopied(
-            docx::copy_out(matter, version, &path, word.dir)?,
-            file.content,
-        )),
-        Format::Text => {
+    }
+}
+
+/// On the matter's thread, once the deleted-file limit passed: the read `finish` names.
+fn finish_read(
+    opened: &Opened<'_>,
+    version: CheckpointId,
+    path: &MatterPath,
+    finish: Finish,
+) -> Result<Done, Refusal> {
+    match finish {
+        Finish::Refuse(refusal) => Err(refusal),
+        Finish::Kept => Ok(Done::Kept),
+        Finish::Copy { dir } => Ok(Done::Copied(docx::copy_out(
+            opened.matter,
+            version,
+            path,
+            dir,
+            opened.cap,
+        )?)),
+        Finish::Text { offset } => {
             let mut window = Window::new(offset);
-            matter
-                .read_file(version, &path, &mut window)
+            opened
+                .matter
+                .read_file(version, path, &mut window)
                 .map_err(|error| not_read(&error))?;
             match window.page() {
-                Ok(Some(page)) => Ok(Read::Text {
-                    page,
-                    total: file.size,
-                }),
+                Ok(Some(page)) => Ok(Done::Text(page)),
                 Ok(None) => Err(Refusal::Unsupported),
                 Err(PastEnd) => Err(Refusal::PastEnd),
             }
@@ -175,31 +249,33 @@ fn check_and_read(
     }
 }
 
-/// The deleted-file limit: `path` is in the folder now, or the version's file was renamed,
-/// exact content and nothing else, to a file that is.
-fn still_here(matter: &Matter, version: CheckpointId, path: &MatterPath) -> Result<(), Refusal> {
-    if here(matter, path)? {
-        return Ok(());
+/// stetdoc's text of the copy, one run per session at a time. A Word file whose text another
+/// read kept while this one waited is not shown again: its run is given back.
+fn show(
+    backend: &Backend,
+    run: &mut Run<'_>,
+    file: &VersionFile,
+    copied: &Copied,
+) -> Result<Arc<str>, Refusal> {
+    let _one_at_a_time = lock(&backend.stetdoc_run);
+    if let Some(text) = backend.docx.get(&file.content) {
+        return Ok(text);
     }
-    let Some(last) = matter.last_checkpoint() else {
-        return Err(Refusal::Deleted);
-    };
-    let changes = matter
-        .changes_between(version, last)
-        .map_err(|error| not_read(&error))?;
-    let renamed_to = changes.iter().find_map(|change| {
-        if let ChangeKind::Renamed { from } = change.change()
-            && from == path
-        {
-            Some(change.path())
-        } else {
-            None
-        }
-    });
-    match renamed_to {
-        Some(now) if here(matter, now)? => Ok(()),
-        Some(_) | None => Err(Refusal::Deleted),
-    }
+    let program = backend
+        .config
+        .stetdoc
+        .as_deref()
+        .ok_or(Refusal::NoWordTool)?;
+    run.spend();
+    let text: Arc<str> = docx::view(program, &backend.config.clock, copied)?.into();
+    backend.docx.put(file.content.clone(), &text);
+    Ok(text)
+}
+
+/// A page of a Word file's text: `docx_text`, the page and the text's length.
+fn docx_page(text: &str, offset: u64) -> Result<(&'static str, Page, u64), Refusal> {
+    let page = page_of(text, offset).ok_or(Refusal::PastEnd)?;
+    Ok(("docx_text", page, text.len() as u64))
 }
 
 fn here(matter: &Matter, path: &MatterPath) -> Result<bool, Refusal> {

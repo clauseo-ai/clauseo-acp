@@ -13,11 +13,12 @@ Files that were deleted are listed with the version that deleted them. 20 versio
 /// `read_version`'s description.
 pub(super) const READ_DESCRIPTION: &str = "Read-only. Returns one file as an earlier version of \
 this matter held it, as text: 64 KiB a page from offset, with next_offset while more is left \
-and total_bytes. Text files come back as they are; Word (.docx) files as the text Clauseo's Word \
-tool shows. PDFs and other files are not read. Covers only this matter. Earlier versions of \
-files the matter still holds can be read, including text the lawyer later removed from them; \
-files the matter no longer holds are listed by list_versions but cannot be read. Changes \
-nothing.";
+and total_bytes. Text files saved as UTF-8 (up to 16 MiB) come back as they are; Word (.docx) \
+files as the text Clauseo's Word tool shows. PDFs and other files are not read. Covers only \
+this matter. Earlier versions of a file the matter has held ever since can be read, including \
+text the lawyer later removed from it. A file that was deleted is listed by list_versions, but \
+its earlier versions cannot be read, even when a file with its name is there again, unless the \
+lawyer brought it back with Undo or from Versions. Changes nothing.";
 
 /// Why a call was refused; [`Refusal::text`] is what the agent reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +27,8 @@ pub(super) enum Refusal {
     UnknownVersion,
     /// The path is not in that version's file list.
     NotInVersion,
-    /// The file is not in the matter now, and no exact rename leads to one that is.
+    /// The file left the matter after that version (or is not in the folder now), and the
+    /// lawyer did not bring it back with Undo or Restore.
     Deleted,
     /// Neither text nor a Word file.
     Unsupported,
@@ -34,13 +36,19 @@ pub(super) enum Refusal {
     TooManyCalls,
     /// The turn's stetdoc runs are spent.
     TooManyDocx,
-    /// The matter's thread did not answer, or the matter did not open.
+    /// The matter's thread did not take the read or did not answer in time.
     Unavailable,
+    /// The matter is not open on its thread yet; a read never opens it.
+    NotOpen,
+    /// A text file over [`super::MAX_TEXT_BYTES`].
+    TooLarge,
+    /// No stetdoc for a Word file.
+    NoWordTool,
     /// The check that the file is in the matter now failed.
     NotChecked,
     /// The history did not read.
     NotRead,
-    /// No stetdoc, or it failed.
+    /// stetdoc, or the Word file's copy for it, failed.
     WordFailed,
     /// `version` is missing or not a string.
     BadVersion,
@@ -59,7 +67,7 @@ pub(super) enum Refusal {
 impl Refusal {
     /// Every refusal (tests).
     #[cfg(test)]
-    pub(super) const ALL: [Self; 16] = [
+    pub(super) const ALL: [Self; 19] = [
         Self::UnknownVersion,
         Self::NotInVersion,
         Self::Deleted,
@@ -67,6 +75,9 @@ impl Refusal {
         Self::TooManyCalls,
         Self::TooManyDocx,
         Self::Unavailable,
+        Self::NotOpen,
+        Self::TooLarge,
+        Self::NoWordTool,
         Self::NotChecked,
         Self::NotRead,
         Self::WordFailed,
@@ -90,23 +101,35 @@ impl Refusal {
                  relative to the matter's folder."
             }
             Self::Deleted => {
-                "That file is no longer in this matter, so I can't read its earlier versions. The \
-                 lawyer can bring it back from Versions."
+                "That file was deleted from this matter, so I can't read its earlier versions, \
+                 even if a file with its name is there now. The lawyer can bring it back from \
+                 Versions."
             }
             Self::Unsupported => {
-                "I can only read text files and Word (.docx) files from earlier versions, and \
-                 that file is neither."
+                "I can only read text files saved as UTF-8, and Word (.docx) files, from earlier \
+                 versions; that file is neither."
             }
             Self::TooManyCalls => {
-                "The version history has been looked at 100 times in this turn, which is the \
-                 limit. It can be looked at again in the next turn."
+                "The version history has been looked at 100 times since the lawyer's last \
+                 message, which is the limit. It can be looked at again after their next message."
             }
             Self::TooManyDocx => {
-                "Word files from earlier versions have been read 20 times in this turn, which is \
-                 the limit. More can be read in the next turn."
+                "Word files from earlier versions have been read 20 times since the lawyer's last \
+                 message, which is the limit. More can be read after their next message."
             }
             Self::Unavailable => {
                 "The version history is not available right now. Try again in a moment."
+            }
+            Self::NotOpen => {
+                "The version history can't be read until Clauseo has opened this matter. Try \
+                 again in the next turn."
+            }
+            Self::TooLarge => {
+                "That file is over 16 MiB, too large to read from an earlier version."
+            }
+            Self::NoWordTool => {
+                "Word files can't be read from earlier versions here, because Clauseo's Word tool \
+                 is missing."
             }
             Self::NotChecked => {
                 "I couldn't check whether that file is still in this matter, so I can't read its \
@@ -138,6 +161,9 @@ impl Refusal {
             Self::TooManyCalls => "too_many_calls",
             Self::TooManyDocx => "too_many_docx",
             Self::Unavailable => "unavailable",
+            Self::NotOpen => "not_open",
+            Self::TooLarge => "too_large",
+            Self::NoWordTool => "no_word_tool",
             Self::NotChecked => "not_checked",
             Self::NotRead => "not_read",
             Self::WordFailed => "word_failed",

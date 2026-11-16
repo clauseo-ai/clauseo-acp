@@ -5,7 +5,7 @@ use serde_json::json;
 
 use super::{Fixture, call, checkpoint, ok, path, read, refused, snapshot, v7};
 use crate::versions::texts::Refusal;
-use crate::versions::{DELETED_FILES_READABLE, PAGE_BYTES};
+use crate::versions::{DELETED_FILES_READABLE, MAX_TEXT_BYTES, PAGE_BYTES};
 
 #[test]
 fn a_version_of_another_matter_is_refused_as_a_made_up_one_is() {
@@ -217,10 +217,10 @@ fn a_rename_the_history_records_is_followed() {
         ok(&read(&backend, v3, "draft.txt"))["text"],
         "the second draft, longer"
     );
-    // Version 2's content is not what was renamed: from there it is a delete and an add.
+    // Version 2's file is the same file, edited at 3 and then renamed: it reads too.
     assert_eq!(
-        refused(&read(&backend, v2, "draft.txt")),
-        Refusal::Deleted.text()
+        ok(&read(&backend, v2, "draft.txt"))["text"],
+        "the first draft"
     );
     // Once the renamed file is gone too, the old name is refused.
     fixture.remove("sub/final.txt");
@@ -358,4 +358,20 @@ fn neither_tool_writes_in_the_matter_or_its_history() {
     refused(&read(&backend, v2, "nothing.txt"));
     refused(&read(&backend, checkpoint(999), "brief.txt"));
     assert_eq!((snapshot(&folder), snapshot(&history)), before);
+}
+
+#[test]
+fn a_text_file_over_the_cap_is_refused_by_its_size_and_one_at_it_reads() {
+    let mut fixture = Fixture::new("versions-read-large");
+    let at_cap = usize::try_from(MAX_TEXT_BYTES).unwrap();
+    fixture.put("at-cap.txt", "a".repeat(at_cap).as_bytes());
+    fixture.put("over-cap.log", "b".repeat(at_cap + 1).as_bytes());
+    let v2 = fixture.checkpoint(2);
+    let backend = fixture.backend();
+    assert_eq!(
+        refused(&read(&backend, v2, "over-cap.log")),
+        Refusal::TooLarge.text()
+    );
+    let page = read(&backend, v2, "at-cap.txt");
+    assert_eq!(ok(&page)["total_bytes"], MAX_TEXT_BYTES);
 }

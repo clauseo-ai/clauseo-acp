@@ -361,3 +361,66 @@ fn tool_paths_resolve_outside_spellings_into_the_matter() {
         .into()
     );
 }
+
+/// A version-history read that says whether it got the matter.
+fn read_job(got: &mpsc::Sender<bool>) -> MatterJob {
+    let got = got.clone();
+    MatterJob::Read(crate::versions::MatterRead::new(move |opened| {
+        got.send(opened.is_some()).unwrap();
+    }))
+}
+
+#[test]
+fn a_version_read_gets_only_a_matter_already_open_and_never_opens_one() {
+    let dir = TempDir::new("matter-worker-read");
+    let root = dir.path();
+    let folder = root.join("matter");
+    let away = root.join("away");
+    let at = Timestamp::new(1_790_000_000_000).unwrap();
+    let id = MatterId::new(v7(2)).unwrap();
+    let new = NewMatter {
+        id,
+        folder: folder.clone(),
+        created_at: at,
+        marker: DEFAULT_MARKER,
+        checkpoint: CheckpointId::new(v7(1)).unwrap(),
+    };
+    drop(clauseo_matters::Matter::create(matter_settings(&root.join("data")), new).unwrap());
+    let (worker, replies) = worker(root);
+    let (got, heard) = mpsc::channel();
+    // No matter yet: the read gets none.
+    worker.send(read_job(&got), 0).unwrap();
+    assert!(!heard.recv().unwrap());
+    assert!(matches!(replies.recv().unwrap(), MatterReply::Read));
+    // An open that failed leaves the matter to open before the next job that needs it; a read
+    // is not such a job, though the folder is back by then.
+    write::rename(&folder, &away).unwrap();
+    let open = MatterJob::Open {
+        id,
+        folder: folder.clone(),
+        relink: None,
+    };
+    worker.send(open, 0).unwrap();
+    assert!(matches!(
+        replies.recv().unwrap(),
+        MatterReply::Opened(Err(_))
+    ));
+    write::rename(&away, &folder).unwrap();
+    worker.send(read_job(&got), 0).unwrap();
+    assert!(!heard.recv().unwrap());
+    assert!(matches!(replies.recv().unwrap(), MatterReply::Read));
+    // Opened by a job that opens, it is read.
+    let open = MatterJob::Open {
+        id,
+        folder,
+        relink: None,
+    };
+    worker.send(open, 0).unwrap();
+    assert!(matches!(
+        replies.recv().unwrap(),
+        MatterReply::Opened(Ok(_))
+    ));
+    worker.send(read_job(&got), 0).unwrap();
+    assert!(heard.recv().unwrap());
+    worker.stop().unwrap();
+}

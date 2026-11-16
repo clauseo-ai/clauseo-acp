@@ -515,13 +515,23 @@ pub(super) fn on_matter_reply(
     }
 }
 
-/// A version-history read for `matter`'s thread, started now if the matter has none. An unknown
-/// matter, or a thread that cannot take it, drops it unrun: its caller hears nothing.
+/// A version-history read for `matter`'s thread, when it has a live one; it never starts one
+/// (which would open, and could relink, the matter). With none, or a thread that cannot take
+/// it, the read runs at once with no matter: its caller hears that the matter is not open.
 pub(super) fn read(actor: &mut Actor, matter: MatterId, read: crate::versions::MatterRead) {
-    let sent = matter_worker(actor, matter)
-        .and_then(|worker| worker.send(MatterJob::Read(read), MatterTag::Read));
-    match sent {
+    let worker = actor
+        .matters
+        .get(&matter)
+        .and_then(|entry| entry.worker.as_ref())
+        .filter(|worker| worker.is_alive());
+    let Some(worker) = worker else {
+        read.run(None);
+        return;
+    };
+    match worker.send(MatterJob::Read(read), MatterTag::Read) {
         Ok(()) => actor.work.matter_jobs += 1,
+        // The job, and its read with it, went with the failed send: its caller hears nothing
+        // and gives up as for a matter thread that ended.
         Err(error) => {
             tracing::info!(%matter, error = %Cause(&error), "a version read was not sent");
         }

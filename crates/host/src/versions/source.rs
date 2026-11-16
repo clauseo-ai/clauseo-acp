@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 
 use clauseo_protocol::{CheckpointId, DomainEvent, MatterId, Seq, StreamId};
-use clauseo_store::Store;
+use clauseo_store::{CheckpointRow, Store};
 
 use super::{Logged, MatterRead, Unreachable, VersionsSource};
 use crate::actor::input::Input;
@@ -42,6 +42,13 @@ impl VersionsSource for HostSource {
     }
 }
 
+/// The log position of `row` when it is `matter`'s: a checkpoint row of another matter (never
+/// asked for, since ids come from this matter's timeline) is left out.
+fn own_seq(row: Option<CheckpointRow>, matter: MatterId) -> Option<u64> {
+    row.filter(|row| row.matter == matter)
+        .map(|row| row.seq.get())
+}
+
 /// See [`VersionsSource::logged`].
 async fn logged(
     store: &Store,
@@ -50,10 +57,8 @@ async fn logged(
 ) -> Result<Logged, clauseo_store::Error> {
     let mut seqs = Vec::new();
     for id in versions {
-        if let Some(row) = store.checkpoint(*id).await?
-            && row.matter == matter
-        {
-            seqs.push(row.seq.get());
+        if let Some(seq) = own_seq(store.checkpoint(*id).await?, matter) {
+            seqs.push(seq);
         }
     }
     let mut logged = Logged::default();
@@ -89,4 +94,28 @@ async fn logged(
         }
     }
     Ok(logged)
+}
+
+#[cfg(test)]
+mod tests {
+    use clauseo_protocol::{CheckpointId, MatterId, Seq};
+    use clauseo_store::CheckpointRow;
+
+    use super::own_seq;
+
+    #[test]
+    fn a_checkpoint_row_of_another_matter_is_left_out() {
+        let id = |n: u128| uuid::Uuid::from_u128(0x0190_0000_0000_7000_8000_0000_0000_0000 | n);
+        let ours = MatterId::new(id(1)).unwrap();
+        let theirs = MatterId::new(id(2)).unwrap();
+        let row = |matter| CheckpointRow {
+            id: CheckpointId::new(id(3)).unwrap(),
+            matter,
+            commit_oid: "0".repeat(40),
+            seq: Seq::new(7).unwrap(),
+        };
+        assert_eq!(own_seq(Some(row(ours)), ours), Some(7));
+        assert_eq!(own_seq(Some(row(theirs)), ours), None);
+        assert_eq!(own_seq(None, ours), None);
+    }
 }

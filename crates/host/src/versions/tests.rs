@@ -2,6 +2,8 @@
 //! the matter's thread that runs each read at once on the caller's thread.
 
 mod caps;
+mod concurrency;
+mod continuity;
 mod docx;
 mod list;
 mod read;
@@ -11,13 +13,18 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use clauseo_matters::{DEFAULT_MARKER, Matter, NewMatter, TurnMeta};
-use clauseo_protocol::{CheckpointId, MatterId, MatterPath, ThreadId, Timestamp, TurnId};
+use clauseo_matters::{
+    DEFAULT_MARKER, Limits, Matter, NewMatter, Restore, RestoreFiles, TurnMeta, UndoRequest,
+};
+use clauseo_protocol::{
+    CheckpointId, FileChoice, FileDecision, MatterId, MatterPath, ThreadId, Timestamp, TurnId,
+};
 use serde_json::{Value, json};
 
-use super::{Logged, MatterRead, Unreachable, VersionsBackend, VersionsConfig, VersionsSource};
+use super::{
+    Logged, MatterRead, Opened, Unreachable, VersionsBackend, VersionsConfig, VersionsSource,
+};
 use crate::config::SessionKey;
-use crate::error::Error;
 use crate::matter_worker::matter_settings;
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
@@ -40,15 +47,20 @@ pub(super) fn checkpoint(n: u32) -> CheckpointId {
 pub(super) struct Source {
     pub(super) matters: Mutex<Vec<Matter>>,
     pub(super) logged: Mutex<Logged>,
+    /// The size cap reads get, when not the default one.
+    pub(super) cap: Mutex<Option<u64>>,
 }
 
 impl VersionsSource for Source {
     fn on_matter(&self, matter: MatterId, read: MatterRead) -> Result<(), Unreachable> {
         let matters = self.matters.lock().unwrap();
-        match matters.iter().find(|held| held.id() == matter) {
-            Some(held) => read.run(Ok(held)),
-            None => read.run(Err(Error::Closed)),
-        }
+        let held = matters.iter().find(|held| held.id() == matter);
+        let cap = self
+            .cap
+            .lock()
+            .unwrap()
+            .unwrap_or(Limits::DEFAULT.effective_cap());
+        read.run(held.map(|matter| Opened { matter, cap }));
         Ok(())
     }
 
@@ -184,6 +196,56 @@ impl Fixture {
         checkpoint(n)
     }
 
+    /// Restores `files` of version `from` as the lawyer does from Versions: an `outside-edits`
+    /// checkpoint `outside` when the folder changed, then the `restore` checkpoint `n`.
+    pub(super) fn restore(&mut self, from: CheckpointId, files: &[&str], outside: u32, n: u32) {
+        let paths: Vec<MatterPath> = files.iter().map(|file| path(file)).collect();
+        let mut matters = self.source.matters.lock().unwrap();
+        matters[0]
+            .restore(&Restore {
+                undoes: None,
+                from,
+                files: RestoreFiles::Only(&paths),
+                outside_edits: checkpoint(outside),
+                checkpoint: checkpoint(n),
+                at: Timestamp::new(1_790_000_000_000 + i64::from(n) * 1000).unwrap(),
+            })
+            .unwrap();
+    }
+
+    /// Undoes the step from `before` to `after` for `files`, as the lawyer does: an
+    /// `outside-edits` checkpoint `outside` when the folder changed, then the `undo` checkpoint
+    /// `n`.
+    pub(super) fn undo(
+        &mut self,
+        (before, after): (u32, u32),
+        files: &[&str],
+        outside: u32,
+        n: u32,
+    ) {
+        let decisions: Vec<FileDecision> = files
+            .iter()
+            .map(|file| FileDecision {
+                path: path(file),
+                choice: FileChoice::Undo,
+            })
+            .collect();
+        let meta = self.meta(n, self.session.thread);
+        let mut matters = self.source.matters.lock().unwrap();
+        matters[0]
+            .undo(&UndoRequest {
+                before: checkpoint(before),
+                after: checkpoint(after),
+                decisions: &decisions,
+                thread: Some(meta.thread),
+                turn: Some(meta.turn),
+                outside_edits: checkpoint(outside),
+                checkpoint: checkpoint(n),
+                at: meta.at,
+            })
+            .unwrap();
+    }
+
     /// A checkpoint `n` that also versions `old`, files under excluded folders, as a build from
     /// before the dot-folder rule did.
     pub(super) fn checkpoint_with_old(&mut self, n: u32, old: &[&str]) -> CheckpointId {
@@ -229,13 +291,15 @@ pub(super) fn call(backend: &VersionsBackend, tool: &str, args: Value) -> Value 
     answer["result"].clone()
 }
 
-/// The structured answer of a call that must succeed.
+/// The structured answer of a call that must succeed: `content` is one short line beside it,
+/// so a page reaches the model once.
 pub(super) fn ok(result: &Value) -> &Value {
     assert_eq!(result["isError"], false, "{result}");
-    assert_eq!(
-        result["content"][0]["text"].as_str().unwrap(),
-        result["structuredContent"].to_string()
-    );
+    let content = result["content"].as_array().unwrap();
+    assert_eq!(content.len(), 1, "{result}");
+    let line = content[0]["text"].as_str().unwrap();
+    assert!(!line.contains('\n'), "{line}");
+    assert!(line.len() < 300, "{line}");
     &result["structuredContent"]
 }
 

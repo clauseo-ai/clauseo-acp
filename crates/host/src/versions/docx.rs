@@ -1,5 +1,5 @@
-//! A Word file of an earlier version as text: copied on the matter's thread into a private
-//! folder, `<data>/tmp/versions-<id>/version.docx` ([`copy_out`]), then shown by
+//! A Word file of an earlier version as text: copied on the matter's thread (capped at the
+//! matter's size cap) into a private folder, `<data>/tmp/versions-<id>/version.docx` ([`copy_out`]), then shown by
 //! `stetdoc view --all` off the matter's thread ([`view`]), within stetdoc's read limits (10 s,
 //! 16 MiB of output), through a passthrough launcher with a clean environment, as tracked
 //! changes run it. The folder goes when its [`Copied`] drops, after the run. The text of the last
@@ -17,6 +17,7 @@ use clauseo_protocol::{CheckpointId, ContentId, MatterPath};
 use super::lock;
 use super::texts::Refusal;
 use crate::clock::{Clock, ProcessTimer};
+use crate::matter_worker::Capped;
 use crate::revisions::stetdoc::{READ_LIMIT, READ_STDOUT_MAX, env};
 
 /// The prefix of each copy's folder in `<data>/tmp/`; the blackline's start-up sweep removes
@@ -42,11 +43,6 @@ impl Kept {
             .as_ref()
             .filter(|(kept, _)| kept == content)
             .map(|(_, text)| Arc::clone(text))
-    }
-
-    /// The content kept, if any.
-    pub(super) fn content(&self) -> Option<ContentId> {
-        lock(&self.last).as_ref().map(|(kept, _)| kept.clone())
     }
 
     /// Keeps `text` as `content`'s, when it is not too long.
@@ -93,12 +89,15 @@ pub(super) fn copy_dir(data_dir: &Path, clock: &dyn Clock) -> PathBuf {
 }
 
 /// On the matter's thread: `path` as version `version` holds it, streamed into the new private
-/// folder `dir`. On any failure the folder is gone before this returns.
+/// folder `dir` through [`Capped`] at `cap` (the matter's size cap, as the blackline's copies
+/// take theirs): past it the copy is refused as [`Refusal::WordFailed`]. On any failure the
+/// folder is gone before this returns.
 pub(super) fn copy_out(
     matter: &Matter,
     version: CheckpointId,
     path: &MatterPath,
     dir: PathBuf,
+    cap: u64,
 ) -> Result<Copied, Refusal> {
     let failed = |what: &str, error: &std::io::Error| {
         tracing::warn!(what, kind = ?error.kind(), "a version's Word copy could not be written");
@@ -109,15 +108,20 @@ pub(super) fn copy_out(
     }
     crate::write::create_private_dir(&dir).map_err(|error| failed("its folder", &error))?;
     let copied = Copied { dir };
-    let mut file = crate::write::create_new_file(&copied.file())
+    let file = crate::write::create_new_file(&copied.file())
         .map_err(|error| failed("the copy", &error))?;
-    matter
-        .read_file(version, path, &mut file)
-        .map_err(|error| {
+    let mut out = Capped::new(file, cap);
+    match matter.read_file(version, path, &mut out) {
+        Ok(_) => Ok(copied),
+        Err(_over) if out.over() => {
+            tracing::warn!("a version's Word file is past the size cap");
+            Err(Refusal::WordFailed)
+        }
+        Err(error) => {
             tracing::warn!(error = %crate::log_file::Cause(&error), "a version's Word file did not read");
-            Refusal::NotRead
-        })?;
-    Ok(copied)
+            Err(Refusal::NotRead)
+        }
+    }
 }
 
 /// Off the matter's thread: `stetdoc view --all` of the copy, its stdout as the text. A run

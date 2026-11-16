@@ -47,7 +47,8 @@ pub(super) fn run(backend: &Backend, args: &Map<String, Value>) -> Outcome {
         rows,
         next_before,
         mut files,
-    } = backend.on_matter(move |matter| {
+    } = backend.on_matter(move |opened| {
+        let matter = opened.matter;
         let (rows, next_before) = pick(matter.timeline(), before, limit)?;
         let first: Vec<_> = rows
             .iter()
@@ -66,7 +67,7 @@ pub(super) fn run(backend: &Backend, args: &Map<String, Value>) -> Outcome {
             .iter()
             .map(|row| (row.entry.id, row.previous))
             .collect();
-        files.extend(backend.on_matter(move |matter| files_of(matter, &pairs))?);
+        files.extend(backend.on_matter(move |opened| files_of(opened.matter, &pairs))?);
     }
     let ids: Vec<CheckpointId> = rows.iter().map(|row| row.entry.id).collect();
     let session = backend.config.session;
