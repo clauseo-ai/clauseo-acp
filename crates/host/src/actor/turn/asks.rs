@@ -40,6 +40,8 @@ mod limit;
 
 mod codex_auto;
 
+mod bundled;
+
 use codex_auto::{
     allow_browser_tool, allow_trusted_tool, browser_tool_to_allow, trusted_tool_to_allow,
 };
@@ -114,6 +116,9 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         super::own_turn::cancel_outside_turn(actor, thread, &ask.session);
         return;
     };
+    if bundled::answered(actor, thread, &ask) {
+        return;
+    }
     if let Some((tool, option)) = browser_tool_to_allow(actor, thread, &ask, raw_input.as_ref()) {
         allow_browser_tool(actor, thread, ask.key, &tool, option);
         return;

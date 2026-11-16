@@ -8,8 +8,10 @@
 //! - modes: only [`ASK_MODES`] may be set (`SetMode` refuses any other with `command.invalid`),
 //!   a session starts in `default` ([`ASK_MODE`], not the `auto` every other Claude
 //!   session starts in), and a mode the agent moves to itself is switched back to it;
-//! - options: a permission request loses every option that would stop later asks
-//!   ([`keep_option`]), so no "always" rule reaches the adapter;
+//! - options: a permission request loses every option of the agent's that would stop later asks
+//!   ([`keep_option`]), so no "always" rule reaches the adapter; Clauseo's own
+//!   [`CLAUSEO_ALWAYS`] stays, since the host keeps that rule and the agent only ever gets its
+//!   `allow_once` (decision record 0063);
 //! - no `allowedTools` in the session's `_meta` (`agent/loads.rs`), and [`ASK_RULES`] as
 //!   `permissions.ask` rules in its flag settings, the fence that holds when the hook fails;
 //! - the guard hook runs before every tool with [`ASK_ALL_FLAG`] and answers `ask` for all but a
@@ -72,11 +74,22 @@ pub(crate) fn mode_allowed(id: &str) -> bool {
     ASK_MODES.contains(&id)
 }
 
-/// Whether a forced-ask session's permission request keeps `option`: not an `allow_always`
-/// one, and not one of [`SKIPPING_OPTIONS`].
+/// The host's own "Always for this matter" option (decision record 0063): kind `allow_always`,
+/// added by the host's option rewrite (`actor/turn/asks.rs`) when the request is eligible: an
+/// edit inside the matter (`Edit(*)`), a command or a site. Answered, the host keeps the rule
+/// in Clauseo's data and the agent gets the request's `allow_once` option, so nothing reaches
+/// the adapter's settings and later asks still come to the host, which answers them from the
+/// kept rule. The rewrite drops any agent option whose id starts `clauseo.`, so one the agent
+/// sends under this id never gets here.
+pub(crate) const CLAUSEO_ALWAYS: &str = "clauseo.always";
+
+/// Whether a forced-ask session's permission request keeps `option`: not one of
+/// [`SKIPPING_OPTIONS`], and not an `allow_always` one unless it is [`CLAUSEO_ALWAYS`], by
+/// exact id. Every agent option that writes a rule (Claude's `allow-with-updates`,
+/// `allow-skill-*`, a plan exit's `exit-plan-*`) goes.
 pub(crate) fn keep_option(option: &PermissionOption) -> bool {
     let id = option.option_id.as_str();
-    option.kind != PermissionKind::AllowAlways
+    (option.kind != PermissionKind::AllowAlways || id == CLAUSEO_ALWAYS)
         && !SKIPPING_OPTIONS
             .iter()
             .any(|skipping| skipping.eq_ignore_ascii_case(id))

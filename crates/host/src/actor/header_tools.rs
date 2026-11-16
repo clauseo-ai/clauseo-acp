@@ -59,6 +59,17 @@ pub(crate) fn web_search_on(actor: &Actor, thread: ThreadId) -> bool {
     }
 }
 
+/// Whether `thread`'s session got Clauseo's own entry for `tool`, as its launch worked it out
+/// and its header shows it: `Available` is shown only when the host filled and sent that entry
+/// (`agent/loads/case_law.rs` `hook_servers`). False for a thread that shows none yet.
+pub(crate) fn sent(actor: &Actor, thread: ThreadId, tool: ClauseoTool) -> bool {
+    actor.header_tools.shown.get(&thread).is_some_and(|tools| {
+        tools
+            .iter()
+            .any(|state| state.tool == tool && state.availability == ToolAvailability::Available)
+    })
+}
+
 /// `thread`'s session call answered: what [`hold`] kept shows in its header.
 pub(crate) fn show_held(actor: &mut Actor, thread: ThreadId) {
     if let Some(tools) = actor.header_tools.held.remove(&thread) {

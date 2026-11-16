@@ -1,0 +1,12 @@
+{"scenario":"claude-forced-bundled-unsent","description":"A forced-ask Claude session with no case-law entry of the host's (no relay) and a lawyer's server named case-law in the settings: a search_law request reaches the lawyer, who answers allow-once","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-search","title":"mcp__case-law__search_law","name":"mcp__case-law__search_law","kind":"other","status":"pending","rawInput":{"query":"section 138"}}}}
+{"note":"not the host's entry: the lawyer is asked, and answers allow-once","request":{"id":"perm-tc-search","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-search","title":"mcp__case-law__search_law","rawInput":{"query":"section 138"}},"options":[{"optionId":"allow-once","name":"Yes","kind":"allow_once"},{"optionId":"allow-with-updates","name":"Yes, and don't ask again","kind":"allow_always"},{"optionId":"reject","name":"No","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-tc-search","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-search","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-p1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

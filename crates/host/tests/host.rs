@@ -202,6 +202,8 @@ mod folder_support;
 #[cfg(test)]
 #[path = "host/forced_ask.rs"]
 mod forced_ask;
+#[path = "host/forced_bundled.rs"]
+mod forced_bundled;
 #[cfg(test)]
 #[path = "host/forget.rs"]
 mod forget;

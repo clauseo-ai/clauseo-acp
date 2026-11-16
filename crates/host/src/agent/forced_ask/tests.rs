@@ -117,3 +117,30 @@ fn a_tool_request_loses_allow_always_and_keeps_the_rest() {
         .collect();
     assert_eq!(kept, ["allow", "reject", "reject_always"]);
 }
+
+/// Clauseo's own `clauseo.always` stays in forced ask (decision record 0063): the host keeps its
+/// rule and the agent only gets `allow_once`. Every agent option that writes a rule goes, and
+/// so does anything that only looks like ours.
+#[test]
+fn clauseos_always_stays_and_the_agents_rule_writers_go() {
+    let options = [
+        option("allow-once", PermissionKind::AllowOnce),
+        option("clauseo.always", PermissionKind::AllowAlways),
+        option("allow-with-updates", PermissionKind::AllowAlways),
+        option("allow-skill-exact", PermissionKind::AllowAlways),
+        option("allow-skill-prefix", PermissionKind::AllowAlways),
+        option("allow_always", PermissionKind::AllowAlways),
+        option("Clauseo.Always", PermissionKind::AllowAlways),
+        option("clauseo.always ", PermissionKind::AllowAlways),
+        option("clauseo.always.x", PermissionKind::AllowAlways),
+        option("clauseo.session:allow_session", PermissionKind::AllowAlways),
+        option("reject", PermissionKind::RejectOnce),
+    ];
+    let kept: Vec<&str> = options
+        .iter()
+        .filter(|option| keep_option(option))
+        .map(|option| option.option_id.as_str())
+        .collect();
+    assert_eq!(kept, ["allow-once", "clauseo.always", "reject"]);
+    assert_eq!(super::CLAUSEO_ALWAYS, "clauseo.always");
+}
