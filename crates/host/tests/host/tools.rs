@@ -58,13 +58,95 @@ const SEEDED: [&str; 33] = [
     "highcourtofuttarakhand.gov.in",
 ];
 
-/// The `allowedTools` a Claude session gets with no hook and web search on.
+/// The hosts Claude also fetches unasked (`FETCH_ONLY_SITES`), written out for the same reason.
+const FETCH_ONLY: [&str; 74] = [
+    "www.sci.gov.in",
+    "api.sci.gov.in",
+    "www.allahabadhighcourt.in",
+    "www.aphc.gov.in",
+    "www.bombayhighcourt.nic.in",
+    "www.calcuttahighcourt.gov.in",
+    "www.highcourt.cg.gov.in",
+    "www.delhihighcourt.nic.in",
+    "www.ghconline.gov.in",
+    "www.hphighcourt.nic.in",
+    "www.jkhighcourt.nic.in",
+    "www.jharkhandhighcourt.nic.in",
+    "www.judiciary.karnataka.gov.in",
+    "www.highcourt.kerala.gov.in",
+    "www.mphc.gov.in",
+    "www.hcmadras.tn.gov.in",
+    "www.hcmimphal.nic.in",
+    "www.meghalayahighcourt.nic.in",
+    "www.orissahighcourt.nic.in",
+    "www.patnahighcourt.gov.in",
+    "www.highcourtchd.gov.in",
+    "www.hcs.gov.in",
+    "www.tshc.gov.in",
+    "www.thc.nic.in",
+    "www.highcourtofuttarakhand.gov.in",
+    "ecourts.gov.in",
+    "www.ecourts.gov.in",
+    "services.ecourts.gov.in",
+    "hcservices.ecourts.gov.in",
+    "judgments.ecourts.gov.in",
+    "njdg.ecourts.gov.in",
+    "indiankanoon.org",
+    "www.indiacode.nic.in",
+    "legislative.gov.in",
+    "www.legislative.gov.in",
+    "sansad.in",
+    "www.sansad.in",
+    "eparlib.sansad.in",
+    "prsindia.org",
+    "www.prsindia.org",
+    "lawcommissionofindia.nic.in",
+    "www.lawcommissionofindia.nic.in",
+    "www.egazette.gov.in",
+    "www.cci.gov.in",
+    "www.sebi.gov.in",
+    "www.rbi.org.in",
+    "rbidocs.rbi.org.in",
+    "trai.gov.in",
+    "www.trai.gov.in",
+    "www.ibbi.gov.in",
+    "www.mca.gov.in",
+    "nclt.gov.in",
+    "www.nclt.gov.in",
+    "nclat.gov.in",
+    "www.nclat.gov.in",
+    "nclat.nic.in",
+    "www.nclat.nic.in",
+    "itat.gov.in",
+    "www.itat.gov.in",
+    "greentribunal.gov.in",
+    "www.greentribunal.gov.in",
+    "cestat.gov.in",
+    "www.cestat.gov.in",
+    "drt.gov.in",
+    "www.drt.gov.in",
+    "sat.gov.in",
+    "www.sat.gov.in",
+    "aptel.gov.in",
+    "www.aptel.gov.in",
+    "tdsat.gov.in",
+    "www.tdsat.gov.in",
+    "cgat.gov.in",
+    "ncdrc.nic.in",
+    "e-jagriti.gov.in",
+];
+
+/// The `allowedTools` a Claude session gets with no hook and web search on: no bare `WebFetch`.
 fn seeded(web_search: bool) -> Vec<String> {
     web_search
         .then(|| "WebSearch".to_owned())
         .into_iter()
-        .chain(["WebFetch".to_owned()])
-        .chain(SEEDED.map(|host| format!("WebFetch(domain:{host})")))
+        .chain(
+            SEEDED
+                .iter()
+                .chain(&FETCH_ONLY)
+                .map(|host| format!("WebFetch(domain:{host})")),
+        )
         .collect()
 }
 

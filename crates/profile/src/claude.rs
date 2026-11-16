@@ -228,9 +228,9 @@ pub const OPTION_KEYS: [&str; 5] = [
 /// The keys the profile sets in `options.settings`.
 pub const SETTINGS_KEYS: [&str; 1] = ["disableSkillShellExecution"];
 
-/// What the profile sends a Claude session. The host adds after it: `WebSearch`, a bare
-/// `WebFetch` (every fetch unasked) and the seeded `WebFetch(domain:…)` rules (already covered
-/// by the bare one) to `allowedTools` when web search is on, `WebSearch` and
+/// What the profile sends a Claude session. The host adds after it: `WebSearch` and the seeded
+/// `WebFetch(domain:…)` rules to `allowedTools` when web search is on (no bare `WebFetch`: a
+/// fetch from any other host goes to the permission mode), `WebSearch` and
 /// `WebFetch` to `disallowedTools` when it is off, and `skipWebFetchPreflight` to `settings` on
 /// a cloud login.
 ///
