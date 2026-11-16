@@ -241,9 +241,25 @@ mod tests {
             "{found:#?}"
         );
 
-        let sha = format!("sha256 = \"{}\"", "0".repeat(64));
-        let real = format!("sha256 = \"{}\"", "1".repeat(64));
-        let found = problems(&PIN.replace(&sha, &real));
+        // Copy the x64 table's pinned sha256 into the ARM64 table: a real hash, not a placeholder.
+        let pinned = |triple: &str| -> String {
+            let table: toml::Table = toml::from_str(PIN).expect("the pin parses");
+            table[triple].as_table().expect("a table")["sha256"]
+                .as_str()
+                .expect("a sha256")
+                .to_owned()
+        };
+        let (x64_sha, arm64_sha) = (
+            pinned("x86_64-pc-windows-msvc"),
+            pinned("aarch64-pc-windows-msvc"),
+        );
+        assert_ne!(
+            x64_sha, arm64_sha,
+            "the two Windows tables hold distinct hashes"
+        );
+        let from = format!("sha256 = \"{arm64_sha}\"");
+        let to = format!("sha256 = \"{x64_sha}\"");
+        let found = problems(&PIN.replacen(&from, &to, 1));
         assert!(
             found
                 .iter()
