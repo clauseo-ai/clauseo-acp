@@ -61,6 +61,24 @@ pub(crate) fn link_file(link: &Path, target: &Path) {
     link_dir(link, target);
 }
 
+/// Makes `path` a named pipe (FIFO) with `mkfifo`, making its folder; `path` must not exist.
+#[cfg(unix)]
+pub(crate) fn make_fifo(path: &Path) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let status = std::process::Command::new("mkfifo")
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success(), "mkfifo {}: {status}", path.display());
+}
+
+/// Makes `link` a symbolic link to the file `target`. Windows may refuse without the privilege,
+/// so the error is the caller's to read.
+#[cfg(windows)]
+pub(crate) fn symlink_file(link: &Path, target: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_file(target, link)
+}
+
 /// Makes the folder at `path` read-only (`0555`), or writable again (`0755`), so a delete in
 /// it fails.
 #[cfg(unix)]

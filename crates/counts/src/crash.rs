@@ -257,20 +257,20 @@ pub struct CrashPost {
     pub gzip_body: Vec<u8>,
 }
 
-/// The file at `path` whole, when it is a plain file (not a link) of at most
-/// [`MAX_CRASH_JSON`] bytes: none for a bigger one, any other kind or a failed read. Never reads
-/// more than one byte past the limit.
+/// The file at `path` whole, when it is a plain file of at most [`MAX_CRASH_JSON`] bytes: none
+/// for a bigger one, any other kind or a failed read. Never reads more than one byte past the
+/// limit. The path is opened once and the kind is checked on that open file, so a link is never
+/// followed (the open fails on Unix, and on Windows opens the link as itself) and a FIFO or
+/// other special file is never read or waited on.
 pub(crate) fn read_capped(path: &Path) -> Option<Vec<u8>> {
-    if !std::fs::symlink_metadata(path).ok()?.is_file() {
+    let file = write::open_read_no_follow(path).ok()?;
+    let kind = file.metadata().ok()?;
+    if !kind.is_file() || kind.file_type().is_symlink() {
         return None;
     }
     let limit = u64::try_from(MAX_CRASH_JSON).ok()?.saturating_add(1);
     let mut bytes = Vec::new();
-    File::open(path)
-        .ok()?
-        .take(limit)
-        .read_to_end(&mut bytes)
-        .ok()?;
+    file.take(limit).read_to_end(&mut bytes).ok()?;
     (bytes.len() <= MAX_CRASH_JSON).then_some(bytes)
 }
 

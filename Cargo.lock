@@ -1011,6 +1011,7 @@ dependencies = [
  "flate2",
  "futures",
  "insta",
+ "libc",
  "proptest",
  "schemars 1.2.3",
  "serde",

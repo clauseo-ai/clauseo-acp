@@ -22,6 +22,11 @@ uuid = { workspace = true }
 flate2 = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 
+# crash.rs read_capped: O_NOFOLLOW and O_NONBLOCK, which std does not offer. Unix only, so the
+# wasm32 Worker build does not get it.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 # The agreement test: setting_changed's values are the settings' own (src/schema/tests/settings.rs).
 clauseo-settings = { path = "../settings" }

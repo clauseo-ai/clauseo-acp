@@ -11,7 +11,7 @@
     reason = "counts writes files here alone; clippy.toml bans std's writes elsewhere"
 )]
 
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -57,6 +57,34 @@ pub(crate) fn open_record(path: &Path, header: &[u8]) -> io::Result<std::fs::Fil
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
     file.write_all(header).and_then(|()| file.sync_all())?;
     Ok(file)
+}
+
+/// Opens `path` to read, never following a link at it. On Unix `O_NOFOLLOW` makes a link fail
+/// the open, and `O_NONBLOCK` lets a FIFO open without waiting for a writer, so a caller must
+/// check what it opened before reading it. On Windows the link is opened as itself
+/// (`FILE_FLAG_OPEN_REPARSE_POINT`). A read changes nothing; it lives here beside the writes'
+/// link rule, as agents' `open_read` does.
+#[cfg(unix)]
+pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+}
+
+/// Win32's `FILE_FLAG_OPEN_REPARSE_POINT`: a link is opened as itself, never as what it names.
+#[cfg(windows)]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+/// Opens `path` to read, never following a link at it; see the Unix version.
+#[cfg(windows)]
+pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
 }
 
 /// Removes the file at `path`; a missing file is no error.
