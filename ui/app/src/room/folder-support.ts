@@ -30,3 +30,9 @@ export const MatterFolderContext = createContext<string | null>(null);
 
 /** The open matter's folder for display, or null. */
 export const useMatterFolder = (): string | null => use(MatterFolderContext);
+
+/** The other matter's folder agent.sandbox_wildcard's line names (folder-wildcard.ts' coveringWildcard), or null. */
+export const CoveringFolderContext = createContext<string | null>(null);
+
+/** That folder's name, or null. */
+export const useCoveringFolder = (): string | null => use(CoveringFolderContext);

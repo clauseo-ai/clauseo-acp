@@ -375,9 +375,9 @@ test("matter.folder_backslash with no place known: the Mac's line for the folder
 const UC470 = (name: string) =>
   `Rename the folder '\u2068${name}\u2069' so it has no * or ? in its name, then try again. Clauseo can't protect conversations in a folder with those characters.`;
 const UC471 =
-  "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again. If you can't find it, ask your firm's IT.";
+  "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again.";
 const UC472 =
-  "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again. If this keeps happening, ask your firm's IT.";
+  "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again.";
 
 test("the sandbox refusals' lines, in English in both languages until their Hindi comes", () => {
   for (const lang of ["en", "hi"] as const) {
@@ -386,6 +386,26 @@ test("the sandbox refusals' lines, in English in both languages until their Hind
     expect(errorWords(lang, "matter.folder_wildcard")).toBe(UC472);
   }
   for (const en of [UC470("Test*"), UC471, UC472]) expect(en).not.toMatch(BANNED_EN);
+});
+
+// agent.sandbox_wildcard names the other matter's folder whose * or ? pattern would cover this one's (UC-471), isolated,
+// in its own {folder} slot; with none known, the code's own line, which names none
+const UC471_NAMED = (folder: string) =>
+  `Clauseo can't protect conversations here because the folder '\u2068${folder}\u2069' has * or ? in its name. Rename it so it has no * or ?, then try again.`;
+test.each([
+  ["What?", UC471_NAMED("What?")],
+  ["A*B", UC471_NAMED("A*B")],
+  [null, UC471],
+  ["", UC471],
+] as const)("agent.sandbox_wildcard with the covering folder %j: %s", (covering, said) => {
+  const place = { platform: "mac", parent: null, covering } as const;
+  for (const lang of ["en", "hi"] as const) {
+    expect(errorWords(lang, "agent.sandbox_wildcard", CLAUDE, place)).toBe(said);
+  }
+  expect(said).not.toMatch(BANNED_EN);
+  expect(said).not.toContain("IT");
+  // it reaches no other code's line
+  expect(errorWords("en", "matter.folder_wildcard", CLAUDE, place)).toBe(UC472);
 });
 
 test.each([

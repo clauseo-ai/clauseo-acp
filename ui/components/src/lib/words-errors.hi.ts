@@ -265,9 +265,11 @@ export const HI = {
   // Provisional English; hi: later
   "Rename the folder '{name}' so it has no * or ? in its name, then try again. Clauseo can't protect conversations in a folder with those characters.":
     null,
-  "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again. If you can't find it, ask your firm's IT.":
+  "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again.":
     null,
-  "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again. If this keeps happening, ask your firm's IT.":
+  "Clauseo can't protect conversations here because the folder '{folder}' has * or ? in its name. Rename it so it has no * or ?, then try again.":
+    null,
+  "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again.":
     null,
 } as const;
 

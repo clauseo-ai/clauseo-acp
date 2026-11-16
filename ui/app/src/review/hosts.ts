@@ -109,6 +109,9 @@ export type ThreadState = {
   /** The matter's folder as the host shows it (folder_display), and the OS display_info reports (Linux when left out):
    * matter.folder_backslash's line names the folder and the file manager by them. */
   matterFolder?: string;
+  /** Other matters' folders as the host shows them, each its own listed matter: agent.sandbox_wildcard's line names
+   * the one whose * or ? pattern would cover this matter's folder. */
+  otherFolders?: string[];
   platform?: "mac" | "linux" | "windows";
   /** The thread's title, as its list row gives it; none by default. */
   title?: string;
@@ -189,6 +192,12 @@ export function threadHost(state: ThreadState): FakeTransport {
               ...(state.folder === undefined ? {} : { folder_support: state.folder }),
               ...(state.matterFolder === undefined ? {} : { folder_display: state.matterFolder }),
             },
+            ...(state.otherFolders ?? []).map((folder_display, i) => ({
+              ...MATTER,
+              matter: `${MATTER.matter.slice(0, -2)}${String(i + 10)}`,
+              name: `Other ${String(i + 1)}`,
+              folder_display,
+            })),
           ],
         };
       if (typeof query === "object" && query.list_threads !== undefined)

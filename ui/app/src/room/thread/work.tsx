@@ -42,7 +42,12 @@ import { paperMentions } from "./paper-mentions.ts";
 import { WorkComposer } from "./work-composer.tsx";
 import { ArchivedLine } from "../archived.tsx";
 import { useToolsSegment } from "../tool-line-load.ts";
-import { FolderSupportContext, MatterFolderContext, notedFolder } from "../folder-support.ts";
+import {
+  CoveringFolderContext,
+  FolderSupportContext,
+  MatterFolderContext,
+  notedFolder,
+} from "../folder-support.ts";
 import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { LocateButton } from "../locate-button.tsx";
 import { hasSetup } from "../first-run/hold.ts";
@@ -101,6 +106,7 @@ export function Work({
   archived = false,
   folderShut,
   openRefused = null,
+  covering = null,
 }: {
   transport: HostTransport;
   matter: MatterSummary | null;
@@ -129,6 +135,9 @@ export function Work({
   /** A paper's open from an answer or from Find, refused, by its code, until the next try
    * (act-refusals.ts). */
   openRefused?: string | null;
+  /** Another matter's folder whose * or ? pattern would cover this matter's (agent.sandbox_wildcard's line names it),
+   * or null (room.tsx, folder-wildcard.ts' coveringWildcard). */
+  covering?: string | null;
 }) {
   const store = useViewStore();
   const field = useRef<ComposerHandle>(null);
@@ -262,12 +271,14 @@ export function Work({
               <KeyedRequestContext value={keyed}>
                 <FolderSupportContext value={matter?.folder_support}>
                   <MatterFolderContext value={matter?.folder_display || null}>
-                    <LazyThreadList
-                      transport={transport}
-                      stream={stream}
-                      busy={busy}
-                      sent={session.sentTurn}
-                    />
+                    <CoveringFolderContext value={covering}>
+                      <LazyThreadList
+                        transport={transport}
+                        stream={stream}
+                        busy={busy}
+                        sent={session.sentTurn}
+                      />
+                    </CoveringFolderContext>
                   </MatterFolderContext>
                 </FolderSupportContext>
               </KeyedRequestContext>

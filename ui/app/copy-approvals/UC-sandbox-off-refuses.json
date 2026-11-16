@@ -9,21 +9,21 @@
     "note": "matter.folder_wildcard: a * or ? in a folder name of the matter folder's path keeps Claude's sandbox from naming it on macOS or Linux, so the host didn't start Claude; {name} is the deepest such folder in the matter's folder display (the matter folder's own name or one above it), isolated; English settled by the orchestrator; with no folder to name, the line is UC-472's"
   },
   "UC-471": {
-    "en": "Clauseo can't protect conversations here because another matter's folder, or a folder Clauseo keeps its own files in, has * or ? in its name. Rename that folder so it has no * or ?, then try again. If you can't find it, ask your firm's IT.",
+    "en": "Clauseo can't protect conversations here because the folder '{folder}' has * or ? in its name. Rename it so it has no * or ?, then try again.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-16",
-    "by": "app thread (provisional; Rohan batch review)",
-    "note": "agent.sandbox_wildcard: a * or ? in another matter's folder (whose pattern would cover this conversation's folders) or in the path of a folder Clauseo keeps a Claude session's own files in (data, work, temp or notes), so the host didn't start Claude; not retryable"
+    "by": "app thread voice check (final words, provisional; Hindi later)",
+    "note": "agent.sandbox_wildcard: another matter's folder has a * or ? and its pattern would cover this conversation's folders, so the host didn't start Claude; {folder} is that matter's deepest folder with a * or ? (folder-wildcard.ts' coveringWildcard, by the matter list's folder displays), isolated. With no such matter (a * or ? in a folder Clauseo keeps a conversation's own files in) the code's own line, which names none, until its separate line; not retryable"
   },
   "UC-472": {
-    "en": "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again. If this keeps happening, ask your firm's IT.",
+    "en": "Clauseo couldn't set up its protection for conversations on this computer, so Claude didn't start. Restart your computer, then try again.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-16",
-    "by": "app thread (provisional; Rohan batch review)",
+    "by": "app thread voice check (final words, provisional; Hindi later)",
     "note": "agent.sandbox_unavailable: Claude's sandbox couldn't be set up for another reason (its short temp folder couldn't be made, or a folder to deny isn't UTF-8), so the host didn't start Claude; also matter.folder_wildcard's line when the folder with the * or ? is unknown or out of sight; not retryable"
   }
 }

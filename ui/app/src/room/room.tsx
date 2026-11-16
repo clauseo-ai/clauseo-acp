@@ -75,6 +75,7 @@ import { useDraftMenus } from "./config-menus.ts";
 import { FolderChooserHost } from "./folder-chooser-host.tsx";
 import { PickerLine } from "@clauseo/components/clauseo/picker-line.tsx";
 import { unprotectedFolder } from "./folder-support.ts";
+import { coveringWildcard } from "./folder-wildcard.ts";
 import { RoomRail } from "./rail.tsx";
 import { useSettingsKey } from "./settings-key.ts";
 import { focusFind, useFindKey } from "./find-key.ts";
@@ -261,6 +262,15 @@ function RoomFrame({
     [talks.drafting, talks.options, talks.agent, conversations],
   );
   const open = view.open;
+  // agent.sandbox_wildcard's folder: another matter's whose * or ? pattern would cover the open one's
+  const covering = useMemo(
+    () =>
+      coveringWildcard(
+        open?.folder_display ?? null,
+        view.matters.filter((m) => m.matter !== open?.matter).map((m) => m.folder_display),
+      ),
+    [open, view.matters],
+  );
   const draftMenus = useDraftMenus(talks, conversations, open, w.lang);
   const setup = hasSetup(transport);
   const welcome =
@@ -573,6 +583,7 @@ function RoomFrame({
                               onThread={matters.onThread}
                               conversations={conversations}
                               folderShut={folderShut}
+                              covering={covering}
                               openRefused={opened?.act === "open" ? opened.code : null}
                             />
                           </ProtectionContext>

@@ -26,7 +26,7 @@ import type { StreamView } from "../../store/view.ts";
 import { FolderPlaceContext } from "../folder-place.ts";
 import { backslashPlace } from "../folder-backslash.ts";
 import { wildcardName } from "../folder-wildcard.ts";
-import { useMatterFolder } from "../folder-support.ts";
+import { useCoveringFolder, useMatterFolder } from "../folder-support.ts";
 import { undoneRestoredOf, unversionedOf } from "../undone-marker.ts";
 import { toHostError } from "../../transport/host-transport.ts";
 import { locatable, useLocateFolder } from "../act-refusals.ts";
@@ -289,6 +289,8 @@ export function StepRow({
   // matter.folder_backslash's line names the folder above the matter's whose name has the backslash, and
   // matter.folder_wildcard's the deepest folder whose name has a * or ?
   const folder = useMatterFolder();
+  // agent.sandbox_wildcard's names the other matter's folder whose pattern would cover this one's
+  const covering = useCoveringFolder();
   const line = sentNow ? null : stopLine(entry, plan);
   return (
     <div
@@ -307,6 +309,7 @@ export function StepRow({
               ? errorWords(w.lang, line.code, plan, {
                   ...backslashPlace(folder, platform),
                   wildcard: wildcardName(folder),
+                  covering,
                 })
               : th(w.lang, line.key, line.slots)}
           </Say>
