@@ -177,7 +177,10 @@ pub use matter::{
 pub use papers::{Paper, PaperList};
 pub use place::{Place, SyncService, place};
 pub use probe::{OsProbe, PlaceholderProbe};
-pub use refuse::{WINDOWS_FOLDER_LIMIT, check_place, check_protected, is_too_deep, same_or_nested};
+pub use refuse::{
+    Fold, WINDOWS_FOLDER_LIMIT, check_place, check_protected, fold_text, is_too_deep, keys,
+    same_or_nested,
+};
 pub use rules::is_excluded_path;
 pub use scan::scan;
 pub use trash::{FolderTrash, OsTrash, Removals, Trash, TrashError};

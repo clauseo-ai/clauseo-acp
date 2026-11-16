@@ -380,7 +380,7 @@ fn is_macos_volume_key(key: &[OsString]) -> bool {
 
 /// How names are folded before two paths are compared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Fold {
+pub enum Fold {
     /// The safety matches, where a match refuses (refused folders, a folder holding or inside
     /// another matter's, a path checked for an owner file): composed (NFC) everywhere, so
     /// either Unicode form is caught, and lower case on macOS and Windows (decision 0007,
@@ -399,6 +399,20 @@ pub(crate) enum Fold {
 /// without those three parts.
 pub(crate) fn spellings(path: &Path) -> Vec<Vec<OsString>> {
     keys_by(path, Fold::Safety)
+}
+
+/// `path`'s comparison keys folded by `how` ([`keys_by`]), for the host's matter fence: on
+/// macOS a key starting with `/System/Volumes/Data` comes twice, as it is and without them.
+pub fn keys(path: &Path, how: Fold) -> Vec<Vec<OsString>> {
+    keys_by(path, how)
+}
+
+/// `text` folded by `how` as one name of a path is ([`keys`]); `text` as it is when `how`
+/// folds nothing on this OS.
+pub fn fold_text(text: &str, how: Fold) -> String {
+    fold(OsString::from(text), how)
+        .into_string()
+        .unwrap_or_else(|_| text.to_owned())
 }
 
 /// [`spellings`] folded by `fold`.
