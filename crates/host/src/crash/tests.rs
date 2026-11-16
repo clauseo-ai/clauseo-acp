@@ -235,10 +235,11 @@ mod native {
     #[cfg(unix)]
     #[test]
     fn a_kernel_fault_and_an_abort_are_recorded_and_kills_are_not() {
-        // A sent SIGSEGV goes on to Rust's own handler, which lets a process it was sent to
-        // carry on, so that child may exit cleanly; the others end by their signal.
-        // macOS records a sent SIGSEGV too: XNU's sendsig gives it the same si_code as a fault
-        // (bsd/dev/arm/unix_signal.c, bsd/dev/i386/unix_signal.c), so the handler cannot tell.
+        // A sent SIGSEGV goes on to Rust's own handler, which resets to the default and returns;
+        // with no fault to repeat, the child may carry on and exit cleanly, so how it ends is
+        // not checked. What is checked: macOS records exactly one report, [11] (XNU's sendsig
+        // gives a sent SIGSEGV the same si_code as a fault: bsd/dev/arm/unix_signal.c,
+        // bsd/dev/i386/unix_signal.c), and Linux none. The others end by their signal.
         let sent_segv = if cfg!(target_vendor = "apple") {
             vec![nix::libc::SIGSEGV.cast_unsigned()]
         } else {
@@ -300,6 +301,14 @@ mod native {
                 status.code().map(i32::cast_unsigned),
                 Some(code),
                 "{mode}: {status}"
+            );
+            // The next start reads the first line after the header only: the record itself
+            // holds exactly as many lines as reports, so a second write would show here.
+            let record = std::fs::read_to_string(dir.join("crash/native")).unwrap();
+            assert_eq!(
+                record.lines().skip(1).count(),
+                want.len(),
+                "{mode}: {record}"
             );
             assert_eq!(next_start_codes(&dir), want, "{mode}");
             crate::write::remove_dir_all(&dir).unwrap();

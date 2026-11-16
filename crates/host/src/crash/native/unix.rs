@@ -65,7 +65,9 @@ struct Decision {
 /// codes on arm64 (SIGSEGV always `SEGV_ACCERR`, SIGBUS `BUS_ADRALN`, SIGILL `ILL_ILLTRP`), and
 /// on Intel a real general protection fault gets 0 (`bsd/dev/arm/unix_signal.c` and
 /// `bsd/dev/i386/unix_signal.c`). So every one is recorded and raised again under the previous
-/// action: a fault ends as it would have, and an outside `kill -SEGV` leaves one report.
+/// action: a fault ends as it would have, and an outside `kill -SEGV` leaves one report (Rust's
+/// handler then resets to the default and returns, so with no fault to repeat the process may
+/// carry on).
 fn decide(abort: bool, si_code: Option<libc::c_int>, os: Os) -> Decision {
     match os {
         Os::Apple => Decision {

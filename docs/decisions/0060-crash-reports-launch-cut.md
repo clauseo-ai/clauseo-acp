@@ -51,8 +51,12 @@ symbols job and no new crates.
     report. XNU's `sendsig` (`bsd/dev/arm/unix_signal.c`) gives SIGSEGV `SEGV_ACCERR`, SIGBUS
     `BUS_ADRALN` and SIGILL `ILL_ILLTRP` however the signal came, and on Intel
     (`bsd/dev/i386/unix_signal.c`) a real general protection fault arrives with `si_code` 0.
-    The handler records and raises the signal again under the previous action, so the process
-    still dies. SIGTERM and SIGKILL are never recorded.
+    The handler records the signal and raises it again under the previous action, Rust's
+    stack-overflow handler. For a raised signal that handler resets to the default and returns,
+    and with no fault to repeat, the process may keep running: an outside kill -SEGV or -BUS
+    leaves one report, and the app may carry on. SIGTERM and SIGKILL are never recorded. A real
+    stack overflow on macOS loses Rust's "thread has overflowed its stack" message, because the
+    re-raised signal reaches Rust's handler without the guard-page address.
   - Windows: the unhandled-exception filter (`crates/host/src/crash/native/win.rs:32`) takes
     every exception no handler took, a stack overflow (`0xC00000FD`) included; `abort` fails fast
     past every filter, so its own report is the panic hook's. Inside a crashed process the
