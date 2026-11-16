@@ -325,11 +325,11 @@ pub fn read_registry(registry: &dyn Registry) -> RemoteDebugging {
 }
 
 /// One browser's `DeveloperToolsAvailability` ([`devtools_says`]), the computer's value over
-/// the user's as Chrome merges its policies: the computer's when it holds a good one, else the
-/// user's. The place that holds 2 says [`Found::Disallowed`]; nothing set, 0, 1 or 3 adds
-/// nothing; a failed read says [`Found::Unreadable`] (the user's is still read when the
-/// computer's failed, since a 2 there blocks whatever the computer holds); a value Chrome would
-/// not take says [`Found::BadValue`] and, ignored as Chrome ignores it, leaves it to the user's.
+/// the user's: the computer's when it holds a good one, else the user's. The place that holds 2
+/// says [`Found::Disallowed`]; nothing set, 0, 1 or 3 adds nothing; a failed read says
+/// [`Found::Unreadable`] (the user's is still read when the computer's failed, since a 2 there
+/// blocks whatever the computer holds); a value the code does not take says [`Found::BadValue`]
+/// and is set aside, leaving it to the user's.
 fn devtools_from_registry(
     registry: &dyn Registry,
     browser: Browser,

@@ -932,7 +932,10 @@ Chrome does:
 On a Mac and on Linux, a policy file's `DeveloperToolsAvailability` of 2 (developer tools off)
 turns remote debugging off too, so it counts as a false in the rule below. On Windows the same
 value under the same registry keys counts as a false for that browser, the `HKLM` value over the
-`HKCU` one, as Chrome merges them.
+`HKCU` one. Clauseo reads the `DeveloperToolsAvailability` value this way: 2 blocks Clauseo's
+browser; 0, 1 and 3 say nothing; any other value is a bad value and is set aside. On Windows a bad
+computer value is set aside and the user's value decides, but a valid computer value is never
+overridden by the user's, so a firm's valid machine-level block always holds.
 
 **What Clauseo doesn't read.** Brave's policy on Windows and Linux, and Chrome or Edge policy pushed from the cloud
 (Chrome Browser Cloud Management, Edge management service) that is not written to the registry,
