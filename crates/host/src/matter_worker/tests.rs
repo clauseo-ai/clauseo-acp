@@ -361,3 +361,55 @@ fn tool_paths_resolve_outside_spellings_into_the_matter() {
         .into()
     );
 }
+
+/// The worker's open puts back a crashed rewrite's backup on Windows, the one OS that makes
+/// them; elsewhere it leaves it where it is.
+#[test]
+fn the_worker_open_puts_back_backups_on_windows_alone() {
+    let dir = TempDir::new("worker-backups");
+    let root = dir.path();
+    let folder = root.join("matter");
+    let lease = folder.join("Lease.docx");
+    let backup = folder.join("Lease.docx.clauseo-0.orig.tmp");
+    let at = Timestamp::new(1_790_000_000_000).unwrap();
+    let id = MatterId::new(v7(2)).unwrap();
+    let (made, replies) = worker(root);
+    let new = NewMatter {
+        id,
+        folder: folder.clone(),
+        created_at: at,
+        marker: DEFAULT_MARKER,
+        checkpoint: CheckpointId::new(v7(1)).unwrap(),
+    };
+    let check = CheckSource::Windows;
+    made.send(MatterJob::Create { new, check }, 0).unwrap();
+    assert!(matches!(
+        replies.recv().unwrap(),
+        MatterReply::Created(Ok(_))
+    ));
+    write::write_file(&lease, b"old").unwrap();
+    let meta = TurnMeta {
+        checkpoint: CheckpointId::new(v7(3)).unwrap(),
+        thread: ThreadId::new(v7(10)).unwrap(),
+        turn: TurnId::new(v7(11)).unwrap(),
+        at,
+    };
+    made.send(MatterJob::BeforeTurn(meta), 0).unwrap();
+    let reply = replies.recv().unwrap();
+    assert!(matches!(reply, MatterReply::BeforeTurn(Ok(_))), "{reply:?}");
+    made.stop().unwrap();
+
+    write::rename(&lease, &backup).unwrap();
+    let (opened, replies) = worker(root);
+    let job = MatterJob::Open {
+        id,
+        folder,
+        relink: None,
+    };
+    opened.send(job, 0).unwrap();
+    let reply = replies.recv().unwrap();
+    assert!(matches!(reply, MatterReply::Opened(Ok(_))), "{reply:?}");
+    assert_eq!(lease.exists(), cfg!(windows));
+    assert_eq!(backup.exists(), !cfg!(windows));
+    opened.stop().unwrap();
+}

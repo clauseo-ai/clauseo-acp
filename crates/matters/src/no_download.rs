@@ -9,7 +9,7 @@
 //!
 //! Every function that reads a file's content in the matter folder, and the walk's listing,
 //! takes a `&NoDownload`, so such a read without a guard does not compile. The guard is taken in
-//! three places, and every public entry point that reads the folder goes through one of them:
+//! four places, and every public entry point that reads the folder goes through one of them:
 //!
 //! - the checkpoint walk (`checkpoint/walk_folder.rs`): `Matter::create` and
 //!   `Matter::import` (the root checkpoint), `Matter::before_turn` and `Matter::after_turn`,
@@ -17,7 +17,8 @@
 //!   `Matter::preview_restore` and `Matter::compare` with the folder (the hash-only walk);
 //! - `undo::edited_since`: `Matter::edited_since` (hashes of the step's targets);
 //! - `replace::read_local`: `Matter::read_local` (one file, checked with the probe first);
-//! - [`crate::scan`]: its listings (it reads no content).
+//! - [`crate::scan`]: its listings (it reads no content);
+//! - `matter/backups.rs`: `recover_backups` (hashes of backups; Windows and tests).
 //!
 //! The others read no file in the folder but `matter.json`: `Matter::open`, `locate`,
 //! `relink`, `changes_between`, `files_at`, `read_file`, `compare` of two checkpoints,

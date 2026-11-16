@@ -214,3 +214,18 @@ fn a_failed_put_back_puts_the_new_content_in_place() {
     let message = err.to_string();
     assert!(message.contains("Lease.docx.clauseo-0.orig.tmp") && message.contains("gone.tmp"));
 }
+
+/// A name too long to take the backup suffix: the plain rename, as on main, with the metadata
+/// counted lost.
+#[test]
+fn a_name_too_long_for_a_backup_gets_the_plain_rename() {
+    let dir = TestDir::new("replace-keeping-long");
+    let name = format!("{}.docx", "a".repeat(235));
+    assert_eq!(name.len(), 240);
+    let target = file(&dir, &name, b"old");
+    let temp = file(&dir, "new.tmp", b"new");
+    let lost = replace_keeping(&temp, &target, |_, _, _| panic!("called")).unwrap();
+    assert_eq!(lost.count, 1);
+    assert_eq!(read(&target), b"new");
+    assert_eq!(names(&dir), [name]);
+}
