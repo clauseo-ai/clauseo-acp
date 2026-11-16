@@ -1036,6 +1036,35 @@ built-in plugin, the same for every matter. Run folders and matters created afte
 that session's Claude deny rules; Clauseo's own permission check refuses them when Claude asks
 ([decision 0030](decisions/0030-launch-profile.md), "The data folder fence").
 
+### Matters on Windows and on a Mac
+
+What the app will say (UC-820 Windows, UC-821 Mac, PR to come; this build doesn't show them yet,
+and the words are provisional):
+
+- On Windows, in the launch build: "On Windows, Clauseo stops Claude's and ChatGPT's file tools
+  from opening or changing another matter's files, and refuses their commands that name another
+  matter's folder. It can't catch everything: a program they write and run, a file location they
+  piece together, or a shortcut they make first can still reach those files." Refusing commands
+  that name another matter's folder needs the launch build's shell scan, which this build doesn't
+  have. Moving another matter's folder isn't promised: no folder above a matter is in Clauseo's
+  rules, and the Windows handle pin comes in a separate update.
+- On a Mac: "On a Mac, the operating system keeps Claude inside this matter's folder, so it can't
+  open, change or move another matter's files." That holds once the Mac sandbox update (#1153) is
+  in, and only while Claude's sandbox is on; when it can't be (for example a matter folder whose
+  name holds `*` or `?`), each command Claude runs comes to the lawyer as a card first.
+
+In more detail, the scope for Claude on Windows in this build. Claude's file tools are refused
+by Clauseo's rules alone (nothing of Clauseo's watches Claude's Read tool).
+
+| Claude tries to | Covered by | Outside Clauseo's rules in this build (Anthropic's safety review judges it) |
+|---|---|---|
+| Read another matter's file | Claude's file tools; Claude's common file commands (`cat`, `type`, `Get-Content` and the like), which Claude Code checks against Clauseo's rules | programs Claude writes and runs, and interpreters it starts in a command; shortcuts and links it makes; file locations held in variables; a listing of a folder that holds the open matter beside others |
+| Change it | Claude's file tools; the common write commands | the same, including writing into a matter the lawyer let the conversation read |
+| Move, rename or delete it, or a folder above it | nothing in this build; the Windows handle pin and Clauseo's refusal to open a moved matter come in separate updates | a folder above another matter; matters on network shares or USB drives |
+
+No folder above a matter (`C:\Clients`, `Documents`) is in Clauseo's rules: a rule for it
+would also stop Claude saving anything else inside it, such as a copy in Documents.
+
 ## 9. Windows protection: a matter folder Clauseo can't take back
 
 **Not in the launch build.** The Safe workspace isn't in Clauseo's launch build; it comes in a
