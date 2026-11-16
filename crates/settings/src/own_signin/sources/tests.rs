@@ -89,7 +89,8 @@ fn no_settings_files_add_nothing() {
 
 /// The global config, then the user settings, then the policy tier: the remote settings over the
 /// policy files and the drop-ins in name order, a name the remote settings set (in any case)
-/// dropped from the files. Only the checked names, a key's value only as set or empty.
+/// taking the remote value under the files' spelling. Only the checked names, a key's value only
+/// as set or empty.
 #[test]
 fn the_sources_apply_in_claude_code_s_order_the_policy_tier_last() {
     let temp = Temp::new("order");
@@ -128,6 +129,7 @@ fn the_sources_apply_in_claude_code_s_order_the_policy_tier_last() {
             pair("ANTHROPIC_API_KEY", ""),
             pair("ANTHROPIC_BASE_URL", "https://a.example"),
             pair("anthropic_base_url", "https://e.example"),
+            pair("ANTHROPIC_BASE_URL", "https://e.example"),
             pair("ANTHROPIC_AUTH_TOKEN", "set"),
             pair("CLAUDE_CODE_USE_VERTEX", "0"),
         ]
@@ -278,12 +280,17 @@ fn a_managed_preferences_plist_s_env_is_read() {
     assert!(unreadable.unsure());
 }
 
-/// The plists read: the computer's and the login user's, or the computer's alone without one.
+/// The plists read: the login user's, then the computer's, or the computer's alone without one.
 #[test]
-fn the_plists_are_the_computer_s_and_the_login_user_s() {
+fn the_plists_are_the_login_user_s_then_the_computer_s() {
     let names = |user| -> Vec<PathBuf> { plist_paths_for(user) };
     assert_eq!(names(None).len(), 1);
-    assert_eq!(names(Some("lawyer")).len(), 2);
+    let dir = Path::new("/Library/Managed Preferences");
+    let file = "com.anthropic.claudecode.plist";
+    assert_eq!(
+        names(Some("lawyer")),
+        [dir.join("lawyer").join(file), dir.join(file)]
+    );
     assert_eq!(names(Some("..")).len(), 1);
     assert!(names(None)[0].ends_with(Path::new("com.anthropic.claudecode.plist")));
 }
@@ -406,6 +413,7 @@ fn the_policy_tiers_join_highest_first() {
         [
             pair("anthropic_base_url", "https://a.example"),
             pair("ANTHROPIC_AUTH_TOKEN", ""),
+            pair("ANTHROPIC_BASE_URL", "https://a.example"),
         ]
     );
     // A lower tier's key stays when no higher tier set one, and an empty one always stays.
@@ -514,3 +522,5 @@ fn a_blank_key_is_kept_as_empty_and_the_address_variables_are_kept() {
     );
     assert!(reaches(&[("ANTHROPIC_API_KEY", "")], &read));
 }
+
+mod tiers;

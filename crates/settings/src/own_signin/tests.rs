@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 
-use super::{SettingsEnv, is_default_address, own_signin_reaches_endpoint, plan_keeps_own_signin};
+use super::{
+    SettingsEnv, is_default_address, js_trim, own_signin_reaches_endpoint, plan_keeps_own_signin,
+};
 use crate::schema::{Plan, PlanProvider};
 
 fn plan(endpoint: bool, provider: Option<PlanProvider>) -> Plan {
@@ -53,6 +55,7 @@ fn from_settings(pairs: &[(&str, &str)], unsure: bool) -> SettingsEnv {
         unsure,
         content: !pairs.is_empty(),
         helper: false,
+        without_remote: None,
     }
 }
 
@@ -225,7 +228,7 @@ fn on_windows_the_last_spelling_of_a_name_wins() {
 fn a_blank_key_or_token_is_no_key() {
     let url = ("ANTHROPIC_BASE_URL", "https://gateway.firm.example");
     for name in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] {
-        for blank in [" ", "\t", " \t "] {
+        for blank in [" ", "\t", " \t ", "\u{FEFF}", "\u{FEFF}  ", " \u{FEFF}\t"] {
             assert!(reaches(&[url, (name, blank)]), "{name}={blank:?}");
             assert!(
                 reaches_under(&[url], &from_settings(&[(name, blank)], false), false),
@@ -233,7 +236,24 @@ fn a_blank_key_or_token_is_no_key() {
             );
         }
         assert!(!reaches(&[url, (name, " k ")]), "{name}");
+        // JavaScript's `trim` keeps U+0085, so to Claude Code that is a key.
+        assert!(!reaches(&[url, (name, "\u{85}")]), "{name}");
     }
+}
+
+/// A provider switch is read as Claude Code's `isEnvTruthy` reads it, after JavaScript's `trim`:
+/// U+FEFF around `1` is trimmed, U+0085 is not, so that switch leaves the sign-in on.
+#[test]
+fn a_provider_switch_is_trimmed_as_bun_trims() {
+    let url = ("ANTHROPIC_BASE_URL", "https://gateway.firm.example");
+    assert!(!reaches(&[
+        url,
+        ("CLAUDE_CODE_USE_BEDROCK", "\u{FEFF} 1\u{FEFF}")
+    ]));
+    assert!(reaches(&[url, ("CLAUDE_CODE_USE_BEDROCK", "\u{85}1")]));
+    // An endpoint of only U+FEFF is still an endpoint: that errs toward refusing.
+    assert!(reaches(&[("ANTHROPIC_BASE_URL", "\u{FEFF}")]));
+    assert!(reaches(&[("ANTHROPIC_BASE_URL", "\u{FEFF} ")]));
 }
 
 /// `CLAUDE_CODE_API_BASE_URL` names the API's address as `ANTHROPIC_BASE_URL` does, and a unix
@@ -260,4 +280,23 @@ fn the_api_base_url_and_a_unix_socket_count_as_an_endpoint() {
         &SettingsEnv::default(),
         true
     ));
+}
+
+/// The trim is JavaScript's: exactly its white space and line ends go from both ends, every
+/// other character stays (U+0085, U+180E and U+200B among them, which some other trims remove).
+#[test]
+fn the_trim_is_javascript_s() {
+    let js: Vec<char> = [
+        '\t', '\n', '\u{B}', '\u{C}', '\r', ' ', '\u{A0}', '\u{1680}', '\u{2028}', '\u{2029}',
+        '\u{202F}', '\u{205F}', '\u{3000}', '\u{FEFF}',
+    ]
+    .into_iter()
+    .chain('\u{2000}'..='\u{200A}')
+    .collect();
+    for c in (0..=0x3_FFFF).filter_map(char::from_u32) {
+        let text = format!("{c}k{c}");
+        let trimmed = if js.contains(&c) { "k" } else { text.as_str() };
+        assert_eq!(js_trim(&text), trimmed, "U+{:04X}", u32::from(c));
+    }
+    assert_eq!(js_trim("\u{FEFF} \u{3000}k j\u{2028}\t"), "k j");
 }

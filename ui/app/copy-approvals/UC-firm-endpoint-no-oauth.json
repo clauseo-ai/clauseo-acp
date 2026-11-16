@@ -29,7 +29,7 @@
     "note": "new (firm endpoint fix): the Plans card and the room's sign-in screen for agent.endpoint_key_needed, naming the host Claude's connection is set to; on the room's screen \"Settings › Plans\" links to the settings window at Plans; provisional for Rohan, hi later"
   },
   "UC-849": {
-    "en": "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever set up this computer can correct or remove it; the setting is called ANTHROPIC_BASE_URL.",
+    "en": "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever looks after this computer can correct or remove it; the setting is called ANTHROPIC_BASE_URL.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",

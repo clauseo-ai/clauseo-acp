@@ -51,18 +51,35 @@ fn asked(rig: &Rig, name: &str) -> usize {
     rig.calls().iter().filter(|(call, _)| *call == name).count()
 }
 
-/// Each window's `StartSignIn` is refused with `code`, its text holding no key or address,
-/// and no run starts.
+/// Each window's `StartSignIn`, and every other action that starts a sign-in (the device code,
+/// a found login, a different account), is refused with `code`, its text holding no key or
+/// address, and no run starts.
 fn every_start_refused(rig: &Rig, code: ErrorCode) {
+    let starts = [
+        "start_sign_in",
+        "use_device_code",
+        "use_found_login",
+        "use_different_account",
+    ];
     for label in [MAIN, SETTINGS] {
-        let refused = block_on(rig.setup().run(label, start())).unwrap_err();
-        assert_eq!(refused.code(), code, "{label}");
-        assert!(!refused.retryable());
-        for secret in [KEY, ENDPOINT, "gateway"] {
-            assert!(!refused.message().contains(secret), "{refused}");
+        for action in starts {
+            let start = command(action, &claude(), &json!({}));
+            let refused = block_on(rig.setup().run(label, start)).unwrap_err();
+            assert_eq!(refused.code(), code, "{label} {action}");
+            assert!(!refused.retryable());
+            for secret in [KEY, ENDPOINT, "gateway"] {
+                assert!(!refused.message().contains(secret), "{refused}");
+            }
         }
     }
-    assert_eq!(asked(rig, "sign_in"), 0, "no S18 run");
+    for run in [
+        "sign_in",
+        "sign_in_device_code",
+        "use_found_login",
+        "use_different_account",
+    ] {
+        assert_eq!(asked(rig, run), 0, "no S18 run: {run}");
+    }
 }
 
 #[test]

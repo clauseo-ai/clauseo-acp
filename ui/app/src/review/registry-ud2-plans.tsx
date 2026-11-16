@@ -211,7 +211,7 @@ export const UD2_PLANS: Entry[] = [
   entry(
     "UC-849",
     errorWords(
-      "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever set up this computer can correct or remove it; the setting is called ANTHROPIC_BASE_URL.",
+      "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever looks after this computer can correct or remove it; the setting is called ANTHROPIC_BASE_URL.",
     ),
     ENDPOINT_UNREADABLE,
   ),

@@ -93,3 +93,38 @@ fn the_claude_home_is_forced_over_an_inherited_and_a_settings_config_dir() {
     );
     assert!(spec.env().get(OsStr::new("CLAUDE_CONFIG_DIR")).is_none());
 }
+
+/// A base URL inherited from the app's environment or set in the entry's env, with no key, stops
+/// the read before anything runs, as Claude Code would send its own sign-in there; a key in
+/// either lets it go.
+#[test]
+fn a_base_url_from_the_app_or_the_entry_with_no_key_runs_nothing() {
+    let scratch = Scratch::new("claude-prepare-base-url");
+    let script = scratch.file(CLAUDE_SCRIPT, "");
+    scratch.file(CLAUDE_SDK, SDK_PACKAGE);
+    let home = scratch.path("data/agents/claude-acp/home");
+    let run_dir = scratch.path("data/limits/run");
+    let url = ("ANTHROPIC_BASE_URL", "https://gateway.firm.example");
+    let launch = |env: &[(&str, &str)]| AgentLaunch {
+        command: node(),
+        args: vec![script.to_string_lossy().into_owned()],
+        env: env
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect(),
+    };
+    let inherited = |vars: &[(&str, &str)]| {
+        vars.iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+            .collect::<Vec<_>>()
+            .into_iter()
+    };
+    let key = ("ANTHROPIC_API_KEY", "k");
+    let read = |entry: &[(&str, &str)], app: &[(&str, &str)]| {
+        prepare(&launch(entry), &run_dir, Some(&home), inherited(app))
+    };
+    assert!(read(&[], &[url]).is_err(), "inherited");
+    assert!(read(&[url], &[]).is_err(), "the entry's");
+    assert!(read(&[url, key], &[]).is_ok());
+    assert!(read(&[], &[url, key]).is_ok());
+}

@@ -386,7 +386,7 @@ const versions = wordsOf("versions");
 
 /** UC-849's words (provisional): the one place they are set. */
 const UNREADABLE_ENDPOINT =
-  "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever set up this computer can correct or remove it; the setting is called ANTHROPIC_BASE_URL.";
+  "Claude can't start: a setting on this computer sends Claude to an address that isn't a web address, so Claude can't reach anyone. Whoever looks after this computer can correct or remove it; the setting is called ANTHROPIC_BASE_URL.";
 
 /** The card's words for `agent.endpoint_key_needed` (UC-825, provisional), naming the `host` Claude's connection is
  * set to. */

@@ -11,24 +11,31 @@
 //!   `user` (sessions do; the limits helper passes none);
 //! - the policy tier, always. Its tiers are the cached remote settings
 //!   (`<config>/remote-settings.json`), then the OS's (the first macOS managed-preferences
-//!   property list with content, or the Windows registry's HKLM `Settings`), then the files
-//!   (`<managed>/managed-settings.json` and each `<managed>/managed-settings.d/*.json` not
-//!   starting `.`, in name order). Their `env` objects are joined: the first tier to set a name
-//!   (in any case) wins, and once a tier has set a key, token or provider switch, a lower tier's
-//!   that would turn the sign-in off is dropped. HKCU's `Settings` applies only when no other
-//!   tier has content; with one that has, only a custom endpoint of HKCU's is kept (it can only
-//!   refuse a launch that was safe).
+//!   property list with content, the login user's before the computer's, or the Windows
+//!   registry's HKLM `Settings`), then the files (`<managed>/managed-settings.json` and each
+//!   `<managed>/managed-settings.d/*.json` not starting `.`, in name order). Their `env`
+//!   objects are joined as Claude Code joins them: the first tier to set a name (in any case)
+//!   wins, and a lower tier's other spelling of it takes the winner's value. Clauseo's own rule
+//!   on top, stricter than Claude Code's: once a tier has set a key, token or provider switch, a
+//!   lower tier's that would turn the sign-in off is dropped. HKCU's `Settings` applies only
+//!   when no other tier has content; with one that has, only a custom endpoint of HKCU's is
+//!   kept (it can only refuse a launch that was safe). Claude Code does not always apply the
+//!   cached remote settings (it may wait to verify them), so when they set a checked name the
+//!   read also keeps the reading without them ([`SettingsEnv::readings`]), and a launch is
+//!   refused if either reading would offer the sign-in: the cache may add an endpoint, never
+//!   take one away (Clauseo's own, stricter rule).
 //!
 //! A source that is there but cannot be read, is over [`MAX_FILE`] or does not parse, an `env`
-//! that is no object, or a checked name whose value is no string, number or boolean makes the
-//! read [`unsure`](SettingsEnv::unsure): a base URL may be set. So does a policy helper
+//! that is no object, a checked name whose value is no string, number or boolean, or a property
+//! list holding a date or data value anywhere makes the read [`unsure`](SettingsEnv::unsure): a
+//! base URL may be set. So does a policy helper
 //! (`policyHelper` or `policyHelpers`) in a policy document: Claude Code runs it at start and its
 //! output takes the policy tier's place, so the tier's own pairs are dropped too. A source that
 //! is not there changes nothing. Only the names the check reads are kept, a key's or token's
 //! value only as set or empty.
 
-use std::collections::BTreeSet;
-use std::ffi::OsString;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{Cursor, ErrorKind, Read as _};
 use std::path::{Path, PathBuf};
@@ -83,12 +90,22 @@ pub struct SettingsEnv {
     pub(super) content: bool,
     /// Whether a policy document names a policy helper.
     pub(super) helper: bool,
+    /// When the cached remote settings set a checked name, the pairs as they apply without that
+    /// tier, which Claude Code may not apply: a second reading, checked as well.
+    pub(super) without_remote: Option<Vec<(OsString, OsString)>>,
 }
 
 impl SettingsEnv {
     /// The pairs Claude Code applies over its environment, in order, the policy tier last.
     pub fn pairs(&self) -> &[(OsString, OsString)] {
         &self.pairs
+    }
+
+    /// Each reading of the pairs to check: [`Self::pairs`], then the one without the cached
+    /// remote settings when they set a checked name. A launch is refused if either offers the
+    /// sign-in.
+    pub fn readings(&self) -> impl Iterator<Item = &[(OsString, OsString)]> {
+        std::iter::once(self.pairs.as_slice()).chain(self.without_remote.as_deref())
     }
 
     /// Whether a source was there but could not be read: a base URL may be set.
@@ -143,14 +160,21 @@ impl SettingsEnv {
                 .any(|tier| tier.content || tier.unsure);
             os.add_registry_tiers(super::claude_registry_settings(), admin);
         }
+        let without_remote = (!remote.pairs.is_empty()).then(|| {
+            let mut pairs = env.pairs.clone();
+            pairs.extend(Self::policy([Self::default(), os.clone(), files.clone()]).pairs);
+            pairs
+        });
         env.extend(Self::policy([remote, os, files]));
+        env.without_remote = without_remote;
         env
     }
 
     /// The policy tier's `env` from its tiers, highest first: the first tier to set a name in
-    /// any case wins, and once a tier has set a key, token or provider switch, a lower tier's
-    /// that would turn the sign-in off is dropped. A policy helper anywhere drops every pair, as
-    /// its output takes the tier's place, and makes the read unsure.
+    /// any case wins, and a lower tier's other spelling of the name gets the winner's value, as
+    /// Claude Code writes it. Clauseo's own rule: once a tier has set a key, token or provider
+    /// switch, a lower tier's that would turn the sign-in off is dropped. A policy helper
+    /// anywhere drops every pair, as its output takes the tier's place, and makes the read unsure.
     pub(super) fn policy(tiers: [Self; 3]) -> Self {
         let mut policy = Self::default();
         for tier in &tiers {
@@ -162,14 +186,19 @@ impl SettingsEnv {
             policy.unsure = true;
             return policy;
         }
-        let mut seen: BTreeSet<String> = BTreeSet::new();
+        // Each name set so far, upper-cased, with the winning tier's value.
+        let mut seen: BTreeMap<String, OsString> = BTreeMap::new();
+        let mut spelled: BTreeSet<OsString> = BTreeSet::new();
         let mut credential = false;
         for tier in tiers {
-            let mut named = BTreeSet::new();
+            let mut named = BTreeMap::new();
             let mut sets_credential = false;
             for (name, value) in tier.pairs {
                 let upper = name.to_string_lossy().to_ascii_uppercase();
-                if seen.contains(&upper) {
+                if let Some(winner) = seen.get(&upper) {
+                    if spelled.insert(name.clone()) {
+                        policy.pairs.push((name, winner.clone()));
+                    }
                     continue;
                 }
                 let is_credential = super::KEY_VARS.contains(&upper.as_str())
@@ -178,7 +207,8 @@ impl SettingsEnv {
                 if is_credential && credential && super::turns_off(&upper, &value) {
                     continue;
                 }
-                named.insert(upper);
+                named.entry(upper).or_insert_with(|| value.clone());
+                spelled.insert(name.clone());
                 policy.pairs.push((name, value));
             }
             seen.extend(named);
@@ -255,9 +285,12 @@ impl SettingsEnv {
         }
     }
 
-    /// One registry `Settings` value: JSON text; an empty one is nothing.
+    /// One registry `Settings` value: JSON text; an empty one is nothing. One starting with
+    /// U+FEFF is unsure (Clauseo's own, stricter rule): Claude Code parses the text `reg.exe`
+    /// prints with `JSON.parse`, which fails on it, so it may read the tier as empty.
     fn add_registry(&mut self, read: TierRead) {
         match read {
+            Ok(Some(text)) if text.starts_with('\u{FEFF}') => self.unsure = true,
             Ok(Some(text)) if !text.trim().is_empty() => {
                 self.add_json(Ok(Some(text.trim_end().as_bytes().to_vec())), true);
             }
@@ -268,6 +301,9 @@ impl SettingsEnv {
 
     /// A managed-preferences property list (XML or binary): its top-level `env` dictionary.
     /// An empty file is nothing, as Claude Code reads it; one that is no property list is unsure.
+    /// So is one holding a date or data value anywhere, with none of its pairs kept: Claude Code
+    /// reads the file through plutil's JSON conversion, which fails on those (Clauseo's own,
+    /// stricter rule, as what Claude Code then does is not checked).
     pub(super) fn add_plist(&mut self, read: Result<Option<Vec<u8>>, ()>) {
         let bytes = match read {
             Ok(Some(bytes)) if !bytes.is_empty() => bytes,
@@ -281,6 +317,10 @@ impl SettingsEnv {
             self.unsure = true;
             return;
         };
+        if holds_date_or_data(&value) {
+            self.unsure = true;
+            return;
+        }
         let settings = value.as_dictionary();
         self.content |= settings.is_some_and(|keys| !keys.is_empty());
         self.helper |=
@@ -335,7 +375,7 @@ impl SettingsEnv {
         let secret = SECRET_NAMES
             .iter()
             .any(|secret| name.eq_ignore_ascii_case(secret));
-        let value = match (secret, text.trim().is_empty()) {
+        let value = match (secret, super::blank(OsStr::new(&text))) {
             (true, false) => "set".to_owned(),
             (true, true) => String::new(),
             (false, _) => text,
@@ -392,13 +432,31 @@ fn plist_paths() -> Vec<PathBuf> {
     Vec::new()
 }
 
-/// The managed-preferences files for the login user `user` (the computer's alone without one,
-/// as Claude Code skips the user's file when it finds no name).
+/// The managed-preferences files for the login user `user` in Claude Code's order: the user's,
+/// then the computer's (the computer's alone without a user, as Claude Code skips the user's
+/// file when it finds no name). `file_paths` lists the computer's first, for its other callers.
 #[cfg(any(target_os = "macos", test))]
 pub(super) fn plist_paths_for(user: Option<&str>) -> Vec<PathBuf> {
     use crate::policy::managed_prefs::{MANAGED_DIR, file_paths};
-    user.and_then(|user| file_paths(DOMAIN, user).ok())
-        .unwrap_or_else(|| vec![Path::new(MANAGED_DIR).join(format!("{DOMAIN}.plist"))])
+    let mut paths = user
+        .and_then(|user| file_paths(DOMAIN, user).ok())
+        .unwrap_or_else(|| vec![Path::new(MANAGED_DIR).join(format!("{DOMAIN}.plist"))]);
+    paths.reverse();
+    paths
+}
+
+/// Whether `value` holds a date or data value at any depth, which plutil cannot turn into JSON.
+fn holds_date_or_data(value: &plist::Value) -> bool {
+    let mut stack = vec![value];
+    while let Some(value) = stack.pop() {
+        match value {
+            plist::Value::Date(_) | plist::Value::Data(_) => return true,
+            plist::Value::Array(items) => stack.extend(items),
+            plist::Value::Dictionary(entries) => stack.extend(entries.values()),
+            _ => {}
+        }
+    }
+    false
 }
 
 /// `path`'s bytes: `None` when it is not there, `Err` when it is there but cannot be read or

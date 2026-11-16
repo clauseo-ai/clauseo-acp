@@ -11,7 +11,8 @@
 //! - `ANTHROPIC_AUTH_TOKEN` set (a plan's `env` can never set it: `plans.rs`);
 //! - an API key (`ANTHROPIC_API_KEY`, the stored key) or an `apiKeyHelper` in its settings.
 //!
-//! A key or token counts only when it is not blank, as Claude Code trims them. A custom
+//! A key or token counts only when it is not blank, as Claude Code trims them with JavaScript's
+//! `trim` ([`js_trim`]: U+FEFF goes, U+0085 stays). A custom
 //! `ANTHROPIC_BASE_URL` or `CLAUDE_CODE_API_BASE_URL` turns none of it off; the default address,
 //! `https://api.anthropic.com` in any spelling ([`is_default_address`]), is no custom endpoint.
 //! `ANTHROPIC_UNIX_SOCKET` set sends the API to a socket, and counts as a custom endpoint here.
@@ -19,7 +20,9 @@
 //! safe.
 //!
 //! The variables checked are those of the launch's final env together with the `env` Claude Code
-//! applies over it from its settings files and policy tiers ([`SettingsEnv`], `sources.rs`).
+//! applies over it from its settings files and policy tiers ([`SettingsEnv`], `sources.rs`), in
+//! each of its readings: with and without the cached remote settings, which Claude Code may not
+//! apply.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -77,10 +80,24 @@ pub fn own_signin_reaches_endpoint<'a>(
     reaches(env, settings, cfg!(windows))
 }
 
-/// [`own_signin_reaches_endpoint`], names folded as on Windows when `windows`.
+/// [`own_signin_reaches_endpoint`], names folded as on Windows when `windows`: true when any
+/// of `settings`' readings would offer the sign-in.
 fn reaches<'a>(
     env: impl IntoIterator<Item = (&'a OsStr, &'a OsStr)>,
     settings: &SettingsEnv,
+    windows: bool,
+) -> bool {
+    let env: Vec<(&OsStr, &OsStr)> = env.into_iter().collect();
+    settings
+        .readings()
+        .any(|pairs| reading_reaches(&env, pairs, settings.unsure(), windows))
+}
+
+/// One reading: `env` with `pairs` over it, the last value of a name winning.
+fn reading_reaches(
+    env: &[(&OsStr, &OsStr)],
+    pairs: &[(OsString, OsString)],
+    unsure: bool,
     windows: bool,
 ) -> bool {
     let mut last: BTreeMap<String, OsString> = BTreeMap::new();
@@ -100,12 +117,12 @@ fn reaches<'a>(
     for (name, value) in env {
         put(name, value);
     }
-    for (name, value) in settings.pairs() {
+    for (name, value) in pairs {
         put(name, value);
     }
     let endpoint = last.iter().any(|(name, value)| routes(name, value));
     let off = last.iter().any(|(name, value)| turns_off(name, value));
-    (endpoint || settings.unsure()) && !off
+    (endpoint || unsure) && !off
 }
 
 /// Whether the pair `name` (upper case on Windows) = `value` sends the API elsewhere than the
@@ -126,7 +143,28 @@ fn turns_off(name: &str, value: &OsStr) -> bool {
 
 /// Whether a key's `value` is empty or only white space, which Claude Code reads as no key.
 fn blank(value: &OsStr) -> bool {
-    value.to_string_lossy().trim().is_empty()
+    js_trim(&value.to_string_lossy()).is_empty()
+}
+
+/// `text` as JavaScript's `String.prototype.trim` leaves it, which Claude Code uses: its white
+/// space and line ends are ASCII's (tab, line feed, vertical tab, form feed, carriage return,
+/// space), U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and U+FEFF.
+/// Rust's `trim` differs: it keeps U+FEFF and removes U+0085. One function on purpose: the
+/// shared helper of the launch scrub's work replaces it when the two meet.
+fn js_trim(text: &str) -> &str {
+    text.trim_matches(|c: char| {
+        matches!(
+            c,
+            '\t' | '\n' | '\u{B}' | '\u{C}' | '\r' | ' ' | '\u{A0}' | '\u{1680}' | '\u{2000}'
+                ..='\u{200A}'
+                    | '\u{2028}'
+                    | '\u{2029}'
+                    | '\u{202F}'
+                    | '\u{205F}'
+                    | '\u{3000}'
+                    | '\u{FEFF}'
+        )
+    })
 }
 
 /// Whether `url` names the vendor's default address: `https://api.anthropic.com` in any case,
@@ -162,7 +200,7 @@ pub fn claude_registry_settings() -> Vec<Result<Option<String>, ()>> {
 /// Claude Code's `isEnvTruthy`: `1`, `true`, `yes` or `on`, in any case, spaces around ignored.
 fn truthy(value: &OsStr) -> bool {
     value.to_str().is_some_and(|text| {
-        let text = text.trim().to_ascii_lowercase();
+        let text = js_trim(text).to_ascii_lowercase();
         matches!(text.as_str(), "1" | "true" | "yes" | "on")
     })
 }

@@ -541,16 +541,34 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     the global config (`.config.json` or `.claude.json`) and, for sessions only
     (`settingSources`), `<home>/settings.json`, then the policy tier
     (`clauseo_settings::SettingsEnv`). The policy tier joins its tiers as Claude Code does: the
-    cached `remote-settings.json`, then the OS's (macOS managed preferences or the Windows
-    registry policy), then `managed-settings.json` and `managed-settings.d`. The first tier to
-    set a name, in any case, wins, and once a tier has set a key, token or provider switch, a
-    lower tier's is dropped. With no `CLAUDE_CONFIG_DIR` (the host's own limits reader), the
+    cached `remote-settings.json`, then the OS's (the first macOS managed-preferences profile
+    with content, the login user's before the computer's, or the Windows registry policy), then
+    `managed-settings.json` and `managed-settings.d`. The first tier to set a name, in any
+    case, wins, and a lower tier's other spelling of that name takes the winner's value, as
+    Claude Code writes it. Three rules on top are Clauseo's own, stricter than Claude Code's,
+    and each can only refuse more. Once a tier has set a key, token or provider switch, a lower
+    tier's that would turn the sign-in off is dropped (Claude Code 2.1.293 drops a lower tier's
+    value that way only for its telemetry names). A profile holding a date or data value
+    anywhere counts as unreadable, its pairs dropped, as Claude Code reads profiles through
+    plutil's JSON conversion, which fails on those values. A registry `Settings` value starting
+    with U+FEFF counts as unreadable too, as Claude Code parses the text `reg.exe` prints with
+    `JSON.parse`, which fails on it. In both cases Claude Code might read that source as empty
+    and take a lower one, which Clauseo would not have seen. And the cached
+    `remote-settings.json` may add an endpoint but never take one away: Claude Code does not
+    always apply that cache (a run on a Mac with no sign-in sent its requests to a managed
+    file's gateway under a cache naming the default address), so when the cache sets a checked
+    name the launch is checked both with and without it, and refused if either reading would
+    offer the sign-in. With no `CLAUDE_CONFIG_DIR` (the host's own limits reader), the
     files are `~/.claude.json` and `~/.claude`'s. A source there that cannot be read or parsed
     counts as setting a base URL, so with no key the launch is refused. So does a policy
     document holding `policyHelper` or `policyHelpers`: Claude Code runs that helper at start
     and its output takes the policy tier's place, env included, which Clauseo cannot read
     before the launch. The cost: a firm that uses a policy helper must give lawyers a key. A
-    key or token of only white space is no key, as Claude Code trims them.
+    known leftover: with a key of the launch's own, a helper is let through, yet its output
+    could set that key to empty and a base URL with it, which Clauseo cannot see before the
+    launch. A key or token of only white space is no key, as Claude Code trims them. The white
+    space is JavaScript's `trim` set: it includes U+FEFF, which Rust's `trim` keeps, and not
+    U+0085, which Rust's removes.
     `CLAUDE_CODE_API_BASE_URL` counts as a base URL. `ANTHROPIC_UNIX_SOCKET` set counts as a
     custom endpoint too, though Claude Code sends no claude.ai sign-in on the socket: this errs
     toward refusing. A base URL naming
@@ -586,8 +604,11 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
       come from the admin of the Claude organisation the lawyer is signed in to, so a token
       Claude Code then offers goes to an address that organisation's own admin chose.
     - *Settings changed mid-session.* Claude Code applies the `env` again when a settings
-      source changes during a session. Changing the managed files needs admin rights on the
-      machine.
+      source changes during a session. Changing the managed files, the profiles or the
+      registry policy needs admin rights on the machine. `<home>/settings.json`, the global
+      config and the cached `remote-settings.json` don't: the lawyer's own account, or any
+      program running as it, can change them, and the server-managed settings change whenever
+      the organisation's admin changes them.
 
     The per-prompt re-run and the 2 s mid-turn poll planned in launch-never-weaker will narrow
     both gaps to one prompt, or about 2 s mid-turn. This record changes to say so once that PR
