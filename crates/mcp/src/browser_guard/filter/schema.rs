@@ -5,7 +5,7 @@
 
 use serde_json::{Map, Value, json};
 
-use super::{ALLOWED_TOOLS, EXTRA_ARGS_ALLOWED, MAX_TIMEOUT_MS, TIME_KEYS, TOOL_READ, keys};
+use super::{ALLOWED_TOOLS, EXTRA_ARGS_ALLOWED, TIME_KEYS, TOOL_READ, keys, time_max};
 
 /// `agent_browser_read` as the guard lets it run: on the open tab only (its `url` is refused,
 /// `filter.rs`'s [`super::READ_FETCH_KEYS`]). agent-browser's own text, "Fetch a URL as
@@ -21,9 +21,9 @@ const READ_TITLE: &str = "Read page";
 /// refuses; `required` loses any key dropped. What stays is told the guard's limits:
 /// `extraArgs` lists its allowed tokens as an `enum` (agent-browser's own text names
 /// `--allowed-domains` and engines the guard refuses), and each key of [`TIME_KEYS`] gets its
-/// `maximum`. `agent_browser_read`'s description and title lose the `url` it no longer takes
-/// ([`READ_DESCRIPTION`]). An entry with no string name stays as it is. `None` when `line` is no
-/// such reply or nothing changes: it then goes on as read.
+/// `maximum` ([`time_max`]). `agent_browser_read`'s description and title lose the `url` it no
+/// longer takes ([`READ_DESCRIPTION`]). An entry with no string name stays as it is. `None` when
+/// `line` is no such reply or nothing changes: it then goes on as read.
 pub(crate) fn advertised_tools(line: &[u8]) -> Option<Vec<u8>> {
     let mut reply: Value = serde_json::from_slice(line).ok()?;
     let tools = reply.get_mut("result")?.get_mut("tools")?.as_array_mut()?;
@@ -64,7 +64,7 @@ fn advertise(name: &str, tool: &mut Value) {
         }
         for key in TIME_KEYS {
             if let Some(time) = properties.get_mut(*key).and_then(Value::as_object_mut) {
-                time.insert("maximum".to_owned(), json!(MAX_TIMEOUT_MS));
+                time.insert("maximum".to_owned(), json!(time_max(key)));
             }
         }
     }

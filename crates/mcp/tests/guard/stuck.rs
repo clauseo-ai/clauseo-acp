@@ -23,6 +23,10 @@ const RESTARTED: &str = "Clauseo already controls which sites the browser may op
 const STUCK: &str = "The browser is stuck on a site restriction; close it with agent_browser_close, \
                      then open the page again without allowedDomains. Clauseo already controls \
                      which sites the browser may open.";
+/// agent-browser v0.41.1's refusal, which a stuck session gives every call.
+#[cfg(unix)]
+const CDP_REFUSAL: &str = "--allowed-domains is not supported with --cdp because WebRTC \
+                           containment cannot be installed before existing page scripts run";
 /// What the guard notes when it stops the browser for it.
 #[cfg(unix)]
 const STOP_NOTE: &str = "agent-browser refused --allowed-domains on the guard's Chrome; stopped";
@@ -73,7 +77,8 @@ fn said(reply: &Value) -> &str {
 /// A page's thrown error quoting the refusal goes to the agent as agent-browser sent it, and
 /// stops nothing. The real refusal stops Chrome and the daemon before its reply goes out: the
 /// reply says so, the call in flight gets the same words, the profile stays, and the next call
-/// starts both again on it. A second real refusal in the run stops nothing, and says to close.
+/// starts both again on it. A second real refusal in the run stops nothing, and says to close;
+/// that close, refused too, stops Chrome and the daemon.
 #[cfg(unix)]
 #[test]
 fn a_stuck_session_is_stopped_once_keeping_the_profile_and_answering_what_is_in_flight() {
@@ -137,6 +142,26 @@ fn a_stuck_session_is_stopped_once_keeping_the_profile_and_answering_what_is_in_
     assert!(
         alive(second[1]) && alive(second[0]),
         "the second refusal stopped the browser"
+    );
+
+    // The way out the reply names: a close, refused by the stuck session as well, still goes
+    // to the agent as read and stops Chrome and the daemon.
+    guard.send(
+        &json!({"jsonrpc": "2.0", "id": "stub-stuck-close", "method": "tools/call",
+        "params": {"name": "agent_browser_close", "arguments": {}}}),
+    );
+    let reply = guard.read();
+    assert_eq!(reply["id"], "stub-stuck-close", "{reply}");
+    assert_eq!(
+        reply["result"]["structuredContent"]["response"]["error"], CDP_REFUSAL,
+        "{reply}"
+    );
+    guard.stderr_until("agent_browser_close: stopped Chrome and agent-browser");
+    assert!(within(|| !alive(second[1])), "Chrome {} is left", second[1]);
+    assert!(
+        within(|| !alive(second[0])),
+        "the daemon {} is left",
+        second[0]
     );
 
     let (status, _) = guard.finish();

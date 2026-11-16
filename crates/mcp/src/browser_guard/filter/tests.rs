@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use super::keys::{TOOL_KEYS, UNSUPPORTED};
 use super::{
     BATCH_MESSAGE, EXTRA_ARGS_ALLOWED, MUST_BE_FALSE, READ_FETCH, READ_FETCH_KEYS, REFUSED_KEYS,
-    SCREENSHOT_PATH, TIME_KEYS, Verdict, check, refusal_text, time_refusal,
+    SCREENSHOT_PATH, Verdict, check, refusal_text,
 };
 
 mod keys;
@@ -331,49 +331,6 @@ fn read_reads_only_the_open_page() {
         assert_eq!(read(&arguments), None, "{arguments}");
     }
     assert_eq!(refused(&json!({"url": "https://example.com/"})), None);
-}
-
-/// `timeoutMs`, and every other time in milliseconds, is capped at five minutes.
-#[test]
-fn times_are_capped_at_five_minutes() {
-    assert_eq!(
-        time_refusal("timeoutMs"),
-        "a timeoutMs other than a whole number up to 300000"
-    );
-    for key in TIME_KEYS {
-        for good in [json!(1), json!(30_000), json!(300_000)] {
-            assert_eq!(
-                refused_on(tool_of(key), &json!({ *key: good })),
-                None,
-                "{key} {good}"
-            );
-        }
-        for bad in [
-            json!(300_001),
-            json!(u64::MAX),
-            json!(1e12),
-            json!(-1),
-            json!("5"),
-            json!(1.5),
-        ] {
-            assert_eq!(
-                refused_on(tool_of(key), &json!({ *key: bad })),
-                Some(time_refusal(key)),
-                "{key} {bad}"
-            );
-        }
-    }
-}
-
-/// A tool that takes `key`.
-fn tool_of(key: &str) -> &'static str {
-    match key {
-        "waitTimeoutMs" => "agent_browser_wait_for_text",
-        "ms" => "agent_browser_wait_ms",
-        "delayMs" => "agent_browser_type",
-        "readTimeoutMs" => "agent_browser_read",
-        _ => "agent_browser_open",
-    }
 }
 
 #[test]

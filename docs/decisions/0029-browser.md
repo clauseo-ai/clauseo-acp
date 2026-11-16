@@ -241,10 +241,10 @@ on Windows.
      files, so a hostile page could get `file:`, `chrome:` or `data:` pages opened.
      `webgpu: true` adds `--enable-unsafe-webgpu` (`chrome.rs:483-486`). Any other value, even
      `null`, is refused by the key's name.
-   - **`timeoutMs`, `waitTimeoutMs`, `ms`, `delayMs`, `readTimeoutMs`:** each refused unless a
-     whole number up to 300000 ("a waitTimeoutMs other than a whole number up to 300000"). The MCP
-     server runs one call at a time (`mcp.rs:586`), so a huge value would stall it and the
-     guard's shutdown.
+   - **`timeoutMs`, `waitTimeoutMs`, `ms`, `readTimeoutMs`, `delayMs`:** each refused unless a
+     whole number up to 300000 ("a waitTimeoutMs other than a whole number up to 300000"), and
+     `delayMs`, waited between every two keystrokes, up to 1000. The MCP server runs one call at
+     a time (`mcp.rs:586`), so a huge value would stall it and the guard's shutdown.
    - **`selector` on `agent_browser_screenshot`:** refused when it holds `/` or `\`, or ends in
      `.png`, `.jpg`, `.jpeg` or `.webp` in any case: "Clauseo does not allow a file path as the
      screenshot selector in the browser." The selector is the screenshot command's one
@@ -337,7 +337,7 @@ on Windows.
    list and the keys refused unless `false` (`advertised_tools`, `filter/schema.rs`), so
    neither agent is offered `agent_browser_eval`, `allowedDomains`, `session`, `path` or any
    other refused key; `extraArgs` is advertised as an `enum` of the allowed tokens, each time
-   key above with its `maximum` of 300000, and `agent_browser_read` as "Read the open tab as
+   key above with its `maximum` (300000, or 1000 for `delayMs`), and `agent_browser_read` as "Read the open tab as
    agent-readable text." (title "Read page"), in place of agent-browser's text offering a `url`. The guard takes no agent argument: Codex and
    Claude get the same filter and the same list.
 

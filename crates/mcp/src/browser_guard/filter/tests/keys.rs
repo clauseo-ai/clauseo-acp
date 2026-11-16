@@ -1,7 +1,7 @@
 //! The pass list, `allowedDomains` in every spelling, the advertised schemas and the
 //! domain-restriction error, read against agent-browser v0.41.1's own `tools/list` reply for its
 //! `core` tools (`agent_browser_core_tools.json`: the binary's reply to `mcp --tools core`, its
-//! descriptions taken out).
+//! descriptions taken out), and the caps on the keys that hold a time.
 
 use std::collections::BTreeSet;
 
@@ -13,7 +13,7 @@ use super::super::domains::{
 use super::super::keys::{COMMON_KEYS, TOOL_KEYS, UNSUPPORTED, advertised, passes};
 use super::super::{
     ALLOWED_TOOLS, EXTRA_ARGS_ALLOWED, MUST_BE_FALSE, READ_FETCH_KEYS, REFUSED_KEYS, TIME_KEYS,
-    advertised_tools,
+    advertised_tools, time_max, time_refusal,
 };
 use super::{refused_on, verdict};
 use crate::browser_guard::filter::Verdict;
@@ -214,10 +214,14 @@ fn the_tool_list_offers_only_what_passes() {
         );
         for key in TIME_KEYS {
             if let Some(time) = props.get(*key) {
-                assert_eq!(time["maximum"], 300_000, "{name}.{key}");
+                let max = if *key == "delayMs" { 1000 } else { 300_000 };
+                assert_eq!(time["maximum"], max, "{name}.{key}");
             }
         }
         assert!(props.contains_key("timeoutMs"), "{name}");
+        if name == "agent_browser_type" {
+            assert_eq!(props["delayMs"]["maximum"], 1000);
+        }
         for key in tool["inputSchema"]["required"]
             .as_array()
             .into_iter()
@@ -313,4 +317,54 @@ fn the_domain_restriction_error_is_recognised() {
     assert_eq!(reply["id"], "x");
     assert_eq!(reply["result"]["isError"], true);
     assert_eq!(reply["result"]["content"][0]["text"], RESTARTED);
+}
+
+/// `timeoutMs`, and every other time in milliseconds, is capped at five minutes; `delayMs`,
+/// waited between every two keystrokes, at one second.
+#[test]
+fn times_are_capped() {
+    assert_eq!(
+        time_refusal("timeoutMs"),
+        "a timeoutMs other than a whole number up to 300000"
+    );
+    assert_eq!(
+        time_refusal("delayMs"),
+        "a delayMs other than a whole number up to 1000"
+    );
+    for key in TIME_KEYS {
+        let max = time_max(key);
+        assert_eq!(max, if *key == "delayMs" { 1000 } else { 300_000 }, "{key}");
+        for good in [json!(1), json!(max / 2), json!(max)] {
+            assert_eq!(
+                refused_on(tool_of(key), &json!({ *key: good })),
+                None,
+                "{key} {good}"
+            );
+        }
+        for bad in [
+            json!(max + 1),
+            json!(u64::MAX),
+            json!(1e12),
+            json!(-1),
+            json!("5"),
+            json!(1.5),
+        ] {
+            assert_eq!(
+                refused_on(tool_of(key), &json!({ *key: bad })),
+                Some(time_refusal(key)),
+                "{key} {bad}"
+            );
+        }
+    }
+}
+
+/// A tool that takes `key`.
+fn tool_of(key: &str) -> &'static str {
+    match key {
+        "waitTimeoutMs" => "agent_browser_wait_for_text",
+        "ms" => "agent_browser_wait_ms",
+        "delayMs" => "agent_browser_type",
+        "readTimeoutMs" => "agent_browser_read",
+        _ => "agent_browser_open",
+    }
 }

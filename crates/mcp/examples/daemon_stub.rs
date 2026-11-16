@@ -20,7 +20,8 @@
 //! profiles. Each detached process (`--daemon`, `--linger`, `--late`) first closes every file
 //! descriptor above 2 it inherited. Two `open` URLs get agent-browser's errors ([`domain_part`]):
 //! `.../stub-stuck` its refusal of `--allowed-domains` on the guard's Chrome, `.../stub-quoted` a
-//! page's thrown error quoting that refusal. Cargo builds it for the tests; it is never shipped.
+//! page's thrown error quoting that refusal; a close whose id starts `stub-stuck` gets the
+//! refusal. Cargo builds it for the tests; it is never shipped.
 
 use std::io::{BufRead, Write};
 
@@ -232,19 +233,26 @@ const CDP_REFUSAL: &str = "--allowed-domains is not supported with --cdp because
 
 /// agent-browser's error reply, as the release binary sends it, to an `open` of a URL ending in
 /// `/stub-stuck` (its refusal of `--allowed-domains`, which then stuck on its session) or
-/// `/stub-quoted` (a page's thrown error that quotes that refusal).
+/// `/stub-quoted` (a page's thrown error that quotes that refusal), and to an
+/// `agent_browser_close` whose id starts `stub-stuck` (the same refusal).
 fn domain_part(message: &Value) -> Option<Value> {
     let id = message.get("id")?;
-    if message.pointer("/params/name").and_then(Value::as_str)? != "agent_browser_open" {
-        return None;
-    }
-    let url = message.pointer("/params/arguments/url")?.as_str()?;
-    let error = if url.ends_with("/stub-stuck") {
-        CDP_REFUSAL.to_owned()
-    } else if url.ends_with("/stub-quoted") {
-        format!("Evaluation error: Error: {CDP_REFUSAL}")
-    } else {
-        return None;
+    let error = match message.pointer("/params/name").and_then(Value::as_str)? {
+        "agent_browser_open" => {
+            let url = message.pointer("/params/arguments/url")?.as_str()?;
+            if url.ends_with("/stub-stuck") {
+                CDP_REFUSAL.to_owned()
+            } else if url.ends_with("/stub-quoted") {
+                format!("Evaluation error: Error: {CDP_REFUSAL}")
+            } else {
+                return None;
+            }
+        }
+        // A stuck session refuses its close too, as the release binary does.
+        "agent_browser_close" if id.as_str().is_some_and(|id| id.starts_with("stub-stuck")) => {
+            CDP_REFUSAL.to_owned()
+        }
+        _ => return None,
     };
     let stdout = json!({"error": error, "success": false}).to_string();
     Some(json!({"jsonrpc": "2.0", "id": id, "result": {
