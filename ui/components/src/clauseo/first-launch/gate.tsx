@@ -516,7 +516,8 @@ export function Gate({
     <div ref={root} className="fl-gate" data-testid={testIds.root} data-agent={plan}>
       <div className="fl-gate-body" data-testid={testIds.state} data-state={stateOf(view)}>
         {body}
-        {refused != null && (
+        {/* a refusal in the failure's own code (Try again on an unreadable key) says what the gate says already */}
+        {refused != null && !(view.kind === "failed" && view.code === refused.code) && (
           <Ways>
             <span className="fl-gate-note" role="status" data-testid="signin-refused">
               <Say>

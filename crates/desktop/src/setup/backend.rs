@@ -47,7 +47,7 @@ use clauseo_agents::{
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
 use futures::{Stream, StreamExt as _};
 
-use super::admit::sign_in_barred;
+use super::admit::{SignInBar, sign_in_barred};
 use super::compose::Compose;
 use super::confirm::{Ask, SetupConfirm};
 use super::host_calls::SetupHost;
@@ -133,9 +133,7 @@ impl SetupBackend for AgentsBackend {
     }
 
     fn sign_in_refused(&self, agent: &AgentId) -> Option<HostError> {
-        self.compose
-            .sign_in_bar(agent)
-            .map(|bar| sign_in_barred(agent, bar))
+        self.barred(agent)
     }
 
     fn sign_in_pending(&self, agent: &AgentId) -> bool {
@@ -303,10 +301,20 @@ impl AgentsBackend {
     /// (`admit::sign_in_bar`: a firm policy's endpoint, a key, an endpoint the lawyer set).
     fn refuse_start(&self, agent: &AgentId) -> Result<(), HostError> {
         self.refuse_blocked(agent)?;
-        match self.compose.sign_in_bar(agent) {
-            Some(bar) => Err(sign_in_barred(agent, bar)),
-            None => Ok(()),
+        self.barred(agent).map_or(Ok(()), Err)
+    }
+
+    /// The refusal of a sign-in for what bars it now, if anything. A stored key that could not
+    /// be read is read again first: the card's Try again (a sign-in press) is the lawyer's
+    /// retry once macOS's prompt is answered, and a read that succeeds shows the key's line.
+    fn barred(&self, agent: &AgentId) -> Option<HostError> {
+        let bar = self.compose.sign_in_bar(agent)?;
+        if bar == SignInBar::KeyUnreadable {
+            tracing::info!(%agent, "sign-in press, stored key unreadable: read again");
+            // Its answer comes back as a `KeyNote::Read` when the mark changes.
+            drop(self.keys.read_again(agent));
         }
+        Some(sign_in_barred(agent, bar))
     }
 
     /// Ends `agent`'s sign-in, if one runs or is reserved, because a key or an endpoint took

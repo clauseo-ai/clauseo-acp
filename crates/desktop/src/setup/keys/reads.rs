@@ -16,7 +16,14 @@
 //!   `failed` entry, read with the plan by [`KeyCache::unreadable_for`]), so a lawyer's own
 //!   sign-in token is never offered to a firm's gateway.
 //!   A write since the read began (a key set or cleared) wins: the read's answer is dropped.
-//! - [`KeyCache::read_again`]: a key marked unreadable, with no read running, is read again.
+//! - [`KeyCache::read_again`]: a key marked unreadable, or whose read failed unmarked (refused
+//!   under a firm plan), with no read running, is read again: a launch that met
+//!   `agent.key_unreadable` asks it, and so does a sign-in press while the key is unreadable
+//!   (`setup/backend.rs`), the card's Try again. A read that timed out still runs: its answer,
+//!   once the lawyer answers macOS's prompt, is taken in as any read is.
+//! - A read that has not answered by the bound, for an agent the marker does not mark, counts as
+//!   a failed read (`failed`) as well: it launches without a key, unless a firm plan, which
+//!   refuses it, as a failed read does, until the read answers.
 //! - Each change of a mark sends a [`KeyNote::Read`].
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -175,21 +182,33 @@ impl Marks {
 
     /// Marks each read still running unreadable when `marked` marks its agent: the first
     /// load's bound has passed. One the marker does not mark has no key Clauseo stored, so it
-    /// launches without one; its read goes on and is taken in when it answers.
+    /// launches without one, unless a firm plan: it counts as failed (`ReadState::failed`).
+    /// Each read goes on and is taken in when it answers.
     fn time_out(&self, marked: &Marked) {
-        let late: Vec<AgentId> = {
+        let (late, unmarked): (Vec<AgentId>, Vec<AgentId>) = {
             let mut state = lock(&self.state);
-            let late: Vec<AgentId> = state
+            let (late, unmarked): (Vec<AgentId>, Vec<AgentId>) = state
                 .reading
                 .iter()
-                .filter(|agent| !state.unreadable.contains(*agent) && marked.contains(agent))
+                .filter(|agent| {
+                    !state.unreadable.contains(*agent) && !state.failed.contains(*agent)
+                })
                 .cloned()
-                .collect();
+                .partition(|agent| marked.contains(agent));
             state.unreadable.extend(late.iter().cloned());
-            late
+            state.failed.extend(unmarked.iter().cloned());
+            (late, unmarked)
         };
         for agent in late {
             tracing::warn!(%agent, kind = "timed_out", "key unreadable");
+            self.noted(true, &agent);
+        }
+        for agent in unmarked {
+            tracing::warn!(
+                %agent,
+                kind = "timed_out",
+                "key read late, no key marked stored: none used unless a firm plan"
+            );
             self.noted(true, &agent);
         }
     }
@@ -288,12 +307,16 @@ impl FirstLoad {
     }
 }
 
-/// Reads `agent`'s key again when it is marked unreadable and no read of it runs (a launch
-/// met `agent.key_unreadable`); a read that succeeds ends the mark. The receiver resolves
-/// once the answer is in (at once when no read starts); nobody needs to wait for it.
+/// Reads `agent`'s key again when it is marked unreadable, or its read failed unmarked, and
+/// no read of it runs (a launch met `agent.key_unreadable`, or a sign-in press did, the card's
+/// Try again); a read that succeeds ends the mark. The receiver resolves once the answer is in
+/// (at once when no read starts); nobody needs to wait for it.
 pub(super) fn read_again(cache: &KeyCache, agent: &AgentId) -> oneshot::Receiver<()> {
-    let reading = lock(&cache.marks.state).reading.contains(agent);
-    if !cache.marks.is_unreadable(agent) || reading {
+    let (reading, failed) = {
+        let state = lock(&cache.marks.state);
+        (state.reading.contains(agent), state.failed.contains(agent))
+    };
+    if !(cache.marks.is_unreadable(agent) || failed) || reading {
         // Nothing to read again, or the read that timed out still waits: its answer is taken
         // in when it comes.
         return oneshot::channel().1;
