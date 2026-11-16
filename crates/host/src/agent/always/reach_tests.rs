@@ -1,16 +1,23 @@
 //! A kept rule's reach on disk (`reach.rs`).
 
+#[cfg(unix)]
 use std::ffi::OsString;
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 
-use super::{Program, Reach};
+#[cfg(unix)]
+use super::Program;
+use super::Reach;
+#[cfg(unix)]
 use crate::agent::always::table::At;
 use crate::pipeline::tests::support::TempDir;
 
+#[cfg(unix)]
 fn search(dirs: &[&Path]) -> Option<OsString> {
     std::env::join_paths(dirs).ok()
 }
 
+#[cfg(unix)]
 fn program(name: &str, search: Option<OsString>, bundled: &[&Path]) -> Program {
     Program {
         name: name.to_owned(),
@@ -20,6 +27,7 @@ fn program(name: &str, search: Option<OsString>, bundled: &[&Path]) -> Program {
     }
 }
 
+#[cfg(unix)]
 fn tool(dir: &Path, name: &str) -> PathBuf {
     crate::write::create_dir_all(dir).unwrap();
     let file = dir.join(name);
@@ -55,11 +63,7 @@ fn a_path_swapped_for_a_link_after_the_keep_is_caught() {
     crate::write::symlink(&other.join("secret.txt"), &matter.join("notes.txt")).unwrap();
     assert_eq!(reach.check(&matter, false), Some(false));
     // A working folder outside, or a name an agent reads its own instructions from.
-    for place in [
-        other.clone(),
-        matter.join("AGENTS.md"),
-        matter.join(".codex/x"),
-    ] {
+    for place in [other, matter.join("AGENTS.md"), matter.join(".codex/x")] {
         let reach = Reach {
             places: vec![place.clone()],
             ..Reach::default()

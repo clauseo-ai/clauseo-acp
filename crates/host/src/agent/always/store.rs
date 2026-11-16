@@ -95,16 +95,16 @@ fn key() -> Option<[u8; 32]> {
     let key = match stored {
         // A key of another length was never written by this host: it is not replaced, which
         // would void every matter's rules, and nothing is kept until it is dealt with.
-        Some(bytes) => match <[u8; 32]>::try_from(bytes.as_slice()) {
-            Ok(key) => key,
-            Err(_) => {
+        Some(bytes) => {
+            let Ok(key) = <[u8; 32]>::try_from(bytes.as_slice()) else {
                 tracing::error!(
                     len = bytes.len(),
                     "the kept-permissions key is malformed; nothing is kept or offered"
                 );
                 return None;
-            }
-        },
+            };
+            key
+        }
         None => new_key(&*store)?,
     };
     *cached = Some(key);

@@ -4,11 +4,10 @@
 //! requests reach the lawyer with no "Always" on a card that cannot show the command.
 
 use clauseo_protocol::{PermissionKind, StopReason, StreamId};
-use serde_json::json;
 
-use crate::always::{
-    ALWAYS, CLAUDE, ask, bash_options, claude_scenario, keep, offers, resolutions,
-};
+use crate::always::{ALWAYS, keep, offers, resolutions};
+#[cfg(unix)]
+use crate::always::{CLAUDE, ask, bash_options, claude_scenario};
 use crate::permissions::answer_from;
 use crate::support::{Dir, Scenario, matter_with_thread};
 
@@ -18,7 +17,7 @@ use crate::support::{Dir, Scenario, matter_with_thread};
 #[test]
 fn a_kept_command_never_follows_a_link_out_of_the_matter() {
     let dir = Dir::new("always_reach_link", &[]);
-    let wc = json!({"command": "wc -l notes.txt"});
+    let wc = serde_json::json!({"command": "wc -l notes.txt"});
     let turn = ask("wc", "Bash", &wc, &bash_options(), "reject").to_vec();
     let scenario = claude_scenario(&dir, "claude-reach-link", false, turn);
     dir.set_agents(&[(CLAUDE, scenario)]);

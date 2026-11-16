@@ -4,8 +4,8 @@
 //! - [`ask`]: a request that comes in gets its rule (or why none) and its first `allow_once`
 //!   option, unless it is a plan exit (an `exit-plan-*` option, or the `ExitPlanMode` tool).
 //!   What its rule reaches on disk goes with the request's matter-thread check ([`reach`],
-//!   `agent::always::Reach`): files, a command's program, working folder and path words. The agent's rule-writing options are
-//!   dropped in `asks.rs` (`agent::always::options`).
+//!   `agent::always::Reach`): files, a command's program, working folder and path words. The
+//!   agent's rule-writing options are dropped in `asks.rs` (`agent::always::options`).
 //! - [`offer`]: when the request is logged for the lawyer, `clauseo.always` is added and the
 //!   card says what it would keep (`PermissionRequested.always`), when the rule can be kept.
 //! - [`answer`]: the lawyer's `clauseo.always` answer is logged as chosen, but the agent gets

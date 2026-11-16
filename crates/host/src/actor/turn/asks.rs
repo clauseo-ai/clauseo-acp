@@ -154,7 +154,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     let reaches = ask
         .always
         .as_ref()
-        .is_some_and(|always| always.has_command());
+        .is_some_and(super::always::AlwaysAsk::has_command);
     if paths.is_empty() && fence.is_none() && !reaches {
         log_for_lawyer(actor, thread, ask, None);
         return;

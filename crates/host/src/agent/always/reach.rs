@@ -127,6 +127,10 @@ impl Program {
 
 /// The first file named `name` (on Windows with an extension a shell would add) in the
 /// entries of `search`, in order; none when a relative entry comes first or none holds it.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "walks the agent's own PATH, as its launch set it, for the file a kept command runs"
+)]
 fn first_on(search: &OsString, name: &str, windows: bool) -> Option<PathBuf> {
     let names: Vec<String> = if windows {
         ["", ".exe", ".com", ".bat", ".cmd"]

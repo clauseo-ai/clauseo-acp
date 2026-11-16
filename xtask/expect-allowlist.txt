@@ -344,6 +344,7 @@ crates/host/src/config/wiring/stetdoc.rs HostConfig clippy::multiple_inherent_im
 crates/host/src/config/mcp.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/config/idle.rs HostConfig clippy::multiple_inherent_impl
 crates/host/src/agent/loads/lawyer.rs server_path clippy::disallowed_methods
+crates/host/src/agent/always/reach.rs first_on clippy::disallowed_methods
 crates/host/src/actor/query.rs query clippy::too_many_lines
 crates/host/src/actor/query/blackline/parse/tests/partial.rs joining_wrapped_lines_is_linear clippy::disallowed_methods
 crates/host/src/actor/startup.rs open clippy::too_many_lines

@@ -260,10 +260,8 @@ fn codex_s_own_wrapper_is_read_through_only_at_its_system_path() {
     assert_eq!(codex("bash -lc ls"), Err(NotPlain::NotListed));
     assert_eq!(codex("zsh -c ls"), Err(NotPlain::NotListed));
     // unix-paths-ok: command text only; `codex` parses it and no path API opens it
-    assert_eq!(
-        codex("/opt/homebrew/bin/bash -lc ls"),
-        Err(NotPlain::Unparsed)
-    );
+    let homebrew = "/opt/homebrew/bin/bash -lc ls";
+    assert_eq!(codex(homebrew), Err(NotPlain::Unparsed));
     // Claude's own shell takes the script as given: a `bash -c` in it is the model's.
     assert_eq!(claude("/bin/bash -lc 'ls -la'"), Err(NotPlain::Unparsed));
 }

@@ -432,11 +432,13 @@ pub(crate) fn read(spec: &Spec, args: &[String]) -> Result<Read, Unfit> {
     let mut operands = operands.into_iter();
     if !spec.subcommands.is_empty() {
         // No subcommand only with `--help` alone.
-        match operands.next() {
-            Some(sub) if spec.subcommands.contains(&sub.as_str()) => {}
-            Some(_) => return Err(Unfit::Count),
-            None if args.len() == 1 && args.first().is_some_and(|arg| arg == "--help") => {}
-            None => return Err(Unfit::Count),
+        let help = args.len() == 1 && args.first().is_some_and(|arg| arg == "--help");
+        let fits = match operands.next() {
+            Some(sub) => spec.subcommands.contains(&sub.as_str()),
+            None => help,
+        };
+        if !fits {
+            return Err(Unfit::Count);
         }
     }
     let operands: Vec<&String> = operands.collect();
