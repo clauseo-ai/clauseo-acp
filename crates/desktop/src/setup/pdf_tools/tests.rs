@@ -30,7 +30,7 @@ fn elsewhere_the_folder_is_under_the_resource_folder() {
 }
 
 #[test]
-fn the_folder_is_usable_only_with_both_programs() {
+fn the_folder_is_usable_only_with_all_three_programs() {
     let suffix = std::env::consts::EXE_SUFFIX;
     let scratch = Scratch::new("pdf-tools-usable", &["pdf"]);
     let folder = scratch.dir("pdf");
@@ -43,6 +43,10 @@ fn the_folder_is_usable_only_with_both_programs() {
     scratch.file(&format!("pdf/pdfinfo{suffix}"), b"program");
     #[cfg(unix)]
     scratch.executable(&format!("pdf/pdfinfo{suffix}"));
+    assert!(!usable(&folder));
+    scratch.file(&format!("pdf/pdftotext{suffix}"), b"program");
+    #[cfg(unix)]
+    scratch.executable(&format!("pdf/pdftotext{suffix}"));
     assert!(usable(&folder));
     assert!(!usable(&scratch.path().join("missing")));
 }

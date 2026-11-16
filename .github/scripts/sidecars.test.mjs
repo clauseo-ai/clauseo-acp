@@ -125,12 +125,14 @@ const STETDOC_RES = (triple) => {
 const PDF_MAC = (triple) => ({
   "Helpers/pdf/pdftoppm": `binaries/clauseo-pdftoppm-${triple}`,
   "Helpers/pdf/pdfinfo": `binaries/clauseo-pdfinfo-${triple}`,
+  "Helpers/pdf/pdftotext": `binaries/clauseo-pdftotext-${triple}`,
 });
 const PDF_RES = (triple) =>
   isWindows(triple)
     ? {
         [`binaries/clauseo-pdftoppm-${triple}.exe`]: "pdf/pdftoppm.exe",
         [`binaries/clauseo-pdfinfo-${triple}.exe`]: "pdf/pdfinfo.exe",
+        [`binaries/clauseo-pdftotext-${triple}.exe`]: "pdf/pdftotext.exe",
       }
     : {};
 /** Every own-folder entry a full run writes: stetdoc's, and the PDF tools' where they ship. */
@@ -154,10 +156,11 @@ test("the table ships clauseo-mcp and clauseo-agent-browser on every release tar
       ["clauseo-stetdoc", RELEASE_TARGETS, false, true],
       ["clauseo-pdftoppm", PDF_TARGETS, false, true],
       ["clauseo-pdfinfo", PDF_TARGETS, false, true],
+      ["clauseo-pdftotext", PDF_TARGETS, false, true],
     ],
   );
   assert.deepEqual(PDF_TARGETS, RELEASE_TARGETS.filter((t) => isDarwin(t) || isWindows(t)));
-  assert.deepEqual(PDF_TOOLS, ["clauseo-pdftoppm", "clauseo-pdfinfo"]);
+  assert.deepEqual(PDF_TOOLS, ["clauseo-pdftoppm", "clauseo-pdfinfo", "clauseo-pdftotext"]);
   assert.deepEqual(Object.keys(OWN_FOLDERS), ["clauseo-stetdoc", ...PDF_TOOLS]);
   assert.equal(MACOS_HELPER, "clauseo-agent-browser");
   assert.equal(STETDOC, "clauseo-stetdoc");
@@ -308,6 +311,7 @@ test("a triple the pin marks none leaves agent-browser out of the overlay", asyn
     "clauseo-mcp-aarch64-pc-windows-msvc.exe",
     "clauseo-pdfinfo-aarch64-pc-windows-msvc.exe",
     "clauseo-pdftoppm-aarch64-pc-windows-msvc.exe",
+    "clauseo-pdftotext-aarch64-pc-windows-msvc.exe",
     "clauseo-sandbox-setup-aarch64-pc-windows-msvc.exe",
     "clauseo-stetdoc-aarch64-pc-windows-msvc.exe",
   ]);
