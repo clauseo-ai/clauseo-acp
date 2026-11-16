@@ -1,7 +1,8 @@
 // A tool's or a permission's own name as an agent sometimes sends it for a title ("SandboxNetworkAccess", "write_file",
-// "mcp__browser__navigate", "fs.read", "ApplyPatch"): never shown. A name Clauseo knows reads as what it does, in the
-// room's words; any other title shaped like a name reads as the kind's own plain line, or, on a permission prompt,
-// as nothing beneath "Clauseo asks before going on.". A title in words ("Read Notice to the bank.pdf") stays as it is.
+// "mcp__browser__navigate", "mcp.browser.agent_browser_open", "fs.read", "ApplyPatch"): never shown. A name Clauseo
+// knows reads as what it does, in the room's words; any other title shaped like a name reads as the kind's own plain
+// line, or, on a permission prompt, as nothing beneath "Clauseo asks before going on.". A title in words ("Read Notice
+// to the bank.pdf") stays as it is.
 // Pure, and without words of its own: each place that tells a step or a prompt holds its words for each name
 // (step-names.ts while a step runs, tool-words.ts once it is over, permission-model.ts for a prompt), so the room's
 // first chunk takes none of the settled group's.
@@ -64,8 +65,10 @@ const KNOWN: Readonly<Record<string, ToolAs>> = {
   webfetch: "fetch",
 };
 
-/** The browser's tools, by their MCP server ("mcp__browser__navigate"): looking online. */
-const BROWSER = /^mcp__browser__/i;
+/** The browser's tools, by their MCP server: looking online. Claude (claude-agent-acp) titles an MCP call with its
+ * name, `mcp__<server>__<tool>` ("mcp__browser__agent_browser_open"); ChatGPT (codex-acp) with
+ * `mcp.<server>.<tool>` ("mcp.browser.agent_browser_open"). */
+const BROWSER = /^(?:mcp__browser__|mcp\.browser\.)/i;
 
 /** A title that is a tool's name: what it does when Clauseo knows it (`as`), null when it doesn't; undefined for a
  * title in words, which is shown. A known name counts in any shape, "Bash" as much as "exec_command". */
