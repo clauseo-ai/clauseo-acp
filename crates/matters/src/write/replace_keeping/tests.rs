@@ -133,7 +133,7 @@ fn a_staged_rewrite_keeps_its_temp_file_when_the_target_is_gone() {
         crate::write::set_permissions(&folder, locked)?;
         Err(code(UNABLE_TO_MOVE_REPLACEMENT_2))
     };
-    let failed = staged.rename_with(Some(simulate)).unwrap_err();
+    let failed = staged.rename_with(Some(simulate), None).unwrap_err();
     let open = std::fs::Permissions::from_mode(0o755);
     crate::write::set_permissions(dir.path(), open).unwrap();
     if !failed.changed {

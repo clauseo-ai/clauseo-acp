@@ -39,6 +39,36 @@ pub enum Error {
         /// The locked files, sorted.
         paths: Vec<MatterPath>,
     },
+    /// Files a write-back could not change, each with why (`matter.file_refused`); every other
+    /// file of the operation was written or deleted (a restore or an undo also took its
+    /// checkpoint of them). Each refused file is as it was.
+    #[error("{} of {of} files could not be changed", files.len())]
+    FilesRefused {
+        /// The refused files and why, sorted by path.
+        files: Vec<(MatterPath, RefusedBecause)>,
+        /// How many files the operation wrote, deleted or meant to: one is an operation on that
+        /// file alone.
+        of: usize,
+    },
+    /// A write in place (the rename over a lawyer's file refused, macOS) failed after its first
+    /// byte (`matter.file_write_failed`), and the write-back stopped there: the files it changed
+    /// before stay changed, and no checkpoint of the operation is taken. The version of the file
+    /// confirmed just before was then written back through the same open file: when that
+    /// worked (`put_back`) the file is as it was; otherwise it may be torn. Either way the
+    /// version before the operation (its outside-edits checkpoint, or the last one) holds it.
+    #[error("{path} was partly written, {}: {source}", put_back_text(*put_back))]
+    PartlyWritten {
+        /// The file.
+        path: MatterPath,
+        /// The confirmed version was written back whole and synced: the file is as it was.
+        put_back: bool,
+        /// How many files the operation wrote, deleted or meant to: one is an operation on that
+        /// file alone, so nothing else changed.
+        of: usize,
+        /// The failure of the write.
+        #[source]
+        source: io::Error,
+    },
     /// [`Matter::replace_file`](crate::Matter::replace_file): the file's content in the folder
     /// is not the bytes the new content was made from (missing, behind a link), or it changed
     /// after the walk (`word.revisions_stale`). Nothing was written.
@@ -172,6 +202,24 @@ impl fmt::Display for MissingReason {
     }
 }
 
+/// Why a file is in [`Error::FilesRefused`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefusedBecause {
+    /// The file's permissions refuse the change: macOS refused both the rename over it and the
+    /// write in place; elsewhere the rename (Windows: the file denies `DELETE` and its folder
+    /// denies deleting its files, or it is read-only). Or a delete of it was refused for its
+    /// permissions. On Windows each is tried again first, as a brief hold may refuse it too.
+    Permissions,
+    /// The rename was refused and the file has a second name (a hard link), which a write in
+    /// place would change too.
+    SecondName,
+    /// The rename was refused, and the file could not be confirmed as the version the history
+    /// holds before a byte of it was overwritten (the history's copy read back whole, the same
+    /// bytes as the file; a regular file, the one its name has now, opened with the new content
+    /// at hand), so it was not written in place.
+    SavedCopyUnconfirmed,
+}
+
 /// Why [`Error::FolderRefused`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
@@ -218,6 +266,15 @@ impl fmt::Display for Refusal {
     }
 }
 
+/// [`Error::PartlyWritten`]'s words for `put_back`.
+const fn put_back_text(put_back: bool) -> &'static str {
+    if put_back {
+        "then put back as it was"
+    } else {
+        "and may be torn"
+    }
+}
+
 fn join(paths: &[MatterPath]) -> String {
     let names: Vec<&str> = paths.iter().map(MatterPath::as_str).collect();
     names.join(", ")
@@ -240,6 +297,8 @@ impl Error {
             } => ErrorCode::MatterFolderNotAMatter,
             Self::FolderRefused { .. } => ErrorCode::MatterFolderRefused,
             Self::FileLocked { .. } => ErrorCode::MatterFileLocked,
+            Self::FilesRefused { .. } => ErrorCode::MatterFileRefused,
+            Self::PartlyWritten { .. } => ErrorCode::MatterFileWriteFailed,
             Self::ChangedSince { .. } => ErrorCode::WordRevisionsStale,
             Self::NotVersioned { .. } => ErrorCode::WordEditFailed,
             Self::FileFolderClash { .. } => ErrorCode::MatterFileFolderClash,

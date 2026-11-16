@@ -250,6 +250,11 @@ pub struct Undone {
     /// How many of `deleted` went to the trash, and how many were deleted for good (the trash
     /// could not take them, and the history holds them).
     pub removals: Removals,
+    /// The files of the undo neither written nor deleted because the folder refused the change,
+    /// and why, sorted: each as it was, and not in `restored`. The rest of the undo was done and
+    /// is in `checkpoint`; the host names these ([`crate::Error::FilesRefused`], of
+    /// `restored` and these together).
+    pub refused: Vec<(MatterPath, crate::RefusedBecause)>,
 }
 
 /// Which files a restore puts back.
@@ -279,7 +284,9 @@ impl<'a> From<&'a RestoreRequest> for RestoreFiles<'a> {
 /// failed restore with fresh ids. A restore that failed after its `outside-edits` checkpoint
 /// has put that id on the timeline. One that failed partway through its renames leaves the
 /// folder partly restored, recorded by nothing until the next checkpoint, which takes it as it
-/// is; a retry writes only what still differs from the version, so it finishes the restore.
+/// is; a retry writes only what still differs from the version, so it finishes the restore. A
+/// file written in place that failed part way ([`crate::Error::PartlyWritten`]) stops it the
+/// same way; the `outside-edits` checkpoint, or the last one, holds the folder as it was before.
 #[derive(Debug, Clone, Copy)]
 pub struct Restore<'a> {
     /// The checkpoint to bring back.
@@ -340,7 +347,7 @@ pub struct Restored {
     pub checkpoint: Checkpoint,
     /// The files written, sorted.
     pub written: Vec<MatterPath>,
-    /// The files deleted, as [`RestorePlan::removes`].
+    /// The files deleted, as [`RestorePlan::removes`] less those in `refused`.
     pub removed: Vec<MatterPath>,
     /// The files of `removed` deleted for good, since the trash could not take them (the
     /// history holds each); the rest went to the trash.
@@ -349,6 +356,11 @@ pub struct Restored {
     pub added_since: Vec<MatterPath>,
     /// As [`RestorePlan::kept`].
     pub kept: Vec<MatterPath>,
+    /// The files the restore meant to write or delete that the folder refused, and why, sorted:
+    /// each as it was, and not in `written` or `removed`. The rest of the restore was done and is
+    /// in `checkpoint`; the host names these ([`crate::Error::FilesRefused`], of `written`,
+    /// `removed` and these together, as an undo counts).
+    pub refused: Vec<(MatterPath, crate::RefusedBecause)>,
 }
 
 /// A replace of one file with content made outside the folder ([`crate::Matter::replace_file`]):

@@ -172,3 +172,27 @@ pub(crate) fn before_restore_write(
     }
     Ok(())
 }
+
+/// The refusals [`refuse_write`] armed: the file's absolute path, and why.
+static REFUSE_WRITE: std::sync::Mutex<Vec<(std::path::PathBuf, crate::RefusedBecause)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// From now on, for the whole process, the next write-back (restore, undo, replace) that would
+/// rename over or write in place the file `path` (absolute) passes it over as refused for
+/// `because`, the file untouched, as the folder refuses it on macOS or Windows. Once per call.
+/// Process-wide, as the host writes on a matter thread; it suits nextest's one process per test.
+pub fn refuse_write(path: impl Into<std::path::PathBuf>, because: crate::RefusedBecause) {
+    let mut armed = REFUSE_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    armed.push((path.into(), because));
+}
+
+/// Before a write-back's rename over `path`: the refusal armed for it, if any (and disarms it).
+pub(crate) fn refused_at_write(path: &std::path::Path) -> Option<crate::RefusedBecause> {
+    let mut armed = REFUSE_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let at = armed.iter().position(|(one, _)| one == path)?;
+    Some(armed.remove(at).1)
+}

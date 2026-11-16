@@ -228,6 +228,61 @@ fn a_restore_over_a_file_held_with_no_sharing_is_file_locked() {
     assert_eq!(temp_files(&matter.folder), Vec::<String>::new());
 }
 
+/// Read-only `b.txt` among three files: its replace is refused with an access denied, tried
+/// again after each of the short waits, then refused for its permissions, as it was; the files
+/// on both sides of it are written. Made writable again during the first wait (a hold that
+/// lets go), it is written like the others.
+#[test]
+fn a_read_only_file_is_tried_again_then_refused_and_the_rest_written() {
+    use crate::checkpoint::pauses;
+    for let_go in [false, true] {
+        let mut matter = matter("writeback-win-read-only");
+        cached(&mut matter, "a.txt", "a now");
+        let b = cached(&mut matter, "b.txt", "b now");
+        cached(&mut matter, "c.txt", "c now");
+        let ops = [
+            Op::Write(path("a.txt"), blob(&mut matter, "a then")),
+            Op::Write(path("b.txt"), blob(&mut matter, "b then")),
+            Op::Write(path("c.txt"), blob(&mut matter, "c then")),
+        ];
+        let writable = std::fs::metadata(&b).unwrap().permissions();
+        let read_only = |on: bool| {
+            let mut permissions = std::fs::metadata(&b).unwrap().permissions();
+            permissions.set_readonly(on);
+            write::set_permissions(&b, permissions).unwrap();
+        };
+        read_only(true);
+        if let_go {
+            let b = b.clone();
+            pauses::on_pause(move |_| write::set_permissions(&b, writable.clone()).unwrap());
+        }
+        let done = super::apply_or_partial(
+            &matter.core,
+            &matter.folder,
+            &matter.trash,
+            &ops.iter().collect::<Vec<_>>(),
+        );
+        let (waits, _) = pauses::take();
+        read_only(false);
+        let done = done.unwrap();
+        let read = |name: &str| std::fs::read_to_string(matter.folder.join(name)).unwrap();
+        assert_eq!(
+            (read("a.txt"), read("c.txt")),
+            ("a then".into(), "c then".into())
+        );
+        if let_go {
+            assert!(done.unfinished.refused.is_empty(), "{:?}", done.unfinished);
+            assert_eq!((read("b.txt"), waits), ("b then".into(), 1));
+        } else {
+            let refused = [(path("b.txt"), crate::RefusedBecause::Permissions)];
+            assert_eq!(done.unfinished.refused, refused);
+            assert_eq!(read("b.txt"), "b now");
+            assert_eq!(waits, crate::checkpoint::VANISHED_WAITS.len());
+        }
+        assert_eq!(temp_files(&matter.folder), Vec::<String>::new());
+    }
+}
+
 /// As Word holds a document: open with read sharing only (`FILE_SHARE_READ`), and its owner
 /// file `~$ief.docx` beside it. Renaming over it fails (an access denied or a sharing
 /// violation), and the write-back fails with `matter.file_locked` naming it.

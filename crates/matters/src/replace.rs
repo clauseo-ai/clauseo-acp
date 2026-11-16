@@ -19,14 +19,16 @@
 //!    since the walk is `word.revisions_stale`, one held open by then `matter.file_locked`;
 //!    either way nothing is written. A hold already released when it is checked again (an
 //!    antivirus scanning the file for a moment) with the file's stat still the walk's is no
-//!    change: the write is tried once more. A crash here leaves the file old or new, never torn,
-//!    and a new one recorded by the next checkpoint as outside edits.
+//!    change: the write is tried once more. A crash here leaves the file old or new, never torn
+//!    (but a file written in place, its rename refused, which may be), and a new one recorded
+//!    by the next checkpoint as outside edits.
 //! 6. The `revisions` checkpoint.
 //!
 //! Once the rename is made the replace succeeds, whatever fails after it: a folder sync in
 //! step 5, or the walk of step 6 (a file another program holds anywhere in the folder fails
 //! it). The answer then has `before` and no `revisions` checkpoint; the next checkpoint records
-//! the new content.
+//! the new content. A write in place that fails part way is no rename made: the replace fails
+//! with [`Error::PartlyWritten`], saying whether the file was put back as it was.
 
 use std::path::Path;
 
@@ -102,8 +104,21 @@ pub(crate) fn replace(
     let checkpoint = loop {
         tries += 1;
         match write_once(core, folder, trash, &op) {
+            // Refused (the file as it was): no checkpoint, nothing written.
+            Ok(deleted) if !deleted.unfinished.refused.is_empty() => {
+                return Err(deleted
+                    .unfinished
+                    .refused_error(&[&op])
+                    .unwrap_or_else(|| locked(path)));
+            }
             // 6. The revisions checkpoint.
             Ok(_deleted) => break after_write(take_revisions(core, folder, settings, request)),
+            // A write in place that failed part way: never a success, whether the file was put
+            // back as it was or may be torn (the version before, `before`, holds it).
+            Err(Failed {
+                error: error @ Error::PartlyWritten { .. },
+                ..
+            }) => return Err(error),
             // Written, then a sync failed: no checkpoint over a rename that may not last.
             Err(Failed {
                 error,
@@ -169,7 +184,7 @@ fn write_once(
         return Err(Failed {
             error: locked(op.path()),
             changed: false,
-            unfinished: writeback::Unfinished::default(),
+            unfinished: Box::default(),
         });
     }
     writeback::apply_or_partial(core, folder, trash, &[op])

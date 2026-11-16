@@ -1,5 +1,6 @@
 //! Files and folders the user's account cannot read or write: every such failure is an
-//! `Error::Io` saying why, never a finding that the file is missing, unchanged or written.
+//! `Error::Io` saying why, never a finding that the file is missing, unchanged or written; but
+//! a delete refused for its permissions, which names the file as refused and leaves it.
 
 #![cfg(unix)]
 
@@ -10,7 +11,7 @@ use clauseo_matters::Error;
 use clauseo_protocol::ErrorCode;
 
 use crate::fixture::{
-    Fixture, added, assert_no_temp_files, assert_none, cid, created, deleted, meta, modified,
+    Fixture, added, assert_no_temp_files, assert_none, cid, created, deleted, meta, modified, path,
     tools, undo,
 };
 use crate::support;
@@ -147,10 +148,10 @@ fn edited_since_fails_when_a_target_cannot_be_read() {
     assert_eq!(io_kind(&err).0, io::ErrorKind::PermissionDenied, "{err:?}");
 }
 
-/// An undo that cannot delete a file (its folder is read-only) fails, and the file is still
-/// there: it never reports the file undone.
+/// An undo that cannot delete a file (its folder is read-only) names it as refused for its
+/// permissions, and the file is still there: it never reports the file undone.
 #[test]
-fn undo_fails_when_a_file_cannot_be_deleted() {
+fn undo_names_a_file_it_cannot_delete_and_keeps_it() {
     let fx = Fixture::new("unreadable-undo-delete");
     fx.write("keep.txt", "keep");
     let mut matter = fx.import();
@@ -163,9 +164,17 @@ fn undo_fails_when_a_file_cannot_be_deleted() {
     );
 
     let locked = Mode::set(fx.file("sub"), 0o555);
-    let err = undo(&mut matter, (1, 3), &["sub/new.txt"], (4, 5)).unwrap_err();
-    assert_eq!(io_kind(&err).0, io::ErrorKind::PermissionDenied, "{err:?}");
+    let done = undo(&mut matter, (1, 3), &["sub/new.txt"], (4, 5)).unwrap();
     drop(locked);
+    assert_eq!(
+        done.refused,
+        [(
+            path("sub/new.txt"),
+            clauseo_matters::RefusedBecause::Permissions
+        )]
+    );
+    assert!(done.restored.is_empty(), "{:?}", done.restored);
+    assert!(done.deleted.is_empty(), "{:?}", done.deleted);
     assert_eq!(fx.read("sub/new.txt"), b"new");
 }
 

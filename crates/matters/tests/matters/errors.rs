@@ -4,7 +4,9 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
-use clauseo_matters::{Error, Matter, MissingReason, NewMatter, Refusal, RestoreFiles};
+use clauseo_matters::{
+    Error, Matter, MissingReason, NewMatter, Refusal, RefusedBecause, RestoreFiles,
+};
 use clauseo_protocol::{ErrorCode, FileChoice, FileDecision};
 
 use crate::fixture::{
@@ -18,6 +20,8 @@ fn variant(err: &Error) -> &'static str {
         Error::FolderMissing { .. } => "FolderMissing",
         Error::FolderRefused { .. } => "FolderRefused",
         Error::FileLocked { .. } => "FileLocked",
+        Error::FilesRefused { .. } => "FilesRefused",
+        Error::PartlyWritten { .. } => "PartlyWritten",
         Error::ChangedSince { .. } => "ChangedSince",
         Error::NotVersioned { .. } => "NotVersioned",
         Error::UnknownCheckpoint { .. } => "UnknownCheckpoint",
@@ -42,7 +46,7 @@ fn assert_code(err: &Error, code: ErrorCode, name: &str) {
 }
 
 /// One of each variant, with the code it maps to.
-fn hand_built() -> [(Error, ErrorCode); 18] {
+fn hand_built() -> [(Error, ErrorCode); 20] {
     let folder = PathBuf::from("/m");
     [
         (
@@ -64,6 +68,22 @@ fn hand_built() -> [(Error, ErrorCode); 18] {
                 paths: vec![path("a.docx")],
             },
             ErrorCode::MatterFileLocked,
+        ),
+        (
+            Error::FilesRefused {
+                files: vec![(path("a.docx"), RefusedBecause::SecondName)],
+                of: 2,
+            },
+            ErrorCode::MatterFileRefused,
+        ),
+        (
+            Error::PartlyWritten {
+                path: path("a.docx"),
+                put_back: true,
+                of: 1,
+                source: std::io::Error::other("full"),
+            },
+            ErrorCode::MatterFileWriteFailed,
         ),
         (
             Error::ChangedSince {

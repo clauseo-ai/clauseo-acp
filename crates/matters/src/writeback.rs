@@ -18,6 +18,11 @@ use crate::types::Settings;
 use crate::walk::{self, FoundKind};
 use crate::{Error, clash, fsync, locks, write};
 
+mod deletes;
+mod renames;
+#[cfg(any(target_os = "macos", all(test, target_os = "linux")))]
+mod saved;
+
 #[cfg(test)]
 #[cfg(windows)]
 mod windows_tests;
@@ -220,7 +225,8 @@ pub(crate) fn writable(
 /// folder, [`write::sweep_temps`], or by the host's matter worker as it opens the matter,
 /// [`crate::recover_leftovers`]); a crash in step 3 or 4 leaves the folder partly written, each
 /// file old or new and never torn (each was synced before its rename; a rename whose folder was
-/// not synced yet may be lost, leaving the old file), recorded by nothing until the next
+/// not synced yet may be lost, leaving the old file; only a file written in place, its rename
+/// refused, may be torn by a crash, `write`'s `in_place`), recorded by nothing until the next
 /// checkpoint. `apply` returns only after every folder is synced, so the checkpoint the caller
 /// takes next never records a rename that could be lost.
 ///
@@ -230,6 +236,16 @@ pub(crate) fn writable(
 /// and renames before it stay, so the folder is partly written (an undo or restore that a retry
 /// finishes, as [`crate::UndoRequest`] and [`crate::Restore`] say); the folders of the renames
 /// made are synced, and every temp file not renamed yet is removed.
+///
+/// A rename the folder refuses for the file's permissions (macOS: an ACL that denies `delete`)
+/// is a write in place instead, once the history's copy of the file is confirmed
+/// (`saved::confirm_saved`); a file refused even so (a second name, a saved copy not
+/// confirmed, permissions that refuse the write too), or whose delete is refused for its
+/// permissions, is left as it was and named in [`Unfinished::refused`], and the deletes and
+/// renames after it go on. On Windows a rename or delete refused with an access denied is tried
+/// again after short waits first ([`write::again_while_denied`]). A write in place that fails
+/// part way stops the write-back with [`Error::PartlyWritten`], the file put back as it was if
+/// the version confirmed before can be written back.
 ///
 /// Deleting before renaming matters on a case- or normalisation-insensitive file system: undoing
 /// a rename of `Brief.txt` to `brief.txt` deletes `brief.txt`, which is the same file as
@@ -266,8 +282,9 @@ pub(crate) struct Failed {
     pub(crate) error: Error,
     /// A delete or a rename was made before the failure: the folder is not as it was.
     pub(crate) changed: bool,
-    /// What the write-back left for the lawyer to hear about, by name, up to the failure.
-    pub(crate) unfinished: Unfinished,
+    /// What the write-back left for the lawyer to hear about, by name, up to the failure (boxed:
+    /// the error stays small).
+    pub(crate) unfinished: Box<Unfinished>,
 }
 
 /// The files a write-back, whether it went or failed, left otherwise than it should, by their
@@ -282,6 +299,10 @@ pub(crate) struct Unfinished {
     /// linked to another), or, on Windows, a temp file holding the new content of a file the
     /// folder lost during the write.
     pub(crate) left_behind: Vec<MatterPath>,
+    /// Files neither renamed over nor written in place, or whose delete was refused, and why
+    /// ([`renames::rename_all`], [`deletes::delete_all`]): each as it was, while the files after
+    /// it were written.
+    pub(crate) refused: Vec<(MatterPath, crate::RefusedBecause)>,
 }
 
 /// [`apply`], telling a failure that left the folder as it was from one after a delete or a
@@ -304,6 +325,7 @@ pub(crate) fn apply_or_partial(
         ops,
         &mut dirs,
         &mut unfinished.owner_only,
+        &mut unfinished.refused,
     );
     // Every temp file is renamed or dropped by now: what is left could not go.
     for dir in &dirs {
@@ -316,6 +338,7 @@ pub(crate) fn apply_or_partial(
         }
     }
     unfinished.owner_only.sort();
+    unfinished.refused.sort_by(|a, b| a.0.cmp(&b.0));
     unfinished.left_behind.sort();
     let result = match result {
         Ok((paths, removals, for_good)) => Ok(Deleted {
@@ -327,22 +350,36 @@ pub(crate) fn apply_or_partial(
         Err((error, changed)) => Err(Failed {
             error,
             changed,
-            unfinished,
+            unfinished: Box::new(unfinished),
         }),
     };
     match &result {
-        Ok(Deleted { unfinished, .. }) | Err(Failed { unfinished, .. }) => unfinished.log(),
+        Ok(Deleted { unfinished, .. }) => unfinished.log(),
+        Err(Failed { unfinished, .. }) => unfinished.log(),
     }
     result
 }
 
 impl Unfinished {
+    /// [`Error::FilesRefused`] for the refused files, if any, of the write-back of `ops`: `of`
+    /// counts every file it writes or deletes, as a restore and an undo count theirs.
+    pub(crate) fn refused_error(&self, ops: &[&Op]) -> Option<Error> {
+        if self.refused.is_empty() {
+            return None;
+        }
+        Some(Error::FilesRefused {
+            files: self.refused.clone(),
+            of: ops.len(),
+        })
+    }
+
     /// Logs how many files there are of each kind, if any: counts only, never a name.
     fn log(&self) {
-        if !self.owner_only.is_empty() || !self.left_behind.is_empty() {
+        if !self.owner_only.is_empty() || !self.left_behind.is_empty() || !self.refused.is_empty() {
             tracing::warn!(
                 owner_only = self.owner_only.len(),
                 left_behind = self.left_behind.len(),
+                refused = self.refused.len(),
                 "a write-back left files to name to the lawyer"
             );
         }
@@ -363,6 +400,7 @@ fn write_all(
     ops: &[&Op],
     dirs: &mut std::collections::BTreeSet<PathBuf>,
     owner_only: &mut Vec<MatterPath>,
+    refused: &mut Vec<(MatterPath, crate::RefusedBecause)>,
 ) -> Result<Written, (Error, bool)> {
     let unchanged = |error| (error, false);
     let changed = |error| (error, true);
@@ -379,78 +417,21 @@ fn write_all(
             return Err(unchanged(err));
         }
     };
-    let mut deleted = Vec::new();
     let mut removing = Removing::new(trash);
     // A delete or a rename made: a failure from here on leaves the folder changed.
     let mut any_change = false;
-    for op in ops {
-        if let Op::Delete(path) = op {
-            // The path `moved_since` just checked, and nothing else.
-            let abs = folder.join(path.as_str());
-            match removing.remove(core, &abs, path) {
-                Ok(()) => {
-                    any_change = true;
-                    deleted.push(path.clone());
-                }
-                Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                    deleted.push(path.clone());
-                    continue;
-                }
-                Err(err) => {
-                    let error = held_or(folder, path, Error::io("delete", abs, err));
-                    return Err(if any_change {
-                        changed(error)
-                    } else {
-                        unchanged(error)
-                    });
-                }
-            }
-            let dir = abs.parent().unwrap_or(folder);
-            fsync::sync_dir(dir).map_err(|err| changed(Error::io("sync", dir, err)))?;
-        }
-    }
+    let deleted = deletes::delete_all(core, folder, ops, &mut removing, refused, &mut any_change)?;
     // Every rename, then each folder synced once: the renames are durable before the
     // checkpoint that follows records them.
-    let mut synced = std::collections::BTreeSet::new();
     let mut lost = Lost(write::Lost::default());
-    for (path, file) in staged {
-        match file.rename() {
-            Ok(renamed) => {
-                any_change = true;
-                lost.0.add(renamed.lost);
-                if renamed.owner_only {
-                    owner_only.push(path.clone());
-                }
-                synced.insert(renamed.dir);
-            }
-            Err(write::RenameFailed {
-                error: err,
-                changed: gone,
-            }) => {
-                // The renames before it stay, made durable as far as the OS lets; the temp files
-                // after it, and its own, are removed as each `Staged` drops.
-                for dir in synced {
-                    if let Err(err) = fsync::sync_dir(&dir) {
-                        tracing::warn!(error = %err, "a renamed file's folder not synced");
-                    }
-                }
-                // The old file gone: not a file held open, and the folder changed.
-                let error = if gone {
-                    err
-                } else {
-                    held_or(folder, path, err)
-                };
-                return Err(if any_change || gone {
-                    changed(error)
-                } else {
-                    unchanged(error)
-                });
-            }
-        }
-    }
-    for dir in synced {
-        fsync::sync_dir(&dir).map_err(|err| changed(Error::io("sync", &dir, err)))?;
-    }
+    let mut tally = renames::Tally {
+        any_change: &mut any_change,
+        lost: &mut lost.0,
+        owner_only,
+        refused,
+        of: ops.len(),
+    };
+    renames::rename_all(core, folder, staged, &mut tally)?;
     // macOS: the syncs above reach the drive but not past its cache, and the checkpoint's
     // `F_FULLFSYNC` is on the matters root, which may be another drive. A share or an exFAT
     // drive without `F_FULLFSYNC` keeps the folder syncs.
@@ -585,7 +566,16 @@ fn make_parents(
 }
 
 #[cfg(test)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod in_place_tests;
+#[cfg(test)]
 #[cfg(target_os = "macos")]
 mod macos_tests;
 #[cfg(test)]
 mod outcome_tests;
+#[cfg(test)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod torn_flow_tests;
+#[cfg(test)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod torn_tests;
