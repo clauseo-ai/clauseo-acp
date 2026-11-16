@@ -7,8 +7,9 @@ import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act } from "react";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { reset } from "../../testing/stream-script.ts";
+import { assertWarm, WARM_MS, warmUp } from "@clauseo/components/lib/warm-up.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type {
   AgentLimitsView,
@@ -37,10 +38,20 @@ const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times deri
 const MIDNIGHT = NOW - 17 * 3_600_000; // the start of NOW's day
 
 let h: Harness | null = null;
+// the cold imports the waits below stand on, loaded once before the first test, under their own budget (warm-up.ts):
+// the thread's chunk room() waits on, and the plan card's module openCard() waits on
+let warmFailure: string | null = null;
+beforeAll(async () => {
+  warmFailure = await warmUp("the thread's chunk and the plan card's", () =>
+    Promise.all([loadThread(), import("./plan-card-view.tsx")]),
+  );
+}, WARM_MS + 5_000);
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
   startWaits();
+  assertWarm(warmFailure);
 });
 
 afterEach(async () => {
@@ -127,7 +138,7 @@ async function room(
     setup: { first: () => setupFirst },
     waitForRenderer: false,
   });
-  // the thread's chunk, which the harness would await in an act of its own with no bound
+  // the thread's chunk, which the harness would await in an act of its own with no bound; warm, so this is quick
   await bounded("the thread's chunk", loadThread);
   h.deliver([reset([])]);
   await h.type("Summarise the notice to the bank.");
