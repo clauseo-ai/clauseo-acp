@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::MatterId;
 use serde_json::json;
 
-use super::other_matter_on;
+use super::{named_in_words, other_matter_on};
 use crate::agent::data_fence::resolve::Disk;
 use crate::agent::data_fence::tests::{check, layout};
 use crate::network_paths::{FOLD_CASE, NetEnv};
@@ -70,4 +70,22 @@ fn a_word_naming_a_fenced_path_counts_only_up_to_a_names_end() {
     assert_eq!(words(format!("{}/x", outside.display())), Some(id(1)));
     assert_eq!(words(format!("{}/inner/y", outside.display())), Some(id(2)));
     assert_eq!(words(format!("{} 2/x", outside.display())), None);
+}
+
+/// A shell word names a fence path folded as the safety fold folds names, where names are
+/// folded: `Zoë` written NFD names the matter stored NFC; a longer name still does not.
+#[test]
+fn a_word_in_another_unicode_form_names_the_matter() {
+    let matters = [(id(1), vec![PathBuf::from("/m/Zo\u{eb}")])];
+    let word = |text: &str| vec![text.to_owned()];
+    let named = named_in_words(&word("cat /m/Zoe\u{308}/x"), &matters, true);
+    assert_eq!(named, Some(id(1)));
+    assert_eq!(
+        named_in_words(&word("cat /m/Zoetrope/x"), &matters, true),
+        None
+    );
+    assert_eq!(
+        named_in_words(&word("cat /m/ZO\u{cb}"), &matters, true),
+        Some(id(1))
+    );
 }

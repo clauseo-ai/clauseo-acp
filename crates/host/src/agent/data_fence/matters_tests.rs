@@ -553,3 +553,7 @@ fn denies_inside_counts_a_matter_whose_paths_were_dropped() {
     assert!(deny.denies_inside(&own));
     assert!(!deny.denies_inside(&[]), "no spelling, no answer");
 }
+
+#[cfg(unix)]
+#[path = "matters_link_tests.rs"]
+mod link;

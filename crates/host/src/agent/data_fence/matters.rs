@@ -12,6 +12,7 @@ use clauseo_protocol::MatterId;
 
 use super::resolve::{self, Disk, Found};
 use super::{FenceCheck, key, variables};
+use crate::agent::matter_fence::forms;
 
 /// Each other matter and its fence paths, as the session's launch made them.
 pub(crate) type Fenced = Vec<(MatterId, Vec<PathBuf>)>;
@@ -26,9 +27,18 @@ pub(crate) fn other_matter_on(
     insensitive: bool,
     disk: &Disk<'_>,
 ) -> Option<MatterId> {
+    // Each fence path by its key, and on macOS by its data-volume twin's (`/System/Volumes/Data`
+    // and back: a firmlink, which the request's resolve leaves as written); in no rule.
+    let volume = forms::data_volume();
+    let twin = |path: &PathBuf| volume.and_then(|volume| forms::twin_text(path, volume));
     let fenced: Vec<(MatterId, Vec<OsString>)> = matters
         .iter()
-        .flat_map(|(id, paths)| paths.iter().map(|path| (*id, key(path, insensitive))))
+        .flat_map(|(id, paths)| {
+            paths
+                .iter()
+                .flat_map(|path| std::iter::once(path.clone()).chain(twin(path)))
+                .map(|path| (*id, key(&path, insensitive)))
+        })
         .collect();
     if fenced.is_empty() {
         return None;
@@ -97,7 +107,7 @@ pub(super) fn named_in_words(
     let norm = |text: &str| {
         let text = text.replace('\\', "/");
         if insensitive {
-            text.to_lowercase()
+            crate::network_paths::fold_name(&text)
         } else {
             text
         }

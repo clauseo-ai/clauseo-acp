@@ -64,6 +64,8 @@ use crate::agent::short_forms::with_short_forms;
 use crate::network_paths::resolve::Disk;
 use crate::network_paths::{FOLD_CASE, NetEnv, fold_name, touchable};
 
+pub(crate) mod forms;
+
 /// Another matter, as a launch fences it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Other {
@@ -163,15 +165,44 @@ impl MatterFence {
     /// leads too ([`Kept`]), so a spelling of the own matter the caller did not pass (a link
     /// to it, macOS's `/var` for `/private/var`) is still never fenced. Reads the file system:
     /// off the actor.
-    pub(crate) fn resolve(mut self, own: &[&Path], data: &[&Path]) -> Self {
+    pub(crate) fn resolve(self, own: &[&Path], data: &[&Path]) -> Self {
         let net = NetEnv::current();
         let disk = Disk::resolved(&net);
-        let kept = |place: &Path| Kept {
-            place: place.to_path_buf(),
-            real: real(place, &disk),
+        self.resolve_on(own, data, &disk, forms::data_volume())
+    }
+
+    /// [`Self::resolve`] on `disk`, macOS's data volume at `volume` (a test's firmlink model).
+    /// Each kept place is known as given, canonical and by its data-volume twin
+    /// (`matter_fence::forms`), each with where it leads; the twins in no rule.
+    pub(crate) fn resolve_on(
+        mut self,
+        own: &[&Path],
+        data: &[&Path],
+        disk: &Disk<'_>,
+        volume: forms::DataVolume<'_>,
+    ) -> Self {
+        let net = disk.net;
+        let kept = |places: &[&Path]| {
+            let mut out: Vec<Kept> = Vec::new();
+            for place in places {
+                let mut found = vec![place.to_path_buf()];
+                found.extend(forms::canonical(place, disk));
+                let twins: Vec<PathBuf> = found
+                    .iter()
+                    .filter_map(|form| forms::twin(form, disk, volume))
+                    .collect();
+                found.extend(twins);
+                for place in found {
+                    if !out.iter().any(|kept| kept.place == place) {
+                        let real = real(&place, disk);
+                        out.push(Kept { place, real });
+                    }
+                }
+            }
+            out
         };
-        let own: Vec<Kept> = own.iter().map(|place| kept(place)).collect();
-        let data: Vec<Kept> = data.iter().map(|place| kept(place)).collect();
+        let own: Vec<Kept> = kept(own);
+        let data: Vec<Kept> = kept(data);
         // The own matter where it leads too, for `split_own` and `innermost`.
         self.own = Vec::new();
         for place in own
@@ -185,10 +216,16 @@ impl MatterFence {
         let reals: Vec<Option<PathBuf>> = self
             .others
             .iter()
-            .map(|other| real(&other.folder, &disk))
+            .map(|other| real(&other.folder, disk))
             .collect();
         for other in &mut self.others {
-            other.spellings = spellings(&other.folder, &disk);
+            other.spellings = spellings(&other.folder, disk);
+            // Its case and Unicode form as on the disk too.
+            if let Some(found) = forms::canonical(&other.folder, disk)
+                && !other.spellings.contains(&found)
+            {
+                other.spellings.push(found);
+            }
         }
         let invited: Vec<Kept> = self
             .others
@@ -210,7 +247,7 @@ impl MatterFence {
             let mut paths = Vec::new();
             let mut whole = true;
             for spelling in &other.spellings {
-                match fence_paths(spelling, real.as_deref(), &keep, &net) {
+                match fence_paths(spelling, real.as_deref(), &keep, net) {
                     Ok(found) => paths.extend(found),
                     Err(()) => whole = false,
                 }
@@ -224,8 +261,8 @@ impl MatterFence {
         }
         // Their full short forms beside them, made from the long ones (`short_forms`).
         for other in &mut self.others {
-            other.paths = with_short_forms(std::mem::take(&mut other.paths), &net);
-            other.spellings = with_short_forms(std::mem::take(&mut other.spellings), &net);
+            other.paths = with_short_forms(std::mem::take(&mut other.paths), net);
+            other.spellings = with_short_forms(std::mem::take(&mut other.spellings), net);
         }
         self.spend_budget();
         if !self.unfenced.is_empty() {
@@ -410,22 +447,20 @@ fn fence_paths(
     keep: &[&Kept],
     net: &NetEnv,
 ) -> Result<Vec<PathBuf>, ()> {
-    let at = key(spelling);
-    let real_at = real.map(key);
     let mut inside: Vec<Vec<OsString>> = Vec::new();
     for kept in keep {
-        let by_text = Some((kept.place.as_path(), &at));
-        let by_real = kept.real.as_deref().zip(real_at.as_ref());
-        // Each way the place lies under the folder: by its text, and by where it leads.
-        for (place, under) in [by_text, by_real].into_iter().flatten() {
-            let place_key = key(place);
-            if !place_key.starts_with(under) {
+        let by_text = Some((kept.place.as_path(), spelling));
+        let by_real = kept.real.as_deref().zip(real);
+        // Each way the place lies under the folder: by its text, and by where it leads; folded
+        // as the file system folds names, a match keeping the place out of the deny.
+        for (place, folder) in [by_text, by_real].into_iter().flatten() {
+            let Some(names) = forms::below_keep(place, folder) else {
                 continue;
-            }
-            if place_key.len() == under.len() {
+            };
+            if names.is_empty() {
                 return Ok(Vec::new());
             }
-            inside.push(below(place, under.len()));
+            inside.push(names);
         }
     }
     if inside.is_empty() {
@@ -439,19 +474,9 @@ fn fence_paths(
     Ok(out)
 }
 
-/// `place`'s names after its first `depth`, as it spells them.
-fn below(place: &Path, depth: usize) -> Vec<OsString> {
-    place
-        .components()
-        .skip(depth)
-        .map(|part| part.as_os_str().to_owned())
-        .collect()
-}
-
 /// Every entry of `parent`, and of each folder on the way to each of `ways` (names below
 /// `parent`), that is not on a way, into `out`; `None` when a folder on the way can't be listed.
 fn down_to(parent: &Path, ways: &[Vec<OsString>], out: &mut Vec<PathBuf>) -> Option<()> {
-    let fold = |name: &OsString| key(Path::new(name));
     let mut names: Vec<OsString> = std::fs::read_dir(parent)
         .ok()?
         .map(|entry| entry.map(|entry| entry.file_name()))
@@ -461,7 +486,10 @@ fn down_to(parent: &Path, ways: &[Vec<OsString>], out: &mut Vec<PathBuf>) -> Opt
     for name in names {
         let on_way: Vec<&Vec<OsString>> = ways
             .iter()
-            .filter(|way| way.first().is_some_and(|first| fold(first) == fold(&name)))
+            .filter(|way| {
+                way.first()
+                    .is_some_and(|first| forms::same_name(first, &name))
+            })
             .collect();
         if on_way.is_empty() {
             out.push(parent.join(&name));
