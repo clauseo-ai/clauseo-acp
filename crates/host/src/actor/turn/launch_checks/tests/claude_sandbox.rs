@@ -55,16 +55,37 @@ fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
     assert!(sandbox.deny_read.contains(&text(&data)));
 }
 
-/// Codex on Windows, which nothing fences, gets the name-free rule (no other client's matter
-/// goes to the model's provider); elsewhere the fenced rule.
+/// Codex's instructions name no matter on any OS (no other client's matter goes to the model's
+/// provider, and a resumed thread never reads them again): its rule is fixed, the fenced one off
+/// Windows; the note names the invited matters alone, by name.
 #[test]
-fn codex_on_windows_gets_the_name_free_rule() {
+fn codex_s_rule_names_no_matter_and_its_note_only_the_invited() {
     use clauseo_profile::instructions::OTHER_MATTERS;
 
-    use crate::actor::turn::outside::fence::codex_rule;
+    use crate::actor::turn::outside::fence::{codex_reads_note, codex_rule};
+    use crate::agent::matter_fence::{MatterFence, Other};
 
+    let data = PathBuf::from(crate::testing::abs("/Users/l/AppData/Local/Clauseo"));
+    let mut run = folders(&data, 1);
+    let id = |n: u128| {
+        let bits = (0x0190_0000_0000_u128 << 80) | (0x7 << 76) | (0b10 << 62) | n;
+        clauseo_protocol::MatterId::new(uuid::Uuid::from_u128(bits)).unwrap()
+    };
+    let other = |n, name: &str, invited| {
+        let folder = PathBuf::from(crate::testing::abs(&format!("/Clients/{name}")));
+        Other::new(id(n), name.to_owned(), folder, invited)
+    };
+    run.data_deny.matters =
+        MatterFence::asked(vec![other(1, "Smith", false), other(2, "Jones", true)]);
     assert_eq!(codex_rule(false), OTHER_MATTERS.trim());
-    let rule = codex_rule(true);
-    assert!(rule.contains("`.clauseo`"), "{rule}");
-    assert!(rule.contains("\"Let this conversation read\""), "{rule}");
+    for rule in [codex_rule(false), codex_rule(true)] {
+        assert!(!rule.contains("Smith") && !rule.contains("Jones"), "{rule}");
+    }
+    assert!(codex_rule(true).contains("`.clauseo`"));
+    assert!(codex_rule(true).contains("\"Let this conversation read\""));
+    let note = codex_reads_note(&run);
+    assert!(note.contains("\"Jones\""), "{note}");
+    assert!(!note.contains("Smith"), "{note}");
+    run.data_deny.matters = MatterFence::asked(vec![other(1, "Smith", false)]);
+    assert!(codex_reads_note(&run).ends_with("may read no other matter."));
 }

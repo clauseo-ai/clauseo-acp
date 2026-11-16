@@ -146,10 +146,12 @@ fn the_budgets_hold_for_a_long_macos_path_with_the_folders_filled() {
     };
     let fenced = clauseo_profile::instructions::OTHER_MATTERS.trim();
     let shared = fill(&profile.instructions_for(AgentKind::Claude), fenced);
-    assert!(word_count(&shared) <= 1800, "{} words", word_count(&shared));
+    // Decision record 0058: the whole instructions, and Codex's text with the skills index, at
+    // most 1,850 words (amended for #1085's other matters' rule and stage E's research rules).
+    assert!(word_count(&shared) <= 1850, "{} words", word_count(&shared));
     // What `codex_keys` sends after a successful write (checked on disk in `tests/skills`), with
-    // the other matters' rule each way Codex gets it: the project's count of Codex's whole text
-    // (`instructions::word_count`).
+    // the other matters' rule each way Codex gets it, both fixed in size: the project's count of
+    // Codex's whole text (`instructions::word_count`).
     let windows = clauseo_profile::instructions::other_matters_unfenced();
     let codex_text = format!("{}\n\n{index}", profile.instructions_for(AgentKind::Codex));
     let words: Vec<usize> = [fenced, windows]
@@ -157,7 +159,7 @@ fn the_budgets_hold_for_a_long_macos_path_with_the_folders_filled() {
         .map(|rule| word_count(&fill(&codex_text, rule)))
         .collect();
     let most = words.iter().copied().max().unwrap_or_default();
-    assert!(most <= 1800, "{words:?} words");
+    assert!(most <= 1850, "{words:?} words");
 }
 
 #[test]

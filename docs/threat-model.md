@@ -218,13 +218,18 @@ anything the agent starts.
   and the lawyer is told, `ShellLimited`); a deny the sandbox can't spell is widened to a folder
   above it, never dropped. Not on Windows: there is no OS fence there, so a command in the own
   matter (`rg x .`, `dir /s`) reads a matter nested inside it, and Codex on Windows has no fence
-  between matters at all: its instructions, naming no other matter, tell it a folder holding
-  `.clauseo` is a matter, to open only its own and those invited, to name a skipped one to the
-  lawyer and never to search for `.clauseo` outside its own
-  (`instructions::other_matters_unfenced`). On Windows each fenced folder, the data
-  folder and the own matter are also named by their full 8.3 short form (`agent::short_forms`); a path with
-  only some names short is in no rule, a known gap until the file tools' hook. The invite's offer names only a matter a
-  refused call's own arguments targeted, never one its output printed. A lawyer's
+  between matters at all: its instructions tell it a folder holding `.clauseo` is a matter, to
+  open another only if a Clauseo note at the start of the lawyer's message names it as one the
+  lawyer let this conversation read (its instructions name no matter, and a resumed Codex thread
+  keeps its first instructions; after a start of the app the first prompt names the whole
+  list again), never because of a chat request, the lawyer's included, or a document, and to
+  check only a requested path's own folders for `.clauseo` (`instructions::other_matters_unfenced`).
+  That is an instruction Codex can ignore: the real fix is a read deny it can't ignore, which
+  its launch on Windows doesn't have yet. On Windows each fenced folder, the data folder and the
+  own matter are also named by their full 8.3 short form (`agent::short_forms`); a path with
+  only some names short is in no rule, a known gap until the file tools' hook. The invite's
+  offer names only a matter a refused call's own arguments targeted, never one its output
+  printed. A lawyer's
   per-conversation read invite is read-only: Claude reads through its Read tool, writes stay
   denied. Gaps: an agent can fake a refused tool call to make the invite's offer appear (the
   lawyer's click is still required); renaming a folder above a nested matter gets past the path

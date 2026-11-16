@@ -89,10 +89,8 @@ pub(super) fn launch_keys(
             let unfenced = prepared.run.data_deny.matters.unfenced.clone();
             super::outside::fence::tell_unfenced(actor, thread, unfenced);
         }
-        let reads = super::outside::fence::reads_part(&prepared.run, false);
-        if let Some(text) = codex.keys.get_mut("developer_instructions") {
-            super::outside::fence::append_part(text, &reads);
-        }
+        // No matter is named in Codex's instructions: a note carries the grants
+        // (`note_parts.rs`), as a resumed thread never reads its instructions again.
         // The data-folder fence (`agent::codex_fence`), in every Codex session, and the other
         // matters' (`agent::matter_fence`).
         let matters = &prepared.run.data_deny.matters;

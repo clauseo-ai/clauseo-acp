@@ -155,7 +155,8 @@ fn legal_word_budget() {
         word_count(TOOLS) + word_count(LEGAL),
         "only {{author}} is filled, with one word"
     );
-    assert!(word_count(&whole) <= 1800, "{} words", word_count(&whole));
+    // Decision record 0058: at most 1,850 words (amended for #1085 and stage E).
+    assert!(word_count(&whole) <= 1850, "{} words", word_count(&whole));
     // With a working stetdoc, as the app launches: the stetdoc line joins the tools part.
     let stetdoc = ClauseoProfile::new(paths_under(Path::new("/data")), None)
         .with_stetdoc_cli(true)
@@ -163,7 +164,7 @@ fn legal_word_budget() {
     let line = clauseo_profile::instructions::STETDOC_CLI;
     assert_eq!(word_count(&stetdoc), word_count(&whole) + word_count(line));
     assert!(
-        word_count(&stetdoc) <= 1800,
+        word_count(&stetdoc) <= 1850,
         "{} words",
         word_count(&stetdoc)
     );

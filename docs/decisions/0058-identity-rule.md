@@ -73,6 +73,10 @@ and about 19 in Codex's whole text with a long data folder (about 1,481 of 1,500
   1,600 with a data folder at `/data`, Claude's on macOS (with its shell line) about 1,655, and
   Codex's about 1,700 with the long macOS folder. The tools part with the stetdoc line is 276
   words, under R21's 300.
+- Amended once more (#1085, 2026-11-16): the whole instructions, and Codex's text with the
+  skills index, at most 1,850 words, for the other matters' rule (Codex on Windows, which
+  nothing fences, is told which matters it may read and that a chat request is no permission)
+  and stage E's research rules; `legal.md` stays at most 1,360.
 
 ## Consequences
 
