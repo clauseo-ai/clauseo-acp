@@ -67,8 +67,9 @@ pub(super) enum Refusal {
     /// A shell command nests `$(…)` too deep, or holds too much nested text, to be read
     /// (`words::MAX_NESTING`, `words::MAX_NESTED_BYTES`).
     Unread,
-    /// A target is a file Clauseo holds no copy of (`no_copy.rs`), and why.
-    NoCopy(MatterPath, SkippedFileReason),
+    /// A target is a file Clauseo holds no copy of (`no_copy.rs`), why, and what the call
+    /// would have done to it.
+    NoCopy(MatterPath, SkippedFileReason, no_copy::Act),
 }
 
 impl Refusal {
@@ -94,7 +95,7 @@ impl Refusal {
             Self::Unread => "Clauseo can't read this command: it is nested too deep or is too \
                              long. Split it into smaller commands."
                 .to_owned(),
-            Self::NoCopy(path, why) => no_copy::reason(path, *why),
+            Self::NoCopy(path, why, act) => no_copy::reason(path, *why, *act),
         }
     }
 }

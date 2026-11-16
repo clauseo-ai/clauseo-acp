@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use clauseo_protocol::{MatterPath, SkippedFile, SkippedFileReason};
 
-use super::{HEADER, List, MAX_BYTES, MAX_FILES, fitting, within_limit};
+use super::{HEADER, List, MAX_BYTES, MAX_FILES, fitting, refusal, within_limit};
 
 const CLOUD: SkippedFileReason = SkippedFileReason::CloudOnly;
 const LARGE: SkippedFileReason = SkippedFileReason::OverSizeCap;
@@ -131,4 +131,37 @@ fn a_list_past_the_limit_is_read_to_its_last_whole_line() {
     assert_eq!(fitting(changes, MAX_BYTES - 20), "remove A.pdf\n");
     assert_eq!(fitting(changes, MAX_BYTES - 5), "");
     assert_eq!(fitting(changes, MAX_BYTES + 5), "");
+}
+
+/// F8: the list is read only when the call deletes something; a read, a listing or a write (the
+/// hook runs before every tool under forced ask) never pays for it.
+#[test]
+fn the_list_is_read_only_for_a_call_that_deletes() {
+    let made = std::env::temp_dir().join(format!("clauseo-no-copy-lazy-{}", std::process::id()));
+    crate::write::create_dir_all(&made).unwrap();
+    let matter = dunce::canonicalize(&made).unwrap();
+    let calls = std::cell::Cell::new(0);
+    let read = || {
+        calls.set(calls.get() + 1);
+        List::decode(&format!("{HEADER}add cloud-only Free.docx\n"))
+    };
+    let hook = |tool: &str, input: serde_json::Value| {
+        serde_json::json!({"tool_name": tool, "tool_input": input, "cwd": matter}).to_string()
+    };
+    for (tool, input) in [
+        ("Read", serde_json::json!({"file_path": "Free.docx"})),
+        ("Bash", serde_json::json!({"command": "ls; cat Free.docx"})),
+        (
+            "Write",
+            serde_json::json!({"file_path": "New.docx", "content": "x"}),
+        ),
+        ("Bash", serde_json::json!({"command": "echo x > New.docx"})),
+    ] {
+        assert!(refusal(hook(tool, input).as_bytes(), Some(&matter), read).is_none());
+    }
+    assert_eq!(calls.get(), 0, "never read without a delete");
+    let rm = hook("Bash", serde_json::json!({"command": "rm Free.docx"}));
+    assert!(refusal(rm.as_bytes(), Some(&matter), read).is_some());
+    assert_eq!(calls.get(), 1);
+    crate::write::remove_dir_all(&made).unwrap();
 }

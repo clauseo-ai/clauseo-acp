@@ -183,6 +183,17 @@ pub(super) fn text_has_codex_part(text: &str) -> bool {
     text.split(['/', '\\']).any(is_codex)
 }
 
+/// The files a Codex `apply_patch` patch deletes (`*** Delete File:`).
+pub(super) fn patch_deletes(patch: &str) -> Vec<PathBuf> {
+    patch
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("*** Delete File:"))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
 /// The files a Codex `apply_patch` patch adds, updates, deletes or moves to.
 pub(super) fn patch_targets(patch: &str) -> Vec<PathBuf> {
     const HEADERS: [&str; 4] = [
