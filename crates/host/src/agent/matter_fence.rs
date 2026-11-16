@@ -29,11 +29,20 @@
 //!
 //! Who uses which: Claude's `Read` deny rules and Codex's profile name the fence paths of the
 //! matters not invited, Claude's `Edit` deny rules and its Windows shell rules those of every
-//! other matter (an invite is read-only, and on Windows Claude reads an invited matter through
-//! its file tools only), and Claude's `Read` allow rules the folders of the invited ones
-//! (`data_fence::claude_deny_rules`, `claude_allow_rules`, `codex_fence::rules`,
-//! `data_fence::shell_deny::matters`). The residual, as for `<data>`: what is made in a parent
-//! matter after the launch is in no rule until the next launch.
+//! other matter (an invite is read-only), and Claude's `Read` allow rules the folders of the
+//! invited ones (`data_fence::claude_deny_rules`, `claude_allow_rules`, `codex_fence::rules`,
+//! `data_fence::shell_deny::matters`). On Windows Claude reads an invited matter through its
+//! file tools only, and on macOS and Linux too: an invited matter is in no `denyRead` of its
+//! own, but nothing re-opens it for the sandbox (its `allowRead` names only the session's
+//! folders, `agent::loads::sandbox`), so where the lawyer's home, `/Volumes` or
+//! `/Users/Shared` holds it, as matters are kept, a shell command (`cat ../B/f.txt`) is refused
+//! by the OS even after the lawyer allows its card (stage C on a Mac, sandbox on). An invited
+//! matter inside this matter is readable to the shell with it, and is denied writes; the
+//! sandbox's write list never holds an invited matter in any spelling
+//! (`actor/turn/profile_loads_sandbox.rs`'s test). A withdrawal shuts the matter to the file
+//! tools at the relaunch (`actor/turn/idle/fence.rs`, which stops a running turn at once). The
+//! residual, as for `<data>`: what is made in a parent matter after the launch is in no rule
+//! until the next launch.
 
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf, Prefix};

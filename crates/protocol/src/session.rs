@@ -364,6 +364,15 @@ open_data_enum! {
         /// folder could only be denied through a folder above it. Claude's file tools still
         /// read and edit the matter. Once a launch.
         ShellLimited = "shell_limited",
+        /// The lawyer stopped letting this conversation read another matter, or forgot that
+        /// matter, while an answer ran: Clauseo stopped the answer, and the agent starts again
+        /// without that matter's files. Once a turn.
+        MatterReadStopped = "matter_read_stopped" {
+            /// The other matter.
+            matter: MatterId,
+            /// Its name when the host gave the notice (display only; it may have changed).
+            name: String,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -398,6 +407,11 @@ open_data_enum! {
             matters: vec![MatterId::new(uuid::Uuid::from_u128((0x0190_0000_0000 << 80) | (0x7 << 76) | (0b10 << 62) | 8))
                 .unwrap()],
             more: 3,
+        },
+        NoticeKind::MatterReadStopped {
+            matter: MatterId::new(uuid::Uuid::from_u128((0x0190_0000_0000 << 80) | (0x7 << 76) | (0b10 << 62) | 9))
+                .unwrap(),
+            name: "Smith".to_owned(),
         },
     ];
 }

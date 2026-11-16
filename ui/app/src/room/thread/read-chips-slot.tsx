@@ -2,8 +2,8 @@
 // the room's list names it now, a matter no longer listed left out. An ×, pressed, sends withdraw_matter_read; the
 // pill goes once the host's header no longer lists the matter. A refusal goes to the console: the pill stays, so the
 // lawyer sees nothing changed and can press again.
-// A turn already running keeps reading until it ends: the host closes a withdrawn read only as the agent relaunches,
-// at the end of that turn, though the header drops the matter at once. So a pill whose × was pressed while a turn
+// A turn already running is stopped at once (the host's MatterReadStopped notice), and the agent relaunches without
+// the matter as that turn ends, though the header drops the matter first. So a pill whose × was pressed while a turn
 // runs stays, without its ×, saying it reads until this answer ends; it goes once the turn has (the status leaves
 // starting, running and needs_you), or turns back into a plain pill if the header lists the matter again.
 import { useState } from "react";

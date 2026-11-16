@@ -1,5 +1,5 @@
 // Host notices' copy review entries (TN-01 on; UC-346 to UC-350 the read invite's: another matter's files refused, with
-// the offer, and matters Clauseo couldn't fully keep the agent out of), apart from registry.tsx to keep that file under the size limit: a
+// the offer, and matters Clauseo couldn't fully keep the agent out of; UC-424 an answer stopped as a read was taken away), apart from registry.tsx to keep that file under the size limit: a
 // notice the host sends with its kind, in the room's thread, shown in the app's words (notice-words.ts). Each over the
 // thread the notice is in, as the host sends it.
 import type { ReactNode } from "react";
@@ -131,6 +131,13 @@ const OTHER_NOTICE = notice(6, {
   text: "Clauseo kept the agent out of another matter's files.",
   kind: { other_matter_refused: { matter: JOSHI.matter, name: JOSHI.name } },
 });
+const STOPPED = "Stopped this answer so {name} can no longer read {matter}'s files.";
+/** Joshi's read taken away while Claude answered: the answer stopped. */
+const STOPPED_NOTICE = notice(6, {
+  level: "warning",
+  text: "Stopped this answer so Claude can no longer read another matter's files.",
+  kind: { matter_read_stopped: { matter: JOSHI.matter, name: JOSHI.name } },
+});
 const OFFLINE_NO_SEARCH = "Clauseo stopped a step: {name} tried to go online by running a command.";
 const OFFLINE_NO_SEARCH_ALONE =
   "Clauseo stopped a step: the AI tried to go online by running a command.";
@@ -249,6 +256,13 @@ export const TN: Entry[] = [
     words: threadWords(OFFER),
     screen: "room/thread",
     render: thread(OTHER_NOTICE),
+  },
+  {
+    // Where the room knows no agent name, the row shows the host's own words.
+    id: "UC-424",
+    words: threadWords(STOPPED),
+    screen: "room/thread",
+    render: thread(STOPPED_NOTICE),
   },
   {
     id: "UC-349",

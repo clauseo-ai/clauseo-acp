@@ -113,6 +113,8 @@ mod codex_reads_note;
 #[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
+#[path = "host/withdraw_steer.rs"]
+mod withdraw_steer;
 
 #[cfg(test)]
 #[path = "host/case_law.rs"]

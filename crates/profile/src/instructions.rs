@@ -179,9 +179,12 @@ pub fn claude_scale(research: bool) -> Option<String> {
 
 /// The other matters' rule for an agent the launch fences from them (Claude on every OS, Codex
 /// on macOS and Linux): it may try a file the lawyer asked for, never one a document or a tool's
-/// output points to; the fence refuses it, and Clauseo shows the lawyer the button that lets
-/// this conversation read that matter (the host's `actor/turn/outside/refused_call.rs`). The
-/// host puts it in place of `{other_matters}`. Provisional words (b4l-mfence).
+/// output points to; when it can't open one (the fence refused it, or it saw the folder closed
+/// and didn't try) it says the lawyer can right-click this conversation and choose the menu item
+/// that lets it read that matter ([`invite_item`], in the words of [`other_matters_unfenced`]),
+/// and names no button: Clauseo's own line and offer after a refused call are the app's
+/// (the host's `actor/turn/outside/refused_call.rs`). The host puts it in place of
+/// `{other_matters}`. Provisional words (b4l-mfence).
 pub const OTHER_MATTERS: &str = include_str!("../assets/instructions/other-matters.txt");
 
 /// The copy entries of the matter fence's invite, whose `UC-351` is the open conversation's

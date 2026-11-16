@@ -116,3 +116,100 @@ pub(super) fn sandbox_denies(run: &RunFolders) -> SandboxDenies {
         limited,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use clauseo_protocol::{MatterId, ThreadId};
+
+    use super::{RunFolders, sandbox_denies};
+    use crate::agent::loads::sandbox::{ClaudeSandbox, SandboxOs, SandboxPaths};
+    use crate::agent::matter_fence::{MatterFence, Other};
+    use crate::config::SessionKey;
+    use crate::pipeline::tests::support::id;
+
+    /// The sandbox's write list never opens an invited matter, in any spelling: a sibling's
+    /// folders lie under no writable folder, and one inside the session's matter (writable) is
+    /// denied writes in each spelling. An invite is read-only on macOS and Linux too.
+    #[test]
+    #[cfg_attr(windows, ignore = "Claude's sandbox is macOS and Linux only")]
+    fn the_sandbox_s_write_list_never_holds_an_invited_matter() {
+        let data = PathBuf::from("/Data/Clauseo");
+        let key = SessionKey {
+            matter: id::<MatterId>(7),
+            thread: id::<ThreadId>(8),
+            launch: 1,
+        };
+        let run = RunFolders::new(&data, key);
+        let matter = PathBuf::from("/Clients/A");
+        let other = |n: u64, folder: &str, alias: &str, invited: bool| {
+            let mut other = Other::new(id(n), format!("M{n}"), PathBuf::from(folder), invited);
+            other.spellings = vec![PathBuf::from(folder), PathBuf::from(alias)];
+            other
+        };
+        let sibling = other(1, "/Clients/B", "/Volumes/Share/B", true);
+        let sibling_spellings = sibling.spellings.clone();
+        let nested = other(2, "/Clients/A/Shared", "/Volumes/Share/A/Shared", true);
+        let fenced = other(3, "/Clients/C", "/Volumes/Share/C", false);
+        let invited: Vec<PathBuf> = [&sibling, &nested]
+            .iter()
+            .flat_map(|other| other.spellings.clone())
+            .collect();
+        let mut fence = MatterFence::asked(vec![sibling, nested.clone(), fenced]);
+        fence.inside_own = nested.spellings.iter().map(|p| (p.clone(), true)).collect();
+        let mut run = run;
+        run.data_deny.matters = fence;
+        let denies = sandbox_denies(&run);
+        let tmp = crate::agent::temp::temp_dir(&run.root);
+        let short = PathBuf::from("/tmp/clsb-abcd1234");
+        let home = data.join("agents/claude-acp/home");
+        let paths = SandboxPaths {
+            matter: &matter,
+            work: &run.work,
+            tmp: &tmp,
+            claude_tmp: Some(&short),
+            downloads: &run.downloads,
+            skill_packs: &run.skill_packs,
+            notes: &run.notes,
+            skills: &[],
+            path: &[],
+            env_file: None,
+            ca_file: None,
+            claude_home: &home,
+            data: &run.data_deny.spellings,
+            other_matters: &denies.other_matters,
+            matter_shut: run.data_deny.matters.own_shut,
+            matter_inside: &denies.inside,
+        };
+        for os in [SandboxOs::Mac, SandboxOs::Linux] {
+            let sandbox = ClaudeSandbox::for_os(os, &paths).expect("the sandbox stays on");
+            for spelling in &invited {
+                let spelling = spelling.to_str().unwrap();
+                let denied = sandbox.deny_write.iter().any(|path| path == spelling);
+                let opened = sandbox.allow_write.iter().any(|open| {
+                    let open = open.trim_end_matches("/**");
+                    spelling == open || spelling.starts_with(&format!("{open}/"))
+                });
+                assert!(!opened || denied, "{os:?}: {spelling} is writable");
+            }
+            // Nor re-opened for reading: a sibling's folders lie under no `allowRead` entry, so
+            // Claude's shell stays out where a `denyRead` (the home) holds them; one inside the
+            // session's matter is read with the matter, which is re-opened whole.
+            for spelling in sibling_spellings.iter().map(|p| p.to_str().unwrap()) {
+                let read = sandbox.allow_read.iter().any(|open| {
+                    let open = open.trim_end_matches("/**");
+                    spelling == open || spelling.starts_with(&format!("{open}/"))
+                });
+                assert!(!read, "{os:?}: {spelling} is re-opened for reading");
+            }
+            assert!(
+                sandbox
+                    .deny_write
+                    .iter()
+                    .any(|path| path == "/Clients/A/Shared"),
+                "{os:?}"
+            );
+        }
+    }
+}

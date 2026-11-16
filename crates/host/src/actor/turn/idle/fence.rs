@@ -12,16 +12,22 @@
 //!   ([`stop_stale_at_turn_end`]): the relaunch sends the queue. A change
 //!   put back before then stops nothing. A stopping agent is not stoppable, so quick changes
 //!   make one stop, and the agent relaunched takes the newest key.
-//! - Shape shared with the Tools change (branch tools-reach-open, `idle/tools.rs`): once that
-//!   lands, this becomes one reason of its stale mark, with one stop path.
+//! - A read taken away while a turn runs (an invite withdrawn, or the invited matter forgotten)
+//!   doesn't wait: the turn is stopped at once, as the lawyer's Stop does
+//!   (`cancel::cancel_current`), with one notice naming the matter
+//!   (`NoticeKind::MatterReadStopped`), so the agent reads nothing more there; the stops above
+//!   then relaunch it. A queue the stop holds waits for the lawyer, and its next prompt meets the
+//!   new rules (`agents::ensure`). A read added mid-turn waits for the next prompt, as before.
+//! - Shape shared with the Tools change (`idle/tools.rs`); its stop waits out a grace, this one
+//!   doesn't.
 //! - The log names the thread only.
 
-use clauseo_protocol::ThreadId;
+use clauseo_protocol::{AgentKind, MatterId, Notice, NoticeKind, NoticeLevel, ThreadId};
 
 use super::super::super::Actor;
-use super::super::agents;
-use super::super::outside::fence::{key_of, matters_hash};
-use crate::log_file::LIFECYCLE;
+use super::super::outside::fence::{key_of, matters_hash, read_matters};
+use super::super::{TurnPhase, agents, cancel, current};
+use crate::log_file::{Cause, LIFECYCLE};
 
 /// Stops each live agent whose fence is out of date and that has nothing pending.
 pub(super) fn stop_stale(actor: &mut Actor) {
@@ -31,6 +37,7 @@ pub(super) fn stop_stale(actor: &mut Actor) {
     }
     let matters = matters_hash(actor);
     for thread in live {
+        stop_turn_if_narrowed(actor, thread);
         if stale(actor, thread, matters) && super::stoppable(actor, thread) == Some(true) {
             tracing::info!(target: LIFECYCLE, %thread, "agent stopped for a matter fence change");
             agents::idle_stop(actor, thread);
@@ -78,4 +85,64 @@ fn stale(actor: &Actor, thread: ThreadId, matters: u64) -> bool {
         .and_then(|entry| entry.turn.run.as_ref())
         .map(|run| run.data_deny.matters.key);
     launched.is_some_and(|launched| launched != key_of(actor, thread, matters))
+}
+
+/// `thread`'s live launch let it read a matter it may no longer read (the invite withdrawn, or
+/// the matter forgotten) and a turn runs that the lawyer's Stop would cancel: the turn is
+/// cancelled that way now (`cancel::cancel_current`), with one notice naming the matter: one
+/// checkpointing, starting or prompting on that attached agent. A cancelled turn, or one
+/// already ending, is left alone, so the notice goes once a turn; a turn not yet past its launch
+/// (accepting, queued, or waiting on a relaunch) meets the new rules at `agents::ensure`.
+fn stop_turn_if_narrowed(actor: &mut Actor, thread: ThreadId) {
+    let Some((matter, name)) = narrowed(actor, thread) else {
+        return;
+    };
+    // The prompt is with the stale agent, or about to go to it: a turn whose agent is stopping
+    // (or not up) relaunches it first, and `agents::ensure` stops a stale one before a prompt.
+    let attached = actor
+        .threads
+        .get(&thread)
+        .and_then(|entry| entry.turn.agent.as_deref())
+        .is_some_and(|agent| agent.stage == agents::Stage::Attached);
+    let running = attached
+        && current(actor, thread).is_some_and(|current| {
+            !current.cancelled
+                && matches!(
+                    current.phase,
+                    TurnPhase::Checkpointing | TurnPhase::Starting | TurnPhase::Prompting
+                )
+        });
+    if !running {
+        return;
+    }
+    tracing::info!(target: LIFECYCLE, %thread, "a turn stopped: a matter it could read was taken away");
+    let kind = actor
+        .threads
+        .get(&thread)
+        .and_then(|entry| AgentKind::of(&entry.row.agent));
+    let agent = kind.map_or("the AI", clauseo_profile::instructions::plan_name);
+    let notice = Notice {
+        level: NoticeLevel::Warning,
+        text: format!("Stopped this answer so {agent} can no longer read another matter's files."),
+        kind: Some(NoticeKind::MatterReadStopped { matter, name }),
+    };
+    if let Err(error) = super::super::updates::commit(actor, thread, [notice.into()], Vec::new()) {
+        tracing::warn!(%thread, error = %Cause(&error), "the read-stopped notice was not logged");
+    }
+    cancel::cancel_current(actor, thread, cancel::why::FENCE);
+}
+
+/// The first matter `thread`'s live launch let it read that it may no longer read: not invited
+/// now, or no longer on the list (forgotten), with its name as the launch knew it.
+fn narrowed(actor: &Actor, thread: ThreadId) -> Option<(MatterId, String)> {
+    let run = actor.threads.get(&thread)?.turn.run.as_ref()?;
+    let invited = read_matters(actor, thread);
+    run.data_deny
+        .matters
+        .others
+        .iter()
+        .find(|other| {
+            other.invited && !(invited.contains(&other.id) && actor.matters.contains_key(&other.id))
+        })
+        .map(|other| (other.id, other.name.clone()))
 }

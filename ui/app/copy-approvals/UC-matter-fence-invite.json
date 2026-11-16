@@ -119,5 +119,14 @@
     "at": "2026-11-15",
     "by": "mfence (provisional; Rohan batch review)",
     "note": "Host notice NoticeKind::ShellLimited, reworded 2026-11-15 to hold in every case: a matter the conversation is not invited into lies inside this one (Claude's sandbox re-opens none of the matter), or another matter's folder could only be denied through a folder above it (reads elsewhere, or writes into part of this matter). Its file tools still read and edit the matter. Once while it lasts"
+  },
+  "UC-424": {
+    "en": "Stopped this answer so {name} can no longer read {matter}'s files.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "mfence2 (provisional; Rohan batch review)",
+    "note": "Host notice NoticeKind::MatterReadStopped: the lawyer stopped letting this conversation read another matter (the pill's ×), or forgot that matter, while an answer ran; Clauseo stopped the answer at once, as Stop does, and the agent starts again without that matter's files. {name} the agent, {matter} the matter's name, isolated. Where the room knows no agent name, the row shows the host's words. Hindi later"
   }
 }
