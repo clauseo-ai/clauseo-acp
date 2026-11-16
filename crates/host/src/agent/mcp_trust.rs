@@ -53,7 +53,8 @@ pub(crate) fn is_trusted(trusted: &[String], server: &str) -> bool {
 }
 
 /// Whether `tool` of `server` is a built-in's that never asks: one of Clauseo's own `case-law`
-/// connector's search and read tools (`loads::case_law::UNASKED_TOOLS`), by exact server and
+/// connector's search and read tools (`loads::case_law::UNASKED_TOOLS`), or one of the
+/// `clauseo-versions` tools (`loads::versions::TOOLS`, both read-only), by exact server and
 /// tool name. Codex 0.162.1 asks before an MCP tool unless the tool says `readOnlyHint: true`
 /// (`core/src/mcp_tool_call.rs:2461-2491`, the `Auto` mode codex-acp's servers run in), so a
 /// tool whose hint is missing would ask; the host answers for these. `recharge`, which opens a
@@ -62,8 +63,12 @@ pub(crate) fn is_trusted(trusted: &[String], server: &str) -> bool {
 /// (`clauseo_settings::reserved_mcp_server`), so a lawyer's or firm's server cannot borrow it.
 /// The `browser`'s own rule is `sources::browser::auto_allowed_browser_tool`.
 pub(crate) fn never_asks(server: &str, tool: Option<&str>) -> bool {
-    server == clauseo_profile::servers::CASE_LAW
-        && tool.is_some_and(crate::agent::loads::case_law::unasked_tool)
+    let unasked = match server {
+        clauseo_profile::servers::CASE_LAW => crate::agent::loads::case_law::unasked_tool,
+        clauseo_profile::servers::VERSIONS => crate::agent::loads::versions::unasked_tool,
+        _ => return false,
+    };
+    tool.is_some_and(unasked)
 }
 
 /// Claude's allow rule for every tool of `server`.

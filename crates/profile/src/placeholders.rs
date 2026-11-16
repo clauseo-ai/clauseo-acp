@@ -83,13 +83,24 @@ pub const RELAY_PORT: &str = "{relay_port}";
 /// `dunce`-simplified path. Unfillable (no relay): the host drops `case-law`.
 pub const RELAY_TOKEN_FILE: &str = "{relay_token_file}";
 
+/// The port of the session's version-history listener, as
+/// `CLAUSEO_RELAY=127.0.0.1:{versions_port}`. Unfillable (no listener): the host drops
+/// `clauseo-versions`.
+pub const VERSIONS_PORT: &str = "{versions_port}";
+/// The session's version-history token file, `<data>/run/<session id>/versions-token`, as
+/// `CLAUSEO_RELAY_TOKEN_FILE`: a path, never the token. The host fills it with a
+/// `dunce`-simplified path. Unfillable (no listener): the host drops `clauseo-versions`.
+pub const VERSIONS_TOKEN_FILE: &str = "{versions_token_file}";
+
 /// The tokens the host fills in the instructions. An unfillable one is a host bug: the host
 /// fails the launch with `agent.launch_failed`, naming the token ([`Unfilled`]'s message).
 pub const IN_INSTRUCTIONS: [&str; 4] = [WORK_FOLDER, MATTER_NOTES, CONNECTORS, BROWSER];
-/// The tokens the host fills in the `browser` and `case-law` entries. The browser entry holds
-/// [`SOCKET_DIR`] on macOS and Linux only and [`DAEMON_PORT`] on Windows only; the host fills
-/// whichever it finds. Only `case-law` holds [`RELAY_PORT`] and [`RELAY_TOKEN_FILE`].
-pub const IN_SERVERS: [&str; 11] = [
+/// The tokens the host fills in the `browser`, `case-law` and `clauseo-versions` entries. The
+/// browser entry holds [`SOCKET_DIR`] on macOS and Linux only and [`DAEMON_PORT`] on Windows
+/// only; the host fills whichever it finds. Only `case-law` holds [`RELAY_PORT`] and
+/// [`RELAY_TOKEN_FILE`], and only `clauseo-versions` [`VERSIONS_PORT`] and
+/// [`VERSIONS_TOKEN_FILE`].
+pub const IN_SERVERS: [&str; 13] = [
     BROWSER_DIR,
     MATTER_DOWNLOADS,
     PROXY_PORT,
@@ -101,6 +112,8 @@ pub const IN_SERVERS: [&str; 11] = [
     DAEMON_PORT,
     RELAY_PORT,
     RELAY_TOKEN_FILE,
+    VERSIONS_PORT,
+    VERSIONS_TOKEN_FILE,
 ];
 
 /// A token in `tokens` that [`fill`] had no value for.

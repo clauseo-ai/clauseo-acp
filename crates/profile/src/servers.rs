@@ -1,6 +1,7 @@
 //! The MCP servers the profile adds: `browser`, agent-browser's MCP server behind S27's guard
 //! (Codex only, [`browser_mcp`]), then `case-law`, the paid case-law connector through the
-//! host's relay (R24).
+//! host's relay (R24), then `clauseo-versions`, the matter's version history through the
+//! host's second listener ([`versions`]).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -10,7 +11,8 @@ use clauseo_protocol::AgentKind;
 use crate::paths::ProfilePaths;
 use crate::placeholders::{
     BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, MATTER_DOWNLOADS, PROXY_PORT,
-    PROXY_SECRET_FILE, RELAY_PORT, RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR,
+    PROXY_SECRET_FILE, RELAY_PORT, RELAY_TOKEN_FILE, SESSION_ID, SOCKET_DIR, VERSIONS_PORT,
+    VERSIONS_TOKEN_FILE,
 };
 
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
@@ -90,6 +92,11 @@ pub fn shell_browser_on(windows: bool) -> bool {
 /// The case-law connector's reserved server name (R24): a `mcp.servers.case-law` entry in the
 /// settings or a policy source is dropped (`clauseo_settings::RESERVED_MCP_SERVERS`).
 pub const CASE_LAW: &str = "case-law";
+
+/// The version-history tool's reserved server name: a `mcp.servers.clauseo-versions` entry in the
+/// settings or a policy source is dropped (`clauseo_settings::RESERVED_MCP_SERVERS`). Its tools
+/// are `list_versions` and `read_version`, answered by the host.
+pub const VERSIONS: &str = "clauseo-versions";
 
 /// One stdio MCP server, as the host sends it in `session/new` and `session/load`. Strings
 /// may hold [`IN_SERVERS`](crate::placeholders::IN_SERVERS) tokens for the host to fill.
@@ -192,6 +199,29 @@ pub fn case_law(paths: &ProfilePaths) -> ProfileServer {
             (
                 "CLAUSEO_RELAY_TOKEN_FILE".to_owned(),
                 RELAY_TOKEN_FILE.to_owned(),
+            ),
+        ]),
+    }
+}
+
+/// The `clauseo-versions` entry: `clauseo-mcp connector clauseo-versions`, which relays each
+/// JSON-RPC line to the session's version-history listener in the host, the same way as
+/// [`case_law`] does to the relay: `CLAUSEO_RELAY=127.0.0.1:{versions_port}` and
+/// `CLAUSEO_RELAY_TOKEN_FILE={versions_token_file}`; the token itself is never in the entry.
+/// The host fills both per session, or drops the entry.
+pub fn versions(paths: &ProfilePaths) -> ProfileServer {
+    ProfileServer {
+        name: VERSIONS.to_owned(),
+        command: paths.browser.clauseo_mcp.clone(),
+        args: vec!["connector".to_owned(), VERSIONS.to_owned()],
+        env: BTreeMap::from([
+            (
+                "CLAUSEO_RELAY".to_owned(),
+                format!("127.0.0.1:{VERSIONS_PORT}"),
+            ),
+            (
+                "CLAUSEO_RELAY_TOKEN_FILE".to_owned(),
+                VERSIONS_TOKEN_FILE.to_owned(),
             ),
         ]),
     }

@@ -1,9 +1,10 @@
 //! A Word file of an earlier version as text: copied on the matter's thread (capped at the
-//! matter's size cap) into a private folder, `<data>/tmp/versions-<id>/version.docx` ([`copy_out`]), then shown by
-//! `stetdoc view --all` off the matter's thread ([`view`]), within stetdoc's read limits (10 s,
-//! 16 MiB of output), through a passthrough launcher with a clean environment, as tracked
-//! changes run it. The folder goes when its [`Copied`] drops, after the run. The text of the last
-//! Word file read is kept by content ([`Kept`]), so paging it runs stetdoc once.
+//! matter's size cap) into a private folder, `<data>/tmp/versions-<id>/version.docx`
+//! ([`copy_out`]), then shown by `stetdoc view --all` off the matter's thread ([`view`]),
+//! within stetdoc's read limits (10 s, 16 MiB of output), through a passthrough launcher with a
+//! clean environment, as tracked changes run it. The folder goes when its [`Copied`] drops,
+//! after the run. The text of the last Word file read is kept by content ([`Kept`]), so paging
+//! it runs stetdoc once.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

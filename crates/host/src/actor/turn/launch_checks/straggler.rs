@@ -230,13 +230,14 @@ fn chrome_alive(session: &BrowserSession, probe: Probe) -> Option<Check> {
 }
 
 /// What a session holds that must outlive its processes: its browser claims, its case-law
-/// relay and its egress proxy, dropped in that order. Freed only after a completed wait
-/// ([`Lease`]); otherwise held ([`HeldRuns`]).
+/// relay, its egress proxy and its version-history listener, dropped in that order. Freed only
+/// after a completed wait ([`Lease`]); otherwise held ([`HeldRuns`]).
 #[derive(Debug, Default)]
 pub(crate) struct Parts {
     pub(super) browser: Option<Arc<BrowserSession>>,
     pub(super) case_law: super::relay::CaseLaw,
     pub(super) egress: Option<Arc<super::egress::EgressGuard>>,
+    pub(super) versions: super::versions::Versions,
 }
 
 impl Parts {
@@ -245,6 +246,7 @@ impl Parts {
         self.browser.is_none()
             && matches!(self.case_law, super::relay::CaseLaw::Absent)
             && self.egress.is_none()
+            && matches!(self.versions, super::versions::Versions::Absent)
     }
 }
 

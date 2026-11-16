@@ -109,6 +109,7 @@ fn claude_gets_allow_rules_unless_forced_ask() {
             forced_ask,
             data: &crate::agent::data_fence::LaunchDeny::default(),
             case_law,
+            versions: crate::versions::VersionsTool::Absent,
             browser: false,
             sandbox: None,
             matter: None,
@@ -270,6 +271,29 @@ fn codex_calls_keep_unfinished_mcp_calls_by_id() {
 /// name, get the built-in's pass: not `recharge`, not an unknown tool, not a tool the host could
 /// not read, and not a lawyer's server named like it. A settings entry of the reserved name is
 /// never trusted or sent.
+#[test]
+fn only_the_version_history_tools_of_our_exact_server_never_ask() {
+    for tool in ["list_versions", "read_version"] {
+        assert!(never_asks("clauseo-versions", Some(tool)), "{tool}");
+        for other in [
+            "Clauseo-Versions",
+            "clauseo-versions-2",
+            "versions",
+            "case-law",
+        ] {
+            assert!(!never_asks(other, Some(tool)), "{other} {tool}");
+        }
+    }
+    for tool in [
+        Some("write_version"),
+        Some("List_versions"),
+        Some("search_law"),
+        None,
+    ] {
+        assert!(!never_asks("clauseo-versions", tool), "{tool:?}");
+    }
+}
+
 #[test]
 fn only_the_built_in_case_laws_search_and_read_tools_never_ask() {
     for tool in [

@@ -202,12 +202,16 @@ impl ClauseoProfile {
 
     /// The servers for an agent of `kind`: `browser` for Codex ([`servers::browser_mcp`]; Claude
     /// keeps the shell command), then `case-law` (R24), which the host sends only in a session
-    /// whose relay it opened.
+    /// whose relay it opened, then `clauseo-versions`, which it sends only in a session whose
+    /// version-history listener it opened.
     pub fn servers(&self, kind: Option<AgentKind>) -> Vec<ProfileServer> {
         servers::browser_mcp(kind)
             .then(|| servers::browser(&self.paths))
             .into_iter()
-            .chain([servers::case_law(&self.paths)])
+            .chain([
+                servers::case_law(&self.paths),
+                servers::versions(&self.paths),
+            ])
             .collect()
     }
 

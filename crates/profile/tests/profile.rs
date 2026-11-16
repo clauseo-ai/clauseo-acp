@@ -263,13 +263,16 @@ fn kind_specific_parts_go_only_to_their_kind() {
     // `browser` goes to Codex alone (`servers::browser_mcp`), and not on Windows: Claude keeps
     // the shell command.
     let codex = if cfg!(windows) {
-        vec!["case-law"]
+        vec!["case-law", "clauseo-versions"]
     } else {
-        vec!["browser", "case-law"]
+        vec!["browser", "case-law", "clauseo-versions"]
     };
     for (kind, want) in [
-        (None, vec!["case-law"]),
-        (Some(AgentKind::Claude), vec!["case-law"]),
+        (None, vec!["case-law", "clauseo-versions"]),
+        (
+            Some(AgentKind::Claude),
+            vec!["case-law", "clauseo-versions"],
+        ),
         (Some(AgentKind::Codex), codex),
     ] {
         let names: Vec<String> = profile.servers(kind).into_iter().map(|s| s.name).collect();

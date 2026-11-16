@@ -53,6 +53,8 @@ pub(super) struct Claims {
     pub(super) egress: EgressPrep,
     /// Where the run's parts go when it drops without a completed wait.
     pub(super) held: super::straggler::HeldRuns,
+    /// The version-history listener.
+    pub(super) versions: super::versions::VersionsPrep,
     /// The session's `PATH` folders, found once the browser claims are known.
     pub(super) path: PathPrep,
 }
@@ -118,6 +120,7 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
         browser,
         case_law: relay::case_law_prep(actor, &row.agent),
         held: actor.wiring.held.clone(),
+        versions: super::versions::versions_prep(actor, &row.agent, &run),
         path: PathPrep {
             prepend: actor.wiring.path_prepend.clone(),
             browser_tool: actor.profile.browser_tool(),

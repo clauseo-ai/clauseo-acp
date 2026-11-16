@@ -37,6 +37,7 @@ fn claude_meta(deny: &LaunchDeny, run: &Path, notes: &Path, matter: &Path) -> Ma
         forced_ask: false,
         data: deny,
         case_law: true,
+        versions: crate::versions::VersionsTool::Absent,
         browser: true,
         sandbox: None,
         matter: Some(matter),

@@ -1,6 +1,6 @@
-//! Loopback listeners for one launch (the proxy's two, and stage E's connector relay), and
-//! loopback ports claimed for a session that something else binds later (agent-browser's
-//! daemon and Chrome's debugging port).
+//! Loopback listeners for one launch (the proxy's two, stage E's connector relay and the
+//! version-history listener), and loopback ports claimed for a session that something else
+//! binds later (agent-browser's daemon and Chrome's debugging port).
 //!
 //! macOS and Linux bind `127.0.0.1` on a port the OS picks. Windows binds a free port in
 //! [`TIER_B_PORTS`], the range set-up's static permits open to every pool user (S15 PR7),
@@ -8,11 +8,11 @@
 //! process can bind the same port. Every listener binds `127.0.0.1` only.
 //!
 //! The range is for tier B's listeners alone, since every pool user's agent reaches it: a
-//! tier-B launch's proxy agent listener and R24 relay ([`bind_loopback`] with
-//! [`ListenerFor::TierB`]), and what a tier-B launch binds later ([`claim_port`],
-//! [`claim_port_at`]). A tier-C launch's listeners, the proxy's browser listener always, and the
-//! browser's ports bind or are claimed outside it ([`ListenerFor::Other`],
-//! [`claim_browser_port`], [`claim_browser_port_at`]).
+//! tier-B launch's proxy agent listener, R24 relay and version-history listener, which every
+//! launch opens ([`bind_loopback`] with [`ListenerFor::TierB`]), and what a tier-B launch binds
+//! later ([`claim_port`], [`claim_port_at`]). A tier-C launch's listeners, the proxy's browser
+//! listener always, and the browser's ports bind or are claimed outside it
+//! ([`ListenerFor::Other`], [`claim_browser_port`], [`claim_browser_port_at`]).
 //!
 //! A [`PortClaim`] holds a port in a process-wide registry until it drops. Nothing is bound
 //! while it is held, so the registry keeps this process's own listeners and claims apart:

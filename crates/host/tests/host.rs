@@ -551,6 +551,9 @@ mod update_install;
 #[path = "host/versions.rs"]
 mod versions;
 #[cfg(test)]
+#[path = "host/versions_tool.rs"]
+mod versions_tool;
+#[cfg(test)]
 #[path = "host/word_open.rs"]
 mod word_open;
 

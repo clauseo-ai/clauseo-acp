@@ -180,6 +180,13 @@ pub(crate) struct RunFolders {
     /// before that, when the agent is stopped and again before the run folder is removed.
     /// Stage C's R17 adds its port to the session's `Loopback::Ports`.
     pub(crate) case_law: relay::CaseLaw,
+    /// `<root>/versions-token`: the version-history listener's token file, written by the
+    /// launch prep only when the session's listener opened, and gone with the run folder.
+    pub(crate) versions_token: PathBuf,
+    /// The session's version-history listener ([`versions::Versions`]), opened on the
+    /// launch-prep thread whether or not case law is; it rides and stops like the relay, and its
+    /// token is revoked at the same points. Stage C's R17 adds its port to `Loopback::Ports`.
+    pub(crate) versions: versions::Versions,
     /// The session's egress proxy ([`egress`]), opened on the launch-prep thread when the
     /// session can get the browser and its Chrome and claims were found; none otherwise, or
     /// when it did not open or its password file was not written (`NoProxy`). It closes when
@@ -226,6 +233,7 @@ impl RunFolders {
             skill_packs: root.join("skill-packs"),
             relay_token: relay::token_file(&root),
             proxy_secret: egress::secret_file(&root),
+            versions_token: versions::token_file(&root),
             notes: notes_dir(data, key.matter),
             root,
             chrome: None,
@@ -238,6 +246,7 @@ impl RunFolders {
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
             codex_listed: Listed::default(),
             case_law: relay::CaseLaw::Absent,
+            versions: versions::Versions::Absent,
             egress: None,
             lease: Arc::default(),
             slot_waited: false,
@@ -421,6 +430,7 @@ fn undo_late(late: Prepared) {
     // Nothing to wait for: no agent was started, so its parts are freed as it drops.
     run.lease.wait_done();
     relay::end(&run);
+    versions::end(&run);
     run.remove();
     // Its claims, relay and proxy go now, after the folder.
     drop(run);
@@ -469,6 +479,7 @@ use paths::Claims;
 pub(super) mod folder;
 pub(super) mod relay;
 mod straggler;
+pub(super) mod versions;
 pub(crate) use straggler::HeldRuns;
 mod removal;
 use removal::discard;

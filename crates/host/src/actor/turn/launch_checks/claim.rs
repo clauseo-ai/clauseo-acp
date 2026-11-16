@@ -1,5 +1,6 @@
-//! The launch-prep thread's claims for a session ([`claim`]): its browser, egress proxy and
-//! case-law relay, and the `PATH` its shells get, which needs the browser's answer.
+//! The launch-prep thread's claims for a session ([`claim`]): its browser, egress proxy,
+//! case-law relay and version-history listener, and the `PATH` its shells get, which needs the
+//! browser's answer.
 
 use std::path::Path;
 
@@ -14,6 +15,7 @@ pub(super) fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: boo
         egress,
         held,
         path,
+        versions,
     } = claims;
     let browser = if slot || browser.shell() {
         browser
@@ -34,10 +36,12 @@ pub(super) fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: boo
     (run.egress, run.egress_refused) = egress.open(run.key, offered);
     super::egress::write_secret(run);
     run.case_law = case_law.open(run);
+    run.versions = versions.open(run);
     let parts = straggler::Parts {
         browser: run.browser_session.clone(),
         case_law: run.case_law.clone(),
         egress: run.egress.clone(),
+        versions: run.versions.clone(),
     };
     run.lease.keep(held, parts);
     // Last: the tools folder goes on `PATH` only once the browser is known.

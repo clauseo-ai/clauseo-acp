@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use clauseo_settings::Locations;
 
-use super::{CASE_LAW, browser_for, browser_mcp_on, case_law, no_browser_on, shell_browser_on};
+use super::{
+    CASE_LAW, VERSIONS, browser_for, browser_mcp_on, case_law, no_browser_on, shell_browser_on,
+    versions,
+};
 use crate::{BrowserSidecars, ProfilePaths};
 
 fn paths() -> ProfilePaths {
@@ -107,6 +110,28 @@ fn the_case_law_entry_names_the_relay_and_the_token_file_only() {
         [
             ("CLAUSEO_RELAY", "127.0.0.1:{relay_port}"),
             ("CLAUSEO_RELAY_TOKEN_FILE", "{relay_token_file}"),
+        ]
+    );
+}
+
+/// The `clauseo-versions` entry: `clauseo-mcp connector clauseo-versions` with the listener's
+/// address and its own token file's path as tokens, never the relay's, and no token in it.
+#[test]
+fn the_versions_entry_names_its_own_listener_and_token_file_only() {
+    let entry = versions(&paths());
+    assert_eq!(entry.name, VERSIONS);
+    assert_eq!(entry.command, paths().browser.clauseo_mcp);
+    assert_eq!(entry.args, ["connector", "clauseo-versions"]);
+    let env: Vec<(&str, &str)> = entry
+        .env
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    assert_eq!(
+        env,
+        [
+            ("CLAUSEO_RELAY", "127.0.0.1:{versions_port}"),
+            ("CLAUSEO_RELAY_TOKEN_FILE", "{versions_token_file}"),
         ]
     );
 }

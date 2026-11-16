@@ -75,6 +75,7 @@ pub(super) fn discard(
             run.lease.wait_done();
             // The token is revoked before its file goes with the folder.
             relay::end(&run);
+            super::versions::end(&run);
             if let Some(hook) = &hook {
                 hook(&run.root);
             }

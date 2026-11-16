@@ -212,6 +212,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     }
     // Case-law calls from now on count against the between-turns bucket (R24).
     super::launch_checks::relay::turn_ended(actor, thread);
+    super::launch_checks::versions::turn_ended(actor, thread);
     let Some(current) = super::current(actor, thread) else {
         return;
     };

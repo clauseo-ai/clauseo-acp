@@ -52,10 +52,13 @@ pub(super) fn launch(
             format!("no agent {} in the settings", row.agent),
         )
     })?;
-    // The relay token and the browser proxy's password reach the agent's tree in files; its
-    // stderr tail hides them all the same. So are the lawyer's MCP values and remote URLs, which
-    // reach it in `session/new`.
+    // The relay's and the version-history listener's tokens and the browser proxy's password
+    // reach the agent's tree in files; its stderr tail hides them all the same. So are the
+    // lawyer's MCP values and remote URLs, which reach it in `session/new`.
     let mut redacted = super::super::launch_checks::relay::redacted(&prepared.run);
+    redacted.extend(super::super::launch_checks::versions::redacted(
+        &prepared.run,
+    ));
     redacted.extend(agent::loads::lawyer::redacted(&prepared.run.lawyer.servers));
     redacted.extend(
         prepared

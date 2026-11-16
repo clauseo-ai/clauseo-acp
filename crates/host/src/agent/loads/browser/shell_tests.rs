@@ -201,6 +201,7 @@ fn claude_gets_agent_browser_rules_only_with_the_browser() {
             forced_ask: false,
             data: &data,
             case_law: false,
+            versions: crate::versions::VersionsTool::Absent,
             browser,
             sandbox: None,
             matter: None,

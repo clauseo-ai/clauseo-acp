@@ -162,9 +162,9 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
             "{id}"
         );
         // Codex gets `browser` first off Windows (`clauseo_profile::servers::browser_mcp`),
-        // Claude none (it keeps the shell command); both get `case-law` (R24). The host fills
-        // each per session or leaves it out (no relay, the connector not signed in, the firm's
-        // managed MCP).
+        // Claude none (it keeps the shell command); both get `case-law` (R24), then
+        // `clauseo-versions`. The host fills each per session or leaves it out (no relay or
+        // listener, the connector not signed in, the firm's managed MCP).
         let mut servers = hook.mcp_servers(&agent(id));
         assert_eq!(
             id == CODEX && !cfg!(windows),
@@ -183,14 +183,25 @@ fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
                 args: case_law_args,
                 env: case_law_env,
             },
+            McpServer::Stdio {
+                name: versions,
+                command: versions_command,
+                args: versions_args,
+                env: versions_env,
+            },
         ] = servers.as_slice()
         else {
-            panic!("one stdio server after Codex's browser: {servers:?}");
+            panic!("two stdio servers after Codex's browser: {servers:?}");
         };
         assert_eq!(case_law, "case-law");
         assert_eq!(case_law_command, &clauseo_mcp);
         assert_eq!(case_law_args, &["connector", "case-law"]);
         let names: Vec<&str> = case_law_env.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["CLAUSEO_RELAY", "CLAUSEO_RELAY_TOKEN_FILE"]);
+        assert_eq!(versions, "clauseo-versions");
+        assert_eq!(versions_command, &clauseo_mcp);
+        assert_eq!(versions_args, &["connector", "clauseo-versions"]);
+        let names: Vec<&str> = versions_env.iter().map(|(name, _)| name.as_str()).collect();
         assert_eq!(names, ["CLAUSEO_RELAY", "CLAUSEO_RELAY_TOKEN_FILE"]);
     }
     // Codex's entry names both sidecars where the release bundles them, under the

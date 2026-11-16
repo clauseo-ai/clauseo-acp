@@ -20,6 +20,10 @@
 //!   relay's `CaseLawFound` feeds the thread's sources (`sources/case_law.rs`).
 //! - `state.rs` holds what the app sees of the connector (PR5): the credential, the balance, out
 //!   of credit and the pay link; `actor/connectors.rs` runs the commands that change it.
+//! - `versions_relay.rs` is the launch's second loopback listener, for the version-history tool
+//!   (`clauseo-versions`): open in every session whatever case law's state, with its own token,
+//!   answered by the session's `crate::versions` backend. It shares the relay's handshake, gate
+//!   and accept loop (`gate.rs`, `relay/handshake.rs`, `relay/accept.rs`).
 //!
 //! Logs name the session, the method and the reason, never a line's content, an argument, a
 //! URL query or a token; the hello line is never logged or echoed.
@@ -33,6 +37,7 @@ pub(crate) use limits::civil_from_days;
 mod relay;
 pub(crate) mod state;
 mod texts;
+mod versions_relay;
 mod wiring;
 
 use std::time::Duration;
@@ -47,6 +52,11 @@ pub use limits::{
     MAX_PAID_CALLS_PER_TURN, MAX_PENDING_HANDSHAKES, MAX_RECHARGE_CALLS_PER_TURN, MAX_REPLY_BYTES,
 };
 pub use relay::{RelayConfig, RelaySession, Relays, TurnHandle};
+pub use versions_relay::MAX_VERSIONS_LINE_BYTES;
+pub(crate) use versions_relay::VersionsRelay;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub use versions_relay::versions_opened_for_test;
 pub use wiring::{ConnectorEvents, ConnectorOpener, ConnectorsWiring};
 
 /// What a paid `recharge` answer says of the balance after the call it resumed.

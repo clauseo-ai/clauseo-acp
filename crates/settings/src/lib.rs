@@ -79,10 +79,10 @@
 //! - Policy fails closed per key: a policy value for a known key that does not type is a
 //!   warning and still locks the key, at its default (an agent: with no entry), or off for a
 //!   security key.
-//! - The MCP server names `browser` and `case-law` (Clauseo's own) and `ide`, `claude-in-chrome`
-//!   and `computer-use` (Claude Code's built-ins) are reserved ([`RESERVED_MCP_SERVERS`]):
-//!   an entry of any of them, in any case, in `settings.json` or a policy is left out with a
-//!   warning; the rest of the list loads.
+//! - The MCP server names `browser`, `case-law` and `clauseo-versions` (Clauseo's own) and `ide`,
+//!   `claude-in-chrome` and `computer-use` (Claude Code's built-ins) are reserved
+//!   ([`RESERVED_MCP_SERVERS`]): an entry of any of them, in any case, in `settings.json` or a
+//!   policy is left out with a warning; the rest of the list loads.
 //! - A key that `settings.json` or `policy.json` sets twice keeps its last value, valid or not:
 //!   a last value that does not type puts the key back at its default, with a warning.
 //! - A key this version does not know is a warning, never an error, so a firm's profile for a

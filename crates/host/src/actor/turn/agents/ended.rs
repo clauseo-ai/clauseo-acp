@@ -58,6 +58,7 @@ pub(in super::super) fn stop(actor: &mut Actor, thread: ThreadId) {
     }
     // The session is ending: its case-law relay refuses from now on (R24).
     launch_checks::relay::end_for(actor, thread);
+    launch_checks::versions::end_for(actor, thread);
 }
 
 /// Stops `thread`'s agent for idling (`idle.rs`) with the shutdown ladder: its `Ended` logs

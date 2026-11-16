@@ -369,6 +369,7 @@ fn claude_pre_allows_case_law_only_with_our_entry() {
             forced_ask,
             data: &crate::agent::data_fence::LaunchDeny::default(),
             case_law,
+            versions: crate::versions::VersionsTool::Absent,
             browser: false,
             sandbox: None,
             matter: None,

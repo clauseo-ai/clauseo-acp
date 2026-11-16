@@ -37,6 +37,7 @@ mod subagents_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) mod tls_roots;
+pub(crate) mod versions;
 
 pub use codex::{GUARD_EXE, codex_guard_program, codex_hook_config};
 

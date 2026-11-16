@@ -180,6 +180,10 @@ pub(crate) struct ClaudeKeys<'a> {
     /// `mcp__case-law__<tool>` per `case_law::UNASKED_TOOLS` (decision D7), never `recharge`.
     /// Without it, any hook rule for a `case-law` server is dropped.
     pub(crate) case_law: bool,
+    /// Whether the session gets the `clauseo-versions` entry: with it, `allowedTools` gains
+    /// `mcp__clauseo-versions__<tool>` per `versions::TOOLS`. Without it, any hook rule for a
+    /// `clauseo-versions` server is dropped.
+    pub(crate) versions: crate::versions::VersionsTool,
     /// The session has the browser as a shell tool: `allowedTools` gains agent-browser's page
     /// subcommands, `disallowedTools` its denied flags, subcommands and file or JavaScript
     /// commands, and `permissions.ask` the options that still ask
@@ -218,11 +222,17 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
         allowed.retain(|rule| !rule.as_str().is_some_and(is_web_rule));
     }
     allowed.retain(|rule| !rule.as_str().is_some_and(super::case_law::is_case_law_rule));
+    allowed.retain(|rule| !rule.as_str().is_some_and(super::versions::is_versions_rule));
     for server in keys.trusted_servers {
         push_new(&mut allowed, &crate::agent::mcp_trust::claude_rule(server));
     }
     if keys.case_law {
         for rule in super::case_law::claude_allow() {
+            push_new(&mut allowed, &rule);
+        }
+    }
+    if keys.versions == crate::versions::VersionsTool::Offered {
+        for rule in super::versions::claude_allow() {
             push_new(&mut allowed, &rule);
         }
     }

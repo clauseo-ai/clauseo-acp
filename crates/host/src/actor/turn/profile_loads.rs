@@ -15,6 +15,7 @@ use super::super::Actor;
 use super::launch_checks::egress;
 use super::launch_checks::relay::CaseLaw;
 use super::launch_checks::{Prepared, RunFolders};
+use super::own_servers;
 use crate::agent::loads;
 use crate::agent::loads::browser::{self, BrowserInputs, Claims, Switch};
 use crate::agent::loads::case_law::{self, CaseLawInputs, Relay};
@@ -100,20 +101,6 @@ pub(super) fn launch_keys(
 /// `additionalDirectories`.
 pub(super) type SessionLoads = (Map<String, Value>, Vec<McpServer>, Vec<PathBuf>);
 
-/// Notes on `thread`'s agent what may run unasked in its session (`agent/mcp_trust.rs`): only
-/// what Clauseo sent, the lawyer's `trusted` servers and `case-law` when its entry went.
-fn note_mcp_sent(actor: &mut Actor, thread: ThreadId, trusted: &[String], case_law: bool) {
-    let mut sent = trusted.to_vec();
-    if case_law {
-        sent.push(clauseo_profile::servers::CASE_LAW.to_owned());
-    }
-    if let Some(agent) = super::state(actor, thread).and_then(|state| state.agent.as_deref_mut())
-        && let Some(slot) = agent.mcp_sent.as_mut()
-    {
-        *slot = sent;
-    }
-}
-
 /// Of the lawyer's servers `sent` to `thread`'s session, the ones that run unasked
 /// (`agent/mcp_trust.rs`): only a server the agent gets, so the trust never names one left out,
 /// nor a remote one when the agent takes none (no `mcpCapabilities.http`: `clauseo-acp` leaves
@@ -164,6 +151,7 @@ pub(super) fn session_loads(
     let none_here = browser::no_browser(kind, cfg!(windows));
     let offered = browser::offered(actor.profile.mcp_servers(&agent_id), none_here);
     let (hook, case_law_entry, case_law_state) = case_law_servers(actor, &run, offered, control);
+    let (hook, versions_entry) = own_servers::versions_servers(actor, thread, &run, hook, control);
     let part = connectors_part(case_law_entry.is_some());
     let (web_search, browser_switch) = switches(actor);
     let downloads = matter.join(browser::DOWNLOADS_FOLDER);
@@ -213,6 +201,7 @@ pub(super) fn session_loads(
         forced_ask,
         data: &run.data_deny,
         case_law: case_law_entry.is_some(),
+        versions: own_servers::tool(versions_entry.as_ref()),
         browser: browser_on,
         sandbox: sandbox.as_ref(),
         matter: Some(matter),
@@ -226,21 +215,7 @@ pub(super) fn session_loads(
             matter,
             ask_all: forced_ask,
         });
-    // Without the guard's hook, a forced-ask session would rest on the ask rules alone, and a
-    // hook that is missing fails open: refuse it.
-    if let (true, Some(_), Some(reason)) = (forced_ask, &claude, loads::guard_missing(guard)) {
-        let matter_id = actor.check_thread(thread)?.row.matter;
-        tracing::warn!(
-            matter = %matter_id,
-            reason,
-            "a forced-ask Claude launch has no guard hook to give: the launch is refused"
-        );
-        return Err(Error::refused(
-            ErrorCode::AgentGuardMissing,
-            "this matter's folder is unprotected, and the guard that makes Claude ask before \
-             each change could not be set up",
-        ));
-    }
+    refuse_unguarded(actor, thread, forced_ask && claude.is_some(), guard)?;
     let mut meta = loads::session_meta(
         actor
             .profile
@@ -257,9 +232,10 @@ pub(super) fn session_loads(
     }
     let mut servers = lawyer_sent;
     super::super::mcp::left_out(actor, left_out);
-    note_mcp_sent(actor, thread, &trusted, case_law_entry.is_some());
+    own_servers::note_mcp_sent(actor, thread, &trusted, [&case_law_entry, &versions_entry]);
     servers.extend(hook_servers);
     servers.extend(case_law_entry);
+    servers.extend(versions_entry);
     if browser_state
         .as_ref()
         .is_some_and(|state| state.availability == ToolAvailability::Available)
@@ -281,6 +257,30 @@ pub(super) fn session_loads(
         Vec::new()
     };
     Ok((meta, servers, directories))
+}
+
+/// Refuses a forced-ask Claude launch (`forced_claude`) with no `guard` hook to give: without
+/// it, the session would rest on the ask rules alone, and a hook that is missing fails open.
+fn refuse_unguarded(
+    actor: &Actor,
+    thread: ThreadId,
+    forced_claude: bool,
+    guard: Option<loads::GuardHook<'_>>,
+) -> Result<(), Error> {
+    let (true, Some(reason)) = (forced_claude, loads::guard_missing(guard)) else {
+        return Ok(());
+    };
+    let matter_id = actor.check_thread(thread)?.row.matter;
+    tracing::warn!(
+        matter = %matter_id,
+        reason,
+        "a forced-ask Claude launch has no guard hook to give: the launch is refused"
+    );
+    Err(Error::refused(
+        ErrorCode::AgentGuardMissing,
+        "this matter's folder is unprotected, and the guard that makes Claude ask before \
+         each change could not be set up",
+    ))
 }
 
 /// A Claude session's sandbox ([`claude_sandbox`]); none for another agent. Where one was meant
@@ -414,18 +414,7 @@ fn case_law_servers(
             token_file: &run.relay_token,
         },
     };
-    let inherited: Vec<(OsString, OsString)> = match &actor.wiring.inherited_env {
-        Some(env) => env.clone(),
-        None if cfg!(windows) => std::env::vars_os().collect(),
-        None => Vec::new(),
-    };
-    let lookup = |name: &str| {
-        inherited
-            .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))
-            .map(|(_, value)| value.clone())
-    };
-    let windows_env = case_law::windows_env(cfg!(windows), lookup, case_law::windows_directory);
+    let windows_env = own_servers::windows_env(actor);
     let inputs = CaseLawInputs {
         relay,
         control,

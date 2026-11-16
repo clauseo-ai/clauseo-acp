@@ -103,6 +103,7 @@ fn the_reserved_mcp_server_name_is_left_out_and_the_rest_load() {
         [
             "browser",
             "case-law",
+            "clauseo-versions",
             "ide",
             "claude-in-chrome",
             "computer-use"
@@ -189,6 +190,50 @@ fn the_case_law_name_is_reserved_too() {
         .collect();
     keys.sort();
     assert_eq!(keys, ["mcp.servers.CASE-LAW", "mcp.servers.case-law"]);
+}
+
+/// `clauseo-versions`, the version-history tool's server, is reserved in any case, so a lawyer's
+/// server of that name is left out with the warning and never inherits the tools' pre-allow.
+#[test]
+fn the_version_history_name_is_reserved_too() {
+    for name in ["clauseo-versions", "Clauseo-Versions"] {
+        assert_eq!(
+            reserved_mcp_server(name),
+            Some(("clauseo-versions", "Clauseo's version-history tool"))
+        );
+    }
+    for near in ["versions", "clauseo_versions", "clauseo-versions-2"] {
+        assert_eq!(reserved_mcp_server(near), None, "{near}");
+    }
+    let command = abs_str("bin/s");
+    let raw = Raw {
+        key: "mcp.servers".to_owned(),
+        value: json!({
+            "clauseo-versions": {"command": command, "enabled": true},
+            "versions": {"command": command, "enabled": true},
+        }),
+        origin: origin(),
+    };
+    let mut warnings = Vec::new();
+    let leaves = typed(vec![raw], Vec::new(), &mut warnings);
+    let Some(Leaf::McpServers(servers)) = leaves.first() else {
+        panic!("{leaves:?}");
+    };
+    assert_eq!(
+        servers.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["versions"]
+    );
+    let messages: Vec<String> = warnings
+        .into_iter()
+        .map(|warning| match warning.kind {
+            WarningKind::InvalidValue { message, .. } => message,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        messages,
+        ["the server name clauseo-versions is reserved for Clauseo's version-history tool"]
+    );
 }
 
 /// Claude names a tool `mcp__<server>__<tool>` and splits it at the first `__` after `mcp__`, so
