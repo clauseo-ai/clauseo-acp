@@ -61,8 +61,9 @@ pub(super) enum Refusal {
     CodexFolder,
     /// A shell command runs `stetdoc mcp` or `stetdoc init`.
     StetdocServe,
-    /// A target is a file Clauseo holds no copy of (`no_copy.rs`), and why.
-    NoCopy(MatterPath, SkippedFileReason),
+    /// A target is a file Clauseo holds no copy of (`no_copy.rs`), why, and what the call
+    /// would have done to it.
+    NoCopy(MatterPath, SkippedFileReason, no_copy::Act),
 }
 
 impl Refusal {
@@ -80,7 +81,7 @@ impl Refusal {
             Self::StetdocServe => "Clauseo doesn't let the agent run stetdoc mcp or stetdoc init \
                                    in its shell: run the stetdoc command you need directly."
                 .to_owned(),
-            Self::NoCopy(path, why) => no_copy::reason(path, *why),
+            Self::NoCopy(path, why, act) => no_copy::reason(path, *why, *act),
         }
     }
 }

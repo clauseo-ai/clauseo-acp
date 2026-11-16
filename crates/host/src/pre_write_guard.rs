@@ -266,8 +266,7 @@ fn run_timed(
             // The held-open and `.codex` rules first, then the no-copy one.
             refusal(&bytes, matter.as_deref()).map(|found| {
                 found.or_else(|| {
-                    let list = no_copy::List::of_args(args);
-                    no_copy::refusal(&bytes, matter.as_deref(), &list)
+                    no_copy::refusal(&bytes, matter.as_deref(), || no_copy::List::of_args(args))
                 })
             })
         }

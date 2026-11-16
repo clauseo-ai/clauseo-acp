@@ -63,11 +63,11 @@ use clauseo_matters::{FILE_CAP_BYTES, OsProbe, PlaceholderProbe};
 use clauseo_protocol::{MatterPath, SkippedFile, SkippedFileReason};
 use serde_json::Value;
 
-use super::Refusal;
-use super::codex::patch_targets;
+use super::codex::{patch_deletes, patch_targets};
 use super::names::disk_key;
 use super::reach::Reach;
 use super::shell::walked_resolutions;
+use super::{Refusal, lexical};
 use crate::shell_writes::{self, Dialect};
 use crate::write::RecordId;
 
@@ -324,27 +324,50 @@ fn arg(args: &[OsString], flag: &str) -> Option<OsString> {
     args.get(at.saturating_add(1)).cloned()
 }
 
-/// What the agent is told when it may not delete or overwrite `path`.
-pub(super) fn reason(path: &MatterPath, why: SkippedFileReason) -> String {
+/// What a refused call would have done to a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Act {
+    /// Deleted it (`rm`, `Remove-Item`, a patch's `Delete File`, a folder holding it).
+    Delete,
+    /// Overwritten, edited or moved it, while it is cloud-only or over the size cap.
+    Overwrite,
+}
+
+/// What the agent is told when it may not delete or overwrite `path`, for `why`: true in each
+/// case (a listed file being deleted may be on the disk now, so a cloud file is "kept only
+/// online", never "not downloaded"), and never a promise that asking unlocks it.
+pub(super) fn reason(path: &MatterPath, why: SkippedFileReason, act: Act) -> String {
     let because = match why {
         SkippedFileReason::OverSizeCap => "it is larger than 512 MB",
         SkippedFileReason::CloudOnly
         | SkippedFileReason::UnreadFolder
-        | SkippedFileReason::Unknown => {
-            "it is only online, a cloud file not downloaded to this computer"
-        }
+        | SkippedFileReason::Unknown => match act {
+            Act::Delete => "it was only online, not on this computer, when this answer began",
+            Act::Overwrite => "it is only online, a cloud file not downloaded to this computer",
+        },
     };
-    format!(
-        "{path} can't be brought back if it is deleted, moved or overwritten: Clauseo keeps no \
-         copy of it, because {because}. Don't delete, move or overwrite it. Ask the lawyer \
-         first, or write to a new file."
-    )
+    match act {
+        Act::Delete => format!(
+            "{path} can't be brought back if it is deleted: Clauseo keeps no copy of it, because \
+             {because}. Clauseo does not let you delete it. Tell the lawyer; they can delete it \
+             themselves."
+        ),
+        Act::Overwrite => format!(
+            "{path} can't be brought back if it is overwritten: Clauseo keeps no copy of it, \
+             because {because}. Write to a new file instead, and tell the lawyer."
+        ),
+    }
 }
 
 /// The no-copy refusal of the hook input `bytes`, if any, with `matter` the folder from the
-/// arguments and `list` the session's list. Input the guard cannot read is no refusal here: the
-/// other rules already let it go (`Ignored`).
-pub(super) fn refusal(bytes: &[u8], matter: Option<&Path>, list: &List) -> Option<Refusal> {
+/// arguments and `list` reading the session's list, called only when the call deletes something
+/// (an overwrite is judged by the file's state now alone, [`live`]). Input the guard cannot read
+/// is no refusal here: the other rules already let it go (`Ignored`).
+pub(super) fn refusal(
+    bytes: &[u8],
+    matter: Option<&Path>,
+    list: impl FnOnce() -> List,
+) -> Option<Refusal> {
     let hook: Value = serde_json::from_slice(bytes).ok()?;
     let cwd = hook
         .get("cwd")
@@ -354,29 +377,54 @@ pub(super) fn refusal(bytes: &[u8], matter: Option<&Path>, list: &List) -> Optio
     let folder = matter.map(Path::to_path_buf).or_else(|| cwd.clone())?;
     let base = cwd.unwrap_or_else(|| folder.clone());
     let tool = hook.get("tool_name")?.as_str()?;
-    let (writes, deletes) = targets(tool, hook.get("tool_input")?, &base)?;
+    let Targets { writes, deletes } = targets(tool, hook.get("tool_input")?, &base)?;
     let reach = Reach::new(&folder);
-    let check = |paths: &[PathBuf], delete: bool| {
-        paths
-            .iter()
-            .flat_map(|path| walked_resolutions(&base.join(path), &reach))
-            .find_map(|resolved| at(list, &folder, &resolved, delete))
-    };
-    check(&writes, false).or_else(|| check(&deletes, true))
+    let overwrite = writes
+        .iter()
+        .flat_map(|path| walked_resolutions(&base.join(path), &reach))
+        .find_map(|resolved| overwritten(&folder, &resolved));
+    if overwrite.is_some() || deletes.is_empty() {
+        return overwrite;
+    }
+    let list = list();
+    deletes.iter().find_map(|path| {
+        let path = base.join(path);
+        let walked = walked_resolutions(&path, &reach);
+        if walked.is_empty() {
+            // A path the guard may not touch (a matter kept on a network share): the list is
+            // looked up by its text alone, and nothing is looked at on the disk.
+            deleted(&list, &folder, &lexical(&path), false)
+        } else {
+            walked
+                .iter()
+                .find_map(|resolved| deleted(&list, &folder, resolved, true))
+        }
+    })
 }
 
-/// The paths the tool `tool` with `input` writes, deletes or moves, and those a delete program
-/// names (for the folder rule), relative ones taken from `base`; `None` for a tool the guard
-/// does not check.
-fn targets(tool: &str, input: &Value, base: &Path) -> Option<(Vec<PathBuf>, Vec<PathBuf>)> {
+/// The paths a call overwrites or moves (`writes`) and those it deletes (`deletes`), relative
+/// ones taken from its folder.
+#[derive(Debug, Default)]
+struct Targets {
+    writes: Vec<PathBuf>,
+    deletes: Vec<PathBuf>,
+}
+
+/// The paths the tool `tool` with `input` writes or moves, and those it deletes, relative ones
+/// taken from `base`; `None` for a tool the guard does not check. A shell's delete is what a
+/// delete program names (`shell_writes::add_deleted_input`), a patch's its `Delete File`; every
+/// other target, a move's both sides included, is a write.
+fn targets(tool: &str, input: &Value, base: &Path) -> Option<Targets> {
     let text = |key: &str| input.get(key).and_then(Value::as_str);
     let dialect = match tool {
         "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "apply_patch" => {
-            let paths = match text("file_path").or_else(|| text("notebook_path")) {
-                Some(path) => vec![PathBuf::from(path)],
-                None => patch_targets(text("command")?),
-            };
-            return Some((paths, Vec::new()));
+            return Some(match text("file_path").or_else(|| text("notebook_path")) {
+                Some(path) => Targets {
+                    writes: vec![PathBuf::from(path)],
+                    deletes: Vec::new(),
+                },
+                None => patch_split(text("command")?),
+            });
         }
         "Bash" => Dialect::Posix,
         "PowerShell" => Dialect::PowerShell,
@@ -387,32 +435,66 @@ fn targets(tool: &str, input: &Value, base: &Path) -> Option<(Vec<PathBuf>, Vec<
     let (mut writes, mut deletes) = (BTreeSet::new(), BTreeSet::new());
     shell_writes::add_input(&mut writes, &raw, dialect, start);
     shell_writes::add_deleted_input(&mut deletes, &raw, dialect, start);
-    let mut paths: Vec<PathBuf> = writes.into_iter().map(PathBuf::from).collect();
-    paths.extend(text("command").map(patch_targets).unwrap_or_default());
-    Some((paths, deletes.into_iter().map(PathBuf::from).collect()))
+    let patch = text("command").map(patch_split).unwrap_or_default();
+    let mut found = Targets {
+        writes: writes
+            .difference(&deletes)
+            .map(PathBuf::from)
+            .chain(patch.writes)
+            .collect(),
+        deletes: deletes.into_iter().map(PathBuf::from).collect(),
+    };
+    found.deletes.extend(patch.deletes);
+    Some(found)
 }
 
-/// The refusal for a write to `resolved` (walked, absolute) in the matter `folder`: a listed
-/// file, under `delete` a folder holding one, else a file [`live`] finds has no copy.
-fn at(list: &List, folder: &Path, resolved: &Path, delete: bool) -> Option<Refusal> {
-    if delete && is_folder(folder, resolved) {
-        let (path, why) = list.first()?;
-        return Some(Refusal::NoCopy(path, why));
-    }
+/// A patch's targets: its `Delete File` lines deleted, every other file written.
+fn patch_split(patch: &str) -> Targets {
+    let deletes = patch_deletes(patch);
+    let writes = patch_targets(patch)
+        .into_iter()
+        .filter(|path| !deletes.contains(path))
+        .collect();
+    Targets { writes, deletes }
+}
+
+/// The refusal for an overwrite or a move of `resolved` (walked, absolute) in the matter
+/// `folder`: only a file that is cloud-only now, or over the size cap ([`live`]). A listed file
+/// that is on the disk now and within the cap may be overwritten: the agent's read downloaded it,
+/// and refusing every edit of it for the rest of the turn would block ordinary work.
+fn overwritten(folder: &Path, resolved: &Path) -> Option<Refusal> {
     let inside = clauseo_matters::matter_path_of_resolved(folder, resolved)?;
-    let listed = list
-        .file(&inside)
-        .or_else(|| delete.then(|| list.under(&inside)).flatten());
-    if let Some((path, why)) = listed {
-        return Some(Refusal::NoCopy(path, why));
-    }
-    live(resolved).map(|why| Refusal::NoCopy(inside, why))
+    live(resolved).map(|why| Refusal::NoCopy(inside, why, Act::Overwrite))
 }
 
-/// Whether `resolved` (walked) is the matter `folder` itself (`rm -rf .`), or a folder above it.
-fn is_folder(folder: &Path, resolved: &Path) -> bool {
-    let canonical = dunce::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-    folder.starts_with(resolved) || canonical.starts_with(resolved)
+/// The refusal for a delete of `resolved` (absolute; walked when `touched`, else by its text
+/// alone) in the matter `folder`: the matter folder or one above it when anything is listed, a
+/// listed file, a folder holding one, else (when `touched`) a file [`live`] finds has no copy.
+fn deleted(list: &List, folder: &Path, resolved: &Path, touched: bool) -> Option<Refusal> {
+    let refused = |(path, why)| Refusal::NoCopy(path, why, Act::Delete);
+    if is_folder(folder, resolved, touched) {
+        return list.first().map(refused);
+    }
+    let inside = if touched {
+        clauseo_matters::matter_path_of_resolved(folder, resolved)?
+    } else {
+        MatterPath::from_relative(resolved.strip_prefix(lexical(folder)).ok()?)?
+    };
+    if let Some(listed) = list.file(&inside).or_else(|| list.under(&inside)) {
+        return Some(refused(listed));
+    }
+    touched
+        .then(|| live(resolved))
+        .flatten()
+        .map(|why| refused((inside, why)))
+}
+
+/// Whether `resolved` is the matter `folder` itself (`rm -rf .`), or a folder above it; the
+/// folder's real path is looked up only when `touched` (the guard may look at the disk).
+fn is_folder(folder: &Path, resolved: &Path, touched: bool) -> bool {
+    folder.starts_with(resolved)
+        || (touched
+            && dunce::canonicalize(folder).is_ok_and(|canonical| canonical.starts_with(resolved)))
 }
 
 /// Why Clauseo could hold no copy of the file at `resolved`, by looking at it now: over

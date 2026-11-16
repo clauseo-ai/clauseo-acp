@@ -1,9 +1,11 @@
-//! The no-copy rule (`no_copy.rs`): a delete, move or overwrite of a file the session's list
-//! names is refused by every form the guard reads, with the reason, and recorded for the lawyer;
-//! a read or a write elsewhere goes on. The list is trusted only as the regular file with one
-//! link the host made (its identity in the arguments): a hard link, a symlink, another file, a
-//! missing one or none at all reads as an empty list, and the guard still refuses a file it can
-//! see has no copy itself (here one over the size cap), so a bad list never opens the gate.
+//! The no-copy rule (`no_copy.rs`): a delete of a file the session's list names is refused by every
+//! form the guard reads, with the reason, and recorded for the lawyer; an overwrite, an edit or a
+//! move is refused only for a file that is cloud-only or over the size cap now (a listed file the
+//! agent's read downloaded may be edited); a read or a write elsewhere goes on. The list is trusted
+//! only as the regular file with one link the host made (its identity in the arguments): a hard
+//! link, a symlink, another file, a missing one or none at all reads as an empty list, and the
+//! guard still refuses a file it can see has no copy itself (here one over the size cap), so a bad
+//! list never opens the gate.
 
 use std::path::{Path, PathBuf};
 
@@ -12,7 +14,7 @@ use clauseo_protocol::{MatterPath, SkippedFileReason};
 use serde_json::{Value, json};
 
 use super::{Fixture, deny, guard_with};
-use crate::pre_write_guard::no_copy::{HEADER, reason};
+use crate::pre_write_guard::no_copy::{Act, HEADER, reason};
 use crate::pre_write_guard::record::{Reason, Record};
 use crate::write;
 
@@ -55,9 +57,20 @@ fn args<'a>(before: &[&'a str], file: &'a Path, id: &'a str) -> Vec<&'a str> {
     args
 }
 
-/// The exact stderr line refusing `path` for `why`.
+/// The exact stderr line refusing a delete of `path` for `why`.
 fn refused(path: &str, why: SkippedFileReason) -> String {
-    format!("{}\n", reason(&MatterPath::new(path).unwrap(), why))
+    format!(
+        "{}\n",
+        reason(&MatterPath::new(path).unwrap(), why, Act::Delete)
+    )
+}
+
+/// The exact stderr line refusing an overwrite of `path` for `why`.
+fn refused_overwrite(path: &str, why: SkippedFileReason) -> String {
+    format!(
+        "{}\n",
+        reason(&MatterPath::new(path).unwrap(), why, Act::Overwrite)
+    )
 }
 
 /// A Codex patch with the one file line `line`.
@@ -71,7 +84,7 @@ fn big(fx: &Fixture) {
 }
 
 #[test]
-fn a_listed_file_is_refused_by_every_form_the_guard_reads() {
+fn a_listed_file_is_refused_by_every_delete_form_the_guard_reads() {
     let fx = Fixture::new("no-copy-forms");
     let (file, id) = list(&fx, LINES);
     let matter = fx.matter();
@@ -79,40 +92,12 @@ fn a_listed_file_is_refused_by_every_form_the_guard_reads() {
     let codex = args(&[], &file, &id);
     let free = || refused("Free.docx", CLOUD);
     let note = || refused("sub/Note.txt", LARGE);
-    for tool in ["Write", "Edit", "MultiEdit"] {
-        let hook = fx.hook(tool, &json!({"file_path": "Free.docx", "content": "x"}));
-        assert_eq!(
-            guard_with(&claude, hook.to_string().as_bytes()),
-            free(),
-            "{tool}"
-        );
-    }
-    let notebook = fx.hook("NotebookEdit", &json!({"notebook_path": "sub/Note.txt"}));
-    assert_eq!(guard_with(&claude, notebook.to_string().as_bytes()), note());
-    for line in [
-        "*** Delete File: Free.docx",
-        "*** Update File: Free.docx",
-        "*** Add File: Free.docx",
-        "*** Update File: Other.docx\n*** Move to: Free.docx",
-    ] {
-        let hook = fx.hook("apply_patch", &patch(line));
-        assert_eq!(
-            guard_with(&codex, hook.to_string().as_bytes()),
-            free(),
-            "{line}"
-        );
-    }
+    let hook = fx.hook("apply_patch", &patch("*** Delete File: Free.docx"));
+    assert_eq!(guard_with(&codex, hook.to_string().as_bytes()), free());
     for (command, said) in [
         ("rm Free.docx", free()),
         ("rm -f \"Free.docx\"", free()),
         ("unlink ./Free.docx", free()),
-        ("mv Free.docx Renamed.docx", free()),
-        ("mv Other.docx Free.docx", free()),
-        ("cp Other.docx Free.docx", free()),
-        ("echo x > Free.docx", free()),
-        ("echo x >> Free.docx", free()),
-        ("echo x | tee Free.docx", free()),
-        ("pandoc a.md -o Free.docx", free()),
         ("cd sub && rm Note.txt", note()),
         ("rm -rf sub", note()),
         ("rm -r sub/", note()),
@@ -134,11 +119,7 @@ fn a_listed_file_is_refused_by_every_form_the_guard_reads() {
     let absolute = format!("rm '{}'", fx.path("m/Free.docx").replace('\\', "/"));
     let hook = fx.hook("Bash", &json!({"command": absolute}));
     assert_eq!(guard_with(&claude, hook.to_string().as_bytes()), free());
-    for command in [
-        "Remove-Item -Path Free.docx -Force",
-        "del Free.docx",
-        "Move-Item Free.docx x",
-    ] {
+    for command in ["Remove-Item -Path Free.docx -Force", "del Free.docx"] {
         let hook = fx.hook("PowerShell", &json!({"command": command}));
         assert_eq!(
             guard_with(&claude, hook.to_string().as_bytes()),
@@ -146,6 +127,145 @@ fn a_listed_file_is_refused_by_every_form_the_guard_reads() {
             "{command}"
         );
     }
+}
+
+/// R2: a listed file that is on the disk now and within the cap (here: every listed file of the
+/// fixture, small local files) may be overwritten, edited or moved: the agent's read of a
+/// cloud-only file downloads it, and its edit must not be refused for the rest of the turn.
+#[test]
+fn a_listed_file_on_the_disk_now_may_be_overwritten_or_moved() {
+    let fx = Fixture::new("no-copy-local");
+    let (file, id) = list(&fx, LINES);
+    let matter = fx.matter();
+    let claude = args(&["--matter", matter.to_str().unwrap()], &file, &id);
+    let codex = args(&[], &file, &id);
+    for tool in ["Write", "Edit", "MultiEdit"] {
+        let hook = fx.hook(tool, &json!({"file_path": "Free.docx", "content": "x"}));
+        assert_eq!(
+            guard_with(&claude, hook.to_string().as_bytes()),
+            "",
+            "{tool}"
+        );
+    }
+    let notebook = fx.hook("NotebookEdit", &json!({"notebook_path": "sub/Note.txt"}));
+    assert_eq!(guard_with(&claude, notebook.to_string().as_bytes()), "");
+    for line in [
+        "*** Update File: Free.docx",
+        "*** Update File: Other.docx\n*** Move to: Free.docx",
+    ] {
+        let hook = fx.hook("apply_patch", &patch(line));
+        assert_eq!(
+            guard_with(&codex, hook.to_string().as_bytes()),
+            "",
+            "{line}"
+        );
+    }
+    for command in [
+        "mv Free.docx Renamed.docx",
+        "mv Other.docx Free.docx",
+        "cp Other.docx Free.docx",
+        "echo x > Free.docx",
+        "echo x >> Free.docx",
+        "echo x | tee Free.docx",
+        "pandoc a.md -o Free.docx",
+        "cd sub && echo x > Note.txt",
+    ] {
+        let hook = fx.hook("Bash", &json!({"command": command}));
+        assert_eq!(
+            guard_with(&codex, hook.to_string().as_bytes()),
+            "",
+            "{command}"
+        );
+    }
+    let hook = fx.hook("PowerShell", &json!({"command": "Move-Item Free.docx x"}));
+    assert_eq!(guard_with(&claude, hook.to_string().as_bytes()), "");
+}
+
+/// An overwrite, an edit or a move of a file over the size cap now (listed or not) is refused,
+/// with the overwrite's words: write to a new file, and tell the lawyer.
+#[test]
+fn a_file_over_the_cap_now_is_refused_to_an_overwrite() {
+    let fx = Fixture::new("no-copy-overwrite");
+    big(&fx);
+    let (file, id) = list(&fx, "add over-size-cap Big.bin\n");
+    let matter = fx.matter();
+    let claude = args(&["--matter", matter.to_str().unwrap()], &file, &id);
+    let codex = args(&[], &file, &id);
+    let said = refused_overwrite("Big.bin", LARGE);
+    let hook = fx.hook("Write", &json!({"file_path": "Big.bin", "content": "x"}));
+    assert_eq!(guard_with(&claude, hook.to_string().as_bytes()), said);
+    let hook = fx.hook("apply_patch", &patch("*** Update File: Big.bin"));
+    assert_eq!(guard_with(&codex, hook.to_string().as_bytes()), said);
+    for command in ["cp a Big.bin", "echo x > Big.bin", "mv Big.bin Old.bin"] {
+        let hook = fx.hook("Bash", &json!({"command": command}));
+        assert_eq!(
+            guard_with(&codex, hook.to_string().as_bytes()),
+            said,
+            "{command}"
+        );
+    }
+    let hook = fx.hook("Bash", &json!({"command": "rm Big.bin"}));
+    assert_eq!(
+        guard_with(&codex, hook.to_string().as_bytes()),
+        refused("Big.bin", LARGE)
+    );
+}
+
+/// R4: the agent's words are true for each case and promise nothing for asking: a delete says
+/// the lawyer can delete it themselves; an overwrite says to write to a new file; neither says a
+/// listed file being deleted is "not downloaded".
+#[test]
+fn the_refusal_words_say_what_is_true_and_promise_nothing() {
+    let path = MatterPath::new("Contract.docx").unwrap();
+    let delete = reason(&path, CLOUD, Act::Delete);
+    assert_eq!(
+        delete,
+        "Contract.docx can't be brought back if it is deleted: Clauseo keeps no copy of it, \
+         because it was only online, not on this computer, when this answer began. Clauseo does \
+         not let you delete it. Tell the lawyer; they can delete it themselves."
+    );
+    let overwrite = reason(&path, LARGE, Act::Overwrite);
+    assert_eq!(
+        overwrite,
+        "Contract.docx can't be brought back if it is overwritten: Clauseo keeps no copy of it, \
+         because it is larger than 512 MB. Write to a new file instead, and tell the lawyer."
+    );
+    for text in [&delete, &overwrite, &reason(&path, CLOUD, Act::Overwrite)] {
+        assert!(!text.contains("Ask the lawyer"), "{text}");
+        assert!(!text.contains("moved"), "{text}");
+    }
+    assert!(!delete.contains("not downloaded"));
+}
+
+/// F2: a matter kept on a network share is never touched (`network_paths::touchable` refuses
+/// every path in it, so nothing is walked): the list is looked up by the path's text alone, and a
+/// delete of a listed file is still refused there. `/network/…` is a network location by its text
+/// (and, unlike macOS's `/net`, no automount: nothing there is ever looked up).
+#[cfg(unix)]
+#[test]
+fn a_listed_file_in_a_matter_on_a_share_is_refused_by_its_text() {
+    let fx = Fixture::new("no-copy-share");
+    let (file, id) = list(&fx, LINES);
+    let share = "/network/clauseo-no-copy-test/m";
+    let claude = args(&["--matter", share], &file, &id);
+    let hook = json!({
+        "tool_name": "Bash",
+        "tool_input": {"command": "rm Free.docx"},
+        "cwd": share,
+    });
+    assert_eq!(
+        guard_with(&claude, hook.to_string().as_bytes()),
+        refused("Free.docx", CLOUD)
+    );
+    let hook = json!({
+        "tool_name": "Bash",
+        "tool_input": {"command": "rm -r sub"},
+        "cwd": share,
+    });
+    assert_eq!(
+        guard_with(&claude, hook.to_string().as_bytes()),
+        refused("sub/Note.txt", LARGE)
+    );
 }
 
 #[test]

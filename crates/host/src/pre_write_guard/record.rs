@@ -182,7 +182,7 @@ pub(super) fn record_of(refusal: &Refusal, bytes: &[u8], claude: bool) -> Option
     let (reason, path) = match refusal {
         Refusal::HeldOpen(path) => (Reason::HeldOpen, Some(path.clone())),
         Refusal::CodexFolder => (Reason::CodexFolder, None),
-        Refusal::NoCopy(path, _) => (Reason::NoCopy, Some(path.clone())),
+        Refusal::NoCopy(path, _, _) => (Reason::NoCopy, Some(path.clone())),
         Refusal::StetdocServe => return None,
     };
     let tool = serde_json::from_slice::<Value>(bytes)
