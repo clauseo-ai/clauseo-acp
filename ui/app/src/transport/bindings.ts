@@ -536,10 +536,15 @@ export type BlacklineNotice =
 "numbers_may_differ" | 
 /**
  *  stetdoc lists tracked changes (by id, `stetdoc check`) or counts more (its summary)
- *  than the blackline's body names: the others are outside the main text (headers,
- *  footers, footnotes, endnotes), which it does not show.
+ *  than the blackline shows, in its body and its parts: the others are outside what it
+ *  shows (a comment, or a footnote, endnote, header or footer it could not show).
  */
 "changes_outside_text" | 
+/**
+ *  A header or footer is in one version only: stetdoc's compare does not compare it, so
+ *  the blackline does not show it as a change.
+ */
+"header_or_footer_in_one_version" | 
 /**
  *  The text of a comment differs between the two versions; the blackline does not show
  *  comments, and stetdoc 0.9.3's compare marks no change for it.
@@ -548,8 +553,11 @@ export type BlacklineNotice =
 /**  The text in a text box changed; the blackline does not show the old text. */
 "text_box_changed" | 
 /**
- *  The formatting of some table cells changed (a tracked cell change), which the
- *  blackline does not mark.
+ *  The formatting of some tables changed: a table's own (its borders, widths, alignment
+ *  and the like), a row's or a cell's (its shading, borders, merging). The blackline
+ *  does not mark it; [`WordBlackline::changed_tables`] names each table Clauseo's own
+ *  comparison found, and is empty when only stetdoc's list of changes said so (a tracked
+ *  cell change).
  */
 "cell_format_changed" | 
 /**
@@ -596,6 +604,42 @@ export type BlacklineParagraph = {
 	 */
 	hidden?: boolean,
 };
+
+/**  A footnote, an endnote, a header or a footer that holds a change, shown after the body. */
+export type BlacklinePart = {
+	/**  Which one it is. */
+	kind: BlacklinePartKind,
+	/**  Its paragraphs, first to last, as the body's are (a table's cells' included). */
+	paragraphs: BlacklineParagraph[],
+};
+
+/**  Which footnote, endnote, header or footer a [`BlacklinePart`] is. */
+export type BlacklinePartKind = 
+/**  A footnote, by the number Word shows for it. */
+({ footnote: {
+	/**  Its number, from 1. */
+	number: number,
+} }) & { endnote?: never; footer?: never; header?: never } | 
+/**  An endnote, by the number Word shows for it. */
+({ endnote: {
+	/**  Its number, from 1. */
+	number: number,
+} }) & { footer?: never; footnote?: never; header?: never } | 
+/**  A header, with the pages it is on. */
+({ header: {
+	/**
+	 *  Where Word shows it: each kind of page, with the sections. Empty when stetdoc
+	 *  does not say.
+	 */
+	uses: HeaderUse[],
+} }) & { endnote?: never; footer?: never; footnote?: never } | 
+/**  A footer, with the pages it is on. */
+({ footer: {
+	/**  Where Word shows it, as for a header. */
+	uses: HeaderUse[],
+} }) & { endnote?: never; footnote?: never; header?: never } | 
+/**  A kind from a newer Clauseo; written back as the plain string `kind`. */
+string;
 
 /**  A stretch of a paragraph's text with one kind. */
 export type BlacklineRun = {
@@ -765,6 +809,19 @@ export type ChangeKind =
 } } | 
 /**  A change from a newer Clauseo; written back as the plain string `kind`. */
 string;
+
+/**  A table whose formatting differs between the two versions. */
+export type ChangedTable = {
+	/**  The part of the document it is in. */
+	place: TablePlace,
+	/**
+	 *  Its number in that part, from 1, counting every table in the order it starts (a table
+	 *  inside a cell counts too), in the newer version.
+	 */
+	number: number,
+	/**  What changed, each once, in the order of [`TableFormat`]; never empty. */
+	formats: TableFormat[],
+};
 
 /**
  *  A checkpoint of a matter's files. The git commit id stays inside `matters` and `store`.
@@ -2361,6 +2418,25 @@ export type HeaderEntry = {
 	plan: PlanEntry[],
 	/**  Context and cost, once reported. */
 	usage?: ContextUsage,
+};
+
+/**  Which pages of a section a header or footer is on. */
+export type HeaderSlot = 
+/**  Every page the others do not take. */
+"default" | 
+/**  The section's first page. */
+"first_page" | 
+/**  The even pages. */
+"even_pages" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**  One kind of page a header or footer is on, and the sections where it is. */
+export type HeaderUse = {
+	/**  The kind of page. */
+	slot: HeaderSlot,
+	/**  The sections, from 1, in order. Empty when not known. */
+	sections: number[],
 };
 
 /**
@@ -6455,6 +6531,49 @@ export type SyncService =
 /**  A service Clauseo does not name. */
 "other";
 
+/**  What changed in a table's formatting: the table's own, a row's or a cell's. */
+export type TableFormat = 
+/**  Borders. */
+"borders" | 
+/**  Shading. */
+"shading" | 
+/**  Widths: the table's, its columns', a cell's, or the table's indent. */
+"widths" | 
+/**  Alignment: the table's on the page, a row's, or a cell's text from top to bottom. */
+"alignment" | 
+/**  Merged cells. */
+"merged_cells" | 
+/**  A row's height. */
+"row_height" | 
+/**
+ *  Anything else: the table's style, cell margins, a row kept on one page or repeated as
+ *  a heading, and the like.
+ */
+"other" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**  The part of the document a [`ChangedTable`] is in. */
+export type TablePlace = 
+/**  The body. */
+"body" | 
+/**  A header, with the pages it is on. */
+({ header: {
+	/**  Where Word shows it, in the newer version. Empty when it is on none. */
+	uses: HeaderUse[],
+} }) & { footer?: never } | 
+/**  A footer, with the pages it is on. */
+({ footer: {
+	/**  Where Word shows it, as for a header. */
+	uses: HeaderUse[],
+} }) & { header?: never } | 
+/**  The footnotes, all together: the number counts the tables of every footnote. */
+"footnotes" | 
+/**  The endnotes, all together. */
+"endnotes" | 
+/**  A place from a newer Clauseo; written back as the plain string `kind`. */
+string;
+
 /**  Text appended to an agent's answer or thought. */
 export type TextAppended = {
 	/**  The turn. */
@@ -7739,6 +7858,20 @@ export type WordBlackline = {
 	 *  left out.
 	 */
 	changed_links?: string[],
+	/**
+	 *  The footnotes, endnotes, headers and footers that hold a change, each with its
+	 *  paragraphs: the footnotes by number, then the endnotes by number, then the headers and
+	 *  then the footers, each in the order of the first section they serve. One that holds no
+	 *  change is left out. Empty when none; missing reads as empty, and empty is left out.
+	 */
+	parts?: BlacklinePart[],
+	/**
+	 *  The tables whose formatting differs between the two versions (stetdoc 0.9.3's compare
+	 *  marks none of it), found by Clauseo's own comparison of the two files; each once, in the
+	 *  order of [`TablePlace`], then by number. At most 50: past them the blackline says it may
+	 *  differ. Empty when none; missing reads as empty, and empty is left out.
+	 */
+	changed_tables?: ChangedTable[],
 };
 
 /* Tauri Specta runtime */

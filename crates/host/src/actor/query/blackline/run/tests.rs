@@ -142,6 +142,8 @@ fn a_difference_the_blackline_does_not_show_may_differ() {
         truncated: false,
         notices: Vec::new(),
         changed_links: Vec::new(),
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
     };
     let noted = |mut blackline: WordBlackline, differ| {
         note_a_silent_difference(&mut blackline, differ);
@@ -189,6 +191,8 @@ fn what_compare_missed_is_said() {
         truncated: false,
         notices: vec![BlacklineNotice::MayDiffer, BlacklineNotice::HiddenText],
         changed_links: Vec::new(),
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
     };
     let mut said = empty.clone();
     note_what_compare_missed(

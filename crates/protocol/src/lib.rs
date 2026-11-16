@@ -210,7 +210,9 @@ wire_types! {
         PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, Principal,
     },
     blackline::{
-        BlacklineNotice, BlacklineObject, BlacklineParagraph, BlacklineRun, ParagraphChange, RunKind, WordBlackline,
+        BlacklineNotice, BlacklineObject, BlacklineParagraph, BlacklinePart, BlacklinePartKind,
+        BlacklineRun, ChangedTable, HeaderSlot, HeaderUse, ParagraphChange, RunKind, TableFormat,
+        TablePlace, WordBlackline,
     },
     browser_install::{BrowserInstallFailure, BrowserInstallState},
     browser_policy::{BrowserPolicyState},

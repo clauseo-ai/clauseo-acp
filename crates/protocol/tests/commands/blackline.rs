@@ -2,8 +2,9 @@
 //! missing or `null` for the folder now, as for `CompareVersions`.
 
 use clauseo_protocol::{
-    BlacklineNotice, BlacklineObject, BlacklineParagraph, BlacklineRun, HostQuery, ParagraphChange,
-    QueryResult, RunKind, WordBlackline,
+    BlacklineNotice, BlacklineObject, BlacklineParagraph, BlacklinePart, BlacklinePartKind,
+    BlacklineRun, ChangedTable, HeaderSlot, HeaderUse, HostQuery, ParagraphChange, QueryResult,
+    RunKind, TableFormat, TablePlace, WordBlackline,
 };
 
 use super::fixtures::{checkpoint_id, matter_id, path, round_trips, v7_text};
@@ -74,6 +75,8 @@ fn a_word_blackline_answer_on_the_wire() {
         changed_links: Vec::new(),
         truncated: false,
         notices: Vec::new(),
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
     });
     round_trips(&answer);
     assert_eq!(
@@ -112,6 +115,8 @@ fn a_word_blackline_answer_with_notices_on_the_wire() {
             BlacklineNotice::NumbersMayDiffer,
             BlacklineNotice::MayDiffer,
         ],
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
     });
     round_trips(&answer);
     assert_eq!(
@@ -156,6 +161,8 @@ fn hidden_text_formatting_and_places_not_shown_on_the_wire() {
         changed_links: Vec::new(),
         truncated: false,
         notices: vec![BlacklineNotice::ChangesOutsideText],
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
     });
     round_trips(&answer);
     assert_eq!(
@@ -188,6 +195,8 @@ fn an_object_run_on_the_wire() {
         changed_links: Vec::new(),
         truncated: false,
         notices: Vec::new(),
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
     });
     round_trips(&answer);
     assert_eq!(
@@ -201,6 +210,77 @@ fn an_object_run_on_the_wire() {
     let later = r#"{"kind":"del","text":"","object":"zz_later"}"#;
     let read: BlacklineRun = serde_json::from_str(later).unwrap();
     assert_eq!(read.object, Some(BlacklineObject::Unknown));
+}
+
+/// A footnote and a header that changed, and a table whose formatting changed, on the wire: each
+/// part's kind is a one-key object, its slot and the table's formats snake-case names; an answer
+/// without the fields reads as none, and a newer kind of part as `unknown`.
+#[test]
+fn parts_and_changed_tables_on_the_wire() {
+    let changed = BlacklineParagraph {
+        change: ParagraphChange::Changed,
+        runs: vec![run(RunKind::Same, "Note "), run(RunKind::Ins, "two")],
+        hidden: false,
+    };
+    let answer = QueryResult::WordBlackline(WordBlackline {
+        paragraphs: Vec::new(),
+        truncated: false,
+        notices: vec![
+            BlacklineNotice::HeaderOrFooterInOneVersion,
+            BlacklineNotice::CellFormatChanged,
+        ],
+        changed_links: Vec::new(),
+        parts: vec![
+            BlacklinePart {
+                kind: BlacklinePartKind::Footnote { number: 1 },
+                paragraphs: vec![changed.clone()],
+            },
+            BlacklinePart {
+                kind: BlacklinePartKind::Header {
+                    uses: vec![HeaderUse {
+                        slot: HeaderSlot::FirstPage,
+                        sections: vec![1, 2],
+                    }],
+                },
+                paragraphs: vec![changed],
+            },
+        ],
+        changed_tables: vec![ChangedTable {
+            place: TablePlace::Body,
+            number: 2,
+            formats: vec![TableFormat::Shading, TableFormat::MergedCells],
+        }],
+    });
+    round_trips(&answer);
+    let para = concat!(
+        r#"{"change":"changed","runs":[{"kind":"same","text":"Note "},"#,
+        r#"{"kind":"ins","text":"two"}]}"#
+    );
+    assert_eq!(
+        serde_json::to_string(&answer).unwrap(),
+        format!(
+            concat!(
+                r#"{{"word_blackline":{{"paragraphs":[],"truncated":false,"#,
+                r#""notices":["header_or_footer_in_one_version","cell_format_changed"],"#,
+                r#""parts":[{{"kind":{{"footnote":{{"number":1}}}},"paragraphs":[{para}]}},"#,
+                r#"{{"kind":{{"header":{{"uses":[{{"slot":"first_page","sections":[1,2]}}]}}}},"#,
+                r#""paragraphs":[{para}]}}],"#,
+                r#""changed_tables":[{{"place":"body","number":2,"#,
+                r#""formats":["shading","merged_cells"]}}]}}}}"#
+            ),
+            para = para
+        )
+    );
+    let later = r#"{"kind":{"zz_later":{"x":1}},"paragraphs":[]}"#;
+    let read: BlacklinePart = serde_json::from_str(later).unwrap();
+    assert!(matches!(read.kind, BlacklinePartKind::Unknown { .. }));
+    let QueryResult::WordBlackline(none) = serde_json::from_str::<QueryResult>(
+        r#"{"word_blackline":{"paragraphs":[],"truncated":false}}"#,
+    )
+    .unwrap() else {
+        panic!("not a word_blackline answer");
+    };
+    assert_eq!((none.parts.len(), none.changed_tables.len()), (0, 0));
 }
 
 /// A run of `kind` with `text`.

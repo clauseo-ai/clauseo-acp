@@ -62,6 +62,8 @@ fn query_result_word_blackline() {
         changed_links: Vec::new(),
         truncated: false,
         notices: Vec::new(),
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
     });
     snapshot!("query_result_word_blackline", answer);
     round_trips(&answer);
