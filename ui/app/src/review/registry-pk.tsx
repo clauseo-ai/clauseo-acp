@@ -1,5 +1,5 @@
-// The pickers' copy review entries (PK-01 to PK-05, and UC-152's "(default)"): the agent's model and effort on the composer's status line, and
-// the plan not set up on this computer, each in the real room over a FakeTransport with the setup wire, the agents'
+// The pickers' copy review entries (PK-01 to PK-05, UC-152's "(default)" and UC-874's "{agent}'s default"): the
+// agent's model and effort on the composer's status line, and the plan not set up on this computer, each in the real room over a FakeTransport with the setup wire, the agents'
 // options as they last reported them, and the scene's steps taken in order (RoomDriven). The model and value names are
 // the agents' own, never Clauseo's words, so they are fake here. Apart from registry.tsx to keep that file under the
 // size limit.
@@ -96,6 +96,20 @@ export const DEFAULTS: Record<AgentId, ConfigOption[]> = {
     ]),
   ],
   [CODEX]: OPTIONS[CODEX]!,
+};
+
+/** The host's seed, on fresh data before either agent's first session: each option's one choice the sentinel, the
+ * agent left to its own default (crates/host/src/actor/agent_options/seed.rs). */
+const SEED = "clauseo-agent-default";
+export const SEEDED: Record<AgentId, ConfigOption[]> = {
+  [CLAUDE]: [
+    select("model", "model", SEED, [[SEED, "Default"]]),
+    select("effort", "thought_level", SEED, [[SEED, "Default"]]),
+  ],
+  [CODEX]: [
+    select("model", "model", SEED, [[SEED, "Default"]]),
+    select("reasoning_effort", "thought_level", SEED, [[SEED, "Default"]]),
+  ],
 };
 
 export const install = (agent: AgentId): SetupEvent => ({
@@ -239,6 +253,17 @@ export const PK: Entry[] = [
     render: renderPick({
       events: BOTH,
       options: DEFAULTS,
+      steps: [{ press: '[data-testid="pick-model"]' }],
+    }),
+  },
+  // a new conversation on fresh data, before Claude has said what it offers: the host's seed, the model menu open
+  {
+    id: "UC-874",
+    words: threadWords("{agent}'s default"),
+    screen,
+    render: renderPick({
+      events: BOTH,
+      options: SEEDED,
       steps: [{ press: '[data-testid="pick-model"]' }],
     }),
   },

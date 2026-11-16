@@ -42,6 +42,12 @@ export function pickables(options: readonly ConfigOption[] | undefined): readonl
 /** The value of an agent's "Default" row: the agent's own choice, whatever it stands at. */
 export const DEFAULT_VALUE = "default";
 
+/** The value of a choice the host makes up for an agent that hasn't reported its options yet: the one choice of each
+ * option in its seed (AgentSummary.config_options before the agent's first session), meaning the agent picks its own
+ * default. Mirrors the host's sentinel (crates/host/src/actor/agent_options/seed.rs, `AGENT_DEFAULT`); the host never
+ * sends it to the agent and refuses a SetConfigOption of it, so a draft never sends it either. */
+export const AGENT_DEFAULT_VALUE = "clauseo-agent-default";
+
 /** What an option's "Default" row stands for, when the agent says: claude-agent-acp gives its model's Default row the
  * resolved model's name as the description ("Opus 5.5", session-model.js), and its effort's Default row none, since
  * Claude Code settles the effort itself and says nothing of it. Undefined with no Default row (codex-acp's values are
@@ -67,18 +73,20 @@ export function draftValue(p: Pickable, pick?: string, remembered?: string): str
 /** What `create_thread` sends as `config`: nothing while the lawyer picked nothing in the draft, so the host applies
  * the matter's remembered picks or the agent's defaults by itself; otherwise every picker's value as the draft shows
  * it (the picks over the remembered ones), so a pick of the model alone keeps the remembered effort. Only values the
- * options offer, and only the pickers' options. */
+ * options offer, and only the pickers' options; never the host's seed sentinel (AGENT_DEFAULT_VALUE), which the agent
+ * settles by itself. */
 export function draftConfig(
   options: readonly ConfigOption[] | undefined,
   picks: ConfigPicks | undefined,
   remembered: ConfigPicks | undefined,
 ): ConfigPicks | undefined {
   const shown = pickables(options);
-  if (picks === undefined || !shown.some((p) => offers(p, picks[p.id]))) return undefined;
+  const picked = (p: Pickable) => offers(p, picks?.[p.id]) && picks?.[p.id] !== AGENT_DEFAULT_VALUE;
+  if (picks === undefined || !shown.some(picked)) return undefined;
   const config: ConfigPicks = {};
   for (const p of shown) {
     const value = draftValue(p, picks[p.id], remembered?.[p.id]);
-    if (offers(p, value)) config[p.id] = value;
+    if (offers(p, value) && value !== AGENT_DEFAULT_VALUE) config[p.id] = value;
   }
   return config;
 }

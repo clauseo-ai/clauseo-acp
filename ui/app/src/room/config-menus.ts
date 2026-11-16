@@ -13,9 +13,10 @@ import type { ViewStore } from "../store/store.ts";
 import type { StreamView } from "../store/view.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { ConfigOption, MatterSummary, StreamId, ThreadId } from "../transport/protocol.ts";
-import { kindOf } from "./agent.ts";
+import { kindOf, planName } from "./agent.ts";
 import type { Conversations, ConversationsView } from "./conversations.ts";
 import {
+  AGENT_DEFAULT_VALUE,
   DEFAULT_VALUE,
   draftValue,
   pickables,
@@ -26,13 +27,15 @@ import {
 
 const NO_OPTIONS: readonly ConfigOption[] = [];
 
-/** The menus for the options the pickers show, each value as `valueOf` says, each pick to `pick`. */
+/** The menus for the options the pickers show, each value as `valueOf` says, each pick to `pick`, in `scope`. `plan`
+ * names the agent's plan ("Claude", "ChatGPT") for the host's seed, before the agent has reported its options. */
 export function menusOf(
   lang: Lang,
   shown: readonly Pickable[],
   valueOf: (p: Pickable) => string,
   pick: (p: Pickable, value: string) => void,
   scope?: string,
+  plan?: string,
 ): readonly ConfigMenu[] {
   return shown.map((p) => {
     // the Default row in the name of what it stands for, so the trigger says "Opus 5.5", never "Default"; the menu
@@ -44,21 +47,24 @@ export function menusOf(
       label: th(lang, p.category === "model" ? "Model" : "Effort"),
       value: valueOf(p),
       options: p.choices.map((c) =>
-        c.value === DEFAULT_VALUE && resolved !== undefined
-          ? { value: c.value, name: resolved, note: th(lang, "(default)") }
-          : {
-              value: c.value,
-              name: c.name,
-              ...(c.description === undefined ? {} : { description: c.description }),
-            },
+        // the host's seed: one choice, the agent left to its own default, named for the plan (UC-874)
+        c.value === AGENT_DEFAULT_VALUE && plan !== undefined
+          ? { value: c.value, name: th(lang, "{agent}'s default", { agent: plan }) }
+          : c.value === DEFAULT_VALUE && resolved !== undefined
+            ? { value: c.value, name: resolved, note: th(lang, "(default)") }
+            : {
+                value: c.value,
+                name: c.name,
+                ...(c.description === undefined ? {} : { description: c.description }),
+              },
       ),
       onValueChange: (value) => pick(p, value),
     };
   });
 }
 
-/** A new conversation's menus, while the open conversation is a draft: undefined otherwise, and none for a plan whose
- * agent hasn't reported its options yet (its first conversation reports them). */
+/** A new conversation's menus, while the open conversation is a draft: undefined otherwise. Before a plan's agent has
+ * reported its options (its first conversation reports them), the host's seed: one "{agent}'s default" row a menu. */
 export function useDraftMenus(
   talks: ConversationsView,
   conversations: Conversations,
@@ -80,6 +86,7 @@ export function useDraftMenus(
       (p, value) => conversations.pick(p.id, value),
       // a new conversation's, for its plan: another plan's values come in silently
       `draft:${agent}`,
+      planName(agent, agents),
     );
   }, [drafting, agent, agents, picks, prefs, lang, conversations]);
 }

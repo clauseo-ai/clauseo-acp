@@ -3,7 +3,14 @@
 import { expect, test } from "vitest";
 import type { ConfigOption } from "../transport/protocol.ts";
 import { menusOf } from "./config-menus.ts";
-import { draftConfig, draftValue, pickables, resolvedDefault, setOption } from "./pickers.ts";
+import {
+  AGENT_DEFAULT_VALUE,
+  draftConfig,
+  draftValue,
+  pickables,
+  resolvedDefault,
+  setOption,
+} from "./pickers.ts";
 
 const select = (id: string, category: string, current: string, values: string[]): ConfigOption =>
   ({
@@ -152,4 +159,44 @@ test("an explicit pick shows as the agent names it; the menu still marks the def
       () => {},
     )[0]!.options[0]!.note,
   ).toBe("(डिफ़ॉल्ट)");
+});
+
+/** The host's seed before an agent's first session (seed.rs): each option's one choice the sentinel, named Default. */
+const seed = (id: string, category: string) =>
+  named(id, category, AGENT_DEFAULT_VALUE, [[AGENT_DEFAULT_VALUE, "Default"]]);
+const SEED_CLAUDE = [seed("model", "model"), seed("effort", "thought_level")];
+const SEED_CODEX = [seed("model", "model"), seed("reasoning_effort", "thought_level")];
+const seedShown = (options: ConfigOption[], plan?: string) =>
+  menusOf(
+    "en",
+    pickables(options),
+    (p) => p.current,
+    () => {},
+    undefined,
+    plan,
+  ).map((m) => [m.id, m.value, m.options.map((o) => [o.name, o.note, o.description])]);
+
+test("the seed reads as the plan's own default, on the closed picker and in the menu", () => {
+  expect(seedShown(SEED_CLAUDE, "Claude")).toEqual([
+    ["model", AGENT_DEFAULT_VALUE, [["Claude's default", undefined, undefined]]],
+    ["effort", AGENT_DEFAULT_VALUE, [["Claude's default", undefined, undefined]]],
+  ]);
+  expect(seedShown(SEED_CODEX, "ChatGPT")).toEqual([
+    ["model", AGENT_DEFAULT_VALUE, [["ChatGPT's default", undefined, undefined]]],
+    ["reasoning_effort", AGENT_DEFAULT_VALUE, [["ChatGPT's default", undefined, undefined]]],
+  ]);
+  // with no plan to name (a conversation's own menus never see the seed), the agent's name stands
+  expect(seedShown(SEED_CLAUDE)[0]![2]).toEqual([["Default", undefined, undefined]]);
+});
+
+test("create_thread's config never carries the seed's sentinel", () => {
+  const pick = { model: AGENT_DEFAULT_VALUE, effort: AGENT_DEFAULT_VALUE };
+  expect(draftConfig(SEED_CLAUDE, pick, undefined)).toBeUndefined();
+  expect(draftConfig(SEED_CLAUDE, {}, pick)).toBeUndefined();
+  expect(draftConfig(SEED_CODEX, { model: AGENT_DEFAULT_VALUE }, undefined)).toBeUndefined();
+  // a real pick beside a seeded option: only the real one goes
+  const mixed = [MODEL, seed("effort", "thought_level")];
+  expect(draftConfig(mixed, { model: "haiku" }, { effort: AGENT_DEFAULT_VALUE })).toEqual({
+    model: "haiku",
+  });
 });
