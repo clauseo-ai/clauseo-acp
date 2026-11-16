@@ -1,27 +1,36 @@
 //! The tables' formatting compared on .docx files built here: one change of each group, noise
-//! that is no change, tables inserted beside a change, tables that can't be paired, a header's
-//! table, and a file that does not read.
+//! that is no change, tables inserted beside a change, tables that can't be paired, tracked
+//! deletions, `mc:Fallback`, the Strict namespace, the alignment's cap, and a file that does not
+//! read. The headers, footers and notes are in `parts.rs`.
 
 use std::io::{Cursor, Write as _};
 
 use clauseo_protocol::TableFormat::{
     Alignment, Borders, MergedCells, Other, RowHeight, Shading, Widths,
 };
-use clauseo_protocol::{ChangedTable, HeaderSlot, HeaderUse, TableFormat, TablePlace};
+use clauseo_protocol::{ChangedTable, TableFormat, TablePlace};
 
 use super::{TABLES_MAX, TablesCompared, align, compare};
 
-const W: &str = concat!(
+pub(super) const W: &str = concat!(
     r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" "#,
     r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" "#,
-    r#"xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml""#
+    r#"xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" "#,
+    r#"xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006""#
 );
 
-const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+pub(super) const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 /// A .docx whose body is `body`, with `parts` (name, XML) and the main part's relationships
 /// `rels`.
-fn docx_with(body: &str, parts: &[(&str, String)], rels: &str) -> Vec<u8> {
+pub(super) fn docx_with(body: &str, parts: &[(&str, String)], rels: &str) -> Vec<u8> {
+    let document = format!("<w:document {W}><w:body>{body}</w:body></w:document>");
+    docx_of(&document, parts, rels)
+}
+
+/// A .docx whose main part is `document`, with `parts` (name, XML) and the main part's
+/// relationships `rels`.
+pub(super) fn docx_of(document: &str, parts: &[(&str, String)], rels: &str) -> Vec<u8> {
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let package_rels = format!(
         r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>"#
@@ -29,11 +38,10 @@ fn docx_with(body: &str, parts: &[(&str, String)], rels: &str) -> Vec<u8> {
     let document_rels = format!(
         r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rels}</Relationships>"#
     );
-    let document = format!("<w:document {W}><w:body>{body}</w:body></w:document>");
     let mut all = vec![
         ("_rels/.rels", package_rels),
         ("word/_rels/document.xml.rels", document_rels),
-        ("word/document.xml", document),
+        ("word/document.xml", document.to_owned()),
     ];
     all.extend(parts.iter().map(|(name, xml)| (*name, xml.clone())));
     for (name, text) in all {
@@ -50,12 +58,12 @@ fn docx(body: &str) -> Vec<u8> {
 }
 
 /// A paragraph of `text`.
-fn p(text: &str) -> String {
+pub(super) fn p(text: &str) -> String {
     format!("<w:p><w:r><w:t>{text}</w:t></w:r></w:p>")
 }
 
 /// A cell holding `text`, with `tcpr` in its properties.
-fn cell(text: &str, tcpr: &str) -> String {
+pub(super) fn cell(text: &str, tcpr: &str) -> String {
     format!(
         r#"<w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/>{tcpr}</w:tcPr>{}</w:tc>"#,
         p(text)
@@ -63,30 +71,30 @@ fn cell(text: &str, tcpr: &str) -> String {
 }
 
 /// A row of `cells`, with `trpr` in its properties.
-fn row(cells: &str, trpr: &str) -> String {
+pub(super) fn row(cells: &str, trpr: &str) -> String {
     format!("<w:tr><w:trPr>{trpr}</w:trPr>{cells}</w:tr>")
 }
 
 /// A table of `rows`, with `tblpr` in its properties and the grid `cols`.
-fn table(rows: &str, tblpr: &str, cols: &str) -> String {
+pub(super) fn table(rows: &str, tblpr: &str, cols: &str) -> String {
     format!(
         r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/>{tblpr}</w:tblPr><w:tblGrid>{cols}</w:tblGrid>{rows}</w:tbl>"#
     )
 }
 
 /// Two columns of 2000.
-const COLS: &str = r#"<w:gridCol w:w="2000"/><w:gridCol w:w="2000"/>"#;
+pub(super) const COLS: &str = r#"<w:gridCol w:w="2000"/><w:gridCol w:w="2000"/>"#;
 
 /// A 2x2 table named `name`, with `tblpr`, `trpr` on its first row and `tcpr` on its last
 /// cell.
-fn grid(name: &str, tblpr: &str, trpr: &str, tcpr: &str) -> String {
+pub(super) fn grid(name: &str, tblpr: &str, trpr: &str, tcpr: &str) -> String {
     let first = row(&(cell(name, "") + &cell("A", "")), trpr);
     let second = row(&(cell("B", "") + &cell("C", tcpr)), "");
     table(&(first + &second), tblpr, COLS)
 }
 
 /// The body's table `number` changed by `formats`.
-fn body(number: u32, formats: &[TableFormat]) -> ChangedTable {
+pub(super) fn body(number: u32, formats: &[TableFormat]) -> ChangedTable {
     ChangedTable {
         place: TablePlace::Body,
         number,
@@ -271,145 +279,6 @@ fn a_table_inside_a_cell_is_numbered_in_order() {
     );
 }
 
-/// A header's table, its header found by the section's reference.
-#[test]
-fn a_tables_change_in_a_header_names_the_header() {
-    let header = |tcpr: &str| {
-        format!(
-            "<w:hdr {W}>{}</w:hdr>",
-            table(&row(&cell("Logo", tcpr), ""), "", COLS)
-        )
-    };
-    let rels = format!(r#"<Relationship Id="rIdH" Type="{REL}/header" Target="header1.xml"/>"#);
-    let body_xml = format!(
-        r#"{}<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/></w:sectPr>"#,
-        p("Body")
-    );
-    let file = |tcpr: &str| docx_with(&body_xml, &[("word/header1.xml", header(tcpr))], &rels);
-    let found = compare(&file(""), &file(r#"<w:vAlign w:val="center"/>"#));
-    let uses = vec![HeaderUse {
-        slot: HeaderSlot::Default,
-        sections: vec![1],
-    }];
-    assert_eq!(
-        found,
-        TablesCompared {
-            changed: vec![ChangedTable {
-                place: TablePlace::Header { uses },
-                number: 1,
-                formats: vec![Alignment],
-            }],
-            may_differ: false,
-            ..TablesCompared::default()
-        }
-    );
-}
-
-/// A header part holding `xml`'s body.
-fn hdr(xml: &str) -> String {
-    format!("<w:hdr {W}>{xml}{}</w:hdr>", p(""))
-}
-
-/// A one-cell table reading `text`, its cell with `tcpr`.
-fn logo(text: &str, tcpr: &str) -> String {
-    table(&row(&cell(text, tcpr), ""), "", COLS)
-}
-
-/// A file whose sections each use one header, by default: `headers` gives each section's header
-/// part's XML, first to last, and the body holds `body` in the last section.
-fn sectioned(headers: &[String], body: &str) -> Vec<u8> {
-    let mut parts = Vec::new();
-    let mut rels = String::new();
-    let mut xml = String::new();
-    for (index, header) in headers.iter().enumerate() {
-        let name = format!("header{index}.xml");
-        rels.push_str(&format!(
-            r#"<Relationship Id="rIdH{index}" Type="{REL}/header" Target="{name}"/>"#
-        ));
-        parts.push((format!("word/{name}"), header.clone()));
-        let reference = format!(r#"<w:headerReference w:type="default" r:id="rIdH{index}"/>"#);
-        if index + 1 < headers.len() {
-            xml.push_str(&format!(
-                "<w:p><w:pPr><w:sectPr>{reference}</w:sectPr></w:pPr></w:p>"
-            ));
-        } else {
-            xml.push_str(&format!("{}<w:sectPr>{reference}</w:sectPr>", p(body)));
-        }
-    }
-    let parts: Vec<(&str, String)> = parts
-        .iter()
-        .map(|(name, xml)| (name.as_str(), xml.clone()))
-        .collect();
-    docx_with(&xml, &parts, &rels)
-}
-
-/// A cover section inserted before the only one, with its own header, while the shading of the
-/// table in the old section's header changes: the sections pair from the last one back, as
-/// stetdoc's compare pairs them, so the header with the table pairs with itself and its table
-/// is named on section 2.
-#[test]
-fn a_header_whose_section_moved_pairs_from_the_last_section_back() {
-    let shaded = r#"<w:shd w:val="clear" w:fill="FFFF00"/>"#;
-    let old = sectioned(&[hdr(&logo("Logo", ""))], "One year.");
-    let new = sectioned(
-        &[hdr(&p("Cover header.")), hdr(&logo("Logo", shaded))],
-        "Two years.",
-    );
-    let uses = vec![HeaderUse {
-        slot: HeaderSlot::Default,
-        sections: vec![2],
-    }];
-    assert_eq!(
-        compare(&old, &new),
-        TablesCompared {
-            changed: vec![ChangedTable {
-                place: TablePlace::Header { uses },
-                number: 1,
-                formats: vec![Shading],
-            }],
-            may_differ: false,
-            lone_header_texts: vec!["Coverheader.".to_owned()],
-        }
-    );
-}
-
-/// A header's text one version only has is listed, white space taken out; a header edited in
-/// place lists its text on both sides, and the same header lists nothing.
-#[test]
-fn a_header_text_one_version_only_has_is_listed() {
-    let old = sectioned(&[hdr(&p("Main header."))], "One year.");
-    let added = sectioned(
-        &[hdr(&p("Schedule header.")), hdr(&p("Main header."))],
-        "Two years.",
-    );
-    assert_eq!(compare(&old, &added).lone_header_texts, ["Scheduleheader."]);
-    let edited = sectioned(&[hdr(&p("Main header, revised."))], "One year.");
-    assert_eq!(
-        compare(&old, &edited).lone_header_texts,
-        ["Mainheader,revised.", "Mainheader."]
-    );
-    let blank = sectioned(&[hdr(&p("Main header.")), hdr("")], "Two years.");
-    assert_eq!(
-        compare(&old, &blank).lone_header_texts,
-        Vec::<String>::new()
-    );
-}
-
-/// A header with a table that pairs with no header of the other version: what changed in its
-/// table can't be told, so the blackline may differ.
-#[test]
-fn a_header_with_tables_and_no_counterpart_may_differ() {
-    let old = sectioned(&[hdr(&logo("Logo", ""))], "One year.");
-    let new = sectioned(
-        &[hdr(&logo("Logo", "")), hdr(&logo("Seal", ""))],
-        "Two years.",
-    );
-    assert!(compare(&old, &new).may_differ);
-    // Without a table, a header with no counterpart has nothing to compare.
-    let plain = sectioned(&[hdr(&p("Cover.")), hdr(&logo("Logo", ""))], "Two years.");
-    assert!(!compare(&old, &plain).may_differ);
-}
-
 /// Past the cap the rest may differ; a file that does not read may differ.
 #[test]
 fn too_many_tables_and_unreadable_files_may_differ() {
@@ -449,3 +318,88 @@ fn align_pairs_by_order_then_by_text() {
     );
     assert_eq!(align(&[], &["a"]), (vec![], false));
 }
+
+/// A shaded cell's tcPr.
+pub(super) const SHADED: &str = r#"<w:shd w:val="clear" w:fill="FFFF00"/>"#;
+
+/// A row whose deletion is tracked, its cells shaded, is left out: it pairs with nothing, so the
+/// copy of the row below it, unshaded, pairs with the older row.
+#[test]
+fn a_row_whose_deletion_is_tracked_is_left_out() {
+    let deleted = r#"<w:del w:id="7" w:author="A"/>"#;
+    let rows = |extra: &str| {
+        row(&(cell("A", "") + &cell("1", "")), "")
+            + extra
+            + &row(&(cell("B", "") + &cell("2", "")), "")
+    };
+    let old = table(&rows(""), "", COLS);
+    let gone = row(&(cell("B", SHADED) + &cell("2", SHADED)), deleted);
+    let new = table(&rows(&gone), "", COLS);
+    assert_eq!(bodies(&old, &new), TablesCompared::default());
+}
+
+/// A cell whose deletion is tracked, shaded, is left out in the same way.
+#[test]
+fn a_cell_whose_deletion_is_tracked_is_left_out() {
+    let deleted = r#"<w:cellDel w:id="8" w:author="A"/>"#;
+    let old = table(&row(&(cell("A", "") + &cell("B", "")), ""), "", COLS);
+    let cells = cell("A", "") + &cell("B", &format!("{SHADED}{deleted}")) + &cell("B", "");
+    let new = table(&row(&cells, ""), "", COLS);
+    assert_eq!(bodies(&old, &new), TablesCompared::default());
+}
+
+/// A table that `mc:Fallback` repeats is read once, from `mc:Choice`'s side: the shaded table is
+/// the newer version's only one.
+#[test]
+fn a_table_mc_fallback_repeats_is_read_once() {
+    let fallback = format!(
+        r#"<mc:AlternateContent><mc:Choice Requires="w14"/><mc:Fallback>{}</mc:Fallback></mc:AlternateContent>"#,
+        grid("T", "", "", "")
+    );
+    let new = fallback + &grid("T", "", "", SHADED);
+    assert_eq!(
+        bodies(&grid("T", "", "", ""), &new).changed,
+        [body(1, &[Shading])]
+    );
+}
+
+/// A file in Word's Strict namespace is read as a Transitional one is.
+#[test]
+fn a_strict_file_is_read() {
+    let strict = |tcpr: &str| {
+        let document = format!(
+            r#"<w:document xmlns:w="http://purl.oclc.org/ooxml/wordprocessingml/main"><w:body>{}</w:body></w:document>"#,
+            grid("T", "", "", tcpr)
+        );
+        docx_of(&document, &[], "")
+    };
+    assert_eq!(
+        compare(&strict(""), &strict(SHADED)).changed,
+        [body(1, &[Shading])]
+    );
+}
+
+/// Cells left unpaired on both sides of a paired row (a row whose cells changed shape and text)
+/// may differ.
+#[test]
+fn cells_unpaired_on_both_sides_may_differ() {
+    let old = table(
+        &row(&(cell("A", "") + &cell("B", "") + &cell("C", "")), ""),
+        "",
+        COLS,
+    );
+    let new = table(&row(&(cell("X", "") + &cell("Y", "")), ""), "", COLS);
+    assert!(bodies(&old, &new).may_differ);
+}
+
+/// Past [`super::ALIGN_MAX`] cells, a list is not aligned, even where its texts would pair: what
+/// is left unpaired may differ.
+#[test]
+fn a_list_past_the_alignment_cap_may_differ() {
+    let old = vec!["a"; 2001];
+    let new = vec!["a"; 2002];
+    assert!(old.len() * new.len() > super::ALIGN_MAX);
+    assert_eq!(align(&old, &new), (vec![], true));
+}
+
+mod parts;
