@@ -212,8 +212,7 @@ pub(crate) const BUILT_IN_SKILLS: [&str; 3] = ["profile", "claude-plugin", "skil
 /// a command that lists or reads one ([`own_shell_allow_rules`]), so the auto-mode classifiers
 /// never see those. Nothing wider; a deny rule (another session's, a link's) still beats each.
 /// A spelling that is not UTF-8 gets none. With `sandbox_off` (macOS or Linux, Claude's sandbox
-/// `Off`, `agent::loads::sandbox`) the shell rules are left out: a command they allow would
-/// run unsandboxed with no classifier, so those commands keep theirs.
+/// `Off`) the shell rules are left out: what they allow would run unsandboxed and unjudged.
 pub(crate) fn claude_allow_rules(deny: &LaunchDeny, sandbox_off: bool) -> Vec<String> {
     if sandbox_off {
         return read_allow_rules(deny, cfg!(windows));

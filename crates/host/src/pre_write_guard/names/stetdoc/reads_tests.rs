@@ -480,6 +480,7 @@ fn git_bash_forms_become_windows_paths_or_none() {
     }
     for word in [
         "/tmp/x.docx",
+        // unix-paths-ok: a Git Bash word, mapped as text and never handed to a path API
         "/usr/x",
         "//server/s/x.docx",
         "/cc/x",
