@@ -3,9 +3,9 @@
 //! when it fails. The call is passed in, so the steps after each failure are tested on every OS
 //! with the failure simulated.
 //!
-//! The call is given the backup name `<name>.clauseo-<n>.orig.tmp` ([`crate::backups`]: never
-//! versioned, never swept, and put back when the matter next opens if a crash left the target
-//! missing). By the call's documentation, after a failure:
+//! The call is given the backup name `<name>.clauseo-<n>.orig.tmp` ([`crate::matter::backups`]:
+//! never versioned, never swept, and put back when the worker next opens the matter if a crash
+//! left the target missing). By the call's documentation, after a failure:
 //! - 1175 `ERROR_UNABLE_TO_REMOVE_REPLACED`: nothing moved; the target is as it was.
 //! - 1176 `ERROR_UNABLE_TO_MOVE_REPLACEMENT`: with a backup name, both files keep their names.
 //! - 1177 `ERROR_UNABLE_TO_MOVE_REPLACEMENT_2`: the old file is under the backup name and the
@@ -21,7 +21,8 @@
 //!
 //! A target missing before the call (a restore of a deleted file) gets the plain rename alone; so
 //! does a target with the read-only attribute, which stays refused as a rename refuses it (the
-//! attribute is kept, not overridden).
+//! attribute is kept, not overridden), and a target with no free backup name (a name too long
+//! for one), which loses its metadata as on main.
 //!
 //! A symlink or junction never reaches this: `writeback::writable` writes only a regular file or
 //! a missing one, and the stat check before the renames fails a target replaced by one since.
@@ -30,7 +31,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::{Lost, TEMP_TRIES, remove_file, rename};
-use crate::backups::backup_name;
+use crate::matter::backups::backup_name;
 
 /// What [`next_step`] chose after the call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +88,16 @@ pub(super) fn replace_keeping(
             .map(|()| Lost::default())
             .map_err(Failed::Unchanged);
     }
-    let backup = free_backup(target).map_err(Failed::Unchanged)?;
+    let backup = match free_backup(target) {
+        Ok(backup) => backup,
+        // No backup name to give (too long for the folder, or all taken): the plain rename, over
+        // the old file, whose metadata is lost.
+        Err(err) => {
+            return rename(temp, target)
+                .map(|()| Lost::one(err.raw_os_error()))
+                .map_err(Failed::Unchanged);
+        }
+    };
     let result = replace(target, temp, &backup);
     let code = result.as_ref().err().and_then(io::Error::raw_os_error);
     let target_there = there(target);
@@ -117,8 +127,8 @@ pub(super) fn replace_keeping(
 
 /// The old file is under `backup` and could not go back (`put_back` says why): the temp file
 /// goes to the target's free name, so the new content is in place, with the metadata lost; the
-/// backup stays for the next open ([`crate::backups`]). If that fails too, the error names the
-/// two files, by their names in the target's folder.
+/// backup stays for the next open ([`crate::matter::backups`]). If that fails too, the error
+/// names the two files, by their names in the target's folder.
 pub(super) fn after_failed_put_back(
     temp: &Path,
     target: &Path,

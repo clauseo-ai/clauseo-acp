@@ -562,6 +562,11 @@ fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, E
             Err(error) => return Err(error.into()),
         };
         *slot = Slot::Open(Box::new(matter));
+        // Here alone, on the matter's one writer: a crashed rewrite's backups (Windows only).
+        #[cfg(windows)]
+        if let Slot::Open(matter) = slot {
+            clauseo_matters::recover_backups(matter);
+        }
     }
     match slot {
         Slot::Open(matter) => Ok(matter),

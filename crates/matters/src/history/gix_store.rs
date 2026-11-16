@@ -137,6 +137,7 @@ impl GixStore {
 
     /// Whether the store holds blob `blob` (its object file is there; not read): published, or
     /// written since and not yet published.
+    #[cfg(any(windows, test, feature = "test-support"))]
     pub(crate) fn has_blob(&self, blob: Oid) -> bool {
         self.objects.contains(&to_gix(blob))
     }
