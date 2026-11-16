@@ -91,8 +91,17 @@ impl Always {
         let Some(read) = run.always.as_ref() else {
             return Self::default();
         };
-        let mut rules = read.iter().cloned().collect();
+        let mut rules: BTreeSet<String> = read.iter().cloned().collect();
         kept.drop_removed(run.key.matter, &mut rules);
+        // Counts only: a rule can hold the lawyer's own words (0047).
+        let listed: Vec<String> = rules.iter().cloned().collect();
+        let sites = always::kept_sites(&listed).len();
+        tracing::debug!(
+            rules = rules.len(),
+            sites,
+            ?kind,
+            "kept rules read for a launch"
+        );
         Self {
             file: always::file_beside(&run.notes),
             kind,

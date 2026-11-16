@@ -33,7 +33,7 @@ use super::{
     run_parts, well_formed, within,
 };
 
-fn claude(tool: &str, input: Option<&Value>, windows: bool) -> Result<Kept, NotKept> {
+pub(super) fn claude(tool: &str, input: Option<&Value>, windows: bool) -> Result<Kept, NotKept> {
     let matter = [if windows { "C:/m" } else { "/m" }.to_owned()];
     rule(&Request {
         agent: AgentKind::Claude,
@@ -45,7 +45,7 @@ fn claude(tool: &str, input: Option<&Value>, windows: bool) -> Result<Kept, NotK
     })
 }
 
-fn of(tool: &str, input: &Value) -> Option<String> {
+pub(super) fn of(tool: &str, input: &Value) -> Option<String> {
     claude(tool, Some(input), false).ok().map(|kept| kept.rule)
 }
 

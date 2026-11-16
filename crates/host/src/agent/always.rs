@@ -26,8 +26,12 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::{AgentKind, AlwaysKind, AlwaysOffer, ToolKind};
 use serde_json::Value;
 
+pub(crate) use site::kept_sites;
+use site::{domain, domain_name, sandbox_host};
+
 pub(crate) mod options;
 pub(crate) mod plain;
+mod site;
 mod store;
 
 pub(crate) use store::{delete, list, next_seq, read_beside, remove_now, store, use_secrets};
@@ -159,6 +163,16 @@ fn claude_rule(request: &Request<'_>) -> Result<Kept, NotKept> {
         "PowerShell" => shell("PowerShell", plain::Grammar::PowerShell)?,
         "WebFetch" => {
             let host = exact(domain(text("url")?))?;
+            kept(
+                format!("WebFetch(domain:{host})"),
+                AlwaysKind::Site,
+                Some(host),
+            )
+        }
+        // Claude's shell asking for a host the sandbox does not list: the same entry as a
+        // WebFetch of that site (claude-agent-acp 0.89.1 `permissions/options/tools.js:102`).
+        "SandboxNetworkAccess" => {
+            let host = exact(sandbox_host(text("host")?))?;
             kept(
                 format!("WebFetch(domain:{host})"),
                 AlwaysKind::Site,
@@ -380,25 +394,6 @@ fn one_plain_command(command: &str, grammar: plain::Grammar, agent: plain::Agent
         Ok(_) | Err(plain::NotPlain::Outside) => true,
         Err(_) => false,
     }
-}
-
-/// The host of an `http` or `https` URL, lower case, for a `WebFetch(domain:…)` rule; none for
-/// another scheme, no host, or a host that is not a plain name or IPv4 address.
-fn domain(url: &str) -> Option<String> {
-    let url = url::Url::parse(url).ok()?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return None;
-    }
-    let host = url.host_str()?.to_ascii_lowercase();
-    domain_name(&host).then_some(host)
-}
-
-/// Letters, digits, `.` and `-` only, not starting with `.` or `-`.
-fn domain_name(host: &str) -> bool {
-    !host.starts_with(['.', '-'])
-        && host
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '-'))
 }
 
 /// An MCP tool's exact name, `mcp__<server>__<tool>`: letters, digits, `_` and `-` only.
