@@ -396,11 +396,11 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // start Claude. Claude-only: no other plan's line. Hindi later
   "agent.firm_hooks_off":
     "Your firm's Claude settings on this computer switch off a safety check Clauseo needs (the setting disableAllHooks or allowManagedHooksOnly), so Claude can't start here. Start this conversation with Codex instead.",
-  // provisional (UC-475): a Claude Code policy any program can write (Windows, HKCU) sets permissions, sandbox or
+  // provisional (UC-756): a Claude Code policy any program can write (Windows, HKCU) sets permissions, sandbox or
   // hooks, so the host didn't start Claude, or stopped it. Claude-only. Hindi later
   "agent.user_policy":
     "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is gone. Uninstall the program that made it, then try again, or use Codex for now.",
-  // provisional (UC-476): the settings file Clauseo writes at each launch changed while Claude ran, so Clauseo stopped
+  // provisional (UC-757): the settings file Clauseo writes at each launch changed while Claude ran, so Clauseo stopped
   // it; the next message starts it again (retryable). Claude-only. Hindi later
   "agent.settings_changed":
     "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.",

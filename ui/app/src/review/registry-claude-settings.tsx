@@ -1,5 +1,5 @@
 // The copy review entries for a Claude launch the host refused, or a Claude it stopped, over Claude's own settings
-// (UC-474 to UC-476, #launch-never-weaker): the firm's managed settings turn hooks off (agent.firm_hooks_off), a policy
+// (UC-474, UC-756 and UC-757, #launch-never-weaker): the firm's managed settings turn hooks off (agent.firm_hooks_off), a policy
 // any program can write changed its security settings (agent.user_policy), or its settings file changed while it ran
 // (agent.settings_changed). Each is the question and its stop line, never a send's refusal, in place of the
 // "U3-err-<code>" entry (registry-offline.tsx's ownEntry).
@@ -39,7 +39,7 @@ export const CLAUDE_SETTINGS: Partial<Record<ErrorCode, Entry[]>> = {
   ],
   "agent.user_policy": [
     {
-      id: "UC-475",
+      id: "UC-756",
       words: errorWords(
         "A program on this computer changed Claude's security settings, so Clauseo won't run Claude until that change is gone. Uninstall the program that made it, then try again, or use Codex for now.",
       ),
@@ -49,7 +49,7 @@ export const CLAUDE_SETTINGS: Partial<Record<ErrorCode, Entry[]>> = {
   ],
   "agent.settings_changed": [
     {
-      id: "UC-476",
+      id: "UC-757",
       words: errorWords(
         "Claude's settings changed while it was working, so Clauseo stopped it. Send your message again to restart Claude with Clauseo's own settings.",
       ),
