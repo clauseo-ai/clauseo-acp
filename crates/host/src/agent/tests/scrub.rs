@@ -17,10 +17,11 @@ fn scrubbed(name: &str) -> bool {
     upper.starts_with("CLAUDE_") || upper.starts_with("ANTHROPIC_") || upper == "IS_SANDBOX"
 }
 
-/// A Claude launch as the host builds it (routing names Clauseo sets win over inherited ones): the home and temp folder forced, the sign-in's
-/// variables in the agent's settings entry, the stored key and the firm plan's in the hook. With
-/// a pile of loosening variables inherited, in any case, every name with those prefixes the spec
-/// holds is one Clauseo set, with Clauseo's value; the rest of the inherited env stays.
+/// A Claude launch as the host builds it (routing names Clauseo sets win over inherited ones):
+/// the home and temp folder forced, the sign-in's variables in the agent's settings entry, the
+/// stored key and the firm plan's in the hook. With a pile of loosening variables inherited, in
+/// any case, every name with those prefixes the spec holds is one Clauseo set, with Clauseo's
+/// value; the rest of the inherited env stays.
 #[test]
 fn only_the_claude_and_anthropic_variables_clauseo_sets_reach_the_agent() {
     let home = Path::new("/data/agents/claude-acp/home");
