@@ -1,7 +1,7 @@
 //! stetdoc's environment (`stetdoc_env`): empty off Windows; on Windows `SystemRoot`, `windir`,
 //! `TEMP` and `TMP`, the last two the blackline's own folder. And the code a failed run gives
-//! (`error_of`, `refusal_code`). What the blackline says of a difference it does not show, and of
-//! what the versions' views found.
+//! (`error_of`, `refusal_code`). What the blackline says of a difference it does not show, of what
+//! the versions' views found, and of what the table comparison found.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -10,12 +10,15 @@ use std::path::Path;
 use clauseo_protocol::ErrorCode;
 
 use clauseo_protocol::{
-    BlacklineNotice, BlacklineParagraph, BlacklinePart, BlacklinePartKind, ParagraphChange,
-    WordBlackline,
+    BlacklineNotice, BlacklineParagraph, BlacklinePart, BlacklinePartKind, ChangedTable,
+    ParagraphChange, TableFormat, TablePlace, WordBlackline,
 };
 
 use super::cross::{LINKS_MAX, note_what_compare_missed};
-use super::{author_arg, error_of, note_a_silent_difference, refusal_code, stetdoc_env};
+use super::{
+    TablesCompared, author_arg, error_of, note_a_silent_difference, note_tables, refusal_code,
+    stetdoc_env,
+};
 use crate::actor::query::blackline::parse::sides::Crossed;
 
 /// A lookup over `pairs`, the name matched in any case.
@@ -183,13 +186,59 @@ fn a_difference_the_blackline_does_not_show_may_differ() {
     let mut linked = blackline(ParagraphChange::Same);
     linked.changed_links.push("the account".to_owned());
     assert_eq!(noted(linked, true), []);
-    // A part shown says what changed.
+    // A part shown, or a table named, says what changed.
     let mut parted = blackline(ParagraphChange::Same);
     parted.parts.push(BlacklinePart {
         kind: BlacklinePartKind::Footnote { number: 1 },
         paragraphs: Vec::new(),
     });
     assert_eq!(noted(parted, true), []);
+    let mut tabled = blackline(ParagraphChange::Same);
+    tabled.changed_tables.push(shaded_table());
+    assert_eq!(noted(tabled, true), []);
+}
+
+/// The body's first table, its shading changed.
+fn shaded_table() -> ChangedTable {
+    ChangedTable {
+        place: TablePlace::Body,
+        number: 1,
+        formats: vec![TableFormat::Shading],
+    }
+}
+
+/// What the comparison of the table formatting found goes on the blackline: the tables with the
+/// table notice, and may differ where it could not tell, in order; nothing found adds nothing.
+#[test]
+fn what_the_table_comparison_found_is_said() {
+    let empty = WordBlackline {
+        paragraphs: Vec::new(),
+        truncated: false,
+        notices: vec![BlacklineNotice::HiddenText],
+        changed_links: Vec::new(),
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
+    };
+    let mut found = empty.clone();
+    note_tables(
+        &mut found,
+        TablesCompared {
+            changed: vec![shaded_table()],
+            may_differ: true,
+        },
+    );
+    assert_eq!(found.changed_tables, [shaded_table()]);
+    assert_eq!(
+        found.notices,
+        [
+            BlacklineNotice::HiddenText,
+            BlacklineNotice::CellFormatChanged,
+            BlacklineNotice::MayDiffer,
+        ]
+    );
+    let mut none = empty.clone();
+    note_tables(&mut none, TablesCompared::default());
+    assert_eq!(none, empty);
 }
 
 /// What the versions' views found goes on the blackline: the links by text, to the cap (past it,
