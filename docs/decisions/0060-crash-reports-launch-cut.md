@@ -57,6 +57,9 @@ symbols job and no new crates.
     leaves one report, and the app may carry on. SIGTERM and SIGKILL are never recorded. A real
     stack overflow on macOS loses Rust's "thread has overflowed its stack" message, because the
     re-raised signal reaches Rust's handler without the guard-page address.
+  - CI's Linux runs x86_64 under Rosetta, which delivers a process's own raised SIGSEGV as a
+    fault (`SEGV_MAPERR`), so there a sent SIGSEGV is recorded; on native Linux it is not. The
+    rule is the same for both.
   - Windows: the unhandled-exception filter (`crates/host/src/crash/native/win.rs:32`) takes
     every exception no handler took, a stack overflow (`0xC00000FD`) included; `abort` fails fast
     past every filter, so its own report is the panic hook's. Inside a crashed process the
