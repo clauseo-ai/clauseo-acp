@@ -136,11 +136,14 @@ fn a_wildcard_matching_the_held_name_as_stored_is_refused() {
 #[test]
 fn many_devanagari_names_beside_an_owner_file_cost_one_listing() {
     let fx = Fixture::new("dev-many");
+    let clock = SystemClock;
+    let set_up = clock.now().mono;
     let names: Vec<String> = (0..5000).map(|n| format!("{FREE_STEM} {n}.docx")).collect();
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
     add(&fx, &refs);
+    let set_up = clock.now().mono.saturating_sub(set_up);
+    eprintln!("writing the 5,000 names took {set_up:?}");
     let hook = fx.hook("Bash", &json!({"command": "echo hi > new.txt"}));
-    let clock = SystemClock;
     let started = clock.now().mono;
     assert_eq!(guard_json(&hook), "");
     let took = clock.now().mono.saturating_sub(started);
