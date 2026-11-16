@@ -392,6 +392,8 @@ env key and secret names, and anything else fails, naming the line. It also refu
 (`set -x` in any form, `bash -x`, `BASH_XTRACEFD`, `PS4`, `SHELLOPTS`) anywhere in the
 workflow, and any upload path, or copy into an uploaded folder, that can reach `RUNNER_TEMP`
 (where the keychain, the .p8 and the key files live), past a short list of named files there.
+What each step that holds a secret does is pinned too: a sha256 of its text (`STEP_SNAPSHOTS`),
+so any edit to one fails the test until the hash is updated in the same pull request.
 The Apple ID's password reaches `notarytool` on its command line, as Tauri's own call passes it:
 GitHub masks it, and the runner is the job's alone.
 

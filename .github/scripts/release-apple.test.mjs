@@ -20,7 +20,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
+import { createHash, createPublicKey, generateKeyPairSync, verify } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -438,6 +438,106 @@ test("every mention of secrets, in any syntax, is on a step and env key the tabl
   }
   // A problem names the line.
   assert.match(secretMentionProblems(withEnv("ALL: ${{ toJSON(secrets) }}"))[0], /, line \d+: /);
+});
+
+// ---- What each step that holds a secret does: a reviewed snapshot ----
+
+/**
+ * The sha256 of each SECRET_TABLE step as it stands: every line of the step but YAML comments
+ * (its name, if:, env, with: and the exact run: text). Where a secret goes once a step holds it
+ * (GITHUB_ENV, GITHUB_OUTPUT, a file that is uploaded, a pipe) is in the run: text, which no rule
+ * can read for every case, so any edit to these steps fails here until the hash is updated in the
+ * same pull request, where the review reads the step's diff.
+ */
+const STEP_SNAPSHOTS = {
+  "custody/Decide the unsigned beta": "0b4d6464006d24bacc8b7f83ded1d4812e7e4deda460874577c4dbc8582b5200",
+  [`custody/${CUSTODY_STEP}`]: "93277a25944dcbec265ca1ca70747b461055d745f78cd5e6a600c4cd74d2e6c4",
+  [`custody/${RELEASE_KEY_STEP}`]: "1cf338d2cff41a4857ad70b524914207df7543021475a8c62880216b29bc7c68",
+  [`build/${BUNDLE_STEP}`]: "39df8b01fc4d6c0f97f7609b8a6cc0cfc316afb7fb5e8316d870a1742370a9c9",
+  [`build/${CHECK_STEP}`]: "305ac2167ebdaef2b9eb8ad4af62967471908ac0cd6f4f6a94a47ec16528da92",
+  "sign-windows/Sign the sandbox tool for the updater": "03b94a3aab5f96ee6d85415cc5197f4e566680f618cbee1f177e7bdbe69e6aae",
+  "sign-windows/Sign the currentUser installer for the updater": "3f0b89f8806cc07965fecc671d7030db8e54613051593aed9e450839bcd0ff45",
+  "publish/Record the release (S23)": "cdf1b48dcc99fd8d1ee5f8e4504fc06c20a0b8dfffe33f4bcacd153ae78bc0c1",
+};
+
+/** Each SECRET_TABLE step's text as hashed, by "job/step". */
+function secretStepTexts(text) {
+  const placed = placedLines(text);
+  const texts = new Map();
+  for (const { job, step } of SECRET_TABLE) {
+    const ids = new Set(placed.filter((line) => line.job === job && line.step?.name === step).map((line) => line.step.id));
+    if (ids.size !== 1) {
+      texts.set(`${job}/${step}`, null);
+      continue;
+    }
+    const [id] = ids;
+    const body = placed
+      .filter((line) => line.step?.id === id && (line.scalar || line.code.trim() !== ""))
+      .map((line) => (line.scalar ? line.raw : line.code.trimEnd()))
+      .join("\n")
+      .trimEnd();
+    texts.set(`${job}/${step}`, body);
+  }
+  return texts;
+}
+
+const sha256 = (body) => createHash("sha256").update(body).digest("hex");
+
+/** Each secret-holding step whose text is not its snapshot, with how to update it. */
+function snapshotProblems(text) {
+  const problems = [];
+  for (const [key, body] of secretStepTexts(text)) {
+    if (body === null) {
+      problems.push(`${key}: not exactly one such step in release.yml`);
+    } else if (STEP_SNAPSHOTS[key] !== sha256(body)) {
+      problems.push(
+        `${key}: the step changed (sha256 ${sha256(body)}, snapshot ${STEP_SNAPSHOTS[key] ?? "none"}). It holds a secret, ` +
+          "so its diff is reviewed: if the change is meant, set its entry in STEP_SNAPSHOTS " +
+          "(.github/scripts/release-apple.test.mjs) to the new sha256 in the same pull request",
+      );
+    }
+  }
+  for (const key of Object.keys(STEP_SNAPSHOTS)) {
+    if (!secretStepTexts(text).has(key)) {
+      problems.push(`${key}: a snapshot for a step SECRET_TABLE no longer lists`);
+    }
+  }
+  return problems;
+}
+
+test("each step that holds a secret is exactly its reviewed snapshot", () => {
+  const text = workflow();
+  assert.deepEqual(snapshotProblems(text), []);
+  const bundle = `        run: |\n          set -euo pipefail\n          fail() { echo "::error::$1"; exit 1; }\n          if [ "$MODE" = dry ]; then\n`;
+  const inBundle = (line) => text.replace(bundle, `${bundle.replace("          if [ \"$MODE\" = dry ]; then\n", "")}          ${line}\n          if [ "$MODE" = dry ]; then\n`);
+  const breaks = [
+    // The review's: a secret handed to later steps, to the job's outputs, to an upload, a pipe.
+    [inBundle('echo "LEAKED=$APPLE_PASSWORD" >> "$GITHUB_ENV"'), BUNDLE_STEP],
+    [inBundle('echo "leaked=$APPLE_PASSWORD" >> "$GITHUB_OUTPUT"'), BUNDLE_STEP],
+    [inBundle('mkdir -p "$OUT" && printf %s "$APPLE_CERTIFICATE" > "$OUT/c"'), BUNDLE_STEP],
+    [inBundle('echo "$APPLE_PASSWORD" | base64'), BUNDLE_STEP],
+    // Each other secret-holding step, once.
+    [text.replace('          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || fail "the release environment has no TAURI_SIGNING_PRIVATE_KEY"\n',
+      '          [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || fail "the release environment has no TAURI_SIGNING_PRIVATE_KEY"\n          echo "$TAURI_SIGNING_PRIVATE_KEY" >> "$GITHUB_STEP_SUMMARY"\n'), RELEASE_KEY_STEP],
+    [text.replace("            echo \"custody: no Apple secret; the macOS legs sign ad hoc\"", "            echo \"custody: no Apple secret; the macOS legs sign ad hoc $APPLE_ID\""), CUSTODY_STEP],
+    [text.replace("          echo \"custody: unsigned beta $beta (Apple secret: $HAS_APPLE)\"", "          echo \"custody: unsigned beta $beta (Apple secret: $HAS_APPLE) \""), "Decide the unsigned beta"],
+    [text.replace("          team=$(sed 's/#.*//' crates/desktop/release/apple-team-id | tr -d '[:space:]')\n          [[ \"$team\" =~ ^[A-Z0-9]{10}$ ]] || fail",
+      "          team=$(sed 's/#.*//' crates/desktop/release/apple-team-id | tr -d '[:space:]')\n          echo \"$APPLE_SIGNING_IDENTITY\" > identity.txt\n          [[ \"$team\" =~ ^[A-Z0-9]{10}$ ]] || fail"), CHECK_STEP],
+    [text.replace("        run: node .github/scripts/record-release.mjs \"$VERSION\" stable", "        run: node .github/scripts/record-release.mjs \"$VERSION\" stable \"$CLAUSEO_RELEASE_ACCESS_CLIENT_SECRET\""), "Record the release (S23)"],
+    // A key added to a step's env or with: changes it too.
+    [text.replace("        if: needs.check.outputs.mode == 'release'\n        env:\n          TAURI_SIGNING_PRIVATE_KEY:", "        if: needs.check.outputs.mode == 'release'\n        env:\n          EXTRA: x\n          TAURI_SIGNING_PRIVATE_KEY:"), RELEASE_KEY_STEP],
+  ];
+  for (const [i, [broken, step]] of breaks.entries()) {
+    assert.notEqual(broken, text, `break ${i} applies`);
+    const problems = snapshotProblems(broken);
+    assert.ok(problems.some((problem) => problem.includes(step) && problem.includes("STEP_SNAPSHOTS")), `break ${i} is caught, naming ${step}: ${JSON.stringify(problems)}`);
+  }
+  // The sign-windows steps are in the snapshot too.
+  for (const step of ["Sign the sandbox tool for the updater", "Sign the currentUser installer for the updater"]) {
+    assert.ok(Object.keys(STEP_SNAPSHOTS).includes(`sign-windows/${step}`), step);
+  }
+  // A YAML comment above or inside a step is not part of it.
+  assert.deepEqual(snapshotProblems(text.replace("      - name: Collect this leg's assets\n", "      # A note.\n      - name: Collect this leg's assets\n")), []);
 });
 
 // ---- No shell tracing anywhere, so no step that holds a secret can print it ----
