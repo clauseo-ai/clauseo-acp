@@ -27,25 +27,24 @@ const APP: &str = env!("CARGO_BIN_EXE_clauseo-desktop");
 /// What the line writes when the guard could not run (`agent/loads/codex.rs`, `UNCHECKED`).
 const UNCHECKED: &str = "Clauseo could not check this step, so it did not run.";
 
-/// The shells Codex may run a hook under: PowerShell 7 when it is on `PATH` (Codex prefers it),
-/// and Windows PowerShell.
-fn shells() -> Vec<&'static str> {
-    let on_path = |program: &str| {
-        std::env::var_os("PATH").is_some_and(|paths| {
-            std::env::split_paths(&paths).any(|folder| folder.join(program).is_file())
-        })
-    };
-    let mut shells = vec!["powershell.exe"];
-    if on_path("pwsh.exe") {
-        shells.push("pwsh.exe");
-    } else {
-        eprintln!("SKIPPED pwsh.exe: not installed");
+/// The shells Codex may run a hook under: Windows PowerShell, and PowerShell 7 where it is
+/// installed in its usual place (Codex prefers it when it is on `PATH`).
+#[cfg(test)]
+fn shells() -> Vec<String> {
+    let mut shells = vec!["powershell.exe".to_owned()];
+    let pwsh = std::env::var_os("ProgramFiles")
+        .map(|folder| Path::new(&folder).join(r"PowerShell\7\pwsh.exe"))
+        .filter(|pwsh| pwsh.is_file());
+    match pwsh {
+        Some(pwsh) => shells.push(pwsh.to_string_lossy().into_owned()),
+        None => eprintln!("SKIPPED pwsh.exe: not installed"),
     }
     shells
 }
 
 /// Runs `command` as Codex runs a hook's `commandWindows` under `shell`, `input` on its stdin,
 /// from `cwd`; the output and how long it took.
+#[cfg(test)]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test starts PowerShell and the built app itself, as Codex does, to read the \
@@ -74,6 +73,7 @@ fn as_codex_runs_it(shell: &str, command: &str, input: &[u8], cwd: &Path) -> (Ou
 
 /// Codex's trust hash of a `PreToolUse` command hook: the hook's identity as JSON with every
 /// object's keys sorted, compact, SHA-256 (`version_for_toml`).
+#[cfg(test)]
 fn codex_hash(command: &str) -> String {
     let identity = format!(
         "{{\"event_name\":\"pre_tool_use\",\"hooks\":[{{\"async\":false,\"command\":{},\
@@ -90,6 +90,7 @@ fn codex_hash(command: &str) -> String {
 }
 
 /// A Codex hook input from `cwd` for `tool` with `command`.
+#[cfg(test)]
 fn codex_input(cwd: &Path, tool: &str, command: &str) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({
         "cwd": cwd,
@@ -100,6 +101,7 @@ fn codex_input(cwd: &Path, tool: &str, command: &str) -> Vec<u8> {
 }
 
 /// A folder `name` under `parent`, made now.
+#[cfg(test)]
 fn folder(parent: &Path, name: &str) -> tempfile::TempDir {
     tempfile::Builder::new()
         .prefix(name)
@@ -212,7 +214,7 @@ fn a_held_file_with_a_devanagari_name_is_refused_with_its_name_byte_for_byte() {
     let patch = "*** Begin Patch\n*** Update File: अनुबंध.docx\n@@\n-x\n+y\n*** End Patch\n";
     let input = codex_input(matter.path(), "apply_patch", patch);
     let want = "अनुबंध.docx is open in Word or another program on this computer.";
-    for shell in shells() {
+    for shell in &shells() {
         let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
         assert_eq!(output.status.code(), Some(2), "{shell}: {output:?}");
         let errors = String::from_utf8(output.stderr).expect("stderr stays UTF-8");
@@ -232,7 +234,7 @@ fn a_guard_that_cannot_start_blocks_with_plain_words() {
     let command = config["PreToolUse"][0]["hooks"][0]["commandWindows"]
         .as_str()
         .unwrap();
-    for shell in shells() {
+    for shell in &shells() {
         let input = codex_input(root.path(), "Bash", "dir");
         let (output, _) = as_codex_runs_it(shell, command, &input, root.path());
         let errors = String::from_utf8_lossy(&output.stderr);
