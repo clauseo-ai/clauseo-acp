@@ -129,4 +129,13 @@ fn every_read_keeps_the_scheduler_off() {
             .get(OsStr::new("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS")),
         Some(&OsString::from("1"))
     );
+    for (name, value) in [
+        ("CLAUDE_CODE_HARBOR_KITE", "0"),
+        ("CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL", "1"),
+    ] {
+        assert_eq!(
+            spec.env().get(OsStr::new(name)),
+            Some(&OsString::from(value))
+        );
+    }
 }

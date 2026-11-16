@@ -146,11 +146,46 @@ pub(crate) const CLAUDE_GIT_STATUS_OFF_VAR: &str = "CLAUDE_CODE_DISABLE_GIT_INST
 /// launch's flag settings ([`session_meta`]).
 pub(crate) const GIT_STATUS_SETTING: &str = "includeGitInstructions";
 
+/// The Claude Code variable that, set to `0`, turns off its messaging between sessions (and its
+/// `ListAgents` tool). Claude Code 2.1.293 reads it in `vi()`, the gate of that messaging,
+/// before any feature flag; Claude Code's own helpers are still continued by `SendMessage`.
+/// Every Claude launch sets it; [`CROSS_SESSION_SETTING`] goes with it.
+pub(crate) const CLAUDE_MESSAGING_OFF_VAR: &str = "CLAUDE_CODE_HARBOR_KITE";
+
+/// The Claude Code variable that, set to `1`, keeps it from adding its official plugin
+/// marketplace by itself. Clauseo gives Claude no plugins, so every launch sets it.
+pub(crate) const CLAUDE_MARKETPLACE_OFF_VAR: &str =
+    "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL";
+
+// A place for further launch variables of this kind: each goes in `CLAUDE_LAUNCH_VARS` below
+// and in the limits reader's `CLAUDE_FORCED_VARS`, with a test in `tools_tests.rs`.
+
 /// The variables every Claude launch sets, each in the adapter's own environment
 /// ([`claude_launch_vars`]), in `claudeCode.options.env` and in the flag settings' `env`
 /// ([`session_meta`]); the limits reader sets the same (`clauseo_limits`' `CLAUDE_FORCED_VARS`).
-pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 2] =
-    [(CLAUDE_CRON_OFF_VAR, "1"), (CLAUDE_GIT_STATUS_OFF_VAR, "1")];
+pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 4] = [
+    (CLAUDE_CRON_OFF_VAR, "1"),
+    (CLAUDE_GIT_STATUS_OFF_VAR, "1"),
+    (CLAUDE_MESSAGING_OFF_VAR, "0"),
+    (CLAUDE_MARKETPLACE_OFF_VAR, "1"),
+];
+
+/// Claude Code's setting for messages between sessions, `"refuse"` in every launch's flag
+/// settings, beside [`CLAUDE_MESSAGING_OFF_VAR`].
+pub(crate) const CROSS_SESSION_SETTING: &str = "crossSessionInbound";
+
+/// The flag setting that turns Claude Code's Remote Control off; 2.1.293 reads it from the
+/// merged settings, the flag settings among them (`fj()`).
+pub(crate) const REMOTE_CONTROL_OFF_SETTING: &str = "disableRemoteControl";
+
+/// The keys every Claude launch sets in its flag settings ([`session_meta`]), over a hook's.
+pub(crate) fn claude_flag_settings() -> [(&'static str, Value); 3] {
+    [
+        (GIT_STATUS_SETTING, Value::Bool(false)),
+        (CROSS_SESSION_SETTING, Value::from("refuse")),
+        (REMOTE_CONTROL_OFF_SETTING, Value::Bool(true)),
+    ]
+}
 
 /// The variables every Claude launch sets in its own environment, over any of the same name
 /// from the settings, the hook or the inherited environment: [`CLAUDE_LAUNCH_VARS`].
@@ -208,7 +243,7 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   `claudeCode.options.env` (claude-agent-acp 0.89.1 spreads it over its own env for the
 ///   SDK's spawn of Claude Code, `acp-agent.js:7302-7304`) and, with `keys` (a Claude agent),
 ///   in `claudeCode.options.settings.env` (flag settings, over a user's or project's), with
-///   [`GIT_STATUS_SETTING`] `false` beside it. A hook value at `settings` or its `env` that is
+///   [`claude_flag_settings`] beside it. A hook value at `settings` or its `env` that is
 ///   not an object is then replaced.
 /// - On Windows, with `keys`: `CLAUDE_CODE_USE_POWERSHELL_TOOL` `"1"` in both of those `env`
 ///   objects, over any hook value, and no `CLAUDE_CODE_GIT_BASH_PATH` (`agent/one_shell.rs`).
@@ -301,7 +336,9 @@ pub(crate) fn session_meta(
             settings_env.insert(name.to_owned(), Value::from(value));
         }
         settings.insert("env".to_owned(), Value::Object(settings_env));
-        settings.insert(GIT_STATUS_SETTING.to_owned(), Value::Bool(false));
+        for (key, value) in claude_flag_settings() {
+            settings.insert(key.to_owned(), value);
+        }
         options.insert("settings".to_owned(), Value::Object(settings));
     }
     claude.insert("options".to_owned(), Value::Object(options));
