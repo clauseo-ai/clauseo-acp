@@ -122,7 +122,10 @@ fn read_head(stream: &mut TcpStream) -> String {
     String::from_utf8(got).unwrap()
 }
 
-/// Reads the client hello's record header, then answers a server hello's.
+/// Reads the whole client hello record, then answers a server hello's. The reply is sent
+/// after everything the client wrote is read, and the socket is drained until the client
+/// hangs up: closing with unread data resets the connection, and on Windows a reset that
+/// arrives before the client reads discards the reply.
 fn answer_hello(stream: &mut TcpStream) {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -130,7 +133,13 @@ fn answer_hello(stream: &mut TcpStream) {
     let mut header = [0_u8; 5];
     stream.read_exact(&mut header).unwrap();
     assert_eq!(&header[..2], &[0x16, 0x03], "a client hello");
+    let body = u16::from_be_bytes([header[3], header[4]]) as usize;
+    let mut hello = vec![0_u8; body];
+    stream.read_exact(&mut hello).unwrap();
     stream.write_all(&SERVER_HELLO).unwrap();
+    drop(stream.shutdown(std::net::Shutdown::Write));
+    let mut rest = [0_u8; 512];
+    while matches!(stream.read(&mut rest), Ok(n) if n > 0) {}
 }
 
 /// A port on 127.0.0.1 nothing listens on.
