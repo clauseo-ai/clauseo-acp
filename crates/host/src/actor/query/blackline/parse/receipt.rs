@@ -5,9 +5,9 @@
 //! a warning of its own).
 //!
 //! It answers what each warning means for the blackline, by its code:
-//! - `compare_story_unmatched`: a header or footer in one version only, which compare does not
-//!   compare, so the redline marks nothing for it
-//!   ([`BlacklineNotice::HeaderOrFooterInOneVersion`]);
+//! - `compare_story_unmatched`: headers or footers compare did not compare (a slot one version
+//!   has and the other lacks, or one with no one-to-one partner), so the redline marks nothing
+//!   for them ([`BlacklineNotice::HeaderOrFooterNotCompared`]);
 //! - `compare_not_redlined` and `compare_not_restored`, one for each block compare could not
 //!   mark up: that block is shown as the newer version has it, or rejecting its changes would
 //!   not give the older one back, so the blackline may differ ([`BlacklineNotice::MayDiffer`]);
@@ -77,7 +77,7 @@ pub(crate) fn read_compare(json: &str) -> CompareSaid {
 /// The notice one of compare's warnings gives, by its code (the module doc).
 fn notice_of(code: &str) -> Option<BlacklineNotice> {
     match code {
-        "compare_story_unmatched" => Some(BlacklineNotice::HeaderOrFooterInOneVersion),
+        "compare_story_unmatched" => Some(BlacklineNotice::HeaderOrFooterNotCompared),
         "compare_revisions_accepted"
         | "compare_paragraph_replaced"
         | "compare_table_replaced"

@@ -226,7 +226,7 @@ fn parts_and_changed_tables_on_the_wire() {
         paragraphs: Vec::new(),
         truncated: false,
         notices: vec![
-            BlacklineNotice::HeaderOrFooterInOneVersion,
+            BlacklineNotice::HeaderOrFooterNotCompared,
             BlacklineNotice::CellFormatChanged,
         ],
         changed_links: Vec::new(),
@@ -261,7 +261,7 @@ fn parts_and_changed_tables_on_the_wire() {
         format!(
             concat!(
                 r#"{{"word_blackline":{{"paragraphs":[],"truncated":false,"#,
-                r#""notices":["header_or_footer_in_one_version","cell_format_changed"],"#,
+                r#""notices":["header_or_footer_not_compared","cell_format_changed"],"#,
                 r#""parts":[{{"kind":{{"footnote":{{"number":1}}}},"paragraphs":[{para}]}},"#,
                 r#"{{"kind":{{"header":{{"uses":[{{"slot":"first_page","sections":[1,2]}}]}}}},"#,
                 r#""paragraphs":[{para}]}}],"#,
