@@ -9,7 +9,10 @@
 //! Prints `{"port":..,"browser_port":..,"token":..,"browser_token":..}` on stdout (each
 //! listener's own password; the user is `clauseo`), then logs every request as one JSON line
 //! (listener, host, port, verdict, why, bytes each way) to `--log`, or to stderr without it,
-//! and every denial as a JSON line on stderr. Neither token is ever logged. `--open` admits
+//! and every denial as a JSON line on stderr. Neither token is ever logged. The proxy's own
+//! `tracing` lines at info and above, from Clauseo's crates, go to stderr too, each as
+//! `{"log":{"level":..,"target":..,"message":..,<fields>}}` (the learned firm names' counts
+//! among them, in open mode). `--open` admits
 //! any public host (`ProxyMode::Open`) in place of the allowlist. `--block` (may repeat) loads
 //! a block list naming those hosts as phishing; without it no list is loaded, the proxy logs
 //! once that nothing is blocked, and `--open` does not start (open mode needs a list). Runs
@@ -18,9 +21,15 @@
 //! comment.
 
 use std::error::Error;
+use std::fmt;
 use std::fs::File;
 use std::io::{self, LineWriter, Write};
 use std::sync::{Arc, Mutex, mpsc};
+
+use tracing::field::{Field, Visit};
+use tracing::level_filters::LevelFilter;
+use tracing::span::{Attributes, Id, Record};
+use tracing::{Event, Level, Metadata, Subscriber};
 
 use clauseo_sandbox::{
     Allowlist, Denial, DenialSink, Exchange, ProxyConfig, Reachability, Upstream, start_proxy,
@@ -37,6 +46,63 @@ impl DenialSink for StderrSink {
     fn upstream(&self, r: Reachability) {
         line(&mut io::stderr(), &serde_json::json!({ "upstream": r }));
     }
+}
+
+/// The proxy's `tracing` lines at info and above, from `clauseo_*` targets, as JSON on stderr.
+struct StderrTrace;
+
+/// An event's fields, each as text.
+#[derive(Default)]
+struct Fields(serde_json::Map<String, serde_json::Value>);
+
+impl Visit for Fields {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.0.insert(field.name().to_owned(), value.into());
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.0.insert(field.name().to_owned(), value.into());
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        self.0
+            .insert(field.name().to_owned(), format!("{value:?}").into());
+    }
+}
+
+impl Subscriber for StderrTrace {
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        metadata.is_event()
+            && *metadata.level() <= Level::INFO
+            && metadata.target().starts_with("clauseo_")
+    }
+
+    fn max_level_hint(&self) -> Option<LevelFilter> {
+        Some(LevelFilter::INFO)
+    }
+
+    fn new_span(&self, _span: &Attributes<'_>) -> Id {
+        Id::from_u64(1)
+    }
+
+    fn record(&self, _span: &Id, _values: &Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
+
+    fn event(&self, event: &Event<'_>) {
+        let mut fields = Fields::default();
+        let meta = event.metadata();
+        fields
+            .0
+            .insert("level".to_owned(), meta.level().as_str().into());
+        fields.0.insert("target".to_owned(), meta.target().into());
+        event.record(&mut fields);
+        line(&mut io::stderr(), &serde_json::json!({ "log": fields.0 }));
+    }
+
+    fn enter(&self, _span: &Id) {}
+
+    fn exit(&self, _span: &Id) {}
 }
 
 fn line(out: &mut dyn Write, value: &serde_json::Value) {
@@ -122,6 +188,7 @@ fn open_log(path: &str) -> io::Result<File> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    tracing::subscriber::set_global_default(StderrTrace)?;
     let args = args()?;
     let log: Box<dyn Write + Send> = match &args.log {
         Some(path) => Box::new(LineWriter::new(open_log(path)?)),

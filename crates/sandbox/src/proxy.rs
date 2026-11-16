@@ -388,9 +388,7 @@ pub(crate) fn start_with(
         Some(firm) => firm,
         None if open_browser => {
             let no_proxy = Env::from_process().no_proxy;
-            let firm = FirmNames::new(upstream::firm_suffixes(no_proxy.as_deref()));
-            tracing::debug!(learned = firm.count(), "egress: the firm's own names read");
-            firm
+            FirmNames::new(upstream::firm_suffixes(no_proxy.as_deref()))
         }
         None => FirmNames::default(),
     };
