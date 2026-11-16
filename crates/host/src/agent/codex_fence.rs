@@ -161,6 +161,10 @@ pub(crate) struct Listed {
     /// Every entry of `<data>/agents/runtime` but the real folders of a Python build
     /// (`data_fence::is_python_runtime`); `None` when there is none.
     pub(crate) runtime: Option<Vec<PathBuf>>,
+    /// `<data>/browser` and `<data>/browsers` under the data folder's real path, when that
+    /// differs from the path as configured (a linked data folder): denied by that path too, so
+    /// neither depends on Codex resolving a path that may not exist yet.
+    pub(crate) real_browser: Vec<PathBuf>,
 }
 
 /// Lists, for [`Listed`], `<data>/run` down to `run_root`, `<data>/agent-state` down to
@@ -192,6 +196,7 @@ pub(crate) fn list(data: &Path, run_root: &Path, notes: &Path) -> Listed {
                 .map(|entry| entry.path)
                 .collect()
         }),
+        real_browser: real_browser(data),
         runtime: entries(&runtime).and_then(|all| {
             let found = all.iter().any(python);
             found.then(|| {
@@ -267,6 +272,21 @@ fn down_to(parent: &Path, own: &Path) -> Option<Vec<PathBuf>> {
         at = at.join(name);
     }
     Some(out)
+}
+
+/// `<data>/browser` and `<data>/browsers` under `data`'s canonical path, when it differs from
+/// `data`; none when it does not resolve or is the same.
+fn real_browser(data: &Path) -> Vec<PathBuf> {
+    match dunce::canonicalize(data) {
+        Ok(real) if real != data => [
+            crate::browser::CONFIG_DIR,
+            crate::browser::chrome::BROWSERS_DIR,
+        ]
+        .iter()
+        .map(|name| real.join(name))
+        .collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// The session's folders the fence needs.
@@ -376,6 +396,7 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
         keep
     });
     denied.extend(whole);
+    denied.extend(listed.real_browser.iter().cloned());
     denied.extend(session.socket_dir.map(Path::to_path_buf));
     let mut seen = std::collections::HashSet::new();
     denied.retain(|path| seen.insert(path.clone()));

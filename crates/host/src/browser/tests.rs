@@ -1,6 +1,6 @@
 //! agent-browser's config file: `{}` written at every launch, never through a link.
 
-use super::{CONFIG_DIR, CONFIG_FILE, write_config};
+use super::{CONFIG_DIR, CONFIG_FILE, make_data_folders, write_config};
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
 
@@ -45,4 +45,35 @@ fn no_config_is_written_through_a_link() {
     assert_eq!(std::fs::read(&target).unwrap(), b"secret");
     assert!(std::fs::symlink_metadata(&file).unwrap().is_file());
     assert_eq!(std::fs::read(&file).unwrap(), b"{}\n");
+}
+
+/// `<data>/browser` and `<data>/browsers` are made at every launch, 0700 on Unix, so both exist
+/// and resolve before any agent starts; made again, nothing changes. A link at either name is
+/// refused, never followed.
+#[test]
+fn the_browsers_data_folders_are_made_before_any_agent() {
+    let dir = TempDir::new("browser-data-folders");
+    let data = dir.path().join("data");
+    write::create_dir_all(&data).unwrap();
+    make_data_folders(&data).unwrap();
+    make_data_folders(&data).unwrap();
+    for name in [CONFIG_DIR, super::chrome::BROWSERS_DIR] {
+        let folder = data.join(name);
+        let meta = std::fs::symlink_metadata(&folder).unwrap();
+        assert!(meta.is_dir(), "{name}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(meta.permissions().mode() & 0o777, 0o700, "{name}");
+        }
+    }
+    #[cfg(unix)]
+    {
+        let elsewhere = dir.path().join("elsewhere");
+        write::create_dir_all(&elsewhere).unwrap();
+        let linked = dir.path().join("linked");
+        write::create_dir_all(&linked).unwrap();
+        write::symlink(&elsewhere, &linked.join(super::chrome::BROWSERS_DIR)).unwrap();
+        assert!(make_data_folders(&linked).is_err());
+    }
 }

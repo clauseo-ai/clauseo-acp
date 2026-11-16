@@ -39,6 +39,21 @@ pub(crate) fn write_config(data: &std::path::Path) -> std::io::Result<std::path:
     Ok(file)
 }
 
+/// Makes `<data>/browser` and `<data>/browsers` (`chrome::BROWSERS_DIR`), through no link
+/// below `data`, 0700 on Unix, at every launch before any agent starts, whether or not the
+/// session gets the browser. Both are denied to every agent's shell by path; made now, each
+/// exists and resolves, so Codex's sandbox, which resolves the links on a path that exists,
+/// denies it by its real place too, and no escalated command can make it first, through a
+/// linked data folder, as a folder of its own (`agent::codex_fence`). File system calls: off
+/// the actor (the launch prep).
+pub(crate) fn make_data_folders(data: &std::path::Path) -> std::io::Result<()> {
+    for name in [CONFIG_DIR, chrome::BROWSERS_DIR] {
+        let folder = data.join(name);
+        crate::write::create_private_dirs_under(data, &folder)?;
+    }
+    Ok(())
+}
+
 /// The shell tool's per-session folder in the session's run folder, `<run>/agent-browser`: its
 /// config file, Chrome profile and downloads, so the data fences reopen exactly one folder for
 /// them (the run folder, `agent::codex_fence`), and no other session's.

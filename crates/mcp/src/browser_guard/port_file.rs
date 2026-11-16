@@ -29,10 +29,11 @@
 //! Chrome), and anything that runs in that tree could write the claimed port into the file
 //! itself. Whether an agent's shell can write the folder depends on the OS:
 //!
-//! - macOS and Linux: no agent's shell can. Codex's data fence denies `<data>/browser`
-//!   (`<cwd>`'s parent) and the session's socket folder to reads and writes, escalated commands
-//!   included (`clauseo_host`'s `agent/codex_fence.rs`). Claude's sandbox writes only its
-//!   allowed folders and denies `<data>/browser` to reads and writes (`agent/loads/sandbox.rs`).
+//! - macOS and Linux: no agent's shell can. Codex's data fence denies `<data>/browser` (the
+//!   grandparent of `<cwd>`, which is `<data>/browser/run/<session>`) and the session's socket
+//!   folder to reads and writes, escalated commands included (`clauseo_host`'s
+//!   `agent/codex_fence.rs`). Claude's sandbox writes only its allowed folders and denies
+//!   `<data>/browser` to reads and writes (`agent/loads/sandbox.rs`).
 //! - Windows (the folder is `<data>\browser\run\<session>\run`): Codex's shell can't, because its
 //!   write-restricted token writes only the sandbox's writable roots and this folder is not one of
 //!   them (the data fence does not apply on Windows). Claude's shell can, since Claude has no OS

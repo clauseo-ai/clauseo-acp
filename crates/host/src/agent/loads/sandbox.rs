@@ -79,8 +79,8 @@
 //!   (`dist/sandbox/macos-sandbox-utils.js:281-305, 646-651`; Seatbelt's last match wins), and
 //!   the write denies after the write allows (`:703-722`), so a deny here beats an allowed
 //!   folder that holds it. It resolves the links on a deny's path itself too (`:199-222`). An
-//!   allowed folder inside one of them (a matter kept in `<data>/browsers`) stays open: the
-//!   data folder's own gap (`agent::data_folder`).
+//!   allow on one of these very paths, or inside one, would win; a matter folder there is
+//!   refused at the launch (`agent::data_folder`), and no other allowed folder sits there.
 //! - `enableWeakerNestedSandbox: false`: on Linux each command keeps its own PID namespace and
 //!   a fresh `/proc` (sandbox-runtime's `linux-sandbox-utils.js:3039, 3059`), so it can't see,
 //!   signal or trace Chrome or read its environment. On macOS the profile allows

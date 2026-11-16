@@ -180,7 +180,10 @@ fn a_session_with_a_chrome_gets_the_shell_browser() {
         var(&seen, "AGENT_BROWSER_CONFIG"),
         Some(own.join("config.json"))
     );
-    assert!(!data.join("browser").exists());
+    // `<data>/browser` is made at every launch (so the fences' denies resolve), but the shell
+    // browser writes nothing there.
+    assert!(!data.join("browser").join("agent-browser.json").exists());
+    assert!(!data.join("browser").join("run").exists());
     let profile = var(&seen, "AGENT_BROWSER_PROFILE").unwrap();
     assert_eq!(profile, own.join("profile"));
     assert!(profile.starts_with(data));

@@ -55,6 +55,18 @@ fn own_folders(run: &RunFolders, stored: &Path, claude_home: Option<&Path>) -> V
     .collect()
 }
 
+/// `<data>/browser` and `<data>/browsers`, made before any agent starts
+/// (`browser::make_data_folders`); a failure is logged, and the fences still deny both by path,
+/// and by the data folder's real path too (`codex_fence::list`).
+pub(super) fn make_browser_folders(data: &Path) {
+    if let Err(error) = crate::browser::make_data_folders(data) {
+        tracing::warn!(
+            error = %crate::log_file::Cause(&error),
+            "the browser's data folders were not made"
+        );
+    }
+}
+
 /// `<data>/run`.
 pub(super) fn run_dir(data: &Path) -> PathBuf {
     data.join("run")

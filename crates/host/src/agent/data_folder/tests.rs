@@ -55,6 +55,30 @@ fn a_matter_folder_in_the_data_folders_agents_or_holding_it_is_refused() {
     write::remove_dir_all(&root).unwrap();
 }
 
+/// `<data>/browser` (the guard folders, Chrome's profile in them) and `<data>/browsers` (the
+/// Chrome for Testing downloads) are refused like `agents`: the folder, inside it, or holding it.
+#[test]
+fn a_matter_folder_overlapping_the_browsers_folders_is_refused() {
+    let root = data("refuse-browser");
+    let data = root.join("data");
+    write::create_dir_all(&data.join("browser/run/s1/chrome-profile-1")).unwrap();
+    write::create_dir_all(&data.join("browsers/chrome-148.0.1")).unwrap();
+    for folder in [
+        data.join("browser"),
+        data.join("browser/run"),
+        data.join("browser/run/s1/chrome-profile-1"),
+        data.join("browsers"),
+        data.join("browsers/chrome-148.0.1"),
+        // Not made yet: still inside.
+        data.join("browsers/chrome-149.0.1"),
+    ] {
+        assert!(refused(&folder, &data), "{}", folder.display());
+    }
+    assert!(!refused(&data.join("browsers2"), &data));
+    assert!(!refused(&data.join("work/m"), &data));
+    write::remove_dir_all(&root).unwrap();
+}
+
 /// A spelling that differs only in case is the same folder on macOS and Windows.
 #[cfg(any(target_os = "macos", windows))]
 #[test]

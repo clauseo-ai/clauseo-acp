@@ -288,3 +288,40 @@ fn the_launch_list_names_siblings_only() {
         assert_eq!((got.run, got.agent_state, got.runtime), (None, None, None));
     }
 }
+
+/// A linked data folder: `<data>/browser` and `<data>/browsers` are denied by the real path as
+/// well, to ordinary and escalated commands, whether or not they exist yet. A data folder that is
+/// no link adds nothing.
+#[cfg(unix)]
+#[test]
+fn a_linked_data_folder_denies_the_browsers_folders_by_their_real_path() {
+    use crate::pipeline::tests::support::TempDir;
+    let dir = TempDir::new("codex-fence-real-browser");
+    let real = dir.path().join("real");
+    let link = dir.path().join("link");
+    crate::write::create_dir_all(&real.join("run/s1")).unwrap();
+    crate::write::symlink(&real, &link).unwrap();
+    let real = dunce::canonicalize(&real).unwrap();
+    let notes = |data: &Path| data.join("agent-state/m1/notes");
+    let got = list(&link, &link.join("run/s1"), &notes(&link));
+    assert_eq!(
+        got.real_browser,
+        vec![real.join("browser"), real.join("browsers")]
+    );
+    assert_eq!(
+        list(&real, &real.join("run/s1"), &notes(&real)).real_browser,
+        Vec::<PathBuf>::new()
+    );
+    let keys = fence_with(&Listed {
+        real_browser: got.real_browser,
+        ..listed()
+    });
+    for path in [
+        real.join("browsers"),
+        real.join("browsers/chrome-148.0.1/chrome"),
+        real.join("browser/run/s1/chrome-profile-1"),
+    ] {
+        assert_eq!(access(&keys, &path), "deny", "{}", path.display());
+        assert_eq!(escalated(&keys, &path), "deny", "{}", path.display());
+    }
+}

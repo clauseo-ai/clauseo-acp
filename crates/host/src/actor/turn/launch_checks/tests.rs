@@ -547,7 +547,7 @@ fn the_shell_browser_folders_and_config_are_made_in_the_own_agent_browser_folder
         names(&run.agent_browser),
         ["config.json", "downloads", "profile"]
     );
-    assert!(!data.join(crate::browser::CONFIG_DIR).exists());
+    assert!(!data.join(crate::browser::CONFIG_DIR).join("run").exists());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

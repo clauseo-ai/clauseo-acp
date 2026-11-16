@@ -400,7 +400,8 @@ fn python_and_tools_are_readable_never_editable_and_their_siblings_stay_denied()
 }
 
 /// The fixed rules (before the launch lists anything): Node and half-unpacked folders under
-/// `agents/runtime`, not the folder whole; `<data>/browser` still; and in every run folder,
+/// `agents/runtime`, not the folder whole; `<data>/browser` still, and `<data>/browsers` whether or
+/// not Chrome for Testing is installed yet; and in every run folder,
 /// the own one too, the shell browser's config file, which agent-browser reads itself.
 #[test]
 fn the_fixed_rules_deny_node_browser_and_every_shell_browser_config() {
@@ -408,6 +409,7 @@ fn the_fixed_rules_deny_node_browser_and_every_shell_browser_config() {
         "agents/runtime/node-v*/**",
         "agents/runtime/.tmp-*/**",
         "browser/**",
+        "browsers/**",
         "run/*/agent-browser/config.json",
         "agents/signin/**",
     ] {
@@ -419,6 +421,8 @@ fn the_fixed_rules_deny_node_browser_and_every_shell_browser_config() {
         "Read(//d/run/*/agent-browser/config.json)",
         "Edit(//d/run/*/agent-browser/config.json)",
         "Read(//d/browser/**)",
+        "Read(//d/browsers/**)",
+        "Edit(//d/browsers/**)",
         "Edit(//d/agents/runtime/clauseo-python-*/**)",
         "Edit(//d/tools/**)",
     ] {

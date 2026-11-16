@@ -105,6 +105,7 @@ pub(crate) fn listed() -> Listed {
             runtime().join(format!(".tmp-{NODE}")),
             runtime().join("notes.txt"),
         ]),
+        real_browser: Vec::new(),
     }
 }
 

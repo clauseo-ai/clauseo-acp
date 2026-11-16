@@ -65,7 +65,9 @@ pub(crate) use variables::launch_vars;
 /// launch adds every other entry that exists then, `launch.rs`), as rule patterns under it,
 /// each denied to Claude for Read and Edit: the skill packs' sources, the version store, the
 /// logs, the updater's downloads, the usage counts, the Windows sandbox's ledger, the limits
-/// reader's state, the browser's config, the block list's store and the lawyer's allowed sites, the
+/// reader's state, the browser's config and guard folders, the Chrome for Testing downloads
+/// (`browsers`, which the guard runs: named so one installed mid-session is covered too), the
+/// block list's store and the lawyer's allowed sites, the
 /// trust roots file Claude's sandboxed commands trust (`tls/roots.pem`, `loads::tls_roots`: a
 /// root Claude wrote there would be trusted by `curl` and Python in every later session), the
 /// settings file, the updater's marker, the counts' first-act marker, the host's store, the search
@@ -86,7 +88,7 @@ pub(crate) use variables::launch_vars;
 /// session's Claude settings file (`agent::launch_settings`), its own too: Claude Code reads
 /// it itself at its start, so its tools never need it, and it holds every session's rules.
 /// And Claude's config folder's names (`claude_home::CLAUDE_HOME`, added by the launch).
-pub(crate) const DENIED: [&str; 31] = [
+pub(crate) const DENIED: [&str; 32] = [
     "run/*/relay-token",
     "run/*/agent-browser/config.json",
     "skill-packs/**",
@@ -97,6 +99,7 @@ pub(crate) const DENIED: [&str; 31] = [
     "sandbox/**",
     "limits/**",
     "browser/**",
+    "browsers/**",
     "blocklist/**",
     "tls/**",
     clauseo_settings::SETTINGS_FILE,

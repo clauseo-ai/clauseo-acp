@@ -248,6 +248,7 @@ impl RunFolders {
     /// run folder is taken back. File system calls: off the actor.
     pub(crate) fn make(&self, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
         sweep.once(data);
+        folders::make_browser_folders(data);
         let tmp = crate::agent::temp::temp_dir(&self.root);
         for folder in [&self.work, &tmp, &self.notes] {
             if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
