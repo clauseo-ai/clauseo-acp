@@ -1464,6 +1464,22 @@ this record and firm-it §8.
   - The subagents' `tools` list (`RESEARCHER_WEB_TOOLS`) names `WebFetch` as a tool the
     researcher may use, not a permission; its fetches meet the same rules.
 
+### Forgotten matters and the fence (2026-11-16, #1085)
+
+- **A forgotten matter stays fenced.** Every matter the host knows but the conversation's own is
+  fenced, the forgotten ones too (`actor/turn/outside/fence.rs`, `matter_fence`): Claude's Read
+  and Edit denies, its sandbox's read deny and Codex's profile name its folder as they name a
+  listed matter's. Reason: removing a matter from Clauseo's list doesn't make its papers less
+  confidential, and a list action must never quietly open a client's folder to other
+  conversations.
+- **A forgotten matter's invite waits for it to come back.** A thread's read invite counts only
+  for a matter on the list; forgetting an invited matter stops a running turn and fences the
+  matter again at the next launch. The lawyer brings it back with Import, then lets the
+  conversation read it.
+- **Open:** a folder added by mistake and forgotten keeps fencing everything in it, and no new
+  matter can be made inside it (`matter.folder_inside_matter`), with no way out in the app; the
+  refusal line for a forgotten matter does not yet say it was removed. Both are follow-ups.
+
 ## Consequences
 
 - R22 adds its text with `Instructions::with_part` and its skills with `SkillSource::builtin`

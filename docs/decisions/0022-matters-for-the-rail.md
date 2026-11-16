@@ -47,7 +47,8 @@ unreadable `matter.json` and Clauseo's own data folder alike.
   new one opens on first use after it comes back, so a folder moved meanwhile, even in the same
   run, is read where it is now. A forgotten matter's folder still counts against other folders
   (one inside it or holding it is `matter.folder_is_matter`); only that exact folder passes, to
-  bring the matter back.
+  bring the matter back. It also stays fenced from other conversations (decision 0030, "Forgotten
+  matters and the fence").
 - **Status**, computed on each `ListMatters` from memory, never stored. Per thread: `NeedsYou`
   with a pending permission is `needs_permission`, other `NeedsYou` `needs_answer`;
   `PausedAtLimit` is `paused_at_limit`; `Starting`, `Running`, `Queued` are `working`; a thread
