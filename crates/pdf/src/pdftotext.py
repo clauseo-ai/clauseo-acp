@@ -118,7 +118,23 @@ def write_atomic(path, data):
     tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "wb") as file:
         file.write(data)
-    os.replace(tmp, path)
+    for wait in (0.05, 0.2, 0.5, None):
+        try:
+            return os.replace(tmp, path)
+        except PermissionError:
+            # Windows refuses to replace a file another process has open (a waiter reading it).
+            if wait is None:
+                os.remove(tmp)
+                raise
+            time.sleep(wait)
+
+
+def keep(path, body):
+    """A cache write; one that fails costs a later run the work, not this run its output."""
+    try:
+        write_atomic(path, json.dumps(body).encode())
+    except OSError:
+        pass
 
 
 def read_json(path):
@@ -148,7 +164,8 @@ class Cache:
 
     def put(self, pg, kind, text, langs=""):
         body = {"kind": kind, "langs": langs, "text": text}
-        write_atomic(os.path.join(self.dir, f"p{pg:04d}.json"), json.dumps(body).encode())
+        if self.page(pg) != body:
+            keep(os.path.join(self.dir, f"p{pg:04d}.json"), body)
 
     def meta(self):
         return read_json(os.path.join(self.dir, "meta.json")) or {}
@@ -156,14 +173,14 @@ class Cache:
     def set_meta(self, **values):
         meta = self.meta()
         meta.update(values)
-        write_atomic(os.path.join(self.dir, "meta.json"), json.dumps(meta).encode())
+        keep(os.path.join(self.dir, "meta.json"), meta)
 
     def failed(self):
         return read_json(os.path.join(self.dir, "failed.json"))
 
     def fail(self, reason):
-        body = {"reason": reason, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-        write_atomic(os.path.join(self.dir, "failed.json"), json.dumps(body).encode())
+        keep(os.path.join(self.dir, "failed.json"),
+             {"reason": reason, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
 
     def lock(self):
         """True when this process now holds the lock (O_EXCL; a holder touches it every few
