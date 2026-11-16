@@ -232,6 +232,13 @@ mod native {
         dir
     }
 
+    /// Whether this is Linux run by Rosetta, which registers itself with `binfmt_misc` (its
+    /// `/proc/cpuinfo` has no sign of it).
+    #[cfg(unix)]
+    fn under_rosetta() -> bool {
+        cfg!(target_os = "linux") && Path::new("/proc/sys/fs/binfmt_misc/rosetta").exists()
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_kernel_fault_and_an_abort_are_recorded_and_kills_are_not() {
@@ -240,7 +247,11 @@ mod native {
         // not checked. What is checked: macOS records exactly one report, [11] (XNU's sendsig
         // gives a sent SIGSEGV the same si_code as a fault: bsd/dev/arm/unix_signal.c,
         // bsd/dev/i386/unix_signal.c), and Linux none. The others end by their signal.
-        let sent_segv = if cfg!(target_vendor = "apple") {
+        // Under Rosetta (CI's Linux, an x86_64 VM on Apple silicon) the child's own raise arrives
+        // as a fault, SEGV_MAPERR with no pid, uid or address (CI's diagnostic run: `signo=11
+        // code=1 pid=0 uid=0 addr=0`, where native Linux gives `code=-6`, SI_TKILL), so it is
+        // recorded there as on macOS. The product's Linux rule is right for a real kernel.
+        let sent_segv = if cfg!(target_vendor = "apple") || under_rosetta() {
             vec![nix::libc::SIGSEGV.cast_unsigned()]
         } else {
             vec![]
