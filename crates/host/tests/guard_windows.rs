@@ -1,31 +1,55 @@
-//! The pre-write guard through the hook command Codex runs on Windows (Windows CI), as Codex runs
-//! it: the session's shell, PowerShell, `<ps> -NoProfile -Command <commandWindows>`, the line
-//! passed as one argument, the environment cleared and set again, the hook input on stdin, from
-//! the turn's folder (codex-rs at rust-v0.162.1 `core/src/session/mod.rs:5141-5149`,
-//! `hooks/src/engine/command_runner.rs:384-433`), under Windows PowerShell 5.1 and, when
-//! installed, PowerShell 7. A data folder under `…\O'Brien & Sons Zoë Q\…\data` (an apostrophe,
-//! an ampersand, spaces, non-ASCII names, a record path over 260 characters); the record made as the host's launch makes it
-//! (`clauseo_host::pre_write_guard::make_record`); the hook built as the host builds it
-//! (`clauseo_host::codex_hook_config`), with the built app as the guard. The guard refuses a
-//! `.codex` write with its code 2 and its reason, and appends one line to the record; a file held
-//! open under a Devanagari name is refused with that name in the reason, byte for byte (the
-//! input reached the guard and its stderr came back unchanged); a guard that isn't at its path
-//! ends with 2 and plain words. The hook's trust hash is the one Codex computes for the command
-//! (`config/src/fingerprint.rs`, worked out here again from its rule). Prints the hook's time.
+//! Codex's hook on Windows (Windows CI) as Codex runs it, with the console program it names,
+//! `clauseo-guard.exe` (`src/bin/clauseo-guard.rs`): the line read back from
+//! `clauseo_host::codex_hook_config` for the program `clauseo_host::codex_guard_program` picks
+//! beside the app, run as `<ps> -NoProfile -Command <commandWindows>` with the hook input on a
+//! redirected stdin and nothing piped inside the line (codex-rs at rust-v0.162.1
+//! `core/src/session/mod.rs:5141-5149`, `hooks/src/engine/command_runner.rs:384-433`), under each
+//! PowerShell found, the one Codex picks first. A `.codex` write is refused with a record line,
+//! from a data folder under `…\O'Brien & Sons Zoë Q\…` (a record path over 260 characters); a
+//! harmless step ends with 0; a held file under a Devanagari name, fifty times, and one in
+//! `Müller GmbH` are refused by name; a guard that isn't there ends with 2 and the shared line.
+//! The program is a console program, and its GUI twin (the same bytes, Subsystem 2) run by the
+//! same line gives no answer of the guard's: the check that these tests catch a GUI target.
+//! The trust hash is the one Codex computes (`config/src/fingerprint.rs`). Prints timings.
 #![cfg(windows)]
 
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
 use sha2::{Digest as _, Sha256};
 
-/// The binary under test.
-const APP: &str = env!("CARGO_BIN_EXE_clauseo-desktop");
+/// The program under test, as cargo built it.
+#[cfg(test)]
+const GUARD: &str = env!("CARGO_BIN_EXE_clauseo-guard");
 
-/// What the line writes when the guard could not run (`pre_write_guard.rs`, `UNCHECKED`).
-const UNCHECKED: &str = "Clauseo could not check this step, so it did not run.";
+/// What the line writes when the guard could not run.
+#[cfg(test)]
+const UNCHECKED: &str = clauseo_host::pre_write_guard::UNCHECKED;
+
+/// The program Codex's hook names for an app installed beside the guard, as the host picks it.
+#[cfg(test)]
+fn guard_for_app() -> PathBuf {
+    let program =
+        clauseo_host::codex_guard_program(&Path::new(GUARD).with_file_name("Clauseo.exe"));
+    assert_eq!(
+        program,
+        Path::new(GUARD),
+        "the hook names the program beside the app"
+    );
+    program
+}
+
+/// The `commandWindows` line of the hook `codex_hook_config` builds for `program`.
+#[cfg(test)]
+fn line_for(program: &Path) -> String {
+    let config = clauseo_host::codex_hook_config(program, None).unwrap();
+    config["PreToolUse"][0]["hooks"][0]["commandWindows"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
 
 /// The shells to run the hook under, the one Codex 0.162.1 would pick on this machine first
 /// (`shell-command/src/shell_detect.rs:257-297`: `pwsh` on `PATH`, then PowerShell 7 at its
@@ -161,13 +185,13 @@ fn folder(parent: &Path, name: &str) -> tempfile::TempDir {
 }
 
 #[test]
-fn the_real_hook_command_refuses_and_records_under_powershell_from_an_apostrophe_folder() {
+fn the_hook_line_refuses_and_records_and_lets_a_step_go_from_an_apostrophe_folder() {
     let root = tempfile::Builder::new()
         .prefix("guard-ps-")
         .tempdir()
         .unwrap();
     // A Windows user named as lawyers are, under a folder long enough that the record's path is
-    // over 200 characters.
+    // over 260 characters.
     let user = folder(root.path(), "O'Brien & Sons Zoë Q");
     // No folder name ends in a space or a dot: Windows drops those from a path it doesn't take
     // verbatim, and no lawyer's folder is named so.
@@ -189,14 +213,15 @@ fn the_real_hook_command_refuses_and_records_under_powershell_from_an_apostrophe
     assert_eq!(record, data.join(r"browser\guard\s1\guard-blocks.jsonl"));
     assert!(record.as_os_str().len() > 260, "{record:?}");
 
-    let config = clauseo_host::codex_hook_config(Path::new(APP), Some((&record, &id))).unwrap();
+    let guard = guard_for_app();
+    let config = clauseo_host::codex_hook_config(&guard, Some((&record, &id))).unwrap();
     let hook = &config["PreToolUse"][0]["hooks"][0];
     let command = hook["commandWindows"].as_str().unwrap();
     let quoted = |path: &str| format!("'{}'", path.replace('\'', "''"));
     assert!(
         command.starts_with(&format!(
             "$global:LASTEXITCODE = -1; & {} --pre-write-guard --record {} --record-id '{id}'; $c",
-            quoted(APP),
+            quoted(GUARD),
             quoted(&record.display().to_string()),
         )),
         "{command}"
@@ -250,32 +275,15 @@ fn the_real_hook_command_refuses_and_records_under_powershell_from_an_apostrophe
 /// folder with an apostrophe: the reason names the file, so the name crossed stdin into the
 /// guard and its stderr back out byte for byte.
 #[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the test holds a file open with no sharing, as Word would"
-)]
 fn a_held_file_with_a_devanagari_name_is_refused_with_its_name_byte_for_byte() {
-    use std::os::windows::fs::OpenOptionsExt as _;
     let root = tempfile::Builder::new()
         .prefix("guard-held-")
         .tempdir()
         .unwrap();
     let matter = folder(root.path(), "O'Brien मामला");
-    let file = matter.path().join("अनुबंध.docx");
-    std::fs::write(&file, b"x").unwrap();
-    let _held = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .share_mode(0)
-        .open(&file)
-        .unwrap();
-    let command = clauseo_host::codex_hook_config(Path::new(APP), None).unwrap();
-    let command = command["PreToolUse"][0]["hooks"][0]["commandWindows"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let patch = "*** Begin Patch\n*** Update File: अनुबंध.docx\n@@\n-x\n+y\n*** End Patch\n";
-    let input = codex_input(matter.path(), "apply_patch", patch);
+    let _held = held(&matter.path().join("अनुबंध.docx"));
+    let command = line_for(&guard_for_app());
+    let input = codex_input(matter.path(), "apply_patch", &patch("अनुबंध.docx"));
     let want = "अनुबंध.docx is open in Word or another program on this computer.";
     // Fifty runs under each shell: every one gets the whole input on stdin (no record here, so an
     // input lost on the way would let the step go and fail the run).
@@ -300,16 +308,126 @@ fn a_guard_that_cannot_start_blocks_with_plain_words() {
         .prefix("guard-gone-")
         .tempdir()
         .unwrap();
-    let gone = root.path().join("O'Brien").join("clauseo.exe");
-    let config = clauseo_host::codex_hook_config(&gone, None).unwrap();
-    let command = config["PreToolUse"][0]["hooks"][0]["commandWindows"]
-        .as_str()
-        .unwrap();
+    // An app whose folder holds no guard: the line names the missing program.
+    let app = root.path().join("O'Brien").join("Clauseo.exe");
+    let command = line_for(&clauseo_host::codex_guard_program(&app));
     for shell in &shells() {
         let input = codex_input(root.path(), "Bash", "dir");
-        let (output, _) = as_codex_runs_it(shell, command, &input, root.path());
+        let (output, _) = as_codex_runs_it(shell, &command, &input, root.path());
         let errors = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(2), "{shell}: {output:?}");
         assert!(errors.contains(UNCHECKED), "{shell}: {errors}");
+    }
+}
+
+/// Holds `file` open with no sharing, as Word would, after writing it.
+#[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test holds a file open with no sharing, as Word would"
+)]
+fn held(file: &Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    std::fs::write(file, b"x").unwrap();
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(0)
+        .open(file)
+        .unwrap()
+}
+
+/// A patch updating `name`.
+#[cfg(test)]
+fn patch(name: &str) -> String {
+    format!("*** Begin Patch\n*** Update File: {name}\n@@\n-x\n+y\n*** End Patch\n")
+}
+
+/// In a matter named `Müller GmbH`, a held `Müller Vertrag.docx` is refused by its name and a
+/// listing of the folder goes on.
+#[test]
+fn a_matter_named_muller_is_checked_by_name() {
+    let root = tempfile::Builder::new()
+        .prefix("guard-muller-")
+        .tempdir()
+        .unwrap();
+    let matter = folder(root.path(), "Müller GmbH");
+    let _held = held(&matter.path().join("Müller Vertrag.docx"));
+    let command = line_for(&guard_for_app());
+    let want = "Müller Vertrag.docx is open in Word or another program on this computer.";
+    for shell in &shells() {
+        let input = codex_input(matter.path(), "apply_patch", &patch("Müller Vertrag.docx"));
+        let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
+        assert_eq!(output.status.code(), Some(2), "{shell}: {output:?}");
+        let errors = String::from_utf8(output.stderr).expect("stderr stays UTF-8");
+        assert!(errors.contains(want), "{shell}: {errors:?}");
+        let input = codex_input(matter.path(), "Bash", "Get-ChildItem");
+        let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
+        assert_eq!(output.status.code(), Some(0), "{shell}: {output:?}");
+    }
+}
+
+/// The offset of a PE image's `Subsystem` field: the optional header starts 24 bytes after the
+/// `PE\0\0` signature (whose offset is at 0x3C), and the field is 68 bytes into it.
+#[cfg(test)]
+fn subsystem_at(image: &[u8]) -> usize {
+    let at = image.get(0x3C..0x40).unwrap();
+    let pe = usize::try_from(u32::from_le_bytes(at.try_into().unwrap())).unwrap();
+    assert_eq!(image.get(pe..pe + 4), Some(&b"PE\0\0"[..]), "a PE image");
+    pe + 24 + 68
+}
+
+/// The PE `Subsystem` of the image at `path`: 2 for a GUI program, 3 for a console one.
+#[cfg(test)]
+fn subsystem(path: &Path) -> u16 {
+    let image = std::fs::read(path).unwrap();
+    let at = subsystem_at(&image);
+    u16::from_le_bytes([image[at], image[at + 1]])
+}
+
+/// A copy of the console program `exe` in `folder` with its `Subsystem` set to 2 (GUI), named
+/// as the hook names the guard.
+#[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test writes a GUI twin of a built program"
+)]
+fn gui_twin(exe: &Path, folder: &Path) -> PathBuf {
+    let mut image = std::fs::read(exe).unwrap();
+    let at = subsystem_at(&image);
+    image[at..at + 2].copy_from_slice(&2_u16.to_le_bytes());
+    let twin = folder.join(clauseo_host::GUARD_EXE);
+    std::fs::write(&twin, &image).unwrap();
+    twin
+}
+
+#[test]
+fn the_guard_is_a_console_program() {
+    assert_eq!(subsystem(Path::new(GUARD)), 3, "{GUARD}");
+}
+
+/// The control: the same line run against a GUI twin of the guard gives no answer of the guard's
+/// (PowerShell does not wait for a GUI program or take its exit code), so the tests above would
+/// fail for a GUI target: a listing doesn't end with 0, and a held file's refusal doesn't name it.
+#[test]
+fn a_gui_twin_of_the_guard_gives_no_answer_of_the_guards() {
+    let root = tempfile::Builder::new()
+        .prefix("guard-gui-")
+        .tempdir()
+        .unwrap();
+    let twin = gui_twin(Path::new(GUARD), root.path());
+    assert_eq!(subsystem(&twin), 2);
+    let matter = folder(root.path(), "O'Brien मामला");
+    let _held = held(&matter.path().join("अनुबंध.docx"));
+    let command = line_for(&twin);
+    let named = "अनुबंध.docx is open in Word";
+    for shell in &shells() {
+        let input = codex_input(matter.path(), "Bash", "dir");
+        let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
+        assert_ne!(output.status.code(), Some(0), "{shell}: {output:?}");
+        let input = codex_input(matter.path(), "apply_patch", &patch("अनुबंध.docx"));
+        let (output, _) = as_codex_runs_it(shell, &command, &input, matter.path());
+        let errors = String::from_utf8_lossy(&output.stderr);
+        assert!(!errors.contains(named), "{shell}: {errors}");
     }
 }

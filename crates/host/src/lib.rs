@@ -166,6 +166,8 @@
 //!   `HostConfig::with_search_holds` (with [`SearchHold`]),
 //!   `EncodedEvent::ptr_eq` and
 //!   `HostHandle::abort_for_test`, which ends the thread with no flush and no graceful stop.
+//! - [`codex_guard_program`]: the program Codex's hook names (on Windows the console
+//!   [`GUARD_EXE`] beside the app).
 //! - [`codex_hook_config`]: the `hooks` value for Codex's config that runs the same guard,
 //!   trusted by its own `state` entry; each Codex launch's `CODEX_CONFIG` carries it when
 //!   [`HostConfig::with_pre_write_guard`] names the program.
@@ -280,7 +282,7 @@ mod view;
 mod window;
 mod write;
 
-pub use agent::loads::codex_hook_config;
+pub use agent::loads::{GUARD_EXE, codex_guard_program, codex_hook_config};
 pub use agent::login_link::{
     AgentsStopped, LoginCheck, LoginLink, LoginSplit, Shared, SignInAgain, StopFor,
 };

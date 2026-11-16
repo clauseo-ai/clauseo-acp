@@ -10,6 +10,8 @@
 //!   (`shell-command/src/shell_detect.rs:350-353`); `%COMSPEC% /C "<command>"` only when the
 //!   session has no shell (`hooks/src/engine/command_runner.rs:384-409`). So `command` quotes in
 //!   POSIX single quotes, and `commandWindows` is one PowerShell statement ([`ps_command`]).
+//!   On Windows the line names the console program [`GUARD_EXE`] beside the app
+//!   ([`codex_guard_program`]): PowerShell waits for a console program and reads its exit code.
 //!   Under `cmd`, the session's fallback shell, this line does not run as one command; where
 //!   PowerShell is blocked or absent, Codex can't start the guard.
 //! - The hook passes no `--matter`: Codex's hook input `cwd` is the turn's working folder
@@ -32,7 +34,7 @@
 //!   [`fingerprint`] to Codex's own fingerprint test and the hook hashes to a reference run of
 //!   Codex's own types and crates.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -128,6 +130,30 @@ pub(crate) fn posix_quoted(text: &str) -> String {
 }
 
 pub(crate) use crate::pre_write_guard::UNCHECKED;
+
+/// The console program Codex's hook runs on Windows, installed beside the app.
+pub const GUARD_EXE: &str = "clauseo-guard.exe";
+
+/// The program Codex's hook line names for the app at `app`: on Windows [`GUARD_EXE`] in the
+/// app's folder, a console program, which PowerShell waits for and whose exit code it reads (the
+/// app is a GUI program in a release build); elsewhere the app itself. With [`codex_hook_config`]
+/// this is the one way to build the line, for the hook and for a check that starts the guard as
+/// Codex does. A missing program fails closed: the line ends with 2 and [`UNCHECKED`].
+///
+/// Scope: the program sits in the app's install folder beside `Clauseo.exe` (per user, under
+/// `%LOCALAPPDATA%`; `tauri.conf.json` `installMode`), under the same rules as the app: no fence
+/// of Clauseo's names that folder, and what stands between Codex's shell and either program is
+/// Codex's own sandbox (the ask mode with Windows' unelevated sandbox, `agent/codex.rs`
+/// `ASK_MODE`, `WINDOWS_SANDBOX`), which asks before a write outside the matter. A firm whose
+/// allow rule names only `Clauseo.exe` by path refuses the program, and every Codex step is then
+/// refused.
+pub fn codex_guard_program(app: &Path) -> PathBuf {
+    if cfg!(windows) {
+        app.with_file_name(GUARD_EXE)
+    } else {
+        app.to_path_buf()
+    }
+}
 
 /// `words` (the program, then its arguments, each quoted as it must be) as one line of
 /// PowerShell: the call operator runs the program, whose stdin, stdout and stderr are the hook's

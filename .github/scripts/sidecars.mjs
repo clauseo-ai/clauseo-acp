@@ -169,9 +169,16 @@ export const SIDECARS = [
   // Throws on a triple missing from crates/desktop/agent-browser.toml; null for `none = true`.
   // On macOS in Contents/Helpers, out of the agent's reach (MACOS_HELPER).
   { name: "clauseo-agent-browser", targets: RELEASE_TARGETS, macosHelper: true, place: pinnedAgentBrowser },
-  // Parked (host thread, 2026-11-03): the guard's start time was not the cost. If it returns:
-  // { name: "clauseo-guard", targets: RELEASE_TARGETS, place: cargoBin("clauseo-guard") },
-  // which gets -C target-feature=+crt-static on Windows from the job's flags, as every row.
+  // The pre-write guard as a console program, for Codex's hook on Windows: PowerShell runs the
+  // hook line and waits only for a console program, and Clauseo.exe is a GUI one. A [[bin]] of
+  // clauseo-host (not the desktop package, whose bins Tauri would bundle on every OS), beside
+  // Clauseo.exe as clauseo-guard.exe (crates/host/src/bin/clauseo-guard.rs). Windows only; it gets
+  // -C target-feature=+crt-static from the job's flags, as every row.
+  {
+    name: "clauseo-guard",
+    targets: RELEASE_TARGETS.filter(isWindows),
+    place: cargoPackageBin("clauseo-host", "clauseo-guard"),
+  },
   // S15's set-up tool, a [[bin]] of the clauseo-sandbox package, only with the Safe workspace on
   // (safeWorkspace). Tauri bundles it beside Clauseo.exe as clauseo-sandbox-setup.exe;
   // hooks.nsh (CLAUSEO_SAFE_WORKSPACE) writes it to Program Files and runs it, and the NSIS

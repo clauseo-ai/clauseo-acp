@@ -2,8 +2,8 @@
 //! folder whose path has a space and a non-ASCII name gets its record in a folder of its own,
 //! `<data>/browser/guard/<session>`, with the file's identity after `--record-id` in both hook
 //! commands, and passes the trust check; the folder goes with the session. A Claude session, whose
-//! hook passes no record, makes neither the folder nor the file. The real hook command run
-//! through `cmd /c` with the built app is `crates/desktop/tests/guard_record_windows.rs`.
+//! hook passes no record, makes neither the folder nor the file. The real hook line run
+//! through PowerShell with the console guard is `tests/guard_windows.rs`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -74,17 +74,20 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
     };
     let hook = &config["hooks"]["PreToolUse"][0]["hooks"][0];
     let windows = hook["commandWindows"].as_str().unwrap();
-    // One PowerShell line: the guard by the call operator, its paths in single quotes.
+    // One PowerShell line: the guard by the call operator, its paths in single quotes. On
+    // Windows the hook names the console program beside the app (`codex_guard_program`).
+    let program = clauseo_host::codex_guard_program(Path::new(PROGRAM));
+    let program = program.display();
     let (record, id) = windows
         .strip_prefix(&format!(
-            "$global:LASTEXITCODE = -1; & '{PROGRAM}' --pre-write-guard --record '"
+            "$global:LASTEXITCODE = -1; & '{program}' --pre-write-guard --record '"
         ))
         .and_then(|rest| rest.split_once("' --record-id '"))
         .and_then(|(record, rest)| Some((record, rest.split_once("';")?.0)))
         .unwrap_or_else(|| panic!("{windows}"));
     let record = PathBuf::from(record);
     let posix = format!(
-        "'{PROGRAM}' --pre-write-guard --record '{}' --record-id {id}",
+        "'{program}' --pre-write-guard --record '{}' --record-id {id}",
         record.display()
     );
     assert_eq!(hook["command"], posix);

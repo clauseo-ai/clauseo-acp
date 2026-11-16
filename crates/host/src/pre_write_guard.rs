@@ -222,8 +222,9 @@ const MAX_INPUT: u64 = 16 * 1024 * 1024;
 /// input object comes from `input`. Returns the exit code: [`DENY`], with the reason and a newline
 /// on `errors`, when a target is refused; 0 with an [`IGNORED`] line when the input could not be
 /// read, but as Codex's hook (no `--matter`, a [`RECORD_FLAG`]) [`DENY`] with [`UNCHECKED`] when
-/// it is empty, unreadable or not JSON; else 0 with nothing written. With `CLAUSEO_GUARD_TIMINGS` set in the environment (not
-/// empty, not `0`), one more line follows, the phase timings (`timings.rs`).
+/// it is empty, unreadable or not JSON; else 0 with nothing written. With
+/// `CLAUSEO_GUARD_TIMINGS` set in the environment (not empty, not `0`), one more line follows,
+/// the phase timings (`timings.rs`).
 /// With `--ask-all` after the folder (forced ask, `agent/forced_ask.rs`), a tool it does not
 /// refuse that is not one of `ask::LOCAL_READS` gets Claude Code's `ask` decision on
 /// `output` (`ask.rs`); otherwise `output` stays empty.
