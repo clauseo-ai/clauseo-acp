@@ -406,13 +406,15 @@ export class VersionsController {
   }
 
   /** Undoes a restore by restoring the version just before it, the files the restore added removed (undoes), through
-   * the restore dialog, which lists what that writes and removes now. Only a restore version is undone this way. */
+   * the restore dialog, which lists what that writes and removes now; a one-file restore's undo puts back that file
+   * alone. Only a restore version is undone this way. */
   undoRestore(checkpoint: string): void {
     if (this.meta(checkpoint)?.kind !== "restore" || this.#acting) return;
     const { history } = this.#snap.timeline;
     const i = history.findIndex((v) => v.id === checkpoint);
     const prior = i > 0 ? history[i - 1] : undefined;
-    if (prior !== undefined) void this.askRestore(prior.id, checkpoint);
+    const file = this.#snap.oneFile.get(checkpoint) ?? null;
+    if (prior !== undefined) void this.askRestore(prior.id, checkpoint, file);
   }
 
   /** Cancel: the dialog closes. One the toolbar's Undo opened goes back to where the lawyer was; true when that is out
@@ -509,8 +511,7 @@ export class VersionsController {
       );
       return;
     }
-    const undone = this.#snap.oneFile.get(undoes ?? "") ?? null;
-    this.#finish(restoreDone(ask, outcome, this.meta(id)?.ts ?? this.#snap.now, undone), {
+    this.#finish(restoreDone(ask, outcome, this.meta(id)?.ts ?? this.#snap.now), {
       checkpoint: outcome.kind === "wrote" ? outcome.checkpoint : null,
       turn: null,
     });

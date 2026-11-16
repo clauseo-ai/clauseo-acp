@@ -219,8 +219,8 @@ pub(crate) fn writable(
 }
 
 /// Whether `path` meets the other kind of entry in the folder: a folder where the file goes, or
-/// a regular file where one of its folders goes. A link, or nothing, on the way is no clash
-/// ([`writable`] refuses a link).
+/// a file, pipe, socket or device where one of its folders goes. A link, or nothing, on the way
+/// is no clash ([`writable`] refuses a link).
 pub(crate) fn clash(folder: &Path, path: &MatterPath) -> Result<bool, Error> {
     let mut at = folder.to_owned();
     let mut parts = path.as_str().split('/').peekable();
@@ -235,7 +235,9 @@ pub(crate) fn clash(folder: &Path, path: &MatterPath) -> Result<bool, Error> {
             return Ok(false);
         }
         let last = parts.peek().is_none();
-        if (last && kind.is_dir()) || (!last && kind.is_file()) {
+        // a folder where the file goes, or anything but a folder (a file, a pipe, a socket)
+        // where one of its folders goes
+        if (last && kind.is_dir()) || (!last && !kind.is_dir()) {
             return Ok(true);
         }
     }

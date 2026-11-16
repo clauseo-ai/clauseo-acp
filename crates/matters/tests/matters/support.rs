@@ -107,6 +107,12 @@ pub(crate) fn folder_link(target: &Path, link: &Path) {
     }
 }
 
+/// A Unix socket at `path`, there while the listener lives.
+#[cfg(unix)]
+pub(crate) fn socket(path: impl AsRef<Path>) -> std::os::unix::net::UnixListener {
+    std::os::unix::net::UnixListener::bind(path).unwrap()
+}
+
 /// `fs::remove_dir_all`.
 pub(crate) fn remove_dir_all(path: impl AsRef<Path>) {
     std::fs::remove_dir_all(path).unwrap();
