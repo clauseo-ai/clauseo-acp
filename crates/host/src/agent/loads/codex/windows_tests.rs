@@ -128,11 +128,12 @@ fn the_line_passes_0_through_and_turns_every_other_ending_but_2_into_a_refusal()
 #[test]
 #[expect(
     clippy::disallowed_methods,
-    reason = "the test copies its own binary to a path with an apostrophe and non-ASCII names"
+    reason = "the test copies its own binary to a path with an apostrophe, an ampersand, a \
+              semicolon and non-ASCII names"
 )]
 fn the_programs_2_stdin_stdout_and_stderr_pass_byte_for_byte() {
     let root = crate::pipeline::tests::support::TempDir::new("ps-line");
-    let folder = root.path().join("O'Brien Zoë Ångström मामला");
+    let folder = root.path().join("O'Brien & Sons; Zoë Ångström मामला");
     crate::write::create_dir_all(&folder).unwrap();
     let program = folder.join("clauseo guard.exe");
     std::fs::copy(std::env::current_exe().unwrap(), &program).unwrap();

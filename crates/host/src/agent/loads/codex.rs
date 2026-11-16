@@ -280,8 +280,8 @@ mod tests {
     fn quoting_keeps_the_path_one_word() {
         assert_eq!(posix_quoted("/a b/O'Brien"), r"'/a b/O'\''Brien'");
         assert_eq!(
-            ps_quoted(r"C:\O'Brien $x `y 100%"),
-            r"'C:\O''Brien $x `y 100%'"
+            ps_quoted(r"C:\O'Brien & Sons; $x `y 100% (2024)"),
+            r"'C:\O''Brien & Sons; $x `y 100% (2024)'"
         );
         assert_eq!(ps_quoted("C:\u{2019}x"), "'C:\u{2019}\u{2019}x'");
         let config = codex_hook_config(Path::new(r"C:\100%\clauseo.exe"), None).unwrap();
