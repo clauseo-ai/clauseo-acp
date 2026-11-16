@@ -2,7 +2,11 @@
 // host's text. An agent's notice has no kind; a kind this version doesn't know (a newer host's, arriving as some other
 // string or as an object it doesn't read) gives null, and the row shows the notice's text as the host wrote it.
 import { listOf, namesOf } from "@clauseo/components/lib/words-core.ts";
-import { goneLines, type useThreadWords } from "@clauseo/components/lib/words-thread.ts";
+import {
+  changedLines,
+  goneLines,
+  type useThreadWords,
+} from "@clauseo/components/lib/words-thread.ts";
 import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import type { NoticeKind } from "../../transport/protocol.ts";
 import { agentNameOf } from "./stops.ts";
@@ -104,11 +108,11 @@ function guardBlocked(kind: NoticeKind, w: NoticeWords, agent?: AgentName): stri
     const file = namesOf([noCopy.file])(noCopy.file);
     return name === null
       ? w.th(
-          "Clauseo stopped a step: the AI tried to delete or replace {file}. Clauseo has no copy of it, so that couldn't be undone.",
+          "Clauseo stopped a step: the AI tried to delete or replace {file}. Clauseo has no copy of it, so Undo couldn't have brought it back.",
           { file },
         )
       : w.th(
-          "Clauseo stopped a step: {name} tried to delete or replace {file}. Clauseo has no copy of it, so that couldn't be undone.",
+          "Clauseo stopped a step: {name} tried to delete or replace {file}. Clauseo has no copy of it, so Undo couldn't have brought it back.",
           { name, file },
         );
   }
@@ -192,6 +196,14 @@ export function noticeLine(
     return !Array.isArray(gone.files) || gone.files.length + gone.more === 0
       ? null
       : goneLines(w.lang, gone.files, gone.more, service);
+  const changed =
+    typeof kind === "object" && kind !== null && "files_changed_no_copy" in kind
+      ? kind.files_changed_no_copy
+      : undefined;
+  if (changed !== undefined)
+    return !Array.isArray(changed.files) || changed.files.length + changed.more === 0
+      ? null
+      : changedLines(w.lang, changed.files, changed.more, service);
   const skipped =
     typeof kind === "object" && kind !== null && "skill_pack_not_loaded" in kind
       ? kind.skill_pack_not_loaded

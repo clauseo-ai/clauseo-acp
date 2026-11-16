@@ -344,10 +344,21 @@ open_data_enum! {
         /// of (cloud-only, over the size cap) were deleted during it: no undo brings them back.
         /// The step's `FilesChanged` lists them all as `gone`.
         FilesGoneNoCopy = "files_gone_no_copy" {
-            /// The first of them, at most five, sorted by path bytes, each with why it had not
-            /// been versioned.
+            /// The first of them, at most five (all six when there are six, so `more` is never
+            /// 1), sorted by path bytes, each with why it had not been versioned.
             files: Vec<SkippedFile>,
             /// How many more were deleted beyond `files`.
+            more: u32,
+        },
+        /// Files that were in the matter's folder when an answer began but that Clauseo kept no
+        /// copy of (cloud-only, over the size cap) are still there with another size or
+        /// modification time: changed during it, with no copy of how they were before, so no
+        /// undo brings that version back. A file only downloaded is not one.
+        FilesChangedNoCopy = "files_changed_no_copy" {
+            /// The first of them, at most five (all six when there are six, so `more` is never
+            /// 1), sorted by path bytes, each with why it had not been versioned.
+            files: Vec<SkippedFile>,
+            /// How many more were changed beyond `files`.
             more: u32,
         },
         /// Clauseo's pre-write guard refused a step of the agent's that would delete, move or
@@ -387,10 +398,17 @@ open_data_enum! {
                 path: MatterPath::new("Drafts/Scan.pdf").unwrap(),
                 reason: crate::SkippedFileReason::CloudOnly,
             }],
-            more: 1,
+            more: 2,
         },
         NoticeKind::NoCopyBlocked {
             file: MatterPath::new("Scan.pdf").unwrap(),
+        },
+        NoticeKind::FilesChangedNoCopy {
+            files: vec![SkippedFile {
+                path: MatterPath::new("Drafts/Contract.docx").unwrap(),
+                reason: crate::SkippedFileReason::CloudOnly,
+            }],
+            more: 2,
         },
     ];
 }

@@ -142,20 +142,20 @@ test("a step the guard stopped with no paper named, and the turn's count of more
   expect(noticeLine({ guard_steps_more: { more: 0 } }, en)).toBeNull();
 });
 
-test("a step the guard stopped on a file Clauseo keeps no copy of names the agent and the file, in English and Hindi", () => {
+test("a step the guard stopped on a file Clauseo keeps no copy of names the agent and the file (Hindi later: the English stands)", () => {
   const kind: NoticeKind = { no_copy_blocked: { file: "Scan.pdf" } };
   const codex = { kind: "codex", name: "codex-acp" } as const;
   expect(noticeLine(kind, en, codex)).toBe(
-    `Clauseo stopped a step: ChatGPT tried to delete or replace ${iso("Scan.pdf")}. Clauseo has no copy of it, so that couldn't be undone.`,
+    `Clauseo stopped a step: ChatGPT tried to delete or replace ${iso("Scan.pdf")}. Clauseo has no copy of it, so Undo couldn't have brought it back.`,
   );
   expect(noticeLine(kind, words("hi"), codex)).toBe(
-    `Clauseo ने एक काम रोक दिया: ChatGPT ने ${iso("Scan.pdf")} को हटाने या बदलने की कोशिश की। Clauseo के पास इसकी कोई प्रति नहीं है, इसलिए इसे पूर्ववत नहीं किया जा सकता था।`,
+    `Clauseo stopped a step: ChatGPT tried to delete or replace ${iso("Scan.pdf")}. Clauseo has no copy of it, so Undo couldn't have brought it back.`,
   );
   expect(noticeLine(kind, en)).toBe(
-    `Clauseo stopped a step: the AI tried to delete or replace ${iso("Scan.pdf")}. Clauseo has no copy of it, so that couldn't be undone.`,
+    `Clauseo stopped a step: the AI tried to delete or replace ${iso("Scan.pdf")}. Clauseo has no copy of it, so Undo couldn't have brought it back.`,
   );
   expect(noticeLine(kind, words("hi"))).toBe(
-    `Clauseo ने एक काम रोक दिया: AI ने ${iso("Scan.pdf")} को हटाने या बदलने की कोशिश की। Clauseo के पास इसकी कोई प्रति नहीं है, इसलिए इसे पूर्ववत नहीं किया जा सकता था।`,
+    `Clauseo stopped a step: the AI tried to delete or replace ${iso("Scan.pdf")}. Clauseo has no copy of it, so Undo couldn't have brought it back.`,
   );
 });
 
@@ -283,32 +283,57 @@ test("a skill pack notice with no pack gives null, so the row shows its text", (
   ).toBeNull();
 });
 
-test("files gone with no copy: each named with why, the recycle bin only for a file that was only online", () => {
+test("files gone with no copy: each named with why, its cloud service only for a file that was only online", () => {
   const kind = (files: { path: string; reason: "cloud_only" | "over_size_cap" }[], more = 0) =>
     ({ files_gone_no_copy: { files, more } }) as NoticeKind;
   const brief = { path: "Drafts/Brief.docx", reason: "cloud_only" } as const;
   const scan = { path: "Scans/Photos.zip", reason: "over_size_cap" } as const;
   expect(noticeLine(kind([brief]), en, undefined, "OneDrive")).toBe(
-    `${iso("Brief.docx")} was deleted during this step. Clauseo had no copy of it to bring back. It was only in OneDrive, so OneDrive's recycle bin may still have it.`,
+    `${iso("Brief.docx")} was deleted during this answer. Clauseo had no copy of it to bring back. It was kept only in OneDrive, so OneDrive may still have it among its deleted files.`,
   );
   expect(noticeLine(kind([brief]), en)).toBe(
-    `${iso("Brief.docx")} was deleted during this step. Clauseo had no copy of it to bring back. It was only online, so your cloud service's recycle bin may still have it.`,
+    `${iso("Brief.docx")} was deleted during this answer. Clauseo had no copy of it to bring back. It was kept only in your cloud service, which may still have it among its deleted files.`,
   );
   const large = noticeLine(kind([scan]), en, undefined, "OneDrive");
   expect(large).toBe(
-    `${iso("Photos.zip")} was deleted during this step. Clauseo had no copy of it to bring back, because it was too large to keep versions of.`,
+    `${iso("Photos.zip")} was deleted during this answer. It was too large for Clauseo to keep a copy of, so Clauseo can't bring it back.`,
   );
-  expect(large).not.toContain("recycle bin");
+  expect(large).not.toContain("deleted files");
   // more than are named: the rest counted after them
   expect(noticeLine(kind([brief, scan], 3), en)).toMatch(
-    /may still have it\. .*too large to keep versions of\. 3 more files that Clauseo had no copy of were deleted during this step\.$/,
+    /among its deleted files\. .*can't bring it back\. 3 more files Clauseo had no copy of were deleted during this answer\.$/,
   );
   expect(noticeLine(kind([scan]), words("hi"))).toBe(
-    `${iso("Photos.zip")} इस काम के दौरान हटा दी गई। Clauseo के पास इसकी कोई प्रति नहीं थी जिसे वापस लाया जा सके, क्योंकि यह संस्करण रखने के लिए बहुत बड़ी थी।`,
+    // Hindi later (null): the English stands
+    `${iso("Photos.zip")} was deleted during this answer. It was too large for Clauseo to keep a copy of, so Clauseo can't bring it back.`,
   );
   // none named and none counted, or a shape this version doesn't read: the notice's own text
   expect(noticeLine(kind([]), en)).toBeNull();
   expect(
     noticeLine({ files_gone_no_copy: { files: "x", more: 0 } } as unknown as NoticeKind, en),
+  ).toBeNull();
+});
+
+test("files changed with no earlier copy: each named, its cloud service only for a file that was only online", () => {
+  const kind = (files: { path: string; reason: "cloud_only" | "over_size_cap" }[], more = 0) =>
+    ({ files_changed_no_copy: { files, more } }) as NoticeKind;
+  const contract = { path: "Drafts/Contract.docx", reason: "cloud_only" } as const;
+  const reel = { path: "Scans/Reel.mov", reason: "over_size_cap" } as const;
+  const base = `${iso("Contract.docx")} was changed during this answer. Clauseo had no copy of how it was before, so Undo can't bring the earlier version back.`;
+  expect(noticeLine(kind([contract]), en, undefined, "OneDrive")).toBe(
+    `${base} OneDrive may still have an earlier version.`,
+  );
+  expect(noticeLine(kind([contract]), en)).toBe(
+    `${base} Your cloud service may still have an earlier version.`,
+  );
+  expect(noticeLine(kind([reel]), en, undefined, "OneDrive")).toBe(
+    `${iso("Reel.mov")} was changed during this answer. Clauseo had no copy of how it was before, so Undo can't bring the earlier version back.`,
+  );
+  expect(noticeLine(kind([contract, reel], 2), en)).toMatch(
+    / 2 more files Clauseo had no earlier copy of were changed during this answer\.$/,
+  );
+  expect(noticeLine(kind([]), en)).toBeNull();
+  expect(
+    noticeLine({ files_changed_no_copy: { files: "x", more: 0 } } as unknown as NoticeKind, en),
   ).toBeNull();
 });

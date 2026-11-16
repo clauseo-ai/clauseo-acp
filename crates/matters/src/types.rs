@@ -186,6 +186,11 @@ pub struct Checkpoint {
     /// folder now, sorted by path, each with why it had not been versioned: Clauseo holds no
     /// copy of them, so no undo can bring them back (`gone.rs`). Empty when reused.
     pub gone: Vec<SkippedFile>,
+    /// Files the last checkpoint skipped (cloud-only, over the size cap) that are still in the
+    /// folder with another size or modification time, sorted by path, each with why it had not
+    /// been versioned: changed with no copy of how they were before, so no undo can bring that
+    /// version back (`gone.rs` `changed`). A file only downloaded is not one.
+    pub changed_no_copy: Vec<SkippedFile>,
     /// Every file this checkpoint's walk found but did not version (cloud-only, over the size
     /// cap), sorted by path, each with why: Clauseo holds no copy of them, so no undo could bring
     /// one back after a delete or an overwrite. The before-turn checkpoint's list is what the

@@ -35,8 +35,8 @@ export function useThreadWords() {
 /** A file gone with no copy: its path in the matter and why Clauseo had not versioned it (SkippedFileReason). */
 export type GoneFile = { path: string; reason: string };
 
-/** The line for one gone file, named as Versions names files: a file that was only online says its cloud service's
- * recycle bin may still have it, by the service's name where the room knows one; a file too large says so; any other
+/** The line for one gone file, named as Versions names files: a file that was only online says its cloud service may
+ * still have it among its deleted files, by the service's name where the room knows one; a file too large says so; any other
  * reason (one this version doesn't know) says only that Clauseo had no copy. */
 export function goneLine(lang: Lang, f: GoneFile, service: string | null): string {
   const file = fileName(f.path);
@@ -44,23 +44,27 @@ export function goneLine(lang: Lang, f: GoneFile, service: string | null): strin
     return service === null
       ? th(
           lang,
-          "{file} was deleted during this step. Clauseo had no copy of it to bring back. It was only online, so your cloud service's recycle bin may still have it.",
+          "{file} was deleted during this answer. Clauseo had no copy of it to bring back. It was kept only in your cloud service, which may still have it among its deleted files.",
           { file },
         )
       : th(
           lang,
-          "{file} was deleted during this step. Clauseo had no copy of it to bring back. It was only in {service}, so {service}'s recycle bin may still have it.",
+          "{file} was deleted during this answer. Clauseo had no copy of it to bring back. It was kept only in {service}, so {service} may still have it among its deleted files.",
           { file, service },
         );
   if (f.reason === "over_size_cap")
     return th(
       lang,
-      "{file} was deleted during this step. Clauseo had no copy of it to bring back, because it was too large to keep versions of.",
+      "{file} was deleted during this answer. It was too large for Clauseo to keep a copy of, so Clauseo can't bring it back.",
       { file },
     );
-  return th(lang, "{file} was deleted during this step. Clauseo had no copy of it to bring back.", {
-    file,
-  });
+  return th(
+    lang,
+    "{file} was deleted during this answer. Clauseo had no copy of it to bring back.",
+    {
+      file,
+    },
+  );
 }
 
 /** Every gone file's line, then, when `more` were gone than are named, one line counting the rest; joined by a space,
@@ -74,7 +78,53 @@ export function goneLines(
   const lines = files.map((f) => goneLine(lang, f, service));
   if (more > 0)
     lines.push(
-      th(lang, "{n} more files that Clauseo had no copy of were deleted during this step.", {
+      th(lang, "{n} more files Clauseo had no copy of were deleted during this answer.", {
+        n: more,
+      }),
+    );
+  return lines.join(" ");
+}
+
+// Files Clauseo kept no copy of (only online, or over the size cap) that are still there with another size or
+// modification time: changed during the answer with no copy of how they were before, so Undo can't bring the earlier
+// version back: the host's files_changed_no_copy notice in the thread (app's room/thread/notice-words.ts). A file only
+// downloaded is not one (the host tells none).
+
+/** The line for one changed file, named as Versions names files: a file that was only online adds that its cloud
+ * service may still have an earlier version, by the service's name where the room knows one. */
+export function changedLine(lang: Lang, f: GoneFile, service: string | null): string {
+  const file = fileName(f.path);
+  if (f.reason === "cloud_only")
+    return service === null
+      ? th(
+          lang,
+          "{file} was changed during this answer. Clauseo had no copy of how it was before, so Undo can't bring the earlier version back. Your cloud service may still have an earlier version.",
+          { file },
+        )
+      : th(
+          lang,
+          "{file} was changed during this answer. Clauseo had no copy of how it was before, so Undo can't bring the earlier version back. {service} may still have an earlier version.",
+          { file, service },
+        );
+  return th(
+    lang,
+    "{file} was changed during this answer. Clauseo had no copy of how it was before, so Undo can't bring the earlier version back.",
+    { file },
+  );
+}
+
+/** Every changed file's line, then, when `more` were changed than are named, one line counting the rest (the host
+ * never leaves one alone to count: `more` is 0 or at least 2); joined by a space, as one paragraph. Empty when none. */
+export function changedLines(
+  lang: Lang,
+  files: readonly GoneFile[],
+  more: number,
+  service: string | null,
+): string {
+  const lines = files.map((f) => changedLine(lang, f, service));
+  if (more > 0)
+    lines.push(
+      th(lang, "{n} more files Clauseo had no earlier copy of were changed during this answer.", {
         n: more,
       }),
     );

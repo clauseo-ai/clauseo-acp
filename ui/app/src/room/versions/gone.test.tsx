@@ -51,31 +51,31 @@ async function mounted(gone: SkippedFile[], place: FolderPlace): Promise<Version
 
 const band = () => plain(document.body.querySelector(".ver-note")?.textContent);
 
-test("a deleted file only in OneDrive: the timeline notes it, and the band says OneDrive's recycle bin may have it", async () => {
+test("a deleted file only in OneDrive: the timeline notes it, and the band says OneDrive may still have it among its deleted files", async () => {
   h = await mounted([{ path: "Drafts/Brief.docx", reason: "cloud_only" }], {
     synced: { service: "one_drive" },
   });
   await vi.waitFor(() => expect(h?.all("ver-gone")).toHaveLength(1));
   expect(plain(h.one("ver-gone")?.textContent)).toBe(
-    "Brief.docx was deleted, with no copy to bring back",
+    "Brief.docx was deleted; Clauseo had no copy to bring back.",
   );
   await h.lookAt("cp2");
   await vi.waitFor(() =>
     expect(band()).toBe(
-      "Brief.docx was deleted during this step. Clauseo had no copy of it to bring back. It was only in OneDrive, so OneDrive's recycle bin may still have it.",
+      "Brief.docx was deleted during this answer. Clauseo had no copy of it to bring back. It was kept only in OneDrive, so OneDrive may still have it among its deleted files.",
     ),
   );
 }, 30_000);
 
-test("a deleted file too large to keep: no recycle bin; a version with none gone has no note", async () => {
+test("a deleted file too large to keep: no cloud service named; a version with none gone has no note", async () => {
   h = await mounted([{ path: "Scans/Photos.zip", reason: "over_size_cap" }], "local");
   await h.lookAt("cp2");
   await vi.waitFor(() =>
     expect(band()).toBe(
-      "Photos.zip was deleted during this step. Clauseo had no copy of it to bring back, because it was too large to keep versions of.",
+      "Photos.zip was deleted during this answer. It was too large for Clauseo to keep a copy of, so Clauseo can't bring it back.",
     ),
   );
-  expect(band()).not.toContain("recycle bin");
+  expect(band()).not.toContain("deleted files");
   await h.unmount();
   h = await mounted([], "local");
   expect(h.all("ver-gone")).toHaveLength(0);

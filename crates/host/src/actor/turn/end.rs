@@ -40,7 +40,7 @@ use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
 
 mod files;
-pub(super) use files::{after_events, gone_notice};
+pub(super) use files::{after_events, changed_notice, gone_notice};
 
 /// A Codex turn whose end waits for a limits read (the module doc's Codex fallback).
 #[derive(Debug, Default)]

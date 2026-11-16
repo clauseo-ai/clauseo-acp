@@ -349,6 +349,20 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 file: MatterPath::new("Scan.pdf").unwrap(),
             }),
         },
+        Notice {
+            level: NoticeLevel::Warning,
+            text:
+                "Drafts/Contract.docx was changed during this answer. Clauseo had no copy of how \
+                   it was before, so Undo can't bring the earlier version back."
+                    .to_owned(),
+            kind: Some(NoticeKind::FilesChangedNoCopy {
+                files: vec![SkippedFile {
+                    path: MatterPath::new("Drafts/Contract.docx").unwrap(),
+                    reason: SkippedFileReason::CloudOnly,
+                }],
+                more: 0,
+            }),
+        },
     ];
     notices.extend(skill_pack_notices());
     notices.into_iter().map(DomainEvent::from).collect()

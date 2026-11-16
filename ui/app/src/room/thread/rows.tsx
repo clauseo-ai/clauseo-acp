@@ -260,7 +260,7 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   const w = useThreadWords();
   if (entry.kind === undefined || entry.kind === null) return null;
   const agent = useAgentPlan();
-  // a deleted file that was only online: its recycle bin, by the folder's sync service where the room knows one
+  // a deleted or changed file that was only online: its cloud service, by the folder's sync service where the room knows one
   const service = serviceName(use(FolderPlaceContext));
   return (
     <p
