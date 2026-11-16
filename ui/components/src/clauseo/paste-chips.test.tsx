@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // A long paste on the composer: a chip at PASTE_CHIP_MIN characters and over, words in the field under it; the chips'
-// texts with the typed words in what goes, and apart from them in what the room hears (a Draft); removal; and the
+// texts first, then the typed words, in what goes, and apart from them in what the room hears (a Draft); removal; and the
 // chips coming back with the composer's words through every way they come back (a draft, setText, fill, clear and its
 // undo), as they were, never split again from one string.
 import { act, createRef, type ReactNode } from "react";
@@ -102,7 +102,7 @@ test("the chip's size in words is grouped as the app writes counts (money.ts), a
   expect(wordCount("  one\ttwo\nthree\u00a0four  ")).toBe(4);
 });
 
-test("Ask sends the typed words, then each chip's text in paste order, a blank line between", async () => {
+test("Ask sends each chip's text in paste order, as they are drawn, then the typed words, a blank line between", async () => {
   const onAsk = vi.fn();
   await mount(composer({ onAsk }));
   const one = brief(PASTE_CHIP_MIN, "a");
@@ -111,14 +111,14 @@ test("Ask sends the typed words, then each chip's text in paste order, a blank l
   await paste(two);
   await type("Summarise both briefs.");
   await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="send"]')!.click());
-  expect(onAsk).toHaveBeenCalledExactlyOnceWith(`Summarise both briefs.\n\n${one}\n\n${two}`);
+  expect(onAsk).toHaveBeenCalledExactlyOnceWith(`${one}\n\n${two}\n\nSummarise both briefs.`);
   // Enter the same
   await act(async () => {
     field().dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
     );
   });
-  expect(onAsk).toHaveBeenLastCalledWith(`Summarise both briefs.\n\n${one}\n\n${two}`);
+  expect(onAsk).toHaveBeenLastCalledWith(`${one}\n\n${two}\n\nSummarise both briefs.`);
 });
 
 test("Remove pasted text takes its chip off, tells the room, and puts the focus on the next chip, then the field", async () => {
@@ -180,7 +180,7 @@ test("the draft comes back with its chips: the typed words in the field, each ch
   expect(field().value).toBe("Compare these.");
   expect(chips()).toHaveLength(2);
   expect(ref.current?.draft()).toEqual({ typed: "Compare these.", pastes: [one, two] });
-  expect(ref.current?.text()).toBe(`Compare these.\n\n${one}\n\n${two}`);
+  expect(ref.current?.text()).toBe(`${one}\n\n${two}\n\nCompare these.`);
 });
 
 test("a chip whose text holds another chip's text comes back byte for byte, never cut up or doubled", async () => {
@@ -219,7 +219,7 @@ test("fill, setText and clear carry the chips; Cmd+Z after a clear brings them b
   await type("Read it.");
   const asked = ref.current!.text();
   const held = ref.current!.draft();
-  expect(asked).toBe(`Read it.\n\n${one}`);
+  expect(asked).toBe(`${one}\n\nRead it.`);
   expect(held).toEqual({ typed: "Read it.", pastes: [one] });
   // a clear for other words does nothing
   await act(async () => ref.current?.clear("Read it."));

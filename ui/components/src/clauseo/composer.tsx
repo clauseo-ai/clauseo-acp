@@ -104,7 +104,7 @@ function useOpening(ref: RefObject<HTMLDivElement | null>, on: boolean) {
  * engine's own editing (`execCommand`), so Cmd/Ctrl+Z takes it back. */
 export type ComposerHandle = {
   focus: () => void;
-  /** What goes if sent now, as one string: the typed words and each long paste's text (paste-chips-logic.ts's
+  /** What goes if sent now, as one string: each long paste's text, then the typed words (paste-chips-logic.ts's
    * sentOf). Made on each call: for a send, or to check what was sent, never per keystroke. */
   text: () => string;
   /** What the composer holds now, its typed words and its long pastes' texts apart (paste-chips-logic.ts's Draft). */

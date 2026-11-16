@@ -1,7 +1,8 @@
 // A long paste as a chip on the composer's well, not words in its field: the field stays small, so each keystroke
 // stays cheap however much was pasted (a 6 MiB paste in the field took over a second a key in headless Chromium).
 // What the composer holds is a Draft: the typed words, and each chip's text in paste order, kept apart. It is joined
-// into one string only to go (sentOf): the typed words, then the chips' texts in paste order, a blank line between. A draft is never split again by searching its joined string: it comes back as
+// into one string only to go (sentOf): the chips' texts first, in paste order, as they are drawn above the field, then
+// the typed words, a blank line between. A draft is never split again by searching its joined string: it comes back as
 // the Draft it was. A sent string coming back from the host (a stopped question, a steer not sent, a lost edit) is
 // looked up whole among the questions this app sent (draftOf); a long one not found is one chip, as it stands.
 
@@ -9,7 +10,7 @@
  * Chromium: with 20,000 characters in the field no keystroke reached Event Timing's 16 ms floor. */
 export const PASTE_CHIP_MIN = 20_000;
 
-/** Between the typed words and each chip's text, as they are sent. */
+/** Between each chip's text and the next, and before the typed words, as they are sent. */
 export const CHIP_GAP = "\n\n";
 
 /** One pasted text, as its chip holds it: its words counted once, as it comes. */
@@ -60,12 +61,13 @@ export const EMPTY_DRAFT: Draft = { typed: "", pastes: [] };
 /** A draft with nothing in it: no typed character and no chip. */
 export const isBlank = (d: Draft): boolean => d.typed === "" && d.pastes.length === 0;
 
-/** The one string a draft goes as: the typed words, then each chip's text in paste order, a blank line between. With
+/** The one string a draft goes as: each chip's text in paste order, as the chips are drawn above the field, then the
+ * typed words, a blank line between. With
  * no chips, the typed words alone; with no typed words, the chips alone. Made only to send, or to check what was sent. */
 export function sentOf(d: Draft): string {
   const tail = d.pastes.join(CHIP_GAP);
   if (tail === "") return d.typed;
-  return d.typed === "" ? tail : d.typed + CHIP_GAP + tail;
+  return d.typed === "" ? tail : tail + CHIP_GAP + d.typed;
 }
 
 /** `there` with `back` after it: the chips of both, `there`'s first, and the typed words of both, `sep` between. */

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// The long paste's chips in the room (composer.tsx, paste-chips.tsx): what goes is one string, the typed words then
-// each chip's text; the cap counts the chips, the window's (prompt-cost.ts) and the host's (ChatGPT's, #985) alike, and
+// The long paste's chips in the room (composer.tsx, paste-chips.tsx): what goes is one string, each chip's text in
+// paste order, as they are drawn, then the typed words; the cap counts the chips, the window's (prompt-cost.ts) and the host's (ChatGPT's, #985) alike, and
 // a refusal keeps them; and the chips come back with the composer's words wherever those come back, as they were: the
 // draft after a visit to another conversation (the typed words and the chips' texts kept apart), and the stopped
 // question's refill.
@@ -11,11 +11,20 @@ import {
   forgetChipsForTests,
   PASTE_CHIP_MIN,
 } from "@clauseo/components/clauseo/paste-chips-logic.ts";
-import { reset } from "../../testing/stream-script.ts";
-import type { EntryId, HostError, MatterId } from "../../transport/protocol.ts";
+import { header, reset, upsert, userMessage, uuid } from "../../testing/stream-script.ts";
+import type {
+  CommandOutcome,
+  EntryId,
+  HostCommand,
+  HostError,
+  MatterId,
+  ViewEntry,
+} from "../../transport/protocol.ts";
+import { loadQueueStrip } from "../queue-chunk.ts";
 import { defaultOutcome, mountRoom, type Harness } from "./harness.ts";
 import { MAX_PROMPT_TEXT_BYTES } from "./prompt-cost.ts";
 import type { Drafts } from "./session.ts";
+import { forgetSteerRestores } from "./steer-restore.ts";
 import { WorkComposer } from "./work-composer.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -25,6 +34,7 @@ let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 beforeEach(() => forgetChipsForTests());
 afterEach(async () => {
+  forgetSteerRestores();
   await h?.unmount();
   h = null;
   await act(async () => root?.unmount());
@@ -49,7 +59,7 @@ async function paste(text: string) {
 const sentText = () =>
   h!.sent("send_prompt").map((s) => (s.content[0] as { text: { text: string } }).text.text);
 
-test("Enter sends the typed words, then the chips in paste order, as one text block; the accepted send empties all", async () => {
+test("Enter sends the chips in paste order, then the typed words, as one text block; the accepted send empties all", async () => {
   h = await mountRoom();
   h.deliver([reset([])]);
   const one = brief(PASTE_CHIP_MIN, "a");
@@ -59,7 +69,7 @@ test("Enter sends the typed words, then the chips in paste order, as one text bl
   await type("Which brief is stronger?");
   expect(chips()).toBe(2);
   await h.key({ key: "Enter", keyCode: 13 });
-  expect(sentText()).toEqual([`Which brief is stronger?\n\n${one}\n\n${two}`]);
+  expect(sentText()).toEqual([`${one}\n\n${two}\n\nWhich brief is stronger?`]);
   expect(h.sent("send_prompt")[0]!.content).toHaveLength(1);
   expect(chips()).toBe(0);
   expect(field().value).toBe("");
@@ -100,7 +110,7 @@ test("the host's own prompt.too_long (ChatGPT's cap) keeps the chips and the wor
   await paste(one);
   await type("Summarise it");
   await h.key({ key: "Enter", keyCode: 13 });
-  expect(sentText()).toEqual([`Summarise it\n\n${one}`]);
+  expect(sentText()).toEqual([`${one}\n\nSummarise it`]);
   expect(h.one("error")?.dataset["code"]).toBe("prompt.too_long");
   expect(chips()).toBe(1);
   expect(field().value).toBe("Summarise it");
@@ -166,7 +176,7 @@ test("the stopped question's refill brings its chips back with its words", async
   const one = brief(PASTE_CHIP_MIN, "a");
   await paste(one);
   await type("Read this.");
-  const asked = `Read this.\n\n${one}`;
+  const asked = `${one}\n\nRead this.`;
   // sent and accepted: the composer empties
   await act(async () => {
     field().dispatchEvent(
@@ -188,7 +198,7 @@ const enter = () =>
     );
   });
 
-test("a chip whose text holds another chip's comes back byte for byte after a visit, and goes as pasted", async () => {
+test("a chip whose text holds another chip's comes back byte for byte after a visit, and goes chips first, as pasted", async () => {
   const drafts: Drafts = new Map();
   const sent: string[] = [];
   const show = room(drafts, sent);
@@ -209,5 +219,89 @@ test("a chip whose text holds another chip's comes back byte for byte after a vi
   expect(back.pastes[1] === schedule).toBe(true);
   await enter();
   expect(sent).toHaveLength(1);
-  expect(sent[0] === `Is B consistent with A?\n\n${agreement}\n\n${schedule}`).toBe(true);
+  expect(sent[0] === `${agreement}\n\n${schedule}\n\nIs B consistent with A?`).toBe(true);
+});
+
+/** A running answer that takes words mid-answer: Enter steers. */
+const running = (): ViewEntry => ({
+  header: { ...header("running").header!, steer_joins_turn: true } as NonNullable<
+    ViewEntry["header"]
+  >,
+});
+const accept = (c: HostCommand): CommandOutcome =>
+  c.send_prompt !== undefined
+    ? { prompt_accepted: { turn: uuid(9, 4), message: uuid(9, 5) } }
+    : defaultOutcome(c);
+/** The steer as the host lists it, with the words it went with. */
+const steerOf = (text: string, over: object = {}): ViewEntry => ({
+  user_message: { ...userMessage(2, 2, text).user_message!, delivery: "steer", ...over },
+});
+
+test("a steer not sent comes back with its chips: all the chips first, the field's then its own, then the words", async () => {
+  h = await mountRoom({ dispatch: accept });
+  h.deliver([reset([userMessage(1, 1, "Q")], running())]);
+  const one = brief(PASTE_CHIP_MIN, "a");
+  await paste(one);
+  await type("Also this.");
+  await h.key({ key: "Enter", keyCode: 13 });
+  const steered = h.sent("send_prompt")[0]!;
+  expect(steered.delivery).toBe("steer");
+  const asked = sentText()[0]!;
+  expect(asked).toBe(`${one}\n\nAlso this.`);
+  expect(chips()).toBe(0);
+  // the lawyer goes on: a second paste and words of her own
+  const two = brief(PASTE_CHIP_MIN, "b");
+  await paste(two);
+  await type("Mine.");
+  // the host lists the steer waiting, then not sent: it comes back
+  h.deliver([upsert(steerOf(asked))]);
+  await h.settle();
+  h.deliver([upsert(steerOf(asked, { steer: { not_sent: { turn: uuid(1, 4) } } }))]);
+  await h.settle();
+  expect(chips()).toBe(2);
+  expect(field().value).toBe("Mine.\nAlso this.");
+  h.deliver([reset([userMessage(1, 1, "Q")], header("idle"))]);
+  await h.settle();
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(sentText()[1] === `${two}\n\n${one}\n\nMine.\nAlso this.`).toBe(true);
+});
+
+test("an edit lost as its message went comes back after the field's chips as a chip, before the field's words", async () => {
+  h = await mountRoom({
+    dispatch: (c) => {
+      if (c.edit_queued_prompt !== undefined)
+        throw { code: "thread.turn_not_queued", message: "raw host text", retryable: false };
+      return accept(c);
+    },
+  });
+  const queuedText = "Check the lease.";
+  const queued: ViewEntry = {
+    user_message: {
+      ...userMessage(5, 2, queuedText).user_message!,
+      status: "queued",
+      turn: uuid(2, 4),
+    },
+  };
+  h.deliver([reset([userMessage(1, 1, "Q"), queued], running())]);
+  await act(async () => void (await loadQueueStrip()));
+  await h.settle();
+  const one = brief(PASTE_CHIP_MIN, "a");
+  await paste(one);
+  await type("My own words.");
+  // the queued message edited to a long text, refused as it had gone
+  const edited = brief(PASTE_CHIP_MIN + 10, "e");
+  await h.click(h.all("queued-edit")[0]!);
+  const edit = h.host.querySelector<HTMLTextAreaElement>(".queue-edit")!;
+  await act(async () => {
+    Reflect.set(HTMLTextAreaElement.prototype, "value", edited, edit);
+    edit.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await h.click([...h.host.querySelectorAll("button")].find((b) => b.textContent === "Save"));
+  await act(async () => h!.store.flush());
+  expect(chips()).toBe(2);
+  expect(field().value).toBe("My own words.");
+  h.deliver([reset([userMessage(1, 1, "Q")], header("idle"))]);
+  await h.settle();
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(sentText()[0] === `${one}\n\n${edited}\n\nMy own words.`).toBe(true);
 });
