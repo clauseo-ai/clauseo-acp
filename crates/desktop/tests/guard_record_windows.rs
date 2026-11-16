@@ -169,8 +169,16 @@ fn the_real_hook_command_refuses_and_records_under_powershell_from_an_apostrophe
     // A Windows user named as lawyers are, under a folder long enough that the record's path is
     // over 200 characters.
     let user = folder(root.path(), "O'Brien & Sons Zoë Q");
-    let long = folder(user.path(), &"Sharma v State 2024 papers ".repeat(5));
-    let longer = folder(long.path(), &"Müller GmbH correspondence ".repeat(4));
+    // No folder name ends in a space or a dot: Windows drops those from a path it doesn't take
+    // verbatim, and no lawyer's folder is named so.
+    let long = folder(
+        user.path(),
+        "Sharma v State 2024 papers ".repeat(5).trim_end(),
+    );
+    let longer = folder(
+        long.path(),
+        "Müller GmbH correspondence ".repeat(4).trim_end(),
+    );
     let data = folder(longer.path(), "data");
     let data = data.path();
     assert!(
