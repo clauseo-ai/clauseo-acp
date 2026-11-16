@@ -190,9 +190,6 @@ fn the_real_stetdoc_shows_the_parts_and_names_what_compare_misses() {
         ..shaded()
     };
     assert_eq!(cover.changed_tables, [on_section_2]);
-    // A section added in the newer version (an existing paragraph now ends it) with a header of
-    // its own, beside a body change: stetdoc's compare neither compares that header nor warns,
-    // and its view shows the header unchanged.
     // A changed header whose text the views write unlike its w:t (an entity and a character
     // reference, a list number, a symbol) is shown as a part, and not said to be not compared.
     for pair in ["entity", "numbered", "symbol"] {
@@ -200,6 +197,9 @@ fn the_real_stetdoc_shows_the_parts_and_names_what_compare_misses() {
         assert_eq!(answer.parts.len(), 1, "{pair}");
         assert_eq!(answer.notices, [], "{pair}");
     }
+    // A section added in the newer version (an existing paragraph now ends it) with a header of
+    // its own, beside a body change: stetdoc's compare neither compares that header nor warns,
+    // and its view shows the header unchanged.
     let added = through_real(&stetdoc, "added");
     assert!(body_changed(&added));
     assert_eq!(
