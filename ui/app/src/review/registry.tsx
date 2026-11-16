@@ -503,6 +503,16 @@ export const REGISTRY: readonly Entry[] = [
     render: () => <MovedFolder folder="Documents/Khan Leather Works" onLocate={() => {}} />,
   },
   {
+    id: "UC-858",
+    words: matterWords(
+      "Until you locate it, Clauseo doesn't know where this matter's papers are now, so it can't keep conversations in your other matters out of them.",
+    ),
+    screen: "matters/moved",
+    width: 640,
+    height: 320,
+    render: () => <MovedFolder folder="Documents/Khan Leather Works" onLocate={() => {}} />,
+  },
+  {
     id: "U2-26",
     words: matterWords("Locate the folder to ask about this matter"),
     screen: "matters/moved",

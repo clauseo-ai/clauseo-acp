@@ -83,6 +83,36 @@ test("without a folder to name, the line leaves out where it was", async () => {
   expect(host?.textContent).toContain(mt("en", "This matter's folder has moved."));
 });
 
+test("the until-located line (UC-858) sits between the path line and the kept line, styled as they are", async () => {
+  await render(<MovedFolder folder="Documents/Khan" onLocate={() => {}} />);
+  const lines = Array.from(host?.querySelectorAll(".room-moved > p") ?? []);
+  const until = "Until you locate it, Clauseo doesn't know where this matter's papers are now";
+  const texts = lines.map((p) => p.textContent ?? "");
+  const at = texts.findIndex((t) => t.includes("It was at"));
+  const mid = texts.findIndex((t) => t.includes(until));
+  const kept = texts.findIndex((t) => t.includes("nothing is lost while the folder is away"));
+  expect(mid).toBeGreaterThan(at);
+  expect(kept).toBeGreaterThan(mid);
+  expect(texts[mid]).toBe(
+    mt(
+      "en",
+      "Until you locate it, Clauseo doesn't know where this matter's papers are now, so it can't keep conversations in your other matters out of them.",
+    ),
+  );
+  expect(lines[mid]?.className).toBe(lines[kept]?.className);
+  expect(lines[mid]?.className).toBe(lines[at]?.className);
+});
+
+test("the until-located line shows without a folder to name, after the moved line and before the kept line", async () => {
+  await render(<MovedFolder onLocate={() => {}} />);
+  const texts = Array.from(host?.querySelectorAll(".room-moved > p") ?? []).map(
+    (p) => p.textContent ?? "",
+  );
+  const mid = texts.findIndex((t) => t.includes("Until you locate it"));
+  expect(mid).toBe(1);
+  expect(texts[2]).toContain("nothing is lost while the folder is away");
+});
+
 test("the composer's gate says why it can't ask, with Locate folder", async () => {
   let pressed = 0;
   await render(<LocateGate onLocate={() => (pressed += 1)} />);

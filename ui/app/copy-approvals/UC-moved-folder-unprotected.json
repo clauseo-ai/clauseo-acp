@@ -1,0 +1,11 @@
+{
+  "UC-858": {
+    "en": "Until you locate it, Clauseo doesn't know where this matter's papers are now, so it can't keep conversations in your other matters out of them.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-16",
+    "by": "app track (provisional)",
+    "note": "Orchestrator: the moved-folder state must say that until it's located Clauseo can't protect the papers at their new place."
+  }
+}

@@ -84,6 +84,9 @@ export const HI = {
     "यह {path} पर था। यह अब जहाँ है वहाँ इसे ढूँढें, और मामला वैसे ही खुलेगा जैसा आपने छोड़ा था।",
   "Its conversations and versions are kept on this computer, so nothing is lost while the folder is away.":
     "इसकी बातचीत और संस्करण इसी कंप्यूटर पर रखे हैं, इसलिए फ़ोल्डर के न मिलने तक भी कुछ नहीं खोता।",
+  // UC-858: the moved folder's line between U2-24 and U2-25. Provisional; hi: later
+  "Until you locate it, Clauseo doesn't know where this matter's papers are now, so it can't keep conversations in your other matters out of them.":
+    null,
   "Locate the folder to ask about this matter": "इस मामले के बारे में पूछने के लिए फ़ोल्डर ढूँढें",
   /* ---------- the scratch matter's line ---------- */
   "A matter for quick questions, with no papers of its own.":

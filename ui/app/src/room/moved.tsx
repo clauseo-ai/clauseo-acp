@@ -19,7 +19,8 @@ import { locateRefusalLine } from "./locate-refusal.ts";
 export { LocateWarningHost } from "./locate-warning-host.tsx";
 
 /** The moved folder's line: that it moved, where it was (when the host says, H20's folder_display), that nothing is
- * lost, and Locate folder. A Locate the host refused says why under it (`refused`, locate-refusal.ts), in New matter's
+ * lost, that until it's located Clauseo can't keep conversations out of the papers at their new place (UC-858), and
+ * Locate folder. A Locate the host refused says why under it (`refused`, locate-refusal.ts), in New matter's
  * line for the code: the same primary-tone line (matter-form-error) a refused folder gets there. */
 export function MovedFolder({
   folder,
@@ -48,6 +49,14 @@ export function MovedFolder({
           </Say>
         </p>
       )}
+      <p className="text-small text-quiet">
+        <Say>
+          {mt(
+            lang,
+            "Until you locate it, Clauseo doesn't know where this matter's papers are now, so it can't keep conversations in your other matters out of them.",
+          )}
+        </Say>
+      </p>
       <p className="text-small text-quiet">
         <Say>
           {mt(
