@@ -37,6 +37,9 @@ mod subagents_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) mod tls_roots;
+pub(crate) mod tools;
+#[cfg(test)]
+mod tools_tests;
 
 pub use codex::{GUARD_EXE, codex_guard_program, codex_hook_config};
 
@@ -125,6 +128,39 @@ pub(crate) const CLAUDE_AI_MCP_VAR: &str = "ENABLE_CLAUDEAI_MCP_SERVERS";
 /// where the next writes. Unset, the folder a call's `cd` reaches would carry to the next.
 pub(crate) const CLAUDE_SHELL_FOLDER_VAR: &str = "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR";
 
+/// The Claude Code variable that, set to `1`, keeps its scheduler off: no `CronCreate`,
+/// `CronDelete` or `CronList` tool, and no scheduled task is started (Claude Code 2.1.293 reads
+/// it from the process env). Clauseo has no scheduling, so every Claude launch sets it, in the
+/// adapter's environment, in `claudeCode.options.env` and in the flag settings' `env`
+/// ([`session_meta`], [`claude_launch_vars`]). `ScheduleWakeup` stays offered with it set, so
+/// it is denied by name too (`tools::NOT_OFFERED`).
+pub(crate) const CLAUDE_CRON_OFF_VAR: &str = "CLAUDE_CODE_DISABLE_CRON";
+
+/// The Claude Code variable that, set to `1`, keeps the repository status (branch, user and
+/// recent commits of the folder's or a parent's git repository) out of the conversation's
+/// first message (Claude Code 2.1.293 reads it before the setting [`GIT_STATUS_SETTING`]).
+/// Clauseo works in matter folders, not repositories, so every Claude launch sets both.
+pub(crate) const CLAUDE_GIT_STATUS_OFF_VAR: &str = "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS";
+
+/// The flag setting that does what [`CLAUDE_GIT_STATUS_OFF_VAR`] does, `false` in every Claude
+/// launch's flag settings ([`session_meta`]).
+pub(crate) const GIT_STATUS_SETTING: &str = "includeGitInstructions";
+
+/// The variables every Claude launch sets, each in the adapter's own environment
+/// ([`claude_launch_vars`]), in `claudeCode.options.env` and in the flag settings' `env`
+/// ([`session_meta`]); the limits reader sets the same (`clauseo_limits`' `CLAUDE_FORCED_VARS`).
+pub(crate) const CLAUDE_LAUNCH_VARS: [(&str, &str); 2] =
+    [(CLAUDE_CRON_OFF_VAR, "1"), (CLAUDE_GIT_STATUS_OFF_VAR, "1")];
+
+/// The variables every Claude launch sets in its own environment, over any of the same name
+/// from the settings, the hook or the inherited environment: [`CLAUDE_LAUNCH_VARS`].
+pub(crate) fn claude_launch_vars() -> BTreeMap<OsString, OsString> {
+    CLAUDE_LAUNCH_VARS
+        .iter()
+        .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+        .collect()
+}
+
 /// Who decides which MCP servers a session gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum McpControl {
@@ -168,11 +204,12 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// value at `claudeCode`, `options` or `env` that is not an object is replaced.
 ///
 /// - `claudeCode.options.env.ENABLE_CLAUDEAI_MCP_SERVERS`: `"false"`.
-/// - [`CLAUDE_SHELL_FOLDER_VAR`] `"1"` in `claudeCode.options.env` (claude-agent-acp 0.89.1
-///   spreads it over its own env for the SDK's spawn of Claude Code, `acp-agent.js:7302-7304`)
-///   and, with `keys` (a Claude agent), in `claudeCode.options.settings.env` (flag settings,
-///   over a user's or project's). A hook value at `settings` or its `env` that is not an
-///   object is then replaced.
+/// - [`CLAUDE_SHELL_FOLDER_VAR`] and each of [`CLAUDE_LAUNCH_VARS`], in
+///   `claudeCode.options.env` (claude-agent-acp 0.89.1 spreads it over its own env for the
+///   SDK's spawn of Claude Code, `acp-agent.js:7302-7304`) and, with `keys` (a Claude agent),
+///   in `claudeCode.options.settings.env` (flag settings, over a user's or project's), with
+///   [`GIT_STATUS_SETTING`] `false` beside it. A hook value at `settings` or its `env` that is
+///   not an object is then replaced.
 /// - On Windows, with `keys`: `CLAUDE_CODE_USE_POWERSHELL_TOOL` `"1"` in both of those `env`
 ///   objects, over any hook value, and no `CLAUDE_CODE_GIT_BASH_PATH` (`agent/one_shell.rs`).
 /// - `claudeCode.options.allowDangerouslySkipPermissions`: `false`. claude-agent-acp 0.89.1 then
@@ -215,6 +252,9 @@ pub(crate) fn session_meta(
     env.insert(CLAUDE_AI_MCP_VAR.to_owned(), Value::from("false"));
     env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
     super::one_shell::meta_env(&mut env, keys.is_some() && cfg!(windows));
+    for (name, value) in CLAUDE_LAUNCH_VARS {
+        env.insert(name.to_owned(), Value::from(value));
+    }
     options.insert("env".to_owned(), Value::Object(env));
     options.insert(ALLOW_BYPASS_OPTION.to_owned(), Value::Bool(false));
     let (strict, sources) = match control {
@@ -257,7 +297,11 @@ pub(crate) fn session_meta(
         let mut settings_env = take_object(&mut settings, "env");
         settings_env.insert(CLAUDE_SHELL_FOLDER_VAR.to_owned(), Value::from("1"));
         super::one_shell::meta_env(&mut settings_env, cfg!(windows));
+        for (name, value) in CLAUDE_LAUNCH_VARS {
+            settings_env.insert(name.to_owned(), Value::from(value));
+        }
         settings.insert("env".to_owned(), Value::Object(settings_env));
+        settings.insert(GIT_STATUS_SETTING.to_owned(), Value::Bool(false));
         options.insert("settings".to_owned(), Value::Object(settings));
     }
     claude.insert("options".to_owned(), Value::Object(options));

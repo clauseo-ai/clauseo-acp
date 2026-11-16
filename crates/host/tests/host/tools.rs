@@ -59,6 +59,33 @@ const SEEDED: [&str; 33] = [
 ];
 
 /// The `allowedTools` a Claude session gets with no hook and web search on.
+/// The built-in tools every Claude launch leaves out and denies by name, after the web's two
+/// when web search is off (`agent/loads/tools.rs`).
+const LEFT_OUT: [&str; 12] = [
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "ScheduleWakeup",
+    "EnterWorktree",
+    "ExitWorktree",
+    "Workflow",
+    "DesignSync",
+    "PushNotification",
+    "Monitor",
+    "ListAgents",
+    "ListPeers",
+];
+
+/// Claude's `disallowedTools`: the web's two when web search is off, then [`LEFT_OUT`].
+fn denied(web_search: bool) -> Vec<&'static str> {
+    let web = if web_search {
+        vec![]
+    } else {
+        vec!["WebSearch", "WebFetch"]
+    };
+    web.into_iter().chain(LEFT_OUT).collect()
+}
+
 fn seeded(web_search: bool) -> Vec<String> {
     web_search
         .then(|| "WebSearch".to_owned())
@@ -121,7 +148,7 @@ fn both(
 
 fn off_claude() -> Value {
     json!({"_meta": {"claudeCode": {"options": {
-        "disallowedTools": ["WebSearch", "WebFetch"], "allowedTools": []}}}})
+        "disallowedTools": denied(false), "allowedTools": []}}}})
 }
 
 #[test]
@@ -180,8 +207,9 @@ fn web_search_on_allows_search_and_the_seeded_sites() {
     let dir = Dir::new("tools_search_on", &[]);
     let (config, tools) = both(
         &dir,
-        &json!({"_meta": {"claudeCode": {"options": {"allowedTools": seeded(true)}}}}),
-        &["/_meta/claudeCode/options/disallowedTools"],
+        &json!({"_meta": {"claudeCode": {"options": {
+            "allowedTools": seeded(true), "disallowedTools": denied(true)}}}}),
+        &[],
         &json!({}),
         json!({}),
         |config| config,
@@ -202,9 +230,9 @@ fn a_bedrock_login_shows_no_search() {
             "bedrock",
             "session/new",
             &json!({"_meta": {"claudeCode": {"options": {
-                "allowedTools": seeded(false),
+                "allowedTools": seeded(false), "disallowedTools": denied(true),
                 "settings": {"disableSkillShellExecution": true, "skipWebFetchPreflight": true}}}}}),
-            &["/_meta/claudeCode/options/disallowedTools"],
+            &[],
         ),
     );
     settings(
