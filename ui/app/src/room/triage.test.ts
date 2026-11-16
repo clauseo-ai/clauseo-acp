@@ -106,6 +106,16 @@ test("a turn ended on the lawyer's refusal is no answer ready, as a Stop is not"
     expect(needOf({ status: "idle", seen: false, last_stop: { reason, at: 1 } })).toBe("ready");
 });
 
+test("an idle-stopped thread's answer finished while the lawyer was away is ready, as an idle one's is", () => {
+  // decision 0052: an agent stopped for being idle (idle_stopped) is treated as idle
+  expect(
+    needOf({ status: "idle_stopped", seen: false, last_stop: { reason: "end_turn", at: 1 } }),
+  ).toBe("ready");
+  expect(
+    needOf({ status: "idle_stopped", seen: false, last_stop: { reason: "cancelled", at: 1 } }),
+  ).toBe(null);
+});
+
 test("a matter's row names the thread behind it: the oldest waiting, over an answer ready", () => {
   const m = matter(1, { status: "needs_answer" });
   const ready = thread(1, m, { seen: false, last_stop: { reason: "end_turn", at: NOW } });

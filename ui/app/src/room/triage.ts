@@ -122,7 +122,6 @@ export function needOf(t: {
   const reason = t.last_stop.reason;
   if (reason === "failed") return "failed";
   if (
-    t.status === "idle" &&
     reason !== "at_limit" &&
     reason !== "cancelled" &&
     reason !== "not_allowed" &&

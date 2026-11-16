@@ -36,3 +36,14 @@ test("rowWords for every status, and H6's marks over idle", () => {
     state: "idle",
   });
 });
+
+test("an answer that finished while the lawyer was away stays ready after its agent is stopped for idling", () => {
+  const unseen = (
+    status: ThreadStatus,
+    reason: NonNullable<ConversationRow["last_stop"]>["reason"],
+  ) => rowWords({ status, seen: false, last_stop: { reason, at: 42 } });
+  // decision 0052: an agent stopped for being idle (idle_stopped) is treated as idle
+  expect(unseen("idle_stopped", "end_turn")).toEqual({ state: "ready" });
+  expect(unseen("agent_exited", "end_turn")).toEqual({ state: "ready" });
+  expect(unseen("idle_stopped", "cancelled")).toEqual({ state: "stopped", at: 42 });
+});
