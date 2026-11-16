@@ -96,3 +96,16 @@ fn an_entry_without_always_decodes_with_none_and_a_newer_kind_reads_as_unknown()
         }))
     );
 }
+
+/// Each `AlwaysKind` keeps its wire form, and one from a newer Clauseo reads as `unknown`.
+#[test]
+fn always_kind() {
+    let cases = [
+        (AlwaysKind::Command, "command"),
+        (AlwaysKind::FileEdit, "file_edit"),
+        (AlwaysKind::Site, "site"),
+        (AlwaysKind::Tool, "tool"),
+        (AlwaysKind::Read, "read"),
+    ];
+    crate::unknown_variants::unit_enum(&AlwaysKind::ALL, &cases, AlwaysKind::Unknown);
+}

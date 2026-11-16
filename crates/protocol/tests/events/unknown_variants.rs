@@ -5,11 +5,11 @@
 use std::fmt::Debug;
 
 use clauseo_protocol::{
-    AlwaysKind, CheckpointKind, ContentBlock, Deliverable, Delivery, DetachReason, DomainEvent,
-    ErrorCode, ExpiryReason, HostError, LimitSource, Notice, NoticeKind, NoticeLevel, PackId,
-    PackSkipReason, PermissionAbout, PermissionKind, RawFrom, RawPayload, RenameSource,
-    SkippedFileReason, StaleReason, SteerOutcome, StopReason, TextOrBlob, Timestamp,
-    ToolCallStatus, ToolKind, TurnFailed, UnavailableReason,
+    CheckpointKind, ContentBlock, Deliverable, Delivery, DetachReason, DomainEvent, ErrorCode,
+    ExpiryReason, HostError, LimitSource, Notice, NoticeKind, NoticeLevel, PackId, PackSkipReason,
+    PermissionAbout, PermissionKind, RawFrom, RawPayload, RenameSource, SkippedFileReason,
+    StaleReason, SteerOutcome, StopReason, TextOrBlob, Timestamp, ToolCallStatus, ToolKind,
+    TurnFailed, UnavailableReason,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -109,18 +109,6 @@ fn permission_kind() {
 fn permission_about() {
     let cases = [(PermissionAbout::AgentPlan, "agent_plan")];
     unit_enum(&PermissionAbout::ALL, &cases, PermissionAbout::Unknown);
-}
-
-#[test]
-fn always_kind() {
-    let cases = [
-        (AlwaysKind::Command, "command"),
-        (AlwaysKind::FileEdit, "file_edit"),
-        (AlwaysKind::Site, "site"),
-        (AlwaysKind::Tool, "tool"),
-        (AlwaysKind::Read, "read"),
-    ];
-    unit_enum(&AlwaysKind::ALL, &cases, AlwaysKind::Unknown);
 }
 
 #[test]
