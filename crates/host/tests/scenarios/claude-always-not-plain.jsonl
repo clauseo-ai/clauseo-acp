@@ -1,0 +1,20 @@
+{"scenario":"claude-always-not-plain","description":"Claude asks to run three commands that are not one plain command (an interpreter, a pipe, a redirection) with claude-agent-acp 0.89.1's Bash options: the host forwards each card without its allow-with-updates option, so the lawyer sees only Allow once and Deny","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"auto","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"python draft.py","name":"Bash","kind":"execute","status":"pending","rawInput":{"command":"python draft.py","description":"Run it"}}}}
+{"note":"not plain: no Always on the card","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-1","title":"python draft.py","rawInput":{"command":"python draft.py","description":"Run it"}},"options":[{"optionId":"allow-once","name":"Yes","kind":"allow_once"},{"optionId":"allow-with-updates","name":"Yes, and don't ask again for python draft.py","kind":"allow_always"},{"optionId":"reject","name":"No","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-2","title":"ls | wc -l","name":"Bash","kind":"execute","status":"pending","rawInput":{"command":"ls | wc -l","description":"Run it"}}}}
+{"note":"not plain: no Always on the card","request":{"id":"perm-2","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-2","title":"ls | wc -l","rawInput":{"command":"ls | wc -l","description":"Run it"}},"options":[{"optionId":"allow-once","name":"Yes","kind":"allow_once"},{"optionId":"allow-with-updates","name":"Yes, and don't ask again for ls | wc -l","kind":"allow_always"},{"optionId":"reject","name":"No","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-2","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-2","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-3","title":"cat brief.txt > copy.txt","name":"Bash","kind":"execute","status":"pending","rawInput":{"command":"cat brief.txt > copy.txt","description":"Run it"}}}}
+{"note":"not plain: no Always on the card","request":{"id":"perm-3","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-3","title":"cat brief.txt > copy.txt","rawInput":{"command":"cat brief.txt > copy.txt","description":"Run it"}},"options":[{"optionId":"allow-once","name":"Yes","kind":"allow_once"},{"optionId":"allow-with-updates","name":"Yes, and don't ask again for cat brief.txt > copy.txt","kind":"allow_always"},{"optionId":"reject","name":"No","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-3","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-3","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-p1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

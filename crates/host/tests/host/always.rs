@@ -192,8 +192,12 @@ fn a_rule_outside_the_matter_is_neither_kept_nor_applied() {
         &[(CLAUDE, Scenario::Local("claude-always-fence"))],
     );
     let host = dir.start(0);
-    let files = [("brief.txt", "x\n")];
-    let (matter, thread, folder) = matter_with_thread(&dir, &host, "m", &files, CLAUDE);
+    // Imported by its real path, as the room's folder picker gives it: on macOS the temp folder
+    // is under `/var`, a link to `/private/var`, and the rules are built from the paths the
+    // agent sends, which are under the folder Claude runs in.
+    let folder = dunce::canonicalize(dir.folder("m", &[("brief.txt", "x\n")])).unwrap();
+    let matter = host.create_matter("m", &folder);
+    let thread = host.create_thread(matter, CLAUDE);
     let root = folder.to_str().unwrap();
     let outside = [
         format!("Edit(/{root}-b/a.txt)"),
@@ -357,5 +361,43 @@ fn a_kept_rule_never_passes_the_fence_or_a_swapped_link() {
         "{}",
         events.dump()
     );
+    host.shutdown();
+}
+
+/// A command that is not one plain command (`agent/always/plain.rs`: an interpreter, a pipe, a
+/// redirection) gets a card with no "Always": the host forwards it with only Allow once and
+/// Deny, and keeps nothing.
+#[test]
+fn a_command_that_is_not_plain_offers_only_allow_once_and_deny() {
+    let dir = Dir::new(
+        "always_not_plain",
+        &[(CLAUDE, Scenario::Local("claude-always-not-plain"))],
+    );
+    let host = dir.start(0);
+    let (matter, thread, _folder) =
+        matter_with_thread(&dir, &host, "m", &[("draft.py", "x\n")], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Run the draft.");
+    answer_from(
+        &host,
+        &mut events,
+        thread,
+        0,
+        &["allow-once", "allow-once", "allow-once"],
+    );
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    let once = (
+        ["allow-once", "reject"].map(String::from).to_vec(),
+        Some(("allow-once".to_owned(), PermissionKind::AllowOnce)),
+    );
+    assert_eq!(
+        resolutions(&events),
+        [once.clone(), once.clone(), once],
+        "{}",
+        events.dump()
+    );
+    assert!(!rules_file(&dir, matter).exists(), "nothing was kept");
     host.shutdown();
 }

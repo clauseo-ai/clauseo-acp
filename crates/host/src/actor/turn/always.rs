@@ -5,7 +5,9 @@
 //! - [`ask`]: a request that comes in gets its rule (or why none) and its first `allow_once`
 //!   option, unless it is a plan exit (an `exit-plan-*` option, or the `ExitPlanMode` tool),
 //!   which passes through unchanged. One with an `allow_always` option but no `allow_once` loses
-//!   its `allow_always` options, so none can reach the adapter. A path rule's file goes with the
+//!   its `allow_always` options, so none can reach the adapter, and so does a `Bash` request
+//!   whose command is not one plain command in the matter folder (`always::plain`): its card
+//!   offers only Allow once and Deny. A path rule's file goes with the
 //!   request's matter-thread check ([`real_path`]), which resolves its real path
 //!   (`agent::always::real_within`).
 //! - [`answer`]: the lawyer's `allow_always` answer is logged as chosen, but the agent gets the
@@ -75,6 +77,9 @@ pub(super) struct Always {
     /// The matter folder's spellings as path rules (`always::matter_roots`): a path rule
     /// outside them is neither kept nor applied (`always::within`).
     roots: Vec<String>,
+    /// The matter folder as text, where Claude's commands run: a command's card offers
+    /// "Always" only when it is one plain command there (`always::plain`).
+    folder: Option<String>,
     asked: BTreeMap<PermissionRequestId, AlwaysAsk>,
 }
 
@@ -97,6 +102,7 @@ impl Always {
             file: always::file_beside(&run.notes),
             rules,
             roots: Vec::new(),
+            folder: None,
             asked: BTreeMap::new(),
         }
     }
@@ -106,6 +112,7 @@ impl Always {
     /// never the only thing between a kept rule and what lies outside the matter.
     pub(super) fn in_matter(mut self, folder: &std::path::Path, spellings: &[String]) -> Self {
         let folder = folder.to_str();
+        self.folder = folder.map(str::to_owned);
         let spellings = folder
             .into_iter()
             .chain(spellings.iter().map(String::as_str));
@@ -146,7 +153,9 @@ pub(super) fn ask(
         .iter()
         .find(|option| option.kind == PermissionKind::AllowOnce)
         .and_then(|option| AgentChoiceId::new(&option.option_id).ok());
-    let Some(once) = once else {
+    let folder = agent(actor, thread)?.always.folder.clone();
+    let plain = tool.as_deref() != Some("Bash") || plain_command(raw_input, folder.as_deref());
+    let Some(once) = once.filter(|_| plain) else {
         options.retain(|option| option.kind != PermissionKind::AllowAlways);
         return None;
     };
@@ -155,6 +164,27 @@ pub(super) fn ask(
     });
     let real = None;
     Some(AlwaysAsk { rule, once, real })
+}
+
+/// Whether a `Bash` request's command is one plain command in the matter `folder`
+/// (`always::plain`): no shell or interpreter, chain, pipe, redirection or substitution, and no
+/// argument naming a place outside the matter. Any other one's card offers no "Always": it would
+/// run the same text later whatever the script behind it became. False with no command, or no
+/// folder yet.
+fn plain_command(raw_input: Option<&Value>, folder: Option<&str>) -> bool {
+    use always::plain;
+    let (Some(command), Some(folder)) = (
+        raw_input.and_then(|input| input.get("command")?.as_str()),
+        folder,
+    ) else {
+        return false;
+    };
+    let place = plain::Place {
+        matter: folder,
+        cwd: folder,
+        windows: cfg!(windows),
+    };
+    plain::plain(command, plain::Grammar::Posix, plain::Agent::Claude, place).is_ok()
 }
 
 /// The file whose real path the request's matter-thread check resolves: a path rule's.
