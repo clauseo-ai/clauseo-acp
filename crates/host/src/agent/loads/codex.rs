@@ -3,10 +3,13 @@
 //!
 //! - A command hook has no exec form: `HookHandlerConfig::Command` holds `command`,
 //!   `commandWindows`, `timeout`, `async`, `statusMessage` and `additionalContextLimit`
-//!   (`config/src/hook_config.rs`). `command` runs as `$SHELL -lc <command>` (else `/bin/sh`), and
-//!   on Windows `commandWindows` runs as `%COMSPEC% /C "<command>"` (else `cmd.exe`)
-//!   (`hooks/src/engine/command_runner.rs`, `build_command`, `default_shell_program`). So the
-//!   program is quoted: POSIX single quotes for `command`, double quotes for `commandWindows`.
+//!   (`config/src/hook_config.rs`). The hook runs under the session's own shell, its exec form
+//!   without the last word (`core/src/session/mod.rs:5141-5149, 5164`, the local environment's
+//!   shell): on macOS and Linux the user's `zsh` or `bash` with `-c <command>`, and on Windows
+//!   PowerShell, `powershell.exe -NoProfile -Command <commandWindows>`
+//!   (`shell-command/src/shell_detect.rs:350-353`); `%COMSPEC% /C "<command>"` only when the
+//!   session has no shell (`hooks/src/engine/command_runner.rs:384-409`). So `command` quotes in
+//!   POSIX single quotes, and `commandWindows` is one PowerShell statement ([`ps_command`]).
 //! - The hook passes no `--matter`: Codex's hook input `cwd` is the turn's working folder
 //!   (`core/src/hook_runtime.rs`, `tool_hook_cwd`: the local environment's cwd, else the turn's),
 //!   which a command's `cd` does not move, so the guard takes the matter from it, and the value
@@ -54,17 +57,16 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 /// ```json
 /// {"PreToolUse": [{"matcher": "apply_patch|Write|Edit|Bash", "hooks": [{"type": "command",
 ///   "command": "'<program>' --pre-write-guard --record '<record>' --record-id <hex>",
-///   "commandWindows": "\"<program>\" --pre-write-guard --record \"<record>\" --record-id <hex>",
-///   "timeout": 10}]}],
+///   "commandWindows": "& '<program>' --pre-write-guard --record '<record>' --record-id <hex>;
+///     exit $(…)", "timeout": 10}]}],
 ///  "state": {"/<session-flags>/config.toml:pre_tool_use:0:0": {"trusted_hash": "sha256:…"}}}
 /// ```
 ///
 /// The hash is for the OS this runs on, as Codex computes it on the same machine, so it changes
-/// with the record file, one per session. `None` when `program` is no UTF-8 string, or (Windows)
-/// holds a `"` or `%`, which `cmd.exe` cannot take inside quotes: no hook rather than one that
-/// runs something else. A record file like that, or an identity of anything but hex digits,
-/// goes out of the command alone: the guard still runs, and the lawyer is not told of its
-/// refusals. The codex hooks seam (`actor::turn::agents`,
+/// with the record file, one per session. `None` when `program` is no UTF-8 string: no hook
+/// rather than one that runs something else. A record file with no UTF-8 spelling, or an
+/// identity of anything but hex digits, goes out of the command alone: the guard still runs, and
+/// the lawyer is not told of its refusals. The codex hooks seam (`actor::turn::agents`,
 /// `codex_hooks`) puts it in each Codex launch's `CODEX_CONFIG`.
 ///
 /// [`RECORD_FLAG`]: crate::pre_write_guard::RECORD_FLAG
@@ -78,17 +80,17 @@ pub fn codex_hook_config(program: &Path, record: Option<(&Path, &str)>) -> Optio
         crate::pre_write_guard::RECORD_ID_FLAG,
     );
     let mut command = format!("{} {}", posix_quoted(program), crate::pre_write_guard::FLAG);
-    let mut command_windows = format!(
-        "{} {}",
-        windows_quoted(program)?,
-        crate::pre_write_guard::FLAG
-    );
+    let mut windows = vec![ps_quoted(program), crate::pre_write_guard::FLAG.to_owned()];
     if let Some((file, id)) = record {
         command = format!("{command} {flag} {} {id_flag} {id}", posix_quoted(file));
+        windows.extend([
+            flag.to_owned(),
+            ps_quoted(file),
+            id_flag.to_owned(),
+            id.to_owned(),
+        ]);
     }
-    if let Some((file, id)) = record.and_then(|(file, id)| Some((windows_quoted(file)?, id))) {
-        command_windows = format!("{command_windows} {flag} {file} {id_flag} {id}");
-    }
+    let command_windows = ps_command(&windows);
     let effective = if cfg!(windows) {
         &command_windows
     } else {
@@ -121,10 +123,37 @@ pub(crate) fn posix_quoted(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
-/// `text` in double quotes for `cmd.exe`, or `None` when it holds `"` (no Windows path can) or
-/// `%` (which `cmd` expands even inside quotes).
-fn windows_quoted(text: &str) -> Option<String> {
-    (!text.contains(['"', '%'])).then(|| format!("\"{text}\""))
+/// What the agent reads when the guard could not run or ended with neither of its codes.
+pub(crate) const UNCHECKED: &str = "Clauseo could not check this step, so it did not run.";
+
+/// `words` (the program, then its arguments, each quoted as it must be) as one line of
+/// PowerShell: the call operator runs the program, whose stdin, stdout and stderr are the hook's
+/// own; its exit code 0 (go on) or 2 (refused, the reason on its stderr) ends the hook unchanged.
+/// Any other ending (no program at that path, which leaves `$LASTEXITCODE` unset, a crash, 1, an
+/// NTSTATUS) writes [`UNCHECKED`] to stderr and ends with 2, so Codex blocks the tool with
+/// that line as its reason (`hooks/src/events/pre_tool_use.rs:261-291`).
+pub(crate) fn ps_command(words: &[String]) -> String {
+    format!(
+        "& {}; $c = $LASTEXITCODE; if ($c -eq 0 -or $c -eq 2) {{ exit $c }}; \
+         [Console]::Error.WriteLine({}); exit 2",
+        words.join(" "),
+        ps_quoted(UNCHECKED),
+    )
+}
+
+/// `text` in PowerShell single quotes, each `'` doubled (the typographic quotes PowerShell also
+/// reads as quotes too): nothing inside expands, not `$`, a backtick or `%`.
+pub(crate) fn ps_quoted(text: &str) -> String {
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('\'');
+    for ch in text.chars() {
+        if matches!(ch, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
+            quoted.push(ch);
+        }
+        quoted.push(ch);
+    }
+    quoted.push('\'');
+    quoted
 }
 
 /// The trust hash Codex 0.162.1 computes for a command hook: the identity's JSON, every object's
@@ -163,7 +192,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{codex_hook_config, fingerprint, hook_hash, posix_quoted};
+    use super::{codex_hook_config, fingerprint, hook_hash, posix_quoted, ps_command, ps_quoted};
 
     /// Codex's own test, `config/src/fingerprint_tests.rs` at rust-v0.162.1: the TOML
     /// `rows = [{ z = 2, a = 1 }, { z = 4, a = 3 }]` with `[nested] z = "text"`, `a = true`.
@@ -210,15 +239,14 @@ mod tests {
     #[test]
     fn the_config_runs_the_guard_and_trusts_itself() {
         let config = codex_hook_config(Path::new("/opt/clauseo/clauseo-desktop"), None).unwrap();
+        let windows = ps_command(&[
+            "'/opt/clauseo/clauseo-desktop'".to_owned(),
+            "--pre-write-guard".to_owned(),
+        ]);
         let (key, hash) = if cfg!(windows) {
             (
                 r"C:\<session-flags>\config.toml:pre_tool_use:0:0",
-                hook_hash(
-                    "pre_tool_use",
-                    "apply_patch|Write|Edit|Bash",
-                    "\"/opt/clauseo/clauseo-desktop\" --pre-write-guard",
-                    10,
-                ),
+                hook_hash("pre_tool_use", "apply_patch|Write|Edit|Bash", &windows, 10),
             )
         } else {
             (
@@ -235,7 +263,7 @@ mod tests {
                     "hooks": [{
                         "type": "command",
                         "command": "'/opt/clauseo/clauseo-desktop' --pre-write-guard",
-                        "commandWindows": "\"/opt/clauseo/clauseo-desktop\" --pre-write-guard",
+                        "commandWindows": windows,
                         "timeout": 10,
                     }],
                 }],
@@ -244,19 +272,46 @@ mod tests {
         );
     }
 
+    /// Each path stays one word for its shell; PowerShell's single quotes expand nothing, so a
+    /// `%`, a `$` or a backtick in a Windows path goes in as it is.
     #[test]
-    fn quoting_keeps_the_path_one_word_and_refuses_what_cmd_would_expand() {
+    fn quoting_keeps_the_path_one_word() {
         assert_eq!(posix_quoted("/a b/O'Brien"), r"'/a b/O'\''Brien'");
         assert_eq!(
-            codex_hook_config(Path::new(r"C:\100%\clauseo.exe"), None),
-            None
+            ps_quoted(r"C:\O'Brien $x `y 100%"),
+            r"'C:\O''Brien $x `y 100%'"
+        );
+        assert_eq!(ps_quoted("C:\u{2019}x"), "'C:\u{2019}\u{2019}x'");
+        let config = codex_hook_config(Path::new(r"C:\100%\clauseo.exe"), None).unwrap();
+        assert!(
+            config["PreToolUse"][0]["hooks"][0]["commandWindows"]
+                .as_str()
+                .unwrap()
+                .starts_with(r"& 'C:\100%\clauseo.exe' --pre-write-guard; $c = $LASTEXITCODE;")
         );
     }
 
+    /// The Windows line runs the program with PowerShell's call operator and ends with the
+    /// guard's code when that is 0 or 2, else writes the plain words to stderr and ends with 2
+    /// (run by PowerShell on Windows CI: `codex/windows_tests.rs`).
+    #[test]
+    fn the_windows_line_is_one_powershell_statement_that_blocks_unless_the_guard_answers() {
+        let line = ps_command(&[
+            "'C:\\a b\\clauseo.exe'".to_owned(),
+            "--pre-write-guard".to_owned(),
+        ]);
+        assert_eq!(
+            line,
+            "& 'C:\\a b\\clauseo.exe' --pre-write-guard; $c = $LASTEXITCODE; if ($c -eq 0 -or $c -eq \
+             2) { exit $c }; [Console]::Error.WriteLine('Clauseo could not check this step, so it did \
+             not run.'); exit 2"
+        );
+        assert!(!line.contains('\n'));
+    }
+
     /// The session's record file goes after the flag, quoted for each shell, then its identity,
-    /// and the trust hash is the one Codex computes for that whole command. A record path
-    /// `cmd.exe` cannot take leaves the Windows command without either; an identity of anything
-    /// but hex digits leaves both commands without them.
+    /// and the trust hash is the one Codex computes for that whole command; an identity of
+    /// anything but hex digits leaves both commands without them.
     #[test]
     fn the_record_file_and_its_identity_go_in_the_command_and_its_hash() {
         let program = Path::new("/opt/clauseo/clauseo-desktop");
@@ -268,10 +323,14 @@ mod tests {
             "'/opt/clauseo/clauseo-desktop' --pre-write-guard --record \
              '/data/browser/guard/s 1/guard-blocks.jsonl' --record-id {id}"
         );
-        let windows = format!(
-            "\"/opt/clauseo/clauseo-desktop\" --pre-write-guard --record \
-             \"/data/browser/guard/s 1/guard-blocks.jsonl\" --record-id {id}"
-        );
+        let windows = ps_command(&[
+            "'/opt/clauseo/clauseo-desktop'".to_owned(),
+            "--pre-write-guard".to_owned(),
+            "--record".to_owned(),
+            "'/data/browser/guard/s 1/guard-blocks.jsonl'".to_owned(),
+            "--record-id".to_owned(),
+            id.to_owned(),
+        ]);
         assert_eq!(hook["command"], posix);
         assert_eq!(hook["commandWindows"], windows);
         let effective = if cfg!(windows) { &windows } else { &posix };
@@ -293,9 +352,11 @@ mod tests {
         let odd = Path::new("/data/100%/guard-blocks.jsonl");
         let odd = codex_hook_config(program, Some((odd, id))).unwrap();
         let odd = &odd["PreToolUse"][0]["hooks"][0];
-        assert_eq!(
-            odd["commandWindows"],
-            "\"/opt/clauseo/clauseo-desktop\" --pre-write-guard"
+        assert!(
+            odd["commandWindows"]
+                .as_str()
+                .unwrap()
+                .contains("--record '/data/100%/guard-blocks.jsonl' --record-id")
         );
         assert!(odd["command"].as_str().unwrap().ends_with(&format!(
             "--record '/data/100%/guard-blocks.jsonl' --record-id {id}"
@@ -310,3 +371,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(test, windows))]
+mod windows_tests;

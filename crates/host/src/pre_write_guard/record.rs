@@ -1,5 +1,5 @@
 //! The guard's record of the refusals the lawyer is told about. Codex sends no event for a call
-//! its hook blocked (codex-acp 2.6.0 ignores `hook/completed`), so with [`FLAG`] and a file
+//! its hook blocked (codex-acp 2.2.2 ignores `hook/completed`), so with [`FLAG`] and a file
 //! (Codex's hook passes `<data>/browser/guard/<session>/guard-blocks.jsonl`, [`file`],
 //! `agent/loads/codex.rs`) and [`ID_FLAG`] with its identity, a refusal for a held-open file or
 //! the `.codex` folder is appended to that file as one JSON line, a [`Record`], and the host

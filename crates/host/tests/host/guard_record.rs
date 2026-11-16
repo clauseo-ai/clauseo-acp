@@ -74,9 +74,11 @@ fn codex_from_a_spaced_non_ascii_data_folder_gets_its_record_and_passes_the_trus
     };
     let hook = &config["hooks"]["PreToolUse"][0]["hooks"][0];
     let windows = hook["commandWindows"].as_str().unwrap();
+    // One PowerShell line: the guard by the call operator, its paths in single quotes.
     let (record, id) = windows
-        .strip_prefix(&format!("\"{PROGRAM}\" --pre-write-guard --record \""))
-        .and_then(|rest| rest.split_once("\" --record-id "))
+        .strip_prefix(&format!("& '{PROGRAM}' --pre-write-guard --record '"))
+        .and_then(|rest| rest.split_once("' --record-id "))
+        .and_then(|(record, rest)| Some((record, rest.split_once(';')?.0)))
         .unwrap_or_else(|| panic!("{windows}"));
     let record = PathBuf::from(record);
     let posix = format!(
