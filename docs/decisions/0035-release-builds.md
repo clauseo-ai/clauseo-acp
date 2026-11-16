@@ -261,10 +261,13 @@ a Linux build and `publish` runs on macOS for the stapler, and this way the chec
 environment, no approval and only a read token, and can be re-run alone. A failure there means the
 release is already public: it is the signal to fix or pull it, not a gate before it.
 
-Only a published `v*` release may hold releases/latest: every other `gh release create` in
-`.github/workflows/` passes `--latest=false` (python-runtime's did not, and on 2026-11-16
-releases/latest was `python-runtime-3.13.18-c2`; agent-browser's and a test run's already did), and
-only `publish` passes `--latest`. `latest-json.test.mjs` reads every workflow and fails otherwise.
+Only a published `v*` release may hold releases/latest: every other `gh release create` passes
+`--latest=false`, and only `publish` passes `--latest`. `latest-json.test.mjs` checks stage F's
+release workflows (`release.yml`, `agent-browser-build.yml`). On 2026-11-16 releases/latest was
+`python-runtime-3.13.18-c2`: `python-runtime.yml` (stage D) creates its releases without
+`--latest=false`, which stage D's own change adds; until it lands, a python-runtime release
+published after an app release takes releases/latest, and only the post-publish `latest` job, at
+the next app release, would notice.
 For the same reason `check`'s version bar is the highest published `v<X.Y.Z>` release in the full
 list, never whatever releases/latest names. Until the first `v*` release is published with
 `--latest`, releases/latest stays python-runtime's; no installed copy has the endpoint before R23's
