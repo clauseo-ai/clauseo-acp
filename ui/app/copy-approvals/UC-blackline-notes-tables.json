@@ -96,7 +96,7 @@
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "a header's or footer's heading ({part}, UC-394 to UC-399) with the first section it is on ({n}), only where two headers or footers that changed would otherwise have the same heading; also inside the table line's place (UC-455)"
+    "note": "a header's or footer's heading ({part}, UC-394 to UC-399) with the first section it is on ({n}), only where two headers or footers that changed would otherwise have the same heading; also inside the table line's place (UC-455, in lower case)"
   },
   "UC-451": {
     "en": "A header or footer couldn't be compared, so changes in it aren't shown. Open both versions in Word to see them.",
@@ -143,15 +143,15 @@
     "note": "in the table line (UC-452, UC-453): a table in the document's body, by its number from 1 counting every table in order (TablePlace body)"
   },
   "UC-455": {
-    "en": "{part}, table {n}",
-    "hi": "{part}, तालिका {n}",
+    "en": "table {n} in the {part}",
+    "hi": "{part} में तालिका {n}",
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "blackline-notes-tables (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "in the table line: a table in a header or footer, after that part's heading ({part}, UC-394 to UC-399, with UC-450 where needed), e.g. 'Header (first page), table 1'"
+    "note": "in the table line: a table in a header or footer, in the footnotes' form so it can't be read as a body table; {part} is that part's heading (UC-394 to UC-399, with UC-450 where needed) set in lower case in English, e.g. 'table 1 in the header (first page)'. Reworded after review round 2 (was '{part}, table {n}', which in a list read like a body table)"
   },
   "UC-456": {
     "en": "table {n} in the footnotes",

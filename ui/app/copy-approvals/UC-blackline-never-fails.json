@@ -99,15 +99,15 @@
     "note": "blackline.format_unknown: stetdoc's view is in a format other than stet 1; no Try again"
   },
   "UC-368": {
-    "en": "Some changes are outside what's shown here, such as in comments. Open both versions in Word to see them.",
-    "hi": "कुछ बदलाव यहाँ दिखाए गए हिस्से के बाहर हैं, जैसे टिप्पणियों में। इन्हें देखने के लिए दोनों संस्करण Word में खोलें।",
+    "en": "Some changes are outside what's shown here, such as in a footnote or header that couldn't be shown. Open both versions in Word to see them.",
+    "hi": "कुछ बदलाव यहाँ दिखाए गए हिस्से के बाहर हैं, जैसे किसी ऐसे फ़ुटनोट या हेडर में जिसे दिखाया नहीं जा सका। इन्हें देखने के लिए दोनों संस्करण Word में खोलें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-16",
     "hi_by": "blackline-notes-tables (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-16",
     "by": "blackline-notes-tables (en provisional, for the orchestrator)",
-    "note": "over the blackline sheet when stetdoc lists or counts more tracked changes than the sheet shows in the body and the parts: they are in comments, or in a footnote, endnote, header or footer whose view failed (BlacklineNotice changes_outside_text). Reworded by blackline PR 2 (was '…such as in headers or footnotes. They aren't shown here.'): the sheet now shows changed notes, headers and footers after the body, so the old sentence was untrue"
+    "note": "over the blackline sheet when stetdoc lists or counts more tracked changes than the sheet shows in the body and the parts: in practice a footnote, endnote, header or footer whose view failed or whose opening line couldn't be read, or a summary count above what is shown; compare marks no tracked change in comments, so they aren't the example (BlacklineNotice changes_outside_text). Reworded by blackline PR 2: first from '…such as in headers or footnotes. They aren't shown here.' (the sheet now shows changed notes, headers and footers), then, after review round 2, from '…such as in comments.', the one case that doesn't happen"
   },
   "UC-369": {
     "en": "This part couldn't be shown.",

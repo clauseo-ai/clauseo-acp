@@ -10,7 +10,13 @@ import { markedDiffs } from "@clauseo/components/clauseo/versions-diff.ts";
 import { useVersionWords } from "@clauseo/components/lib/words-versions.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { keyOf, type Blacklines, type MarkAsk } from "./blackline.ts";
-import { linkLine, markFailedLine, noticeLine, partHeadings, tablesLine } from "./words.ts";
+import {
+  linkLine,
+  markFailedLine,
+  noticeLine,
+  partHeadings,
+  tablesLine,
+} from "./blackline-words.ts";
 
 export function MarkedDesk({
   blacklines: b,
@@ -93,7 +99,7 @@ export function MarkedDesk({
           key={n}
           text={
             n === "cell_format_changed"
-              ? tablesLine(w.lang, mark.changedTables, mark.parts)
+              ? tablesLine(w.lang, mark.changedTables, mark.parts, mark.changedTablesTotal)
               : noticeLine(w.lang, n)
           }
         />

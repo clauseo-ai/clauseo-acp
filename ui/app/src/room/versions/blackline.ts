@@ -35,8 +35,10 @@ export type Mark =
       changedLinks: readonly string[];
       /** The footnotes, endnotes, headers and footers that hold a change, in the host's order, shown after the body. */
       parts: readonly BlacklinePart[];
-      /** The tables whose formatting changed, which the table notice names. */
+      /** The tables whose formatting changed, which the table notice names: the first ones only, past the host's cap. */
       changedTables: readonly ChangedTable[];
+      /** How many tables' formatting changed in all, named or not; changedTables' length when the host doesn't say. */
+      changedTablesTotal: number;
     }
   | { kind: "failed"; code: string; retryable: boolean };
 
@@ -117,6 +119,7 @@ export class Blacklines {
           changed_links = [],
           parts = [],
           changed_tables = [],
+          changed_tables_total,
         } = r.word_blackline;
         this.#set(key, {
           kind: "shown",
@@ -126,6 +129,7 @@ export class Blacklines {
           changedLinks: changed_links,
           parts,
           changedTables: changed_tables,
+          changedTablesTotal: changed_tables_total ?? changed_tables.length,
         });
       } else this.#failed(key, "internal", false);
     } catch (e) {

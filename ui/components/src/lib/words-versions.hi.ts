@@ -97,8 +97,8 @@ const OWN = {
   "Some numbers here may not match the ones Word shows.":
     "यहाँ कुछ संख्याएँ Word में दिखने वाली संख्याओं से अलग हो सकती हैं।",
   "Some of this may look different in Word.": "इसका कुछ हिस्सा Word में अलग दिख सकता है।",
-  "Some changes are outside what's shown here, such as in comments. Open both versions in Word to see them.":
-    "कुछ बदलाव यहाँ दिखाए गए हिस्से के बाहर हैं, जैसे टिप्पणियों में। इन्हें देखने के लिए दोनों संस्करण Word में खोलें।",
+  "Some changes are outside what's shown here, such as in a footnote or header that couldn't be shown. Open both versions in Word to see them.":
+    "कुछ बदलाव यहाँ दिखाए गए हिस्से के बाहर हैं, जैसे किसी ऐसे फ़ुटनोट या हेडर में जिसे दिखाया नहीं जा सका। इन्हें देखने के लिए दोनों संस्करण Word में खोलें।",
   "A header or footer couldn't be compared, so changes in it aren't shown. Open both versions in Word to see them.":
     "एक हेडर या फ़ुटर की तुलना नहीं की जा सकी, इसलिए उसके बदलाव यहाँ नहीं दिखाए गए हैं। इन्हें देखने के लिए दोनों संस्करण Word में खोलें।",
   // what changed that the marked-up document doesn't mark: a link's web address, a comment's or a text box's text,
@@ -115,7 +115,7 @@ const OWN = {
   "Formatting changed in {tables}.": "{tables} में फ़ॉर्मैटिंग बदल गई है।",
   "Formatting changed in {tables} and {n} more.": "{tables} और {n} अन्य में फ़ॉर्मैटिंग बदल गई है।",
   "table {n}": "तालिका {n}",
-  "{part}, table {n}": "{part}, तालिका {n}",
+  "table {n} in the {part}": "{part} में तालिका {n}",
   "table {n} in the footnotes": "फ़ुटनोट में तालिका {n}",
   "table {n} in the endnotes": "एंडनोट में तालिका {n}",
   borders: "बॉर्डर",

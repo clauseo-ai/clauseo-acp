@@ -42,7 +42,7 @@ const NOTICES: [string, BlacklineNotice, VersionKey][] = [
   [
     "UC-368",
     "changes_outside_text",
-    "Some changes are outside what's shown here, such as in comments. Open both versions in Word to see them.",
+    "Some changes are outside what's shown here, such as in a footnote or header that couldn't be shown. Open both versions in Word to see them.",
   ],
   [
     "UC-451",
@@ -147,7 +147,7 @@ const TABLES: [string, VersionKey, ChangedTable[]][] = [
   ["UC-452", "Formatting changed in {tables}.", FOUR_TABLES],
   ["UC-453", "Formatting changed in {tables} and {n} more.", SIX_TABLES],
   ["UC-454", "table {n}", ONE_TABLE],
-  ["UC-455", "{part}, table {n}", FOUR_TABLES],
+  ["UC-455", "table {n} in the {part}", FOUR_TABLES],
   ["UC-456", "table {n} in the footnotes", FOUR_TABLES],
   ["UC-457", "table {n} in the endnotes", FOUR_TABLES],
   ["UC-458", "borders", ONE_TABLE],
