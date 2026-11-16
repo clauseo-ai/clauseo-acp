@@ -84,8 +84,9 @@ async fn checks(
 
 /// [`prepare`] ended well: a Claude mode switch is read back (`claude_mode::prepared`, before
 /// the picks may drop held updates; a refused one ends the launch here), the picks' outcome
-/// (`picks::after`), then the attach; or first another round of [`prepare`] with only the picks made meanwhile
-/// (`picks::late`), so the first prompt, which waits for the attach, runs with them.
+/// (`picks::after`), then the attach; or first another round of [`prepare`] with only the picks
+/// made meanwhile (`picks::late`), so the first prompt, which waits for the attach, runs with
+/// them.
 pub(crate) fn on_prepared(
     actor: &mut Actor,
     thread: ThreadId,

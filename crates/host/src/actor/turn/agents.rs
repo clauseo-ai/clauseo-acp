@@ -130,8 +130,7 @@ pub(super) struct Agent {
     /// A Claude agent's home, its `CLAUDE_CONFIG_DIR`, whose transcripts confirm a steer
     /// (`queue/confirm.rs`); `None` for any other agent.
     pub(super) claude_home: Option<PathBuf>,
-    /// Whether a Claude agent's launch found an admin policy tier with content, or the firm's
-    /// server-managed settings (`profile_loads/policy.rs` `admin`); `Present` until then.
+    /// Whether its launch found a policy tier with content (`policy::admin`); `Present` until then.
     pub(super) admin_tier: super::profile_loads::policy::AdminTier,
     /// The MCP servers Clauseo itself sent this session that may run unasked
     /// (`agent/mcp_trust.rs`), filled by `profile_loads::session_loads`: the lawyer's trusted
