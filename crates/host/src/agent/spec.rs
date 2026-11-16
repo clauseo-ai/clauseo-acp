@@ -204,7 +204,8 @@ pub(crate) const DROPPED_INHERITED: [&str; 2] = ["NO_BROWSER", "CLAUDE_CODE_REMO
 /// `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` loads more `CLAUDE.md`, `CLAUDE_CONFIG_DIR`
 /// picks the user settings, `CLAUDE_CODE_USE_COWORK_PLUGINS` the other user file, and
 /// `ANTHROPIC_*` the service and key. What a launch needs of them Clauseo sets itself, and so
-/// they never come from here: the forced ones (`CLAUDE_CONFIG_DIR`, `agent::home`;
+/// they never come from here, but for the firm's routing ([`ROUTING_KEPT`]): the forced ones
+/// (`CLAUDE_CONFIG_DIR`, `agent::home`;
 /// `CLAUDE_CODE_TMPDIR`, `agent::temp`; `CLAUDE_CODE_SHELL`, `agent::shell_path`), the
 /// sign-in's in the agent's settings entry (`ANTHROPIC_API_KEY` empty, `CLAUDE_CONFIG_DIR`,
 /// `CLAUDE_SECURESTORAGE_CONFIG_DIR`) and the profile hook's (the stored key, the firm plan's
@@ -216,17 +217,22 @@ pub(crate) const DROPPED_INHERITED: [&str; 2] = ["NO_BROWSER", "CLAUDE_CODE_REMO
 /// [`CLAUDE_SHELL_FOLDER_VAR`]: crate::agent::loads::CLAUDE_SHELL_FOLDER_VAR
 pub(crate) const SCRUBBED_PREFIXES: [&str; 2] = ["CLAUDE_", "ANTHROPIC_"];
 
+mod routing;
+pub(crate) use routing::ROUTING_KEPT;
+
 /// The inherited variables outside [`SCRUBBED_PREFIXES`] that loosen Claude Code: `IS_SANDBOX=1`
 /// lets it run as root in bypass and cancels a policy's `disableNoSandbox` (2.1.293).
 pub(crate) const SCRUBBED: [&str; 1] = ["IS_SANDBOX"];
 
 /// Whether an inherited `name` stays out of every agent's environment: it has a prefix in
-/// [`DROPPED_INHERITED_PREFIXES`] or [`SCRUBBED_PREFIXES`], or is in [`DROPPED_INHERITED`] or
-/// [`SCRUBBED`], ignoring ASCII case (Windows does; on Unix a lowercase one dropped costs
-/// nothing).
+/// [`DROPPED_INHERITED_PREFIXES`], or one in [`SCRUBBED_PREFIXES`] and is not in
+/// [`ROUTING_KEPT`], or is in [`DROPPED_INHERITED`] or [`SCRUBBED`], ignoring ASCII case
+/// (Windows does; on Unix a lowercase one dropped costs nothing).
 pub(crate) fn is_dropped_inherited(name: &OsStr) -> bool {
     let bytes = name.as_encoded_bytes();
-    let prefixes = DROPPED_INHERITED_PREFIXES.iter().chain(&SCRUBBED_PREFIXES);
+    let routing = ROUTING_KEPT.iter().any(|kept| same(OsStr::new(kept), name));
+    let scrubbed = SCRUBBED_PREFIXES.iter().filter(|_| !routing);
+    let prefixes = DROPPED_INHERITED_PREFIXES.iter().chain(scrubbed);
     prefixes.into_iter().any(|prefix| {
         bytes
             .get(..prefix.len())

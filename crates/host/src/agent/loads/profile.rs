@@ -35,7 +35,7 @@
 //! JSON, and a folder whose name holds a token stays literal.
 
 use std::collections::BTreeMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::path::Path;
 
 use clauseo_profile::placeholders::{
@@ -86,9 +86,7 @@ impl Login {
     }
 
     /// The merged launch env's view for [`Login::from_env`]: `hook`, then `settings`, then
-    /// `inherited` for a name the launch keeps from it (none of [`CLOUD_LOGIN_VARS`]: every
-    /// inherited `CLAUDE_*` is dropped, `agent::spec::SCRUBBED_PREFIXES`), each name matched
-    /// ignoring ASCII case.
+    /// `inherited`, each name matched ignoring ASCII case.
     pub(crate) fn of(
         hook: &BTreeMap<OsString, OsString>,
         settings: &BTreeMap<String, String>,
@@ -104,10 +102,7 @@ impl Login {
                         .find(|(key, _)| key.eq_ignore_ascii_case(name))
                         .map(|(_, value)| OsString::from(value))
                 })
-                .or_else(|| {
-                    let dropped = crate::agent::spec::is_dropped_inherited(OsStr::new(name));
-                    inherited(name).filter(|_| !dropped)
-                })
+                .or_else(|| inherited(name))
         })
     }
 }
