@@ -52,12 +52,18 @@ fn until_pending(
     seen[n - 1]
 }
 
-/// `permission-kinds` asks four times and expects allow-once, allow-always, reject-once and
-/// reject-always, in that order; it stops on any other answer, so its closing text shows the
-/// bridge sent exactly those.
+/// `permission-kinds-once` (a scenario file of this crate) asks four times, each offering all
+/// four kinds, and expects allow-once, allow-once, reject-once and reject-always, in that order:
+/// the host drops the agent's own allow-always from every card (decision record 0063), so it is
+/// refused as not offered, before any confirm. It stops on any other answer, so its closing text
+/// shows the bridge sent exactly those.
 #[test]
-fn answer_permission_checks_the_option_and_confirms_always_allow() {
-    let scratch = Scratch::with_fake_agent("answer-permission", "permission-kinds");
+fn answer_permission_checks_the_option_and_refuses_the_agents_always() {
+    let scenario = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/scenarios/permission-kinds-once.jsonl"
+    );
+    let scratch = Scratch::with_fake_agent("answer-permission", scenario);
     let host = scratch.start(Vec::new());
     let thread = host.thread();
     let bridge = host.bridge();
@@ -86,17 +92,16 @@ fn answer_permission_checks_the_option_and_confirms_always_allow() {
     );
     answer(&Answers(None), first, "allow-once").unwrap();
 
-    // Always allow, declined in the confirm: refused, and the request is still pending.
+    // The agent's own always allow is not on the card: refused, unasked, still pending.
     let second = until_pending(&messages, &mut seen, 2);
-    let refusal = answer(&Answers(Some(false)), second, "allow-always").unwrap_err();
+    let refusal = answer(&Answers(None), second, "allow-always").unwrap_err();
     assert_eq!(
         refusal.code(),
-        ErrorCode::TransportUnauthorized,
+        ErrorCode::PermissionUnknownOption,
         "{refusal:?}"
     );
     block_on(bridge.pending_permission(thread, second)).unwrap();
-    // Accepted: sent.
-    answer(&Answers(Some(true)), second, "allow-always").unwrap();
+    answer(&Answers(None), second, "allow-once").unwrap();
     let refusal = block_on(bridge.pending_permission(thread, second)).unwrap_err();
     assert_eq!(
         refusal.code(),

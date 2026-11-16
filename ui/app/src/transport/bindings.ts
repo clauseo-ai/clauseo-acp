@@ -418,7 +418,7 @@ export type AllowedSite = {
 
 /**  What "Always for this matter" would keep from a permission request (decision 0063). */
 export type AlwaysKind = 
-/**  One exact command (and, for ChatGPT, its working folder). */
+/**  One exact command (and, for Codex, its working folder). */
 "command" | 
 /**  Changes to any file inside the matter folder. */
 "file_edit" | 
@@ -3341,7 +3341,7 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key 
 /**  What a kept rule allows. */
 export type KeptKind = 
 /**
- *  Running one exact command (`Bash`, `PowerShell`, or ChatGPT's `Run`); the subject is the
+ *  Running one exact command (`Bash`, `PowerShell`, or Codex's `Run`); the subject is the
  *  command.
  */
 "run" | 
@@ -3372,7 +3372,7 @@ export type KeptPermission = {
 	/**  The MCP server, for `Tool`; left out for every other kind. */
 	server?: string,
 	/**
-	 *  For a kept ChatGPT command: the working folder relative to the matter folder, `/`-separated;
+	 *  For a kept Codex command: the working folder relative to the matter folder, `/`-separated;
 	 *  none when it runs in the matter folder itself, and for every other kind.
 	 */
 	cwd?: string,

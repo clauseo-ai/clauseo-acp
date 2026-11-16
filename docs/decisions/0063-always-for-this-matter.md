@@ -160,8 +160,8 @@ in the same words):
 
 | Id | Agent | Words |
 |---|---|---|
-| UC-831 | Claude | Always allow Claude to save new files in {folder} in this matter. |
-| UC-833 | ChatGPT | Always allow ChatGPT to save and change files in {folder} in this matter. |
+| UC-831 | Claude | Always allow Claude to save new files in {folder} and its subfolders in this matter. |
+| UC-833 | ChatGPT | Always allow ChatGPT to create, change and delete files in {folder} and its subfolders in this matter. |
 
 The folder grant (for that work): codex-acp's writable roots are the session's
 `additionalDirectories`, fixed at `session/new`, `load` and `resume`. At launch the matter's
@@ -169,6 +169,32 @@ The folder grant (for that work): codex-acp's writable roots are the session's
 skipping any folder under a deny; mid-conversation only through a re-sent `session/resume`
 between turns, after a spike. Codex has no create-only mode, and Windows unelevated refuses
 deny-read policies, so a granted folder is read and write for Codex.
+
+Spike (stage B, `bspike-result.md`): a between-turns `session/resume` with the folder added to
+`additionalDirectories` works in process (about 0.05 s), and plain writes then run inside the
+sandbox with no card. The grant answers the card allow-once and is applied when the turn ends,
+never while a card is open (that raises a duplicate card). A re-resume resets codex-acp's
+in-session mode and token counters, so Clauseo's mode is applied again after it. codex-acp marks
+an added folder a trusted project, so a `.codex/` inside it would load (config, hooks, rules): a
+Codex `folder_save` grant is refused for a folder that holds `.codex`, checked again at each
+launch and re-resume.
+
+Trust probe (stage B, `trustprobe-result.md`): a Codex `folder_save` grant is also refused when
+the folder is an ancestor of the matter (`.codex` there loads on a fresh `session/new` or `load`,
+or after a crash recovery) or holds `.agents/skills` (loaded at once, with no trust,
+process-wide). The check runs at grant, at each launch and re-resume, and per prompt, in one
+function shared with PR 2's `.codex` check (today's `refuse_codex_folder` checks only
+`<matter>/.codex`). After every re-resume the session mode is applied again (it reverts to the
+launch mode: read-only would become workspace-write), with a test that the next turn has the same
+mode and denies plus only the folder. `sandbox_mode` stays out of `home_config()`, pinned by a
+test; otherwise Codex writes `[projects.<git root>] trusted` into the home `config.toml`. The
+counter reset is harmless for the UI.
+
+Orchestrator decisions for that work: the refusal is a plain sentence (words proposed on the
+wording page); a `.codex`, `.agents/skills` or ancestor case that appears later withdraws the
+grant. The test after a re-resume fails on any widening: mode, approval policy, writable roots
+other than the one granted, or network. If the mode cannot be applied again, the conversation
+stops with a sentence and never goes on in the wider mode.
 
 ### What still asks every time
 

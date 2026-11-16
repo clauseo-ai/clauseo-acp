@@ -10,10 +10,11 @@
 //! - `mcp__case-law__check_citations`
 //! - `mcp__case-law__account`
 //!
-//! These are `agent/loads/case_law.rs` [`UNASKED_TOOLS`](crate::agent::loads::case_law::UNASKED_TOOLS),
-//! the tools a Claude session outside forced ask pre-allows. `recharge`, which opens a payment for
-//! a credit pack, and any other tool of the server still ask, as does anything else that spends
-//! money or credits beyond the relay's own turn and day caps. Clauseo has no other bundled tool on
+//! These are `agent/loads/case_law.rs`
+//! [`UNASKED_TOOLS`](crate::agent::loads::case_law::UNASKED_TOOLS), the tools a Claude session
+//! outside forced ask pre-allows. `recharge`, which opens a payment for a credit pack, and any
+//! other tool of the server still ask, as does anything else that spends money or credits
+//! beyond the relay's own turn and day caps. Clauseo has no other bundled tool on
 //! this tree that a forced-ask Claude session asks about: its document tools are no MCP server,
 //! and Claude has no browser on any OS (`clauseo_profile::servers::no_browser`); a browser entry
 //! for Claude would join here keyed on the host's own record of sending it, never on its name.

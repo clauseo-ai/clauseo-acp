@@ -547,6 +547,12 @@ pub(crate) fn real_within(requested: &Path, folder: &Path, windows: bool) -> boo
     !rest.is_empty() && rest.iter().all(|name| !own_folder(name))
 }
 
+/// Whether every one of `files` is inside `folder` by its real path ([`real_within`]); none
+/// when there are none. File system calls: off the actor.
+pub(crate) fn all_within(files: &[PathBuf], folder: &Path, windows: bool) -> Option<bool> {
+    (!files.is_empty()).then(|| files.iter().all(|file| real_within(file, folder, windows)))
+}
+
 /// A file name as the system opens it, for comparing: on Windows lower case and without its
 /// trailing dots and spaces.
 fn name_as_opened(name: &str, windows: bool) -> String {

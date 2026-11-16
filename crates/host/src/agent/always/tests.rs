@@ -524,6 +524,15 @@ fn a_link_swapped_into_the_matter_is_outside() {
     crate::write::remove_file(&matter.join("work")).unwrap();
     crate::write::symlink(&matter.join(".claude"), &matter.join("work")).unwrap();
     assert!(!real_within(&file, &matter, false));
+    // A file inside the matter that is a link to a file outside it: its real path is outside,
+    // so the matter-wide `Edit(*)` never covers it, nor a new file under a linked folder.
+    let outside = other.join("plist.txt");
+    crate::write::write_file(&outside, b"x").unwrap();
+    crate::write::symlink(&outside, &matter.join("linked.txt")).unwrap();
+    assert!(!real_within(&matter.join("linked.txt"), &matter, false));
+    crate::write::symlink(&other, &matter.join("x")).unwrap();
+    assert!(!real_within(&matter.join("x/new.plist"), &matter, false));
+    assert!(super::needs_real(super::EDIT_ALL));
 }
 
 /// A file this host cannot take is never written over: the next write sets it aside as

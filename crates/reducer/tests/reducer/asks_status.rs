@@ -2,7 +2,8 @@
 //! an expired question settles like an answered one, a turn starts as `NeedsYou` while one
 //! waits, a restored state still counts the questions that wait, and the end of an earlier
 //! prompt's turn leaves the `Starting` of a later one. A request refused because a program holds
-//! the file open keeps the file in its settled state. A request's `about` and `always` reach its entry.
+//! the file open keeps the file in its settled state. A request's `about` and `always` reach its
+//! entry.
 
 use clauseo_protocol::{
     AlwaysKind, AlwaysOffer, DomainEvent, ElicitationExpired, ElicitationOutcome,

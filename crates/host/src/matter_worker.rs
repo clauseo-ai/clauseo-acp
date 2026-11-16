@@ -19,7 +19,7 @@ use clauseo_protocol::{
     CheckpointId, FileChange, FolderSupportKind, MatterId, MatterPath, RestoreRequest,
 };
 
-use crate::agent::always::real_within;
+use crate::agent::always::all_within;
 use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
 use crate::agent::folder_support::CheckSource;
 use crate::clock::Clock;
@@ -185,9 +185,8 @@ pub(crate) enum MatterJob {
     },
     /// The first of `paths` (as the agent named them: absolute, or relative to `folder`) in
     /// `folder` that Word or another program holds open (`clauseo_matters::held_open_at`), after
-    /// the `fence` check (`agent/data_fence.rs`); and whether every file of `real`, a kept
-    /// rule's files, is inside `folder` by its real path (`agent::always::real_within`), none
-    /// when `real` is empty. Needs no open matter.
+    /// the `fence` check (`agent/data_fence.rs`); and whether all of `real` (a kept rule's
+    /// files; none when empty) are inside `folder` by real path. Needs no open matter.
     HeldOpen {
         folder: PathBuf,
         paths: Vec<PathBuf>,
@@ -518,10 +517,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             fence,
             real,
         } => {
-            let inside = (!real.is_empty()).then(|| {
-                real.iter()
-                    .all(|real| real_within(real, &folder, cfg!(windows)))
-            });
+            let inside = all_within(&real, &folder, cfg!(windows));
             MatterReply::HeldOpen(check_paths(&folder, paths, fence.as_deref()), inside)
         }
         MatterJob::ListPapers { limit } => {
