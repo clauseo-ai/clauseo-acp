@@ -6,15 +6,20 @@
 //! list's. A name the launch sets itself (the stored key, a firm plan's endpoint) still wins over
 //! the inherited one.
 //!
+//! Two decisions (the orchestrator, 2026-11-16), for one reason: the scrub never changes where
+//! a lawyer's matters go, or under which account, compared with main.
+//! - The model ids stay: on Bedrock and Vertex they are part of the route (an ARN or a
+//!   project/location path), and a model that can't run auto mode is refused already
+//!   (`actor/turn/model_switch.rs`; at launch, the auto-unavailable notice).
+//! - `CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` stay: dropping them would
+//!   silently replace a firm's account with the lawyer's personal sign-in.
+//!
 //! Exact names only, never a prefix or pattern: a name Claude Code adds later stays dropped
 //! until someone reviews it and adds it here. Each comes from the pinned CLI, Claude Code
 //! 2.1.293 (`@anthropic-ai/claude-agent-sdk-linux-x64/claude`, decimal byte offsets), read
 //! statically (`hostfu/b4l-launchweak-routing.md`); re-check at each bump.
 //!
 //! Left out on purpose, so they stay dropped:
-//! - `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_OAUTH_REFRESH_TOKEN`: a claude.ai account's token,
-//!   not a firm's route; inherited, it would swap the lawyer's own sign-in for whatever account
-//!   set it.
 //! - `CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`, `CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR`,
 //!   `CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR`: a descriptor number, and the agent gets only
 //!   its three standard streams from Clauseo, so the descriptor never reaches it.
@@ -32,7 +37,7 @@
 //! `AWS_BEARER_TOKEN_BEDROCK`, `AWS_ENDPOINT_URL*`, `HTTPS_PROXY`, `NODE_EXTRA_CA_CERTS`.
 
 /// The routing names that pass the scrub, grouped as the CLI groups them.
-pub(crate) const ROUTING_KEPT: [&str; 56] = [
+pub(crate) const ROUTING_KEPT: [&str; 58] = [
     // The provider (the provider list @205034126, its map @204797294).
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
@@ -71,6 +76,10 @@ pub(crate) const ROUTING_KEPT: [&str; 56] = [
     "ANTHROPIC_FOUNDRY_AUTH_TOKEN",
     "ANTHROPIC_AWS_API_KEY",
     "ANTHROPIC_CUSTOM_HEADERS",
+    // The account's own token for Anthropic (the credential list @205039200) and its refresh
+    // token (the auth names @204597800, the remote-settings list @205331559).
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
     // A gateway's own cloud auth skipped (@211328516, @206789764).
     "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
     "CLAUDE_CODE_SKIP_VERTEX_AUTH",

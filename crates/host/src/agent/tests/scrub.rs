@@ -171,8 +171,6 @@ fn only_the_listed_routing_names_pass_and_every_other_prefixed_name_drops() {
     // Names Claude Code 2.1.293 reads that are not routing, names left out on purpose
     // (`agent/spec/routing.rs`), and near-misses of listed names: none passes on a pattern.
     for name in [
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
         "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
         "CLAUDE_CODE_HOST_CREDS_FILE",
         "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
@@ -202,14 +200,15 @@ fn only_the_listed_routing_names_pass_and_every_other_prefixed_name_drops() {
 }
 
 /// The table in #1167's description: where a launch's routing points, for an inherited endpoint
-/// with a token, one without, a firm plan's endpoint, and none. Each row is what main sends:
-/// main drops no `ANTHROPIC_*` or `CLAUDE_*` name (it drops `GIT_`/`SSH_`, `NO_BROWSER` and
-/// `CLAUDE_CODE_REMOTE` only), and the hook's names win over inherited ones.
+/// with a token, one without, a firm plan's endpoint, none, and an inherited account token. Each
+/// row is what main sends: main drops no `ANTHROPIC_*` or `CLAUDE_*` name (it drops
+/// `GIT_`/`SSH_`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE` only), and the hook's names win over
+/// inherited ones.
 #[test]
 fn routing_points_where_it_did_before_the_scrub() {
     use crate::agent::spec::ROUTING_KEPT;
     type Pairs<'a> = &'a [(&'a str, &'a str)];
-    let rows: [(&str, Pairs<'_>, Pairs<'_>, Pairs<'_>); 4] = [
+    let rows: [(&str, Pairs<'_>, Pairs<'_>, Pairs<'_>); 5] = [
         (
             "an inherited endpoint with its token",
             &[
@@ -241,6 +240,18 @@ fn routing_points_where_it_did_before_the_scrub() {
             ],
         ),
         ("none", &[], &[], &[]),
+        (
+            "an inherited account token: the same account as main",
+            &[
+                ("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-firm"),
+                ("CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "rt-firm"),
+            ],
+            &[],
+            &[
+                ("CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "rt-firm"),
+                ("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-firm"),
+            ],
+        ),
     ];
     for (row, inherited, hook, expected) in rows {
         let agent = AgentLaunch {
