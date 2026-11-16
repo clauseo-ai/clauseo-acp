@@ -989,8 +989,8 @@ jobs:
       # helpers are signed before the bundler runs and the bundler's own APPLE_CERTIFICATE import
       # lives only as long as its process; the bundler then finds APPLE_SIGNING_IDENTITY in the
       # search list and signs the externalBin sidecars, the main binary and the .app with it
-      # (--options runtime, macos/app.entitlements.plist, codesign's secure timestamp for a
-      # Developer ID), notarises the .app with the API key (APPLE_API_KEY, APPLE_API_ISSUER and
+      # (--options runtime, macos/app.entitlements.plist, and --timestamp through the codesign
+      # wrapper below, which fails a signature without one before anything is notarised), notarises the .app with the API key (APPLE_API_KEY, APPLE_API_ISSUER and
       # APPLE_API_KEY_PATH, the .p8 written here), prints the notary log if it is refused, and
       # staples it; the DMG and the updater archive hold the stapled .app. The bundler never
       # notarises the DMG, so this step does, staples and validates it, and prints the notary log
@@ -1044,6 +1044,36 @@ jobs:
             APPLE_API_KEY_PATH=$apple/AuthKey_$APPLE_API_KEY.p8
             printf '%s\n' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY_PATH"
             export APPLE_API_KEY_PATH
+            # The bundler's codesign (tauri-macos-sign 2.4.1) passes no --timestamp and has no
+            # setting for it, and codesign's default timestamps "some but not all" signatures. It
+            # runs `codesign` from PATH, so this one, first in PATH, adds --timestamp to every
+            # signing and fails, before the bundler notarises, if the result has no secure
+            # timestamp (a Timestamp= line; an untimestamped signature shows Signed Time=).
+            mkdir "$apple/bin"
+            cat > "$apple/bin/codesign" << 'CODESIGN'
+          #!/bin/bash
+          set -euo pipefail
+          stamp=(--timestamp)
+          for arg in "$@"; do case "$arg" in --timestamp*) stamp=() ;; esac; done
+          for arg in "$@"; do
+            case "$arg" in
+              -s | --sign)
+                /usr/bin/codesign ${stamp[@]+"${stamp[@]}"} "$@"
+                target=${!#}
+                case "$target" in *.zip) exit 0 ;; esac
+                info=$(/usr/bin/codesign -dvv "$target" 2>&1)
+                if ! grep -q '^Timestamp=' <<< "$info" || grep -q '^Signed Time=' <<< "$info"; then
+                  echo "::error::codesign signed $target without a secure timestamp (no Timestamp= line)"
+                  exit 1
+                fi
+                exit 0
+                ;;
+            esac
+          done
+          exec /usr/bin/codesign "$@"
+          CODESIGN
+            chmod 755 "$apple/bin/codesign"
+            export PATH=$apple/bin:$PATH
           else
             [ "$APPLE_SIGNING_IDENTITY" = - ] || fail "an ad hoc leg with a real identity"
             unset APPLE_API_KEY APPLE_API_ISSUER
@@ -1159,7 +1189,8 @@ jobs:
             info=$(codesign -dvvv "$1" 2>&1) || fail "codesign -dvvv fails on $1"
             grep -qxF "Authority=$APPLE_SIGNING_IDENTITY" <<< "$info" || fail "$1 is not signed with APPLE_SIGNING_IDENTITY"
             grep -qx "TeamIdentifier=$team" <<< "$info" || fail "$1's TeamIdentifier is not $team"
-            grep -q '^Timestamp=' <<< "$info" || fail "$1 has no secure timestamp"
+            grep -q '^Timestamp=' <<< "$info" && ! grep -q '^Signed Time=' <<< "$info" ||
+              fail "$1 has no secure timestamp: codesign -dvvv shows no Timestamp= line (Signed Time= is an untimestamped signature's)"
           }
           # $1 code (a Mach-O or the .app): signed, hardened runtime alone, no left-out entitlement.
           code() {
