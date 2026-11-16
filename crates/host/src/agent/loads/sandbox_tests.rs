@@ -34,7 +34,7 @@ pub(super) struct Session {
     pub(super) claude_tmp: Option<PathBuf>,
     pub(super) data: Vec<PathBuf>,
     pub(super) other_matters: Vec<OtherMatter>,
-    pub(super) matter_walked: Option<PathBuf>,
+    pub(super) matter_also: Vec<PathBuf>,
 }
 
 const DATA: &str = "/Users/l/Library/Application Support/Clauseo";
@@ -63,7 +63,7 @@ impl Session {
             claude_tmp: Some(PathBuf::from(SHORT)),
             data: vec![data.to_path_buf()],
             other_matters: vec![OtherMatter::at("/Users/l/Clients/B")],
-            matter_walked: None,
+            matter_also: Vec::new(),
             run,
         }
     }
@@ -71,7 +71,7 @@ impl Session {
     pub(super) fn paths(&self) -> SandboxPaths<'_> {
         SandboxPaths {
             matter: &self.matter,
-            matter_walked: self.matter_walked.as_deref(),
+            matter_also: &self.matter_also,
             work: &self.work,
             tmp: &self.tmp,
             claude_tmp: self.claude_tmp.as_deref(),

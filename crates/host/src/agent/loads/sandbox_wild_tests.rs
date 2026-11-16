@@ -143,7 +143,7 @@ fn the_own_matter_is_covered_by_where_it_leads_and_folded() {
             mac(&session.paths()).is_ok(),
             "{matter}: as stored alone, no match"
         );
-        session.matter_walked = walked.map(PathBuf::from);
+        session.matter_also = walked.into_iter().map(PathBuf::from).collect();
         if walked.is_none() {
             // The fold alone finds it.
             assert_eq!(mac(&session.paths()), Err(Off::CoversOwn), "{matter}");
@@ -179,4 +179,31 @@ fn where_a_link_leads_is_left_open_only_for_the_shells_places() {
     }
     let linux = left_open(SandboxOs::Linux, Path::new("/users/l"), stored, &own);
     assert!(!linux, "Linux compares names as they are");
+}
+
+/// The own-matter sweep's A15 on macOS: a neighbour registered under the data volume's spelling
+/// (`/System/Volumes/Data/Users/…`, a firmlink twin) covers the own matter at `/Users/…`, and
+/// the other way round; and a link to the twin of a folder above the own matter is left open.
+#[test]
+fn a_firmlink_twin_meets_the_own_matter() {
+    use super::super::sandbox::links::left_open;
+    let pairs = [
+        (
+            "/Users/l/Clients/Own",
+            "/System/Volumes/Data/Users/l/Clients/O*",
+        ),
+        (
+            "/System/Volumes/Data/Users/l/Clients/Own",
+            "/Users/l/Clients/O*",
+        ),
+    ];
+    for (matter, other) in pairs {
+        let mut session = Session::new("s-1");
+        session.matter = PathBuf::from(matter);
+        session.other_matters = vec![OtherMatter::at(other)];
+        assert_eq!(mac(&session.paths()), Err(Off::CoversOwn), "{matter}");
+    }
+    let own = [Path::new("/Users/l/Clients/A")];
+    let twin = Path::new("/System/Volumes/Data/Users/l");
+    assert!(left_open(SandboxOs::Mac, twin, Path::new("/x/B"), &own));
 }

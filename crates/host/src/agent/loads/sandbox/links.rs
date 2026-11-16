@@ -14,8 +14,9 @@
 //! place stays denied: a link to `~/Documents` fails closed there, which is accepted.
 //!
 //! Paths compare by name, folded as Seatbelt matches on macOS (case and Unicode form,
-//! `network_paths::fold_name`, as `matter_fence::key_as` folds on #1085's branch), as they are
-//! on Linux.
+//! `network_paths::fold_name`, as `matter_fence::key_as` folds on #1085's branch), and there
+//! with and without the data volume's `/System/Volumes/Data` (a firmlink twin, [`keys`]); as
+//! they are on Linux.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -51,8 +52,9 @@ pub(crate) struct OtherMatter {
     pub(crate) name: String,
     /// Its folder as stored.
     pub(crate) stored: PathBuf,
-    /// Where that leads (the network-safe walk), when it differs from `stored`.
-    pub(crate) walked: Option<PathBuf>,
+    /// Its other spellings (the launch prep's `folders::spellings`): where it leads, that as on
+    /// disk, the firmlink twins.
+    pub(crate) also: Vec<PathBuf>,
 }
 
 impl OtherMatter {
@@ -66,7 +68,7 @@ impl OtherMatter {
             id: None,
             name,
             stored,
-            walked: None,
+            also: Vec::new(),
         }
     }
 }
@@ -75,33 +77,34 @@ impl OtherMatter {
 /// their folders lead was left out.
 #[derive(Debug, Default)]
 pub(super) struct OtherDenies {
-    /// Each stored folder, and where it leads unless that is [`left_open`], each once.
+    /// Each stored folder, and its other spellings but those [`left_open`], each once.
     pub(super) spellings: Vec<PathBuf>,
     /// The names of the matters where it leads was left out, each once.
     pub(super) left_out: Vec<String>,
 }
 
-/// The read-deny spellings of `others` on `os` (the module doc): each stored folder, then where
-/// it leads unless [`left_open`] against `open` (the session's own matter, each spelling, and
-/// every folder its lists open), with one warn line for each one left out, naming no path.
+/// The read-deny spellings of `others` on `os` (the module doc): each stored folder, then its
+/// other spellings but those [`left_open`] against `open` (the session's own matter, each
+/// spelling, and every folder its lists open), with one warn line for each matter one was left
+/// out of, naming no path.
 pub(super) fn other_denies(os: SandboxOs, others: &[OtherMatter], open: &[&Path]) -> OtherDenies {
     let mut out = OtherDenies::default();
     for other in others {
-        let walked = other.walked.as_ref().filter(|walked| {
-            let left = left_open(os, walked, &other.stored, open);
-            if left {
-                tracing::warn!(
-                    matter = ?other.id,
-                    "another matter's folder leads to a place Claude's sandbox must leave open; \
-                     only its stored folder is denied"
-                );
-                if !out.left_out.contains(&other.name) {
-                    out.left_out.push(other.name.clone());
-                }
+        let (kept, left): (Vec<&PathBuf>, Vec<&PathBuf>) = other
+            .also
+            .iter()
+            .partition(|also| !left_open(os, also, &other.stored, open));
+        if !left.is_empty() {
+            tracing::warn!(
+                matter = ?other.id,
+                "another matter's folder leads to a place Claude's sandbox must leave open; \
+                 only its other spellings are denied"
+            );
+            if !out.left_out.contains(&other.name) {
+                out.left_out.push(other.name.clone());
             }
-            !left
-        });
-        for spelling in walked.into_iter().chain([&other.stored]) {
+        }
+        for spelling in kept.into_iter().chain([&other.stored]) {
             if !out.spellings.contains(spelling) {
                 out.spellings.push(spelling.clone());
             }
@@ -114,14 +117,14 @@ pub(super) fn other_denies(os: SandboxOs, others: &[OtherMatter], open: &[&Path]
 /// leave open (the module doc): `/`, a folder above (or the same as) `stored`, any of `open`
 /// or any of [`SHELL_NEEDS`]. Compared by [`key`].
 pub(crate) fn left_open(os: SandboxOs, walked: &Path, stored: &Path, open: &[&Path]) -> bool {
-    let at = key(os, walked);
-    if at.len() <= 1 {
+    let at = keys(os, walked);
+    if at.iter().any(|at| at.len() <= 1) {
         return true;
     }
-    let holds = |place: &Path| key(os, place).starts_with(&at);
-    holds(stored)
-        || open.iter().any(|place| holds(place))
-        || SHELL_NEEDS.iter().any(|place| holds(Path::new(place)))
+    let under = |place: &Path| holds(&keys(os, place), &at);
+    under(stored)
+        || open.iter().any(|place| under(place))
+        || SHELL_NEEDS.iter().any(|place| under(Path::new(place)))
 }
 
 /// `path`'s names for a prefix comparison on `os`: each folded on macOS as Seatbelt matches it
@@ -139,6 +142,41 @@ pub(crate) fn key(os: SandboxOs, path: &Path) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// [`key`] of `path`, and on macOS, when it starts with the data volume
+/// (`/System/Volumes/Data`, folded), also without it: `/System/Volumes/Data/Users/a` is
+/// `/Users/a` through a firmlink, so comparing every key of two paths meets either spelling.
+pub(crate) fn keys(os: SandboxOs, path: &Path) -> Vec<Vec<String>> {
+    let key = key(os, path);
+    let mut out = Vec::with_capacity(2);
+    if os == SandboxOs::Mac
+        && let [rootdir, system, volumes, data, ..] = key.as_slice()
+        && rootdir == "/"
+        && [system, volumes, data] == ["system", "volumes", "data"]
+    {
+        let mut stripped = key.clone();
+        stripped.drain(1..4);
+        out.push(stripped);
+    }
+    out.push(key);
+    out
+}
+
+/// Whether a key of `places` starts with a key of `at`: `at` is the place or above it.
+pub(crate) fn holds(places: &[Vec<String>], at: &[Vec<String>]) -> bool {
+    places
+        .iter()
+        .any(|place| at.iter().any(|at| place.starts_with(at)))
+}
+
+/// `text` without a leading data volume (`/System/Volumes/Data`, any case) on macOS: its
+/// firmlinked form; none when it has none.
+pub(crate) fn off_data_volume(os: SandboxOs, text: &str) -> Option<String> {
+    const DATA: &str = "/system/volumes/data/";
+    let head = text.get(..DATA.len())?;
+    (os == SandboxOs::Mac && head.eq_ignore_ascii_case(DATA))
+        .then(|| text.get(DATA.len() - 1..).unwrap_or("/").to_owned())
 }
 
 /// `text` folded as [`key`] folds a name on `os`.

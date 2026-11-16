@@ -241,8 +241,9 @@ pub(crate) struct ClaudeSandbox {
 pub(crate) struct SandboxPaths<'a> {
     /// The matter folder (the agent's working folder).
     pub(crate) matter: &'a Path,
-    /// Where it leads (the launch prep's walk), when that differs from `matter`.
-    pub(crate) matter_walked: Option<&'a Path>,
+    /// Its other spellings (the launch prep's `folders::own_spellings`): as stored, where it
+    /// leads, as on disk, the firmlink twins.
+    pub(crate) matter_also: &'a [PathBuf],
     /// `<run>/work`.
     pub(crate) work: &'a Path,
     /// `<run>/tmp` (`agent::temp`).
@@ -332,8 +333,9 @@ impl ClaudeSandbox {
             );
             return Err(Off::Wildcard(wild));
         }
-        let own_matter = [Some(paths.matter), paths.matter_walked];
-        let own_matter = texts(own_matter.into_iter().flatten());
+        let own_matter =
+            std::iter::once(paths.matter).chain(paths.matter_also.iter().map(PathBuf::as_path));
+        let own_matter = texts(own_matter);
         if glob::fence_others(os, &mut sandbox, &own_matter).is_err() {
             tracing::warn!(
                 "Claude's sandbox is off: another matter's deny covers its own; refused"
@@ -353,15 +355,8 @@ impl ClaudeSandbox {
     fn other_denies(&self, os: SandboxOs, paths: &SandboxPaths<'_>) -> links::OtherDenies {
         let lists = [&self.allow_write, &self.allow_read, &self.quiet];
         let mut open: Vec<&Path> = lists.into_iter().flatten().map(Path::new).collect();
-        open.extend(
-            [
-                Some(paths.matter),
-                paths.matter_walked,
-                Some(paths.claude_home),
-            ]
-            .iter()
-            .flatten(),
-        );
+        open.extend([paths.matter, paths.claude_home]);
+        open.extend(paths.matter_also.iter().map(PathBuf::as_path));
         links::other_denies(os, paths.other_matters, &open)
     }
 
@@ -528,11 +523,8 @@ fn texts<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Vec<String> {
 fn not_utf8(paths: &SandboxPaths<'_>, spellings: &[PathBuf]) {
     let bad = |path: &PathBuf| path.to_str().is_none();
     let matter = paths.other_matters.iter().find(|other| {
-        bad(&other.stored)
-            || other
-                .walked
-                .as_ref()
-                .is_some_and(|walked| spellings.contains(walked) && bad(walked))
+        let denied = |also: &&PathBuf| spellings.contains(also) && bad(also);
+        bad(&other.stored) || other.also.iter().any(|also| denied(&also))
     });
     match matter {
         Some(other) => tracing::warn!(

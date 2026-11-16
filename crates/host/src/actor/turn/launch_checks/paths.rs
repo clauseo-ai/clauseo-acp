@@ -124,7 +124,7 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
                 id: Some(*id),
                 name: entry.row.name.clone(),
                 stored: PathBuf::from(&entry.row.folder_path),
-                walked: None,
+                also: Vec::new(),
             })
             .collect();
     }

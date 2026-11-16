@@ -19,7 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::links::{fold, key};
+use super::links::{fold, holds, keys, off_data_volume};
 use super::{ClaudeSandbox, SandboxOs, WILDCARDS, texts};
 
 /// Whether the sandbox can name `path` as the folder it is: UTF-8, no `*` or `?`.
@@ -72,10 +72,10 @@ pub(super) fn fence_others(
                 continue;
             }
             let above = widened(Path::new(deny));
-            let above_key = key(os, &above);
+            let above_keys = keys(os, &above);
             if own
                 .iter()
-                .any(|path| key(os, Path::new(path)).starts_with(&above_key))
+                .any(|path| holds(&keys(os, Path::new(path)), &above_keys))
             {
                 return Err(CoversOwn);
             }
@@ -97,14 +97,24 @@ pub(super) fn fence_others(
 
 /// Whether Claude Code's macOS deny for `pattern` covers `path` as Seatbelt matches it, which
 /// ignores case and Unicode form (measured): [`deny_covers`] of the two as they are, folded
-/// (`network_paths::fold_name`: lower case, NFD) and lower case in NFC. Any of them covering
-/// refuses, which only ever refuses more.
+/// (`network_paths::fold_name`: lower case, NFD) and lower case in NFC, each with and without a
+/// leading data volume (`/System/Volumes/Data`, a firmlink twin). Any of them covering refuses,
+/// which only ever refuses more.
 pub(crate) fn covers(pattern: &str, path: &str) -> bool {
     use unicode_normalization::UnicodeNormalization;
     let nfc = |text: &str| -> String { text.nfc().flat_map(char::to_lowercase).collect() };
-    deny_covers(pattern, path)
-        || deny_covers(&fold(SandboxOs::Mac, pattern), &fold(SandboxOs::Mac, path))
-        || deny_covers(&nfc(pattern), &nfc(path))
+    let forms = |text: &str| {
+        let mut forms = vec![text.to_owned()];
+        forms.extend(off_data_volume(SandboxOs::Mac, text));
+        forms
+    };
+    forms(pattern).iter().any(|pattern| {
+        forms(path).iter().any(|path| {
+            deny_covers(pattern, path)
+                || deny_covers(&fold(SandboxOs::Mac, pattern), &fold(SandboxOs::Mac, path))
+                || deny_covers(&nfc(pattern), &nfc(path))
+        })
+    })
 }
 
 /// One step of `globToRegex`'s regex.

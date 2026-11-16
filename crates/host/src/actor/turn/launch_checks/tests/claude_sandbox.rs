@@ -19,7 +19,7 @@ fn claudes_sandbox_opens_no_secret_of_the_real_run_folder() {
     let matter = PathBuf::from("/Users/l/Clients/A");
     let paths = SandboxPaths {
         matter: &matter,
-        matter_walked: None,
+        matter_also: &[],
         work: &run.work,
         tmp: &tmp,
         claude_tmp: Some(&short),
@@ -61,15 +61,27 @@ fn sandbox_beside(
     matter: &Path,
     others: &[OtherMatter],
 ) -> Result<Option<crate::agent::loads::sandbox::ClaudeSandbox>, crate::error::Error> {
-    use crate::agent::loads::sandbox::{ClaudeSandbox, SandboxOs, SandboxPaths};
+    sandbox_on(crate::agent::loads::sandbox::SandboxOs::Mac, matter, others)
+}
+
+/// [`sandbox_beside`] on `os`, the matter stored as `stored` and worked in where it leads
+/// (`agent::session_folder`), its other spellings as the launch prep finds them.
+#[cfg(unix)]
+fn sandbox_on(
+    os: crate::agent::loads::sandbox::SandboxOs,
+    stored: &Path,
+    others: &[OtherMatter],
+) -> Result<Option<crate::agent::loads::sandbox::ClaudeSandbox>, crate::error::Error> {
+    use crate::agent::loads::sandbox::{ClaudeSandbox, SandboxPaths};
     let data = PathBuf::from("/Users/l/Library/Application Support/Clauseo");
     let run = folders(&data, 1);
     let tmp = crate::agent::temp::temp_dir(&run.root);
     let short = PathBuf::from("/tmp/clsb-abcd1234");
-    let walked = super::super::folders::walked(matter);
+    let also = super::super::folders::own_spellings(stored);
+    let matter = crate::agent::session_folder(stored);
     let paths = SandboxPaths {
-        matter,
-        matter_walked: walked.as_deref(),
+        matter: &matter,
+        matter_also: &also,
         work: &run.work,
         tmp: &tmp,
         claude_tmp: Some(&short),
@@ -84,7 +96,7 @@ fn sandbox_beside(
         data: &run.data_deny.spellings,
         other_matters: others,
     };
-    ClaudeSandbox::for_launch(SandboxOs::Mac, &paths)
+    ClaudeSandbox::for_launch(os, &paths)
 }
 
 /// `stored` registered as the matter `Other`, walked as the launch prep walks it.
@@ -111,10 +123,13 @@ fn a_matter_registered_through_a_link_is_denied_by_both_spellings() {
     write::symlink(&root.join("real/m"), &root.join("Linked")).unwrap();
     let (real, linked) = (root.join("real/m"), root.join("Linked"));
     let others = other_at(&linked);
-    assert_eq!(others[0].walked.as_deref(), Some(real.as_path()));
+    assert_eq!(others[0].also.first(), Some(&real));
     let mut plain = vec![OtherMatter::at(real.clone())];
     super::super::folders::matter_spellings(&mut plain);
-    assert_eq!(plain[0].walked, None, "a real folder has one spelling");
+    assert!(
+        !plain[0].also.contains(&real),
+        "a real folder is not its own other spelling"
+    );
     let matter = PathBuf::from("/Users/l/Clients/A");
     let sandbox = sandbox_beside(&matter, &others).unwrap().unwrap();
     for path in [&real, &linked] {
@@ -147,7 +162,11 @@ fn a_link_to_a_place_the_shell_needs_is_left_out_and_told() {
         let link = root.join(format!("link-{name}"));
         write::symlink(&target, &link).unwrap();
         let others = other_at(&link);
-        let walked = others[0].walked.clone().expect("the link leads elsewhere");
+        let walked = others[0]
+            .also
+            .first()
+            .cloned()
+            .expect("the link leads elsewhere");
         assert_eq!(walked, dunce::canonicalize(&target).unwrap(), "{name}");
         let sandbox = sandbox_beside(&matter, &others)
             .expect("no refusal")
@@ -215,7 +234,7 @@ fn under_a_linked_data_folder_claude_is_handed_only_real_spellings() {
     let tmp = crate::agent::temp::temp_dir(&run.root);
     let paths = SandboxPaths {
         matter: &stored,
-        matter_walked: run.matter_walked.as_deref(),
+        matter_also: &run.matter_also,
         work: &run.work,
         tmp: &tmp,
         claude_tmp: run.claude_tmp.as_deref(),
@@ -247,5 +266,49 @@ fn under_a_linked_data_folder_claude_is_handed_only_real_spellings() {
             sandbox.deny_read.contains(&spelling),
             "{spelling} not denied"
         );
+    }
+}
+
+/// The own-matter sweep's rows A15 to A17 on #1153: under a TMPDIR that is a link whose target
+/// passes through another link, a wildcard neighbour's deny is checked against every spelling of
+/// the own matter, and the neighbour is denied by every spelling of its own, so its pattern
+/// covering the own matter refuses on macOS and Linux, whichever side was registered through
+/// the links.
+#[cfg(unix)]
+#[test]
+fn a_wildcard_neighbour_covers_the_own_matter_through_linked_temp_folders() {
+    use crate::agent::loads::sandbox::SandboxOs;
+    use crate::pipeline::tests::support::TempDir;
+    use crate::write;
+
+    let dir = TempDir::new("sandbox-linked-tmpdir");
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    // `tmpdir` → `hop/t`, `hop` → `real`: the temp folder's link passes through a link.
+    let real = root.join("real/t/Clients");
+    write::create_dir_all(&real.join("Own")).unwrap();
+    write::create_dir_all(&real.join("O*")).unwrap();
+    write::symlink(&root.join("real"), &root.join("hop")).unwrap();
+    write::symlink(&root.join("hop/t"), &root.join("tmpdir")).unwrap();
+    let linked = root.join("tmpdir/Clients");
+    let directions = [
+        ("own linked", linked.join("Own"), real.join("O*")),
+        ("other linked", real.join("Own"), linked.join("O*")),
+    ];
+    for (name, own, other) in directions {
+        let mut others = vec![OtherMatter::at(other.clone())];
+        super::super::folders::matter_spellings(&mut others);
+        assert!(
+            others[0].also.contains(&real.join("O*")),
+            "{name}: {:?}",
+            others[0].also
+        );
+        for os in [SandboxOs::Mac, SandboxOs::Linux] {
+            let refusal = sandbox_on(os, &own, &others).expect_err("covers the own matter");
+            assert_eq!(
+                refusal.code(),
+                clauseo_protocol::ErrorCode::AgentSandboxWildcard,
+                "{name} on {os:?}"
+            );
+        }
     }
 }

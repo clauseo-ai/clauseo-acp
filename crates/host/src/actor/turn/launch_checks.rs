@@ -168,9 +168,8 @@ pub(crate) struct RunFolders {
     /// The other matters Claude's sandbox denies, each folder as stored and where it leads
     /// (`folders::fences`).
     pub(crate) other_matters: Vec<OtherMatter>,
-    /// Where this session's matter folder leads, when that differs from it (`folders::fences`,
-    /// for Claude's sandbox).
-    pub(crate) matter_walked: Option<PathBuf>,
+    /// This session's matter folder's other spellings (`folders::own_spellings`, Claude).
+    pub(crate) matter_also: Vec<PathBuf>,
     /// Under a linked data folder: it as configured, and its real path (`folders::respell_run`).
     pub(crate) respelled: Option<(PathBuf, PathBuf)>,
     /// What the launch prep listed for Codex's data fence (`agent::codex_fence::list`): the
@@ -245,7 +244,7 @@ impl RunFolders {
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
             other_matters: Vec::new(),
-            matter_walked: None,
+            matter_also: Vec::new(),
             respelled: None,
             codex_listed: Listed::default(),
             case_law: relay::CaseLaw::Absent,

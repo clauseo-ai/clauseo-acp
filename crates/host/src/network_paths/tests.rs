@@ -258,3 +258,24 @@ fn a_mount_recorded_on_the_data_volume_matches_its_firmlinked_form() {
     assert!(network("/System/Volumes/Data/Users/a/share/x", &known));
     assert!(!network("/Users/a/x", &known));
 }
+
+/// A firmlinked path and its data volume spelling are each other's twin on macOS; a path no
+/// firmlink holds has none, and nothing has one off macOS. Unix paths, as macOS spells them.
+#[cfg(unix)]
+#[test]
+fn a_firmlink_twin_goes_both_ways() {
+    let net = mac_net(&[]);
+    let twin = |path: &str| super::firmlink_twin(Path::new(path), &net);
+    assert_eq!(
+        twin("/Users/a/Clients"),
+        Some(PathBuf::from("/System/Volumes/Data/Users/a/Clients"))
+    );
+    assert_eq!(
+        twin("/System/Volumes/Data/Users/a/Clients"),
+        Some(PathBuf::from("/Users/a/Clients"))
+    );
+    assert_eq!(twin("/Usersx/a"), None);
+    assert_eq!(twin("/bin"), None);
+    let plain = plain_net(false);
+    assert_eq!(super::firmlink_twin(Path::new("/Users/a"), &plain), None);
+}

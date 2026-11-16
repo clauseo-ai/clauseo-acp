@@ -131,37 +131,79 @@ pub(super) fn respelled(path: &Path, from: &Path, to: &Path) -> PathBuf {
 }
 
 /// The launch's fences, made by the launch prep: Claude's data folder deny rules
-/// ([`launch_deny`]), and for a Claude sandbox where the other matters' folders
-/// ([`matter_spellings`] of what [`super::launch_paths`] set, as stored) and this session's
-/// matter folder lead. A matter registered after the launch is in no list (the accepted
-/// residual).
+/// ([`launch_deny`]), and for a Claude sandbox the other spellings of the other matters'
+/// folders ([`matter_spellings`] of what [`super::launch_paths`] set, as stored) and of this
+/// session's matter folder ([`own_spellings`]). A matter registered after the launch is in no
+/// list (the accepted residual).
 pub(super) fn fences(run: &mut RunFolders, stored: &Path, data: &Path, home: Option<&Path>) {
     run.data_deny = launch_deny(run, stored, data, home);
     if run.claude_tmp.is_some() {
         matter_spellings(&mut run.other_matters);
-        run.matter_walked = walked(&crate::agent::session_folder(stored));
+        run.matter_also = own_spellings(stored);
     }
 }
 
-/// Sets where each of `others`' folders leads ([`walked`]). Claude Code's sandbox resolves no
-/// link in a deny, so a matter registered through one is denied by both, unless where it leads
-/// is a place the sandbox must leave open (`agent::loads::sandbox::links`).
+/// Sets each of `others`' other spellings ([`spellings`]). Claude Code's sandbox resolves no
+/// link in a deny and Seatbelt matches a path as it is on disk, so a matter is denied by each,
+/// unless one is a place the sandbox must leave open (`agent::loads::sandbox::links`).
 pub(super) fn matter_spellings(others: &mut [OtherMatter]) {
-    for other in others {
-        other.walked = walked(&other.stored);
-    }
-}
-
-/// Where `folder` leads (the network-safe walk, `network_paths::touchable`) when that differs
-/// from it; none when it is on a share, does not resolve, or is not absolute.
-pub(super) fn walked(folder: &Path) -> Option<PathBuf> {
     let net = crate::network_paths::NetEnv::current();
     let disk = crate::network_paths::resolve::Disk::resolved(&net);
+    for other in others {
+        other.also = spellings(&other.stored, &net, &disk);
+    }
+}
+
+/// The session's matter folder's spellings other than the one it works in
+/// (`agent::session_folder` of `stored`): as stored, and [`spellings`] of both, for the
+/// sandbox's "covers own" checks.
+pub(super) fn own_spellings(stored: &Path) -> Vec<PathBuf> {
+    let net = crate::network_paths::NetEnv::current();
+    let disk = crate::network_paths::resolve::Disk::resolved(&net);
+    let folder = crate::agent::session_folder(stored);
+    let mut out: Vec<PathBuf> = Vec::new();
+    let found = std::iter::once(stored.to_owned())
+        .chain(spellings(stored, &net, &disk))
+        .chain(spellings(&folder, &net, &disk));
+    for spelling in found {
+        if spelling != folder && !out.contains(&spelling) {
+            out.push(spelling);
+        }
+    }
+    out
+}
+
+/// `folder`'s other spellings, each once and none `folder` itself: where it leads (the
+/// network-safe walk, `network_paths::touchable`), that canonicalised (case and Unicode form as
+/// on disk), and the firmlink twin of each and of `folder` (`network_paths::firmlink_twin`,
+/// macOS). Only the twin when it is on a share, does not resolve, or is not absolute.
+pub(super) fn spellings(
+    folder: &Path,
+    net: &crate::network_paths::NetEnv,
+    disk: &crate::network_paths::resolve::Disk<'_>,
+) -> Vec<PathBuf> {
+    let mut found = vec![folder.to_owned()];
     let walked = folder
         .is_absolute()
-        .then(|| crate::network_paths::touchable(folder, folder, &disk))
+        .then(|| crate::network_paths::touchable(folder, folder, disk))
         .flatten();
-    walked.filter(|walked| walked != folder)
+    if let Some(walked) = walked {
+        let canonical = dunce::canonicalize(&walked).ok();
+        found.push(walked);
+        found.extend(canonical);
+    }
+    let twins: Vec<PathBuf> = found
+        .iter()
+        .filter_map(|spelling| crate::network_paths::firmlink_twin(spelling, net))
+        .collect();
+    found.extend(twins);
+    let mut out: Vec<PathBuf> = Vec::new();
+    for spelling in found.into_iter().skip(1) {
+        if spelling != folder && !out.contains(&spelling) {
+            out.push(spelling);
+        }
+    }
+    out
 }
 
 /// Claude's data folder deny rules for this launch: every entry of `data` that is not the

@@ -63,7 +63,7 @@ fn claude_sandbox(
     let claude_home = run.real(&actor.effective.locations().agent_home(agent_id.as_str()));
     let paths = SandboxPaths {
         matter,
-        matter_walked: run.matter_walked.as_deref(),
+        matter_also: &run.matter_also,
         work: &run.work,
         tmp: &tmp,
         claude_tmp: run.claude_tmp.as_deref(),

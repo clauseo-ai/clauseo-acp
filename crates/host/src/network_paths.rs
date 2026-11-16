@@ -277,6 +277,27 @@ fn remote_mounts() -> Vec<PathBuf> {
     Vec::new()
 }
 
+/// `path`'s other spelling across macOS's firmlinks (`/usr/share/firmlinks`): a data volume
+/// path (`/System/Volumes/Data/Users/a`) in its firmlinked form (`/Users/a`), and a firmlinked
+/// one in its data volume form; none off macOS, for a path neither applies to, or one that is
+/// not UTF-8.
+pub(crate) fn firmlink_twin(path: &Path, net: &NetEnv) -> Option<PathBuf> {
+    if !net.macos {
+        return None;
+    }
+    let text = path.to_str()?;
+    if let macos_rules::Mac::Rewritten(form) = macos_rules::firmlinked(text, net) {
+        return Some(PathBuf::from(form));
+    }
+    net.firmlinks.as_ref()?.iter().find_map(|(root, place)| {
+        let root = root.trim_end_matches('/');
+        let rest = text.strip_prefix(root)?;
+        let whole = !root.is_empty() && (rest.is_empty() || rest.starts_with('/'));
+        let place = place.trim_matches('/');
+        whole.then(|| PathBuf::from(format!("/System/Volumes/Data/{place}{rest}")))
+    })
+}
+
 /// The firmlinks, read once and kept (macOS).
 #[cfg(target_os = "macos")]
 fn firmlinks() -> Option<Vec<(String, String)>> {

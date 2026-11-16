@@ -125,7 +125,7 @@ fn every_mac_and_linux_launch_has_a_sandbox_or_a_refusal() {
         // always UTF-8): its own code, never agent.sandbox_unavailable's restart advice.
         let mut session = Session::new("s-1");
         let mut other = OtherMatter::at("/Users/l/Clients/B");
-        other.walked = Some(PathBuf::from(OsStr::from_bytes(b"/Users/l/\xff")));
+        other.also = vec![PathBuf::from(OsStr::from_bytes(b"/Users/l/\xff"))];
         session.other_matters.push(other);
         for os in [SandboxOs::Mac, SandboxOs::Linux] {
             let launch = launch(&session, os);
