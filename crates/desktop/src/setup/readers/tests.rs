@@ -12,7 +12,7 @@ use clauseo_agents::keys::Keychain;
 use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_process::{Error, LaunchSpec, Launched, Launcher};
 use clauseo_protocol::{AgentId, AgentKind};
-use clauseo_settings::{AgentLaunch, Effective, Locations, SystemFiles};
+use clauseo_settings::{AgentLaunch, Effective, Locations, Plan, PlanProvider, SystemFiles};
 use futures::FutureExt as _;
 
 use super::{LeaveReaders, SwappableReaders, read_vars};
@@ -113,7 +113,6 @@ fn claude_s_read_has_the_home_and_the_key_and_a_hold_survives_an_entry_set() {
 #[test]
 fn a_read_s_variables_are_the_launch_hook_s_for_the_plan_and_the_key() {
     use clauseo_host::ProfileHook as _;
-    use clauseo_settings::{Plan, PlanProvider};
 
     use crate::setup::hook::SetupHook;
 
@@ -426,4 +425,63 @@ fn a_locked_keychain_holds_claude_s_read_and_the_next_read_goes_out() {
         1,
         "the read after the unlock did not go out"
     );
+}
+
+/// Whether a Claude read gets past the key check with a keychain that fails every read and no
+/// "key stored" mark, under `plan` (decision record 0048: a failed read refuses under a firm
+/// plan whatever the marker; with none, the read goes out keyless).
+fn keys_ready_with_failed_read(plan: Option<Plan>) -> Result<(), ReadFailure> {
+    let scratch = Scratch::folder("readers-firm-failed-read", &[]);
+    let claude = AgentId::new("claude-acp").unwrap();
+    let keychain = Keychain::memory();
+    keychain.fail_reads(true);
+    let notes = crate::setup::keys::KeyNotes::new();
+    let cache = KeyCache::load_bounded(
+        keychain.clone(),
+        [&claude],
+        crate::setup::keys::KeyMarker::new(scratch.path(), [&claude]),
+        notes.sender(),
+        &clauseo_process::AsyncIoTimer,
+        crate::setup::keys::KEYS_LOAD_BOUND,
+    );
+    assert!(!cache.unreadable(&claude) && cache.read_failed(&claude));
+    let slot = Arc::new(OnceLock::new());
+    let _set = slot.set(Arc::new(cache));
+    let plans: crate::setup::hook::Plans = Arc::new(std::sync::RwLock::new(
+        plan.map(|plan| (claude.clone(), plan))
+            .into_iter()
+            .collect(),
+    ));
+    let ready = block_on(super::keys_ready(&slot, &plans, AgentKind::Claude));
+    keychain.fail_reads(false);
+    ready
+}
+
+#[test]
+fn a_failed_key_read_under_a_firm_endpoint_or_provider_fails_the_read() {
+    let endpoint = Plan {
+        endpoint: Some("https://gw.firm.example".to_owned()),
+        ..Plan::default()
+    };
+    assert!(keys_ready_with_failed_read(Some(endpoint)).is_err());
+    for provider in [PlanProvider::Bedrock, PlanProvider::Vertex] {
+        let plan = Plan {
+            provider: Some(provider),
+            ..Plan::default()
+        };
+        assert!(
+            keys_ready_with_failed_read(Some(plan)).is_err(),
+            "{provider:?}"
+        );
+    }
+}
+
+#[test]
+fn a_failed_key_read_with_no_firm_plan_lets_the_read_go_out() {
+    assert!(keys_ready_with_failed_read(None).is_ok());
+    let env_only = Plan {
+        env: [("AWS_REGION".to_owned(), "eu-west-2".to_owned())].into(),
+        ..Plan::default()
+    };
+    assert!(keys_ready_with_failed_read(Some(env_only)).is_ok());
 }

@@ -27,11 +27,17 @@ use super::host_calls::SetupHost;
 use super::keys::{KeyCache, KeyNote};
 use crate::bridge::lock;
 
-/// The refusal in force for `agent`, given whether a policy `blocked` it and its `keys`.
-pub(crate) fn in_force(blocked: bool, keys: &KeyCache, agent: &AgentId) -> Option<ErrorCode> {
+/// The refusal in force for `agent`, given whether a policy `blocked` it, whether a firm plan
+/// (an endpoint or a provider) is set for it, and its `keys`.
+pub(crate) fn in_force(
+    blocked: bool,
+    firm: bool,
+    keys: &KeyCache,
+    agent: &AgentId,
+) -> Option<ErrorCode> {
     if blocked {
         Some(ErrorCode::SigninPolicyUnreadable)
-    } else if keys.unreadable(agent) {
+    } else if keys.unreadable_for(agent, firm) {
         Some(ErrorCode::AgentKeyUnreadable)
     } else {
         None
@@ -40,8 +46,14 @@ pub(crate) fn in_force(blocked: bool, keys: &KeyCache, agent: &AgentId) -> Optio
 
 /// The refusal in force for `agent` as `backend` holds the settings and keys.
 pub(crate) fn wanted(backend: &AgentsBackend, agent: &AgentId) -> Option<ErrorCode> {
-    let blocked = lock(&backend.wiring.applied).blocked.contains(agent);
-    in_force(blocked, &backend.keys, agent)
+    let (blocked, firm) = {
+        let applied = lock(&backend.wiring.applied);
+        (
+            applied.blocked.contains(agent),
+            applied.firm.contains(agent),
+        )
+    };
+    in_force(blocked, firm, &backend.keys, agent)
 }
 
 /// Tells the host `agent`'s refusal in force when it is not what the host was last told. A
@@ -91,16 +103,17 @@ pub(crate) async fn lift_at_start(backend: &AgentsBackend, wait: Duration) {
 }
 
 /// The first load is over and no backend follows (no platform): each of `known` but those in
-/// `blocked` (whose refusal is the policy's) gets its refusal in force from `keys`. A call
-/// that fails is logged by the agent and its code.
+/// `blocked` (whose refusal is the policy's) gets its refusal in force from `keys`, those in
+/// `firm` under their firm plan. A call that fails is logged by the agent and its code.
 pub(crate) async fn settle_after_load<'a>(
     host: &dyn SetupHost,
     keys: &KeyCache,
     known: impl IntoIterator<Item = &'a AgentId>,
     blocked: &BTreeSet<AgentId>,
+    firm: &BTreeSet<AgentId>,
 ) {
     for agent in known.into_iter().filter(|agent| !blocked.contains(*agent)) {
-        let code = in_force(false, keys, agent);
+        let code = in_force(false, firm.contains(agent), keys, agent);
         if let Err(error) = host.set_launch_refused(agent.clone(), code).await {
             let code = error.code().as_str();
             tracing::warn!(%agent, code, "the keys' launch refusal was not set");

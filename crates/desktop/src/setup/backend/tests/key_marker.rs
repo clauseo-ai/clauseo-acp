@@ -14,7 +14,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use clauseo_agents::SigninState;
 use clauseo_agents::keys::Keychain;
-use clauseo_protocol::{ErrorCode, Secret, SignIn};
+use clauseo_protocol::{AgentId, ErrorCode, Secret, SignIn};
 use clauseo_settings::{Files, SystemFiles};
 use futures::StreamExt as _;
 use zeroize::Zeroizing;
@@ -118,6 +118,11 @@ fn load(keychain: Keychain, marker: KeyMarker, timer: &impl clauseo_process::Tim
 
 /// The refusals the host is told once the load is over.
 fn settled(keys: &KeyCache) -> Vec<HostCall> {
+    settled_with(keys, &BTreeSet::new())
+}
+
+/// [`settled`], with the agents in `firm` under a firm plan (an endpoint or a provider).
+fn settled_with(keys: &KeyCache, firm: &BTreeSet<AgentId>) -> Vec<HostCall> {
     let rig = rig(true);
     let agents = [&claude(), &codex()];
     block_on(settle_after_load(
@@ -125,6 +130,7 @@ fn settled(keys: &KeyCache) -> Vec<HostCall> {
         keys,
         agents,
         &BTreeSet::new(),
+        firm,
     ));
     rig.host.calls()
 }
@@ -432,6 +438,7 @@ fn no_keychain_and_nothing_marked_composes_to_sign_in() {
         let facts = Facts {
             key: keys.in_memory(&agent).then_some(UNIX_EPOCH),
             unreadable: keys.unreadable(&agent).then_some(UNIX_EPOCH),
+            read_failed: keys.read_failed(&agent).then_some(UNIX_EPOCH),
             ..Facts::default()
         };
         assert!(
@@ -442,5 +449,57 @@ fn no_keychain_and_nothing_marked_composes_to_sign_in() {
             "{agent:?} shows Sign in"
         );
     }
+    keychain.fail_reads(false);
+}
+
+#[test]
+fn a_keychain_error_under_a_firm_plan_refuses_an_unmarked_agent_with_key_unreadable() {
+    let scratch = Scratch::folder("key-marker-error-firm", &[]);
+    // Neither agent is marked and every read fails, but Claude has a firm endpoint or provider:
+    // its launch must not go keyless, so a lawyer's own sign-in token never reaches the firm's
+    // gateway, and "Firm" on screen stays true. Codex, with no firm plan, launches as above.
+    let keychain = Keychain::memory();
+    keychain.fail_reads(true);
+    let keys = load(
+        keychain.clone(),
+        KeyMarker::new(scratch.path(), [&claude(), &codex()]),
+        &Never,
+    );
+    assert!(!keys.unreadable(&claude()) && keys.read_failed(&claude()));
+    assert!(keys.unreadable_for(&claude(), true));
+    assert!(!keys.unreadable_for(&codex(), false));
+    assert_eq!(
+        settled_with(&keys, &BTreeSet::from([claude()])),
+        [
+            HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyUnreadable)),
+            HostCall::SetLaunchRefused(codex(), None),
+        ]
+    );
+    // The card says so: the firm line gives way to the unreadable key, as for a marked agent.
+    let facts = Facts {
+        firm: Some(UNIX_EPOCH),
+        read_failed: keys.read_failed(&claude()).then_some(UNIX_EPOCH),
+        ..Facts::default()
+    };
+    let s18 = SigninState::SignedOut { found: None };
+    assert!(matches!(
+        compose(&claude(), Some(&s18), facts),
+        Some(SignIn::Failed {
+            code: ErrorCode::AgentKeyUnreadable,
+            ..
+        })
+    ));
+    let managed = Facts {
+        managed: Some(UNIX_EPOCH),
+        firm: None,
+        ..facts
+    };
+    assert!(matches!(
+        compose(&claude(), Some(&s18), managed),
+        Some(SignIn::Failed {
+            code: ErrorCode::AgentKeyUnreadable,
+            ..
+        })
+    ));
     keychain.fail_reads(false);
 }

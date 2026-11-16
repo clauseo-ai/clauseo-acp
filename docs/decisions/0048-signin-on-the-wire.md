@@ -454,12 +454,23 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     answered by the bound sets `agent.key_unreadable` only for an agent the "key stored" marker
     below marks: such a key never reads as "no key" and the agent never launches without it, so
     a firm's stored key is never skipped silently. An unmarked agent has no key Clauseo stored,
-    so it launches without one and no refusal follows. (Amended 2026-11-15, the orchestrator's
+    so it launches without one and no refusal follows, unless a firm endpoint or provider is
+    set for it (`plans.<id>`): under a firm plan a failed read sets `agent.key_unreadable`
+    whatever the marker (`KeyCache::unreadable_for`). A keyless launch with the firm's
+    `ANTHROPIC_BASE_URL` would let Claude Code offer the lawyer's own claude.ai sign-in token
+    to the firm's gateway, and "Firm" on screen must stay true. (The orchestrator's ruling on
+    the review of #1132.) (Amended 2026-11-15, the orchestrator's
     ruling on VM row M-d: a failed read used to set the refusal for every agent, and a Mac with
     no login keychain, where every read fails, showed "Sign-in didn't finish." in place of Sign
     in for agents that had never stored a key.) The accepted cost: a marker lost together with a
-    keychain error means one session without the stored key, until a read answers and the
-    marker is set again. The log line names the agent, "key unreadable" (or, unmarked, that the
+    keychain error means a session without the stored key, until a read answers and the marker
+    is set again. That session is not always a refused one: the launch empties the key variable
+    (`setup/backend/entry.rs`), so the agent signs in with whatever login it finds, Clauseo's
+    own or the lawyer's reused one, and a firm's matter can run on a personal account, under
+    that account's data terms, in place of the firm's key. What the lawyer sees then follows
+    the login in use, not the key: the sign-in line is S18's, with that account's email and
+    plan (`setup/compose.rs`, rules 5 and 6), the limits read that login's numbers
+    (`setup/readers.rs`, `keys_ready`), and the key's row does not say it is in use. The log line names the agent, "key unreadable" (or, unmarked, that the
     read failed and it launches without a key) and the error's kind; never the key, the item's
     name or a path.
   - *The "key stored" marker* (the orchestrator's ruling, a follow-up to #506). Desktop keeps,

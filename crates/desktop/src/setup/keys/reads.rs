@@ -11,7 +11,10 @@
 //!   unreadable" and the error's kind, never "no key". For an agent it does not mark, the error
 //!   is taken as a read that timed out is: no key Clauseo stored, so no mark, and the agent
 //!   launches without one (M-d, 2026-11-15: a Mac with no login keychain fails every read, and
-//!   the card showed "Sign-in didn't finish." in place of Sign in).
+//!   the card showed "Sign-in didn't finish." in place of Sign in). Only with no firm endpoint
+//!   or provider: under a firm plan such a failure refuses as a marked one does (the agent's
+//!   `failed` entry, read with the plan by [`KeyCache::unreadable_for`]), so a lawyer's own
+//!   sign-in token is never offered to a firm's gateway.
 //!   A write since the read began (a key set or cleared) wins: the read's answer is dropped.
 //! - [`KeyCache::read_again`]: a key marked unreadable, with no read running, is read again.
 //! - Each change of a mark sends a [`KeyNote::Read`].
@@ -36,6 +39,9 @@ use crate::bridge::lock;
 #[derive(Debug, Default)]
 struct ReadState {
     unreadable: BTreeSet<AgentId>,
+    /// Agents whose read failed with no "key stored" mark: refused only under a firm plan
+    /// ([`KeyCache::unreadable_for`]).
+    failed: BTreeSet<AgentId>,
     reading: BTreeSet<AgentId>,
     /// A count of each agent's writes and marks: a read that began before one is dropped.
     writes: BTreeMap<AgentId, u64>,
@@ -62,6 +68,11 @@ impl Marks {
         lock(&self.state).unreadable.contains(agent)
     }
 
+    /// Whether `agent`'s last read failed with no "key stored" mark (see `ReadState::failed`).
+    pub(super) fn is_failed(&self, agent: &AgentId) -> bool {
+        lock(&self.state).failed.contains(agent)
+    }
+
     /// The agents whose key is marked unreadable, for `Debug`.
     pub(super) fn unreadable_agents(&self) -> Vec<AgentId> {
         lock(&self.state).unreadable.iter().cloned().collect()
@@ -72,7 +83,8 @@ impl Marks {
         let changed = {
             let mut state = lock(&self.state);
             *state.writes.entry(agent.clone()).or_default() += 1;
-            state.unreadable.remove(agent)
+            let failed = state.failed.remove(agent);
+            state.unreadable.remove(agent) || failed
         };
         self.noted(changed, agent);
     }
@@ -126,15 +138,21 @@ impl Marks {
             match read {
                 Ok(Some(key)) => {
                     let new = lock(keys).insert(agent.clone(), key).is_none();
-                    (state.unreadable.remove(agent) || new, Some(true))
+                    let failed = state.failed.remove(agent);
+                    (state.unreadable.remove(agent) || new || failed, Some(true))
                 }
                 Ok(None) => {
                     let gone = lock(keys).remove(agent).is_some();
-                    (state.unreadable.remove(agent) || gone, Some(false))
+                    let failed = state.failed.remove(agent);
+                    (
+                        state.unreadable.remove(agent) || gone || failed,
+                        Some(false),
+                    )
                 }
                 Err(error) if marked => {
                     tracing::warn!(%agent, kind = error_kind(&error), "key unreadable");
-                    (state.unreadable.insert(agent.clone()), None)
+                    let failed = state.failed.remove(agent);
+                    (state.unreadable.insert(agent.clone()) || failed, None)
                 }
                 Err(error) => {
                     // As a timed-out read of an unmarked agent (`time_out`): no key Clauseo
@@ -142,9 +160,10 @@ impl Marks {
                     tracing::warn!(
                         %agent,
                         kind = error_kind(&error),
-                        "key read failed with no key marked stored: launches without one"
+                        "key read failed, no key marked stored: none used unless a firm plan"
                     );
-                    (state.unreadable.remove(agent), None)
+                    let failed = state.failed.insert(agent.clone());
+                    (state.unreadable.remove(agent) || failed, None)
                 }
             }
         };

@@ -17,6 +17,12 @@
 //! user (K0, 2026-11-15), and a locked extra keychain raised no dialog (VM row M-c).
 //! (`security show-keychain-info` cannot stand in: in the lawyer's session it exits 0 locked or
 //! unlocked, VM 2026-11-15.)
+//!
+//! The one case left open (review of #1132): a third keychain, neither the default nor the login
+//! one, that is locked and holds an item with Claude Code's service and account. `security`
+//! searches the whole list, so a read of that item could still show an unlock dialog with the
+//! guard reading unlocked. Accepted: VM row M-c showed a locked extra keychain without such an
+//! item raises no dialog, and nothing seen so far puts Claude Code's item in one.
 
 #[cfg(any(target_os = "macos", all(test, unix)))]
 use std::path::Path;
@@ -80,10 +86,21 @@ fn decide(
     !unlocked(status_at(&login))
 }
 
-/// The home folder of the user record of the real user id (`getpwuid_r`), never `$HOME`,
-/// which the environment sets: `None` when the lookup fails, finds no user or an empty folder.
+/// [`user_home_uncached`], looked up once per process. The limits readers call
+/// [`login_keychain_locked`] inside a future on the host actor's thread, and `getpwuid_r` can
+/// reach the directory service (a network-bound Mac), so it is never asked again. A failed
+/// lookup is cached too: `None`, which [`decide`] reads as locked for the rest of the run.
 #[cfg(target_os = "macos")]
-fn user_home() -> Option<std::path::PathBuf> {
+fn user_home() -> Option<&'static Path> {
+    static HOME: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    HOME.get_or_init(user_home_uncached).as_deref()
+}
+
+/// The home folder of the user record of the real user id (`getpwuid_r`), never `$HOME` or
+/// `CFFIXED_USER_HOME`, which the environment sets: `None` when the lookup fails, finds no user
+/// or an empty folder.
+#[cfg(target_os = "macos")]
+fn user_home_uncached() -> Option<std::path::PathBuf> {
     use nix::unistd::{User, getuid};
     User::from_uid(getuid())
         .ok()
@@ -142,7 +159,7 @@ pub fn login_keychain_locked() -> bool {
     };
     decide(
         read(std::ptr::null()),
-        user_home().as_deref(),
+        user_home(),
         Path::is_file,
         status_at,
     )

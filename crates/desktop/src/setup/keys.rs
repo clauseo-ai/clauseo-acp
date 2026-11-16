@@ -185,9 +185,23 @@ impl KeyCache {
         lock(&self.keys).contains_key(agent)
     }
 
-    /// Whether `agent`'s stored key could not be read: the read failed, or has not answered.
+    /// Whether `agent`'s stored key could not be read: the read failed, or has not answered,
+    /// for an agent the "key stored" marker marks.
     pub(crate) fn unreadable(&self, agent: &AgentId) -> bool {
         self.marks.is_unreadable(agent)
+    }
+
+    /// Whether `agent`'s last read failed for an agent the marker does not mark: no key Clauseo
+    /// stored, so it launches without one, unless a firm plan ([`KeyCache::unreadable_for`]).
+    pub(crate) fn read_failed(&self, agent: &AgentId) -> bool {
+        self.marks.is_failed(agent)
+    }
+
+    /// [`KeyCache::unreadable`], and under a firm plan (`firm`: an endpoint or a provider) also
+    /// [`KeyCache::read_failed`]: a firm's launch never goes keyless on a failed read, so a
+    /// lawyer's own sign-in token is never offered to the firm's gateway (decision record 0048).
+    pub(crate) fn unreadable_for(&self, agent: &AgentId, firm: bool) -> bool {
+        self.unreadable(agent) || (firm && self.read_failed(agent))
     }
 
     /// Whether the keychain would take `key` as `agent`'s: `command.invalid` (naming the agent
