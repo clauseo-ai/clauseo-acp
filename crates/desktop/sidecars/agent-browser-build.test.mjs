@@ -24,6 +24,7 @@ import {
   orderPatches,
   parseArgs,
   pinLines,
+  releaseThenTest,
   rustcCommit,
   tarInfo,
   testEnv,
@@ -349,14 +350,14 @@ describe("check", () => {
 
 describe("testEnv", () => {
   const mac = (arch) => ({ platform: "darwin", arch });
-  test("x86_64 macOS tested on an ARM64 Mac (Rosetta) gets 60 s per CLI subprocess test", () => {
+  test("x86_64 macOS tested on an ARM64 Mac (Rosetta) gets 60 s per CLI subprocess test and AB_TEST_ROSETTA", () => {
     const env = testEnv({ PATH: "/bin" }, "x86_64-apple-darwin", mac("arm64"));
-    assert.deepEqual(env, { PATH: "/bin", AB_TEST_SUBPROCESS_TIMEOUT_SECS: "60" });
+    assert.deepEqual(env, { PATH: "/bin", AB_TEST_SUBPROCESS_TIMEOUT_SECS: "60", AB_TEST_ROSETTA: "1" });
   });
 
-  test("a value already set is kept", () => {
-    const env = { AB_TEST_SUBPROCESS_TIMEOUT_SECS: "120" };
-    assert.equal(testEnv(env, "x86_64-apple-darwin", mac("arm64")).AB_TEST_SUBPROCESS_TIMEOUT_SECS, "120");
+  test("a timeout already set is kept, and AB_TEST_ROSETTA still set", () => {
+    const env = testEnv({ AB_TEST_SUBPROCESS_TIMEOUT_SECS: "120" }, "x86_64-apple-darwin", mac("arm64"));
+    assert.deepEqual(env, { AB_TEST_SUBPROCESS_TIMEOUT_SECS: "120", AB_TEST_ROSETTA: "1" });
   });
 
   test("native builds keep the tests' own 10 s", () => {
@@ -369,6 +370,38 @@ describe("testEnv", () => {
       const env = { PATH: "/bin" };
       assert.equal(testEnv(env, triple, host), env, triple);
     }
+  });
+});
+
+describe("releaseThenTest", () => {
+  const steps = (calls, { releaseFails = false, testFails = false } = {}) => ({
+    release: async () => {
+      calls.push("release");
+      if (releaseFails) throw new Error("cargo build exited 101");
+      return { sha256: "abc" };
+    },
+    test: async () => {
+      calls.push("test");
+      if (testFails) throw new Error("cargo test exited 101");
+    },
+  });
+
+  test("builds first, then tests, and resolves to the record", async () => {
+    const calls = [];
+    assert.deepEqual(await releaseThenTest(steps(calls)), { sha256: "abc" });
+    assert.deepEqual(calls, ["release", "test"]);
+  });
+
+  test("failed tests reject (exit 1) after the release build wrote the binary", async () => {
+    const calls = [];
+    await assert.rejects(releaseThenTest(steps(calls, { testFails: true })), /the tests failed.*cargo test exited 101/);
+    assert.deepEqual(calls, ["release", "test"]);
+  });
+
+  test("a failed release build rejects (exit 1) without running the tests", async () => {
+    const calls = [];
+    await assert.rejects(releaseThenTest(steps(calls, { releaseFails: true })), /cargo build exited 101/);
+    assert.deepEqual(calls, ["release"]);
   });
 });
 
