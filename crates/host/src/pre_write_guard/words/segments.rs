@@ -51,6 +51,9 @@ pub(crate) struct Segment {
     pub(crate) unknown: Vec<bool>,
     /// For each of `words`, what it is.
     pub(crate) roles: Vec<Role>,
+    /// For each of `words`, whether it holds a here-string's body (`@'…'@`), whose text a reader
+    /// may also split at blanks ([`super::powershell_words`]).
+    pub(crate) here: Vec<bool>,
     /// What joins it to the next segment.
     pub(crate) ender: Joint,
     /// Whether it stands inside parentheses.
@@ -63,6 +66,7 @@ pub(super) struct Known {
     pub(super) quoted: bool,
     pub(super) unknown: bool,
     pub(super) role: Role,
+    pub(super) here: bool,
 }
 
 /// A shell command's words, grouped by the simple command (segment) each belongs to, the first
@@ -126,6 +130,7 @@ impl Segments {
             last.quoted.push(known.quoted);
             last.unknown.push(known.unknown);
             last.roles.push(known.role);
+            last.here.push(known.here);
             self.count += 1;
         }
     }

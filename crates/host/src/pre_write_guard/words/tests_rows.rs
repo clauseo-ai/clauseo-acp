@@ -126,20 +126,70 @@ fn a_mixed_doubled_quote_keeps_the_second() {
     );
 }
 
-/// Row 9 (L4): Windows PowerShell 5.1 reads `"`u{43}"` as `u{43}`, PowerShell 7.4 as `C`. The
-/// reader reads it as 7 does, always the larger reading.
+/// Row 9 (L4): Windows PowerShell 5.1 reads `"`u{43}"` as `u{43}`, PowerShell 7.4 as `C`. Both
+/// readings are kept, 7's then 5.1's, so a held `Contracte.docx` spelled ``Contract`e.docx`` is
+/// still named (5.1 writes `Contracte.docx`, 7 a name with ESC in it).
 #[test]
-fn the_unicode_escape_reads_as_powershell_7() {
-    assert_eq!(segments("echo \"`u{43}\""), [vec!["echo", "C"]]);
+fn a_7_only_escape_is_read_both_ways() {
+    assert_eq!(segments("echo \"`u{43}\""), [vec!["echo", "C", "u{43}"]]);
+    assert_eq!(
+        segments("Set-Content Contract`e.docx x"),
+        [vec![
+            "Set-Content",
+            "Contract\u{1b}.docx",
+            "Contracte.docx",
+            "x"
+        ]]
+    );
+    // Every other escape reads the same in both.
+    assert_eq!(segments("echo a`tb"), [vec!["echo", "a\tb"]]);
 }
 
-/// L7: a path inside a here-string of more than one line is a word of its own for the readers
+/// Rows 1 and 2 (observed on Windows PowerShell 5.1 and PowerShell 7.4, VM, 16 Nov 2026): `#`
+/// right after a closing quote starts a comment; quotes of the two kinds side by side are two
+/// arguments; two single quotes inside single quotes are one quote, one argument.
+#[test]
+fn what_follows_a_closing_quote_is_a_comment_or_another_word() {
+    assert_eq!(
+        segments("Write-Output 'a'#; Write-Output b"),
+        [vec!["Write-Output", "a"]]
+    );
+    assert_eq!(
+        segments("Write-Output \"a\"#; Write-Output b"),
+        [vec!["Write-Output", "a"]]
+    );
+    assert_eq!(
+        segments("Write-Output 'a'\"b\""),
+        [vec!["Write-Output", "a", "b"]]
+    );
+    assert_eq!(
+        segments("Write-Output \"a\"'b'"),
+        [vec!["Write-Output", "a", "b"]]
+    );
+    assert_eq!(
+        segments("Write-Output 'a''b'"),
+        [vec!["Write-Output", "a'b"]]
+    );
+}
+
+/// L7: a path inside a here-string, of one line or more, is a word of its own for the readers
 /// that take [`powershell_words`].
 #[test]
 fn a_path_inside_a_here_string_is_a_word_too() {
-    let words = powershell_words("$s = @'\nType C:\\Data\\x.txt\nnow\n'@");
-    assert!(
-        words.iter().flatten().any(|word| word == r"C:\Data\x.txt"),
-        "{words:?}"
+    for line in [
+        "$s = @'\nType C:\\Data\\x.txt\nnow\n'@",
+        "$s = @'\nType C:\\Data\\x.txt now\n'@",
+        "$s = @\"\nType C:\\Data\\x.txt\n\"@",
+    ] {
+        let words = powershell_words(line);
+        assert!(
+            words.iter().flatten().any(|word| word == r"C:\Data\x.txt"),
+            "{line}: {words:?}"
+        );
+    }
+    // A quoted word with a blank is no here-string: it stays whole.
+    assert_eq!(
+        powershell_words(r"Get-Content 'C:\Matters\O''Brien & Sons\brief.txt'"),
+        [vec!["Get-Content", r"C:\Matters\O'Brien & Sons\brief.txt"]]
     );
 }

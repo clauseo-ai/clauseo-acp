@@ -5,6 +5,7 @@
 mod powershell;
 mod segments;
 
+pub(crate) use powershell::powershell_words;
 use segments::Known;
 pub(crate) use segments::{Joint, Role, Segment, Segments};
 
@@ -63,10 +64,12 @@ pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segme
         quoted: false,
         unknown: false,
         stream: false,
+        here: false,
         awaiting_delimiter: None,
         redirecting: None,
         heredocs: Vec::new(),
         inner: Vec::new(),
+        alt: Vec::new(),
     };
     segments.split();
     scanner.run(segments);
@@ -92,6 +95,8 @@ struct Scanner<'a> {
     unknown: bool,
     /// Whether the word being read is a stream's number before `>` ([`Role::Stream`]).
     stream: bool,
+    /// Whether the word being read holds a here-string's body.
+    here: bool,
     /// After `<<` or `<<-`: the next word is a heredoc's delimiter; whether tabs are stripped.
     awaiting_delimiter: Option<bool>,
     /// After `>`: the next word is a redirection's target; whether it duplicates a descriptor.
@@ -100,6 +105,9 @@ struct Scanner<'a> {
     heredocs: Vec<(String, bool)>,
     /// The bodies of the `$(…)` read so far (`PowerShell`), read as commands after this one.
     inner: Vec<String>,
+    /// In the word being read, each 7-only escape (`` `e ``, `` `u{…} ``): where its character
+    /// is, the character, and the text 5.1 reads instead ([`Self::escape_char`]).
+    alt: Vec<(usize, char, String)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -251,6 +259,7 @@ impl Scanner<'_> {
                         quoted: false,
                         unknown: true,
                         role: Role::Target,
+                        here: false,
                     };
                     segments.push_word("(".to_owned(), known);
                 }
@@ -287,7 +296,7 @@ impl Scanner<'_> {
     /// One character under `PowerShell`'s rules (`powershell.rs`), where they differ from the
     /// simple shell way: the quote after it, or `None` when the simple way reads it.
     fn powershell_char(&mut self, quote: Quote, c: char, segments: &mut Segments) -> Option<Quote> {
-        use powershell::{escaped, expands, is_double, is_single};
+        use powershell::{expands, is_double, is_single};
         match quote {
             Quote::None if is_single(c) => Some(self.open(Quote::Single)),
             Quote::None if is_double(c) => Some(self.open(Quote::Double)),
@@ -302,8 +311,7 @@ impl Scanner<'_> {
                     Some(next) => {
                         self.in_word = true;
                         self.quoted = true;
-                        let decoded = escaped(next, &mut self.chars);
-                        self.word.push(decoded);
+                        self.escape_char(next);
                     }
                 }
                 Some(quote)
@@ -346,6 +354,7 @@ impl Scanner<'_> {
                 self.unknown |= double && powershell::has_expansion(&body);
                 self.in_word = true;
                 self.quoted = true;
+                self.here = true;
                 self.word.push_str(&body);
                 Some(quote)
             }
@@ -355,18 +364,34 @@ impl Scanner<'_> {
         }
     }
 
+    /// Adds the character a backtick before `next` stands for. `` `e `` and `` `u{…} `` are
+    /// PowerShell 7's; Windows PowerShell 5.1 reads them as the letters themselves, so that
+    /// reading is kept too ([`Self::alt`]): the word is also added as 5.1 spells it.
+    fn escape_char(&mut self, next: char) {
+        let rest = self.chars.clone();
+        let before = rest.clone().count();
+        let decoded = powershell::escaped(next, &mut self.chars);
+        let used = before - self.chars.clone().count();
+        if decoded != next && matches!(next, 'e' | 'u') {
+            let raw: String = std::iter::once(next).chain(rest.take(used)).collect();
+            self.alt.push((self.word.len(), decoded, raw));
+        }
+        self.word.push(decoded);
+    }
+
     /// At a quote of `quote`'s kind (`same`): two in a row stand for the second, kept in the word
     /// (`quote` stays open; `'a'’b'` keeps `’`, VM row 8); one alone closes it. Right after the
     /// closing quote, an unquoted `.`, `[` or `(` makes the word unknown (`'abc'.ToUpper()` calls
-    /// the method, VM row 4a), and bare text starts another word (`'a'b` is two arguments, VM
-    /// row 4b): rows observed on Windows PowerShell 5.1 and PowerShell 7.4, 16 Nov 2026.
+    /// the method, VM row 4a), and bare text or a quote of the other kind starts another word
+    /// (`'a'b` and `'a'"b"` are two arguments, rows 4b and 2), as does `#`, which starts a
+    /// comment (`'a'#…`, row 1): rows observed on Windows PowerShell 5.1 and PowerShell 7.4,
+    /// 16 Nov 2026.
     fn close_or_double(
         &mut self,
         quote: Quote,
         same: fn(char) -> bool,
         segments: &mut Segments,
     ) -> Quote {
-        use powershell::{is_double, is_single};
         if let Some(second) = self.chars.next_if(|next| same(*next)) {
             self.word.push(second);
             return quote;
@@ -375,10 +400,10 @@ impl Scanner<'_> {
             Some('.' | '[' | '(') => self.unknown = true,
             Some(next)
                 if !next.is_whitespace()
-                    && !is_single(next)
-                    && !is_double(next)
                     && !matches!(next, ',' | ';' | '|' | '&' | ')' | '>' | '<' | '}') =>
             {
+                // A quote here is of the other kind (two of a kind were a doubled quote):
+                // `'a'"b"` is two arguments too (VM row 2), and `'a'#` starts a comment (row 1).
                 self.end_word(segments);
             }
             _ => {}
@@ -402,6 +427,8 @@ impl Scanner<'_> {
         let quoted = std::mem::take(&mut self.quoted);
         let unknown = std::mem::take(&mut self.unknown);
         let stream = std::mem::take(&mut self.stream);
+        let alt = std::mem::take(&mut self.alt);
+        let here = std::mem::take(&mut self.here);
         let word = std::mem::take(&mut self.word);
         if let Some(dash) = self.awaiting_delimiter.take() {
             self.heredocs.push((word, dash));
@@ -421,8 +448,15 @@ impl Scanner<'_> {
             quoted,
             unknown,
             role,
+            here,
         };
+        let alt = powershell::spelled_as_5_1(&word, alt);
         segments.push_word(word, known);
+        // The same word as Windows PowerShell 5.1 reads it, when it holds a 7-only escape.
+        if let Some(alt) = alt {
+            let role = Role::Arg;
+            segments.push_word(alt, Known { role, ..known });
+        }
     }
 
     /// Reads the bodies of the heredocs the line just ended opened, each into a segment that is
@@ -458,41 +492,6 @@ impl Scanner<'_> {
         }
         segments.split();
     }
-}
-
-/// A `PowerShell` command's simple commands, each as its words, as [`shell_segments`] reads them
-/// under [`Escape::Backtick`] with no limit: an array's elements (`'a','b'`) each a word of their
-/// own, a quoted comma part of its word; and a word of more than one line (a here-string's body)
-/// also split at blanks, so a path written inside it is a word too, as the data folder fence's
-/// own reader read it before. For readers that keep no other state per word (the data folder
-/// fence's, `agent/data_fence/command.rs`).
-pub(crate) fn powershell_words(command: &str) -> Vec<Vec<String>> {
-    let mut segments = Segments::new(usize::MAX);
-    shell_segments(command, Escape::Backtick, &mut segments);
-    segments
-        .iter()
-        .map(|segment| {
-            segment
-                .words
-                .iter()
-                .flat_map(|word| word.split(ARRAY_COMMA))
-                .flat_map(word_and_lines)
-                .filter(|word| !word.is_empty())
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
-        })
-        .filter(|words| !words.is_empty())
-        .collect()
-}
-
-/// `word`, then, when it has more than one line, its parts between blanks, quotes trimmed
-/// ([`powershell_words`]).
-fn word_and_lines(word: &str) -> impl Iterator<Item = &str> {
-    let parts = word.contains(['\n', '\r']).then(|| {
-        word.split_whitespace()
-            .map(|part| part.trim_matches(['\'', '"']))
-    });
-    std::iter::once(word).chain(parts.into_iter().flatten())
 }
 
 /// The character an ANSI-C escape (`$'…'`) stands for, read from `chars` just after its

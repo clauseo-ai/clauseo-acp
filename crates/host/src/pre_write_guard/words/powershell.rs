@@ -19,6 +19,66 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
+use super::{ARRAY_COMMA, Escape, Segments, shell_segments};
+
+/// `word` with each 7-only escape's character (`alt`: where, the character, 5.1's text) put back
+/// as Windows PowerShell 5.1 reads it (`` `e `` as `e`, `` `u{43} `` as `u{43}`); `None` when it
+/// has none.
+pub(super) fn spelled_as_5_1(word: &str, alt: Vec<(usize, char, String)>) -> Option<String> {
+    if alt.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(word.len());
+    let mut from = 0;
+    for (at, decoded, raw) in alt {
+        out.push_str(word.get(from..at)?);
+        out.push_str(&raw);
+        from = at + decoded.len_utf8();
+    }
+    out.push_str(word.get(from..)?);
+    Some(out)
+}
+
+/// A `PowerShell` command's simple commands, each as its words, as [`shell_segments`] reads them
+/// under [`Escape::Backtick`] with no limit: an array's elements (`'a','b'`) each a word of their
+/// own, a quoted comma part of its word; and a here-string's body, or any word of more than one
+/// line, also split at blanks, so a path written inside it is a word too, as the data folder
+/// fence's own reader read it before. A quoted word with a blank stays whole (a fragment such
+/// as `C:\Matters\O'Brien` of `'C:\Matters\O''Brien & Sons\x'` could name another matter). For
+/// readers that keep no other state per word (the data folder fence's,
+/// `agent/data_fence/command.rs`).
+pub(crate) fn powershell_words(command: &str) -> Vec<Vec<String>> {
+    let mut segments = Segments::new(usize::MAX);
+    shell_segments(command, Escape::Backtick, &mut segments);
+    segments
+        .iter()
+        .map(|segment| {
+            segment
+                .words
+                .iter()
+                .zip(&segment.here)
+                .flat_map(|(word, here)| {
+                    let split = *here || word.contains(['\n', '\r']);
+                    word.split(ARRAY_COMMA)
+                        .flat_map(move |element| word_and_parts(element, split))
+                })
+                .filter(|word| !word.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .filter(|words| !words.is_empty())
+        .collect()
+}
+
+/// `word`, then, when `split`, its parts between blanks, quotes trimmed ([`powershell_words`]).
+fn word_and_parts(word: &str, split: bool) -> impl Iterator<Item = &str> {
+    let parts = split.then(|| {
+        word.split_whitespace()
+            .map(|part| part.trim_matches(['\'', '"']))
+    });
+    std::iter::once(word).chain(parts.into_iter().flatten())
+}
+
 /// Whether PowerShell's tokenizer takes `c` as a single quote.
 pub(super) fn is_single(c: char) -> bool {
     matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}')

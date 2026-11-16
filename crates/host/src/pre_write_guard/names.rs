@@ -488,7 +488,8 @@ fn raw_text(command: &str, escape: Escape) -> String {
 /// one. `stetdoc mcp` and `init` are refused outright, and a `stetdoc` or `textutil` form that
 /// writes a held file (its default output included) is refused. Else the name backstop: a
 /// command naming a held file of `folder`, found by its words' paths or by its text and words
-/// ([`named_in`]), is refused unless the whole command only reads ([`read_only`]).
+/// ([`named_in`]), is refused unless the whole command only reads ([`read_only`]). `held` is
+/// the matter's held files ([`held_files`]), listed once for every reading of the command.
 pub(super) fn shell_refusal(
     text: &str,
     line: &str,
@@ -497,8 +498,8 @@ pub(super) fn shell_refusal(
     found: Option<MatterPath>,
     hits: &[String],
     reach: &super::Reach,
+    held: Vec<Held>,
 ) -> Option<Refusal> {
-    let held = held_files(folder);
     super::timings::mark("walk");
     let mut segments = Segments::new(MAX_WORDS);
     shell_segments(text, escape, &mut segments);
