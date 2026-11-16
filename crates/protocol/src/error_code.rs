@@ -391,24 +391,20 @@ error_codes! {
         matters' size cap (512,000,000 bytes) or one of stetdoc's limits (its `limit_exceeded`: \
         the package's size, entry count or compression ratio, an XML part's size, depth or node \
         count), so its tracked changes were not read or decided.";
-    AgentStartOffline = "agent.start_offline", retryable: true, meaning: "The agent did not \
-        start: it answered a start request (`initialize`, `session/new`, `session/load`) with \
-        an error that names a connection failure, and the host's probe of the agent's service \
-        did not get through. Asking again can work once the computer is back online.";
-    AgentAnswerFailed = "agent.answer_failed", retryable: true, meaning: "The agent answered \
-        the question (`session/prompt`) with an error that no other code reads: not offline, a \
-        sign-in, a limit or a question too long. Codex giving up on a lost connection the host \
-        does not read as offline gets it too. The answer so far is kept; asking again can work.";
-    AgentModeMissing = "agent.mode_missing", retryable: false, meaning: "The agent's session \
-        offered no mode Clauseo runs it in (Codex's `workspace-write`, Claude's mode or its \
-        fallback), so no message was sent: a version of the agent Clauseo does not support.";
-    AgentSettingRefused = "agent.setting_refused", retryable: true, meaning: "The agent \
-        answered the lawyer's own change on a running session (a mode or a setting) with an \
-        error, so the change was not made; nothing else changed.";
-    AgentProgramBlocked = "agent.program_blocked", retryable: false, meaning: "The OS would \
-        not run the agent's program: it is not there, or the computer does not allow it to run \
-        (permission denied; on Windows, a policy or security software blocking it). Asking \
-        again does not help.";
+    AgentStartOffline = "agent.start_offline", retryable: true, meaning: "The agent did not start: \
+        it answered a start request with an error naming a connection failure, and the host's \
+        probe of its service did not get through. Asking again can work once back online.";
+    AgentAnswerFailed = "agent.answer_failed", retryable: true, meaning: "The agent answered the \
+        question with an error no other code reads, or Codex gave up on a connection the host does \
+        not read as offline. The answer so far is kept; asking again can work.";
+    AgentModeMissing = "agent.mode_missing", retryable: false, meaning: "The session offered no \
+        mode Clauseo runs the agent in, so nothing was sent: an unsupported agent version.";
+    AgentSettingRefused = "agent.setting_refused", retryable: true, meaning: "The agent refused \
+        the lawyer's own mode or setting change on a running session; nothing changed.";
+    AgentProgramBlocked = "agent.program_blocked", retryable: false, meaning: "The computer \
+        refused to run the agent's program (permission, Windows policy or antivirus).";
+    AgentProgramMissing = "agent.program_missing", retryable: false, meaning: "The OS found no \
+        agent program to run (not found), so the agent did not start.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

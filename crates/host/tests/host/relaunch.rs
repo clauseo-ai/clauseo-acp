@@ -161,13 +161,13 @@ fn relaunch_exiting_on_session_new_ends_the_turn() {
     );
 }
 
-/// The relaunch's program is not there: `agent.program_blocked`, whose words don't say try again.
+/// The relaunch's program is not there: `agent.program_missing`.
 #[test]
 fn relaunch_that_cannot_spawn_ends_the_turn() {
     relaunch_fails(
         "relaunch_that_cannot_spawn_ends_the_turn",
         Play::Agent(Scenario::Bundled("exit-mid-turn")),
         Play::NoProgram,
-        &[ErrorCode::AgentProgramBlocked],
+        &[ErrorCode::AgentProgramMissing],
     );
 }

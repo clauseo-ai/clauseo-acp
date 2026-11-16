@@ -21,6 +21,8 @@ pub(crate) struct TurnPath {
     /// Whether the agent's service answers, asked before a watch only the window armed ends
     /// a turn (`offline/probe.rs`); tests set a fixed answer.
     pub(super) probe: super::offline::probe::ReachProbe,
+    /// The starting agents' bounds, by agent id (`agents/start_timer.rs`).
+    pub(super) start_bounds: std::collections::HashMap<u64, super::agents::start_timer::Bound>,
     /// The failed starts waiting for that probe, by thread (`offline/start.rs`).
     pub(super) start_probes:
         std::collections::HashMap<clauseo_protocol::ThreadId, super::offline::start::StartProbe>,

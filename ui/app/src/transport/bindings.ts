@@ -1989,16 +1989,18 @@ export type ErrorCode =
 "agent.unreachable" | 
 /** The Word file is over the matters' size cap (512,000,000 bytes) or one of stetdoc's limits (its `limit_exceeded`: the package's size, entry count or compression ratio, an XML part's size, depth or node count), so its tracked changes were not read or decided. */
 "word.too_large" | 
-/** The agent did not start: it answered a start request (`initialize`, `session/new`, `session/load`) with an error that names a connection failure, and the host's probe of the agent's service did not get through. Asking again can work once the computer is back online. */
+/** The agent did not start: it answered a start request with an error naming a connection failure, and the host's probe of its service did not get through. Asking again can work once back online. */
 "agent.start_offline" | 
-/** The agent answered the question (`session/prompt`) with an error that no other code reads: not offline, a sign-in, a limit or a question too long. Codex giving up on a lost connection the host does not read as offline gets it too. The answer so far is kept; asking again can work. */
+/** The agent answered the question with an error no other code reads, or Codex gave up on a connection the host does not read as offline. The answer so far is kept; asking again can work. */
 "agent.answer_failed" | 
-/** The agent's session offered no mode Clauseo runs it in (Codex's `workspace-write`, Claude's mode or its fallback), so no message was sent: a version of the agent Clauseo does not support. */
+/** The session offered no mode Clauseo runs the agent in, so nothing was sent: an unsupported agent version. */
 "agent.mode_missing" | 
-/** The agent answered the lawyer's own change on a running session (a mode or a setting) with an error, so the change was not made; nothing else changed. */
+/** The agent refused the lawyer's own mode or setting change on a running session; nothing changed. */
 "agent.setting_refused" | 
-/** The OS would not run the agent's program: it is not there, or the computer does not allow it to run (permission denied; on Windows, a policy or security software blocking it). Asking again does not help. */
+/** The computer refused to run the agent's program (permission, Windows policy or antivirus). */
 "agent.program_blocked" | 
+/** The OS found no agent program to run (not found), so the agent did not start. */
+"agent.program_missing" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

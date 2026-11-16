@@ -34,21 +34,25 @@ pub(crate) const START_TIMED_OUT: &str = "the agent said nothing for 120 s while
 const SLEPT: Duration = START_WAIT;
 
 /// A starting agent's bound: when it was last heard from and when its timer is due, on the
-/// host's monotonic clock.
+/// host's monotonic clock. Kept in `TurnPath::start_bounds` by agent id until its timer fires
+/// for an agent no longer starting.
 #[derive(Debug, Clone, Copy)]
 pub(in super::super) struct Bound {
     heard: Duration,
     due: Duration,
 }
 
-/// Arms the bound for `thread`'s agent `id`, just launched.
-pub(super) fn arm(actor: &Actor, thread: ThreadId, id: u64) -> Bound {
+/// A new agent's id for `thread`'s launch, its bound armed.
+pub(in super::super) fn launched(actor: &mut Actor, thread: ThreadId) -> u64 {
+    let id = super::next_agent_id();
     let now = actor.now().mono;
+    let due = now.saturating_add(START_WAIT);
+    actor
+        .turn_path
+        .start_bounds
+        .insert(id, Bound { heard: now, due });
     arm_for(actor, thread, id, START_WAIT);
-    Bound {
-        heard: now,
-        due: now.saturating_add(START_WAIT),
-    }
+    id
 }
 
 /// Arms `thread`'s agent `id`'s timer `delay` from now.
@@ -68,10 +72,13 @@ fn arm_for(actor: &Actor, thread: ThreadId, id: u64, delay: Duration) {
 /// while it is starting, the bound counts from now. A long `session/load` replay keeps it alive.
 pub(in super::super) fn heard(actor: &mut Actor, thread: ThreadId, id: Option<u64>) {
     let now = actor.now().mono;
-    if let Some(agent) = starting(actor, thread)
-        && id.is_none_or(|id| id == agent.id)
+    let Some(agent) = starting(actor, thread).map(|agent| agent.id) else {
+        return;
+    };
+    if id.is_none_or(|id| id == agent)
+        && let Some(bound) = actor.turn_path.start_bounds.get_mut(&agent)
     {
-        agent.start.heard = now;
+        bound.heard = now;
     }
 }
 
@@ -87,14 +94,17 @@ fn starting(actor: &mut Actor, thread: ThreadId) -> Option<&mut super::Agent> {
 /// up by sleep starts the wait again; an agent silent for the whole wait has failed to start.
 pub(in super::super) fn on_timer(actor: &mut Actor, thread: ThreadId, id: u64) {
     let now = actor.now().mono;
-    let Some(agent) = starting(actor, thread).filter(|agent| agent.id == id) else {
+    let still = starting(actor, thread).is_some_and(|agent| agent.id == id);
+    let bound = actor.turn_path.start_bounds.get_mut(&id);
+    let (true, Some(bound)) = (still, bound) else {
+        actor.turn_path.start_bounds.remove(&id);
         return;
     };
-    let silent = now.saturating_sub(agent.start.heard);
-    let late = now.saturating_sub(agent.start.due);
+    let silent = now.saturating_sub(bound.heard);
+    let late = now.saturating_sub(bound.due);
     let wait = if late > SLEPT {
         tracing::info!(%thread, late_s = late.as_secs(), "the start's bound waits again after sleep");
-        agent.start.heard = now;
+        bound.heard = now;
         START_WAIT
     } else if silent < START_WAIT {
         START_WAIT.saturating_sub(silent)
@@ -102,10 +112,11 @@ pub(in super::super) fn on_timer(actor: &mut Actor, thread: ThreadId, id: u64) {
         Duration::ZERO
     };
     if !wait.is_zero() {
-        agent.start.due = now.saturating_add(wait);
+        bound.due = now.saturating_add(wait);
         arm_for(actor, thread, id, wait);
         return;
     }
+    actor.turn_path.start_bounds.remove(&id);
     tracing::warn!(%thread, wait_s = START_WAIT.as_secs(), "the agent did not finish starting");
     launch_failed(
         actor,

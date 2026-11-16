@@ -178,7 +178,11 @@ fn agent_failures() -> Vec<DomainEvent> {
         ),
         failed(
             ErrorCode::AgentProgramBlocked,
-            "could not start claude-agent-acp: No such file or directory (os error 2)",
+            "could not start node: Permission denied (os error 13)",
+        ),
+        failed(
+            ErrorCode::AgentProgramMissing,
+            "could not start node: No such file or directory (os error 2)",
         ),
     ]
 }
