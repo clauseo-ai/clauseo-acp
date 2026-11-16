@@ -10,7 +10,7 @@ use clauseo_protocol::TableFormat::{
 };
 use clauseo_protocol::{ChangedTable, TableFormat, TablePlace};
 
-use super::{TABLES_MAX, TablesCompared, align, compare};
+use super::{TablesCompared, align, compare};
 
 pub(super) const W: &str = concat!(
     r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" "#,
@@ -279,17 +279,18 @@ fn a_table_inside_a_cell_is_numbered_in_order() {
     );
 }
 
-/// Past the cap the rest may differ; a file that does not read may differ.
+/// Every changed table is listed, uncapped (the blackline caps them, `run.rs`); a file that
+/// does not read may differ.
 #[test]
-fn too_many_tables_and_unreadable_files_may_differ() {
+fn many_tables_are_all_listed_and_unreadable_files_may_differ() {
     let shaded = r#"<w:shd w:val="clear" w:fill="FFFF00"/>"#;
     let many = |tcpr: &str| {
-        (0..=TABLES_MAX)
+        (0..60)
             .map(|n| grid(&format!("T{n}"), "", "", tcpr))
             .collect::<String>()
     };
     let found = bodies(&many(""), &many(shaded));
-    assert_eq!((found.changed.len(), found.may_differ), (TABLES_MAX, true));
+    assert_eq!((found.changed.len(), found.may_differ), (60, false));
     let plain = docx(&grid("T", "", "", ""));
     for broken in [b"not a zip".to_vec(), docx("<w:tbl><w:tr>")] {
         assert!(compare(&plain, &broken).may_differ);

@@ -151,12 +151,16 @@ pub(crate) async fn blackline<T: Timer>(
     Ok(read)
 }
 
+/// The most changed tables the blackline names; past it, it says the rest may differ, and
+/// [`WordBlackline::changed_tables_total`] counts them all.
+pub(crate) const TABLES_MAX: usize = 50;
+
 /// Says in `blackline` what the comparison of the versions' files found: the tables that
-/// changed, with [`BlacklineNotice::CellFormatChanged`]; that it may differ where it could not
-/// tell; and, when the headers' view read (`headers_read`; when it did not, stetdoc's list of
-/// changes says what it holds is not shown), [`BlacklineNotice::HeaderOrFooterNotCompared`] for
-/// a header's or footer's text one version only has that no part the blackline shows holds, in
-/// its older or newer text.
+/// changed, with [`BlacklineNotice::CellFormatChanged`], the first [`TABLES_MAX`] named and all
+/// counted; that it may differ where it could not tell, or past the cap; and, when the headers'
+/// view read (`headers_read`; when it did not, stetdoc's list of changes says what it holds is
+/// not shown), [`BlacklineNotice::HeaderOrFooterNotCompared`] for a header's or footer's text
+/// one version only has that no part the blackline shows holds, in its older or newer text.
 pub(crate) fn note_tables(
     blackline: &mut WordBlackline,
     compared: TablesCompared,
@@ -165,9 +169,12 @@ pub(crate) fn note_tables(
     if !compared.changed.is_empty() {
         blackline.notices.push(BlacklineNotice::CellFormatChanged);
     }
-    if compared.may_differ {
+    let mut changed = compared.changed;
+    blackline.changed_tables_total = u32::try_from(changed.len()).unwrap_or(u32::MAX);
+    if compared.may_differ || changed.len() > TABLES_MAX {
         blackline.notices.push(BlacklineNotice::MayDiffer);
     }
+    changed.truncate(TABLES_MAX);
     let shown = shown_header_texts(blackline);
     if headers_read
         && compared
@@ -179,7 +186,7 @@ pub(crate) fn note_tables(
             .notices
             .push(BlacklineNotice::HeaderOrFooterNotCompared);
     }
-    blackline.changed_tables = compared.changed;
+    blackline.changed_tables = changed;
     order(&mut blackline.notices);
 }
 

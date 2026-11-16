@@ -16,8 +16,8 @@ use clauseo_protocol::{
 
 use super::cross::{LINKS_MAX, note_what_compare_missed};
 use super::{
-    TablesCompared, author_arg, error_of, note_a_silent_difference, note_tables, refusal_code,
-    stetdoc_env,
+    TABLES_MAX, TablesCompared, author_arg, error_of, note_a_silent_difference, note_tables,
+    refusal_code, stetdoc_env,
 };
 use crate::actor::query::blackline::parse::sides::Crossed;
 
@@ -151,6 +151,7 @@ fn a_difference_the_blackline_does_not_show_may_differ() {
         changed_links: Vec::new(),
         parts: Vec::new(),
         changed_tables: Vec::new(),
+        changed_tables_total: 0,
     };
     let noted = |mut blackline: WordBlackline, differ| {
         note_a_silent_difference(&mut blackline, differ);
@@ -223,6 +224,7 @@ fn a_header_text_one_version_only_has_is_said_unless_shown() {
         changed_links: Vec::new(),
         parts: Vec::new(),
         changed_tables: Vec::new(),
+        changed_tables_total: 0,
     };
     let mut unshown = empty.clone();
     note_tables(&mut unshown, lone(&["Scheduleheader."]), true);
@@ -273,6 +275,7 @@ fn what_the_table_comparison_found_is_said() {
         changed_links: Vec::new(),
         parts: Vec::new(),
         changed_tables: Vec::new(),
+        changed_tables_total: 0,
     };
     let mut found = empty.clone();
     note_tables(
@@ -285,6 +288,7 @@ fn what_the_table_comparison_found_is_said() {
         true,
     );
     assert_eq!(found.changed_tables, [shaded_table()]);
+    assert_eq!(found.changed_tables_total, 1);
     assert_eq!(
         found.notices,
         [
@@ -296,6 +300,35 @@ fn what_the_table_comparison_found_is_said() {
     let mut none = empty.clone();
     note_tables(&mut none, TablesCompared::default(), true);
     assert_eq!(none, empty);
+}
+
+/// Past [`TABLES_MAX`] changed tables, the first are named, all are counted, and the rest may
+/// differ.
+#[test]
+fn past_the_cap_the_tables_are_counted_and_may_differ() {
+    let mut many = WordBlackline {
+        paragraphs: Vec::new(),
+        truncated: false,
+        notices: Vec::new(),
+        changed_links: Vec::new(),
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
+        changed_tables_total: 0,
+    };
+    let compared = TablesCompared {
+        changed: vec![shaded_table(); TABLES_MAX + 10],
+        ..TablesCompared::default()
+    };
+    note_tables(&mut many, compared, true);
+    assert_eq!(many.changed_tables.len(), TABLES_MAX);
+    assert_eq!(many.changed_tables_total, 60);
+    assert_eq!(
+        many.notices,
+        [
+            BlacklineNotice::CellFormatChanged,
+            BlacklineNotice::MayDiffer
+        ]
+    );
 }
 
 /// What the versions' views found goes on the blackline: the links by text, to the cap (past it,
@@ -310,6 +343,7 @@ fn what_compare_missed_is_said() {
         changed_links: Vec::new(),
         parts: Vec::new(),
         changed_tables: Vec::new(),
+        changed_tables_total: 0,
     };
     let mut said = empty.clone();
     note_what_compare_missed(

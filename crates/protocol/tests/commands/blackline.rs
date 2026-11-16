@@ -77,6 +77,7 @@ fn a_word_blackline_answer_on_the_wire() {
         notices: Vec::new(),
         parts: Vec::new(),
         changed_tables: Vec::new(),
+        changed_tables_total: 0,
     });
     round_trips(&answer);
     assert_eq!(
@@ -117,6 +118,7 @@ fn a_word_blackline_answer_with_notices_on_the_wire() {
         ],
         parts: Vec::new(),
         changed_tables: Vec::new(),
+        changed_tables_total: 0,
     });
     round_trips(&answer);
     assert_eq!(
@@ -163,6 +165,7 @@ fn hidden_text_formatting_and_places_not_shown_on_the_wire() {
         notices: vec![BlacklineNotice::ChangesOutsideText],
         parts: Vec::new(),
         changed_tables: Vec::new(),
+        changed_tables_total: 0,
     });
     round_trips(&answer);
     assert_eq!(
@@ -197,6 +200,7 @@ fn an_object_run_on_the_wire() {
         notices: Vec::new(),
         parts: Vec::new(),
         changed_tables: Vec::new(),
+        changed_tables_total: 0,
     });
     round_trips(&answer);
     assert_eq!(
@@ -250,6 +254,7 @@ fn parts_and_changed_tables_on_the_wire() {
             number: 2,
             formats: vec![TableFormat::Shading, TableFormat::MergedCells],
         }],
+        changed_tables_total: 60,
     });
     round_trips(&answer);
     let para = concat!(
@@ -266,7 +271,7 @@ fn parts_and_changed_tables_on_the_wire() {
                 r#"{{"kind":{{"header":{{"uses":[{{"slot":"first_page","sections":[1,2]}}]}}}},"#,
                 r#""paragraphs":[{para}]}}],"#,
                 r#""changed_tables":[{{"place":"body","number":2,"#,
-                r#""formats":["shading","merged_cells"]}}]}}}}"#
+                r#""formats":["shading","merged_cells"]}}],"changed_tables_total":60}}}}"#
             ),
             para = para
         )
@@ -280,7 +285,14 @@ fn parts_and_changed_tables_on_the_wire() {
     .unwrap() else {
         panic!("not a word_blackline answer");
     };
-    assert_eq!((none.parts.len(), none.changed_tables.len()), (0, 0));
+    assert_eq!(
+        (
+            none.parts.len(),
+            none.changed_tables.len(),
+            none.changed_tables_total
+        ),
+        (0, 0, 0)
+    );
 }
 
 /// A run of `kind` with `text`.

@@ -26,8 +26,8 @@
 //! - what is never silent: where both sides have tables, rows or cells left between two pairs
 //!   and not as many of them, what changed there can't be put on a table, so the part may differ
 //!   ([`TablesCompared::may_differ`]); and so may the whole document when a version can't be
-//!   read (a zip that does not open, a part missing, past a cap or not well-formed), or past
-//!   [`TABLES_MAX`] changed tables.
+//!   read (a zip that does not open, a part missing, past a cap or not well-formed). Past
+//!   `run.rs`'s cap on the tables named, the rest may differ too.
 //!
 //! A table is named by its part and its number in it in the newer version, from 1, counting
 //! every table in the order it starts, a table inside a cell too.
@@ -40,9 +40,6 @@ use read::{Package, Prop, Table, Where, read_package};
 
 mod read;
 
-/// The most changed tables the blackline names; past it, it says the rest may differ.
-pub(crate) const TABLES_MAX: usize = 50;
-
 /// The most cells the text alignment of one list may fill (its old length times its new): past
 /// it the list is not aligned, and what is left unpaired may differ.
 const ALIGN_MAX: usize = 4_000_000;
@@ -51,7 +48,7 @@ const ALIGN_MAX: usize = 4_000_000;
 /// differ that it could not put on a table.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct TablesCompared {
-    /// The changed tables, in the order of the parts, then by number; at most [`TABLES_MAX`].
+    /// The changed tables, in the order of the parts, then by number; every one, uncapped.
     pub(crate) changed: Vec<ChangedTable>,
     /// Whether the blackline may differ (the module doc).
     pub(crate) may_differ: bool,
@@ -109,10 +106,6 @@ pub(crate) fn compare(old: &[u8], new: &[u8]) -> TablesCompared {
         .collect();
     // The body, the notes, then the headers and the footers; each part's tables by number.
     found.changed.sort_by_key(|table| place_rank(&table.place));
-    if found.changed.len() > TABLES_MAX {
-        found.changed.truncate(TABLES_MAX);
-        found.may_differ = true;
-    }
     found
 }
 

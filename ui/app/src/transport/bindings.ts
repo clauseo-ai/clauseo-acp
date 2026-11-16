@@ -7874,6 +7874,12 @@ export type WordBlackline = {
 	 *  differ. Empty when none; missing reads as empty, and empty is left out.
 	 */
 	changed_tables?: ChangedTable[],
+	/**
+	 *  How many tables' formatting differs, those past the 50 [`Self::changed_tables`] holds
+	 *  counted too: more than that list's length only past the cap. 0 when none; missing reads
+	 *  as 0, and 0 is left out.
+	 */
+	changed_tables_total?: number,
 };
 
 /* Tauri Specta runtime */
