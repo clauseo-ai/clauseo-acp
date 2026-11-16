@@ -23,6 +23,8 @@ Every lawyer-facing string has an id registered in `ui/app/src/review/registry*.
 
 The app track's 400 to 499 is used up. Parts went to other threads, as their rows say: host follow-ups, the Indian Kanoon thread, stage D and stage E. The ids not handed out are the app track's own. New app-track ids take 800 to 899.
 
+Kanoon: UC-450..UC-469, Indian Kanoon thread (macmini:ses_b07fd6e7771a40ae90ed): blackline PR 2 uses 450–464, the history tool 465–469; blackline PR 2 also uses UC-392..399 from host follow-ups' range.
+
 ### Shared reserve: UC-900 to UC-999
 
 When a thread runs out of its block, it asks the app track, which hands out a sub-range of 900 to 999. Every hand-out gets a row here.

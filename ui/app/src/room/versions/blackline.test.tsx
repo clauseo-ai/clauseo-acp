@@ -217,18 +217,150 @@ test("what the sheet doesn't mark says so: each changed link by its text, then a
     "The web address behind 'the bank's site' changed.",
     "A comment's text changed. Open both versions in Word to see it.",
     "Text in a text box changed. Open both versions in Word to see it.",
-    "The formatting of some table cells changed.",
+    "The formatting of some tables, rows or cells changed.",
   ]);
   expect(page()?.querySelectorAll("[data-change]")).toHaveLength(2);
 });
 
-test("changes outside the main text say so over the sheet", async () => {
+test("changes outside what's shown say so over the sheet, naming comments, not headers or footnotes", async () => {
   h = await comparing(() => ({
     word_blackline: { ...MARKED.word_blackline!, notices: ["changes_outside_text"] },
   }));
   expect(lines()).toEqual([
-    "Some changes are outside the main text, such as in headers or footnotes. They aren't shown here.",
+    "Some changes are outside what's shown here, such as in comments. Open both versions in Word to see them.",
   ]);
+});
+
+const MAY_DIFFER = "Some of this may look different in Word.";
+
+test("a header or footer compare couldn't compare has a line of its own, not the 'may differ' line", async () => {
+  h = await comparing(() => ({
+    word_blackline: {
+      ...MARKED.word_blackline!,
+      notices: ["header_or_footer_not_compared", "may_differ"],
+    },
+  }));
+  expect(lines()).toEqual([
+    "A header or footer couldn't be compared, so changes in it aren't shown. Open both versions in Word to see them.",
+    MAY_DIFFER,
+  ]);
+});
+
+/** The headings after the body, and each part's inserted and deleted words. */
+const partsShown = () =>
+  [...(page()?.querySelectorAll<HTMLElement>(".ver-part") ?? [])].map((s) => ({
+    heading: s.querySelector(".ver-part-title")?.textContent ?? null,
+    ins: [...s.querySelectorAll(".ver-ins")].map((e) => e.textContent),
+    del: [...s.querySelectorAll(".ver-del")].map((e) => e.textContent),
+    barred: s.querySelectorAll("[data-change]").length,
+  }));
+
+const swap = (out: string, into: string) => ({
+  change: "changed" as const,
+  runs: [
+    { kind: "same" as const, text: "See " },
+    { kind: "del" as const, text: out },
+    { kind: "ins" as const, text: into },
+  ],
+});
+
+test("a footnote and a first-page header that changed are shown after the body, each under its heading, marked as the body is", async () => {
+  h = await comparing(() => ({
+    word_blackline: {
+      ...MARKED.word_blackline!,
+      parts: [
+        { kind: { footnote: { number: 3 } }, paragraphs: [swap("3 March", "5 March")] },
+        {
+          kind: { header: { uses: [{ slot: "first_page", sections: [1] }] } },
+          paragraphs: [
+            { change: "same", runs: [{ kind: "same", text: "Lease" }] },
+            swap("draft", "final"),
+          ],
+        },
+        { kind: { endnote: { number: 1 } }, paragraphs: [swap("a", "b")] },
+        {
+          kind: { footer: { uses: [{ slot: "even_pages", sections: [1] }] } },
+          paragraphs: [swap("c", "d")],
+        },
+        { kind: { header: { uses: [] } }, paragraphs: [swap("e", "f")] },
+      ],
+    },
+  }));
+  expect(partsShown()).toEqual([
+    { heading: "Footnote 3", ins: ["5 March"], del: ["3 March"], barred: 1 },
+    { heading: "Header (first page)", ins: ["final"], del: ["draft"], barred: 1 },
+    { heading: "Endnote 1", ins: ["b"], del: ["a"], barred: 1 },
+    { heading: "Footer (even pages)", ins: ["d"], del: ["c"], barred: 1 },
+    { heading: "Header", ins: ["f"], del: ["e"], barred: 1 },
+  ]);
+  // the body comes first, as before, and keeps its own marks
+  expect(page()?.querySelector(".page-paras")?.closest(".ver-part")).toBeNull();
+  expect(page()?.querySelector(".ver-del")?.textContent).toBe("first");
+  expect(lines()).toEqual([]);
+});
+
+test("two sections' headers on the same kind of page say their section; a header alone of its kind doesn't", async () => {
+  const header = (slot: "default" | "first_page", n: number) => ({
+    kind: { header: { uses: [{ slot, sections: [n, n + 1] }] } },
+    paragraphs: [swap("x", "y")],
+  });
+  h = await comparing(() => ({
+    word_blackline: {
+      ...MARKED.word_blackline!,
+      parts: [header("default", 1), header("default", 3), header("first_page", 3)],
+    },
+  }));
+  expect(partsShown().map((p) => p.heading)).toEqual([
+    "Header, section 1",
+    "Header, section 3",
+    "Header (first page)",
+  ]);
+});
+
+test("the table notice names each table and what changed in it; past four, the first three and how many more", async () => {
+  const first = { slot: "first_page" as const, sections: [1] };
+  const four = [
+    { place: "body" as const, number: 2, formats: ["borders" as const, "shading" as const] },
+    { place: { header: { uses: [first] } }, number: 1, formats: ["merged_cells" as const] },
+    { place: "footnotes" as const, number: 1, formats: ["row_height" as const] },
+    { place: "endnotes" as const, number: 2, formats: ["other" as const, "unknown" as const] },
+  ];
+  h = await comparing(() => ({
+    word_blackline: {
+      ...MARKED.word_blackline!,
+      notices: ["cell_format_changed"],
+      changed_tables: four,
+    },
+  }));
+  expect(lines()).toEqual([
+    "Formatting changed in table 2 (borders, shading), Header (first page), table 1 (merged cells), table 1 in the footnotes (row height) and table 2 in the endnotes (other formatting).",
+  ]);
+  await h.unmount();
+  h = await comparing(() => ({
+    word_blackline: {
+      ...MARKED.word_blackline!,
+      notices: ["cell_format_changed"],
+      changed_tables: [
+        ...four,
+        { place: "body", number: 5, formats: ["widths", "alignment"] },
+        { place: "somewhere_new", number: 1, formats: ["borders"] },
+      ],
+    },
+  }));
+  expect(lines()).toEqual([
+    "Formatting changed in table 2 (borders, shading), Header (first page), table 1 (merged cells), table 1 in the footnotes (row height) and 3 more.",
+  ]);
+});
+
+test("a table notice with no table named, or only tables in places this version doesn't know, says only that formatting changed", async () => {
+  h = await comparing(() => ({
+    word_blackline: {
+      ...MARKED.word_blackline!,
+      notices: ["cell_format_changed"],
+      changed_tables: [{ place: "somewhere_new", number: 1, formats: ["borders"] }],
+    },
+  }));
+  expect(lines()).toEqual(["The formatting of some tables, rows or cells changed."]);
 });
 
 test("a place that couldn't be shown says so where it stood; a formatting change and hidden text are named over their words", async () => {

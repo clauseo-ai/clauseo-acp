@@ -150,9 +150,23 @@ function Paras({
   );
 }
 
+/** A footnote, an endnote, a header or a footer of a marked-up document that holds a change: its heading ("Footnote
+ * 3", "Header (first page)"), or none for a kind the room can't name, and its paragraphs. */
+export type MarkedPart = { heading: string | null; diffs: readonly ParaDiff[] };
+
 /** A Word document whose changes the host's Word tool marked up: its name over its paragraphs, words in underlined,
- * words out struck, and a bar by each paragraph that changed. */
-export function MarkedSheet({ title, diffs }: { title: string; diffs: readonly ParaDiff[] }) {
+ * words out struck, and a bar by each paragraph that changed; then each part that changed (parts), under its heading,
+ * its paragraphs set and marked as the body's are. */
+export function MarkedSheet({
+  title,
+  diffs,
+  parts = [],
+}: {
+  title: string;
+  diffs: readonly ParaDiff[];
+  /** Optional: the footnotes, endnotes, headers and footers that changed, in order; none by default. */
+  parts?: readonly MarkedPart[];
+}) {
   const { id } = useRoom();
   return (
     <article className="page ver-page ver-marked" aria-labelledby={id("ver-marked")}>
@@ -160,6 +174,16 @@ export function MarkedSheet({ title, diffs }: { title: string; diffs: readonly P
         <Say>{title}</Say>
       </Heading>
       <Paras diffs={diffs} marked />
+      {parts.map((p, i) => (
+        <section key={i} className="ver-part">
+          {p.heading !== null && (
+            <Heading level={2} depth={1} className="ver-part-title">
+              <Say>{p.heading}</Say>
+            </Heading>
+          )}
+          <Paras diffs={p.diffs} marked />
+        </section>
+      ))}
     </article>
   );
 }

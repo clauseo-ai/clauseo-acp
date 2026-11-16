@@ -2,14 +2,15 @@
 // blackline sheet under the two times. While it runs the times stand with a line saying so; if it fails, a line says
 // why (with Try again where another try may mend it) over the sheet that says only that the file changed. Shown, a
 // line over it for each thing the host says to know: a link whose web address changed, a part not shown, hidden text,
-// numbers that may differ, a comment or a text box whose text changed.
+// numbers that may differ, a comment or a text box whose text changed, the tables whose formatting changed; and after
+// the body, each footnote, endnote, header or footer that changed, under its heading.
 import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { MarkedHead, MarkedSheet, MarkLine } from "@clauseo/components/clauseo/version-page.tsx";
 import { markedDiffs } from "@clauseo/components/clauseo/versions-diff.ts";
 import { useVersionWords } from "@clauseo/components/lib/words-versions.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { keyOf, type Blacklines, type MarkAsk } from "./blackline.ts";
-import { linkLine, markFailedLine, noticeLine } from "./words.ts";
+import { linkLine, markFailedLine, noticeLine, partHeadings, tablesLine } from "./words.ts";
 
 export function MarkedDesk({
   blacklines: b,
@@ -43,6 +44,15 @@ export function MarkedDesk({
     () => (mark?.kind === "shown" ? markedDiffs(mark.paragraphs) : null),
     [mark],
   );
+  const lang = w.lang;
+  const parts = useMemo(() => {
+    if (mark?.kind !== "shown") return [];
+    const headings = partHeadings(lang, mark.parts, mark.changedTables);
+    return mark.parts.map((p, i) => ({
+      heading: headings[i] ?? null,
+      diffs: markedDiffs(p.paragraphs),
+    }));
+  }, [mark, lang]);
   if (mark === undefined || mark.kind === "running")
     return (
       <>
@@ -79,9 +89,16 @@ export function MarkedDesk({
         <MarkLine key={`link-${i}`} text={linkLine(w.lang, text)} />
       ))}
       {mark.notices.map((n) => (
-        <MarkLine key={n} text={noticeLine(w.lang, n)} />
+        <MarkLine
+          key={n}
+          text={
+            n === "cell_format_changed"
+              ? tablesLine(w.lang, mark.changedTables, mark.parts)
+              : noticeLine(w.lang, n)
+          }
+        />
       ))}
-      <MarkedSheet title={title} diffs={diffs ?? []} />
+      <MarkedSheet title={title} diffs={diffs ?? []} parts={parts} />
     </>
   );
 }

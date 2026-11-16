@@ -16,7 +16,9 @@ import {
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type {
   BlacklineNotice,
+  BlacklinePart,
   BlacklineParagraph,
+  ChangedTable,
   CheckpointKind,
   FileChange,
   FolderPlace,
@@ -141,7 +143,8 @@ export type Matter = {
   mark?:
     | "hold"
     | { truncated: boolean }
-    | { notices: BlacklineNotice[] }
+    | { notices: BlacklineNotice[]; changed_tables?: ChangedTable[] }
+    | { parts: BlacklinePart[] }
     | { changed_links: string[] }
     | { paragraphs: BlacklineParagraph[] }
     | { refused: string; retryable: boolean };
@@ -191,7 +194,12 @@ function marking(mark: Matter["mark"]): QueryResult | Promise<QueryResult> {
   const notices = mark !== undefined && "notices" in mark ? mark.notices : [];
   const paragraphs = mark !== undefined && "paragraphs" in mark ? mark.paragraphs : MARKED_NOTICE;
   const changed_links = mark !== undefined && "changed_links" in mark ? mark.changed_links : [];
-  return { word_blackline: { paragraphs, truncated, notices, changed_links } };
+  const parts = mark !== undefined && "parts" in mark ? mark.parts : [];
+  const changed_tables =
+    mark !== undefined && "changed_tables" in mark ? (mark.changed_tables ?? []) : [];
+  return {
+    word_blackline: { paragraphs, truncated, notices, changed_links, parts, changed_tables },
+  };
 }
 
 /** The matter's history: its papers brought in three days ago, a turn of the conversation's that morning, the
