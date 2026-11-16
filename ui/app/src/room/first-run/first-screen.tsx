@@ -132,10 +132,17 @@ export function FirstScreen({
     const picked = await wait.track(() => matters.pickFolder());
     if (picked === null || makingNow.current) return;
     if (hasBackslash(picked.display, platform)) {
-      setHeld({ display: picked.display, again: openFolder, anyway: () => make(picked) });
+      // Locate's step first; its Open anyway asks the drive check too, a drive's step then, else the folder is made
+      setHeld({ display: picked.display, again: openFolder, anyway: () => checkThenMake(picked) });
       return;
     }
-    // asked about as New matter asks; Open the folder waits meanwhile, "Opening the folder…" under it
+    await checkThenMake(picked);
+  };
+  /** The drive check, then the folder: a network drive or a drive without permissions holds the pick for its step,
+   * else the folder made. Open the folder waits meanwhile, "Opening the folder…" under it, and a second press does
+   * nothing. */
+  const checkThenMake = async (picked: { folder: FolderRefId; display: string }) => {
+    if (makingNow.current) return;
     makingNow.current = true;
     setMaking(true);
     const kind = await warningOf(matters, picked.folder);

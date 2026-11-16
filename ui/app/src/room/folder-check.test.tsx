@@ -362,3 +362,28 @@ test("no backslash warning on Windows, nor for a plain path on macOS or Linux", 
     expect(byId("create-matter")).not.toBeNull();
   }
 });
+
+test.each(["mac", "linux"] as const)(
+  "on %s, a folder with a backslash on a network drive: Create anyway on its warning shows the drive's warning, and only its Create anyway makes the matter",
+  async (platform) => {
+    const transport = await mount(checking([{ support: "network" }], ["ref-a"], platform, SLASHED));
+    await openForm();
+    await press("matter-existing");
+    expect(warning()?.dataset["kind"]).toBe("backslash");
+    await press("folder-anyway");
+    expect(created(transport)).toEqual([]);
+    expect(warning()?.dataset["kind"]).toBe("network");
+    expect(byId("folder-anyway")?.textContent).toBe(fr("en", "Create anyway"));
+    await press("folder-anyway");
+    expect(created(transport)).toEqual([existing("ref-a")]);
+  },
+);
+
+test("a folder with a backslash that a check says is fine: Create anyway on its warning makes the matter at once", async () => {
+  const transport = await mount(checking([{}], ["ref-a"], "mac", SLASHED));
+  await openForm();
+  await press("matter-existing");
+  await press("folder-anyway");
+  expect(created(transport)).toEqual([existing("ref-a")]);
+  expect(warning()).toBeNull();
+});
