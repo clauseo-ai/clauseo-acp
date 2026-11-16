@@ -210,7 +210,7 @@ test("a long string from outside is one chip, whole: never searched for chips; a
   expect(draftOf(sentOf(asked))).toEqual(asked);
 });
 
-test("fill, setText and clear carry the chips; Cmd+Z after a clear brings them back with the words", async () => {
+test("fill, setText and clear carry the chips; Cmd+Z after a clear brings them back, never after a sent one's", async () => {
   const ref = createRef<ComposerHandle>();
   const onInput = vi.fn();
   await mount(composer({ ref, onInput }));
@@ -224,21 +224,21 @@ test("fill, setText and clear carry the chips; Cmd+Z after a clear brings them b
   // a clear for other words does nothing
   await act(async () => ref.current?.clear("Read it."));
   expect(chips()).toHaveLength(1);
-  await act(async () => ref.current?.clear(asked));
+  await act(async () => ref.current?.clear());
   expect(chips()).toHaveLength(0);
   expect(field().value).toBe("");
   expect(onInput).toHaveBeenLastCalledWith({ typed: "", pastes: [] }, true);
-  // happy-dom has no execCommand, so the clear was made in place: the composer's own undo brings both back
+  // happy-dom has no execCommand, so the clear was made in place: the composer's own undo brings the chip back
   field().focus();
-  const z = new KeyboardEvent("keydown", {
-    key: "z",
-    metaKey: true,
-    bubbles: true,
-    cancelable: true,
-  });
-  await act(async () => void field().dispatchEvent(z));
-  expect(z.defaultPrevented).toBe(true);
+  expect(await undoKey(field())).toBe(true);
   expect(chips()).toHaveLength(1);
+  // the clear of a question sent and accepted: Cmd+Z brings no chip back
+  await act(async () => ref.current?.setText(held));
+  await act(async () => ref.current?.clear(asked));
+  expect(chips()).toHaveLength(0);
+  expect(await undoKey(field())).toBe(false);
+  expect(chips()).toHaveLength(0);
+  await act(async () => ref.current?.setText(held));
   // the stopped question's refill: only into an empty composer, chips and all
   await act(async () => ref.current?.fill("Other words."));
   expect(field().value).not.toBe("Other words.");

@@ -114,8 +114,9 @@ export type ComposerHandle = {
   setText: (text: string | Draft) => void;
   /** Empties the field as one undoable step: with the field focused, or with focus on nothing or on a button of the
    * field's own row (Ask, just pressed), which it takes back to the field. With focus anywhere else on the page it is
-   * emptied in place, so the lawyer's focus never moves, and that one step can't be undone. Given `only`, it clears
-   * only while the field holds exactly that. While an input method composes it waits for the composition's end and
+   * emptied in place, so the lawyer's focus never moves, and that one step can't be undone. Given `only`, the
+   * question just sent and accepted, it clears only while the composer holds exactly that, and Cmd/Ctrl+Z after it
+   * brings back no chip: the long pastes went with the question. While an input method composes it waits for the composition's end and
    * clears then if the field still holds what it held. */
   clear: (only?: string) => void;
   /** Puts `text` into the field only while it is empty, as one undoable step, and never moves the lawyer's focus:
@@ -348,6 +349,8 @@ export function Composer<V extends string = string>({
       return;
     }
     replace(a, EMPTY_DRAFT, mayTakeFocus(a), inPlace);
+    // an accepted send: its chips went, and no undo brings them back to go twice
+    if (only !== undefined) chips.forget();
   };
   const fill = (text: string | Draft, inPlace = false) => {
     const a = area.current;
