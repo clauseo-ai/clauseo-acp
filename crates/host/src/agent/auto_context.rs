@@ -143,7 +143,7 @@ fn json_len(text: &str) -> usize {
 /// The measure and its thresholds for the host's integration tests, re-exported at the crate
 /// root under `test-support`.
 #[cfg(feature = "test-support")]
-pub mod test_support {
+pub(crate) mod test_support {
     use serde_json::{Map, Value};
 
     /// [`super::ASK_MODE_AT`].
