@@ -71,6 +71,7 @@ fn assert_only_the_matters(deny: &LaunchDeny, windows: bool, above: &[&str], fil
 
 /// The own matter on the Desktop, another under Documents: nothing in `Documents` or
 /// `Documents/Clients` is denied but the other matter, so a copy saved to Documents goes.
+#[cfg(unix)]
 #[test]
 fn a_folder_above_another_matter_gets_no_edit_rule() {
     let deny = launch(
@@ -100,6 +101,7 @@ fn a_folder_above_another_matter_gets_no_edit_rule() {
 /// Matters under `/tmp` and `/var/folders`: no `Edit` of `/tmp`, `/private/tmp`, `/var`,
 /// `/private/var` or any folder down to the matters, so Claude Code's sandbox temp folder
 /// (`/tmp/clsb-…`) stays writable.
+#[cfg(unix)]
 #[test]
 fn matters_under_tmp_and_var_leave_the_temp_folders_writable() {
     let deny = launch(
