@@ -471,13 +471,18 @@ fn a_share_path_and_a_star_are_escaped() {
         "{rules:#?}"
     );
     // A stale work folder in a run folder is the file tools' alone (`STALE_WORK`): no shell
-    // rule names it, so a command naming a run folder and then a `Workpapers` passes.
-    assert!(
-        !rules
-            .iter()
-            .any(|rule| rule.to_lowercase().contains(r"\work")),
-        "{rules:#?}"
-    );
+    // rule names `work` as a whole name (`workflows` in Claude's home is another), so a
+    // command naming a run folder and then a `Workpapers` passes.
+    let names_work = |rule: &String| {
+        let rule = rule.to_lowercase();
+        ["\\work", "/work"].iter().any(|name| {
+            rule.match_indices(name).any(|(at, _)| {
+                let next = rule[at + name.len()..].chars().next();
+                matches!(next, None | Some('\\' | '/' | '*' | ')'))
+            })
+        })
+    };
+    assert!(!rules.iter().any(names_work), "{rules:#?}");
     for (tool, command) in [
         ("Bash", r"type C:\d\run\own\work\reply.md"),
         ("Bash", r"type C:\d\run\own\tmp\reply.md"),
