@@ -20,6 +20,14 @@ use super::{
     refusal_code, stetdoc_env,
 };
 use crate::actor::query::blackline::parse::sides::Crossed;
+use crate::actor::query::blackline::parse::story::part_texts;
+
+/// The older and the newer text of `paragraphs` with the list numbers `labels` names left
+/// out, as `Read::header_texts` holds a shown part's.
+fn texts(paragraphs: &[BlacklineParagraph], labels: &[(usize, usize)]) -> Vec<String> {
+    let (older, newer) = part_texts(paragraphs, labels);
+    vec![older, newer]
+}
 
 /// A lookup over `pairs`, the name matched in any case.
 fn host(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<OsString> {
@@ -226,7 +234,7 @@ fn a_header_text_one_version_only_has_is_said_unless_shown() {
         changed_tables_total: 0,
     };
     let mut unshown = empty.clone();
-    note_tables(&mut unshown, lone(&["Scheduleheader."]));
+    note_tables(&mut unshown, lone(&["Scheduleheader."]), &[]);
     assert_eq!(
         unshown.notices,
         [BlacklineNotice::HeaderOrFooterNotCompared]
@@ -237,42 +245,95 @@ fn a_header_text_one_version_only_has_is_said_unless_shown() {
         text: text.to_owned(),
         object: None,
     };
+    let paragraphs = vec![BlacklineParagraph {
+        change: ParagraphChange::Changed,
+        runs: vec![
+            run(RunKind::Same, "Header "),
+            run(RunKind::Del, "one"),
+            run(RunKind::Ins, "two"),
+            run(RunKind::Same, ".\t"),
+        ],
+        hidden: false,
+    }];
+    let header_texts = texts(&paragraphs, &[]);
     shown.parts.push(BlacklinePart {
         kind: BlacklinePartKind::Header { uses: Vec::new() },
-        paragraphs: vec![BlacklineParagraph {
-            change: ParagraphChange::Changed,
-            runs: vec![
-                run(RunKind::Same, "Header "),
-                run(RunKind::Del, "one"),
-                run(RunKind::Ins, "two"),
-                run(RunKind::Same, ".\t"),
-            ],
-            hidden: false,
-        }],
+        paragraphs,
     });
-    note_tables(&mut shown, lone(&["Headerone.", "Headertwo."]));
+    note_tables(
+        &mut shown,
+        lone(&["Headerone.", "Headertwo."]),
+        &header_texts,
+    );
     assert_eq!(shown.notices, []);
-    // A list number the view writes into the runs, which the part's text does not hold.
+    // A list number the view writes into the runs (`1. `, 3 bytes, which the parser carries),
+    // which the part's text does not hold.
     let mut numbered = empty.clone();
+    let paragraphs = vec![BlacklineParagraph {
+        change: ParagraphChange::Changed,
+        runs: vec![
+            run(RunKind::Same, "1. Draft "),
+            run(RunKind::Del, "1"),
+            run(RunKind::Ins, "2"),
+        ],
+        hidden: false,
+    }];
+    let footer_texts = texts(&paragraphs, &[(0, 3)]);
     numbered.parts.push(BlacklinePart {
         kind: BlacklinePartKind::Footer { uses: Vec::new() },
-        paragraphs: vec![BlacklineParagraph {
-            change: ParagraphChange::Changed,
-            runs: vec![
-                run(RunKind::Same, "1. Draft "),
-                run(RunKind::Del, "1"),
-                run(RunKind::Ins, "2"),
-            ],
-            hidden: false,
-        }],
+        paragraphs,
     });
-    note_tables(&mut numbered, lone(&["Draft1", "Draft2"]));
+    note_tables(&mut numbered, lone(&["Draft1", "Draft2"]), &footer_texts);
     assert_eq!(numbered.notices, []);
     let mut said = empty;
     said.notices
         .push(BlacklineNotice::HeaderOrFooterNotCompared);
-    note_tables(&mut said, lone(&["Scheduleheader."]));
+    note_tables(&mut said, lone(&["Scheduleheader."]), &[]);
     assert_eq!(said.notices, [BlacklineNotice::HeaderOrFooterNotCompared]);
+}
+
+/// A header whose first word is a plain word, not a list number, keeps it: "Confidential Draft"
+/// changed to "Privileged Draft" does not show a header text of "Draft" alone.
+#[test]
+fn a_plain_first_word_is_not_taken_for_a_list_number() {
+    let run = |kind, text: &str| BlacklineRun {
+        kind,
+        text: text.to_owned(),
+        object: None,
+    };
+    let mut blackline = WordBlackline {
+        paragraphs: Vec::new(),
+        truncated: false,
+        notices: Vec::new(),
+        changed_links: Vec::new(),
+        parts: Vec::new(),
+        changed_tables: Vec::new(),
+        changed_tables_total: 0,
+    };
+    let paragraphs = vec![BlacklineParagraph {
+        change: ParagraphChange::Changed,
+        runs: vec![
+            run(RunKind::Del, "Confidential"),
+            run(RunKind::Ins, "Privileged"),
+            run(RunKind::Same, " Draft"),
+        ],
+        hidden: false,
+    }];
+    // As the parser reads it: no list number, so nothing is left out.
+    let header_texts = texts(&paragraphs, &[]);
+    blackline.parts.push(BlacklinePart {
+        kind: BlacklinePartKind::Header { uses: Vec::new() },
+        paragraphs,
+    });
+    let compared = TablesCompared {
+        lone_header_texts: vec!["Draft".to_owned()],
+        ..TablesCompared::default()
+    };
+    note_tables(&mut blackline, compared, &header_texts);
+    assert_eq!(
+        blackline.notices,
+        [BlacklineNotice::HeaderOrFooterNotCompared]
+    );
 }
 
 /// What the comparison of the table formatting found goes on the blackline: the tables with the
@@ -296,6 +357,7 @@ fn what_the_table_comparison_found_is_said() {
             may_differ: true,
             ..TablesCompared::default()
         },
+        &[],
     );
     assert_eq!(found.changed_tables, [shaded_table()]);
     assert_eq!(found.changed_tables_total, 1);
@@ -308,7 +370,7 @@ fn what_the_table_comparison_found_is_said() {
         ]
     );
     let mut none = empty.clone();
-    note_tables(&mut none, TablesCompared::default());
+    note_tables(&mut none, TablesCompared::default(), &[]);
     assert_eq!(none, empty);
 }
 
@@ -329,7 +391,7 @@ fn past_the_cap_the_tables_are_counted_and_may_differ() {
         changed: vec![shaded_table(); TABLES_MAX + 10],
         ..TablesCompared::default()
     };
-    note_tables(&mut many, compared);
+    note_tables(&mut many, compared, &[]);
     assert_eq!(many.changed_tables.len(), TABLES_MAX);
     assert_eq!(many.changed_tables_total, 60);
     assert_eq!(

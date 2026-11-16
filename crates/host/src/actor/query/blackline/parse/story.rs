@@ -30,9 +30,11 @@
 use std::collections::BTreeSet;
 
 use clauseo_protocol::{
-    BlacklineNotice, BlacklinePart, BlacklinePartKind, HeaderSlot, HeaderUse, ParagraphChange,
+    BlacklineNotice, BlacklineParagraph, BlacklinePart, BlacklinePartKind, HeaderSlot, HeaderUse,
+    ParagraphChange, RunKind,
 };
 
+use super::super::tables::squeezed;
 use super::text::read_lines;
 use super::{
     Read, Unreadable, View, ViewFailure, code_word, logical_lines, notice_of, order, stet_1,
@@ -71,6 +73,8 @@ pub(crate) struct StoryRead {
     pub(crate) skipped: usize,
     /// stetdoc's warnings by code alone.
     pub(crate) warnings: Vec<String>,
+    /// The older and the newer text of each header and footer kept in `parts` ([`part_texts`]).
+    pub(crate) header_texts: Vec<String>,
 }
 
 /// The parts in `json`, the stdout of `stetdoc view --story <story> --all --json` on a redline.
@@ -165,11 +169,51 @@ fn close(read: &mut StoryRead, found: &mut Vec<BlacklineNotice>, opened: Opened,
         if text.seen.hidden {
             found.push(BlacklineNotice::HiddenText);
         }
+        if matches!(
+            kind,
+            BlacklinePartKind::Header { .. } | BlacklinePartKind::Footer { .. }
+        ) {
+            let (older, newer) = part_texts(&text.paragraphs, &text.labels);
+            read.header_texts.push(older);
+            read.header_texts.push(newer);
+        }
         read.parts.push(BlacklinePart {
             kind,
             paragraphs: text.paragraphs,
         });
     }
+}
+
+/// The older and the newer text of a part's `paragraphs` as its `w:t` holds it: white space
+/// taken out, and each list number in `labels` left out (a paragraph's index and the number's
+/// length in bytes from the start of its runs), since the view writes the number into the runs
+/// and the part's own text does not hold it. Nothing else is left out.
+pub(crate) fn part_texts(
+    paragraphs: &[BlacklineParagraph],
+    labels: &[(usize, usize)],
+) -> (String, String) {
+    let (mut older, mut newer) = (String::new(), String::new());
+    let mut labels = labels.iter().peekable();
+    for (index, paragraph) in paragraphs.iter().enumerate() {
+        let mut skip = 0;
+        while let Some((at, len)) = labels.next_if(|(at, _)| *at <= index) {
+            if *at == index {
+                skip = *len;
+            }
+        }
+        for run in &paragraph.runs {
+            let cut = skip.min(run.text.len());
+            skip -= cut;
+            let rest = run.text.get(cut..).unwrap_or_default();
+            if matches!(run.kind, RunKind::Same | RunKind::Del) {
+                older.push_str(rest);
+            }
+            if matches!(run.kind, RunKind::Same | RunKind::Ins) {
+                newer.push_str(rest);
+            }
+        }
+    }
+    (squeezed(&older), squeezed(&newer))
 }
 
 /// The part a line names, or `None` when the line names no part.
@@ -252,6 +296,7 @@ pub(crate) fn add_parts(read: &mut Read, stories: Vec<StoryRead>) {
         blackline.parts.extend(story.parts);
         blackline.notices.extend(story.notices);
         read.ids.extend(story.ids);
+        read.header_texts.extend(story.header_texts);
         read.skipped += story.skipped;
         read.warnings.extend(story.warnings);
     }

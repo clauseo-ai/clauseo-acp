@@ -119,6 +119,30 @@ fn notes_headers_and_footers_of_two_sections() {
 /// A header in the newer version only: stetdoc's compare marks nothing in it, so it shows no
 /// change and is left out (compare's warning says it, `receipt.rs`); a story with nothing in
 /// it gives nothing.
+/// A header's texts, as the table comparison's lone texts are matched against: the list number
+/// the view writes (`{§"1."}`) left out, and nothing else; a plain first word stays.
+#[test]
+fn a_headers_texts_leave_out_its_list_number_and_nothing_else() {
+    let plain = read(fixture!("story-headers-header.json"), Story::Headers);
+    assert_eq!(plain.header_texts, ["Headeroneyear.", "Headertwoyears."]);
+    let json =
+        fixture!("story-headers-header.json").replace("p2 Header ", r#"p2 {§\"1.\"} Header "#);
+    let numbered = read(&json, Story::Headers);
+    let runs = &numbered
+        .parts
+        .first()
+        .unwrap()
+        .paragraphs
+        .first()
+        .unwrap()
+        .runs;
+    assert_eq!(runs.first().unwrap().text, "1. Header ");
+    assert_eq!(numbered.header_texts, ["Headeroneyear.", "Headertwoyears."]);
+    // A footnote's texts are not kept: only headers and footers are matched.
+    let notes = read(fixture!("story-notes-footnote.json"), Story::Notes);
+    assert_eq!(notes.header_texts, Vec::<String>::new());
+}
+
 #[test]
 fn a_part_with_no_change_is_left_out() {
     let headers = read(fixture!("story-headers-unmatched.json"), Story::Headers);

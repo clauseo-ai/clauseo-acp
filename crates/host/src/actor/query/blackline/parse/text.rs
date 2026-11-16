@@ -14,6 +14,10 @@ use super::{MAX_TABLE_DEPTH, Unreadable, block_ref, count, logical_lines, table}
 pub(crate) struct Text {
     /// The paragraphs, in order.
     pub(crate) paragraphs: Vec<BlacklineParagraph>,
+    /// The paragraphs that start with a list number the view wrote into their runs
+    /// (`{§"1."}`): each one's index in `paragraphs` and the number's length in bytes, its space
+    /// included. A part's own text does not hold the number.
+    pub(crate) labels: Vec<(usize, usize)>,
     /// How many lines were left out because they broke a rule.
     pub(crate) skipped: usize,
     /// The first of them.
@@ -169,8 +173,11 @@ pub(crate) fn read_lines(lines: impl IntoIterator<Item = (usize, String)>) -> Te
                 let mut seen = read.seen;
                 enter_cell(&mut levels, content, &read.line_ids, &mut seen);
                 match paragraph(content, &mut seen, whole(&levels)) {
-                    Ok(paragraph) => {
+                    Ok((paragraph, label_len)) => {
                         read.seen = seen;
+                        if label_len > 0 {
+                            read.labels.push((read.paragraphs.len(), label_len));
+                        }
                         if paragraph.change != ParagraphChange::Same {
                             read.covered.extend(read.line_ids.iter().copied());
                             for level in &levels {

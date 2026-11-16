@@ -166,12 +166,14 @@ pub(super) fn cell_tags(content: &str) -> CellTags {
 
 /// One paragraph from its content: the tags, then the text; `seen` notes what it holds.
 /// `whole` is the change of the row or cell it stands in, which marks none of its text itself:
-/// in an inserted one all its text is inserted, in a deleted one all deleted.
+/// in an inserted one all its text is inserted, in a deleted one all deleted. With it, the
+/// length in bytes of the list number the view writes before the text (`{§"1."}`), its space
+/// included, which starts its first run; 0 when it has none.
 pub(super) fn paragraph(
     content: &str,
     seen: &mut Seen,
     whole: Mark,
-) -> Result<BlacklineParagraph, &'static str> {
+) -> Result<(BlacklineParagraph, usize), &'static str> {
     // What this paragraph holds, added to `seen` once it reads.
     let mut own = Seen::default();
     let mut formatted = false;
@@ -223,6 +225,7 @@ pub(super) fn paragraph(
         Mark::None if all(RunKind::Same) => ParagraphChange::Same,
         Mark::None | Mark::Inserted | Mark::Deleted => ParagraphChange::Changed,
     };
+    let mut label_len = 0;
     if let Some((number, ghost)) = label {
         let kind = match change {
             ParagraphChange::Added if !ghost => RunKind::Ins,
@@ -244,7 +247,9 @@ pub(super) fn paragraph(
             | ParagraphChange::Unknown => RunKind::Del,
         };
         let mut numbered = Vec::with_capacity(runs.len() + 1);
-        push(&mut numbered, kind, &format!("{number} "));
+        let shown = format!("{number} ");
+        label_len = shown.len();
+        push(&mut numbered, kind, &shown);
         for run in runs {
             push_run(&mut numbered, run.kind, run);
         }
@@ -252,11 +257,14 @@ pub(super) fn paragraph(
     }
     seen.hidden |= own.hidden;
     seen.unknown |= own.unknown;
-    Ok(BlacklineParagraph {
-        change,
-        runs,
-        hidden: own.hidden,
-    })
+    Ok((
+        BlacklineParagraph {
+            change,
+            runs,
+            hidden: own.hidden,
+        },
+        label_len,
+    ))
 }
 
 /// A list number's text from the marker body after `§`: `"1."`, or `"1." ghost` for one that
