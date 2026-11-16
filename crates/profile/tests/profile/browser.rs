@@ -180,7 +180,7 @@ fn every_codex_session_is_told_its_shell_is_offline() {
     use clauseo_profile::instructions::CODEX_SHELL_OFFLINE;
     let line = CODEX_SHELL_OFFLINE.trim();
     assert!(
-        line.contains("curl") && line.contains("web search"),
+        line.contains("curl") && line.contains("Web search"),
         "{line}"
     );
     let profile = profile();
@@ -188,5 +188,42 @@ fn every_codex_session_is_told_its_shell_is_offline() {
         let codex = profile.codex_instructions_for(macos);
         assert_eq!(codex.matches(line).count(), 1, "{codex}");
         assert!(!profile.claude_instructions_for(macos).contains(line));
+    }
+}
+
+/// Stage E's approval census: `curl` (a download, or a check that a link is alive) was Codex's
+/// commonest repeated "run outside the sandbox" card on a Mac. So every Codex text, on macOS and
+/// Windows, sends all web work (pages, judgments and statutes, downloads) to the browser tools,
+/// names the download commands it must never use or ask to approve and why, and says what to do
+/// with no browser. It covers research-rules' "open judgments and statutes" sentence too.
+#[test]
+fn codex_is_sent_to_the_browser_for_web_work_and_never_to_curl() {
+    use clauseo_profile::instructions::CODEX_SHELL_OFFLINE;
+    let line = CODEX_SHELL_OFFLINE.trim();
+    let never = line
+        .split("never use or ask to approve ")
+        .nth(1)
+        .expect(line);
+    let never = never.split(". ").next().unwrap();
+    for command in ["`curl`", "`wget`", "`iwr`", "`nc`", "Python"] {
+        assert!(never.contains(command), "{command}: {line}");
+    }
+    assert!(
+        never.ends_with("Clauseo declines a shell download and your turn ends"),
+        "{line}"
+    );
+    assert!(
+        line.contains(
+            "Open pages, judgments and statutes and download files with your browser tools;"
+        ) && line.contains("with no browser, tell the lawyer."),
+        "{line}"
+    );
+    let profile = profile();
+    for macos in [false, true] {
+        let codex = profile.codex_instructions_for(macos);
+        assert!(
+            codex.contains("judgments and statutes and download files with your browser tools")
+        );
+        assert!(codex.contains("`curl`") && codex.contains("`wget`") && codex.contains("`iwr`"));
     }
 }

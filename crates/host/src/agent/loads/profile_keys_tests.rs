@@ -476,11 +476,12 @@ fn codex_offline_line_offers_web_search_only_with_it() {
     };
     assert_eq!(instructions(ON), format!("Rules.\n\n{line}"));
     let off = instructions(OFF);
-    assert_eq!(
-        off,
-        "Rules.\n\nYour shell has no internet: never use curl, wget or another download \
-         command in it."
+    let kept = line.strip_suffix(CODEX_SHELL_SEARCH).unwrap().trim_end();
+    assert!(
+        kept.ends_with("with no browser, tell the lawyer."),
+        "{kept}"
     );
+    assert_eq!(off, format!("Rules.\n\n{kept}"));
     assert!(!off.contains(CODEX_SHELL_SEARCH) && !off.contains("web search"));
     assert!(line.ends_with(CODEX_SHELL_SEARCH));
 }

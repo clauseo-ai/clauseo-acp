@@ -1,1 +1,1 @@
-Your shell has no internet: never use curl, wget or another download command in it. Use your web search and web fetch tools instead.
+Your shell has no internet: never use or ask to approve `curl`, `wget`, `iwr`, `nc` or Python for the web, since Clauseo declines a shell download and your turn ends. Open pages, judgments and statutes and download files with your browser tools; with no browser, tell the lawyer. Web search and web fetch also read pages.

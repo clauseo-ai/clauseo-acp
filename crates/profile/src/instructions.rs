@@ -78,13 +78,17 @@ pub const CODEX_SHELL_MACOS: &str = include_str!("../assets/instructions/codex-s
 
 /// The line every Codex session gets after the instructions, whatever its browser: Clauseo
 /// declines a Codex shell command that needs the internet (the host's
-/// `actor/turn/shell_network.rs`), so Codex is told before it tries. Claude never gets it.
+/// `actor/turn/shell_network.rs`), so Codex is told before it tries. Stage E's approval census
+/// found `curl` (a download, or a check that a link is alive) the commonest repeated "run outside
+/// the sandbox" card on a Mac, so the line names the download commands on macOS and Windows,
+/// sends all web work to the browser tools (whose downloads land in `<matter>/downloads`) and
+/// says what to do without a browser (Codex on Windows today). Claude never gets it.
 pub const CODEX_SHELL_OFFLINE: &str =
     include_str!("../assets/instructions/codex-shell-offline.txt");
 
 /// The last sentence of [`CODEX_SHELL_OFFLINE`], the way out: the host takes it out of a session
 /// without web search ([`codex_shell_offline`]).
-pub const CODEX_SHELL_SEARCH: &str = "Use your web search and web fetch tools instead.";
+pub const CODEX_SHELL_SEARCH: &str = "Web search and web fetch also read pages.";
 
 /// [`CODEX_SHELL_OFFLINE`] as a session with web search (`web_search`) gets it, else without
 /// its last sentence ([`CODEX_SHELL_SEARCH`]), so Codex is never pointed at a tool it lacks.
