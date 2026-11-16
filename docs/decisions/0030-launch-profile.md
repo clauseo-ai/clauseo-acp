@@ -574,6 +574,21 @@ change from the settings window as `ui` does. R24 (PR5) adds a third to the patc
     with the run folder and swept at the host's first launch; `launch-settings` is denied to
     Claude's tools and Codex's shell, and must stay out of any tier-B grant (a swap before
     Claude Code reads it would change the session's rules; accepted).
+  - **Auto-mode context (2026-11-16, #1085).** The tighter bound is not the settings file. In
+    `auto`, Claude Code 2.1.293 sends its permission rules with each call as the auto-mode context
+    only while that is at most 1,040,000 B. Above that, every Edit and Bash call goes without a
+    server verdict for the whole launch, which Windows Claude showed as refusing everything. Each
+    shell rule costs its JSON plus 33 B, a Read or Edit rule about 225 B, an allow rule nothing.
+    Past 900,000 B (87%) a first-party launch is to go to ask mode instead (the ask-mode PR). The
+    bounds, for one data spelling and for two (two is the ordinary Windows machine:
+    `ai.clauseo.desktop` is never an 8.3 name, so any volume that makes short names gives it
+    `AICLAU~1.DES` as well), are under **600,000 B at 8 matters, 700,000 B at 50 and 810,000 B
+    at 200** (the ask line less 10%). Reason: a lawyer with an ordinary number of matters on an
+    ordinary Windows machine must never be pushed into ask mode.
+    `data_fence/shell_deny_budget_tests.rs` checks them on the laptop-like folder. A launch over a bound is cut down by rules, and the
+    bound is never raised. To meet them, other matters get no shell text rules (their Read and
+    Edit denies stay; Claude Code checks its common file commands' paths against them), and a
+    data spelling whose name holds Clauseo's is written as that name alone.
   - **Residual, beside the one above** (word matching, signed off for launch):
     - other letter cases in Bash, whose rules match as written (`cat …/AI.CLAUSEO.DESKTOP/x`);
     - an 8.3 short name (`C:\Users\CLAUSE~1\…`);

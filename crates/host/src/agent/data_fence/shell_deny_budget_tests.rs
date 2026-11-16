@@ -32,9 +32,13 @@ const SHORT_HOME: &str = r"C:\Users\CLAUSE~1";
 const DATA: &str = r"AppData\Local\ai.clauseo.desktop";
 const SHORT_DATA: &str = r"AppData\Local\AICLAU~1.DES";
 
-/// The half of the 1,040,000 B limit kept at 8 matters, and the most at 200 (87% of it).
-const AT_8: usize = 520_000;
-const AT_200: usize = 900_000;
+/// The most context a launch may cost, by its matters, with one data spelling or two (two is the
+/// ordinary Windows machine: `ai.clauseo.desktop` is never an 8.3 name, so a volume that makes
+/// short names gives it `AICLAU~1.DES` too): an ordinary lawyer is never sent to ask mode, whose
+/// first-party line is 900,000 B (87% of Claude Code's 1,040,000 B). 810,000 B at 200 matters is
+/// that line less 10%. Decision record 0030, "Auto-mode context". A row over its bound is a real
+/// finding: cut rules, never raise the bound.
+const BOUNDS: [(usize, usize); 3] = [(8, 600_000), (50, 700_000), (200, 810_000)];
 
 /// The context a launch's rules cost: each deny rule's JSON (its backslashes doubled) plus 33 B,
 /// or about 225 B for a `Read` or `Edit` rule (root and pattern too); 3 KB fixed. Allow rules
@@ -152,8 +156,9 @@ fn launch(matters: usize, short: bool, prefix: bool) -> Launch {
 }
 
 /// The context at 1, 8, 50 and 200 matters, with one data spelling and with two, and with a
-/// matter whose folder is a text prefix of the open one's: under half the limit at 8 matters
-/// and under 87% of it at 200, whichever way. Printed for the PR.
+/// matter whose folder is a text prefix of the open one's: under [`BOUNDS`] at 8, 50 and 200
+/// matters, whichever way (1 matter is printed, not bounded). Every row is printed for the PR
+/// (`--no-capture`) before any is checked: context, settings bytes, deny and allow counts.
 #[test]
 fn a_windows_launch_stays_within_the_auto_mode_context() {
     let mut seen = Vec::new();
@@ -188,10 +193,12 @@ fn a_windows_launch_stays_within_the_auto_mode_context() {
     }
     // Every row printed first, then checked.
     for (matters, short, prefix, context) in &seen {
-        let budget = if *matters <= 8 { AT_8 } else { AT_200 };
+        let Some((_, bound)) = BOUNDS.iter().find(|(at, _)| at == matters) else {
+            continue;
+        };
         assert!(
-            *context <= budget,
-            "{matters} matters, short {short}, prefix {prefix}: {context} > {budget}; {seen:?}"
+            context < bound,
+            "{matters} matters, short {short}, prefix {prefix}: {context} >= {bound}; {seen:?}"
         );
     }
     // More matters never cost less.
