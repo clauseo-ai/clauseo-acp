@@ -387,6 +387,11 @@ error_codes! {
         service, or a proxy or firewall in front of it, refused, timed out or blocked the \
         connection, or its name did not resolve. The answer so far is kept; asking again can \
         work.";
+    MatterClaudeTasksFile = "matter.claude_tasks_file", retryable: false, meaning: "The matter \
+        folder holds `.claude/scheduled_tasks.json`; Clauseo doesn't start Claude in a matter \
+        that holds it.";
+    MatterGitFolder = "matter.git_folder", retryable: false, meaning: "The matter folder holds \
+        a `.git` folder (or file); Clauseo doesn't start Claude in a matter that holds it.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

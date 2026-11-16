@@ -70,11 +70,45 @@ fn the_recheck_resolves_a_linked_matter_again() {
     crate::write::create_dir_all(&root.join("other/.codex")).unwrap();
     let link = root.join("link");
     crate::write::symlink(&root.join("clean"), &link).unwrap();
-    let check =
-        || futures::executor::block_on(super::recheck(Arc::new(clock()), None, Some(link.clone())));
+    let stored = || {
+        Some((
+            link.clone(),
+            super::super::refuse_codex_folder as super::Refusal,
+        ))
+    };
+    let check = || futures::executor::block_on(super::recheck(Arc::new(clock()), None, stored()));
     assert!(check().is_ok());
     crate::write::remove_file(&link).unwrap();
     crate::write::symlink(&root.join("other"), &link).unwrap();
     assert_eq!(check().unwrap_err().code(), ErrorCode::MatterCodexFolder);
+    crate::write::remove_dir_all(&root).unwrap();
+}
+
+/// A Claude agent's re-check uses its own list: a matter that gains a refused entry after the
+/// launch is refused at the next call, and one that loses it passes again.
+#[test]
+fn a_claude_recheck_catches_an_entry_made_after_the_launch() {
+    let root = std::env::temp_dir().join(format!("clauseo-recheck-claude-{}", std::process::id()));
+    crate::write::remove_dir_all(&root).unwrap();
+    crate::write::create_dir_all(&root.join(".claude")).unwrap();
+    let refusal: super::Refusal = crate::agent::claude_files::refuse_claude_entries;
+    let check = || {
+        futures::executor::block_on(super::recheck(
+            Arc::new(clock()),
+            None,
+            Some((root.clone(), refusal)),
+        ))
+    };
+    assert!(check().is_ok());
+    let tasks = root.join(".claude/scheduled_tasks.json");
+    crate::write::write_file(&tasks, b"{}").unwrap();
+    assert_eq!(
+        check().unwrap_err().code(),
+        ErrorCode::MatterClaudeTasksFile
+    );
+    crate::write::remove_file(&tasks).unwrap();
+    assert!(check().is_ok());
+    crate::write::create_dir_all(&root.join(".git")).unwrap();
+    assert_eq!(check().unwrap_err().code(), ErrorCode::MatterGitFolder);
     crate::write::remove_dir_all(&root).unwrap();
 }

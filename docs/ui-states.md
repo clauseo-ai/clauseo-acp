@@ -248,6 +248,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Folder there without its `.clauseo/matter.json`, or with another matter's (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | the matter's name |
 | The privacy settings keep Clauseo out of the folder (macOS Files and Folders; the app's Privacy settings button) | `ErrorCode::MatterFolderPermission` | the turn is refused before the agent starts, or as its session opens |
 | The folder's path has a backslash (`\`), where Claude can't start (macOS, Linux): the stop line names the agent ("Claude can't work in this matter's folder because its name has a backslash (\). Rename the folder in Finder, then Try again."; when a folder above it holds the backslash, the line names that folder; Linux says "your file manager") | `ErrorCode::MatterFolderBackslash` | the turn is refused before the agent starts |
+| The matter's folder holds `.claude/scheduled_tasks.json`, or a `.git` folder or file (Claude only): the stop line says what it is and to move, rename or remove it; on the Mac it adds how to show a dot folder in Finder (U3-err-matter.claude_tasks_file, U3-err-matter.git_folder and their `.mac` lines, provisional) | `ErrorCode::MatterClaudeTasksFile`, `ErrorCode::MatterGitFolder` | the turn is refused before the agent starts, or before the prompt is sent when it appeared later |
 | The agent couldn't open the matter's folder as it started (Claude Code's "Can't access working directory"): the stop line names the agent ("Claude couldn't open the matter's folder. Check that it's still there and hasn't been renamed, then Try again.") | `ErrorCode::AgentFolderInaccessible` | the turn fails as the session opens |
 | Checkpoint failed | `ErrorCode::MatterCheckpointFailed` | the turn is refused before it starts |
 
@@ -348,7 +349,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Store | `ErrorCode::StoreIo` | yes |
 | Store | `ErrorCode::StoreDiskFull`, `ErrorCode::StoreCorrupt`, `ErrorCode::StoreLocked`, `ErrorCode::StoreNewerVersion` | no |
 | Matter | `ErrorCode::MatterCheckpointFailed`, `ErrorCode::MatterFileLocked`, `ErrorCode::MatterTurnRunning` | yes |
-| Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterCodexFolder`; `ErrorCode::MatterFolderRefused` only from a host before decision record 0022 | no |
+| Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterCodexFolder`, `ErrorCode::MatterClaudeTasksFile`, `ErrorCode::MatterGitFolder`; `ErrorCode::MatterFolderRefused` only from a host before decision record 0022 | no |
 | Codex refused: its sandbox can't work in the folder (Windows) | `ErrorCode::MatterFolderNetwork`, `ErrorCode::MatterFolderNoPermissions` | no |
 | Matter folder refused (0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderIsMatter`, `ErrorCode::MatterFolderInMattersRoot`, `ErrorCode::MatterFolderInClauseoData`, `ErrorCode::MatterFolderInsideMatter`, `ErrorCode::MatterFolderHoldsMatter`, `ErrorCode::MatterFolderTooDeep` (Windows) | no |
 | Transport | `ErrorCode::TransportUnauthorized`, `ErrorCode::TransportTooLarge` | no |

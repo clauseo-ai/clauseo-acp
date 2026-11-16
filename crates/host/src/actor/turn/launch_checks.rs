@@ -362,8 +362,11 @@ pub(super) fn prepare(
                     }
                     None => None,
                 };
-                // Claude is never refused for its folder: the answer decides its forced ask.
+                // Claude is never refused for its folder's support: the answer decides its forced
+                // ask. It is refused for an entry its matter folder may not hold.
                 if let Some(home) = &claude_home {
+                    let folder = crate::agent::session_folder(&stored);
+                    crate::agent::claude_files::refuse_claude_entries(&folder)?;
                     answer = Some(check.run(&cwd));
                     codex::make_agent_home(&data, home, "Claude Code")?;
                     if let Err(error) = crate::agent::home::write_claude_settings(home) {
