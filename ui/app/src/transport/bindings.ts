@@ -4468,8 +4468,8 @@ export type NoticeKind =
 } }) & { files_came_back?: never; guard_steps_more?: never; held_open_blocked?: never; matter_read_stopped?: never; matters_unfenced?: never; skill_pack_not_loaded?: never } | 
 /**
  *  Matters Clauseo could not fully fence off from the agent: a folder on the way to
- *  them could not be listed or is on a network share, there were too many paths to name,
- *  or (Claude on Windows, whose settings file has a size limit) too many shell rules.
+ *  them could not be listed or is on a network share, or there were too many paths to
+ *  name.
  */
 ({ matters_unfenced: {
 	/**  The first of them, at most five. */
