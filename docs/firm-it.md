@@ -881,6 +881,12 @@ pull request that makes Clauseo act on it. Same formats as above ([decision
 | `network.allow_unsafe_site_override`<a id="unsafe-site-override"></a> | R17 | Boolean, default true, `REG_DWORD` 0 or 1. 0: the lawyer can't allow a site the block list names, and sites already allowed stop being honoured (they are kept) (decision 0053); the lawyer may also switch it off for themselves. A change in the policy file takes effect when Clauseo next starts. **Security key**: false if a source is unreadable or a policy value does not type |
 | `network.unsafe_site_list_updates` | R17 | Boolean, default true, `REG_DWORD` 0 or 1. 0: Clauseo never fetches block list updates and keeps the stored or bundled list (decision 0053). A change in the policy file takes effect when Clauseo next starts. Policy only: a `settings.json` value is ignored with a warning. **Security key**, locked at true (its default) if a source is unreadable or a policy value does not type: an unreadable policy must not stop protection updates |
 
+<a id="chatgpt-reads"></a>**What ChatGPT's commands can read.** The `sandbox.allow_unprotected_auto`
+row above is about changes. ChatGPT's commands can read any folder the lawyer can open, on the
+computer and on shares. On a Mac, Clauseo denies them its own data folder. On Windows in this
+release, Codex's sandbox can't enforce a read deny, so they can also read Clauseo's data folder
+([Later](#later)).
+
 ### Browser automation and RemoteDebuggingAllowed
 
 Clauseo's browser is agent-browser, a command the agents run, which drives the computer's installed
@@ -1452,7 +1458,8 @@ Codex on Windows has no data-folder deny. Clauseo runs Codex there in Codex's un
 sandbox, which can't enforce a read deny, so a Codex shell on Windows can read Clauseo's data
 folder, other matters' notes and the search index included. This lasts until Codex runs in the
 elevated sandbox (S15) ([decision 0030](decisions/0030-launch-profile.md), "Codex's data-folder
-deny").
+deny"). What ChatGPT's commands can read, on a Mac and on Windows, is in
+[section 6](#chatgpt-reads).
 
 
 ADMX and ADML templates, a firm bundle zip, an MSI and a `.pkg` for Jamf come when a firm asks. Claude
