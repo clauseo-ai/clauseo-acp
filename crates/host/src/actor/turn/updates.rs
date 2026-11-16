@@ -56,8 +56,15 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
     super::idle::active(&mut agent.idle);
     if agent.stage == Stage::Loading
         && match *event {
+            // A replayed update, and an options update: the thread's options are the start's,
+            // logged at the attach, and one the agent reports before that must not stand for
+            // the thread's own (`picks.rs`).
             AcpEvent::Update {
                 origin: Origin::Replay,
+                ..
+            }
+            | AcpEvent::Update {
+                update: AgentUpdate::ConfigOptions(_),
                 ..
             } => true,
             AcpEvent::Update { .. } => agent.preparing,

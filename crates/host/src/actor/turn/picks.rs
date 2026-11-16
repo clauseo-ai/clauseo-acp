@@ -6,12 +6,18 @@
 //!   Modes keep their own commands and rules, and every other option (Claude's `fast`) stays
 //!   the agent's.
 //! - Each session start (`session/new`, `session/load` or `session/resume`) takes [`wanted`]
-//!   before its attach, so before any prompt: the thread's own values once it has logged
-//!   options, since a reopened conversation keeps its model and effort and neither adapter
-//!   restores both (claude-agent-acp 0.89.1 takes the effort from its settings, codex-acp 2.2.2
-//!   both from Codex's resume answer); else `CreateThread`'s config; else the matter's prefs for
-//!   the agent's kind; else nothing, the agent's defaults. [`apply`] sets each value that differs
-//!   from the session's, the model first since the efforts offered follow it.
+//!   before its attach, so before any prompt: a `SetConfigOption` waiting for the session (a
+//!   pick made while it starts) over everything else; then the thread's own values once a
+//!   session of it has attached and logged options, since a reopened conversation keeps its
+//!   model and effort and neither adapter restores both (claude-agent-acp 0.89.1 takes the
+//!   effort from its settings, codex-acp 2.2.2 both from Codex's resume answer); else
+//!   `CreateThread`'s config; else the matter's prefs for the agent's kind; else nothing, the
+//!   agent's defaults. Options the agent reports while its first session is being created are
+//!   its defaults, not the thread's: they never stand for the thread's own values, and the
+//!   options updates held until the start's answer are dropped there ([`drop_held`]).
+//!   [`apply`] sets each value that differs from the session's, the model first since the
+//!   efforts offered follow it. A waiting `SetConfigOption` of an option the start set is
+//!   answered then, without another call ([`after`]); any other goes to the agent at the attach.
 //! - A pick the agent does not offer, or refuses as invalid (-32602), is dropped ([`after`]):
 //!   logged at info with its option and value ids, taken out of the matter's prefs, and the
 //!   session goes on with the agent's value. So is a pick of an option that is no model or
@@ -49,6 +55,8 @@ pub(crate) struct Picked {
     /// A `session/set_config_option` went out: an options update the agent sent meanwhile is
     /// older than the options its last answer gave.
     sent: bool,
+    /// The picks the agent took.
+    set: Vec<Pick>,
     /// The picks dropped.
     stale: Vec<Pick>,
 }
@@ -70,8 +78,11 @@ fn header(actor: &Actor, thread: ThreadId) -> Option<&HeaderEntry> {
         .or(actor.threads.get(&thread)?.header.as_ref())
 }
 
-/// The options the thread logged last; `None` before its first session's.
+/// The options the thread logged last; `None` until a session of it has attached. Before that,
+/// logged options are the agent's for a session still being created, not the thread's own.
 fn logged(actor: &Actor, thread: ThreadId) -> Option<&[ConfigOption]> {
+    // Set by the attach commit alone (`session.rs`), and kept: a reopened thread has it.
+    actor.threads.get(&thread)?.row.acp_session_id.as_ref()?;
     let options = &header(actor, thread)?.config_options;
     (!options.is_empty()).then_some(options.as_slice())
 }
@@ -146,9 +157,10 @@ fn verdict(option: &AgentChoiceId, picked: Option<bool>, value: &ConfigValue) ->
 
 /// The picks `thread`'s new session takes, leaving out those `options` (its start's) already
 /// hold: the thread's own logged values of the model and effort, else `CreateThread`'s config,
-/// else the matter's prefs for its agent's kind.
-pub(super) fn wanted(actor: &Actor, thread: ThreadId, options: &[ConfigOption]) -> Vec<Pick> {
-    let picks: Vec<Pick> = match logged(actor, thread) {
+/// else the matter's prefs for its agent's kind; each with the value of a `SetConfigOption` of
+/// its option waiting for the session instead, the last one waiting.
+pub(super) fn wanted(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) -> Vec<Pick> {
+    let mut picks: Vec<Pick> = match logged(actor, thread) {
         Some(own) => own.iter().filter_map(current_pick).collect(),
         None => remembered(actor, thread)
             .map(|picks| {
@@ -159,6 +171,18 @@ pub(super) fn wanted(actor: &Actor, thread: ThreadId, options: &[ConfigOption]) 
             })
             .unwrap_or_default(),
     };
+    let waiting = state(actor, thread)
+        .and_then(|state| state.agent.as_deref())
+        .map(|agent| agent.waiting.as_slice())
+        .unwrap_or_default();
+    for item in waiting {
+        if let Waiting::Config(_, option, ConfigValue::Select(value)) = item
+            && category_of(options, option) == Some(true)
+        {
+            picks.retain(|(id, _)| id != option);
+            picks.push((option.clone(), value.clone()));
+        }
+    }
     picks
         .into_iter()
         .filter(|pick| offer(options, pick) != Offer::Held)
@@ -259,7 +283,10 @@ pub(super) async fn apply(
             .set_config_option(&start.session, pick.0.clone(), value)
             .await
         {
-            Ok(options) => start.config_options = options,
+            Ok(options) => {
+                start.config_options = options;
+                picked.set.push(pick);
+            }
             Err(clauseo_acp::Error::Rpc {
                 code: INVALID_PARAMS,
                 ..
@@ -280,19 +307,19 @@ pub(super) async fn apply(
 /// newer), and each stale pick is logged and leaves `CreateThread`'s config and the matter's
 /// prefs, whose new row is written in a commit of its own.
 pub(super) fn after(actor: &mut Actor, thread: ThreadId, picked: &Picked) {
-    if picked.sent
-        && let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
-    {
-        agent.replayed.retain(|event| {
-            !matches!(
-                event,
-                AcpEvent::Update {
-                    update: AgentUpdate::ConfigOptions(_),
-                    ..
-                }
-            )
-        });
+    if !picked.set.is_empty() {
+        let picks = picked
+            .set
+            .iter()
+            .map(|(option, value)| format!("{option}={value}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        tracing::info!(%thread, %picks, "picks sent before first prompt");
     }
+    if picked.sent {
+        drop_held(actor, thread, "a pick was set since");
+    }
+    answer_waiting(actor, thread, &picked.set);
     if picked.stale.is_empty() {
         return;
     }
@@ -324,6 +351,72 @@ pub(super) fn after(actor: &mut Actor, thread: ThreadId, picked: &Picked) {
     });
     if let Err(error) = written {
         tracing::warn!(%thread, error = %Cause(&error), "the matter's prefs were not written");
+    }
+}
+
+/// The `SetConfigOption`s of a select value waiting for `thread`'s session whose option the
+/// start set are answered: [`wanted`] took the last one's value for it. Each is kept in the
+/// matter's prefs as an answered one is (`answers::on_config`), in order, so the last stays.
+fn answer_waiting(actor: &mut Actor, thread: ThreadId, set: &[Pick]) {
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return;
+    };
+    let (answered, rest): (Vec<Waiting>, Vec<Waiting>) = std::mem::take(&mut agent.waiting)
+        .into_iter()
+        .partition(|item| {
+            matches!(item, Waiting::Config(_, option, ConfigValue::Select(_))
+                if set.iter().any(|(id, _)| id == option))
+        });
+    agent.waiting = rest;
+    for item in answered {
+        let Waiting::Config(ctx, option, value) = item else {
+            continue;
+        };
+        let done = Out::new(actor, thread, Some(ctx.id)).and_then(|mut out| {
+            if let Some(row) = remember(actor, thread, &(option, value)) {
+                out.draft.matter_row(row);
+            }
+            super::answers::send_answer(actor, ctx, thread, out, Then::Nothing)
+        });
+        if let Err(error) = done {
+            actor.finish_command(ctx.id, Err(error));
+        }
+    }
+}
+
+/// Whether `event` is an options update.
+fn options_update(event: &AcpEvent) -> bool {
+    matches!(
+        event,
+        AcpEvent::Update {
+            update: AgentUpdate::ConfigOptions(_),
+            ..
+        }
+    )
+}
+
+/// Drops the options updates held for `thread`'s session until its attach: the options of the
+/// agent's answer that follows them are newer. Called when a session start's answer brings
+/// options, and after a `session/set_config_option` went out before the attach (`why`, for
+/// the log).
+pub(super) fn drop_held(actor: &mut Actor, thread: ThreadId, why: &'static str) {
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return;
+    };
+    let before = agent.replayed.len();
+    agent.replayed.retain(|event| !options_update(event));
+    let dropped = before - agent.replayed.len();
+    if dropped > 0 {
+        tracing::info!(%thread, dropped, why, "held config options updates dropped");
+    }
+}
+
+/// The held updates of `thread`'s session are passed on at its attach: logs how many of them
+/// are options updates, which the thread then logs after the start's options.
+pub(super) fn released(thread: ThreadId, held: &[AcpEvent]) {
+    let released = held.iter().filter(|event| options_update(event)).count();
+    if released > 0 {
+        tracing::info!(%thread, released, "held config options updates released");
     }
 }
 

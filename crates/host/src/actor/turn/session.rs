@@ -294,6 +294,9 @@ pub(super) fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> 
 /// (`picks.rs`); any other attaches now.
 pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
     super::profile_loads::show_tools(actor, thread);
+    if !start.config_options.is_empty() {
+        super::picks::drop_held(actor, thread, "the session's answer is newer");
+    }
     let picks = super::picks::wanted(actor, thread, &start.config_options);
     let kind = actor
         .threads
@@ -487,6 +490,7 @@ pub(super) fn attach(actor: &mut Actor, thread: ThreadId, start: SessionStart, l
     agent.preparing = false;
     let replayed = std::mem::take(&mut agent.replayed);
     let waiting = std::mem::take(&mut agent.waiting);
+    super::picks::released(thread, &replayed);
     for event in replayed {
         updates::on_event(actor, thread, Box::new(event));
     }

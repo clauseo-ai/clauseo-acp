@@ -7,7 +7,8 @@
 //! dropped and the prompt still runs, while one the agent fails otherwise, or one of an option
 //! the session does not report, is kept; a pick of a mode is never sent and is dropped; a
 //! reloaded session gets the thread's own values back; options with real values and no Default
-//! rows (the AIR `recommendedValue` capability) need nothing more.
+//! rows (the AIR `recommendedValue` capability) need nothing more. Picks against options the
+//! agent reports while a session starts: `pickers_early.rs`.
 
 use std::collections::BTreeMap;
 
@@ -22,21 +23,21 @@ use crate::observe::Events;
 use crate::support::{Dir, Running, Scenario, matter_with_thread};
 
 /// The agent id that makes a fake agent a Claude agent, so picks are kept per kind.
-const CLAUDE: &str = "claude-acp";
+pub(crate) const CLAUDE: &str = "claude-acp";
 
 fn id(text: &str) -> AgentChoiceId {
     AgentChoiceId::new(text).unwrap()
 }
 
-fn picks(pairs: &[(&str, &str)]) -> ConfigPicks {
+pub(crate) fn picks(pairs: &[(&str, &str)]) -> ConfigPicks {
     ConfigPicks::new(pairs.iter().map(|(o, v)| (id(o), id(v))).collect()).unwrap()
 }
 
-fn claude_prefs(pairs: &[(&str, &str)]) -> AgentPrefs {
+pub(crate) fn claude_prefs(pairs: &[(&str, &str)]) -> AgentPrefs {
     AgentPrefs(BTreeMap::from([(AgentKind::Claude, picks(pairs))]))
 }
 
-fn set(thread: ThreadId, option: &str, value: &str) -> HostCommand {
+pub(crate) fn set(thread: ThreadId, option: &str, value: &str) -> HostCommand {
     HostCommand::SetConfigOption {
         thread,
         option_id: id(option),
@@ -45,7 +46,7 @@ fn set(thread: ThreadId, option: &str, value: &str) -> HostCommand {
 }
 
 /// The current value of the select option `option` in `options`.
-fn current(options: &[ConfigOption], option: &str) -> Option<String> {
+pub(crate) fn current(options: &[ConfigOption], option: &str) -> Option<String> {
     options
         .iter()
         .find(|offered| offered.id == option)
@@ -71,7 +72,7 @@ fn values(options: &[ConfigOption], option: &str) -> Vec<String> {
 }
 
 /// Every logged `ConfigOptionsReplaced`, in order.
-fn replaced(events: &Events) -> Vec<Vec<ConfigOption>> {
+pub(crate) fn replaced(events: &Events) -> Vec<Vec<ConfigOption>> {
     events
         .events()
         .filter_map(|event| match event {
@@ -82,7 +83,7 @@ fn replaced(events: &Events) -> Vec<Vec<ConfigOption>> {
 }
 
 /// The thread's options as last logged.
-fn logged(events: &Events) -> Vec<ConfigOption> {
+pub(crate) fn logged(events: &Events) -> Vec<ConfigOption> {
     replaced(events).pop().unwrap_or_default()
 }
 
@@ -98,7 +99,11 @@ fn agent_options(host: &Running) -> Vec<ConfigOption> {
         .unwrap_or_default()
 }
 
-fn create_thread(host: &Running, matter: MatterId, config: Option<ConfigPicks>) -> ThreadId {
+pub(crate) fn create_thread(
+    host: &Running,
+    matter: MatterId,
+    config: Option<ConfigPicks>,
+) -> ThreadId {
     let outcome = host.ok(HostCommand::CreateThread {
         matter,
         agent: AgentId::new(CLAUDE).unwrap(),
@@ -122,7 +127,7 @@ fn set_prefs(host: &Running, matter: MatterId, prefs: FieldChange<AgentPrefs>) {
 }
 
 /// Runs one prompt on `thread` to its end and returns the thread's events so far.
-fn turn(host: &Running, thread: ThreadId, text: &str) -> Events {
+pub(crate) fn turn(host: &Running, thread: ThreadId, text: &str) -> Events {
     let mut events = host.events(StreamId::Thread(thread));
     events.until_caught_up();
     let (turn, _) = host.prompt(thread, text);
