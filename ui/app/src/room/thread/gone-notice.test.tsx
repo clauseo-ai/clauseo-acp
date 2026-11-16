@@ -54,15 +54,15 @@ for (const lang of ["en", "hi"] as const) {
       [
         th(
           lang,
-          "{file} was deleted during this step. Clauseo had no copy of it to bring back. It was only online, so your cloud service's recycle bin may still have it.",
+          "{file} was deleted during this answer. Clauseo had no copy of it to bring back. It was kept only in your cloud service, which may still have it among its deleted files.",
           { file: iso("Brief.docx") },
         ),
         th(
           lang,
-          "{file} was deleted during this step. Clauseo had no copy of it to bring back, because it was too large to keep versions of.",
+          "{file} was deleted during this answer. It was too large for Clauseo to keep a copy of, so Clauseo can't bring it back.",
           { file: iso("Photos.zip") },
         ),
-        th(lang, "{n} more files that Clauseo had no copy of were deleted during this step.", {
+        th(lang, "{n} more files Clauseo had no copy of were deleted during this answer.", {
           n: 2,
         }),
       ].join(" "),

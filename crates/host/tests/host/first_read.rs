@@ -2,7 +2,8 @@
 //! mtime, so it is the file's baseline, not a change. The turn has no `FilesChanged`, so the
 //! room shows no "changed" line and offers no Undo, and the file stays. And one the agent
 //! deleted: Clauseo kept no copy, so the turn's `FilesChanged` lists it as gone and a notice
-//! follows it.
+//! follows it. And one the agent changed in place: no copy of how it was before, so a notice
+//! names it at the turn's end.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -131,7 +132,56 @@ fn a_cloud_only_file_the_turn_deleted_is_gone_in_files_changed_and_a_notice() {
     );
     assert_eq!(
         notice.text,
-        "notes.txt was deleted during this step. Clauseo had no copy of it to bring back."
+        "notes.txt was deleted during this answer. Clauseo had no copy of it to bring back."
+    );
+    host.shutdown();
+}
+
+#[test]
+fn a_cloud_only_file_the_turn_changed_in_place_is_named_in_a_notice() {
+    let dir = Dir::new(
+        "a_cloud_only_file_the_turn_changed_in_place_is_named_in_a_notice",
+        &[(FAKE, Scenario::Local("change-cloud-only"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_placeholder_probe(Arc::new(MarkerProbe))
+    });
+    let seed = [
+        ("brief.txt", "Clause 4 draft\n"),
+        ("notes.txt", "The lawyer's notes\n"),
+        ("notes.txt.cloud.tmp", ""),
+    ];
+    let (_, thread, folder) = matter_with_thread(&dir, &host, "m", &seed, FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Rewrite the notes.");
+    let ended = events.until_turn_ended(turn);
+    events.assert_no_mismatch();
+    assert_eq!(ended.stop, StopReason::EndTurn);
+    assert_eq!(
+        std::fs::read_to_string(folder.join("notes.txt")).unwrap(),
+        "Rewritten by the agent, longer than before\n"
+    );
+    events.until_caught_up();
+    let notices: Vec<_> = events
+        .events()
+        .filter_map(|event| match event {
+            DomainEvent::Notice(notice) => notice.kind.clone(),
+            _ => None,
+        })
+        .filter(|kind| matches!(kind, NoticeKind::FilesChangedNoCopy { .. }))
+        .collect();
+    let notes = SkippedFile {
+        path: clauseo_protocol::MatterPath::new("notes.txt").unwrap(),
+        reason: SkippedFileReason::CloudOnly,
+    };
+    assert_eq!(
+        notices,
+        [NoticeKind::FilesChangedNoCopy {
+            files: vec![notes],
+            more: 0,
+        }],
+        "{}",
+        events.dump()
     );
     host.shutdown();
 }

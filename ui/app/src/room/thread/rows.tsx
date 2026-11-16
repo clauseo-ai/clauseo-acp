@@ -266,7 +266,7 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   const nameOf = (matter: string) => names.get(matter);
   // another matter's files refused: the line, and the offer to let this conversation read them (read-offer.tsx)
   const refused = refusedMatterOf(entry.kind, nameOf);
-  // a deleted file that was only online: its recycle bin, by the folder's sync service where the room knows one
+  // a deleted or changed file that was only online: its cloud service, by the folder's sync service where the room knows one
   const service = serviceName(use(FolderPlaceContext));
   const line = (
     <p

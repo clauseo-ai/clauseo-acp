@@ -273,6 +273,7 @@ impl Core {
         let mut reads = first_reads(&tip_record, &entries, &versioned);
         let gone = crate::gone::gone(&tip_record, &entries, &record, &versioned);
         let no_copy = crate::gone::no_copy(&record);
+        let changed_no_copy = crate::gone::changed(&tip_record, &entries);
         let mut changes = diff_reads(&old_tree, &new_tree, &over_cap, &reads)?;
         let head = self.timeline.head();
         let tip = self.timeline.tip();
@@ -302,6 +303,7 @@ impl Core {
                 changes,
                 skipped,
                 gone,
+                changed_no_copy,
                 no_copy,
             });
         }
@@ -364,6 +366,7 @@ impl Core {
             changes,
             skipped,
             gone,
+            changed_no_copy,
             no_copy,
         })
     }

@@ -1,6 +1,6 @@
 use clauseo_protocol::{MatterPath, SkippedFile, SkippedFileReason};
 
-use super::{gone, no_copy};
+use super::{changed, gone, no_copy};
 use crate::history::Oid;
 use crate::skip_record::{SkipEntry, SkipRecord};
 use crate::stat::{CacheEntry, EntryState, FileTime, Stat};
@@ -171,4 +171,33 @@ fn every_skipped_file_is_one_without_a_copy_and_a_stale_one_is_not() {
         vec![file("Big.zip", LARGE), file("Scan.pdf", CLOUD)]
     );
     assert_eq!(no_copy(&SkipRecord::default()), []);
+}
+
+/// R3: a skipped file still there with another size or modification time changed with no copy of
+/// how it was before; one only downloaded (same size and modification time), one still skipped
+/// as it was, and one gone are not changed.
+#[test]
+fn a_skipped_file_with_another_size_or_time_is_changed_one_only_downloaded_is_not() {
+    let start = record(
+        vec![
+            skip("Contract.docx", 18, 100, CLOUD),
+            skip("Downloaded.pdf", 30, 100, CLOUD),
+            skip("Gone.pdf", 5, 100, CLOUD),
+            skip("Still.mp4", 900, 100, LARGE),
+            skip("Touched.mp4", 900, 100, LARGE),
+        ],
+        &[],
+    );
+    let entries = vec![
+        entry("Contract.docx", 21, 100, read()),
+        entry("Downloaded.pdf", 30, 100, read()),
+        entry("New.docx", 4, 200, read()),
+        entry("Still.mp4", 900, 100, EntryState::Skipped),
+        entry("Touched.mp4", 900, 300, EntryState::Skipped),
+    ];
+    assert_eq!(
+        changed(&start, &entries),
+        vec![file("Contract.docx", CLOUD), file("Touched.mp4", LARGE)]
+    );
+    assert_eq!(changed(&record(Vec::new(), &[]), &entries), Vec::new());
 }

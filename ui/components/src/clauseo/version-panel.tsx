@@ -229,7 +229,9 @@ export function VersionPanel({
           {v.gone?.map((g) => (
             <span key={g.path} className="ver-entry-note" data-testid="ver-gone">
               <Say>
-                {w.v("{file} was deleted, with no copy to bring back", { file: fileName(g.path) })}
+                {w.v("{file} was deleted; Clauseo had no copy to bring back.", {
+                  file: fileName(g.path),
+                })}
               </Say>
             </span>
           ))}

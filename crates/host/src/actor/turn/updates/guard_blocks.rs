@@ -203,7 +203,7 @@ fn notice(kind: NoticeKind) -> Notice {
     } else if let NoticeKind::NoCopyBlocked { file } = &kind {
         format!(
             "Clauseo stopped a step: the AI tried to delete or replace {file}. Clauseo has no copy \
-             of it, so that couldn't be undone."
+             of it, so Undo couldn't have brought it back."
         )
     } else if kind == NoticeKind::CodexFolderBlocked {
         "Clauseo stopped a step: the AI tried to change its own settings in this matter's folder."

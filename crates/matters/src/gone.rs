@@ -12,6 +12,9 @@
 //! - a file new since the last commit (neither skipped nor versioned then) has its size and
 //!   modification time: it was moved or renamed, as `first_read.rs` reads it too.
 //!
+//! A skipped file the walk still finds with another size or modification time changed with no
+//! copy of how it was before ([`changed`]): undo cannot bring that version back either.
+//!
 //! A versioned file that was cloud-only and not read (`stale` in the record) is not listed: its
 //! deletion is a change of the tree, and undo puts back its earlier version.
 
@@ -48,6 +51,26 @@ pub(crate) fn gone(
         .filter(|skip| !found(skip.path.as_str()))
         .filter(|skip| !now.under_unread(skip.path.as_str()))
         .filter(|skip| !new.iter().any(|entry| same_stat(skip, &entry.stat)))
+        .map(|skip| SkippedFile {
+            path: skip.path.clone(),
+            reason: skip.reason,
+        })
+        .collect()
+}
+
+/// The files `start` (the last commit's skip record) has as skipped that the walk's `entries`
+/// (sorted by path bytes) still hold with another size or modification time, sorted by path
+/// bytes, each with the reason it was skipped: changed since the turn's start with no copy of how
+/// it was before, so no undo brings the earlier version back. A file only downloaded keeps its
+/// size and modification time, so it is not one.
+pub(crate) fn changed(start: &SkipRecord, entries: &[CacheEntry]) -> Vec<SkippedFile> {
+    start
+        .skipped
+        .iter()
+        .filter(|skip| {
+            find_by_path(entries, skip.path.as_str(), |entry| entry.path.as_str())
+                .is_some_and(|entry| !same_stat(skip, &entry.stat))
+        })
         .map(|skip| SkippedFile {
             path: skip.path.clone(),
             reason: skip.reason,

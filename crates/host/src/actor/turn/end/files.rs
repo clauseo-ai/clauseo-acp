@@ -6,6 +6,10 @@
 //! `gone` (`clauseo_matters`' `gone.rs`); the close logs them in `FilesChanged.gone`, which
 //! Versions shows on the step, and as a `Notice` (`NoticeKind::FilesGoneNoCopy`) right after it,
 //! which the conversation shows. Both come from the same list, so they cannot disagree.
+//!
+//! Such a file still there with another size or modification time was changed with no copy of
+//! how it was before (`Checkpoint::changed_no_copy`): the close tells it in a notice of its own
+//! (`NoticeKind::FilesChangedNoCopy`), in the same place. A file only downloaded is not one.
 
 use clauseo_matters::CheckpointOutcome;
 use clauseo_protocol::{
@@ -20,8 +24,18 @@ use crate::error::Error;
 use crate::matter_worker::TurnCheckpoint;
 use crate::pipeline::MatterEvent;
 
-/// How many gone files a notice names; the rest are counted.
+/// How many gone or changed files a notice names; the rest are counted.
 const NAMED: usize = 5;
+
+/// How many of `total` files a notice names: at most [`NAMED`], but all of them when only one
+/// would be left to count, so a count is never 1 (the app has no singular line for it).
+fn named(total: usize) -> usize {
+    if total == NAMED + 1 {
+        total
+    } else {
+        total.min(NAMED)
+    }
+}
 
 /// The after-turn checkpoint's part of a close: matter `CheckpointRecorded { AfterTurn }` when
 /// R8 created it, `FilesChanged` when anything changed, was skipped or is gone with no copy, and
@@ -57,6 +71,7 @@ pub(in super::super) fn after_events(
         let changes = reused.map(|reused| reused.changes).unwrap_or_default();
         files.extend(changes.into_iter().map(FileChange::with_lawyer_edits));
     }
+    close.changed_no_copy = checkpoint.changed_no_copy;
     let gone = checkpoint.gone;
     if !files.is_empty() || !checkpoint.skipped.is_empty() || !gone.is_empty() {
         close.files = Some(FilesChanged {
@@ -71,28 +86,59 @@ pub(in super::super) fn after_events(
 }
 
 /// The notice for the files a turn's `FilesChanged` lists as gone, `None` when there are none:
-/// at most [`NAMED`] named (sorted by path bytes, as listed), the rest counted. Its text, for a
+/// at most [`NAMED`] named (sorted by path bytes, as listed; all six when there are six), the
+/// rest counted. Its text, for a
 /// view that does not know the kind, is English.
 pub(in super::super) fn gone_notice(gone: &[SkippedFile]) -> Option<Notice> {
     let first = gone.first()?;
     let text = if gone.len() == 1 {
         format!(
-            "{} was deleted during this step. Clauseo had no copy of it to bring back.",
+            "{} was deleted during this answer. Clauseo had no copy of it to bring back.",
             first.path
         )
     } else {
         format!(
-            "{} files were deleted during this step that Clauseo had no copy of, so they can't be \
-             brought back.",
+            "{} files were deleted during this answer that Clauseo had no copy of, so they can't \
+             be brought back.",
             gone.len()
         )
     };
-    let more = u32::try_from(gone.len().saturating_sub(NAMED)).unwrap_or(u32::MAX);
-    let files = gone.iter().take(NAMED).cloned().collect();
+    let shown = named(gone.len());
+    let more = u32::try_from(gone.len().saturating_sub(shown)).unwrap_or(u32::MAX);
+    let files = gone.iter().take(shown).cloned().collect();
     Some(Notice {
         level: NoticeLevel::Warning,
         text,
         kind: Some(NoticeKind::FilesGoneNoCopy { files, more }),
+    })
+}
+
+/// The notice for the files the before-turn checkpoint kept no copy of that the turn changed in
+/// place (`Checkpoint::changed_no_copy`), `None` when there are none: at most [`NAMED`] named
+/// (sorted by path bytes), the rest counted. Its text, for a view that does not know the kind,
+/// is English.
+pub(in super::super) fn changed_notice(changed: &[SkippedFile]) -> Option<Notice> {
+    let first = changed.first()?;
+    let text = if changed.len() == 1 {
+        format!(
+            "{} was changed during this answer. Clauseo had no copy of how it was before, so Undo \
+             can't bring the earlier version back.",
+            first.path
+        )
+    } else {
+        format!(
+            "{} files Clauseo had no earlier copy of were changed during this answer, so Undo \
+             can't bring the earlier versions back.",
+            changed.len()
+        )
+    };
+    let shown = named(changed.len());
+    let more = u32::try_from(changed.len().saturating_sub(shown)).unwrap_or(u32::MAX);
+    let files = changed.iter().take(shown).cloned().collect();
+    Some(Notice {
+        level: NoticeLevel::Warning,
+        text,
+        kind: Some(NoticeKind::FilesChangedNoCopy { files, more }),
     })
 }
 

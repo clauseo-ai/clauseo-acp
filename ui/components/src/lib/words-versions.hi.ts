@@ -23,8 +23,7 @@ const OWN = {
   "{from} to {to}": "{from} से {to}",
   "{file} is too large to keep versions": "{file} इतनी बड़ी है कि उसके संस्करण नहीं रखे जा सकते",
   // the timeline's note on a change during which a file Clauseo kept no copy of was deleted (provisional, UC-725)
-  "{file} was deleted, with no copy to bring back":
-    "{file} हटा दी गई, वापस लाने के लिए कोई प्रति नहीं है",
+  "{file} was deleted; Clauseo had no copy to bring back.": null,
   // the plain line over the room as it stood, and its ways on
   "The matter as it stood at {time} on {date}": "मामला जैसा {date} को {time} बजे था",
   "The matter as it stood at {time} today": "मामला जैसा आज {time} बजे था",

@@ -63,7 +63,7 @@ for (const lang of ["en", "hi"] as const) {
       th(lang, "Clauseo stopped {n} more steps.", { n: "3" }),
       th(
         lang,
-        "Clauseo stopped a step: {name} tried to delete or replace {file}. Clauseo has no copy of it, so that couldn't be undone.",
+        "Clauseo stopped a step: {name} tried to delete or replace {file}. Clauseo has no copy of it, so Undo couldn't have brought it back.",
         { name: "Claude", file: iso("Scan.pdf") },
       ),
     ]);
