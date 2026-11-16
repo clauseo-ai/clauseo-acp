@@ -140,7 +140,8 @@ fn the_home_is_the_user_record_s_with_home_set_elsewhere() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let printed = stdout
         .lines()
-        .find_map(|line| line.strip_prefix(PROBE_LINE))
+        // libtest prints `test … ... ` before the probe's line on the same line.
+        .find_map(|line| line.split_once(PROBE_LINE).map(|(_, home)| home))
         .expect("the probe printed the home folder");
     let record = nix::unistd::User::from_uid(nix::unistd::getuid())
         .unwrap()
