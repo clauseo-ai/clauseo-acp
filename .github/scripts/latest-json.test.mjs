@@ -1073,6 +1073,51 @@ test("release.yml makes a published v* release the latest explicitly, and checks
   assert.match(get ?? "", / --location --proto '=https' --proto-redir '=https' /);
 });
 
+test("an unsigned beta goes out only with CLAUSEO_UNSIGNED_BETA 'true' and no Apple secret, signed ad hoc", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const lines = text.split("\n").map((line) => stripComment(line).trim());
+  const beta = "UNSIGNED_BETA: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}";
+  const apple =
+    "HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}";
+  // The variable and the Apple secrets are read in publish and assemble only, the same way.
+  assert.equal(lines.filter((line) => line.includes("vars.CLAUSEO_UNSIGNED_BETA")).length, 2);
+  assert.equal(lines.filter((line) => line.startsWith("HAS_APPLE:")).length, 2);
+  const at = (commands, line, from = 0) => {
+    const index = commands.indexOf(line, from);
+    assert.notEqual(index, -1, line);
+    return index;
+  };
+  // publish: without the variable, or with an Apple secret, today's stapler check; else every
+  // DMG's .app verifies and is signed ad hoc.
+  const publish = jobCommands(text, "publish");
+  at(publish, beta);
+  at(publish, apple);
+  const signed = at(publish, 'if [ "$UNSIGNED_BETA" != true ] || [ "$HAS_APPLE" = true ]; then');
+  const stapler = at(
+    publish,
+    'xcrun stapler validate "$dmg" || { echo "::error::$(basename "$dmg") is not notarised and stapled"; exit 1; }',
+    signed,
+  );
+  const leave = at(publish, "exit 0", stapler);
+  const adhoc = publish.findIndex((line) => line.includes("grep -qx 'Signature=adhoc'"));
+  assert.ok(adhoc > leave, "the ad hoc check is the beta's");
+  at(publish, 'elif ! codesign --verify --deep --strict --verbose=2 "$app"; then', leave);
+  assert.ok(publish.slice(leave).some((line) => line.includes("**Unsigned beta:**")), "the summary says so");
+  assert.ok(at(publish, "- name: Publish the draft as the latest release") > adhoc, "checked before publishing");
+  // assemble: the first-open steps only under the same rule, linking the install guides.
+  const assemble = jobCommands(text, "assemble");
+  at(assemble, beta);
+  at(assemble, apple);
+  const block = at(assemble, 'if [ "$UNSIGNED_BETA" = true ] && [ "$HAS_APPLE" != true ]; then');
+  const end = at(assemble, "fi", at(assemble, 'echo "- **Windows:** a blue box says **Windows protected your PC**. Click **More info**, then **Run anyway**. [Installing Clauseo on Windows]($guide/windows.md) shows each click."', block) + 1) + 1;
+  const inside = assemble.slice(block, end).join("\n");
+  for (const words of ["**Open Anyway**", "xattr -dr com.apple.quarantine /Applications/Clauseo.app", "($guide/macos.md)"]) {
+    assert.ok(inside.includes(words), words);
+  }
+  assert.ok(inside.includes("guide=https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/install"));
+  assert.ok(!assemble.slice(0, block).concat(assemble.slice(end)).some((line) => line.includes("Open Anyway")));
+});
+
 test("the workflow lint fails each broken rule", () => {
   const good = [
     "on:",

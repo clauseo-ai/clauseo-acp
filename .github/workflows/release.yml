@@ -10,9 +10,10 @@
 # Three modes, which `check` decides from what started the run:
 # - release: a pushed tag v<X.Y.Z> on a commit on main. Builds under the environment `release`
 #   and leaves a draft GitHub Release; `publish` waits for Rohan's approval (environment
-#   `release-publish`), refuses unless every DMG is notarised and stapled, then publishes it as
-#   the latest release; `latest` checks that GitHub names it latest and that
-#   releases/latest/download/latest.json verifies against the app's key.
+#   `release-publish`), refuses unless every DMG is notarised and stapled (or, only with the
+#   repository variable CLAUSEO_UNSIGNED_BETA 'true' and no Apple secret, signed ad hoc: the
+#   unsigned beta), then publishes it as the latest release; `latest` checks that GitHub names
+#   it latest and that releases/latest/download/latest.json verifies against the app's key.
 # - test: a pushed tag test-v<X.Y.Z> on a commit of a release-test/* branch. Builds with the
 #   `e2e` feature under `release-test`, signs the updater files with the throwaway test key, and
 #   makes a public pre-release (a draft's assets need a signed-in download) for the updater's
@@ -1435,7 +1436,14 @@ jobs:
       - name: Install 7-Zip
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends p7zip-full
 
+      # UNSIGNED_BETA and HAS_APPLE: the unsigned beta's two inputs, the same expressions as in
+      # publish (see there), for the release notes' first-open steps. Booleans only: no secret's
+      # value reaches the step.
       - name: Name the assets, write latest.json and SHA256SUMS.txt
+        env:
+          UNSIGNED_BETA: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}
+          HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}
+          SIGNPATH_ENABLED: ${{ vars.SIGNPATH_ENABLED == 'true' }}
         run: |
           set -euo pipefail
           mkdir dist
@@ -1573,6 +1581,23 @@ jobs:
             echo "Clauseo $VERSION, built from $GITHUB_SHA by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
             echo
             echo "Check a download with \`sha256sum -c SHA256SUMS.txt --ignore-missing\`."
+            # The first-open steps, only in an unsigned beta, decided exactly as publish decides
+            # it (UNSIGNED_BETA and HAS_APPLE, below and in publish), so a signed release never
+            # carries them; the Windows lines also only while SignPath is off. The words are
+            # docs/install/macos.md's and windows.md's, which the links lead to.
+            if [ "$UNSIGNED_BETA" = true ] && [ "$HAS_APPLE" != true ]; then
+              guide=https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/install
+              echo
+              echo "## Opening Clauseo the first time"
+              echo
+              echo "Clauseo is a small open-source project with no funding yet, so this beta isn't signed by Apple or Microsoft. Your computer asks before it opens Clauseo the first time."
+              echo
+              echo "- **Mac:** drag Clauseo onto Applications and open it. macOS says it can't be opened: click **Done** or **OK**, not the button that moves it to the Bin. Then open **System Settings**, click **Privacy & Security**, scroll down to **Security** and click **Open Anyway**. On macOS 15 and later, right-clicking the app and choosing **Open** no longer gets past this block. [Installing Clauseo on a Mac]($guide/macos.md) shows each click."
+              echo "- **If macOS says Clauseo \"is damaged\":** this one line in Terminal removes the \"downloaded from the internet\" mark from Clauseo alone: \`xattr -dr com.apple.quarantine /Applications/Clauseo.app\`. Then open Clauseo again. On a work Mac, ask your IT team before you do this."
+              if [ "$MODE" != release ] || [ "$SIGNPATH_ENABLED" != true ]; then
+                echo "- **Windows:** a blue box says **Windows protected your PC**. Click **More info**, then **Run anyway**. [Installing Clauseo on Windows]($guide/windows.md) shows each click."
+              fi
+            fi
             echo
             echo "## Which Windows installer"
             echo
@@ -1635,7 +1660,10 @@ jobs:
 
   # Publishes a v* draft once Rohan approves it (environment release-publish) and makes it the
   # latest release explicitly; `latest` then checks what installed apps will read. Refuses while
-  # a DMG is missing or not notarised and stapled: no release before the Apple account (QF.2 (a)).
+  # a DMG is missing or not notarised and stapled (QF.2 (a)), except in an unsigned beta, which
+  # is only ever on purpose: the repository variable CLAUSEO_UNSIGNED_BETA is 'true' and no
+  # Apple secret is set. Then every DMG's Clauseo.app must verify and be signed ad hoc, and the
+  # job summary says the release is an unsigned beta (decision 0035, "The unsigned beta").
   publish:
     name: publish
     needs: [check, assemble]
@@ -1653,17 +1681,57 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Every DMG is notarised and stapled
+      # The unsigned beta, decided exactly as assemble decides the release notes' block:
+      # UNSIGNED_BETA is the variable (a tag push has no inputs, so a repository variable, never
+      # a default); HAS_APPLE is true when any Apple secret is set, as a boolean only, so no
+      # secret's value reaches the step. Tauri's names (local-mac-dmg.sh unsets the same):
+      # APPLE_CERTIFICATE signs, APPLE_ID or APPLE_API_KEY notarises. The safe rule: an Apple
+      # secret, or a DMG signed with a real identity, always means notarisation is required, so
+      # the variable never weakens a signed set-up. A secret kept only in the `release`
+      # environment is not visible here; the ad hoc check below still refuses that DMG.
+      # Without the variable, or with an Apple secret, the check is today's, word for word.
+      - name: Every DMG is notarised and stapled, or this is an unsigned beta on purpose
         env:
           GH_TOKEN: ${{ github.token }}
+          UNSIGNED_BETA: ${{ vars.CLAUSEO_UNSIGNED_BETA == 'true' }}
+          HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' || secrets.APPLE_ID != '' || secrets.APPLE_API_KEY != '' }}
         run: |
           set -euo pipefail
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.dmg' --dir "$RUNNER_TEMP/dmg"
           [ -f "$RUNNER_TEMP/dmg/Clauseo_${VERSION}_aarch64.dmg" ] ||
             { echo "::error::the draft has no Clauseo_${VERSION}_aarch64.dmg"; exit 1; }
+          if [ "$UNSIGNED_BETA" != true ] || [ "$HAS_APPLE" = true ]; then
+            for dmg in "$RUNNER_TEMP"/dmg/*.dmg; do
+              xcrun stapler validate "$dmg" || { echo "::error::$(basename "$dmg") is not notarised and stapled"; exit 1; }
+            done
+            echo "Every DMG of Clauseo $VERSION is notarised and stapled." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # The unsigned beta. Apple silicon runs no unsigned arm64 code, so the .app each DMG
+          # holds (what the lawyer drags to Applications) must verify, strictly and deep, and be
+          # signed ad hoc, as build signed it. A real identity's signature here means a signed
+          # set-up, which must be notarised: refused.
           for dmg in "$RUNNER_TEMP"/dmg/*.dmg; do
-            xcrun stapler validate "$dmg" || { echo "::error::$(basename "$dmg") is not notarised and stapled"; exit 1; }
+            name=$(basename "$dmg")
+            mnt=$(mktemp -d "$RUNNER_TEMP/mnt.XXXXXX")
+            hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mnt" "$dmg" > /dev/null
+            problem=""
+            app=$mnt/Clauseo.app
+            info=""
+            if [ ! -d "$app" ]; then
+              problem="holds no Clauseo.app"
+            elif ! codesign --verify --deep --strict --verbose=2 "$app"; then
+              problem="holds a Clauseo.app that does not verify (codesign --verify --deep --strict)"
+            elif ! info=$(codesign -dv "$app" 2>&1) || ! grep -qx 'Signature=adhoc' <<< "$info"; then
+              problem="holds a Clauseo.app signed with a real identity, so it must be notarised and stapled"
+            fi
+            hdiutil detach "$mnt" > /dev/null
+            [ -z "$problem" ] || { echo "::error::$name $problem"; exit 1; }
+            echo "$name: Clauseo.app verifies and is signed ad hoc"
           done
+          echo "::warning::Clauseo $VERSION is an unsigned beta: its DMGs are signed ad hoc and not notarised"
+          echo "**Unsigned beta:** Clauseo $VERSION's DMGs are signed ad hoc and not notarised, published on purpose (repository variable CLAUSEO_UNSIGNED_BETA is true and no Apple secret is set). The release notes carry the first-open steps." |
+            tee -a "$GITHUB_STEP_SUMMARY"
 
       # --latest makes this release the one releases/latest names, which every installed app's
       # updater reads latest.json through; never left to GitHub's automatic choice.
