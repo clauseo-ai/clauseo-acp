@@ -392,6 +392,32 @@ fn a_runtime_is_valid_only_with_its_receipt() {
     assert!(!runtime_valid(&dir, &archive, Os::Linux), "no receipt");
 }
 
+/// The files a start or an install runs: `node` (an agent's start), and `npm-cli.js` (an
+/// install's). Either gone and the runtime is not valid, so it is fetched again.
+#[test]
+fn a_runtime_missing_node_or_npm_cli_is_not_valid() {
+    let platform = Platform::new(Os::Linux, Arch::X64);
+    let data = TestDir::new("runtime-file-gone");
+    let tarball = data.0.join("node.tar.gz");
+    tar_gz(&tarball, &runtime_tar());
+    let (entry, archive) = fixture_node(platform, &tarball);
+    let dir = runtime_dir(&data.0, &entry, platform);
+    write::create_dir_all(dir.parent().unwrap()).unwrap();
+    for file in [
+        runtime_program(&dir, Os::Linux),
+        runtime_npm_cli(&dir, Os::Linux),
+    ] {
+        install_runtime(&tarball, &entry, &archive, &dir, Os::Linux).unwrap();
+        assert!(runtime_valid(&dir, &archive, Os::Linux));
+        write::remove_file(&file).unwrap();
+        assert!(
+            !runtime_valid(&dir, &archive, Os::Linux),
+            "{} gone",
+            file.display()
+        );
+    }
+}
+
 #[test]
 fn an_archive_changed_after_its_check_is_deleted_and_nothing_unpacked() {
     let platform = Platform::new(Os::Linux, Arch::X64);

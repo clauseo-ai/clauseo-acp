@@ -89,6 +89,27 @@ fn a_folder_with_no_receipt_is_redone() {
     assert_eq!(fx.registry.requests().len(), before);
 }
 
+/// A receipt does not vouch for files gone since: with the adapter's script or its package's
+/// `package.json` removed, the next start shows the agent missing, and an install redoes it.
+#[test]
+fn an_install_whose_script_or_package_json_is_gone_is_not_ready() {
+    let fx = Fixture::new("script-gone");
+    let (agents, events) = fx.start();
+    events.first_states();
+    let installed = install_ready(&agents, &events, &agent_a());
+    drop(agents);
+    let package_json = installed.folder.join("node_modules/adapter-a/package.json");
+    for gone in [&installed.script, &package_json] {
+        std::fs::remove_file(gone).unwrap();
+        let (agents, events) = fx.start();
+        let (a, _) = events.first_states();
+        assert!(matches!(a, InstallState::Missing { .. }), "{a:?}");
+        assert_eq!(agents.installed(&agent_a()), None);
+        install_ready(&agents, &events, &agent_a());
+        assert!(gone.is_file(), "{}", gone.display());
+    }
+}
+
 /// A receipt naming a Node other than the one the `PATH` search finds now (an nvm switch, or a
 /// planted path) is never run: the receipt is rewritten to name the Node found now and the agent
 /// stays `Ready`, with no download. With no usable Node at all, the install is redone.

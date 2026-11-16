@@ -305,7 +305,9 @@ struct RuntimeReceipt {
 }
 
 /// Whether `dir` is a complete runtime for `archive`: its receipt names the archive's SHA-256,
-/// and the program and `npm-cli.js` are regular files.
+/// and the program and `npm-cli.js` are regular files. Those are the files run: `node` alone
+/// starts an agent (it is self-contained), and `npm-cli.js` is what an install runs. Other
+/// files (npm's own modules, headers, docs) are not looked at.
 pub(crate) fn runtime_valid(dir: &Path, archive: &NodeArchive, os: Os) -> bool {
     let Ok(bytes) = std::fs::read(dir.join(RUNTIME_RECEIPT)) else {
         return false;

@@ -9,6 +9,7 @@
 //! rather than at the agent's first use.
 
 mod run;
+mod whole;
 
 use std::ffi::OsString;
 use std::io::{self, Read as _, Seek as _};
@@ -182,23 +183,38 @@ fn read_receipt(dir: &Path) -> Option<PythonReceipt> {
 }
 
 /// Whether `dir` is a complete runtime for `archive`: its receipt is schema 1 and names the
-/// archive and its SHA-256, the manifest beside it hashes to the receipt's `manifest_sha256`,
-/// and the interpreter is a regular file. Each file's own hash is [`contents_match`]'s.
+/// archive and its SHA-256, the interpreter is a regular file, the manifest beside it hashes to
+/// the receipt's `manifest_sha256`, and every file it lists is a regular file of its listed
+/// size ([`whole::whole`], kept for the rest of this start). Each file's own hash is
+/// [`contents_match`]'s.
 pub(crate) fn python_runtime_valid(dir: &Path, archive: &PythonArchive, os: Os) -> bool {
     let Some(receipt) = read_receipt(dir) else {
         return false;
     };
     let is_file = |path: &Path| std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file());
-    receipt.schema == 1
+    let pinned = receipt.schema == 1
         && receipt.archive == archive.name()
-        && receipt.sha256 == archive.sha256_hex()
-        && manifest_hash(dir).is_some_and(|hash| hash == receipt.manifest_sha256)
-        && is_file(&runtime_program(dir, os))
+        && receipt.sha256 == archive.sha256_hex();
+    if !pinned || !is_file(&runtime_program(dir, os)) {
+        return false;
+    }
+    // One read: the bytes hashed against the receipt are the ones whose lines are checked.
+    let Some(manifest) = read_manifest(dir) else {
+        return false;
+    };
+    sha256_hex(manifest.as_bytes()) == receipt.manifest_sha256
+        && whole::whole(dir, &receipt.manifest_sha256, &manifest)
 }
 
-/// The SHA-256 of `dir`'s manifest, when it reads.
-fn manifest_hash(dir: &Path) -> Option<String> {
-    sha256_file(&dir.join(PYTHON_MANIFEST)).map(|(_, hex)| hex)
+/// `dir`'s manifest, read through no link, when it reads and is at most 64 MiB.
+fn read_manifest(dir: &Path) -> Option<String> {
+    write::read_small(&dir.join(PYTHON_MANIFEST), 64 * 1024 * 1024).ok()?
+}
+
+/// The path in `dir` of the manifest's `/`-separated `rel`.
+fn manifest_path(dir: &Path, rel: &str) -> PathBuf {
+    rel.split('/')
+        .fold(dir.to_path_buf(), |path, part| path.join(part))
 }
 
 /// The size and SHA-256 (lowercase hex) of the file at `path`, read through no link.
@@ -259,7 +275,7 @@ pub fn python_contents_match(config: &AgentsConfig) -> bool {
 /// SHA-256: the repair check, reading every byte of the runtime (about 250 MB). Files the
 /// manifest does not list (the receipt, the manifest) are not looked at.
 pub(crate) fn contents_match(dir: &Path) -> bool {
-    let Ok(Some(text)) = write::read_small(&dir.join(PYTHON_MANIFEST), 64 * 1024 * 1024) else {
+    let Some(text) = read_manifest(dir) else {
         return false;
     };
     text.lines().all(|line| {
@@ -267,10 +283,8 @@ pub(crate) fn contents_match(dir: &Path) -> bool {
         let (Some(sha), Some(size), Some(rel)) = (parts.next(), parts.next(), parts.next()) else {
             return false;
         };
-        let path = rel
-            .split('/')
-            .fold(dir.to_path_buf(), |path, part| path.join(part));
-        sha256_file(&path).is_some_and(|(n, hex)| size.parse::<u64>().ok() == Some(n) && hex == sha)
+        sha256_file(&manifest_path(dir, rel))
+            .is_some_and(|(n, hex)| size.parse::<u64>().ok() == Some(n) && hex == sha)
     })
 }
 
@@ -316,6 +330,7 @@ pub(crate) async fn install_python_runtime<T: Timer>(
     tmp_name.push(name);
     let tmp = parent.join(tmp_name);
     write::remove_dir_all(&tmp)?;
+    whole::forget(dir);
     let reader = io::BufReader::new(file.take(archive.size()));
     let unpacked = write::extract_tar_gz_read_only(reader, &tmp).and_then(|files| {
         let program = runtime_program(&tmp, os);
@@ -354,6 +369,8 @@ pub(crate) async fn install_python_runtime<T: Timer>(
     let bytes = serde_json::to_vec_pretty(&receipt)
         .map_err(|err| ExtractError::Malformed(err.to_string()))?;
     write::write_atomic(&dir.join(PYTHON_RECEIPT), &bytes)?;
+    // A check that ran while the files changed is not kept.
+    whole::forget(dir);
     #[cfg(unix)]
     write::make_read_only(dir)?;
     Ok(())
@@ -408,11 +425,17 @@ fn log_verdict(archive: &PythonArchive, matched: bool) {
 }
 
 /// Removes every Python runtime folder and temp folder under `<data_dir>/agents/runtime` but
-/// `keep` (the current archive's stem, when this platform has Python): an app update's new
-/// archive leaves the old runtime behind. Read-only trees are made writable first
-/// ([`write::remove_dir_all`]). Only a real `agents/runtime` folder is listed, never through a
-/// link; Node's folders are left alone.
-pub(crate) fn remove_stale_runtimes(data_dir: &Path, keep: Option<&str>) -> io::Result<()> {
+/// `keep`'s (the current archive's, when this platform has Python): an app update's new
+/// archive leaves the old runtime behind. A folder of another name whose receipt names `keep`
+/// (a copy renamed away) is renamed back to `keep`'s name instead when that name is free:
+/// [`python_runtime_valid`] then decides whether it is trusted, and a good copy saves a
+/// download. `keep`'s own folder is never removed; its `.tmp-` folder (an unfinished install)
+/// is. Read-only trees are made writable first ([`write::remove_dir_all`]). Only a real
+/// `agents/runtime` folder is listed, never through a link; Node's folders are left alone.
+pub(crate) fn remove_stale_runtimes(
+    data_dir: &Path,
+    keep: Option<&PythonArchive>,
+) -> io::Result<()> {
     let root = runtime_root(data_dir);
     if !write::real_dirs_under(data_dir, &root)? {
         return Ok(());
@@ -421,13 +444,39 @@ pub(crate) fn remove_stale_runtimes(data_dir: &Path, keep: Option<&str>) -> io::
         let entry = entry?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
+        let tmp = name.starts_with(".tmp-");
         let folder = name.strip_prefix(".tmp-").unwrap_or(&name);
-        let current = keep.is_some_and(|keep| name == keep);
-        if folder.starts_with(FOLDER_PREFIX) && !current {
-            write::remove_any(&entry.path())?;
+        let current = keep.is_some_and(|keep| name == keep.stem());
+        if !folder.starts_with(FOLDER_PREFIX) || current {
+            continue;
         }
+        let path = entry.path();
+        if let Some(keep) = keep
+            && !tmp
+            && entry.file_type()?.is_dir()
+            && moved_back(&root, &path, keep)?
+        {
+            continue;
+        }
+        write::remove_any(&path)?;
     }
     Ok(())
+}
+
+/// Renames the folder at `path` to `keep`'s folder in `root` when its receipt names `keep`
+/// and that name is free (nothing there, not even a link), and says whether it did.
+fn moved_back(root: &Path, path: &Path, keep: &PythonArchive) -> io::Result<bool> {
+    if !read_receipt(path).is_some_and(|receipt| receipt.archive == keep.name()) {
+        return Ok(false);
+    }
+    let current = root.join(keep.stem());
+    match std::fs::symlink_metadata(&current) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        _ => return Ok(false),
+    }
+    write::rename(path, &current)?;
+    whole::forget(&current);
+    Ok(true)
 }
 
 #[cfg(test)]

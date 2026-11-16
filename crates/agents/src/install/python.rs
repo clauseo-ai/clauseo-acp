@@ -187,7 +187,7 @@ async fn attempt<T: Timer + Send + Sync>(
     drop(write::remove_file(&part_path(&dest)));
     drop(python::remove_stale_runtimes(
         &config.data_dir,
-        Some(archive.stem()),
+        Some(archive),
     ));
     Ok(())
 }
