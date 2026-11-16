@@ -330,6 +330,7 @@ fn a_matter_registered_through_a_link_is_fenced_by_both_spellings() {
 /// A refused path spelled through macOS's `/tmp` or `/var` link, or on its data volume, names
 /// the other matter stored the other way, and never the own matter however it is spelled: the
 /// path and the spellings are put in one form by their text (`forms::plain`), with no disk.
+#[cfg(unix)]
 #[test]
 fn a_refused_path_through_tmp_var_or_the_data_volume_names_the_matter() {
     let at = |path: &str| PathBuf::from(path);
