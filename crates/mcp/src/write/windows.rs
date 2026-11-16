@@ -1,9 +1,12 @@
 //! Windows: the download move that never replaces a file, `MoveFileExW` without
 //! `MOVEFILE_REPLACE_EXISTING` (std has none: `fs::rename` replaces, and `fs::hard_link` plus
 //! `fs::remove_file` would leave two names while Chrome or a scanner holds the file open).
+//! And the proxy's secret file, checked and deleted through the one handle it was opened with
+//! (`write/secret.rs`): `GetFileInformationByHandle` and `SetFileInformationByHandle`.
 #![expect(
     unsafe_code,
-    reason = "MoveFileExW, for a download move that never replaces a file"
+    reason = "MoveFileExW, for a download move that never replaces a file; the secret file's \
+              GetFileInformationByHandle and SetFileInformationByHandle"
 )]
 
 use std::ffi::OsStr;
@@ -11,8 +14,13 @@ use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 
-use windows::Win32::Foundation::WIN32_ERROR;
-use windows::Win32::Storage::FileSystem::{MOVE_FILE_FLAGS, MoveFileExW};
+use std::os::windows::io::AsRawHandle;
+
+use windows::Win32::Foundation::{HANDLE, WIN32_ERROR};
+use windows::Win32::Storage::FileSystem::{
+    BY_HANDLE_FILE_INFORMATION, FILE_DISPOSITION_INFO, FileDispositionInfo,
+    GetFileInformationByHandle, MOVE_FILE_FLAGS, MoveFileExW, SetFileInformationByHandle,
+};
 use windows::core::PCWSTR;
 
 /// Moves `from` to `to`; `AlreadyExists` if `to` exists, a sharing violation while the file
@@ -26,6 +34,36 @@ pub(crate) fn move_new(from: &Path, to: &Path) -> io::Result<()> {
             PCWSTR(from.as_ptr()),
             PCWSTR(to.as_ptr()),
             MOVE_FILE_FLAGS(0),
+        )
+    }
+    .map_err(|error| io_error(&error))
+}
+
+/// `GetFileInformationByHandle` of `file`: its attributes (`dwFileAttributes`) and how many
+/// names it has (`nNumberOfLinks`).
+pub(super) fn attributes_and_links(file: &std::fs::File) -> io::Result<(u32, u32)> {
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: the handle is `file`'s own, open for the whole call; `info` is a live, writable
+    // BY_HANDLE_FILE_INFORMATION that the call fills and nothing else borrows.
+    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &raw mut info) }
+        .map_err(|error| io_error(&error))?;
+    Ok((info.dwFileAttributes, info.nNumberOfLinks))
+}
+
+/// Marks `file` for deletion through its own handle (`SetFileInformationByHandle` with
+/// `FileDispositionInfo`), which needs `DELETE` access on it: the name goes when the last
+/// handle closes, and the path is never opened again.
+pub(super) fn delete_by_handle(file: &std::fs::File) -> io::Result<()> {
+    let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
+    let size = u32::try_from(size_of::<FILE_DISPOSITION_INFO>()).unwrap_or(u32::MAX);
+    // SAFETY: the handle is `file`'s own, open for the whole call; the pointer is to a live
+    // FILE_DISPOSITION_INFO of exactly `size` bytes, which the call only reads.
+    unsafe {
+        SetFileInformationByHandle(
+            HANDLE(file.as_raw_handle()),
+            FileDispositionInfo,
+            (&raw const disposition).cast(),
+            size,
         )
     }
     .map_err(|error| io_error(&error))

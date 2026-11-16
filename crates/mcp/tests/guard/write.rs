@@ -37,6 +37,11 @@ pub(crate) fn set_mode(path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
 }
 
+/// `fs::hard_link`.
+pub(crate) fn hard_link(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+    std::fs::hard_link(original, link)
+}
+
 /// `os::unix::fs::symlink`.
 #[cfg(unix)]
 pub(crate) fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {

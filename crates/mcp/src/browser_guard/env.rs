@@ -16,11 +16,11 @@
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
-use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use super::proxy_auth::Password;
 use crate::write;
+use crate::write::secret::Refused;
 
 /// Which family's rules apply: the names, the folders and how names compare.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,9 +46,10 @@ pub(crate) const PROXY: &str = "AGENT_BROWSER_PROXY";
 /// The absolute path of the file holding the proxy's password, which the host writes for the
 /// guard alone (`<data>/run/<session id>/proxy-secret`): mode 0600 in the session's 0700 run
 /// folder, or on Windows with that folder's ACL. It holds exactly 64 of `0-9 a-f`, then at most
-/// one `\n`. The guard reads it once at its start and deletes it, or empties it when it cannot
-/// ([`proxy_secret`]). The variable is never in a child's environment, and the password never
-/// on a command line, in a log or in `Debug`. Valid only with [`PROXY`], and required with it.
+/// one `\n`. The guard reads it once at its start, through a handle opened without following a
+/// link, then empties and deletes it ([`proxy_secret`]). The variable is never in a child's
+/// environment, and the password never on a command line, in a log or in `Debug`. Valid only
+/// with [`PROXY`], and required with it.
 pub(crate) const PROXY_SECRET_FILE: &str = "CLAUSEO_PROXY_SECRET_FILE";
 /// The most of that file the guard reads: twice what a valid one holds.
 const SECRET_FILE_MAX_BYTES: u64 = 128;
@@ -218,6 +219,7 @@ enum Problem {
     Unreadable,
     NotSecret,
     NotSpent,
+    NotPlain,
     SecretWithoutProxy,
     ProxyWithoutSecret,
 }
@@ -238,16 +240,20 @@ impl fmt::Display for EnvError {
             ),
             Problem::NotSession => write!(f, "{name} must be 1 to 64 of A-Z a-z 0-9 _ -"),
             Problem::NotAbsolute => write!(f, "{name} must be an absolute path"),
-            Problem::Unreadable => write!(f, "{name} names a file the guard cannot read"),
+            Problem::Unreadable => write!(
+                f,
+                "{name} names a file the guard cannot open to read and empty"
+            ),
+            Problem::NotPlain => write!(
+                f,
+                "{name} must name a plain file with one name, not a link, a folder or a device"
+            ),
             Problem::NotSecret => write!(
                 f,
                 "{name} must name a file holding exactly 64 of 0-9 a-f, then at most one newline"
             ),
             Problem::NotSpent => {
-                write!(
-                    f,
-                    "{name} names a file the guard could neither delete nor empty"
-                )
+                write!(f, "{name} names a file the guard read but could not empty")
             }
             Problem::ProxyWithoutSecret => write!(
                 f,
@@ -412,11 +418,13 @@ fn windows_join(dir: &OsStr, name: &str) -> OsString {
 /// The proxy's password, from the file [`PROXY_SECRET_FILE`] names: `None` when the guard's
 /// environment has neither that variable nor [`PROXY`]. An error when one comes without the
 /// other, or the variable names no local file at an absolute path ([`is_local_file`]), or names
-/// one that cannot be read, is over [`SECRET_FILE_MAX_BYTES`] or does not hold exactly 64 of
-/// `0-9 a-f` and at most one `\n`. A file that was read is deleted at once, whatever it held;
-/// one that cannot be deleted is emptied instead (and noted), and one that can be neither is an
-/// error too, so the password never outlives the guard's start on disk. The error names the
-/// variable, never the file's content.
+/// one that is not a plain file with one name (a link, a folder; never followed), cannot be
+/// opened to read and write, is over [`SECRET_FILE_MAX_BYTES`] or does not hold exactly 64 of
+/// `0-9 a-f` and at most one `\n`. The file is opened once, without following a link at its
+/// name, and read, emptied and deleted through that handle (`write/secret.rs`), whatever it
+/// held; one that cannot be deleted is left empty (and noted), and one that cannot be emptied
+/// is an error too, so the password never outlives the guard's start on disk. Nothing that
+/// failed the checks is changed. The error names the variable, never the file's content.
 pub(crate) fn proxy_secret(source: &Source, os: Os) -> Result<Option<Password>, EnvError> {
     let Some(value) = source.get(os, PROXY_SECRET_FILE) else {
         return match source.get(os, PROXY) {
@@ -438,29 +446,26 @@ pub(crate) fn proxy_secret(source: &Source, os: Os) -> Result<Option<Password>, 
         return Err(error(Problem::NotFile));
     }
     let file = Path::new(value);
-    let bytes = read_secret_file(file).map_err(|_unreadable| error(Problem::Unreadable))?;
-    if let Err(failed) = write::remove_file(file) {
-        write::empty_file(file).map_err(|_unemptied| error(Problem::NotSpent))?;
+    let taken = write::secret::take(file, SECRET_FILE_MAX_BYTES).map_err(|refused| {
+        error(match refused {
+            Refused::NotPlain => Problem::NotPlain,
+            Refused::Unopened | Refused::Unread => Problem::Unreadable,
+            Refused::NotEmptied => Problem::NotSpent,
+        })
+    })?;
+    if let Some(failed) = &taken.undeleted {
         super::note(&format!(
-            "cannot delete the proxy's secret file {} ({failed}); emptied it instead",
+            "cannot delete the proxy's secret file {} ({failed}); it was emptied instead",
             file.display()
         ));
     }
+    let bytes = taken.bytes;
     let text = bytes.strip_suffix(b"\n").unwrap_or(bytes.as_slice());
     std::str::from_utf8(text)
         .ok()
         .and_then(Password::parse)
         .map(Some)
         .ok_or_else(|| error(Problem::NotSecret))
-}
-
-/// At most [`SECRET_FILE_MAX_BYTES`] of `file`: a longer file then fails the format check.
-fn read_secret_file(file: &Path) -> io::Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    std::fs::File::open(file)?
-        .take(SECRET_FILE_MAX_BYTES)
-        .read_to_end(&mut bytes)?;
-    Ok(bytes)
 }
 
 /// Adds [`CDP`]: the browser endpoint `chrome.rs` read and checked.

@@ -234,6 +234,45 @@ fn a_missing_or_invalid_host_variable_is_named_and_nothing_starts() {
     );
 }
 
+/// A second name (a hard link) or a symlink planted at the password file's name, pointing at a
+/// file the agent could not write itself (the review of #1093), stops the guard with exit 2 and
+/// a fixed reason before anything starts; the file it names keeps its bytes, and the planted
+/// name stays.
+#[test]
+fn a_link_planted_at_the_password_file_stops_the_guard_and_its_target_is_left() {
+    let scratch = Scratch::new("secret_link");
+    let stub = example("echo_stub");
+    let log = scratch.log();
+    let args = [log.as_os_str()];
+    let target = scratch.path().join("target");
+    write::write(&target, "keep me").unwrap();
+    let hard = scratch.path().join("proxy-secret-hard");
+    write::hard_link(&target, &hard).unwrap();
+    let soft = scratch.path().join("proxy-secret-soft");
+    #[cfg(unix)]
+    write::symlink(&target, &soft).unwrap();
+    let planted = if cfg!(unix) {
+        vec![hard, soft]
+    } else {
+        vec![hard]
+    };
+    for link in planted {
+        let mut command = guard_command(&scratch, &stub, &args);
+        command.env("CLAUSEO_PROXY_SECRET_FILE", &link);
+        let output = run(command);
+        assert_eq!(output.status.code(), Some(2), "{link:?}");
+        assert_eq!(
+            stderr(&output),
+            "clauseo-mcp browser-guard: CLAUSEO_PROXY_SECRET_FILE must name a plain file with \
+             one name, not a link, a folder or a device\n",
+            "{link:?}"
+        );
+        assert!(link.symlink_metadata().is_ok(), "{link:?} was removed");
+    }
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep me");
+    assert!(!scratch.log().exists(), "the stub never started");
+}
+
 #[test]
 fn a_file_where_a_folder_goes_stops_the_guard() {
     let scratch = Scratch::new("bad_folder");

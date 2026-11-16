@@ -8,7 +8,7 @@ use clauseo_protocol::ThreadId;
 use super::super::super::Actor;
 use super::super::super::input::Input;
 use super::super::TurnInput;
-use super::{RunFolders, relay, straggler};
+use super::{RunFolders, egress, relay, straggler};
 use crate::agent::codex;
 use crate::config::SessionKey;
 use crate::error::Error;
@@ -47,6 +47,9 @@ pub(super) fn discard(
     let thread_fails = actor.wiring.removal_thread_fails;
     actor.spawn_post(async move {
         let work = move || {
+            // The browser entry ended with the session: its password file goes now, read by a
+            // guard or not, and does not wait for the processes or the folder's removal.
+            egress::end(&run);
             let browser = run.browser_session.as_deref();
             if let Some(wait_hook) = &wait_hook {
                 wait_hook(browser.map(|session| session.ports.cdp.port()));

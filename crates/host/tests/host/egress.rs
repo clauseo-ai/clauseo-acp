@@ -210,6 +210,39 @@ fn the_proxy_opens_once_per_launch_and_closes_after_the_tree_has_gone() {
     assert_eq!(calls(&log), ["open 1", "removal", "close 1"]);
 }
 
+/// The browser entry ends with its session: the password file, which no guard read (the stand-in
+/// agent starts none), is gone before the run folder's removal begins, so a run held past the
+/// wait for stragglers keeps no password on disk (the review of #1093).
+#[test]
+fn the_password_file_goes_when_the_session_ends_though_no_guard_read_it() {
+    let dir = Dir::new("egress_secret_end", &[]);
+    claude(&dir, &json!([{"name": "browser"}]));
+    let (proxy, log, _closes) = Recording::new(false);
+    let launcher = Wired::new(&dir);
+    let left = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&left);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), move |config| {
+        wired(config, proxy, log).with_run_removal_hook(Arc::new(move |run| {
+            let there = run.join("proxy-secret").symlink_metadata().is_ok();
+            seen.lock().unwrap().push(there);
+        }))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, BROWSING);
+    turn(&host, thread);
+    let file = launcher.seen()[0].run.clone().unwrap().join("proxy-secret");
+    assert!(
+        file.is_file(),
+        "the password file is there while the session runs"
+    );
+    host.shutdown();
+    assert_eq!(
+        *left.lock().unwrap(),
+        [false],
+        "the file outlived the session's end"
+    );
+}
+
 /// A launcher that fails every launch, as an OS that cannot start the program would.
 struct Refuses;
 

@@ -241,6 +241,19 @@ pub(crate) fn remove_old_file(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Removes the file `path` without following a link: `symlink_metadata` first, which never
+/// follows one, then the name itself (a link at it goes, never what it points at). A folder at
+/// the name is left, with an error; a missing name is fine. A session's proxy password file
+/// (`actor/turn/launch_checks/egress.rs`).
+pub(crate) fn remove_file_no_follow(path: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+        Ok(meta) if meta.is_dir() => Err(io::Error::other("a folder is at the file's name")),
+        Ok(_file_or_link) => remove_old_file(path),
+    }
+}
+
 /// Removes the folder `path` and everything under it; a missing folder is fine. A link inside
 /// is removed, never followed (`std::fs::remove_dir_all`): a session's run folder.
 pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
