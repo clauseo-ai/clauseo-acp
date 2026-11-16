@@ -457,7 +457,8 @@ async fn checks(
 
 /// [`prepare`] ended well: a Claude switch to `auto` is judged (`claude_mode::prepared`,
 /// before the picks may drop held updates), the picks' outcome (`picks::after`), then the
-/// attach.
+/// attach; or first another round of [`prepare`] with only the picks made meanwhile
+/// (`picks::late`), so the first prompt, which waits for the attach, runs with them.
 pub(super) fn on_prepared(
     actor: &mut Actor,
     thread: ThreadId,
@@ -467,6 +468,11 @@ pub(super) fn on_prepared(
 ) {
     claude_mode::prepared(actor, thread, fell_back);
     super::picks::after(actor, thread, picked);
+    let late = super::picks::late(actor, thread, &start.config_options, picked);
+    if !late.is_empty() {
+        before_attach(actor, thread, (start, loaded), (None, None, late));
+        return;
+    }
     attach(actor, thread, start, loaded);
 }
 

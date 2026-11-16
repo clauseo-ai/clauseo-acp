@@ -16,8 +16,10 @@
 //!   its defaults, not the thread's: they never stand for the thread's own values, and the
 //!   options updates held until the start's answer are dropped there ([`drop_held`]).
 //!   [`apply`] sets each value that differs from the session's, the model first since the
-//!   efforts offered follow it. A waiting `SetConfigOption` of an option the start set is
-//!   answered then, without another call ([`after`]); any other goes to the agent at the attach.
+//!   efforts offered follow it. A waiting `SetConfigOption` the start's picks cover is answered
+//!   then, without another call ([`after`]). One made while they were being set is set in
+//!   another round before the attach ([`late`]), so the first prompt runs with it too; any
+//!   other goes to the agent at the attach.
 //! - A pick the agent does not offer, or refuses as invalid (-32602), is dropped ([`after`]):
 //!   logged at info with its option and value ids, taken out of the matter's prefs, and the
 //!   session goes on with the agent's value. So is a pick of an option that is no model or
@@ -55,6 +57,8 @@ pub(crate) struct Picked {
     /// A `session/set_config_option` went out: an options update the agent sent meanwhile is
     /// older than the options its last answer gave.
     sent: bool,
+    /// The picks given to [`apply`].
+    asked: Vec<Pick>,
     /// The picks the agent took.
     set: Vec<Pick>,
     /// The picks dropped.
@@ -80,6 +84,12 @@ fn header(actor: &Actor, thread: ThreadId) -> Option<&HeaderEntry> {
 
 /// The options the thread logged last; `None` until a session of it has attached. Before that,
 /// logged options are the agent's for a session still being created, not the thread's own.
+///
+/// Known gap, as on main: an agent that reports its options only in an update before its
+/// answer, with none in the answer, loses a new thread's create-time picks. Each is `Absent`
+/// from the start's options, so none is set; the held update is released at the attach and
+/// logged; from then on it is what this returns, and the picks are not tried again. Neither
+/// claude-agent-acp nor codex-acp answers that way (test `an_answer_without_options_...`).
 fn logged(actor: &Actor, thread: ThreadId) -> Option<&[ConfigOption]> {
     // Set by the attach commit alone (`session.rs`), and kept: a reopened thread has it.
     actor.threads.get(&thread)?.row.acp_session_id.as_ref()?;
@@ -171,10 +181,24 @@ pub(super) fn wanted(actor: &mut Actor, thread: ThreadId, options: &[ConfigOptio
             })
             .unwrap_or_default(),
     };
+    for pick in waiting(actor, thread, options) {
+        picks.retain(|(id, _)| *id != pick.0);
+        picks.push(pick);
+    }
+    picks
+        .into_iter()
+        .filter(|pick| offer(options, pick) != Offer::Held)
+        .collect()
+}
+
+/// The picks of the `SetConfigOption`s of a select value waiting for `thread`'s session, of the
+/// model and effort options `options` hold: the last one waiting for each option.
+fn waiting(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) -> Vec<Pick> {
     let waiting = state(actor, thread)
         .and_then(|state| state.agent.as_deref())
         .map(|agent| agent.waiting.as_slice())
         .unwrap_or_default();
+    let mut picks: Vec<Pick> = Vec::new();
     for item in waiting {
         if let Waiting::Config(_, option, ConfigValue::Select(value)) = item
             && category_of(options, option) == Some(true)
@@ -184,9 +208,22 @@ pub(super) fn wanted(actor: &mut Actor, thread: ThreadId, options: &[ConfigOptio
         }
     }
     picks
-        .into_iter()
-        .filter(|pick| offer(options, pick) != Offer::Held)
-        .collect()
+}
+
+/// The picks made while the session was prepared (after [`wanted`] was taken, so
+/// waiting behind the first prompt): those `options`, the start's now, offer and do not hold,
+/// and that `picked` did not try already. `session::prepare` sets them in another round
+/// before the attach, so the first prompt runs with them; a pick tried and kept (the
+/// agent failed it otherwise) goes to the agent after the attach, as before.
+pub(super) fn late(
+    actor: &mut Actor,
+    thread: ThreadId,
+    options: &[ConfigOption],
+    picked: &Picked,
+) -> Vec<Pick> {
+    let mut picks = waiting(actor, thread, options);
+    picks.retain(|pick| offer(options, pick) == Offer::Offered && !picked.asked.contains(pick));
+    picks
 }
 
 /// A logged model or effort option's current value, as a pick.
@@ -267,7 +304,10 @@ pub(super) async fn apply(
         Some(_) | None => 2,
     };
     picks.sort_by_key(rank);
-    let mut picked = Picked::default();
+    let mut picked = Picked {
+        asked: picks.clone(),
+        ..Picked::default()
+    };
     for pick in picks {
         match offer(&start.config_options, &pick) {
             Offer::Held | Offer::Absent => continue,
@@ -354,21 +394,40 @@ pub(super) fn after(actor: &mut Actor, thread: ThreadId, picked: &Picked) {
     }
 }
 
-/// The `SetConfigOption`s of a select value waiting for `thread`'s session whose option the
-/// start set are answered: [`wanted`] took the last one's value for it. Each is kept in the
+/// The `SetConfigOption`s of a select value waiting for `thread`'s session that the start's
+/// `set` picks cover are answered: for each option set, the last one waiting with the value
+/// set, and those of the option before it, which it overrode. One of the option after it, a
+/// pick made while that value was being set, keeps waiting ([`late`]). Each is kept in the
 /// matter's prefs as an answered one is (`answers::on_config`), in order, so the last stays.
 fn answer_waiting(actor: &mut Actor, thread: ThreadId, set: &[Pick]) {
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
-    let (answered, rest): (Vec<Waiting>, Vec<Waiting>) = std::mem::take(&mut agent.waiting)
-        .into_iter()
-        .partition(|item| {
-            matches!(item, Waiting::Config(_, option, ConfigValue::Select(_))
-                if set.iter().any(|(id, _)| id == option))
+    let waiting = std::mem::take(&mut agent.waiting);
+    let config = |item: &Waiting| match item {
+        Waiting::Config(_, option, ConfigValue::Select(value)) => {
+            Some((option.clone(), value.clone()))
+        }
+        Waiting::Config(..) | Waiting::Turn(_) | Waiting::Mode(..) => None,
+    };
+    // For each option set, the last place it waits with the value set.
+    let upto: Vec<(AgentChoiceId, usize)> = set
+        .iter()
+        .filter_map(|pick| {
+            let at = waiting
+                .iter()
+                .rposition(|item| config(item).as_ref() == Some(pick))?;
+            Some((pick.0.clone(), at))
+        })
+        .collect();
+    let (answered, rest): (Vec<_>, Vec<_>) =
+        waiting.into_iter().enumerate().partition(|(at, item)| {
+            config(item).is_some_and(|(option, _)| {
+                upto.iter().any(|(id, last)| *id == option && at <= last)
+            })
         });
-    agent.waiting = rest;
-    for item in answered {
+    agent.waiting = rest.into_iter().map(|(_, item)| item).collect();
+    for (_, item) in answered {
         let Waiting::Config(ctx, option, value) = item else {
             continue;
         };
