@@ -344,3 +344,60 @@ test("a long paste over selected words takes them out, as any paste does; Cmd+Z 
     Reflect.deleteProperty(document, "execCommand");
   }
 });
+
+/** Cmd+Shift+Z on `at`; true when the composer took it. */
+async function redoKey(at: Element): Promise<boolean> {
+  const z = new KeyboardEvent("keydown", {
+    key: "z",
+    metaKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => void at.dispatchEvent(z));
+  return z.defaultPrevented;
+}
+
+test("Cmd+Shift+Z after undoing a paste brings its chip back, and puts selected words it took out out again", async () => {
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref }));
+  const one = brief(PASTE_CHIP_MIN, "a");
+  await paste(one);
+  field().focus();
+  expect(await undoKey(field())).toBe(true);
+  expect(chips()).toHaveLength(0);
+  expect(await redoKey(field())).toBe(true);
+  expect(ref.current?.draft()).toEqual({ typed: "", pastes: [one] });
+  // over selected words, taken out in place (happy-dom has no execCommand)
+  await type("Compare THIS with clause 4.");
+  field().setSelectionRange(8, 13);
+  const two = brief(PASTE_CHIP_MIN, "b");
+  await paste(two);
+  expect(await undoKey(field())).toBe(true);
+  expect(ref.current?.draft()).toEqual({ typed: "Compare THIS with clause 4.", pastes: [one] });
+  expect(await redoKey(field())).toBe(true);
+  expect(ref.current?.draft()).toEqual({ typed: "Compare with clause 4.", pastes: [one, two] });
+  // nothing more to redo: the key is the engine's
+  expect(await redoKey(field())).toBe(false);
+});
+
+test("Cmd+Shift+Z after undoing a chip's removal removes it again; a new change ends the redo", async () => {
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref }));
+  const one = brief(PASTE_CHIP_MIN, "a");
+  const two = brief(PASTE_CHIP_MIN, "b");
+  await paste(one);
+  await paste(two);
+  await act(async () => chips()[0]!.querySelector("button")!.click());
+  const button = document.activeElement!;
+  expect(await undoKey(button)).toBe(true);
+  expect(ref.current?.draft().pastes).toEqual([one, two]);
+  expect(await redoKey(button)).toBe(true);
+  expect(ref.current?.draft().pastes).toEqual([two]);
+  // undone again, then a new paste: there is nothing left to redo
+  expect(await undoKey(button)).toBe(true);
+  field().focus();
+  await paste(brief(PASTE_CHIP_MIN, "c"));
+  expect(await redoKey(field())).toBe(false);
+  expect(chips()).toHaveLength(3);
+});

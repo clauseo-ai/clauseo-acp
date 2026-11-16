@@ -1,5 +1,5 @@
 // The composer's hold on its long pastes' chips (paste-chips.tsx draws them): the list, the chips' texts, and their
-// part in the field's undo.
+// part in the field's undo and redo.
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { chipOf, type PasteChip } from "./paste-chips-logic.ts";
 
@@ -15,6 +15,10 @@ export type Step = {
   was?: string;
 };
 
+/** A Cmd/Ctrl+Z or redo the chips took (usePasteChips's undo): whether the engine's own undo or redo takes the
+ * field's part, and the words to set in the field in place, if any. */
+export type Turn = { engine: boolean; value?: string };
+
 /** The composer's chips: the list to draw, read through a ref so a keystroke never waits on a render, and the chips'
  * texts listed once per change, for the composer's Draft (paste-chips-logic.ts). */
 export function usePasteChips(initial: readonly PasteChip[]) {
@@ -28,8 +32,11 @@ export function usePasteChips(initial: readonly PasteChip[]) {
     texts.current = next.map((c) => c.text);
     setList(next);
   };
+  // the steps undone, newest last, for redo: gone with any new step
+  const redos = useRef<Step[]>([]);
   // a step recorded and made; at most 16 kept
   const push = (step: Step): Step => {
+    redos.current = [];
     steps.current.push(step);
     if (steps.current.length > 16) steps.current.shift();
     put(step.after);
@@ -66,21 +73,35 @@ export function usePasteChips(initial: readonly PasteChip[]) {
     /** Drops every step: after an accepted send, so Cmd/Ctrl+Z never brings the sent question's chips back. */
     forget: () => {
       steps.current = [];
+      redos.current = [];
     },
     /** Cmd/Ctrl+Z, on the field (`inField`) or on a chip's button, the field holding `box`: when the next undo is
-     * of a step that changed the chips, their change is taken back too, and the step comes back. When its `engine` is
-     * false the key must do nothing more (and the field's words go back to its `was`, if it has one); when true, the
-     * engine's own undo takes the field's part back. Off the field, a step whose words the engine holds is left for
-     * the field's own undo. */
-    undo: (e: ReactKeyboardEvent, mac: boolean, box: string, inField: boolean): Step | null => {
+     * of a step that changed the chips, their change is taken back too. Cmd/Ctrl+Shift+Z, or Ctrl+Y off the Mac, makes
+     * the last step undone again. What comes back says whether the engine's own undo or redo takes the field's part
+     * (`engine`), else the key must do nothing more, and the field's words to set in place (`value`) when they were
+     * changed in place. Off the field, a step whose words the engine holds is left for the field's own keys. */
+    undo: (e: ReactKeyboardEvent, mac: boolean, box: string, inField: boolean): Turn | null => {
       const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-      if (!mod || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z") return null;
+      const key = e.key.toLowerCase();
+      if (!mod || e.altKey) return null;
+      const redo = (key === "z" && e.shiftKey) || (!mac && key === "y" && !e.shiftKey);
+      if (!redo && (key !== "z" || e.shiftKey)) return null;
+      if (redo) {
+        const top = redos.current.at(-1);
+        if (top === undefined || top.before !== now.current) return null;
+        if (top.engine ? !inField : (top.was ?? top.box) !== box) return null;
+        redos.current.pop();
+        steps.current.push(top);
+        put(top.after);
+        return top.was === undefined ? { engine: top.engine } : { engine: false, value: top.box };
+      }
       const top = steps.current.at(-1);
       if (top === undefined || top.after !== now.current || top.box !== box) return null;
       if (top.engine && !inField) return null;
       steps.current.pop();
+      redos.current.push(top);
       put(top.before);
-      return top;
+      return top.was === undefined ? { engine: top.engine } : { engine: false, value: top.was };
     },
   };
 }

@@ -9,7 +9,7 @@ import {
   type Draft,
   type PasteChip,
 } from "./paste-chips-logic.ts";
-import type { Step, usePasteChips } from "./paste-chips-state.ts";
+import type { Turn, usePasteChips } from "./paste-chips-state.ts";
 
 type Chips = ReturnType<typeof usePasteChips>;
 
@@ -62,17 +62,17 @@ export function pasteLong(
   if (!engine) changed();
 }
 
-/** A Cmd/Ctrl+Z the chips took (usePasteChips's undo): with its words not the engine's to undo, nothing more of the
- * key, the field's words put back if they were taken out in place, and the room told. True when the key is done. */
+/** A Cmd/Ctrl+Z or redo the chips took (usePasteChips's undo): with its words not the engine's, nothing more of the
+ * key, the field's words set if they were changed in place, and the room told. True when the key is done. */
 export function undone(
   e: KeyboardEvent<HTMLElement>,
-  step: Step | null,
+  step: Turn | null,
   a: HTMLTextAreaElement,
   changed: () => void,
 ): boolean {
   if (step === null || step.engine) return false;
   e.preventDefault();
-  if (step.was !== undefined) a.value = step.was;
+  if (step.value !== undefined) a.value = step.value;
   changed();
   return true;
 }
