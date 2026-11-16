@@ -29,9 +29,6 @@ use std::io::Cursor;
 use std::path::Path;
 use std::path::PathBuf;
 
-#[cfg(windows)]
-mod registry;
-
 #[cfg(test)]
 mod tests;
 
@@ -72,12 +69,7 @@ fn plist_paths_for(user: Option<&str>) -> Vec<PathBuf> {
 
 /// The registry's `Settings` values, HKLM's then HKCU's: none but on Windows.
 fn registry_values() -> Vec<TierRead> {
-    #[cfg(windows)]
-    {
-        registry::settings_values()
-    }
-    #[cfg(not(windows))]
-    Vec::new()
+    clauseo_settings::claude_registry_settings()
 }
 
 /// Whether one of the property lists at `paths` moves Claude Code ([`plist_moves`]).

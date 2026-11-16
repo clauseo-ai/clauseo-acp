@@ -3,12 +3,16 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 
-use super::{own_signin_reaches_endpoint, plan_keeps_own_signin};
+use super::{SettingsEnv, is_default_address, own_signin_reaches_endpoint, plan_keeps_own_signin};
 use crate::schema::{Plan, PlanProvider};
 
 fn plan(endpoint: bool, provider: Option<PlanProvider>) -> Plan {
+    plan_at(endpoint.then_some("https://gateway.firm.example"), provider)
+}
+
+fn plan_at(endpoint: Option<&str>, provider: Option<PlanProvider>) -> Plan {
     Plan {
-        endpoint: endpoint.then(|| "https://gateway.firm.example".to_owned()),
+        endpoint: endpoint.map(str::to_owned),
         provider,
         env: BTreeMap::new(),
     }
@@ -19,7 +23,36 @@ fn reaches(vars: &[(&str, &str)]) -> bool {
         .iter()
         .map(|(name, value)| (OsString::from(name), OsString::from(value)))
         .collect();
-    own_signin_reaches_endpoint(env.iter().map(|(n, v)| (n.as_os_str(), v.as_os_str())))
+    own_signin_reaches_endpoint(
+        env.iter().map(|(n, v)| (n.as_os_str(), v.as_os_str())),
+        &SettingsEnv::default(),
+    )
+}
+
+/// `vars` in this order, with `settings`' pairs over them, names folded as on Windows when
+/// `windows`.
+fn reaches_under(vars: &[(&str, &str)], settings: &SettingsEnv, windows: bool) -> bool {
+    let env: Vec<(OsString, OsString)> = vars
+        .iter()
+        .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+        .collect();
+    super::reaches(
+        env.iter().map(|(n, v)| (n.as_os_str(), v.as_os_str())),
+        settings,
+        windows,
+    )
+}
+
+/// Settings sources that add `pairs` (and are `unsure`).
+fn from_settings(pairs: &[(&str, &str)], unsure: bool) -> SettingsEnv {
+    SettingsEnv {
+        pairs: pairs
+            .iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+            .collect(),
+        unsure,
+        content: !pairs.is_empty(),
+    }
 }
 
 /// An endpoint with the first-party provider keeps the sign-in on; a cloud provider or no
@@ -92,5 +125,95 @@ fn a_name_that_is_not_utf8_is_skipped() {
     let odd = OsStr::from_bytes(b"\xff");
     let url = OsStr::new("https://gateway.firm.example");
     let env = [(odd, url), (OsStr::new("ANTHROPIC_BASE_URL"), url)];
-    assert!(own_signin_reaches_endpoint(env));
+    assert!(own_signin_reaches_endpoint(env, &SettingsEnv::default()));
+}
+
+/// The vendor's own address, in any spelling, is the default and no custom endpoint: no plan
+/// refusal and no env refusal. Another host, path or port is one.
+#[test]
+fn the_default_address_in_any_spelling_is_no_custom_endpoint() {
+    for url in [
+        "https://api.anthropic.com",
+        "https://api.anthropic.com/",
+        "HTTPS://API.ANTHROPIC.COM",
+        "https://Api.Anthropic.com/",
+        "https://api.anthropic.com:443",
+        "https://api.anthropic.com:443/",
+    ] {
+        assert!(is_default_address(url), "{url}");
+        assert!(!reaches(&[("ANTHROPIC_BASE_URL", url)]), "{url}");
+        assert!(!plan_keeps_own_signin(&plan_at(Some(url), None)), "{url}");
+    }
+    for url in [
+        "http://api.anthropic.com",
+        "https://api.anthropic.com:8443",
+        "https://api.anthropic.com/v1",
+        "https://api.anthropic.com.firm.example",
+        "https://api.anthropic.com//",
+        " https://api.anthropic.com",
+    ] {
+        assert!(!is_default_address(url), "{url}");
+        assert!(reaches(&[("ANTHROPIC_BASE_URL", url)]), "{url}");
+    }
+}
+
+/// A base URL or a key from the settings sources counts as the env's would, applied over it; an
+/// unsure read counts as a base URL unless a key turns the sign-in off.
+#[test]
+fn the_settings_sources_env_applies_over_the_launch_env() {
+    let url = ("ANTHROPIC_BASE_URL", "https://gateway.firm.example");
+    let none = SettingsEnv::default();
+    assert!(reaches_under(&[], &from_settings(&[url], false), false));
+    assert!(reaches_under(
+        &[("ANTHROPIC_API_KEY", "")],
+        &from_settings(&[url], false),
+        false
+    ));
+    assert!(!reaches_under(
+        &[url],
+        &from_settings(&[("ANTHROPIC_API_KEY", "set")], false),
+        false
+    ));
+    assert!(reaches_under(
+        &[url, ("ANTHROPIC_API_KEY", "k")],
+        &from_settings(&[("ANTHROPIC_API_KEY", "")], false),
+        false
+    ));
+    let default = ("ANTHROPIC_BASE_URL", "https://api.anthropic.com");
+    assert!(!reaches_under(
+        &[url],
+        &from_settings(&[default], false),
+        false
+    ));
+    assert!(reaches_under(&[], &from_settings(&[], true), false));
+    assert!(!reaches_under(
+        &[("ANTHROPIC_API_KEY", "k")],
+        &from_settings(&[], true),
+        false
+    ));
+    let bedrock = ("CLAUDE_CODE_USE_BEDROCK", "1");
+    assert!(!reaches_under(
+        &[],
+        &from_settings(&[url, bedrock], true),
+        false
+    ));
+    assert!(!reaches_under(&[], &none, false));
+}
+
+/// On Windows a name in any case is one, and the last spelling the spawn applies wins, as
+/// `std::process::Command` keeps it; elsewhere each spelling is its own name.
+#[test]
+fn on_windows_the_last_spelling_of_a_name_wins() {
+    let none = SettingsEnv::default();
+    let url = ("ANTHROPIC_BASE_URL", "https://gateway.firm.example");
+    let spelled = [url, ("ANTHROPIC_API_KEY", "k"), ("anthropic_api_key", "")];
+    assert!(reaches_under(&spelled, &none, true));
+    assert!(!reaches_under(&spelled, &none, false));
+    let reversed = [url, ("anthropic_api_key", ""), ("ANTHROPIC_API_KEY", "k")];
+    assert!(!reaches_under(&reversed, &none, true));
+    let lower_url = [("anthropic_base_url", "https://gateway.firm.example")];
+    assert!(reaches_under(&lower_url, &none, true));
+    assert!(!reaches_under(&lower_url, &none, false));
+    let unset = [url, ("Anthropic_Base_Url", "")];
+    assert!(!reaches_under(&unset, &none, true));
 }

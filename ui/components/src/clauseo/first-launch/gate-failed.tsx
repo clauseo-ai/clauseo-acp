@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import { IconOpen } from "../../icons/icons.tsx";
 import { useDisplay } from "../../lib/display.ts";
-import { errorWords } from "../../lib/words-errors.ts";
+import { endpointKeyWords, errorWords } from "../../lib/words-errors.ts";
 import type { FirstLaunchKey } from "../../lib/words-first-launch.ts";
 import { Button } from "../../ui/button.tsx";
 import { Say } from "../say.tsx";
@@ -19,9 +19,12 @@ export function Failed({
   signIn,
   instead,
   onAct,
+  settings = false,
 }: {
   plan: Plan;
-  view: { code: string; at: string };
+  view: { code: string; at: string; host?: string };
+  /** Whether "Settings › Plans" in the words can open the settings window there. */
+  settings?: boolean;
   w: (key: FirstLaunchKey, slots?: Record<string, string | number>) => string;
   way: (label: string, a: GateAct) => ReactNode;
   signIn: (label: string) => ReactNode;
@@ -132,6 +135,18 @@ export function Failed({
           <Say>{errorWords(lang, "agent.firm_key_needed")}</Say>
         </Act>
       );
+    case "agent.endpoint_key_needed":
+      // the same, for an endpoint no plan set: named by its host, never as the firm's
+      return (
+        <Act>
+          {linked(
+            view.host === undefined
+              ? errorWords(lang, "agent.endpoint_key_needed")
+              : endpointKeyWords(lang, view.host),
+            settings ? () => onAct({ act: "settings" }) : undefined,
+          )}
+        </Act>
+      );
     default:
       return (
         <Act act={signIn(w("Try again"))}>
@@ -139,4 +154,23 @@ export function Failed({
         </Act>
       );
   }
+}
+
+/** Where the words name Settings › Plans, the place they link to. */
+const SETTINGS_PLANS = "Settings › Plans";
+
+/** `text` with its last "Settings › Plans" a link that calls `open`; the words alone with no `open`, or when the
+ * language's words don't hold the phrase. */
+function linked(text: string, open: (() => void) | undefined) {
+  const at = text.lastIndexOf(SETTINGS_PLANS);
+  if (open === undefined || at < 0) return <Say>{text}</Say>;
+  return (
+    <span>
+      <Say>{text.slice(0, at)}</Say>
+      <button type="button" className="fl-gate-link" onClick={open}>
+        <Say>{SETTINGS_PLANS}</Say>
+      </button>
+      <Say>{text.slice(at + SETTINGS_PLANS.length)}</Say>
+    </span>
+  );
 }

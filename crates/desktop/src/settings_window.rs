@@ -42,8 +42,8 @@ const TITLE: &str = "Settings";
 
 /// A part of the settings window `open_settings` can open it at (R24: the room's case-law hint
 /// and banner open Connectors; R17: UC's first-run button opens Protection; U12: the toolbar's
-/// plan card opens Plan and usage; UD1: the first screen's "What's sent" opens Privacy). Closed,
-/// as the app
+/// plan card opens Plan and usage; UD1: the first screen's "What's sent" opens Privacy; the room's
+/// sign-in screen opens Plans for `agent.endpoint_key_needed`). Closed, as the app
 /// asked: a value the build does not know is refused when the command's arguments decode, never
 /// ignored, and a new section is added here together with the page that shows it (ADR 0002's
 /// rule for commands, which a webview sends).
@@ -51,6 +51,8 @@ const TITLE: &str = "Settings";
 #[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum SettingsSection {
+    /// The Plans section: each agent's sign-in, plan and API key.
+    Plans,
     /// The Connectors section.
     Connectors,
     /// The Protection section: the sandbox's state, its set-up and removal (decision record
@@ -63,10 +65,11 @@ pub(crate) enum SettingsSection {
 }
 
 impl SettingsSection {
-    /// The page's fragment for it: `settings.html#connectors`, `settings.html#protection`,
-    /// `settings.html#usage`, `settings.html#privacy`.
+    /// The page's fragment for it: `settings.html#plans`, `settings.html#connectors`,
+    /// `settings.html#protection`, `settings.html#usage`, `settings.html#privacy`.
     fn fragment(self) -> &'static str {
         match self {
+            Self::Plans => "plans",
             Self::Connectors => "connectors",
             Self::Protection => "protection",
             Self::Usage => "usage",

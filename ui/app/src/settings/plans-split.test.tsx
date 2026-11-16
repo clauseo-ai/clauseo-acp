@@ -62,6 +62,10 @@ const STATES: [string, SignIn][] = [
   ["no plan", { failed: { code: "signin.no_plan", at: AT } }],
   ["key unreadable", { failed: { code: "agent.key_unreadable", at: AT } }],
   ["firm key needed", { failed: { code: "agent.firm_key_needed", at: AT } }],
+  [
+    "endpoint key needed",
+    { failed: { code: "agent.endpoint_key_needed", at: AT, host: "proxy.example" } },
+  ],
   ["switching", { switching: { since: AT, stuck: true } }],
   ["signed in, reused", plans.signed({ source: "reused" })],
 ];
@@ -124,7 +128,9 @@ test.each(STATES)(
     const keyOnly =
       typeof state === "object" &&
       (state.switching !== undefined ||
-        ("failed" in state && state.failed?.code === "agent.firm_key_needed"));
+        ("failed" in state &&
+          (state.failed?.code === "agent.firm_key_needed" ||
+            state.failed?.code === "agent.endpoint_key_needed")));
     if (!keyOnly) expect(t.setups().length).toBeGreaterThan(0);
     // the window's own connectors check on opening (U15) is the only host command
     expect(plans.hostCommands(t)).toEqual(["connector"]);

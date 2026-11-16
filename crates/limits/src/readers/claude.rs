@@ -105,7 +105,8 @@ fn line_outcome(talked: Line, code: Option<i32>, stderr_tail: String) -> ReadOut
 /// `settingSources: []`, so no such file there can change the account or provider it reads.
 /// The env is the `inherited` one under the entry's variables, with `CLAUDE_CONFIG_DIR` forced
 /// to `claude_home` when given (`ProcessReaders::with_claude_home`). An env that would carry
-/// Claude Code's own sign-in to a custom base URL is refused (`own_signin_reaches_endpoint`).
+/// Claude Code's own sign-in to a custom base URL, with the `env` Claude Code applies over it
+/// from its settings files and policy tiers, is refused (`own_signin_reaches_endpoint`).
 fn prepare(
     launch: &AgentLaunch,
     run_dir: &Path,
@@ -122,11 +123,23 @@ fn prepare(
     let env = spec_env(&launch.env, inherited, forced, &[]);
     // Decision record 0048, "A firm endpoint needs a key": with a custom base URL and no key,
     // Claude Code would send its own sign-in (the lawyer's token) there, so the helper never runs.
-    // Desktop refuses such a read first; this holds whatever set the base URL.
+    // Desktop refuses such a read first; this checks the helper's env and the `env` of Claude
+    // Code's global config and policy tier (`settingSources: []` leaves out its settings.json).
+    let config = env
+        .get(OsStr::new(CLAUDE_CONFIG_DIR))
+        .filter(|dir| !dir.is_empty())
+        .map(Path::new);
+    let managed = clauseo_settings::claude_managed_dir();
+    let settings = clauseo_settings::SettingsEnv::read(&clauseo_settings::ClaudeSources {
+        managed: &managed,
+        config,
+        user: false,
+        os_policy: !cfg!(test),
+    });
     let pairs = env
         .iter()
         .map(|(name, value)| (name.as_os_str(), value.as_os_str()));
-    if clauseo_settings::own_signin_reaches_endpoint(pairs) {
+    if clauseo_settings::own_signin_reaches_endpoint(pairs, &settings) {
         return Err("a custom endpoint with no key would get Claude's own sign-in".to_owned());
     }
     LaunchSpec::new(

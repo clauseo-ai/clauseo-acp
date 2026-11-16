@@ -534,15 +534,34 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     read (`setup/readers.rs`), and the card shows `Failed { code: agent.firm_key_needed }` in
     place of `Firm` (`setup/compose.rs`). Saving the firm's key lifts it. Bedrock and Vertex
     plans launch with no key as before: they use the cloud's credentials. The host checks each
-    Claude launch's own env the same way and refuses it with that code whatever set the base
-    URL (`actor/turn/agents/launch.rs`), and so does the limits reader (`readers/claude.rs`):
-    that check also covers the gap between a settings change reaching the launch hook and
-    desktop's `refusal::sync_all`. Unlike a failed key read under a firm plan, where the hook
+    Claude launch the same way (`actor/turn/agents/launch.rs`), and so does the limits reader
+    (`readers/claude.rs`). What is checked is the launch's final env (inherited, the entry's,
+    the hook's; on Windows the last spelling of a name in any case, as the spawn applies it) with
+    the `env` Claude Code applies over it from its settings sources, read by the launch prep:
+    `managed-settings.json` and `managed-settings.d`, `remote-settings.json`, macOS managed
+    preferences, the Windows registry policy, the global config (`.claude.json` or
+    `.config.json`) and, for sessions only (`settingSources`), `<home>/settings.json`, the
+    policy tier last (`clauseo_settings::SettingsEnv`). A source there that cannot be read or
+    parsed counts as setting a base URL, so with no key the launch is refused. A base URL naming
+    the default address (`https://api.anthropic.com` in any case, with or without a trailing
+    `/` or `:443`) is no custom endpoint, in a plan or an env. When no plan set the base URL (the
+    app's own environment, an entry's env or a Claude Code settings source), the code is
+    `agent.endpoint_key_needed`, and for the app's own environment or an entry's env desktop's
+    card names the endpoint's host (`SignIn::Failed.host`, `setup/inherited.rs`), not the
+    firm's gateway. The check also covers the gap
+    between a settings change reaching the launch hook and desktop's `refusal::sync_all`. The
+    sign-in, status and logout runs never get the route variables (`ANTHROPIC_BASE_URL`,
+    `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_*`, `ANTHROPIC_*_BASE_URL`; `signin/env.rs`),
+    so they talk to the vendor's own host. Unlike a failed key read under a firm plan, where the hook
     drops the endpoint and provider (`setup/hook.rs`, `setup_parts`), the endpoint stays: a
     launch with it dropped would go keyless to the vendor's own host on a personal sign-in.
     The accepted cost: a gateway that takes no key at all stops working until any key is saved
     (`docs/firm-it.md`). Codex is not covered: a plan's endpoint sets no Codex variable and a
-    plan cannot name a provider or base URL for it (`setup/hook.rs`, `plan_env`).
+    plan cannot name a provider or base URL for it (`setup/hook.rs`, `plan_env`). Also
+    accepted: a plan with a proxy (and `NODE_EXTRA_CA_CERTS` for it) but no endpoint is not
+    refused. Claude goes to the vendor's own host through that proxy, and a proxy that inspects
+    TLS can read the sign-in. That is the firm's own proxy on the firm's machine, so
+    `docs/firm-it.md` asks firms that inspect to give lawyers an API key for their gateway.
 - *`LoginCheck::shared(&AgentId, agent_home: &Path) -> Shared`*, a second hook call, where
   `Shared` is `Yes`, `No` or `Unknown`. It asks whether the home's `auth.json` is the lawyer's
   file, whatever the link check says. A symlinked `auth.json` is `Split` to `check` (it is no

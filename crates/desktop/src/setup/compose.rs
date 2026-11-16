@@ -22,7 +22,9 @@
 //!    sign-in: a key that may be there is no key in use (the desktop review's item 1).
 //!    Then, while the agent's plan sends it to its endpoint with Claude Code's own sign-in on
 //!    (`hook::sends_own_signin`) and no key is in memory, `Failed { code: agent.firm_key_needed }`:
-//!    its launches are refused (`refusal.rs`) until the firm's key is saved.
+//!    its launches are refused (`refusal.rs`) until the firm's key is saved. Then, while its
+//!    launches get such an endpoint that no plan set (`inherited.rs`) and no key is in memory,
+//!    `Failed { code: agent.endpoint_key_needed, host }`, naming that endpoint's host.
 //! 4. Otherwise `SignedIn { method: Firm }` while the agent has an endpoint or a provider
 //!    (`plans.<id>`, the lawyer's or the firm's policy's);
 //! 5. else `SignedIn { method: ApiKey }` while a key is in memory (read, or just stored), with
@@ -54,7 +56,7 @@ use super::keys::KeyCache;
 use crate::bridge::lock;
 
 /// What desktop knows of one agent's sign-in besides S18's state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Facts {
     /// Since when the agent has an endpoint or a provider, if it has one.
     pub(crate) firm: Option<SystemTime>,
@@ -72,6 +74,9 @@ pub(crate) struct Facts {
     /// Since when the agent's plan sends it to its endpoint with Claude Code's own sign-in on
     /// (`hook::sends_own_signin`), if it does: `agent.firm_key_needed` while no key is in memory.
     pub(crate) own_signin: Option<SystemTime>,
+    /// Since when its launches get a custom endpoint no plan set (`inherited.rs`), and that
+    /// endpoint's host, if they do: `agent.endpoint_key_needed` while no key is in memory.
+    pub(crate) inherited: Option<(SystemTime, String)>,
     /// Since when an automatic leave has been trying again, if one is (its first try's end).
     pub(crate) switching: Option<SystemTime>,
     /// Whether that leave has been trying for 2 minutes (`leave::hold::STUCK_AFTER`).
@@ -105,6 +110,7 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
         return Some(SignIn::Failed {
             code: ErrorCode::SigninPolicyUnreadable,
             at: timestamp(since),
+            host: None,
         });
     }
     let firm = facts.managed.or(facts.firm).is_some();
@@ -112,12 +118,21 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
         return Some(SignIn::Failed {
             code: ErrorCode::AgentKeyUnreadable,
             at: timestamp(since),
+            host: None,
         });
     }
     if let Some(since) = facts.own_signin.filter(|_| facts.key.is_none()) {
         return Some(SignIn::Failed {
             code: ErrorCode::AgentFirmKeyNeeded,
             at: timestamp(since),
+            host: None,
+        });
+    }
+    if let Some((since, host)) = facts.inherited.filter(|_| facts.key.is_none()) {
+        return Some(SignIn::Failed {
+            code: ErrorCode::AgentEndpointKeyNeeded,
+            at: timestamp(since),
+            host: Some(host),
         });
     }
     if let Some(since) = facts.managed.or(facts.firm) {
@@ -366,7 +381,7 @@ impl Compose {
         let agents = lock(&self.agents);
         let facts = agents
             .get(agent)
-            .map(|known| known.facts)
+            .map(|known| known.facts.clone())
             .unwrap_or_default();
         sign_in_bar(
             facts.managed.is_some(),
@@ -454,6 +469,18 @@ impl Compose {
         });
     }
 
+    /// The host of the custom endpoint `agent`'s launches get with no plan setting one, if any.
+    pub(crate) fn set_inherited(&self, agent: &AgentId, host: Option<String>) {
+        self.change(agent, |known, now| {
+            let since = known
+                .facts
+                .inherited
+                .as_ref()
+                .map_or(now, |(since, _)| *since);
+            known.facts.inherited = host.map(|host| (since, host));
+        });
+    }
+
     /// Whether `agent`'s plan sends it to its endpoint with Claude Code's own sign-in on.
     pub(crate) fn set_own_signin(&self, agent: &AgentId, own_signin: bool) {
         self.change(agent, |known, now| {
@@ -506,7 +533,7 @@ impl Compose {
         let mut agents = lock(&self.agents);
         let known = agents.entry(agent.clone()).or_default();
         change(known, now);
-        let state = compose(agent, known.s18.as_ref(), known.facts);
+        let state = compose(agent, known.s18.as_ref(), known.facts.clone());
         let force = known.search == Search::Answer;
         if force {
             known.search = Search::None;

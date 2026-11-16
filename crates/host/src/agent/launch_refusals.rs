@@ -5,7 +5,8 @@
 //!   policy blocks the agent, and `agent.keys_loading` while desktop has not finished loading
 //!   the stored API keys (ruling 4: no agent launches without its key), and
 //!   `agent.firm_key_needed` while a firm plan's endpoint with the first-party provider has no
-//!   key saved (Claude Code would offer the lawyer's own sign-in to it). Another code is refused
+//!   key saved (Claude Code would offer the lawyer's own sign-in to it), and
+//!   `agent.endpoint_key_needed` for such an endpoint no plan set. Another code is refused
 //!   with `command.invalid` and changes nothing.
 //! - A refusal applies to new launches; a running session ends normally.
 //!   `agent.key_unreadable` once this agent's stored key was tried and its read failed or did
@@ -36,11 +37,12 @@ use crate::error::Error;
 
 /// The codes `HostHandle::set_launch_refused` takes: the refusals desktop may put on new
 /// launches.
-pub(crate) const LAUNCH_REFUSALS: [ErrorCode; 4] = [
+pub(crate) const LAUNCH_REFUSALS: [ErrorCode; 5] = [
     ErrorCode::SigninPolicyUnreadable,
     ErrorCode::AgentKeysLoading,
     ErrorCode::AgentKeyUnreadable,
     ErrorCode::AgentFirmKeyNeeded,
+    ErrorCode::AgentEndpointKeyNeeded,
 ];
 
 /// The refusals a launch waits out, at most [`KEYS_WAIT`], before it fails with them.

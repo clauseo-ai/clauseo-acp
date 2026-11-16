@@ -399,6 +399,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             compose.set_blocked(agent, facts.blocked.contains(agent));
             compose.set_firm(agent, facts.firm.contains(agent));
             compose.set_own_signin(agent, facts.own_signin.contains(agent));
+            compose.set_inherited(agent, facts.inherited.get(agent).cloned());
         }
         let firm_policy = facts.firm_policy.clone();
         // The route resolved so far, if any, goes first in `Agents`' queue.
@@ -495,7 +496,7 @@ fn settle_with_no_platform(host: &dyn SetupHost, keys: &KeyCache, read: &SetupSt
         known,
         &settings.blocked,
         &settings.firm,
-        &settings.own_signin,
+        (&settings.own_signin, &settings.inherited),
     );
     futures::executor::block_on(settle);
 }

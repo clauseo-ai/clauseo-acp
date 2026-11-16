@@ -106,6 +106,10 @@ pub(super) fn launch(
     let temp = agent::temp::session_env(&prepared.run.root, short, cfg!(windows));
     forced.extend(temp);
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
+    // Desktop's hook sets the base URL only from a plan (its `plan_env`).
+    let planned = hook
+        .iter()
+        .any(|(name, value)| name.eq_ignore_ascii_case("ANTHROPIC_BASE_URL") && !value.is_empty());
     let session_folder = agent::session_folder(&folder);
     let matter_spellings = start_failure::spellings_at_launch(actor, &folder, &session_folder);
     // The offline probe asks only `chatgpt.com` for a login that is Clauseo's own.
@@ -136,18 +140,25 @@ pub(super) fn launch(
     let spec = agent::spec_of(settings, env, session_folder)
         .map_err(super::super::launch_checks::folder::gone_at_spawn)?
         .with_redacted(redacted);
-    // Desktop refuses a firm endpoint with no key first (`agent.firm_key_needed`); this checks the
-    // env the agent would get, whatever set its base URL (an entry's env, the inherited one), and
-    // holds if desktop's refusal never reached the host or has not yet (a settings change lands
-    // in the launch hook before desktop's `refusal::sync_all`).
+    // Desktop refuses a firm endpoint with no key first (`agent.firm_key_needed`). This checks the
+    // env the agent would get (the inherited one, the entry's, the hook's) with the `env` Claude
+    // Code applies over it from its settings files and policy tiers, read by the prep, and holds
+    // if desktop's refusal never reached the host or has not yet (a settings change lands in the
+    // launch hook before desktop's `refusal::sync_all`).
     let env = spec
         .env()
         .iter()
         .map(|(name, value)| (name.as_os_str(), value.as_os_str()));
-    if claude && clauseo_settings::own_signin_reaches_endpoint(env) {
-        tracing::warn!(agent = %row.agent, "a launch is refused: a custom endpoint with no key");
+    if claude && clauseo_settings::own_signin_reaches_endpoint(env, &prepared.settings.env) {
+        tracing::warn!(agent = %row.agent, planned, "a launch is refused: a custom endpoint, no key");
+        // The firm's words only when a plan set the base URL; else the card's own.
+        let code = if planned {
+            ErrorCode::AgentFirmKeyNeeded
+        } else {
+            ErrorCode::AgentEndpointKeyNeeded
+        };
         return Err(Error::refused(
-            ErrorCode::AgentFirmKeyNeeded,
+            code,
             "a custom endpoint with no key saved would get Claude's own sign-in",
         ));
     }

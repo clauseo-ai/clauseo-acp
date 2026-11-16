@@ -378,3 +378,38 @@ fn a_custom_base_url_with_no_key_launches_nothing() {
     );
     assert!(launcher.specs().is_empty(), "nothing launched");
 }
+
+/// The `env` Claude Code applies from its global config and policy tier counts as the helper's
+/// own: a base URL in `remote-settings.json` or a `.claude.json` that does not parse, with no
+/// key, launches nothing. The helper's `settingSources: []` leaves out `settings.json`.
+#[test]
+fn claude_code_s_settings_files_count_for_the_read() {
+    let setup = installed_setup();
+    let read = |file: &str, text: &str| {
+        let home = setup
+            .root
+            .join(format!("claude-home-{}", file.trim_start_matches('.')));
+        crate::write::create_dir_all(&home).unwrap();
+        crate::write::write(&home.join(file), text).unwrap();
+        let launcher = TestLauncher::new(Play::Scenario("claude-api-key"));
+        let reader = setup
+            .readers(&launcher, &SharedTimer::default())
+            .with_claude_home(home);
+        let outcome = block_on(reader.read(AgentKind::Claude));
+        (outcome, launcher.specs().len())
+    };
+    let url = r#"{"env": {"ANTHROPIC_BASE_URL": "https://gw.firm.example"}}"#;
+    for (file, text) in [
+        ("remote-settings.json", url),
+        (".claude.json", "{ not json"),
+    ] {
+        let (outcome, launched) = read(file, text);
+        assert!(
+            matches!(outcome, ReadOutcome::Failed(ReadFailure::LaunchFailed(_))),
+            "{file}: {outcome:?}"
+        );
+        assert_eq!(launched, 0, "{file}: nothing launched");
+    }
+    let (_, launched) = read("settings.json", url);
+    assert_eq!(launched, 1, "settings.json is not the helper's");
+}

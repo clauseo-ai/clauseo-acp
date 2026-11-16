@@ -131,7 +131,7 @@ fn settled_with(keys: &KeyCache, firm: &BTreeSet<AgentId>) -> Vec<HostCall> {
         agents,
         &BTreeSet::new(),
         firm,
-        &BTreeSet::new(),
+        (&BTreeSet::new(), &std::collections::BTreeMap::new()),
     ));
     rig.host.calls()
 }
@@ -484,7 +484,7 @@ fn a_keychain_error_under_a_firm_plan_refuses_an_unmarked_agent_with_key_unreada
     };
     let s18 = SigninState::SignedOut { found: None };
     assert!(matches!(
-        compose(&claude(), Some(&s18), facts),
+        compose(&claude(), Some(&s18), facts.clone()),
         Some(SignIn::Failed {
             code: ErrorCode::AgentKeyUnreadable,
             ..

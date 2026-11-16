@@ -32,7 +32,10 @@ fn settled(keychain: Keychain, firm: &[AgentId], own_signin: &[AgentId]) -> Vec<
         [&claude(), &codex()],
         &BTreeSet::new(),
         &firm.iter().cloned().collect(),
-        &own_signin.iter().cloned().collect(),
+        (
+            &own_signin.iter().cloned().collect(),
+            &std::collections::BTreeMap::new(),
+        ),
     ));
     rig.host.calls()
 }
@@ -63,6 +66,35 @@ fn an_endpoint_with_no_key_is_refused_and_a_key_a_cloud_provider_or_no_plan_laun
         settled(Keychain::memory(), &[], &[]),
         refused(None),
         "no plan"
+    );
+}
+
+/// An endpoint no plan set (the app's own environment, `inherited.rs`) with no key: refused
+/// with `agent.endpoint_key_needed`, not the firm's code; a stored key launches. A plan's
+/// endpoint with no key keeps the firm's code.
+#[test]
+fn an_endpoint_no_plan_set_with_no_key_is_refused_with_its_own_code() {
+    let settle = |keychain: Keychain, own_signin: &[AgentId]| {
+        let rig = rig_on(true, keychain);
+        let inherited = std::collections::BTreeMap::from([(claude(), "proxy.example".to_owned())]);
+        block_on(settle_after_load(
+            &*rig.host,
+            &rig.backend.keys,
+            [&claude(), &codex()],
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            (&own_signin.iter().cloned().collect(), &inherited),
+        ));
+        rig.host.calls()
+    };
+    assert_eq!(
+        settle(Keychain::memory(), &[]),
+        refused(Some(ErrorCode::AgentEndpointKeyNeeded))
+    );
+    assert_eq!(settle(stored(), &[]), refused(None), "key stored");
+    assert_eq!(
+        settle(Keychain::memory(), &[claude()]),
+        refused(Some(ErrorCode::AgentFirmKeyNeeded))
     );
 }
 

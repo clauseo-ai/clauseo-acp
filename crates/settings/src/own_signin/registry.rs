@@ -1,6 +1,6 @@
 //! The registry's side of Claude Code's OS policy tiers: the `Settings` value of
 //! `SOFTWARE\Policies\ClaudeCode` in HKLM and HKCU, through the 64-bit view as `reg.exe` sees
-//! it, read-only.
+//! it, read-only. The host's offline probe reads them too (`offline/probe/settings/os_policy`).
 
 #![expect(
     unsafe_code,
@@ -15,7 +15,7 @@ use windows::Win32::System::Registry::{
 };
 use windows::core::HSTRING;
 
-use super::TierRead;
+use super::sources::{MAX_FILE, TierRead};
 
 /// The key Claude Code's registry policy sits under, in HKLM and in HKCU.
 const KEY: &str = r"SOFTWARE\Policies\ClaudeCode";
@@ -24,13 +24,13 @@ const KEY: &str = r"SOFTWARE\Policies\ClaudeCode";
 const VALUE: &str = "Settings";
 
 /// The `Settings` values, HKLM's then HKCU's.
-pub(super) fn settings_values() -> Vec<TierRead> {
+pub(crate) fn settings_values() -> Vec<TierRead> {
     vec![value(HKEY_LOCAL_MACHINE), value(HKEY_CURRENT_USER)]
 }
 
 /// `hive`'s `Settings` value: its text when a `REG_SZ` or `REG_EXPAND_SZ` (unexpanded, as
 /// `reg.exe` prints it), `None` when it, its key or a string type is not there (Claude Code
-/// reads no other type), `Err` when it cannot be read or is over [`super::super::MAX_FILE`]
+/// reads no other type), `Err` when it cannot be read or is over [`MAX_FILE`]
 /// UTF-16 units.
 fn value(hive: HKEY) -> TierRead {
     let (mut kind, mut len) = (REG_VALUE_TYPE(0), 0u32);
@@ -45,7 +45,7 @@ fn value(hive: HKEY) -> TierRead {
         return Ok(None);
     }
     let units = usize::try_from(len).map_err(drop)?.div_ceil(2);
-    if u64::try_from(units).map_or(true, |units| units > super::super::MAX_FILE) {
+    if u64::try_from(units).map_or(true, |units| units > MAX_FILE) {
         return Err(());
     }
     let mut data = vec![0u16; units.max(1)];
@@ -93,5 +93,5 @@ fn get(
 
 /// Whether a read's error says the key or the value is not there.
 fn missing(code: WIN32_ERROR) -> bool {
-    clauseo_settings::chromium_policy::registry_missing(code.0)
+    crate::chromium_policy::registry_missing(code.0)
 }

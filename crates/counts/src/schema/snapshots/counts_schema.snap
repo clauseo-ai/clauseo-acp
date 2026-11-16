@@ -1555,7 +1555,8 @@ expression: counts_schema()
         "blackline.too_large",
         "blackline.format_unknown",
         "agent.unreachable",
-        "agent.firm_key_needed"
+        "agent.firm_key_needed",
+        "agent.endpoint_key_needed"
       ],
       "type": "string"
     },

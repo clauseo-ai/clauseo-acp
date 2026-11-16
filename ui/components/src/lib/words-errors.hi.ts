@@ -139,6 +139,11 @@ export const HI = {
   // provisional (firm endpoint PR, Rohan's batch review)
   "Claude can't start here until an API key for your firm's gateway is saved. Ask your firm's IT for the key, then add it in Settings, then Plans.":
     "जब तक आपकी फ़र्म के गेटवे के लिए API key सहेजी नहीं जाती, Claude यहाँ शुरू नहीं हो सकता। अपनी फ़र्म की IT टीम से key लें, फिर सेटिंग्स खोलें, फिर प्लान में उसे जोड़ें।",
+  // provisional (firm endpoint fix, app thread's words): U3-err-agent.endpoint_key_needed and UC-825; hi later
+  "Claude can't start: this computer is set to send it to a different address, and no API key for that address is saved. Add the key in Settings › Plans.":
+    null,
+  "Claude can't start: this computer is set to send it to {host}, and no API key for that address is saved. Add the key in Settings › Plans.":
+    null,
   "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.":
     "इस फ़ाइल का पाथ Word के लिए बहुत लंबा है। मामले के फ़ोल्डर को ड्राइव के ऊपरी स्तर के पास ले जाएँ, या उसके फ़ोल्डरों के नाम छोटे करें।",
   "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.":

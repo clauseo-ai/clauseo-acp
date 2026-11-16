@@ -117,7 +117,12 @@ export function gateView(
   if ("failed" in signIn && signIn.failed !== undefined) {
     // the agent's own refusal for no sign-in is the plan screen again
     if (signIn.failed.code === "agent.auth_required") return { kind: "signed-out" };
-    return { kind: "failed", code: signIn.failed.code, at: clock(signIn.failed.at) };
+    return {
+      kind: "failed",
+      code: signIn.failed.code,
+      at: clock(signIn.failed.at),
+      ...(signIn.failed.host === undefined ? {} : { host: signIn.failed.host }),
+    };
   }
   return { kind: "signed-out" };
 }

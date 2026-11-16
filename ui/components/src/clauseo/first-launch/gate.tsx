@@ -53,7 +53,8 @@ export type GateView =
   | { kind: "waiting"; nudge: boolean; pasting: boolean }
   | { kind: "device"; code: string; until: string }
   | { kind: "login-found"; email?: string | undefined }
-  | { kind: "failed"; code: string; at: string }
+  /** `host`: with agent.endpoint_key_needed, the endpoint Claude's connection is set to. */
+  | { kind: "failed"; code: string; at: string; host?: string }
   | { kind: "switching"; stuck: boolean }
   | { kind: "key" };
 
@@ -77,7 +78,9 @@ export type GateAct =
   | { act: "instead" }
   | { act: "key-panel"; open: boolean }
   | { act: "key"; key: string }
-  | { act: "plans" };
+  | { act: "plans" }
+  /** Settings › Plans in the settings window (agent.endpoint_key_needed's link). */
+  | { act: "settings" };
 
 export type GateTestIds = {
   root?: string;
@@ -103,10 +106,13 @@ export function Gate({
   keys,
   onAct,
   refused,
+  settings = false,
   testIds = {},
 }: {
   plan: Plan;
   view: GateView;
+  /** Whether a press can open the settings window (the host has one): words that name Settings › Plans link to it. */
+  settings?: boolean;
   /** The last setup command desktop refused for this plan, until its next sign-in change or press. */
   refused?: GateRefusal | null | undefined;
   /** Whether this computer can keep an API key, and where (display_info's platform): `null` when it can't. */
@@ -485,6 +491,7 @@ export function Gate({
         <Failed
           plan={plan}
           view={view}
+          settings={settings}
           w={w}
           way={way}
           signIn={signIn}

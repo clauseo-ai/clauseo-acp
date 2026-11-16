@@ -462,6 +462,20 @@ test("agent.firm_key_needed shows the card with its words, no sign-in button, an
   expect(t.setups()).toEqual([]);
 });
 
+test("agent.endpoint_key_needed names the host on the card, never the firm's gateway, with no sign-in button", async () => {
+  const t = await at({
+    failed: { code: "agent.endpoint_key_needed", at: AT, host: "proxy.example" },
+  });
+  expect(block("claude")!.dataset["state"]).toBe("needs-key");
+  expect(words()).toContain(
+    "Claude can't start: this computer is set to send it to \u2068proxy.example\u2069,",
+  );
+  expect(words()).not.toContain("your firm's gateway");
+  expect(block("claude")!.querySelector('[data-testid="plans-sign-in"]')).toBeNull();
+  expect(button("Use an API key instead", block("claude")!)).not.toBeNull();
+  expect(t.setups()).toEqual([]);
+});
+
 test("keys: Sign out's confirm starts on Cancel, and Escape sends nothing and gives focus back to Sign out", async () => {
   const t = await at(signed());
   const opener = document.querySelector<HTMLElement>('[data-testid="plans-sign-out"]');

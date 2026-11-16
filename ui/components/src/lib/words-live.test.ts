@@ -283,7 +283,10 @@ test("an agent's name fills no other code", () => {
 });
 
 // Claude's alone and a sign-in state's (Plans and the gate show it, no thread's agent picks it), so no PLANNED line
-const SIGN_IN_CLAUDE_ONLY: readonly WordedCode[] = ["agent.firm_key_needed"];
+const SIGN_IN_CLAUDE_ONLY: readonly WordedCode[] = [
+  "agent.firm_key_needed",
+  "agent.endpoint_key_needed",
+];
 
 test("only the agent.* codes that name Claude have a sentence per plan", () => {
   const naming = (Object.keys(ERROR_WORDS) as WordedCode[]).filter(

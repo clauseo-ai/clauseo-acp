@@ -4,7 +4,7 @@
 // key, the exact string on screen. The Hindi is a specialist's draft, waiting for a Hindi-speaking lawyer: the formal
 // आप, the danda, Western digits, English names in Latin script. Nothing here says मैं, पेंसिल, स्याही, चरण or कदम.
 import type { Lang } from "./display.ts";
-import { wordsOf } from "./words-core.ts";
+import { isolate, wordsOf } from "./words-core.ts";
 import { BACKSLASH, backslashKey, byAgent, type BackslashPlace } from "./words-errors-backslash.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
@@ -83,6 +83,7 @@ export type ErrorCode =
   | "agent.keys_loading"
   | "agent.key_unreadable"
   | "agent.firm_key_needed"
+  | "agent.endpoint_key_needed"
   | "matter.document_path_too_long"
   | "matter.protected_link"
   | "sandbox.setup_refused"
@@ -260,6 +261,9 @@ export const ERROR_WORDS: Record<WordedCode, ErrorKey> = {
   // provisional (firm endpoint PR, Rohan's batch review)
   "agent.firm_key_needed":
     "Claude can't start here until an API key for your firm's gateway is saved. Ask your firm's IT for the key, then add it in Settings, then Plans.",
+  // provisional (firm endpoint fix, app thread's words): a base URL no plan set; the card's own is UC-825
+  "agent.endpoint_key_needed":
+    "Claude can't start: this computer is set to send it to a different address, and no API key for that address is saved. Add the key in Settings › Plans.",
   "matter.document_path_too_long":
     "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
   // provisional: the item's path joins it once PR6 carries it as a field
@@ -379,6 +383,16 @@ const own = wordsOf("errors");
 /** Versions' words, read from the shared list rather than words-versions.ts, which stays out of the room's first
  * load (first-load.test.ts). */
 const versions = wordsOf("versions");
+
+/** The card's words for `agent.endpoint_key_needed` (UC-825, provisional), naming the `host` Claude's connection is
+ * set to. */
+export function endpointKeyWords(lang: Lang, host: string): string {
+  return own(
+    lang,
+    "Claude can't start: this computer is set to send it to {host}, and no API key for that address is saved. Add the key in Settings › Plans.",
+    { host: isolate(host) },
+  );
+}
 
 /** An error sentence in the language. */
 export function errorSentence(lang: Lang, key: ErrorKey): string {

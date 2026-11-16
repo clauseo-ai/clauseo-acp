@@ -2,7 +2,8 @@
 //! needs a key"): Claude Code 2.1.293 would send the lawyer's own sign-in token to it as a
 //! Bearer, so the host never starts it. Desktop's refusal, `agent.firm_key_needed`, is one the
 //! host takes; and whatever desktop said, a Claude launch whose env has `ANTHROPIC_BASE_URL` and
-//! nothing that turns that sign-in off fails with the same code before anything is spawned.
+//! nothing that turns that sign-in off fails with the same code before anything is spawned. The
+//! `env` Claude Code applies from its settings files counts as the launch env's does.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -15,6 +16,7 @@ use serde_json::{Map, Value};
 
 use crate::codex::{Recording, turn_failed};
 use crate::support::{Dir, Running, Scenario, matter_with_thread, wait};
+use crate::write;
 
 /// The agent id that makes a fake agent a Claude agent.
 const CLAUDE: &str = "claude-acp";
@@ -118,6 +120,67 @@ fn a_custom_endpoint_with_no_key_never_launches_claude_and_a_key_or_a_cloud_prov
         host.handle.set_launch_refused(claude, None),
     )
     .unwrap();
+    assert_eq!(one_turn(&host, matter), (StopReason::EndTurn, None));
+    host.shutdown();
+}
+
+#[test]
+fn claude_code_s_settings_files_count_as_the_launch_env_does() {
+    let dir = Dir::new(
+        "firm_endpoint_settings",
+        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
+    );
+    let recording = Recording::new(&dir);
+    let launches = Arc::clone(&recording.envs);
+    let launched = || launches.lock().unwrap().len();
+    let hook = EnvHook::default();
+    let for_host = hook.clone();
+    let host = dir.start_launching(0, Arc::new(recording), move |config| {
+        config.with_profile_hook(Box::new(for_host))
+    });
+    let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+    // The host's managed folder in these tests: that of `managed-mcp.json`, the test's own.
+    let managed = dir.home().join("managed-settings.json");
+    let no_key = [("ANTHROPIC_API_KEY", "")];
+    // No plan set the base URL, so the code is not the firm's.
+    let refused = (StopReason::Failed, Some(ErrorCode::AgentEndpointKeyNeeded));
+
+    // A base URL only in the policy file, no key anywhere: nothing is spawned.
+    let policy = format!(r#"{{"env": {{"ANTHROPIC_BASE_URL": "{GATEWAY}"}}}}"#);
+    write::write(&managed, policy.as_bytes());
+    hook.set(&no_key);
+    let before = launched();
+    assert_eq!(one_turn(&host, matter), refused);
+    assert_eq!(launched(), before, "nothing launched");
+
+    // The firm's key stored: it launches.
+    hook.set(&[("ANTHROPIC_API_KEY", "stored-key")]);
+    assert_eq!(one_turn(&host, matter), (StopReason::EndTurn, None));
+
+    // The default address in the file is no custom endpoint: it launches with no key.
+    let default = r#"{"env": {"ANTHROPIC_BASE_URL": "https://API.anthropic.com:443/"}}"#;
+    write::write(&managed, default.as_bytes());
+    hook.set(&no_key);
+    assert_eq!(one_turn(&host, matter), (StopReason::EndTurn, None));
+
+    // A policy file that does not parse, no key: refused; a key: it launches.
+    write::write(&managed, b"{ not json");
+    let before = launched();
+    assert_eq!(one_turn(&host, matter), refused);
+    assert_eq!(launched(), before, "nothing launched");
+    hook.set(&[("ANTHROPIC_API_KEY", "stored-key")]);
+    assert_eq!(one_turn(&host, matter), (StopReason::EndTurn, None));
+
+    // A policy file there that cannot be read (a folder in its place), no key: refused.
+    write::remove_file(&managed);
+    write::create_dir_all(&managed);
+    hook.set(&no_key);
+    let before = launched();
+    assert_eq!(one_turn(&host, matter), refused);
+    assert_eq!(launched(), before, "nothing launched");
+
+    // None there: it launches as ever.
+    write::remove_dir_all(&managed).unwrap();
     assert_eq!(one_turn(&host, matter), (StopReason::EndTurn, None));
     host.shutdown();
 }

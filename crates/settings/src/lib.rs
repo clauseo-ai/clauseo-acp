@@ -163,7 +163,10 @@ pub use mcp::{
     MCP_KEYCHAIN_SERVICE, MCP_NAME_MAX, MCP_VALUE_NAME_MAX, McpRefusal, McpValueKind, check_name,
     check_server, command_ok, env_name_ok, header_name_ok, keychain_account, url_ok,
 };
-pub use own_signin::{own_signin_reaches_endpoint, plan_keeps_own_signin};
+pub use own_signin::{
+    ClaudeSources, SettingsEnv, claude_managed_dir, claude_registry_settings, is_default_address,
+    own_signin_reaches_endpoint, plan_keeps_own_signin,
+};
 pub use plans::{
     PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, launch_is_clauseos, secret_shaped,
     web_address_ok,

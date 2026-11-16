@@ -43,6 +43,9 @@ pub(crate) struct SettingsRead {
     /// Those whose plan sends them to its endpoint with Claude Code's own sign-in still on
     /// (`hook::sends_own_signin`): refused while no key is in memory (`refusal::in_force`).
     pub(crate) own_signin: BTreeSet<AgentId>,
+    /// Those whose launches get a custom endpoint from the app's own environment or their entry,
+    /// with no plan setting one, to its host (`inherited.rs`): refused while no key is in memory.
+    pub(crate) inherited: BTreeMap<AgentId, String>,
     /// Those an unreadable policy blocks.
     pub(crate) blocked: BTreeSet<AgentId>,
     /// Every plan, for the launch hook.
@@ -85,6 +88,7 @@ impl SettingsRead {
             .filter(|agent| effective.is_locked(&format!("plans.{agent}")))
             .cloned()
             .collect();
+        let inherited = super::inherited::inherited_hosts(effective, known.clone());
         let network = NetworkFacts::read(effective, known.clone());
         let installed = installed_before(effective, known.clone());
         let blocked = firm_policy(effective, &SystemFiles, known);
@@ -92,6 +96,7 @@ impl SettingsRead {
             firm,
             firm_policy: policy_set,
             own_signin,
+            inherited,
             blocked,
             plans: plans_of(effective),
             network,
@@ -145,6 +150,11 @@ pub(crate) async fn apply_settings(backend: &AgentsBackend, read: SettingsRead) 
         }
         if now(&before.own_signin) != now(&read.own_signin) {
             backend.compose.set_own_signin(agent, now(&read.own_signin));
+        }
+        if before.inherited.get(agent) != read.inherited.get(agent) {
+            backend
+                .compose
+                .set_inherited(agent, read.inherited.get(agent).cloned());
         }
         if now(&before.firm_policy) != now(&read.firm_policy) {
             backend.set_firm_policy(agent, now(&read.firm_policy));

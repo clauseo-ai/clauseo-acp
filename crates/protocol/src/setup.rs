@@ -338,6 +338,10 @@ pub enum SignIn {
         code: ErrorCode,
         /// When.
         at: Timestamp,
+        /// With `agent.endpoint_key_needed`: the host of the endpoint Claude's connection is set
+        /// to, for the card to name; missing otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host: Option<String>,
     },
     /// Clauseo is leaving a login it may no longer use (a split Codex link, or a reused login
     /// the agent's own CLI ended) and the leave did not finish: it tries again by itself, and

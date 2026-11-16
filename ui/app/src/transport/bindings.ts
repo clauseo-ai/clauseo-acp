@@ -145,10 +145,13 @@ export const commands = {
 	 *  Opens the settings window, or brings it forward when it is open (`settings_window.rs`), at
 	 *  `section` when one is named (`"connectors"`: the room's case-law hint and banner;
 	 *  `"protection"`: UC's first-run button, R17; `"usage"`: the toolbar's plan card, U12;
-	 *  `"privacy"`: the first screen's "What's sent", UD1). An
-	 *  unknown section is refused as the arguments decode. Granted to `main` only.
+	 *  `"privacy"`: the first screen's "What's sent", UD1; `"plans"`: the room's sign-in screen for
+	 *  `agent.endpoint_key_needed`). An unknown section is refused as the arguments decode. Granted
+	 *  to `main` only.
 	 */
 	openSettings: (section: 
+/**  The Plans section: each agent's sign-in, plan and API key. */
+"plans" | 
 /**  The Connectors section. */
 "connectors" | 
 /**
@@ -1981,6 +1984,8 @@ export type ErrorCode =
 "agent.unreachable" | 
 /** A firm plan sends Claude to its own endpoint and no API key is saved: Claude Code would offer the lawyer's own sign-in token to that endpoint, so no agent was started. Saving the firm's key lets it start. */
 "agent.firm_key_needed" | 
+/** Claude's connection is set to a custom endpoint that no plan set (the app's own environment, or Claude Code's settings) and no API key is saved: Claude Code would offer the lawyer's own sign-in token to that endpoint, so no agent was started. Saving a key for it lets it start. */
+"agent.endpoint_key_needed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -5753,13 +5758,15 @@ export type SessionCapabilities = {
 /**
  *  A part of the settings window `open_settings` can open it at (R24: the room's case-law hint
  *  and banner open Connectors; R17: UC's first-run button opens Protection; U12: the toolbar's
- *  plan card opens Plan and usage; UD1: the first screen's "What's sent" opens Privacy). Closed,
- *  as the app
+ *  plan card opens Plan and usage; UD1: the first screen's "What's sent" opens Privacy; the room's
+ *  sign-in screen opens Plans for `agent.endpoint_key_needed`). Closed, as the app
  *  asked: a value the build does not know is refused when the command's arguments decode, never
  *  ignored, and a new section is added here together with the page that shows it (ADR 0002's
  *  rule for commands, which a webview sends).
  */
 export type SettingsSection = 
+/**  The Plans section: each agent's sign-in, plan and API key. */
+"plans" | 
 /**  The Connectors section. */
 "connectors" | 
 /**
@@ -6028,6 +6035,11 @@ export type SignIn =
 	code: ErrorCode,
 	/**  When. */
 	at: Timestamp,
+	/**
+	 *  With `agent.endpoint_key_needed`: the host of the endpoint Claude's connection is set
+	 *  to, for the card to name; missing otherwise.
+	 */
+	host?: string,
 } }) & { device_code?: never; login_found?: never; signed_in?: never; signed_out?: never; switching?: never; waiting?: never } | 
 /**
  *  Clauseo is leaving a login it may no longer use (a split Codex link, or a reused login

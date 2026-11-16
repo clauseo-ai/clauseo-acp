@@ -109,10 +109,23 @@ impl Reads {
         codex: Option<&CodexPrepared>,
         claude_home: Option<&Path>,
     ) -> SettingsRead {
+        // A session's `settingSources` names `user` (`agent::loads`), so its settings.json counts.
+        let sources = clauseo_settings::ClaudeSources {
+            managed: &self.managed,
+            config: claude_home,
+            user: true,
+            os_policy: self.os_policy,
+        };
+        let claude = codex.is_none() && self.claude;
         SettingsRead {
             moved: self.moved(codex, claude_home),
             // Every agent but Codex, whose exec runs each call in its own process.
             shell_carries: codex.is_none() && claude_shell_carries(&self.managed),
+            env: if claude {
+                clauseo_settings::SettingsEnv::read(&sources)
+            } else {
+                clauseo_settings::SettingsEnv::default()
+            },
         }
     }
 
@@ -138,13 +151,16 @@ impl Reads {
 }
 
 /// What a launch's settings files say.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SettingsRead {
     /// Why they leave its route or host unknown to the offline probe.
     pub(crate) moved: Option<Moved>,
     /// Claude Code's policy settings may keep its shell's folder from one call to the next
     /// ([`claude_shell_carries`]): each shell call's starting folder is then unknown.
     pub(crate) shell_carries: bool,
+    /// The `env` Claude Code applies from its settings sources, for the launch's own sign-in
+    /// check (`clauseo_settings::own_signin_reaches_endpoint`); empty for any other agent.
+    pub(crate) env: clauseo_settings::SettingsEnv,
 }
 
 /// Why the agent's settings leave its route or host unknown: the one word the log gets.

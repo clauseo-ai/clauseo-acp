@@ -21,7 +21,7 @@ import { installLine } from "@clauseo/components/clauseo/first-launch/install.ts
 import { APP, FOUND, NAME } from "@clauseo/components/clauseo/first-launch/plan-names.ts";
 import { Heading } from "@clauseo/components/clauseo/heading.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
-import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { endpointKeyWords, errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { say } from "@clauseo/components/lib/words-ui.ts";
@@ -72,8 +72,10 @@ type Stand =
   | { kind: "failed"; code: string }
   /** A firm's own endpoint with no key saved (agent.firm_key_needed): its words, and no sign-in, since Claude stays
    * off until a key is saved (the key's panel under the card saves one). */
-  | { kind: "needs-key"; code: string }
+  | { kind: "needs-key"; code: string; host?: string }
   | { kind: "gate" };
+
+const hostOf = (host: string | undefined) => (host === undefined ? {} : { host });
 
 function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
   const install = setup?.install;
@@ -101,6 +103,9 @@ function standOf(setup: AgentSetup | undefined, adding: boolean): Stand {
       return { kind: "failed", code: signIn.failed.code };
     if (signIn.failed?.code === "agent.firm_key_needed")
       return { kind: "needs-key", code: signIn.failed.code };
+    // the same for an endpoint no plan set, named by its host on the card
+    if (signIn.failed?.code === "agent.endpoint_key_needed")
+      return { kind: "needs-key", code: signIn.failed.code, ...hostOf(signIn.failed.host) };
   }
   return { kind: "gate" };
 }
@@ -242,6 +247,9 @@ export function PlanBlock({
         return;
       case "key":
         return saveKey(a.key);
+      case "settings":
+        // the gate's link to Settings › Plans: this is that page already
+        return;
       case "plans":
         transport
           .openExternal(PRICES[plan])
@@ -434,7 +442,14 @@ export function PlanBlock({
         break;
       case "needs-key":
         body = (
-          <PlanCard plan={plan} note={errorWords(lang, stand.code)}>
+          <PlanCard
+            plan={plan}
+            note={
+              stand.host === undefined
+                ? errorWords(lang, stand.code)
+                : endpointKeyWords(lang, stand.host)
+            }
+          >
             {null}
           </PlanCard>
         );

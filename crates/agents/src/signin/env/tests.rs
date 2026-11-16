@@ -285,3 +285,36 @@ fn every_run_uses_the_system_ca_and_keeps_an_inherited_ssl_cert_file() {
     assert_eq!(get(&env, "SSL_CERT_FILE"), Some("/all-roots.pem"));
     assert_eq!(get(&env, "CODEX_CA_CERTIFICATE"), Some("/firm/ca.pem"));
 }
+
+/// Claude Code's route variables never reach a sign-in, status or logout run, in any case: no
+/// base URL, provider switch or token; the variables beside them stay.
+#[test]
+fn every_run_drops_claude_code_s_route_variables() {
+    let mut base = base();
+    for (name, value) in [
+        ("ANTHROPIC_BASE_URL", "https://gateway.firm.example"),
+        ("anthropic_base_url", "https://gateway.firm.example"),
+        ("ANTHROPIC_BEDROCK_BASE_URL", "https://bedrock.firm.example"),
+        ("ANTHROPIC_VERTEX_BASE_URL", "https://vertex.firm.example"),
+        ("ANTHROPIC_AUTH_TOKEN", "t"),
+        ("CLAUDE_CODE_USE_BEDROCK", "1"),
+        ("Claude_Code_Use_Vertex", "1"),
+        ("CLAUDE_CODE_USE_FOUNDRY", "1"),
+        ("ANTHROPIC_MODEL", "kept"),
+        ("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "kept"),
+    ] {
+        base.insert(OsString::from(name), OsString::from(value));
+    }
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        let env = run_env(&inputs(&base, vendor, own()));
+        for name in names(&env) {
+            let upper = name.to_ascii_uppercase();
+            let route = upper == "ANTHROPIC_AUTH_TOKEN"
+                || upper.starts_with("CLAUDE_CODE_USE_")
+                || (upper.starts_with("ANTHROPIC_") && upper.ends_with("BASE_URL"));
+            assert!(!route, "{name} reached the child");
+        }
+        assert_eq!(get(&env, "ANTHROPIC_MODEL"), Some("kept"));
+        assert_eq!(get(&env, "CLAUDE_CODE_MAX_OUTPUT_TOKENS"), Some("kept"));
+    }
+}

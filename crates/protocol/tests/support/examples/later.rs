@@ -229,6 +229,10 @@ fn mcp_failures() -> Vec<DomainEvent> {
             ErrorCode::AgentFirmKeyNeeded,
             "the firm's endpoint needs a saved key",
         ),
+        failed(
+            ErrorCode::AgentEndpointKeyNeeded,
+            "a custom endpoint no plan set needs a saved key",
+        ),
     ]
 }
 

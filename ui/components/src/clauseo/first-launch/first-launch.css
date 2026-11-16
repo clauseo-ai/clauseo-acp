@@ -218,6 +218,18 @@
   .fl-gate-why {
     color: var(--muted);
   }
+  /* a link inside the gate's words (Settings › Plans): a button that reads as a link */
+  .fl-gate-link {
+    font: inherit;
+    color: inherit;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 4px;
+  }
   .fl-gate-dot {
     flex: none;
     width: var(--size-dot-hint);

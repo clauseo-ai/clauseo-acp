@@ -7,6 +7,8 @@
 //! - else `agent.firm_key_needed` while its plan sends it to an endpoint with Claude Code's own
 //!   sign-in still on (`hook::sends_own_signin`) and no key is in memory: Claude Code 2.1.293
 //!   would send the lawyer's claude.ai token to that endpoint as a Bearer;
+//! - else `agent.endpoint_key_needed` while its launches get such an endpoint from the app's own
+//!   environment or its entry, with no plan setting one (`inherited.rs`), and no key is in memory;
 //! - else none: no key is stored (it launches without one), or its key is in memory.
 //!
 //! `agent.keys_loading` is the host's from its start until the first load is over and the
@@ -18,7 +20,7 @@
 //! again (a slow read that answered, a read again that succeeded, a key set or cleared), and
 //! each [`KeyNote::Retry`] (a launch met `agent.key_unreadable`) reads the key again.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use clauseo_protocol::{AgentId, ErrorCode};
@@ -32,11 +34,12 @@ use crate::bridge::lock;
 
 /// The refusal in force for `agent`, given whether a policy `blocked` it, whether a firm plan
 /// (an endpoint or a provider) is set for it, whether that plan keeps Claude Code's own sign-in
-/// on toward its endpoint (`own_signin`), and its `keys`.
+/// on toward its endpoint (`own_signin`), whether its launches get such an endpoint that no
+/// plan set (`inherited`), and its `keys`.
 pub(crate) fn in_force(
     blocked: bool,
     firm: bool,
-    own_signin: bool,
+    (own_signin, inherited): (bool, bool),
     keys: &KeyCache,
     agent: &AgentId,
 ) -> Option<ErrorCode> {
@@ -46,6 +49,8 @@ pub(crate) fn in_force(
         Some(ErrorCode::AgentKeyUnreadable)
     } else if own_signin && !keys.in_memory(agent) {
         Some(ErrorCode::AgentFirmKeyNeeded)
+    } else if inherited && !keys.in_memory(agent) {
+        Some(ErrorCode::AgentEndpointKeyNeeded)
     } else {
         None
     }
@@ -53,15 +58,18 @@ pub(crate) fn in_force(
 
 /// The refusal in force for `agent` as `backend` holds the settings and keys.
 pub(crate) fn wanted(backend: &AgentsBackend, agent: &AgentId) -> Option<ErrorCode> {
-    let (blocked, firm, own_signin) = {
+    let (blocked, firm, endpoint) = {
         let applied = lock(&backend.wiring.applied);
         (
             applied.blocked.contains(agent),
             applied.firm.contains(agent),
-            applied.own_signin.contains(agent),
+            (
+                applied.own_signin.contains(agent),
+                applied.inherited.contains_key(agent),
+            ),
         )
     };
-    in_force(blocked, firm, own_signin, &backend.keys, agent)
+    in_force(blocked, firm, endpoint, &backend.keys, agent)
 }
 
 /// Tells the host `agent`'s refusal in force when it is not what the host was last told. A
@@ -112,21 +120,22 @@ pub(crate) async fn lift_at_start(backend: &AgentsBackend, wait: Duration) {
 
 /// The first load is over and no backend follows (no platform): each of `known` but those in
 /// `blocked` (whose refusal is the policy's) gets its refusal in force from `keys`, those in
-/// `firm` under their firm plan and those in `own_signin` under its endpoint
-/// (`SettingsRead::own_signin`). A call that fails is logged by the agent and its code.
+/// `firm` under their firm plan, those in `own_signin` under its endpoint
+/// (`SettingsRead::own_signin`) and those in `inherited` under one no plan set
+/// (`SettingsRead::inherited`). A call that fails is logged by the agent and its code.
 pub(crate) async fn settle_after_load<'a>(
     host: &dyn SetupHost,
     keys: &KeyCache,
     known: impl IntoIterator<Item = &'a AgentId>,
     blocked: &BTreeSet<AgentId>,
     firm: &BTreeSet<AgentId>,
-    own_signin: &BTreeSet<AgentId>,
+    (own_signin, inherited): (&BTreeSet<AgentId>, &BTreeMap<AgentId, String>),
 ) {
     for agent in known.into_iter().filter(|agent| !blocked.contains(*agent)) {
         let code = in_force(
             false,
             firm.contains(agent),
-            own_signin.contains(agent),
+            (own_signin.contains(agent), inherited.contains_key(agent)),
             keys,
             agent,
         );

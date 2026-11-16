@@ -391,6 +391,11 @@ error_codes! {
         Claude to its own endpoint and no API key is saved: Claude Code would offer the lawyer's \
         own sign-in token to that endpoint, so no agent was started. Saving the firm's key lets \
         it start.";
+    AgentEndpointKeyNeeded = "agent.endpoint_key_needed", retryable: false, meaning: "Claude's \
+        connection is set to a custom endpoint that no plan set (the app's own environment, or \
+        Claude Code's settings) and no API key is saved: Claude Code would offer the lawyer's own \
+        sign-in token to that endpoint, so no agent was started. Saving a key for it lets it \
+        start.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

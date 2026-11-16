@@ -7,7 +7,7 @@ import type { AgentId, InstallProgress, SetupEvent, SignIn } from "../transport/
 import type { Entry } from "./entry.ts";
 import { PressInOrder } from "./press-words.tsx";
 import { SettingsOver, type CellSetup } from "./states-settings.tsx";
-import { firstLaunchWords, settingsWords, type WordsRef } from "./words.ts";
+import { errorWords, firstLaunchWords, settingsWords, type WordsRef } from "./words.ts";
 
 /** The settings window, 960 wide (DESIGN.md), tall enough for both plans' blocks. */
 const WINDOW = { width: 960, height: 1000 } as const;
@@ -115,6 +115,12 @@ const CHATGPT_KEY: Scene = {
   ...SIGNED_OUT,
   press: ['[data-agent="chatgpt"] [data-testid="plans-key-open"]'],
 };
+/** Claude's launches set to a custom endpoint no plan set, with no key saved (agent.endpoint_key_needed). */
+const ENDPOINT_KEY: Scene = {
+  setup: {
+    first: both({ failed: { code: "agent.endpoint_key_needed", at: AT, host: "proxy.example" } }),
+  },
+};
 const found = (f: string): Scene => ({
   setup: { first: both({ signed_out: { found: f as never } }) },
 });
@@ -188,5 +194,13 @@ export const UD2_PLANS: Entry[] = [
     "UC-146",
     firstLaunchWords("A key from the OpenAI platform. Billed to that account."),
     CANCELLED,
+  ),
+  // UC-825: the card for a custom endpoint no plan set, naming its host (firm endpoint fix)
+  entry(
+    "UC-825",
+    errorWords(
+      "Claude can't start: this computer is set to send it to {host}, and no API key for that address is saved. Add the key in Settings › Plans.",
+    ),
+    ENDPOINT_KEY,
   ),
 ];

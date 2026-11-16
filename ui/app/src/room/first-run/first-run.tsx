@@ -128,6 +128,9 @@ function actsFor(
           if (ok) installForKey(store, agent);
           return ok;
         });
+      case "settings":
+        void transport.openSettings?.("plans").catch(() => {});
+        return;
       case "plans":
         transport
           .openExternal(PLANS[planOf(agent)])
@@ -282,6 +285,7 @@ function holdOf(
           keys={keys}
           onAct={actsFor(store, transport, agent, device)}
           refused={refusalView(setup)}
+          settings={transport.openSettings !== undefined}
           testIds={IDS.gate}
         />
       ),
