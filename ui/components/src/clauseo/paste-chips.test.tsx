@@ -256,3 +256,35 @@ test("fill, setText and clear carry the chips; Cmd+Z after a clear brings them b
   expect(field().value).toBe("Read it.\n\nAlso this.");
   expect(ref.current?.draft()).toEqual({ typed: "Read it.\n\nAlso this.", pastes: [one, two] });
 });
+
+/** Cmd+Z on `at`, as the engine fires it; true when the composer took it (its default prevented). */
+async function undoKey(at: Element): Promise<boolean> {
+  const z = new KeyboardEvent("keydown", {
+    key: "z",
+    metaKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => void at.dispatchEvent(z));
+  return z.defaultPrevented;
+}
+
+test("Cmd+Z after a chip's remove button brings the chip back where it stood, from the next chip's button or the field", async () => {
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref }));
+  const one = brief(PASTE_CHIP_MIN, "a");
+  const two = brief(PASTE_CHIP_MIN, "b");
+  await paste(one);
+  await paste(two);
+  await type("Compare.");
+  // a stray press on the first chip's remove button: the focus goes to the next chip's
+  await act(async () => chips()[0]!.querySelector("button")!.click());
+  expect(ref.current?.draft().pastes).toEqual([two]);
+  expect(await undoKey(document.activeElement!)).toBe(true);
+  expect(ref.current?.draft()).toEqual({ typed: "Compare.", pastes: [one, two] });
+  // the same from the field
+  await act(async () => chips()[1]!.querySelector("button")!.click());
+  field().focus();
+  expect(await undoKey(field())).toBe(true);
+  expect(ref.current?.draft()).toEqual({ typed: "Compare.", pastes: [one, two] });
+});
