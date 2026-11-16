@@ -97,13 +97,31 @@ pub(crate) const PROFILE_KEYS: [&str; 1] = ["developer_instructions"];
 /// revisited when stage C's Windows sandbox (S15) lands.
 pub(crate) const WINDOWS_SANDBOX: &str = "unelevated";
 
+/// Two Codex features every Codex launch turns off, as `key=value` the way
+/// `clauseo_limits::CODEX_OVERRIDES` writes them, at `rust-v0.162.1`:
+/// - `features.goals=false`: no goal tools (`create_goal`, `get_goal`, `update_goal`) and no
+///   goal continuation, so Codex does not start turns of its own after a turn ends
+///   (`features/src/lib.rs:1823-1827`, read at `app-server/src/extensions.rs:76-89`).
+/// - `features.unified_exec_tty=false`: `exec_command` has no `tty` parameter and refuses
+///   `tty: true` (`core/src/tools/handlers/unified_exec/exec_command.rs:131-139, 243-246`), so
+///   a command runs without a terminal, and `write_stdin` can only poll a running command or
+///   send it Ctrl-C (`core/src/unified_exec/process_manager.rs:984-989`).
+///
+/// Both go in the home's `config.toml` ([`home_config`]) and in `CODEX_CONFIG` ([`config`]):
+/// the thread that names a conversation reads only the home's file, so with `CODEX_CONFIG`
+/// alone it still listed the goal tools. Ordinary commands, searches, `apply_patch`, a long
+/// command polled to its end and Ctrl-C work as before.
+pub(crate) const LAUNCH_FEATURES: [&str; 2] =
+    ["features.goals=false", "features.unified_exec_tty=false"];
+
 /// The `CODEX_CONFIG` object: [`MODEL_KEYS`] from a settings `CODEX_CONFIG` that parses as a
 /// JSON object; then the launch profile's keys (`agent::loads::profile::codex_keys`), only
 /// [`LAUNCH_KEYS`], merged add-only ([`merge_add_only`]); then every one of
 /// `clauseo_limits::CODEX_OVERRIDES` (apps, plugins, skill MCP installs, cloud skills and
-/// bundled skills off, and no skills instructions) as nested keys over them all, so R15's pins
-/// win; then `hooks`, the object the [hooks seam](crate::actor::turn) gives, when there is one,
-/// over everything. On Windows, `windows.sandbox` is [`WINDOWS_SANDBOX`], set with R15's pins.
+/// bundled skills off, and no skills instructions) and [`LAUNCH_FEATURES`] as nested keys over
+/// them all, so R15's pins win; then `hooks`, the object the [hooks seam](crate::actor::turn)
+/// gives, when there is one, over everything. On Windows, `windows.sandbox` is
+/// [`WINDOWS_SANDBOX`], set with R15's pins.
 /// Nothing here reaches `<agent_home>/config.toml` ([`home_config`]). With folders on the
 /// session's `PATH`, off Windows, the launch then adds `allow_login_shell = false` and
 /// `features.shell_snapshot = false` ([`without_login_shell`]), so Codex's shells keep the
@@ -146,7 +164,10 @@ pub(crate) fn config_on(
         allowed
     });
     merge_add_only(&mut config, profile);
-    for set in clauseo_limits::CODEX_OVERRIDES {
+    for set in clauseo_limits::CODEX_OVERRIDES
+        .iter()
+        .chain(&LAUNCH_FEATURES)
+    {
         if let Some((key, value)) = set.split_once('=') {
             insert_dotted(&mut config, key, toml_value(value));
         }
@@ -252,14 +273,18 @@ fn toml_value(text: &str) -> Value {
 /// The header of the `config.toml` the host writes in a Codex agent's home.
 const HOME_CONFIG_HEADER: &str = "# Clauseo manages this file. It is written again each time \
      Clauseo starts Codex, and any edit is replaced.\n# The switches Clauseo turns off for Codex's \
-     app-server at start-up (clauseo_limits::CODEX_OVERRIDES).\n";
+     app-server at start-up (clauseo_limits::CODEX_OVERRIDES and LAUNCH_FEATURES).\n";
 
 /// The `config.toml` text for a Codex agent's home: [`HOME_CONFIG_HEADER`], then each of
-/// `clauseo_limits::CODEX_OVERRIDES` as a TOML dotted key (each override is already TOML:
-/// `key=value` as Codex's `-c` takes it).
+/// `clauseo_limits::CODEX_OVERRIDES` and of [`LAUNCH_FEATURES`] as a TOML dotted key (each is
+/// already TOML: `key=value` as Codex's `-c` takes it). Every `features.*` key is a dotted key,
+/// so they make one `[features]` table, never two.
 pub(crate) fn home_config() -> String {
     let mut text = HOME_CONFIG_HEADER.to_owned();
-    for set in clauseo_limits::CODEX_OVERRIDES {
+    for set in clauseo_limits::CODEX_OVERRIDES
+        .iter()
+        .chain(&LAUNCH_FEATURES)
+    {
         if let Some((key, value)) = set.split_once('=') {
             text.push_str(key);
             text.push_str(" = ");
@@ -502,5 +527,7 @@ pub(crate) mod prepare;
 
 #[cfg(test)]
 mod code_mode_tests;
+#[cfg(test)]
+mod features_tests;
 #[cfg(test)]
 mod tests;

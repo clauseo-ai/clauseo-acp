@@ -207,7 +207,8 @@ fn codex_launch_variables_beat_the_settings_env() {
     // exactly; on Windows, also the unelevated sandbox (record 0025).
     let mut expected = json!({
         "model": "m",
-        "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false},
+        "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false,
+            "goals": false, "unified_exec_tty": false},
         "cloud": {"skills": {"enabled": false}},
         "skills": {"bundled": {"enabled": false}, "include_instructions": false},
         "cli_auth_credentials_store": "file",
